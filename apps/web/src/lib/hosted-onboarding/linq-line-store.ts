@@ -228,29 +228,7 @@ async function projectPhoneNumberStatusUpdated(
   const healthStatus = classifyHostedLinqProviderStatus(event.providerStatus);
   const egressPolicy = deriveHostedLinqEgressPolicy(event.providerStatus);
   const updated = await prisma.hostedLinqLine.updateMany({
-    where: {
-      phoneNumberLookupKey,
-      OR: [
-        {
-          providerUpdatedAt: null,
-        },
-        {
-          providerUpdatedAt: {
-            lt: event.providerCreatedAt,
-          },
-        },
-        {
-          lastStatusEventId: null,
-          providerUpdatedAt: event.providerCreatedAt,
-        },
-        {
-          lastStatusEventId: {
-            lt: event.eventId,
-          },
-          providerUpdatedAt: event.providerCreatedAt,
-        },
-      ],
-    },
+    where: buildPhoneNumberStatusProjectionWhere(phoneNumberLookupKey, event, egressPolicy),
     data: {
       ...(egressPolicy ? { egressPolicy } : {}),
       healthStatus,
@@ -267,28 +245,57 @@ function buildMessageReceiptLineProjectionWhere(
   phoneNumberLookupKey: string,
   event: ParsedHostedLinqProviderEvent,
 ): Prisma.HostedLinqLineWhereInput {
+  const orderingWhere: Prisma.HostedLinqLineWhereInput[] = [
+    {
+      lastReceiptAt: null,
+    },
+    {
+      lastReceiptAt: {
+        lt: event.providerCreatedAt,
+      },
+    },
+  ];
+  if (event.deliveryStatus === "failed") {
+    orderingWhere.push({
+      lastFailedAt: null,
+      lastReceiptAt: event.providerCreatedAt,
+    });
+  }
   return {
     phoneNumberLookupKey,
-    OR: [
-      {
-        lastReceiptAt: null,
+    OR: orderingWhere,
+  };
+}
+
+function buildPhoneNumberStatusProjectionWhere(
+  phoneNumberLookupKey: string,
+  event: ParsedHostedLinqProviderEvent,
+  egressPolicy: string | null,
+): Prisma.HostedLinqLineWhereInput {
+  const orderingWhere: Prisma.HostedLinqLineWhereInput[] = [
+    {
+      providerUpdatedAt: null,
+    },
+    {
+      providerUpdatedAt: {
+        lt: event.providerCreatedAt,
       },
-      {
-        lastReceiptAt: {
-          lt: event.providerCreatedAt,
-        },
-      },
-      {
-        lastReceiptAt: event.providerCreatedAt,
-        lastReceiptEventId: null,
-      },
-      {
-        lastReceiptAt: event.providerCreatedAt,
-        lastReceiptEventId: {
-          lt: event.eventId,
-        },
-      },
-    ],
+    },
+  ];
+  if (egressPolicy === "disabled") {
+    orderingWhere.push({
+      providerUpdatedAt: event.providerCreatedAt,
+    });
+  } else if (egressPolicy === "avoid_new_assignments") {
+    orderingWhere.push({
+      egressPolicy: { not: "disabled" },
+      providerUpdatedAt: event.providerCreatedAt,
+    });
+  }
+
+  return {
+    phoneNumberLookupKey,
+    OR: orderingWhere,
   };
 }
 

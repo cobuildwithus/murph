@@ -375,7 +375,7 @@ function readHostedLinqProviderWebhookEvent(
 }
 
 function parseProviderCreatedAt(value: string): Date {
-  return parseProviderDate(value) ?? new Date();
+  return parseProviderDate(value) ?? new Date(0);
 }
 
 function parseProviderDate(value: string | null): Date | null {

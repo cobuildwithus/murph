@@ -4269,7 +4269,7 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
   });
 
-  it("blocks routed Linq reactions when the requested target differs from the routed thread", async () => {
+  it("does not reuse mismatched routed Linq authority for reactions", async () => {
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",
       channel: "linq" as const,
@@ -4303,20 +4303,38 @@ describe("hosted runtime callbacks", () => {
       transportIdempotent: false,
     });
     const assertAuthority = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async () => undefined);
+    mocks.setLinqMessageReaction.mockResolvedValueOnce({
+      reaction: "heart",
+      targetMessageId: "linq_message_other",
+    });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
-      await dependencies.setLinqMessageReaction({
+      const delivery = await dependencies.setLinqMessageReaction({
         reaction: "heart",
         target: "linq_chat_other",
         targetMessageId: "linq_message_other",
       });
 
-      throw new Error("unreachable after route target mismatch");
+      return createDispatchResult({
+        delivery: {
+          channel: "linq",
+          idempotencyKey: "assistant-outbox:intent_123",
+          kind: "message-reaction",
+          reaction: delivery.reaction,
+          sentAt: "2026-04-08T00:01:00.000Z",
+          target: delivery.target,
+          targetKind: "thread",
+          targetMessageId: delivery.targetMessageId,
+        },
+        status: "sent",
+      });
     });
 
-    await expect(drainHostedPreparedAssistantDeliveries({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub({
         assertLinqThreadRouteAuthority: assertAuthority,
+        assertLinqRecentInboundEngagement: assertRecentInbound,
       }),
       forwardedEnv: {
         LINQ_API_TOKEN: "linq-token",
@@ -4325,12 +4343,31 @@ describe("hosted runtime callbacks", () => {
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake,
-    })).rejects.toMatchObject({
-      code: "ASSISTANT_LINQ_ROUTE_AUTHORITY_TARGET_MISMATCH",
     });
 
     expect(assertAuthority).not.toHaveBeenCalled();
-    expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
+    expect(assertRecentInbound).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: null,
+      fromPhoneNumber: null,
+      idempotencyKey: "assistant-outbox:intent_123",
+      intentId: "intent_123",
+      routeAuthority: null,
+      target: "linq_chat_other",
+      targetKind: "thread",
+    }, {
+      signal: null,
+    });
+    expect(mocks.setLinqMessageReaction).toHaveBeenCalledWith({
+      reaction: "heart",
+      targetMessageId: "linq_message_other",
+    }, expect.any(Object));
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+        target: "linq_chat_other",
+      }),
+    ]);
   });
 
   it("marks post-dispatch Linq reaction transport errors as possibly committed", async () => {
@@ -4799,7 +4836,7 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("blocks routed Linq provider egress when the requested target differs from the routed thread", async () => {
+  it("does not reuse mismatched routed Linq authority for provider egress", async () => {
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",
       channel: "linq" as const,
@@ -4834,8 +4871,15 @@ describe("hosted runtime callbacks", () => {
       transportIdempotent: true,
     });
     const assertAuthority = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async () => undefined);
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_other",
+      target: "linq_chat_other",
+      targetKind: "thread" as const,
+    });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
-      await dependencies.sendLinq({
+      const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
         fromPhoneNumber: null,
         idempotencyKey: "assistant-outbox:intent_hashed_target",
@@ -4845,23 +4889,55 @@ describe("hosted runtime callbacks", () => {
         targetKind: "thread",
       });
 
-      throw new Error("unreachable after route target mismatch");
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
     });
 
-    await expect(drainHostedPreparedAssistantDeliveries({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
         assertLinqThreadRouteAuthority: assertAuthority,
+        assertLinqRecentInboundEngagement: assertRecentInbound,
       }),
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
-    })).rejects.toMatchObject({
-      code: "ASSISTANT_LINQ_ROUTE_AUTHORITY_TARGET_MISMATCH",
     });
 
     expect(assertAuthority).not.toHaveBeenCalled();
-    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(assertRecentInbound).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: null,
+      fromPhoneNumber: null,
+      idempotencyKey: "assistant-outbox:intent_hashed_target",
+      intentId: "intent_123",
+      routeAuthority: null,
+      target: "linq_chat_other",
+      targetKind: "thread",
+    }, {
+      signal: null,
+    });
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: "linq_chat_other",
+        targetKind: "thread",
+      }),
+      expect.any(Object),
+    );
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+        target: "linq_chat_other",
+      }),
+    ]);
   });
 
   it("uses the same-wake Linq target when replyTo recovers a non-routed send", async () => {

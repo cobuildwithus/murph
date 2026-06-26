@@ -451,7 +451,7 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("guards line status projection against stale status webhooks", async () => {
+  it("guards line status projection against stale status webhooks without event-id ordering", async () => {
     const fixture = createObservabilityPrismaFixture();
     const event = requireParsedProviderEvent(buildProviderEvent({
       data: {
@@ -482,17 +482,47 @@ describe("hosted Linq observability stores", () => {
               },
             },
             {
-              lastStatusEventId: null,
-              providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
-            },
-            {
-              lastStatusEventId: {
-                lt: "evt_status_older",
+              egressPolicy: {
+                not: "disabled",
               },
               providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
             },
           ],
         },
+      }),
+    );
+  });
+
+  it("lets critical same-timestamp status callbacks tighten line egress", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        changed_at: "2026-03-26T12:00:00.000Z",
+        new_reputation: "CRITICAL",
+        phone_number: "+15550000000",
+      },
+      eventId: "evt_status_critical",
+      eventType: "phone_number.status_updated",
+    }));
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          egressPolicy: "disabled",
+          healthStatus: "unhealthy",
+        }),
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            {
+              providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
+            },
+          ]),
+        }),
       }),
     );
   });
@@ -634,14 +664,24 @@ describe("hosted Linq observability stores", () => {
 
   it("backfills an already-ingested terminal receipt when acceptance records the provider id", async () => {
     const fixture = createObservabilityPrismaFixture();
-    fixture.hostedLinqProviderEventFindFirst.mockResolvedValueOnce({
-      deliveryStatus: "failed",
-      eventId: "evt_failed_123",
-      failureCode: "30007",
-      failureReason: "[redacted]",
-      providerCreatedAt: new Date("2026-03-26T12:00:05.000Z"),
-      service: "sms",
-    });
+    fixture.hostedLinqProviderEventFindMany.mockResolvedValueOnce([
+      {
+        deliveryStatus: "delivered",
+        eventId: "evt_delivered_same_timestamp",
+        failureCode: null,
+        failureReason: null,
+        providerCreatedAt: new Date("2026-03-26T12:00:05.000Z"),
+        service: "sms",
+      },
+      {
+        deliveryStatus: "failed",
+        eventId: "evt_failed_123",
+        failureCode: "30007",
+        failureReason: "[redacted]",
+        providerCreatedAt: new Date("2026-03-26T12:00:05.000Z"),
+        service: "sms",
+      },
+    ]);
 
     await markHostedLinqDeliveryAcceptedTx({
       idempotencyKey: "linq-message:event-123",
@@ -650,12 +690,12 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
     });
 
-    expect(fixture.hostedLinqProviderEventFindFirst).toHaveBeenCalledWith(
+    expect(fixture.hostedLinqProviderEventFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         orderBy: [
           { providerCreatedAt: "desc" },
-          { eventId: "desc" },
         ],
+        take: 20,
         where: expect.objectContaining({
           deliveryStatus: {
             in: ["delivered", "failed"],
@@ -685,6 +725,12 @@ describe("hosted Linq observability stores", () => {
             {
               lastReceiptAt: {
                 lt: new Date("2026-03-26T12:00:05.000Z"),
+              },
+            },
+            {
+              lastReceiptAt: new Date("2026-03-26T12:00:05.000Z"),
+              status: {
+                not: "failed",
               },
             },
           ]),
@@ -739,6 +785,7 @@ function createObservabilityPrismaFixture() {
     }));
   const hostedLinqProviderEventCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqProviderEventFindFirst = vi.fn().mockResolvedValue(null);
+  const hostedLinqProviderEventFindMany = vi.fn().mockResolvedValue([]);
   const prisma = {
     hostedLinqAlert: {
       createMany: hostedLinqAlertCreateMany,
@@ -760,6 +807,7 @@ function createObservabilityPrismaFixture() {
     hostedLinqProviderEvent: {
       createMany: hostedLinqProviderEventCreateMany,
       findFirst: hostedLinqProviderEventFindFirst,
+      findMany: hostedLinqProviderEventFindMany,
     },
   };
 
@@ -777,6 +825,7 @@ function createObservabilityPrismaFixture() {
     hostedLinqLineUpsert,
     hostedLinqProviderEventCreateMany,
     hostedLinqProviderEventFindFirst,
+    hostedLinqProviderEventFindMany,
     prisma,
   };
 }

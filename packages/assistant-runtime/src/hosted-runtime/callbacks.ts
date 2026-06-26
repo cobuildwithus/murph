@@ -1466,7 +1466,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           await assertHostedAssistantLinqRouteAuthorityForDelivery({
             deliveryContext,
             effectsPort: input.effectsPort,
-            routeScopedContext,
             signal: input.signal,
           });
           await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
@@ -1756,7 +1755,6 @@ function createHostedAssistantLinqSendDependency(input: {
     await assertHostedAssistantLinqRouteAuthorityForDelivery({
       deliveryContext,
       effectsPort: input.effectsPort ?? null,
-      routeScopedContext: input.linqDeliveryContext ?? null,
       signal: signal ?? null,
     });
     await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
@@ -1780,7 +1778,6 @@ function createHostedAssistantLinqSendDependency(input: {
     await assertHostedAssistantLinqRouteAuthorityForDelivery({
       deliveryContext,
       effectsPort: input.effectsPort ?? null,
-      routeScopedContext: input.linqDeliveryContext ?? null,
       signal: signal ?? null,
     });
     const verifiedVaultFiles = await preloadApprovedHostedAssistantVaultFiles({
@@ -1972,7 +1969,6 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
     await assertHostedAssistantLinqRouteAuthorityForDelivery({
       deliveryContext,
       effectsPort: input.effectsPort ?? null,
-      routeScopedContext: input.linqDeliveryContext ?? null,
       signal: signal ?? null,
     });
     await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
@@ -2001,17 +1997,10 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
 async function assertHostedAssistantLinqRouteAuthorityForDelivery(input: {
   deliveryContext: HostedAssistantLinqDeliveryContext | null;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null;
-  routeScopedContext?: HostedAssistantLinqDeliveryContext | null;
   signal: AbortSignal | null;
 }): Promise<void> {
   const routeAuthority = input.deliveryContext?.routeAuthority ?? null;
   if (!routeAuthority) {
-    if (input.routeScopedContext?.routeAuthority) {
-      throw new VaultCliError(
-        "ASSISTANT_LINQ_ROUTE_AUTHORITY_TARGET_MISMATCH",
-        "Hosted Linq route authority does not match the requested delivery target.",
-      );
-    }
     return;
   }
 

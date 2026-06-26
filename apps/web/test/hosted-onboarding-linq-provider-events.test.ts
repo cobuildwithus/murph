@@ -183,6 +183,21 @@ describe("parseHostedLinqProviderEvent", () => {
     });
   });
 
+  it("uses a deterministic minimum timestamp for malformed provider created_at values", () => {
+    const parsed = parseHostedLinqProviderEvent({
+      event: buildGenericEvent({
+        createdAt: "not-a-date",
+        data: {
+          message_id: "msg_delivered_123",
+          phone_number: "+15550000000",
+        },
+        eventType: "message.delivered",
+      }),
+    });
+
+    expect(parsed?.providerCreatedAt).toEqual(new Date(0));
+  });
+
   it("does not store participant phone lookup keys in the line FK column", () => {
     const parsed = parseHostedLinqProviderEvent({
       event: buildGenericEvent({

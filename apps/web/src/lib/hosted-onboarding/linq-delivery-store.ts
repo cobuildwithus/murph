@@ -257,6 +257,7 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
       deliveryId: null,
     };
   }
+  const deliveryStatus = input.event.deliveryStatus;
 
   const delivery = await input.prisma.hostedLinqDelivery.findFirst({
     where: {
@@ -281,7 +282,10 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
   const updated = await input.prisma.hostedLinqDelivery.updateMany({
     where: {
       id: delivery.id,
-      OR: buildReceiptOrderingWhere(input.event),
+      OR: buildReceiptOrderingWhere({
+        deliveryStatus,
+        providerCreatedAt: input.event.providerCreatedAt,
+      }),
     },
     data: buildReceiptUpdate(input.event),
   });
@@ -345,7 +349,7 @@ async function applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx(input: {
     ? [...input.messageLookupKeyCandidates]
     : [input.messageLookupKey];
 
-  const receipt = await input.prisma.hostedLinqProviderEvent.findFirst({
+  const receipts = await input.prisma.hostedLinqProviderEvent.findMany({
     where: {
       deliveryStatus: {
         in: ["delivered", "failed"],
@@ -356,7 +360,6 @@ async function applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx(input: {
     },
     orderBy: [
       { providerCreatedAt: "desc" },
-      { eventId: "desc" },
     ],
     select: {
       deliveryStatus: true,
@@ -366,7 +369,9 @@ async function applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx(input: {
       providerCreatedAt: true,
       service: true,
     },
+    take: 20,
   });
+  const receipt = selectLatestHostedLinqReceiptData(receipts);
 
   if (!isHostedLinqTerminalReceiptData(receipt)) {
     return;
@@ -382,20 +387,19 @@ async function applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx(input: {
 }
 
 function buildReceiptOrderingWhere(
-  receipt: Pick<HostedLinqDeliveryReceiptData, "eventId" | "providerCreatedAt">,
+  receipt: Pick<HostedLinqDeliveryReceiptData, "deliveryStatus" | "providerCreatedAt">,
 ): Prisma.HostedLinqDeliveryWhereInput[] {
-  return [
+  const orderingWhere: Prisma.HostedLinqDeliveryWhereInput[] = [
     { lastReceiptAt: null },
     { lastReceiptAt: { lt: receipt.providerCreatedAt } },
-    {
-      lastProviderEventId: null,
-      lastReceiptAt: receipt.providerCreatedAt,
-    },
-    {
-      lastProviderEventId: { lt: receipt.eventId },
-      lastReceiptAt: receipt.providerCreatedAt,
-    },
   ];
+  if (receipt.deliveryStatus === "failed") {
+    orderingWhere.push({
+      lastReceiptAt: receipt.providerCreatedAt,
+      status: { not: "failed" },
+    });
+  }
+  return orderingWhere;
 }
 
 function isHostedLinqTerminalReceiptData(
@@ -409,6 +413,41 @@ function isHostedLinqTerminalReceiptData(
   } | null,
 ): value is HostedLinqDeliveryReceiptData {
   return value?.deliveryStatus === "delivered" || value?.deliveryStatus === "failed";
+}
+
+function selectLatestHostedLinqReceiptData(
+  receipts: readonly {
+    deliveryStatus: string | null;
+    eventId: string;
+    failureCode: string | null;
+    failureReason: string | null;
+    providerCreatedAt: Date;
+    service: string | null;
+  }[],
+): HostedLinqDeliveryReceiptData | null {
+  let selected: HostedLinqDeliveryReceiptData | null = null;
+  for (const receipt of receipts) {
+    if (!isHostedLinqTerminalReceiptData(receipt)) {
+      continue;
+    }
+    if (!selected) {
+      selected = receipt;
+      continue;
+    }
+    const receiptTime = receipt.providerCreatedAt.getTime();
+    const selectedTime = selected.providerCreatedAt.getTime();
+    if (
+      receiptTime > selectedTime
+      || (
+        receiptTime === selectedTime
+        && selected.deliveryStatus === "delivered"
+        && receipt.deliveryStatus === "failed"
+      )
+    ) {
+      selected = receipt;
+    }
+  }
+  return selected;
 }
 
 function isHostedLinqDeliveryLifecycleFinal(input: {
