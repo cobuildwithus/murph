@@ -304,20 +304,11 @@ interface HostedRunnerDiagnosticBodySource {
 }
 
 type HostedProviderEgressValidationMode =
-  | "active_user_fence"
   | "deploy_smoke_live_model_turn"
   | "exact_headers"
   | "missing_identity"
   | "provider_egress_credential"
   | "provider_egress_token";
-type HostedProviderEgressActiveContainerIdentitySource =
-  | "bound_user_header"
-  | "container_name";
-const HOSTED_ACTIVE_WRITE_FENCE_REJECT_REASONS = [
-  "missing_runner_state",
-  "missing_write_fence",
-  "write_fence_mismatch",
-] as const;
 const HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS = [
   "missing_provider_egress_token",
   "missing_runner_state",
@@ -332,50 +323,13 @@ const HOSTED_PROVIDER_EGRESS_CREDENTIAL_REJECT_REASONS = [
   "runner_container_mismatch",
   "write_fence_mismatch",
 ] as const;
-
-// Provider kinds whose tokenless authorization may fall back to the
-// container-identity active-user fence. Membership requires the upstream
-// operation to be either read-only/lookup (no third-party side effect) or
-// already gated by a Worker-owned bounded request shape that cannot be
-// steered into delivery state.
-//
-// Delivery providers (Linq, Telegram, WhatsApp) and ElevenLabs are
-// deliberately excluded: their authorized request matrices mutate
-// third-party messaging state or burn provider credit on caller-supplied
-// payloads, so they must continue to require either exact write-fence
-// headers or a provider-egress token. Those are attached only by the
-// runtime's wrapped fetch, which routes through the outbound-intent
-// journal that owns recipient binding and idempotency.
-//
-// The injected-credential sentinel is a known literal that any
-// in-container child process can reproduce; it is a "this header was set
-// by code that knew the convention" marker, not a capability proof. So
-// membership in this set is the only thing preventing a child process
-// from authorizing side-effecting calls by spoofing the sentinel during a
-// legitimate active turn.
-const HOSTED_PROVIDER_KINDS_WITH_ACTIVE_USER_FENCE_FALLBACK = new Set<string>([
-  "murph_data_api",
-  "workers_ai_transcribe",
-  "exa",
-  "mapbox",
-]);
-type HostedActiveWriteFenceRejectReason =
-  typeof HOSTED_ACTIVE_WRITE_FENCE_REJECT_REASONS[number];
 type HostedProviderEgressTokenRejectReason =
   typeof HOSTED_PROVIDER_EGRESS_TOKEN_REJECT_REASONS[number];
 type HostedProviderEgressCredentialRejectReason =
   typeof HOSTED_PROVIDER_EGRESS_CREDENTIAL_REJECT_REASONS[number];
 type HostedProviderEgressRejectReason =
-  | HostedActiveWriteFenceRejectReason
   | HostedProviderEgressCredentialRejectReason
   | HostedProviderEgressTokenRejectReason
-  | "active_user_context_missing"
-  | "active_user_context_mismatch"
-  | "active_user_context_read_error"
-  | "active_user_context_rpc_missing"
-  | "active_validation_rpc_missing"
-  | "active_write_fence_rejected"
-  | "active_write_fence_validation_error"
   | "bound_user_missing"
   | "exact_write_fence_rejected"
   | "provider_egress_credential_invalid"
@@ -389,7 +343,6 @@ type HostedProviderEgressRejectReason =
   | "validation_rpc_missing";
 
 interface HostedProviderEgressAuthorization {
-  activeContainerIdentitySource: HostedProviderEgressActiveContainerIdentitySource | null;
   authorized: boolean;
   durationMs: number;
   mode: HostedProviderEgressValidationMode;
@@ -397,6 +350,7 @@ interface HostedProviderEgressAuthorization {
   rejectReason?: HostedProviderEgressRejectReason;
   runtimeAuthorityHeadersPresent: boolean;
   userId: string | null;
+  validationError?: unknown;
   validationErrorCode?: string;
   validationErrorName?: string;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
@@ -736,12 +690,21 @@ async function maybeHandleHostedDataApiRequest(input: {
   if (!upstreamBaseUrl) {
     return new Response("Hosted data API upstream is not configured.", { status: 500 });
   }
+  const bearerCredential = readBearerCredential(input.request.headers);
+  if (!bearerCredential) {
+    return disallowedProviderEgress();
+  }
 
   const startedAt = Date.now();
-  const authorization = await authorizeHostedProviderEgress({
-    ...input,
+  const authorization = await authorizeNativeHostedProviderCredential({
+    credential: bearerCredential,
+    env: input.env,
     providerKind: "murph_data_api",
+    request: input.request,
   });
+  if (!authorization) {
+    return disallowedProviderEgress();
+  }
   if (!authorization.authorized) {
     return unauthorizedProviderEgress({
       authorization,
@@ -921,10 +884,19 @@ async function maybeHandleHostedTranscribeRequest(input: {
   }
 
   const startedAt = Date.now();
-  const authorization = await authorizeHostedProviderEgress({
-    ...input,
+  const providerCredential = readBearerCredential(input.request.headers);
+  if (!providerCredential) {
+    return disallowedProviderEgress();
+  }
+  const authorization = await authorizeNativeHostedProviderCredential({
+    credential: providerCredential,
+    env: input.env,
     providerKind: "workers_ai_transcribe",
+    request: input.request,
   });
+  if (!authorization) {
+    return disallowedProviderEgress();
+  }
   if (!authorization.authorized) {
     return unauthorizedProviderEgress({
       authorization,
@@ -2562,7 +2534,8 @@ async function maybeHandleExaRequest(input: {
   if (!isAllowedExaRequest(input.request.method, pathnameSuffix)) {
     return disallowedProviderEgress();
   }
-  if (!hasHeaderCredentialSentinel(input.request.headers, "x-api-key")) {
+  const providerCredential = input.request.headers.get("x-api-key")?.trim() ?? "";
+  if (!providerCredential) {
     return disallowedProviderEgress();
   }
   if (input.url.search || input.url.hash) {
@@ -2570,10 +2543,15 @@ async function maybeHandleExaRequest(input: {
   }
 
   const startedAt = Date.now();
-  const authorization = await authorizeHostedProviderEgress({
-    ...input,
+  const authorization = await authorizeNativeHostedProviderCredential({
+    credential: providerCredential,
+    env: input.env,
     providerKind: "exa",
+    request: input.request,
   });
+  if (!authorization) {
+    return disallowedProviderEgress();
+  }
   if (!authorization.authorized) {
     return unauthorizedProviderEgress({
       authorization,
@@ -2675,15 +2653,21 @@ async function maybeHandleMapboxRequest(input: {
   if (!isAllowedMapboxRequest(input.request.method, pathnameSuffix)) {
     return disallowedProviderEgress();
   }
-  if (!hasQueryCredentialSentinel(input.url, "access_token")) {
+  const providerCredential = input.url.searchParams.get("access_token")?.trim() ?? "";
+  if (!providerCredential) {
     return disallowedProviderEgress();
   }
 
   const startedAt = Date.now();
-  const authorization = await authorizeHostedProviderEgress({
-    ...input,
+  const authorization = await authorizeNativeHostedProviderCredential({
+    credential: providerCredential,
+    env: input.env,
     providerKind: "mapbox",
+    request: input.request,
   });
+  if (!authorization) {
+    return disallowedProviderEgress();
+  }
   if (!authorization.authorized) {
     return unauthorizedProviderEgress({
       authorization,
@@ -3008,10 +2992,6 @@ function hasHeaderCredentialSentinel(headers: Headers, name: string): boolean {
   return headers.get(name)?.trim() === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
 }
 
-function hasQueryCredentialSentinel(url: URL, name: string): boolean {
-  return url.searchParams.get(name)?.trim() === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
-}
-
 function isAllowedLinqRequest(method: string, pathnameSuffix: string): boolean {
   if (method === "GET" && pathnameSuffix === "/phone_numbers") {
     return true;
@@ -3096,7 +3076,6 @@ async function authorizeHostedProviderEgress(input: {
         userId: input.userId,
       });
       return {
-        activeContainerIdentitySource: null,
         authorized: true,
         durationMs: Date.now() - startedAt,
         mode: "exact_headers",
@@ -3108,7 +3087,6 @@ async function authorizeHostedProviderEgress(input: {
     } catch (error) {
       if (error instanceof RunnerRuntimeWriteFenceError) {
         return {
-          activeContainerIdentitySource: null,
           authorized: false,
           durationMs: Date.now() - startedAt,
           mode: "exact_headers",
@@ -3161,42 +3139,28 @@ async function authorizeHostedProviderEgress(input: {
     }
   }
 
-  if (!HOSTED_PROVIDER_KINDS_WITH_ACTIVE_USER_FENCE_FALLBACK.has(input.providerKind)) {
-    if (!input.userId) {
-      return {
-        activeContainerIdentitySource: null,
-        authorized: false,
-        durationMs: Date.now() - startedAt,
-        mode: "missing_identity",
-        providerEgressTokenPresent: providerEgressToken !== null,
-        rejectReason: "bound_user_missing",
-        runtimeAuthorityHeadersPresent,
-        userId: null,
-        writeFence: null,
-      };
-    }
+  if (!input.userId) {
     return {
-      activeContainerIdentitySource: null,
       authorized: false,
       durationMs: Date.now() - startedAt,
-      mode: "provider_egress_token",
-      providerEgressTokenPresent: false,
-      rejectReason: "provider_egress_token_missing",
+      mode: "missing_identity",
+      providerEgressTokenPresent: providerEgressToken !== null,
+      rejectReason: "bound_user_missing",
       runtimeAuthorityHeadersPresent,
-      userId: input.userId,
+      userId: null,
       writeFence: null,
     };
   }
-
-  const activeUserFence = await authorizeHostedProviderEgressActiveUserFence({
-    ctx: input.ctx,
-    env: input.env,
-    providerEgressTokenPresent: providerEgressToken !== null,
+  return {
+    authorized: false,
+    durationMs: Date.now() - startedAt,
+    mode: "provider_egress_token",
+    providerEgressTokenPresent: false,
+    rejectReason: "provider_egress_token_missing",
     runtimeAuthorityHeadersPresent,
-    startedAt,
     userId: input.userId,
-  });
-  return activeUserFence;
+    writeFence: null,
+  };
 }
 
 async function authorizeHostedProviderEgressDeploySmokeLiveModelTurn(input: {
@@ -3244,7 +3208,6 @@ async function authorizeHostedProviderEgressDeploySmokeLiveModelTurn(input: {
       return null;
     }
     return {
-      activeContainerIdentitySource: null,
       authorized: true,
       durationMs: Date.now() - input.startedAt,
       mode: "deploy_smoke_live_model_turn",
@@ -3342,7 +3305,6 @@ async function authorizeHostedProviderEgressCredential(input: {
   } catch (error) {
     const validationErrorName = readHostedExecutionSafeErrorName(error);
     return {
-      activeContainerIdentitySource: null,
       authorized: false,
       durationMs: Date.now() - startedAt,
       mode: "provider_egress_credential",
@@ -3350,6 +3312,7 @@ async function authorizeHostedProviderEgressCredential(input: {
       rejectReason: "provider_egress_credential_validation_error",
       runtimeAuthorityHeadersPresent,
       userId: null,
+      validationError: error,
       validationErrorCode: deriveHostedExecutionErrorCode(error),
       ...(validationErrorName ? { validationErrorName } : {}),
       writeFence: null,
@@ -3357,7 +3320,6 @@ async function authorizeHostedProviderEgressCredential(input: {
   }
   if (!verification.ok) {
     return {
-      activeContainerIdentitySource: null,
       authorized: false,
       durationMs: Date.now() - startedAt,
       mode: "provider_egress_credential",
@@ -3371,7 +3333,6 @@ async function authorizeHostedProviderEgressCredential(input: {
 
   if (verification.claims.providerKind !== input.providerKind) {
     return {
-      activeContainerIdentitySource: null,
       authorized: false,
       durationMs: Date.now() - startedAt,
       mode: "provider_egress_credential",
@@ -3386,7 +3347,6 @@ async function authorizeHostedProviderEgressCredential(input: {
   const runner = input.env.USER_RUNNER.getByName(verification.claims.userId);
   if (typeof runner.validateRuntimeProviderEgressCredential !== "function") {
     return {
-      activeContainerIdentitySource: null,
       authorized: false,
       durationMs: Date.now() - startedAt,
       mode: "provider_egress_credential",
@@ -3408,7 +3368,6 @@ async function authorizeHostedProviderEgressCredential(input: {
   } catch (error) {
     const validationErrorName = readHostedExecutionSafeErrorName(error);
     return {
-      activeContainerIdentitySource: null,
       authorized: false,
       durationMs: Date.now() - startedAt,
       mode: "provider_egress_credential",
@@ -3416,6 +3375,7 @@ async function authorizeHostedProviderEgressCredential(input: {
       rejectReason: "provider_egress_credential_validation_error",
       runtimeAuthorityHeadersPresent,
       userId: verification.claims.userId,
+      validationError: error,
       validationErrorCode: deriveHostedExecutionErrorCode(error),
       ...(validationErrorName ? { validationErrorName } : {}),
       writeFence: null,
@@ -3424,7 +3384,6 @@ async function authorizeHostedProviderEgressCredential(input: {
 
   const validation = normalizeProviderEgressCredentialValidationResult(rawValidation);
   return {
-    activeContainerIdentitySource: null,
     authorized: validation.owns,
     durationMs: Date.now() - startedAt,
     mode: "provider_egress_credential",
@@ -3447,7 +3406,6 @@ async function authorizeHostedProviderEgressToken(input: {
   const runner = input.env.USER_RUNNER.getByName(input.activeUserId);
   if (typeof runner.validateRuntimeProviderEgressToken !== "function") {
     return {
-      activeContainerIdentitySource: null,
       authorized: false,
       durationMs: Date.now() - input.startedAt,
       mode: "provider_egress_token",
@@ -3468,7 +3426,6 @@ async function authorizeHostedProviderEgressToken(input: {
   } catch (error) {
     const validationErrorName = readHostedExecutionSafeErrorName(error);
     return {
-      activeContainerIdentitySource: null,
       authorized: false,
       durationMs: Date.now() - input.startedAt,
       mode: "provider_egress_token",
@@ -3484,7 +3441,6 @@ async function authorizeHostedProviderEgressToken(input: {
 
   const validation = normalizeProviderEgressTokenValidationResult(rawValidation);
   return {
-    activeContainerIdentitySource: null,
     authorized: validation.owns,
     durationMs: Date.now() - input.startedAt,
     mode: "provider_egress_token",
@@ -3493,254 +3449,6 @@ async function authorizeHostedProviderEgressToken(input: {
     runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
     userId: input.activeUserId,
     writeFence: validation.writeFence,
-  };
-}
-
-async function authorizeHostedProviderEgressActiveUserFence(input: {
-  ctx?: HostedRunnerOutboundContext;
-  env: RunnerOutboundEnvironmentSource;
-  providerEgressTokenPresent: boolean;
-  runtimeAuthorityHeadersPresent: boolean;
-  startedAt: number;
-  userId: string | null;
-}): Promise<HostedProviderEgressAuthorization> {
-  const activeUser = await readHostedProviderEgressActiveUserFromCurrentContainer({
-    ctx: input.ctx,
-    env: input.env,
-  });
-  if (!activeUser.ok) {
-    return {
-      activeContainerIdentitySource: null,
-      authorized: false,
-      durationMs: Date.now() - input.startedAt,
-      mode: "missing_identity",
-      providerEgressTokenPresent: input.providerEgressTokenPresent,
-      rejectReason: activeUser.rejectReason,
-      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
-      userId: null,
-      ...(activeUser.validationErrorCode
-        ? { validationErrorCode: activeUser.validationErrorCode }
-        : {}),
-      ...(activeUser.validationErrorName
-        ? { validationErrorName: activeUser.validationErrorName }
-        : {}),
-      writeFence: null,
-    };
-  }
-
-  const activeUserId = activeUser.userId;
-  if (input.userId && input.userId !== activeUserId) {
-    return {
-      activeContainerIdentitySource: null,
-      authorized: false,
-      durationMs: Date.now() - input.startedAt,
-      mode: "active_user_fence",
-      providerEgressTokenPresent: input.providerEgressTokenPresent,
-      rejectReason: "active_user_context_mismatch",
-      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
-      userId: activeUserId,
-      writeFence: null,
-    };
-  }
-
-  const runner = input.env.USER_RUNNER.getByName(activeUserId);
-  if (typeof runner.validateActiveRuntimeWriteFence !== "function") {
-    return {
-      activeContainerIdentitySource: null,
-      authorized: false,
-      durationMs: Date.now() - input.startedAt,
-      mode: "active_user_fence",
-      providerEgressTokenPresent: input.providerEgressTokenPresent,
-      rejectReason: "active_validation_rpc_missing",
-      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
-      userId: activeUserId,
-      writeFence: null,
-    };
-  }
-
-  let rawValidation: unknown;
-  try {
-    rawValidation = await runner.validateActiveRuntimeWriteFence({
-      userId: activeUserId,
-    });
-  } catch (error) {
-    const validationErrorName = readHostedExecutionSafeErrorName(error);
-    return {
-      activeContainerIdentitySource: null,
-      authorized: false,
-      durationMs: Date.now() - input.startedAt,
-      mode: "active_user_fence",
-      providerEgressTokenPresent: input.providerEgressTokenPresent,
-      rejectReason: "active_write_fence_validation_error",
-      runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
-      userId: activeUserId,
-      validationErrorCode: deriveHostedExecutionErrorCode(error),
-      ...(validationErrorName ? { validationErrorName } : {}),
-      writeFence: null,
-    };
-  }
-
-  const validation = normalizeActiveRuntimeWriteFenceValidationResult(rawValidation);
-  return {
-    activeContainerIdentitySource: null,
-    authorized: validation.owns,
-    durationMs: Date.now() - input.startedAt,
-    mode: "active_user_fence",
-    providerEgressTokenPresent: input.providerEgressTokenPresent,
-    ...(validation.rejectReason ? { rejectReason: validation.rejectReason } : {}),
-    runtimeAuthorityHeadersPresent: input.runtimeAuthorityHeadersPresent,
-    userId: activeUserId,
-    writeFence: validation.writeFence,
-  };
-}
-
-async function readHostedProviderEgressActiveUserFromCurrentContainer(input: {
-  ctx?: HostedRunnerOutboundContext;
-  env: RunnerOutboundEnvironmentSource;
-}): Promise<
-  | {
-      ok: false;
-      rejectReason: Extract<
-        HostedProviderEgressRejectReason,
-        | "active_user_context_missing"
-        | "active_user_context_read_error"
-        | "active_user_context_rpc_missing"
-      >;
-      validationErrorCode?: string;
-      validationErrorName?: string;
-    }
-  | {
-      ok: true;
-      userId: string;
-    }
-> {
-  const containerId = input.ctx?.containerId?.trim();
-  const runnerContainerNamespace = readHostedRunnerContainerNamespace(input.env);
-  if (
-    !containerId
-    || !runnerContainerNamespace
-    || typeof runnerContainerNamespace.idFromString !== "function"
-    || typeof runnerContainerNamespace.get !== "function"
-  ) {
-    return { ok: false, rejectReason: "active_user_context_missing" };
-  }
-
-  try {
-    const id = runnerContainerNamespace.idFromString(containerId);
-    const container = runnerContainerNamespace.get(id);
-    if (typeof container.readActiveRuntimeUserFence !== "function") {
-      return { ok: false, rejectReason: "active_user_context_rpc_missing" };
-    }
-    const result = await container.readActiveRuntimeUserFence();
-    if (isHostedActiveRuntimeUserFenceResult(result) && result.active) {
-      return { ok: true, userId: result.userId };
-    }
-    return { ok: false, rejectReason: "active_user_context_missing" };
-  } catch (error) {
-    const validationErrorName = readHostedExecutionSafeErrorName(error);
-    return {
-      ok: false,
-      rejectReason: "active_user_context_read_error",
-      validationErrorCode: deriveHostedExecutionErrorCode(error),
-      ...(validationErrorName ? { validationErrorName } : {}),
-    };
-  }
-}
-
-function readHostedRunnerContainerNamespace(
-  env: RunnerOutboundEnvironmentSource,
-): {
-  get?(id: unknown): {
-    readActiveRuntimeUserFence?: () => Promise<unknown>;
-  };
-  idFromString?(id: string): unknown;
-} | null {
-  const namespace = (env as { RUNNER_CONTAINER?: unknown }).RUNNER_CONTAINER;
-  if (!namespace || typeof namespace !== "object") {
-    return null;
-  }
-  return namespace as {
-    get?(id: unknown): {
-      readActiveRuntimeUserFence?: () => Promise<unknown>;
-    };
-    idFromString?(id: string): unknown;
-  };
-}
-
-function isHostedActiveRuntimeUserFenceResult(value: unknown): value is {
-  active: true;
-  userId: string;
-} | {
-  active: false;
-  reason?: unknown;
-} {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  if (record.active === true) {
-    return typeof record.userId === "string" && record.userId.length > 0;
-  }
-  return record.active === false;
-}
-
-function normalizeActiveRuntimeWriteFenceValidationResult(value: unknown): {
-  owns: boolean;
-  rejectReason: HostedProviderEgressRejectReason | null;
-  writeFence: HostedProviderEgressWriteFenceMetadata | null;
-} {
-  if (typeof value === "boolean") {
-    return {
-      owns: false,
-      rejectReason: "active_write_fence_rejected",
-      writeFence: null,
-    };
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {
-      owns: false,
-      rejectReason: "active_write_fence_rejected",
-      writeFence: null,
-    };
-  }
-
-  const record = value as Record<string, unknown>;
-  if (record.owns !== true) {
-    return {
-      owns: false,
-      rejectReason: readActiveRuntimeWriteFenceRejectReason(record.reason)
-        ?? "active_write_fence_rejected",
-      writeFence: null,
-    };
-  }
-  if (
-    typeof record.attemptId !== "string"
-    || typeof record.leaseGeneration !== "string"
-    || typeof record.userId !== "string"
-    || (
-      record.workspaceVersion !== null
-      && record.workspaceVersion !== undefined
-      && typeof record.workspaceVersion !== "string"
-    )
-  ) {
-    return {
-      owns: false,
-      rejectReason: "active_write_fence_rejected",
-      writeFence: null,
-    };
-  }
-
-  return {
-    owns: true,
-    rejectReason: null,
-    writeFence: {
-      attemptId: record.attemptId,
-      leaseGeneration: record.leaseGeneration,
-      userId: record.userId,
-      workspaceVersion: typeof record.workspaceVersion === "string"
-        ? record.workspaceVersion
-        : null,
-    },
   };
 }
 
@@ -3857,20 +3565,6 @@ function normalizeProviderEgressTokenValidationResult(value: unknown): {
   };
 }
 
-function readActiveRuntimeWriteFenceRejectReason(
-  value: unknown,
-): HostedActiveWriteFenceRejectReason | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  for (const reason of HOSTED_ACTIVE_WRITE_FENCE_REJECT_REASONS) {
-    if (value === reason) {
-      return reason;
-    }
-  }
-  return null;
-}
-
 function readProviderEgressCredentialRejectReason(
   value: unknown,
 ): HostedProviderEgressCredentialRejectReason | null {
@@ -3966,8 +3660,9 @@ function emitHostedProviderEgressDiagnostic(input: {
   upstreamDurationMs: number | null;
   url: URL;
 }): void {
-  const errorCode = input.error ? deriveHostedExecutionErrorCode(input.error) : null;
-  const errorName = input.error ? readHostedExecutionSafeErrorName(input.error) : null;
+  const diagnosticError = input.error ?? input.authorization.validationError;
+  const errorCode = diagnosticError ? deriveHostedExecutionErrorCode(diagnosticError) : null;
+  const errorName = diagnosticError ? readHostedExecutionSafeErrorName(diagnosticError) : null;
   const providerBearerCredentialKind = input.providerKind === "openai"
     ? readHostedProviderCredentialDiagnosticKind(readBearerCredential(input.request.headers))
     : null;
@@ -3984,7 +3679,6 @@ function emitHostedProviderEgressDiagnostic(input: {
       providerEgressAuthMode: input.authorization.mode,
       responseOk: input.response?.ok ?? null,
       responseStatus: input.response?.status ?? null,
-      activeContainerIdentitySource: input.authorization.activeContainerIdentitySource,
       ...(providerBearerCredentialKind
         ? { providerBearerCredentialKind }
         : {}),
@@ -4021,6 +3715,7 @@ function emitHostedProviderEgressDiagnostic(input: {
           }
         : {}),
     },
+    ...(diagnosticError ? { error: diagnosticError } : {}),
     level: input.authorization.authorized && !input.error ? "info" : "warn",
     message: "Hosted runner provider egress completed.",
     phase: "wake.running",
@@ -4435,4 +4130,23 @@ function uniqueProviderHosts(...hosts: string[]): string[] {
 
 function normalizeProviderHostname(hostname: string): string {
   return hostname.toLowerCase().replace(/\.+$/u, "");
+}
+async function authorizeNativeHostedProviderCredential(input: {
+  credential: string;
+  env: RunnerOutboundEnvironmentSource;
+  providerKind: string;
+  request: Request;
+}): Promise<HostedProviderEgressAuthorization | null> {
+  if (isHostedProviderEgressCredential(input.credential)) {
+    return await authorizeHostedProviderEgressCredential(input);
+  }
+  if (input.credential !== HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL) {
+    return null;
+  }
+  return await authorizeHostedProviderEgress({
+    env: input.env,
+    providerKind: input.providerKind,
+    request: input.request,
+    userId: readHostedRunnerBoundUserId(input.request),
+  });
 }

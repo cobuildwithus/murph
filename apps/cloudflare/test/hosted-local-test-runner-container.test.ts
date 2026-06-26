@@ -23,6 +23,9 @@ import {
   HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS,
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
 } from "../src/runner-egress-intercept.ts";
+import {
+  createHostedProviderEgressCredential,
+} from "../src/hosted-provider-egress-credential.ts";
 import type {
   RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
@@ -31,6 +34,8 @@ import {
 } from "./hosted-execution-fixtures.ts";
 
 const TRANSCRIBE_URL = "http://murph-transcribe.worker/v1/transcribe";
+const PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET = "provider-egress-signing-secret";
+const RUNNER_CONTAINER_NAME = "member_123--v-version_1";
 
 function readHostedLocalTestOutboundByHost(): typeof HOSTED_RUNNER_OUTBOUND_BY_HOST {
   const handlers = HostedLocalTestRunnerContainer.outboundByHost;
@@ -48,6 +53,8 @@ function createOutboundEnv(input: {
     ...createHostedExecutionTestEnv(),
     AI: input.AI,
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
+    HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+      PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
     RUNNER_CONTAINER: {
       get: () => ({
         readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
@@ -67,10 +74,17 @@ function createOutboundEnv(input: {
     USER_RUNNER: {
       getByName: () => ({
         validateActiveRuntimeWriteFence: async (fenceInput: { userId: string }) => ({
-          attemptId: "attempt_active_user_fence",
+          attemptId: "attempt_active_runtime",
           leaseGeneration: "7",
           owns: true,
           userId: fenceInput.userId,
+          workspaceVersion: "4",
+        }),
+        validateRuntimeProviderEgressCredential: async (credentialInput: { userId: string }) => ({
+          attemptId: "attempt_provider_egress_credential",
+          leaseGeneration: "7",
+          owns: true,
+          userId: credentialInput.userId,
           workspaceVersion: "4",
         }),
         validateRuntimeProviderEgressToken: async () => ({ owns: false }),
@@ -78,6 +92,30 @@ function createOutboundEnv(input: {
       }),
     },
   };
+}
+
+async function createAuthorizedTranscribeRequest(input: {
+  body?: BodyInit;
+  headers?: Record<string, string>;
+  method?: string;
+}): Promise<Request> {
+  const credential = await createHostedProviderEgressCredential({
+    providerKind: "workers_ai_transcribe",
+    runnerContainerName: RUNNER_CONTAINER_NAME,
+    source: {
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+        PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+    },
+    userId: "member_123",
+  });
+  return new Request(TRANSCRIBE_URL, {
+    body: input.body ?? null,
+    headers: {
+      authorization: `Bearer ${credential}`,
+      ...(input.headers ?? {}),
+    },
+    method: input.method ?? "POST",
+  });
 }
 
 describe("hosted-local test RunnerContainer outbound composition", () => {
@@ -118,7 +156,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     }
 
     const response = await handler(
-      new Request(TRANSCRIBE_URL, {
+      await createAuthorizedTranscribeRequest({
         body: "wav-bytes",
         headers: { "content-type": "audio/wav" },
         method: "POST",
@@ -157,7 +195,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     });
 
     const response = await handler(
-      new Request(TRANSCRIBE_URL, {
+      await createAuthorizedTranscribeRequest({
         body: "wav-bytes",
         method: "POST",
       }),
@@ -181,7 +219,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     }
 
     const response = await handler(
-      new Request(TRANSCRIBE_URL, { method: "POST" }),
+      await createAuthorizedTranscribeRequest({ method: "POST" }),
       createOutboundEnv(),
       { containerId: "opaque-container-id" },
     );

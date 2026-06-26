@@ -14,7 +14,6 @@ import type {
   ParserToolName,
   ParserToolchainConfig,
   ParserToolchainToolConfig,
-  ParserToolchainTools,
 } from "./config.js";
 import {
   getParserToolchainPaths,
@@ -25,7 +24,15 @@ export type ParserToolDiscoverySource = "config" | "env" | "platform" | "system"
 
 export interface ParserToolchainRuntimeConfig {
   source: "config" | "platform";
-  tools: ParserToolchainTools;
+  tools: ParserToolchainRuntimeTools;
+}
+
+type ParserToolchainRuntimeTools = Partial<
+  Record<ParserToolName, ParserToolchainRuntimeToolConfig>
+>;
+
+interface ParserToolchainRuntimeToolConfig extends ParserToolchainToolConfig {
+  authorizationHeader?: string | null;
 }
 
 export interface ParserToolDiscovery {
@@ -46,9 +53,13 @@ export interface ParserDoctorReport {
 interface ParserToolchainContext {
   allowEnvToolchain: boolean;
   allowSystemToolchainLookup: boolean;
-  config: ParserToolchainConfig | null;
+  config: ParserToolchainRuntimeConfigState | null;
   configPath: string;
   configSource: "config" | "platform";
+}
+
+interface ParserToolchainRuntimeConfigState extends ParserToolchainConfig {
+  tools: ParserToolchainRuntimeTools;
 }
 
 interface ResolvedWhisperToolDiscovery extends ParserToolDiscovery {
@@ -77,7 +88,7 @@ export async function discoverParserToolchain(input: {
 async function discoverParserToolchainFromContext(input: {
   allowEnvToolchain: boolean;
   allowSystemToolchainLookup: boolean;
-  config: ParserToolchainConfig | null;
+  config: ParserToolchainRuntimeConfigState | null;
   configPath: string;
   configSource: "config" | "platform";
   vaultRoot: string;
@@ -89,7 +100,7 @@ async function discoverParserToolchainFromContext(input: {
 async function discoverParserToolchainStateFromContext(input: {
   allowEnvToolchain: boolean;
   allowSystemToolchainLookup: boolean;
-  config: ParserToolchainConfig | null;
+  config: ParserToolchainRuntimeConfigState | null;
   configPath: string;
   configSource: "config" | "platform";
   vaultRoot: string;
@@ -183,6 +194,9 @@ export async function createConfiguredParserRegistry(input: {
   });
 
   const transcriptionEndpoint = state.doctor.tools.transcription.endpoint ?? null;
+  const transcriptionAuthorizationHeader = normalizeNullableString(
+    context.config?.tools.transcription?.authorizationHeader,
+  );
 
   return {
     doctor: state.doctor,
@@ -194,7 +208,10 @@ export async function createConfiguredParserRegistry(input: {
         whisperProviderOptionsFromDiscovery(state.whisper),
       ),
       ...(transcriptionEndpoint
-        ? [createRemoteTranscriptionProvider({ endpoint: transcriptionEndpoint })]
+        ? [createRemoteTranscriptionProvider({
+          authorizationHeader: transcriptionAuthorizationHeader ?? undefined,
+          endpoint: transcriptionEndpoint,
+        })]
         : []),
     ]),
     ffmpeg: ffmpegOptionsFromDoctor(state.doctor),
@@ -356,7 +373,7 @@ async function discoverWhisperTool(input: {
 }
 
 function discoverTranscriptionTool(input: {
-  config: ParserToolchainConfig | null;
+  config: ParserToolchainRuntimeConfigState | null;
   configSource: "config" | "platform";
 }): ParserToolDiscovery {
   const endpoint = normalizeNullableString(input.config?.tools.transcription?.endpoint);
