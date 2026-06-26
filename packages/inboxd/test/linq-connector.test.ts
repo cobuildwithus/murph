@@ -587,6 +587,48 @@ test("normalizeHostedLinqConversationMessage hydrates metadata-only voice memos 
   ]);
 });
 
+test("normalizeHostedLinqConversationMessage keeps generated hydrated voice filenames generic", async () => {
+  const capture = await normalizeHostedLinqConversationMessage({
+    accountId: "hbid:linq.recipient:v1:test",
+    attachmentDownloadTimeoutMs: 5_000,
+    downloadDriver: {
+      async downloadPart() {
+        return Uint8Array.from([7, 8, 9]);
+      },
+      async downloadUrl() {
+        throw new Error("downloadUrl should not run without a voice memo url");
+      },
+    },
+    linqMessage: {
+      chatId: "chat_stored",
+      from: "hbid:linq.from:v1:test",
+      isFromMe: false,
+      messageId: "msg_download_part_private_id_123",
+      parts: [
+        {
+          attachmentId: "voice_att_private_provider_id",
+          mimeType: "audio/m4a",
+          size: 4096,
+          type: "voice_memo",
+        },
+      ],
+      service: "iMessage",
+    },
+    occurredAt: "2026-04-02T04:00:01.000Z",
+  });
+
+  assert.deepEqual(capture.attachments, [
+    {
+      byteSize: 4096,
+      data: Uint8Array.from([7, 8, 9]),
+      externalId: "voice_att_private_provider_id",
+      fileName: "voice-memo-part-1.m4a",
+      kind: "audio",
+      mime: "audio/m4a",
+    },
+  ]);
+});
+
 test("normalizeHostedLinqConversationMessage prefers downloadPart for url-backed attachments", async () => {
   const downloadUrl = vi.fn(async (url: string) => {
     assert.equal(url, "https://cdn.example.test/voice-note.m4a");

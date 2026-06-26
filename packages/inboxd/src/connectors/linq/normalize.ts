@@ -600,8 +600,7 @@ function inferFallbackAttachmentFileName(
   }
 
   const suffix = inferFileExtensionFromMime(mime) ?? "m4a";
-  const identifier = normalizeTextValue(part.attachment_id ?? null) ?? `part-${index + 1}`;
-  return `voice-memo-${identifier}.${suffix}`;
+  return `voice-memo-part-${index + 1}.${suffix}`;
 }
 
 function inferLinqAttachmentKind(
