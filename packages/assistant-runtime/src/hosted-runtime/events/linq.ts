@@ -325,21 +325,28 @@ async function downloadHostedLinqAttachmentPart(input: {
 
   const attachmentId = normalizeHostedLinqAttachmentId(input.part.attachmentId);
   if (!attachmentId || !input.apiConfig || !input.metadataFetch) {
+    const attempt: HostedLinqAttachmentDownloadAttemptLog = {
+      ...baseAttempt,
+      directFetchAttempted: Boolean(directUrl),
+      directFetchSucceeded: false,
+      directLocatorAllowed: Boolean(directUrl),
+      downloadStatus: directFailure?.status ?? null,
+      failureCode: directFailure?.code
+        ?? (!attachmentId
+          ? "missing_attachment_key"
+          : !input.apiConfig
+            ? "api_not_configured"
+            : "metadata_fetch_unavailable"),
+      result: directError ? "failed" : "not_downloaded",
+    };
     await writeHostedLinqAttachmentDownloadAttemptLog({
-      attempt: {
-        ...baseAttempt,
-        directFetchAttempted: Boolean(directUrl),
-        directFetchSucceeded: false,
-        directLocatorAllowed: Boolean(directUrl),
-        downloadStatus: directFailure?.status ?? null,
-        failureCode: directFailure?.code
-          ?? (!attachmentId
-            ? "missing_attachment_key"
-            : !input.apiConfig
-              ? "api_not_configured"
-              : "metadata_fetch_unavailable"),
-        result: directError ? "failed" : "not_downloaded",
-      },
+      attempt: directError
+        ? appendHostedLinqAttachmentDownloadErrorDiagnostics(
+            attempt,
+            directError,
+            shouldRetryHostedLinqAttachmentDownloadError(directError, input.signal),
+          )
+        : attempt,
       platform: input.platform,
     });
     if (directError) {
@@ -382,22 +389,29 @@ async function downloadHostedLinqAttachmentPart(input: {
     ?? normalizeHostedLinqMetadataAttachmentUrl(metadataResult.downloadLocator, input.apiConfig.apiBaseUrl);
 
   if (!normalizedRefreshedUrl) {
+    const attempt: HostedLinqAttachmentDownloadAttemptLog = {
+      ...baseAttempt,
+      directFetchAttempted: Boolean(directUrl),
+      directFetchSucceeded: false,
+      directLocatorAllowed: Boolean(directUrl),
+      downloadStatus: directFailure?.status ?? null,
+      failureCode: directFailure?.code
+        ?? metadataResult.failureCode
+        ?? "metadata_locator_not_allowed",
+      metadataLocatorAllowed: false,
+      metadataLocatorPresent: metadataResult.downloadLocator !== null,
+      metadataLookupAttempted: true,
+      metadataStatus: metadataResult.status,
+      result: directError ? "failed" : "not_downloaded",
+    };
     await writeHostedLinqAttachmentDownloadAttemptLog({
-      attempt: {
-        ...baseAttempt,
-        directFetchAttempted: Boolean(directUrl),
-        directFetchSucceeded: false,
-        directLocatorAllowed: Boolean(directUrl),
-        downloadStatus: directFailure?.status ?? null,
-        failureCode: directFailure?.code
-          ?? metadataResult.failureCode
-          ?? "metadata_locator_not_allowed",
-        metadataLocatorAllowed: false,
-        metadataLocatorPresent: metadataResult.downloadLocator !== null,
-        metadataLookupAttempted: true,
-        metadataStatus: metadataResult.status,
-        result: directError ? "failed" : "not_downloaded",
-      },
+      attempt: directError
+        ? appendHostedLinqAttachmentDownloadErrorDiagnostics(
+            attempt,
+            directError,
+            shouldRetryHostedLinqAttachmentDownloadError(directError, input.signal),
+          )
+        : attempt,
       platform: input.platform,
     });
     if (directError) {

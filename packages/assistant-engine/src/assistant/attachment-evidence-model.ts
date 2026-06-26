@@ -146,7 +146,7 @@ export async function buildAssistantInputAttachmentPromptBundles(input: {
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   vaultRoot: string
 }): Promise<AssistantInputAttachmentPromptBundle[]> {
-  return Promise.all(
+  const results = await Promise.allSettled(
     input.attachments.map((attachment) =>
       buildAssistantInputAttachmentPromptBundle({
         attachment,
@@ -154,6 +154,9 @@ export async function buildAssistantInputAttachmentPromptBundles(input: {
         vaultRoot: input.vaultRoot,
       }),
     ),
+  )
+  return results.flatMap((result) =>
+    result.status === 'fulfilled' ? [result.value] : [],
   )
 }
 

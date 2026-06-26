@@ -640,6 +640,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
   it("falls back to the original direct-download error when metadata returns an untrusted local url", async () => {
     process.env.LINQ_API_BASE_URL = "http://host.docker.internal:4011";
     process.env.LINQ_API_TOKEN = "linq-token";
+    const logRequests: HostedRuntimeLogRequest[] = [];
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -669,7 +670,9 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       throw new Error(`Unexpected fetch url: ${url}`);
     });
 
-    const driver = createInjectedFetchLinqDriver(fetchMock as typeof fetch);
+    const driver = createInjectedFetchLinqDriver(fetchMock as typeof fetch, {
+      platform: createLogPlatform(logRequests),
+    });
     assert.ok(driver);
     assert.ok(driver.downloadPart);
 
@@ -681,6 +684,70 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     }, undefined)).rejects.toThrow(
       "Hosted Linq attachment download failed with 403 Forbidden.",
     );
+    expect(logRequests).toHaveLength(1);
+    const entry = logRequests[0]?.entries[0];
+    assert.ok(entry);
+    expect(entry.eventCode).toBe("mailbox.linq_attachment_download_finished");
+    expect(entry.errorCode).toBe("download_http_status");
+    expect(entry.redactedJson).toMatchObject({
+      directFetchAttempted: true,
+      directFetchSucceeded: false,
+      downloadStatus: 403,
+      errorDetailPresent: true,
+      errorMessage: "Hosted execution authorization failed.",
+      errorRetryable: true,
+      failureCode: "download_http_status",
+      metadataLocatorAllowed: false,
+      metadataLocatorPresent: true,
+      metadataLookupAttempted: true,
+      metadataStatus: 200,
+      result: "failed",
+    });
+  });
+
+  it("logs redacted direct-download diagnostics when attachment id is missing", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      assert.equal(String(input), "https://cdn.linqapp.com/files/missing-key.m4a");
+      return new Response("not found", {
+        status: 404,
+        statusText: "Not Found",
+      });
+    });
+
+    const driver = createInjectedFetchLinqDriver(fetchMock as typeof fetch, {
+      platform: createLogPlatform(logRequests),
+    });
+    assert.ok(driver);
+    assert.ok(driver.downloadPart);
+
+    await expect(driver.downloadPart?.({
+      mimeType: "audio/m4a",
+      type: "voice_memo",
+      url: "https://cdn.linqapp.com/files/missing-key.m4a",
+    }, undefined)).rejects.toThrow(
+      "Hosted Linq attachment download failed with 404 Not Found.",
+    );
+
+    expect(logRequests).toHaveLength(1);
+    const entry = logRequests[0]?.entries[0];
+    assert.ok(entry);
+    expect(entry.eventCode).toBe("mailbox.linq_attachment_download_finished");
+    expect(entry.errorCode).toBe("download_http_status");
+    expect(entry.redactedJson).toMatchObject({
+      directFetchAttempted: true,
+      directFetchSucceeded: false,
+      downloadStatus: 404,
+      errorDetailPresent: true,
+      errorMessage: "Hosted execution rejected an invalid request.",
+      errorRetryable: true,
+      failureCode: "download_http_status",
+      metadataLookupAttempted: false,
+      result: "failed",
+    });
+    const serializedLog = JSON.stringify(entry.redactedJson);
+    expect(serializedLog).not.toContain("missing-key.m4a");
+    expect(serializedLog).not.toContain("cdn.linqapp.com");
   });
 
   it("falls back to the original direct-download error when metadata returns a local url outside the attachment path", async () => {

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   buildAssistantInputAttachmentPromptBundle,
+  buildAssistantInputAttachmentPromptBundles,
   hasAssistantInputAttachmentEvidenceCandidate,
   prepareAssistantInputMultimodalUserMessageContent,
 } from '../src/assistant/attachment-evidence-model.ts'
@@ -95,6 +96,62 @@ describe('assistant input attachment evidence model materialization', () => {
       eligible: true,
       mediaType: 'image/png',
       reason: 'supported-format',
+    })
+  })
+
+  it('keeps successful sibling bundles when one attachment materialization fails', async () => {
+    const vaultRoot = await createTempVaultRoot()
+    const imagePath = 'raw/inbox/capture-1/attachments/meal.jpg'
+    const audioPath = 'raw/inbox/capture-1/attachments/voice-note.m4a'
+    await writeVaultFile(vaultRoot, imagePath, Buffer.from([0xff, 0xd8, 0xff, 0xdb]))
+    await writeVaultFile(vaultRoot, audioPath, Buffer.from([1, 2, 3]))
+
+    const materializeWorkspaceArtifacts = vi.fn(async (paths: readonly string[]) => {
+      if (paths.includes('derived/inbox/capture-1/attachments/att-2/manifest.json')) {
+        throw new Error('derived manifest unavailable')
+      }
+      return {
+        materializedArtifactPaths: new Set(paths.map((item) => `vault:${item}`)),
+        missingArtifactPaths: new Set<string>(),
+      }
+    })
+
+    const bundles = await buildAssistantInputAttachmentPromptBundles({
+      attachments: [
+        createAttachmentEvidence({
+          kind: 'image',
+          mime: 'image/jpeg',
+          ordinal: 1,
+          rawPath: imagePath,
+        }),
+        {
+          ...createAttachmentEvidence({
+            kind: 'audio',
+            mime: 'audio/m4a',
+            ordinal: 2,
+            rawPath: audioPath,
+          }),
+          parseState: 'succeeded',
+          derived: {
+            allowedRoot: 'derived/inbox/capture-1/attachments/att-2',
+            kind: 'parser-manifest',
+            manifestPath: 'derived/inbox/capture-1/attachments/att-2/manifest.json',
+          },
+        },
+      ],
+      materializeWorkspaceArtifacts,
+      vaultRoot,
+    })
+
+    expect(bundles).toHaveLength(1)
+    expect(bundles[0]).toMatchObject({
+      kind: 'image',
+      ordinal: 1,
+      storedPath: imagePath,
+      routingImage: {
+        eligible: true,
+        reason: 'supported-format',
+      },
     })
   })
 
