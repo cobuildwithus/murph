@@ -193,45 +193,45 @@ I'm especially good with small experiments. A new supplement, a workout change, 
 Ready to dive in?`,
   ],
   "linq.invite_signup": [
-    `Hey, I'm Murph. Quick verify so I can reply from this number. Is this still you?
+    `Hey, I'm Murph. Tap to verify your number so I can reply here:
 {joinUrl}`,
-    `Welcome to Murph. Tap to confirm this is your phone. Good number for you?
+    `Welcome to Murph. Tap the link to confirm this is your phone:
 {joinUrl}`,
-    `Hi, Murph here. Verifying so I can text back. Sound good?
+    `Hi, Murph here. Tap to verify your number and we can get started:
 {joinUrl}`,
-    `Murph here. Tap to verify and we can get going. Ready?
+    `Murph here. Tap below to verify so I can reply on this line:
 {joinUrl}`,
-    `Murph here. One tap to confirm your number. Was this you signing up?
+    `Murph here. One tap to confirm your number and we're set:
 {joinUrl}`,
-    `Welcome in to Murph. Phone verify lives here. All good?
+    `Welcome in to Murph. Tap to verify your phone:
 {joinUrl}`,
-    `Hi, I'm Murph. Quick tap to verify. All you?
+    `Hi, I'm Murph. Tap the link to verify your number:
 {joinUrl}`,
-    `Confirm this is your Murph number so I can reply. Ready?
+    `Tap to confirm this is your Murph number so I can text back:
 {joinUrl}`,
-    `Quick Murph verify before we get started. Is this the right number?
+    `Quick Murph verify before we get started. Tap the link:
 {joinUrl}`,
-    `Murph here, glad you're texting. Save this number?
+    `Murph here, glad you're texting. Tap to verify and save my number:
 {joinUrl}`,
-    `Welcome to Murph. Tap to confirm this number is yours. OK to text from here?
+    `Welcome to Murph. Tap below to confirm this number is yours:
 {joinUrl}`,
-    `This is Murph. Verifying so I can reply on this line. Want me to use this number?
+    `This is Murph. Tap to verify so I can reply on this line:
 {joinUrl}`,
-    `Hi from Murph. Quick verify on your end. Make sense?
+    `Hi from Murph. Tap the link to finish verifying:
 {joinUrl}`,
-    `Murph here. Tap to verify and I'll reply from this number. Good?
+    `Murph here. Tap the link to verify and I'll reply from this number:
 {joinUrl}`,
-    `All set with Murph once you verify. That you?
+    `Tap below to verify and Murph is all set:
 {joinUrl}`,
-    `Quick Murph check. Tap to verify this is your number. Is this you?
+    `Quick Murph check. Tap to verify this is your number:
 {joinUrl}`,
-    `Tap to confirm and Murph is set. Cool?
+    `Tap to confirm and Murph is ready to text back:
 {joinUrl}`,
-    `Hello, I'm Murph. Verifying your number to start. Sound right?
+    `Hello, I'm Murph. Tap the link to verify your number:
 {joinUrl}`,
-    `Murph here. One tap and we're in. Good number?
+    `Murph here. One tap to verify and we're in:
 {joinUrl}`,
-    `One tap and Murph can text back from this number. Want me to keep texting from here?
+    `One tap and Murph can text back from this number. Verify here:
 {joinUrl}`,
   ],
   "linq.daily_quota": [
