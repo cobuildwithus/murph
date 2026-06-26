@@ -1829,10 +1829,12 @@ describe("buildWranglerLocalDevConfig", () => {
       JUNCTION_API_KEY: "sk_us_junction-test",
       JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
       JUNCTION_WEBHOOK_SECRET: "junction-webhook-secret",
+      MURPH_DATA_API_KEY: "local-data-api-key",
     });
     const required = readRequiredSecretNames(config);
 
     expect(required.filter((name) => name === "JUNCTION_API_KEY")).toHaveLength(1);
+    expect(required.filter((name) => name === "MURPH_DATA_API_KEY")).toHaveLength(1);
     expect(new Set(required).size).toBe(required.length);
   });
 });
