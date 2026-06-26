@@ -76,6 +76,7 @@ import {
 const TEST_CONTACT_PRIVACY_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=";
 type MockFn = ReturnType<typeof vi.fn>;
 type FamilyPlanTxMock = Prisma.TransactionClient & {
+  $queryRaw: MockFn;
   hostedAccountGroup: Prisma.TransactionClient["hostedAccountGroup"] & {
     create: MockFn;
     findFirst: MockFn;
