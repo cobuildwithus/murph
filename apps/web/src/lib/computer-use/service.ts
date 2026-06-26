@@ -2999,10 +2999,79 @@ function doesResumeContextMatchCheckpoint(input: {
     return false;
   }
 
-  return (!input.expected.conversationId ||
-      input.expected.conversationId === received.conversationId) &&
-    (!input.expected.recipientKey ||
-      input.expected.recipientKey === received.recipientKey);
+  return doesResumeContextPartMatchCheckpoint({
+    expected: input.expected.conversationId,
+    received: received.conversationId,
+    receivedReturnContactKind: input.received?.returnContactKind ?? null,
+  }) && doesResumeContextPartMatchCheckpoint({
+    expected: input.expected.recipientKey,
+    received: received.recipientKey,
+    receivedReturnContactKind: input.received?.returnContactKind ?? null,
+  });
+}
+
+function doesResumeContextPartMatchCheckpoint(input: {
+  expected: string | null;
+  received: string | null;
+  receivedReturnContactKind: HostedComputerReturnContactKind | null;
+}): boolean {
+  if (!input.expected) {
+    return true;
+  }
+  if (input.expected === input.received) {
+    return true;
+  }
+  if (!input.received || !input.receivedReturnContactKind) {
+    return false;
+  }
+
+  const scoped = readScopedComputerCheckpointPart(input.received);
+  return scoped?.value === input.expected &&
+    resolveComputerCheckpointScopedReturnContactKind(scoped.channel) ===
+      input.receivedReturnContactKind;
+}
+
+function readScopedComputerCheckpointPart(value: string): {
+  channel: string;
+  value: string;
+} | null {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed) || parsed.length !== 2) {
+      return null;
+    }
+    const channel = normalizeComputerCheckpointChannel(parsed[0]);
+    const rawValue = normalizeComputerCheckpointValue(parsed[1]);
+    return channel && rawValue ? { channel, value: rawValue } : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveComputerCheckpointScopedReturnContactKind(
+  channel: string,
+): HostedComputerReturnContactKind | null {
+  switch (channel) {
+    case "linq":
+      return "text";
+    case "telegram":
+      return "telegram";
+    case "email":
+      return "email";
+    default:
+      return null;
+  }
+}
+
+function normalizeComputerCheckpointChannel(value: unknown): string | null {
+  const normalized = normalizeComputerCheckpointValue(value);
+  return normalized ? normalized.toLowerCase() : null;
+}
+
+function normalizeComputerCheckpointValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
 }
 
 function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {
