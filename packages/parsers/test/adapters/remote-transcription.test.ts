@@ -45,7 +45,10 @@ function buildRequest(inputPath: string): ParseRequest {
 
 describe("createRemoteTranscriptionProvider", () => {
   it("reports availability from the configured endpoint", async () => {
-    const provider = createRemoteTranscriptionProvider({ endpoint: ENDPOINT });
+    const provider = createRemoteTranscriptionProvider({
+      authorizationHeader: "Bearer signed-provider-credential",
+      endpoint: ENDPOINT,
+    });
     expect(provider.id).toBe("remote-transcription");
     expect(provider.locality).toBe("remote");
     await expect(provider.discover()).resolves.toMatchObject({
@@ -78,7 +81,9 @@ describe("createRemoteTranscriptionProvider", () => {
       const fetchImpl = vi.fn(async (url: URL | RequestInfo, init?: RequestInit) => {
         expect(String(url)).toBe(ENDPOINT);
         expect(init?.method).toBe("POST");
-        expect(new Headers(init?.headers).get("content-type")).toBe("application/octet-stream");
+        const headers = new Headers(init?.headers);
+        expect(headers.get("authorization")).toBe("Bearer signed-provider-credential");
+        expect(headers.get("content-type")).toBe("application/octet-stream");
         expect(Buffer.from(init?.body as Uint8Array).toString("utf8")).toBe("RIFF-wav-bytes");
         return Response.json({
           durationMs: 30_000,
@@ -91,6 +96,7 @@ describe("createRemoteTranscriptionProvider", () => {
         });
       });
       const provider = createRemoteTranscriptionProvider({
+        authorizationHeader: "Bearer signed-provider-credential",
         endpoint: ENDPOINT,
         fetchImpl: fetchImpl as unknown as typeof fetch,
       });

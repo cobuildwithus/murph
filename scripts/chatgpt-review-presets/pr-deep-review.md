@@ -8,6 +8,8 @@ Default to deletion and radical simplicity. Before accepting any new code, abstr
 
 Treat the PR's stated intent as the requirement, not its current runtime state. Code that the diff temporarily disables, gates, fail-closes, scrubs, or stubs while wiring is in progress is not evidence the functionality should be deleted — propose deletion only when the same intended behavior can be preserved with materially less code. If the disabled state itself blocks the PR's stated goal, report that as a Critical/High correctness finding, not as a complexity collapse.
 
+This preset is used with the repo's review:gpt `app_connector="github"` config. Treat missing GitHub connector context as a hard stop: do not review from pasted context, memory, files attached out of band, or the PR description alone.
+
 Use the connected GitHub repository to read:
 
 - the full PR diff
@@ -15,7 +17,6 @@ Use the connected GitHub repository to read:
 - enough surrounding callers, invariants, state owners, and tests to judge the change in context
 - the baseline invariants doc at `docs/contracts/00-invariants.md` (and any topic-specific contract files it links, e.g. `docs/contracts/06-hosted-workspace-file-count.md`) — read this before reporting so invariant checks are grounded in the current rules, not memory
 
-This preset assumes the review:gpt `app_connector="github"` config is active. Treat missing GitHub connector context as a hard stop: do not review from pasted context, memory, files attached out of band, or the PR description alone.
 
 Do not review the diff in isolation.
 

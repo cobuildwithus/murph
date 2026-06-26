@@ -231,6 +231,33 @@ function mockOpenInboxRuntimeWithParseJobs(input: {
         job: failedJob,
       };
     }),
+    requeueAttachmentParseJobs: vi.fn((filters: {
+      attachmentId?: string;
+      captureId?: string;
+      state?: string;
+    } = {}) => {
+      const requeuedJobs = failedJobs.filter((job) =>
+        (filters.captureId === undefined || job.captureId === filters.captureId)
+          && (filters.attachmentId === undefined || job.attachmentId === filters.attachmentId)
+          && (filters.state === undefined || job.state === filters.state)
+          && ((attachmentKinds[job.attachmentId] ?? "audio") === "audio"
+            || (attachmentKinds[job.attachmentId] ?? "audio") === "video")
+      );
+      for (const job of requeuedJobs) {
+        failedJobs.splice(failedJobs.indexOf(job), 1);
+        pendingJobs.push({
+          ...job,
+          errorCode: null,
+          errorMessage: null,
+          finishedAt: null,
+          providerId: null,
+          resultPath: null,
+          startedAt: null,
+          state: "pending",
+        });
+      }
+      return requeuedJobs.length;
+    }),
     getCapture: vi.fn((captureId: string) => ({
       attachments: attachmentIds.map((attachmentId, index) => ({
         attachmentId,
@@ -1196,6 +1223,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
           captureIdPresent: true,
           errorCode: "parser_jobs_failed",
           errorCodes: ["ffmpeg_unavailable", "provider_unavailable"],
+          nextWakeAtPresent: false,
           parserFailed: 2,
           parserObservedFailedJobs: 0,
           parserProcessed: 3,
@@ -1206,9 +1234,9 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
     ]);
   });
 
-  it("logs failed parser job state when drain returns no job result", async () => {
+  it("logs failed parser job state without requeueing terminal failures", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
-    mockOpenInboxRuntimeWithParseJobs({
+    const runtime = mockOpenInboxRuntimeWithParseJobs({
       failedJobs: [
         createParseJobRecord({
           errorCode: "ffmpeg_unavailable",
@@ -1247,6 +1275,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
       nextWakeAt: null,
       parserProcessed: 0,
     });
+    expect(runtime.requeueAttachmentParseJobs).not.toHaveBeenCalled();
     expect(logRequests).toHaveLength(1);
     expect(logRequests[0]?.entries).toEqual([
       expect.objectContaining({
@@ -1259,6 +1288,7 @@ describe("importHostedConversationMessageWakeIntoLocalInbox", () => {
           captureIdPresent: true,
           errorCode: "parser_jobs_failed",
           errorCodes: ["ffmpeg_unavailable"],
+          nextWakeAtPresent: false,
           parserFailed: 1,
           parserObservedFailedJobs: 1,
           parserProcessed: 0,

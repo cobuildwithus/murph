@@ -46,6 +46,22 @@ const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
 const REQUIRED_OPENAI_PROVIDER_ENV = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
 } as const;
+const DEFAULT_HOSTED_RUNNER_NATIVE_PARSER_TOOLCHAIN = {
+  tools: {
+    ffmpeg: {
+      command: "/usr/bin/ffmpeg",
+    },
+    pdfinfo: {
+      command: "/usr/bin/pdfinfo",
+    },
+    pdftotext: {
+      command: "/usr/bin/pdftotext",
+    },
+    transcription: {
+      endpoint: "http://murph-transcribe.worker/v1/transcribe",
+    },
+  },
+} as const;
 
 describe("buildHostedRunnerContainerEnv", () => {
   it("forwards non-automation runner env without leaking unrelated worker vars or parser selectors", () => {
@@ -538,6 +554,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       ),
       configSource,
       forwardedEnv,
+      parserToolchain: DEFAULT_HOSTED_RUNNER_NATIVE_PARSER_TOOLCHAIN,
       platformEnv,
       userEnv: filterHostedRunnerSecrets(runnerSecrets, {
         ...configSource,
@@ -613,7 +630,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     }).parserToolchain).toBeUndefined();
   });
 
-  it("does not serialize parser config through the runtime config wrapper", () => {
+  it("serializes the native parser toolchain through the runtime config wrapper", () => {
     expect(buildHostedRunnerJobRuntimeConfig({
       forwardedEnv: {
         FFMPEG_COMMAND: "/stale/ffmpeg",
@@ -622,7 +639,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         WHISPER_MODEL_PATH: "/stale/model.bin",
       },
       runnerSecrets: {},
-    }).parserToolchain).toBeUndefined();
+    }).parserToolchain).toEqual(DEFAULT_HOSTED_RUNNER_NATIVE_PARSER_TOOLCHAIN);
   });
 
   it("serializes the local e2e parser toolchain only behind the explicit marker", () => {
@@ -676,7 +693,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       configSource,
       forwardedEnv: buildHostedRunnerContainerEnv(configSource),
       runnerSecrets: {},
-    }).parserToolchain).toBeUndefined();
+    }).parserToolchain).toEqual(DEFAULT_HOSTED_RUNNER_NATIVE_PARSER_TOOLCHAIN);
   });
 
   it("rejects parserToolchain:null at the hosted runner boundary", () => {
@@ -941,6 +958,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     })).toEqual({
       commitTimeoutMs: 30_000,
       forwardedEnv: {},
+      parserToolchain: DEFAULT_HOSTED_RUNNER_NATIVE_PARSER_TOOLCHAIN,
       platformEnv: {
         TELEGRAM_API_BASE_URL: "https://api.telegram.example",
         TELEGRAM_BOT_TOKEN: HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
