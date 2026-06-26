@@ -64,7 +64,7 @@ export function createAssistantHostedToolContext(input: {
     currentHostedDeliveryContext: () => {
       const deliveryContext = readDeliveryContext()
       const context = deliveryContext.messageInput.hostedDeliveryIdempotency
-      const channel = normalizeHostedDeliveryContextPart(
+      const channel = normalizeHostedDeliveryChannel(
         deliveryContext.messageInput.channel,
       )
       const conversationId = scopeHostedDeliveryContextPart({
@@ -95,7 +95,7 @@ function scopeHostedDeliveryContextPart(input: {
   channel: string | null
   value: string | null | undefined
 }): string | null {
-  const value = normalizeHostedDeliveryContextPart(input.value)
+  const value = normalizeHostedDeliveryContextValue(input.value)
   if (!value || !input.channel) {
     return value
   }
@@ -109,15 +109,20 @@ function readScopedHostedDeliveryContextChannel(value: string): string | null {
   try {
     const parsed: unknown = JSON.parse(value)
     return Array.isArray(parsed)
-      ? normalizeHostedDeliveryContextPart(parsed[0])
+      ? normalizeHostedDeliveryChannel(parsed[0])
       : null
   } catch {
     return null
   }
 }
 
-function normalizeHostedDeliveryContextPart(value: unknown): string | null {
+function normalizeHostedDeliveryChannel(value: unknown): string | null {
+  const normalized = normalizeHostedDeliveryContextValue(value)
+  return normalized ? normalized.toLowerCase() : null
+}
+
+function normalizeHostedDeliveryContextValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0
-    ? value.trim().toLowerCase()
+    ? value.trim()
     : null
 }
