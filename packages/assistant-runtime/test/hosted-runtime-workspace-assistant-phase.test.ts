@@ -1560,6 +1560,137 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("keeps a retry wake when hosted managed automation work partially succeeds", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const stableKeyFailure = new Error("metadata unavailable");
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 1,
+      skipped: 1,
+      stableKeyFailure,
+      stableKeyRetryNeeded: true,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 1,
+        murphManagedAutomationFailed: true,
+        murphManagedAutomationSkipped: 1,
+        murphManagedAutomationUpdated: 0,
+      }),
+    }));
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        component: "runtime",
+        eventCode: "assistant.pass_finished",
+        level: "info",
+        redactedJson: expect.objectContaining({
+          murphManagedAutomationCreated: 1,
+          murphManagedAutomationFailed: true,
+          murphManagedAutomationSkipped: 1,
+          murphManagedAutomationUpdated: 0,
+        }),
+      }),
+    );
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        component: "runtime",
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: expect.objectContaining({
+          errorCode: "runtime_error",
+          murphManagedAutomationCreated: 1,
+          murphManagedAutomationFailed: true,
+          murphManagedAutomationSkipped: 1,
+          murphManagedAutomationUpdated: 0,
+          safeErrorMessage: "Hosted execution runtime failed.",
+        }),
+      }),
+    );
+  });
+
+  it("logs stable-key metadata failures even when background setup stays idle", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 0,
+      skipped: 1,
+      stableKeyFailure: new Error("metadata unavailable"),
+      stableKeyRetryNeeded: true,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result).not.toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+    }));
+    expect(result).not.toEqual(expect.objectContaining({
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationFailed: true,
+      }),
+    }));
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        component: "runtime",
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: expect.objectContaining({
+          errorCode: "runtime_error",
+          murphManagedAutomationCreated: 0,
+          murphManagedAutomationFailed: true,
+          murphManagedAutomationSkipped: 1,
+          murphManagedAutomationUpdated: 0,
+          safeErrorMessage: "Hosted execution runtime failed.",
+        }),
+      }),
+    );
+  });
+
+  it("logs hosted managed automation setup failures without forcing a background retry", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.applyMurphManagedAutomations.mockRejectedValueOnce(
+      new Error("metadata unavailable"),
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result).not.toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+    }));
+    expect(result).not.toEqual(expect.objectContaining({
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationFailed: true,
+      }),
+    }));
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        component: "runtime",
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: expect.objectContaining({
+          murphManagedAutomationFailed: true,
+        }),
+      }),
+    );
+  });
+
   it("skips hosted managed automation work when background maintenance yields", async () => {
     const shouldYieldBackgroundMaintenance = vi.fn(() => true);
 
@@ -1645,6 +1776,61 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         murphManagedAutomationCreated: 1,
         murphManagedAutomationSkipped: 0,
         murphManagedAutomationUpdated: 0,
+      }),
+    }));
+  });
+
+  it("keeps a managed automation retry wake after a fresh-input checkpoint failure", async () => {
+    const defaultRoute = {
+      channel: "linq",
+      deliverySource: null,
+      deliveryTarget: "chat_synthetic_seed_route",
+      identityId: "identity_synthetic_seed_route",
+      participantId: "participant_synthetic_seed_route",
+      threadId: "thread_synthetic_seed_route",
+    };
+    mocks.readAssistantInputEvent.mockResolvedValueOnce({
+      conversation: {
+        accountId: defaultRoute.identityId,
+        actorId: defaultRoute.participantId,
+        actorIsSelf: false,
+        source: defaultRoute.channel,
+        threadId: defaultRoute.threadId,
+        threadIsDirect: true,
+      },
+      replyTarget: {
+        channel: defaultRoute.channel,
+        messageId: "message_synthetic_seed_route",
+        threadId: defaultRoute.deliveryTarget,
+      },
+    });
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 0,
+      skipped: 1,
+      stableKeyFailure: new Error("metadata unavailable"),
+      stableKeyRetryNeeded: true,
+      updated: 0,
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationFailed: true,
       }),
     }));
   });
