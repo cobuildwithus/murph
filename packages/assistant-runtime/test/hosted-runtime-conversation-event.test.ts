@@ -56,6 +56,9 @@ vi.mock("../src/hosted-runtime/events/email.ts", () => ({
 vi.mock("../src/hosted-runtime/events/linq.ts", () => ({
   createHostedLinqAttachmentDownloadDriver: mocks.createHostedLinqAttachmentDownloadDriver,
   HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS: 5_000,
+  withHostedLinqAttachmentDownloadRetry: (
+    driver: unknown,
+  ) => driver,
 }));
 
 vi.mock("../src/hosted-runtime/events/telegram.ts", () => ({
