@@ -64,8 +64,17 @@ export function createAssistantHostedToolContext(input: {
     currentHostedDeliveryContext: () => {
       const deliveryContext = readDeliveryContext()
       const context = deliveryContext.messageInput.hostedDeliveryIdempotency
-      const conversationId = context?.conversationId ?? null
-      const recipientKey = context?.recipientKey ?? null
+      const channel = normalizeHostedDeliveryContextPart(
+        deliveryContext.messageInput.channel,
+      )
+      const conversationId = scopeHostedDeliveryContextPart({
+        channel,
+        value: context?.conversationId ?? null,
+      })
+      const recipientKey = scopeHostedDeliveryContextPart({
+        channel,
+        value: context?.recipientKey ?? null,
+      })
       return conversationId || recipientKey
         ? { conversationId, recipientKey }
         : null
@@ -80,4 +89,35 @@ export function createAssistantHostedToolContext(input: {
     }),
     vaultFileSendAvailable: typeof input.sendVaultFile === 'function',
   }
+}
+
+function scopeHostedDeliveryContextPart(input: {
+  channel: string | null
+  value: string | null | undefined
+}): string | null {
+  const value = normalizeHostedDeliveryContextPart(input.value)
+  if (!value || !input.channel) {
+    return value
+  }
+  if (readScopedHostedDeliveryContextChannel(value) === input.channel) {
+    return value
+  }
+  return JSON.stringify([input.channel, value])
+}
+
+function readScopedHostedDeliveryContextChannel(value: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return Array.isArray(parsed)
+      ? normalizeHostedDeliveryContextPart(parsed[0])
+      : null
+  } catch {
+    return null
+  }
+}
+
+function normalizeHostedDeliveryContextPart(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim().toLowerCase()
+    : null
 }
