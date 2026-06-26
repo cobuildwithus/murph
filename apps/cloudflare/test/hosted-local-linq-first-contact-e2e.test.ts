@@ -66,7 +66,7 @@ const typingLoopUserId = `member_local_linq_typing_loop_${Date.now()}`;
 const linqApiToken = "linq-local-test-token";
 const linqWebhookSecret = "linq-local-webhook-secret";
 const signupFollowupQuestionText =
-  "What's your name? And if you're comfortable sharing, how old are you and what's your gender?";
+  "What's your name? And if you're comfortable sharing, your age and whether you're a guy or girl.";
 const checkpointReplayReplyText = "Yes - I can help with that.";
 const progressToolAttemptText = "Checking the current iMessage thread now.";
 const progressToolFinalReplyText = "I checked that and can keep helping from here.";
@@ -614,7 +614,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     const assistantProviderResponseCountBefore =
       countAssistantProviderResponsesApiRequests();
     const assistantQuestionText =
-      "What's your name? And if you're comfortable sharing, how old are you and what's your gender?";
+      "What's your name? And if you're comfortable sharing, your age and whether you're a guy or girl.";
     const assistantSecondReplyText =
       "Got it. I will remember that and we can work from those goals.";
     requireScenario().queueAssistantResponses([

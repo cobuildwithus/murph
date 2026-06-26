@@ -81,18 +81,19 @@ export const POST = withJsonError(async (
     userId: session.member.id,
   }).catch(() => undefined);
 
-  const contactOption = await resolveHostedMurphContactOption({
-    message: {
-      body: decision.decision === "approved"
-        ? APPROVED_REPLY_BODY
-        : DENIED_REPLY_BODY,
-    },
-    preferredKind: approval.returnContactKind,
-  });
+  const contactOption = approval.returnContactKind === null
+    ? null
+    : await resolveHostedMurphContactOption({
+        message: {
+          body: decision.decision === "approved"
+            ? APPROVED_REPLY_BODY
+            : DENIED_REPLY_BODY,
+        },
+        preferredKind: approval.returnContactKind,
+      });
   const response: HostedActionApprovalDecisionResponse = {
     ...view,
-    redirectTo: contactOption?.href
-      ?? `/approve/${encodeURIComponent(approvalId)}`,
+    redirectTo: contactOption?.href ?? null,
   };
 
   return jsonOk(response);

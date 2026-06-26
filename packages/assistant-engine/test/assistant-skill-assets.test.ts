@@ -513,10 +513,13 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('diagnosed conditions, allergies or intolerances, and pregnancy or nursing')
     expect(raw).toContain('name plus optional age/gender question')
     expect(raw).toContain(
-      'Name and optional age/gender. After the welcome, ask exactly this setup question by itself',
+      'Name and optional age/gender. After the welcome, ask one short setup message by itself that requests their name and, as optional shares, their age and whether they\'re a guy or girl',
     )
     expect(raw).toContain(
-      'how old are you and what\'s your gender?',
+      'Phrase it in your own conversational voice; do not say "biological sex" or "gender" and do not make it sound like a form',
+    )
+    expect(raw).toContain(
+      'Keep it to a single brief message, make the age and guy/girl parts clearly optional, and do not bundle any other intake question with it',
     )
     expect(raw).toContain(
       'If they already gave their name, skip this even if they skipped age/gender; never re-ask solely for optional demographics.',
@@ -918,7 +921,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Do not press for skipped demographic details, birth date, birth month/year, sex assigned at birth, or gender wording beyond the user\'s plain answer.',
     )
-    expect(raw.slice(nameContextIndex, healthContextIndex)).toContain('```text')
+    expect(raw.slice(nameContextIndex, healthContextIndex)).not.toContain('```text')
     expect(raw.slice(healthContextIndex, wearableIndex)).toContain('```text')
     const movementSection = raw.slice(movementIndex, protocolsIndex)
     const movementExamples = [
@@ -1001,6 +1004,7 @@ describe('assistant skill assets', () => {
     const removedFixedScripts = [
       'One high-level setup detail first: what age and gender should I use for context?',
       'how old are you, and what gender should I use for health context?',
+      'how old are you and what\'s your gender?',
       'What\'s your name? And is there anything health-wise you\'ve been curious about, working on, or dealing with lately?',
       'what gender should I use when interpreting health stuff',
       'Are you already trying any health protocols or experiments, or mostly starting fresh?',

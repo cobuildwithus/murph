@@ -1382,6 +1382,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "workspace.codex_continuity_repaired",
   "workspace.codex_home_snapshot_failed",
   "assistant.device_connect",
+  "assistant.codex_auth_failed",
   "assistant.automation_detail",
   "assistant.computer_tool_failed",
   "assistant.pass_finished",

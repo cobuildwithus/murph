@@ -47,12 +47,52 @@ const hostedTestingHostOnlyEnv = {
 
 type HostedTestPrismaClient =
   & HostedTestPrismaFactoryClient
+  & HostedActionApprovalForTestPrismaClient
   & HostedWorkspaceSeedForTestPrismaClient
   & HostedUsageDiagnosticsForTestPrismaClient;
 
 interface HostedTestPrismaFactoryClient {
   $disconnect(): Promise<void>;
   $transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T>;
+}
+
+interface HostedActionApprovalForTestPrismaClient {
+  hostedSensitiveActionChallenge: {
+    findFirst(
+      args: unknown,
+    ): Promise<HostedSensitiveActionChallengeForTest | null>;
+    update(args: unknown): Promise<HostedSensitiveActionChallengeForTest>;
+    updateMany(args: unknown): Promise<HostedBatchPayloadForTest>;
+    upsert(args: unknown): Promise<HostedSensitiveActionChallengeForTest>;
+  };
+}
+
+type HostedSensitiveActionApprovalStatusForTest =
+  | "approved"
+  | "denied"
+  | "pending";
+
+export interface HostedSensitiveActionChallengeForTest {
+  actionHash: string | null;
+  actionId: string | null;
+  approvalKey: string | null;
+  approvalStatus: HostedSensitiveActionApprovalStatusForTest | null;
+  bindingHash: string;
+  consumedAt: Date | null;
+  consumedBy: string | null;
+  createdAt: Date;
+  decidedAt: Date | null;
+  expiresAt: Date;
+  kind: string;
+  memberId: string;
+  presentationBody: string | null;
+  presentationTitle: string | null;
+  returnContactKind: string | null;
+  tokenHash: string;
+}
+
+interface HostedBatchPayloadForTest {
+  count: number;
 }
 
 interface HostedTestPrismaModule {

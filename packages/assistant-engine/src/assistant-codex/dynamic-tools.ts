@@ -1216,7 +1216,13 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid vault file arguments')
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
-    case 'attach-response-media':
+    case 'attach-response-media': {
+      if (hasVaultFileResponseMedia(input.currentResponseMedia ?? [])) {
+        return toolTextResult(
+          false,
+          'response media cannot be changed after an approved vault file is attached',
+        )
+      }
       return {
         ...toolTextResult(
           true,
@@ -1229,6 +1235,7 @@ export async function executeMurphDynamicToolRequest(input: {
           op: 'replace',
         },
       }
+    }
     case 'send-progress-update':
       return await executeProgressUpdateTool({
         progressDelivery: input.progressDelivery,
@@ -1309,6 +1316,12 @@ export async function executeMurphDynamicToolRequest(input: {
         },
       }
     case 'generate-image': {
+      if (hasVaultFileResponseMedia(input.currentResponseMedia ?? [])) {
+        return toolTextResult(
+          false,
+          'image generation cannot be combined with an approved vault file',
+        )
+      }
       if (hasVoiceMemoResponseMedia(input.currentResponseMedia ?? [])) {
         return toolTextResult(false, 'image generation cannot be combined with a voice memo')
       }
@@ -1466,6 +1479,12 @@ function hasVoiceMemoResponseMedia(
   media: readonly AssistantResponseMedia[],
 ): boolean {
   return media.some((item) => item.kind === 'voice_memo')
+}
+
+function hasVaultFileResponseMedia(
+  media: readonly AssistantResponseMedia[],
+): boolean {
+  return media.some((item) => item.kind === 'vault_file')
 }
 
 async function executeSubmitProductFeedbackTool(input: {

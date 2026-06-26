@@ -147,7 +147,7 @@ export default async function SettingsPage() {
 
       <section className="flex flex-col gap-4">
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          AI account
+          AI
         </div>
         <HostedChatGptSettings
           authenticated={authenticated}
