@@ -538,6 +538,56 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).not.toContain('6:00 PM local time')
   })
 
+  it('preserves a device-activity trigger on an existing weekly health insight', async () => {
+    const vaultRoot = await createVaultRoot()
+    const existingRoute = {
+      channel: 'telegram' as const,
+      deliveryTarget: 'existing-thread',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    }
+    const deviceActivitySchedule = {
+      after: '2026-06-09T12:00:00.000Z',
+      activityKind: 'workout',
+      kind: 'deviceActivity' as const,
+      source: 'whoop' as const,
+    }
+
+    await upsertAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      continuityPolicy: 'preserve',
+      instructions: 'After my next workout, look for one old finding.',
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      route: existingRoute,
+      schedule: deviceActivitySchedule,
+      slug: 'weekly-health-insight',
+      status: 'active',
+      summary: 'Old weekly insight.',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Weekly health insight',
+      vaultRoot,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T13:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 3,
+      skipped: 0,
+      updated: 1,
+    })
+
+    await expect(showAutomation({
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      instructions: expect.stringContaining('On this scheduled weekly run'),
+      schedule: deviceActivitySchedule,
+    })
+  })
+
   it('does not overwrite a user automation that already owns the managed slug', async () => {
     const vaultRoot = await createVaultRoot()
     const userAutomation = await upsertAutomation({

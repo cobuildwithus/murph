@@ -15,6 +15,12 @@ type StoredAutomationRecord = {
     | { kind: 'at'; at: string }
     | { kind: 'cron'; expression: string }
     | { kind: 'dailyLocal'; localTime: string }
+    | {
+        activityKind?: string
+        after: string
+        kind: 'deviceActivity'
+        source?: 'whoop' | 'whoop_v2'
+      }
     | { kind: 'every'; everyMs: number }
   slug: string
   status: 'active' | 'paused' | 'archived'
@@ -97,6 +103,7 @@ import {
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+  MurphManagedAutomationStableKeyUnavailableError,
   applyMurphManagedAutomations,
   type MurphManagedAutomationSeed,
 } from '../src/assistant/managed-automations.ts'
@@ -590,6 +597,43 @@ describe('applyMurphManagedAutomations', () => {
     ).not.toContain('Wednesday at 7:30 PM local time')
   })
 
+  it('preserves an existing device activity cadence on managed reconciliation', async () => {
+    const deviceActivitySchedule = {
+      after: '2026-06-20T12:00:00.000Z',
+      kind: 'deviceActivity' as const,
+      source: 'whoop' as const,
+      activityKind: 'workout',
+    }
+    managedAutomationMocks.records.set(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID, {
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      continuityPolicy: 'preserve',
+      instructions: 'After my next workout, find one old finding.',
+      route: defaultRoute,
+      schedule: deviceActivitySchedule,
+      slug: 'weekly-health-insight',
+      status: 'active',
+      summary: 'Old weekly insight.',
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Weekly health insight',
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-20T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 3,
+      skipped: 0,
+      updated: 1,
+    })
+
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
+      .toEqual(expect.objectContaining({
+        instructions: expect.stringContaining('On this scheduled weekly run'),
+        schedule: deviceActivitySchedule,
+      }))
+  })
+
   it('spreads managed recurring schedules deterministically by vault id', async () => {
     await applyMurphManagedAutomations({
       defaultRoute,
@@ -617,18 +661,14 @@ describe('applyMurphManagedAutomations', () => {
       .toEqual(firstSchedules.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID))
   })
 
-  it('defers spread creation when vault metadata cannot be read', async () => {
+  it('propagates vault metadata read failures before managed creation writes', async () => {
     managedAutomationMocks.loadVault.mockRejectedValue(new Error('metadata unavailable'))
 
     await expect(applyMurphManagedAutomations({
       defaultRoute,
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
-    })).resolves.toEqual({
-      created: 0,
-      skipped: 4,
-      updated: 0,
-    })
+    })).rejects.toBeInstanceOf(MurphManagedAutomationStableKeyUnavailableError)
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
     expect(managedAutomationMocks.records.size).toBe(0)
 

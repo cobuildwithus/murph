@@ -16,6 +16,7 @@ import {
 import {
   applyMurphManagedAutomations,
   getAssistantCronStatus,
+  MurphManagedAutomationStableKeyUnavailableError,
   readAssistantOutboxIntent,
   readAssistantInputEvent,
   refreshAssistantContextSnapshotBestEffort,
@@ -144,6 +145,7 @@ const HOSTED_RUNTIME_ALLOWED_LOG_KEY_NAMES = new Set([
 ]);
 const HOSTED_ASSISTANT_AUTOMATION_DETAIL_MAX_KEYS = 40;
 const HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS = 30_000;
+const HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS = 30_000;
 const HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEFERRED_PENDING_ASSISTANT_INPUT_RETRY_DELAY_MS = 30_000;
 const HOSTED_IDLE_DEVICE_SYNC_PREEMPTION_POLL_MS = 25;
@@ -270,7 +272,10 @@ export async function runHostedWorkspaceAssistantPhase(
     const managedAutomationsResult = hasFreshConversationInput
       || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null
       ? null
-      : await applyHostedManagedAutomationsBestEffort({ input });
+      : await applyHostedManagedAutomationsBestEffort({
+        input,
+        retryStableKeyFailure: false,
+      });
     const shouldContinueAssistantLane = systemMailboxMaintenance.continueAssistantLane
       || managedAutomationsResult !== null;
     if (
@@ -709,6 +714,7 @@ function emptyHostedSystemMailboxMaintenanceResult(input: {
 async function applyHostedManagedAutomationsBestEffort(input: {
   defaultRoute?: AutomationRoute | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  retryStableKeyFailure: boolean;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseResult | null> {
   if (input.input.shouldYieldBackgroundMaintenance?.() === true) {
     return null;
@@ -783,7 +789,24 @@ async function applyHostedManagedAutomationsBestEffort(input: {
       },
       platform: input.input.runtime.platform,
     });
-    return null;
+    if (
+      !input.retryStableKeyFailure ||
+      !(error instanceof MurphManagedAutomationStableKeyUnavailableError)
+    ) {
+      return null;
+    }
+
+    return {
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: new Date(
+        resolveHostedAssistantPhaseNowMs(input.input)
+          + HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS,
+      ).toISOString(),
+      progressed: true,
+      redactedStatus: {
+        murphManagedAutomationFailed: true,
+      },
+    };
   }
 }
 
@@ -827,6 +850,7 @@ async function applyFreshHostedManagedAutomationsAfterCheckpoint(input: {
   const result = await applyHostedManagedAutomationsBestEffort({
     defaultRoute,
     input: input.input,
+    retryStableKeyFailure: true,
   });
   if (!result || result.progressed !== true) {
     return null;
@@ -834,16 +858,31 @@ async function applyFreshHostedManagedAutomationsAfterCheckpoint(input: {
 
   const assistantCronWake =
     await resolveHostedAssistantCronWakeStateBestEffort(input.input);
-  const nextWakeAt = assistantCronWake.available
+  const cronNextWakeAt = assistantCronWake.available
     ? assistantCronWake.wake?.at ?? null
     : new Date(
         resolveHostedAssistantPhaseNowMs(input.input)
           + HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS,
       ).toISOString();
+  const hasManagedNextWakeAt = Object.hasOwn(result, "nextWakeAt");
+  const nextWake = selectHostedRuntimeWakeCandidate([
+    createHostedRuntimeWakeCandidate(
+      cronNextWakeAt,
+      assistantCronWake.wake?.reason ?? HOSTED_ASSISTANT_WAKE_REASON,
+    ),
+    createHostedRuntimeWakeCandidate(
+      hasManagedNextWakeAt ? result.nextWakeAt ?? null : null,
+      result.nextWakeReason ?? HOSTED_ASSISTANT_WAKE_REASON,
+    ),
+  ]);
+  const hasNextWakeAt = cronNextWakeAt !== null || hasManagedNextWakeAt;
 
   return {
     checkpointReason: result.checkpointReason,
-    ...(nextWakeAt ? { nextWakeAt } : {}),
+    ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
+    ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
+      ? { nextWakeReason: nextWake.reason }
+      : {}),
     ...(result.redactedStatus ? { redactedStatus: result.redactedStatus } : {}),
   };
 }
