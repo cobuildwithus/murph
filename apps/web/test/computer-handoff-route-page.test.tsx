@@ -156,18 +156,12 @@ describe("computer handoff route and page", () => {
       createRouteContext({ token: "handoff-token" }),
     );
     const body = (await response.json()) as {
-      contactOptions: Array<{ href: string; kind: string }>;
       redirectTo: string;
     };
 
     expect(response.status).toBe(200);
     expect(body.redirectTo).toBe("sms:+15550100001?body=Done");
     expect(body.redirectTo).not.toContain("private");
-    assert.deepEqual(body.contactOptions.map((option) => option.kind), [
-      "text",
-      "telegram",
-      "email",
-    ]);
     expect(mocks.service.completeHandoff).toHaveBeenCalledWith({
       memberId: "member_123",
       token: "handoff-token",
@@ -187,17 +181,11 @@ describe("computer handoff route and page", () => {
       createRouteContext({ token: "handoff-token" }),
     );
     const body = (await response.json()) as {
-      contactOptions: Array<{ href: string; kind: string }>;
       redirectTo: string;
     };
 
     expect(response.status).toBe(200);
-    expect(body.redirectTo).toBe("/computer/handoff/handoff-token?return=email");
-    assert.deepEqual(body.contactOptions.map((option) => option.kind), [
-      "email",
-      "text",
-      "telegram",
-    ]);
+    expect(body.redirectTo).toBe("/computer/handoff/handoff-token");
   });
 
   it("falls back to the handoff page path when no contact channel resolves", async () => {
@@ -221,12 +209,10 @@ describe("computer handoff route and page", () => {
       createRouteContext({ token: "handoff-token" }),
     );
     const body = (await response.json()) as {
-      contactOptions: unknown[];
       redirectTo: string;
     };
 
     expect(response.status).toBe(200);
-    expect(body.contactOptions).toEqual([]);
     expect(body.redirectTo).toBe("/computer/handoff/handoff-token");
     expect(mocks.service.completeHandoff).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -311,7 +297,7 @@ describe("computer handoff route and page", () => {
     assert.equal(markup.includes("Reply in Email"), false);
   });
 
-  it("renders completed handoff contact CTAs without echoing the suggested reply", async () => {
+  it("renders only the source channel CTA for source-bound completed handoffs", async () => {
     const markup = renderToStaticMarkup(await computerHandoffPage.default({
       params: Promise.resolve({ token: "handoff-token" }),
     }));
@@ -320,14 +306,12 @@ describe("computer handoff route and page", () => {
     assert.match(markup, /All set/);
     assert.match(markup, /Reply to Murph to continue\./);
     assert.match(markup, /Reply in Messages/);
-    assert.match(markup, /Reply in Telegram/);
-    assert.match(markup, /Reply in Email/);
+    assert.equal(markup.includes("Reply in Telegram"), false);
+    assert.equal(markup.includes("Reply in Email"), false);
     assert.equal(markup.includes("Suggested reply"), false);
     assert.equal(markup.includes("finished_browser_step"), false);
     assert.deepEqual(hrefs, [
       "sms:+15550100001?body=Done",
-      "https://t.me/withmurph_bot?text=Done",
-      "mailto:murph+alias123@mail.withmurph.ai?subject=Hey%20Murph&amp;body=Done",
     ]);
     expect(mocks.service.readHandoffPageState).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -335,22 +319,55 @@ describe("computer handoff route and page", () => {
     });
   });
 
-  it("renders the preferred email webmail CTA for email-return handoffs", async () => {
+  it("renders all contact CTAs for legacy completed handoffs without a source kind", async () => {
+    mocks.service.readHandoffPageState.mockResolvedValueOnce({
+      kind: "completed",
+      returnContactKind: null,
+      suggestedReply: "finished_browser_step",
+    });
     mocks.getHostedMurphContactContext.mockResolvedValueOnce(createContactContext({
       userEmailAddress: "member@gmail.com",
     }));
 
     const markup = renderToStaticMarkup(await computerHandoffPage.default({
       params: Promise.resolve({ token: "handoff-token" }),
-      searchParams: Promise.resolve({ return: "email" }),
     }));
     const hrefs = [...markup.matchAll(/href="([^"]+)"/gu)].map((match) => match[1]);
 
-    assert.match(markup, /Reply in Gmail/);
     assert.match(markup, /Reply in Messages/);
-    expect(hrefs[0]).toMatch(/^https:\/\/mail\.google\.com\/mail\/u\/0\/?/u);
-    expect(hrefs[0]).toContain("to=murph%2Balias123%40mail.withmurph.ai");
-    expect(hrefs[0]).toContain("body=Done");
+    assert.match(markup, /Reply in Telegram/);
+    assert.match(markup, /Reply in Gmail/);
+    assert.equal(hrefs[0], "sms:+15550100001?body=Done");
+    assert.equal(hrefs[1], "https://t.me/withmurph_bot?text=Done");
+    expect(hrefs[2]).toMatch(/^https:\/\/mail\.google\.com\/mail\/u\/0\/?/u);
+    expect(hrefs[2]).toContain("to=murph%2Balias123%40mail.withmurph.ai");
+    expect(hrefs[2]).toContain("body=Done");
+  });
+
+  it("renders only the literal Done fallback when a source channel is unavailable", async () => {
+    mocks.service.readHandoffPageState.mockResolvedValueOnce({
+      kind: "completed",
+      returnContactKind: "telegram",
+      suggestedReply: "finished_browser_step",
+    });
+    mocks.getHostedMurphContactContext.mockResolvedValueOnce(createContactContext({
+      initialContactChannels: {
+        email: true,
+        telegram: false,
+        text: true,
+      },
+    }));
+
+    const markup = renderToStaticMarkup(await computerHandoffPage.default({
+      params: Promise.resolve({ token: "handoff-token" }),
+    }));
+
+    assert.match(markup, /All set/);
+    assert.match(markup, /Reply with:/);
+    assert.match(markup, />Done</);
+    assert.equal(markup.includes("Reply in Messages"), false);
+    assert.equal(markup.includes("Reply in Telegram"), false);
+    assert.equal(markup.includes("Reply in Email"), false);
   });
 
   it("renders a literal Done fallback when completed handoff has no contact channel", async () => {
@@ -369,7 +386,7 @@ describe("computer handoff route and page", () => {
     }));
 
     assert.match(markup, /All set/);
-    assert.match(markup, /Return to your Murph thread and reply with:/);
+    assert.match(markup, /Reply with:/);
     assert.match(markup, />Done</);
     assert.equal(markup.includes("Suggested reply"), false);
     assert.equal(markup.includes("finished_browser_step"), false);

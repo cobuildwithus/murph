@@ -27,14 +27,14 @@ export async function POST(
     message: { body: HANDOFF_DONE_REPLY_BODY },
     preferredKind: sourceContactKind,
   });
-  const fallbackHref = buildCompletedHandoffHref({ sourceContactKind, token });
+  const fallbackHref = buildCompletedHandoffHref({ token });
   const redirectTo = resolveHandoffDoneRedirect({
     contactOptions,
     fallbackHref,
     sourceContactKind,
   });
 
-  return NextResponse.json({ contactOptions, redirectTo });
+  return NextResponse.json({ redirectTo });
 }
 
 function resolveHandoffDoneRedirect(input: {
@@ -50,12 +50,6 @@ function resolveHandoffDoneRedirect(input: {
     ?? input.fallbackHref;
 }
 
-function buildCompletedHandoffHref(input: {
-  sourceContactKind: MurphContactKind | null;
-  token: string;
-}): string {
-  const href = `/computer/handoff/${encodeURIComponent(input.token)}`;
-  return input.sourceContactKind
-    ? `${href}?return=${encodeURIComponent(input.sourceContactKind)}`
-    : href;
+function buildCompletedHandoffHref(input: { token: string }): string {
+  return `/computer/handoff/${encodeURIComponent(input.token)}`;
 }

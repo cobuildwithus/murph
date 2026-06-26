@@ -82,12 +82,13 @@ export function createAssistantHostedToolContext(input: {
         channel,
         value: context?.recipientKey ?? null,
       })
+      if (!conversationId && !recipientKey) {
+        return null
+      }
       const returnContactKind = resolveAssistantHostedReturnContactKind(
         deliveryContext.messageInput.channel,
       )
-      return conversationId || recipientKey || returnContactKind
-        ? { conversationId, recipientKey, returnContactKind }
-        : null
+      return { conversationId, recipientKey, returnContactKind }
     },
     currentHostedMailboxItemIds: () => {
       const deliveryContext = readDeliveryContext()
