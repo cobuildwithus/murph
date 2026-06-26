@@ -402,6 +402,7 @@ type PrismaFixtureBase = {
   hostedMemberRouting?: HostedMemberRoutingFixture;
   hostedThreadRoute?: {
     findMany?: MockedFunction;
+    updateMany?: MockedFunction;
   };
   hostedWebhookReceipt?: HostedWebhookReceiptFixture;
   hostedWebhookReceiptSideEffect?: HostedWebhookReceiptSideEffectFixture;
@@ -4625,6 +4626,9 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   if (prisma.hostedMemberRouting && !prisma.hostedMemberRouting.createMany) {
     prisma.hostedMemberRouting.createMany = vi.fn().mockResolvedValue({ count: 1 });
   }
+  if (prisma.hostedMemberRouting && !prisma.hostedMemberRouting.updateMany) {
+    prisma.hostedMemberRouting.updateMany = vi.fn().mockResolvedValue({ count: 1 });
+  }
   if (prisma.hostedMemberRouting && !prisma.hostedMemberRouting.findMany) {
     prisma.hostedMemberRouting.findMany = vi.fn(async (input: { where: Record<string, unknown> }) => {
       const record = await readHostedMemberRoutingFromMockLookup({
@@ -4641,8 +4645,11 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
       configurable: true,
       value: {
         findMany: vi.fn().mockResolvedValue([]),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     });
+  } else if (!prisma.hostedThreadRoute.updateMany) {
+    prisma.hostedThreadRoute.updateMany = vi.fn().mockResolvedValue({ count: 1 });
   }
 
   if (!prisma.hostedWebhookReceiptSideEffect?.deleteMany || !prisma.hostedWebhookReceiptSideEffect?.upsert) {

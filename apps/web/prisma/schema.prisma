@@ -548,11 +548,13 @@ model HostedMemberRouting {
   linqChatIdEncrypted                String?      @map("linq_chat_id_encrypted")
   linqRecipientPhoneLookupKey        String?      @map("linq_recipient_phone_lookup_key")
   linqRecipientPhoneEncrypted        String?      @map("linq_recipient_phone_encrypted")
+  linqLastInboundAt                  DateTime?    @map("linq_last_inbound_at")
   /// Pre-activation Linq acquisition/referral thread before a home line is chosen.
   pendingLinqChatLookupKey           String?      @unique @map("pending_linq_chat_lookup_key")
   pendingLinqChatIdEncrypted         String?      @map("pending_linq_chat_id_encrypted")
   pendingLinqRecipientPhoneLookupKey String?      @map("pending_linq_recipient_phone_lookup_key")
   pendingLinqRecipientPhoneEncrypted String?      @map("pending_linq_recipient_phone_encrypted")
+  pendingLinqLastInboundAt           DateTime?    @map("pending_linq_last_inbound_at")
   pendingLinqParticipantContactKind       String?   @map("pending_linq_participant_contact_kind")
   pendingLinqParticipantContactLookupKey  String?   @unique @map("pending_linq_participant_contact_lookup_key")
   pendingLinqParticipantContactEncrypted  String?   @map("pending_linq_participant_contact_encrypted")
@@ -566,6 +568,8 @@ model HostedMemberRouting {
 
   @@index([linqRecipientPhoneLookupKey])
   @@index([pendingLinqRecipientPhoneLookupKey])
+  @@index([linqLastInboundAt])
+  @@index([pendingLinqLastInboundAt])
   @@map("hosted_member_routing")
 }
 
@@ -894,6 +898,7 @@ model HostedThreadRoute {
   threadLookupKey         String                @map("thread_lookup_key")
   threadIdentityLookupKey String                @map("thread_identity_lookup_key")
   containerMemberId       String                @map("container_member_id")
+  lastInboundAt           DateTime?             @map("last_inbound_at")
   createdAt               DateTime              @default(now()) @map("created_at")
   updatedAt               DateTime              @default(now()) @updatedAt @map("updated_at")
   container               HostedThreadContainer @relation(fields: [containerMemberId], references: [memberId], onDelete: Cascade)
@@ -901,6 +906,7 @@ model HostedThreadRoute {
   @@id([channel, threadIdentityLookupKey])
   @@index([channel, threadLookupKey])
   @@index([containerMemberId])
+  @@index([channel, lastInboundAt])
   @@map("hosted_thread_route")
 }
 
@@ -1003,10 +1009,12 @@ model HostedLinqDelivery {
   acceptedAt           DateTime? @map("accepted_at")
   deliveredAt          DateTime? @map("delivered_at")
   failedAt             DateTime? @map("failed_at")
+  skippedAt            DateTime? @map("skipped_at")
   lastReceiptAt        DateTime? @map("last_receipt_at")
   lastProviderEventId  String?  @map("last_provider_event_id")
   failureCode          String?  @map("failure_code")
   failureReason        String?  @map("failure_reason")
+  skipReason           String?  @map("skip_reason")
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
   line                 HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)

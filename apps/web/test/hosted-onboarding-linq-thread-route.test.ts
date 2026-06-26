@@ -196,6 +196,7 @@ function createPrisma(input: {
         },
       ];
     }),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
   };
   const hostedMemberRouting = {
     findMany: vi.fn().mockResolvedValue([]),
@@ -353,6 +354,7 @@ function createStatefulThreadRoutePrisma() {
       route.threadLookupKey = data.threadLookupKey;
       return route;
     }),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
   };
   const hostedMemberRouting = {
     findMany: vi.fn().mockResolvedValue([]),

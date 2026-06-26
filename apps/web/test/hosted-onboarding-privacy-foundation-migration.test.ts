@@ -75,6 +75,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'linqChatIdEncrypted String? @map("linq_chat_id_encrypted")',
     'linqRecipientPhoneLookupKey String? @map("linq_recipient_phone_lookup_key")',
     'linqRecipientPhoneEncrypted String? @map("linq_recipient_phone_encrypted")',
+    'linqLastInboundAt DateTime? @map("linq_last_inbound_at")',
     'pendingLinqChatLookupKey String? @unique @map("pending_linq_chat_lookup_key")',
     'pendingLinqChatIdEncrypted String? @map("pending_linq_chat_id_encrypted")',
     'pendingLinqParticipantContactKind String? @map("pending_linq_participant_contact_kind")',
@@ -83,6 +84,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'pendingLinqParticipantContactObservedAt DateTime? @map("pending_linq_participant_contact_observed_at")',
     'pendingLinqRecipientPhoneLookupKey String? @map("pending_linq_recipient_phone_lookup_key")',
     'pendingLinqRecipientPhoneEncrypted String? @map("pending_linq_recipient_phone_encrypted")',
+    'pendingLinqLastInboundAt DateTime? @map("pending_linq_last_inbound_at")',
     'replyAliasLookupKey String? @unique @map("reply_alias_lookup_key")',
     'telegramUserLookupKey String? @unique @map("telegram_user_lookup_key")',
     'telegramUserIdEncrypted String? @map("telegram_user_id_encrypted")',
@@ -388,6 +390,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedLinqEgressEngagementMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026062501_hosted_linq_egress_engagement/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -446,6 +455,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260624150000_hosted_sensitive_action_approval",
       "20260624200000_hosted_action_approval_return_contact_kind",
       "2026062500_hosted_linq_observability",
+      "2026062501_hosted_linq_egress_engagement",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -529,6 +539,11 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedLinqObservabilityMigrationSql).toContain('"payload_sanitized_json" JSONB');
     expect(hostedLinqObservabilityMigrationSql).toContain('"provider_created_at" TIMESTAMP(3) NOT NULL');
     expect(hostedLinqObservabilityMigrationSql).not.toContain("raw_payload");
+    expect(hostedLinqEgressEngagementMigrationSql).toContain('"linq_last_inbound_at" TIMESTAMP(3)');
+    expect(hostedLinqEgressEngagementMigrationSql).toContain('"pending_linq_last_inbound_at" TIMESTAMP(3)');
+    expect(hostedLinqEgressEngagementMigrationSql).toContain('"last_inbound_at" TIMESTAMP(3)');
+    expect(hostedLinqEgressEngagementMigrationSql).toContain('"skipped_at" TIMESTAMP(3)');
+    expect(hostedLinqEgressEngagementMigrationSql).not.toContain("raw_payload");
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
     expect(baselineMigrationSql).toContain(
       'CREATE INDEX "hosted_assistant_runtime_issue_fingerprint_occurred_at_idx"',

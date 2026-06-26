@@ -36,6 +36,9 @@ import {
   readHostedLinqDailyState,
 } from "./linq-daily-state";
 import {
+  recordHostedThreadRouteLinqInboundEngagementTx,
+} from "./linq-egress-engagement";
+import {
   type HostedLinqMessageReceivedEvent,
   type HostedLinqWebhookEvent,
   shouldIgnoreHostedLinqForLocalInboundGuard,
@@ -694,6 +697,12 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       }),
     );
   }
+
+  await recordHostedThreadRouteLinqInboundEngagementTx({
+    chatId: summary.chatId,
+    occurredAt,
+    prisma: input.prisma,
+  });
 
   const dailyState = await incrementHostedLinqInboundDailyState({
     memberId: input.route.containerMemberId,

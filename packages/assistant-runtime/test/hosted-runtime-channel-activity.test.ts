@@ -276,6 +276,7 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
   const signal = new AbortController().signal;
   const delivery = createHostedAssistantProgressDeliveryDependencies({
     effectsPort: {
+      async assertLinqRecentInboundEngagement() {},
       sendEmail: mocks.sendEmail,
     },
     forwardedEnv: {
@@ -414,6 +415,10 @@ test("hosted progress Linq delivery aborts provider send when request signal abo
     });
   });
   const delivery = createHostedAssistantProgressDeliveryDependencies({
+    effectsPort: {
+      async assertLinqRecentInboundEngagement() {},
+      sendEmail: mocks.sendEmail,
+    },
     forwardedEnv: {
       LINQ_API_BASE_URL: "https://api.linq.example",
       LINQ_API_TOKEN: "platform-linq-token",
@@ -453,6 +458,10 @@ test("hosted progress Linq delivery recovers same-wake direct recipient only", a
     userId: "member_123",
   });
   const delivery = createHostedAssistantProgressDeliveryDependencies({
+    effectsPort: {
+      async assertLinqRecentInboundEngagement() {},
+      sendEmail: mocks.sendEmail,
+    },
     forwardedEnv: {
       LINQ_API_BASE_URL: "https://api.linq.example",
       LINQ_API_TOKEN: "platform-linq-token",

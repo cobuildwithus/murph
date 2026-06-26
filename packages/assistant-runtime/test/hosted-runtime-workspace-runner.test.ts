@@ -5484,6 +5484,7 @@ function createPlatform(input: {
       },
     },
     effectsPort: {
+      async assertLinqRecentInboundEngagement() {},
       async readRawEmailMessage() {
         return null;
       },

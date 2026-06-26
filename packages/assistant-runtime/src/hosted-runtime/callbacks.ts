@@ -967,7 +967,7 @@ function hasHostedAssistantVoiceMemoMedia(
 }
 
 export function createHostedAssistantProgressDeliveryDependencies(input: {
-  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority" | "sendEmail"> | null;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement" | "assertLinqThreadRouteAuthority" | "sendEmail"> | null;
   forwardedEnv?: Readonly<Record<string, string>>;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   platformEnv?: Readonly<Record<string, string>>;
@@ -1428,6 +1428,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         sendLinq: createHostedAssistantLinqSendDependency({
           actionApprovalPort: input.actionApprovalPort,
+          allowCurrentInboundEngagementBypass: input.assistantDeliveryEffect.deliveryPhase === "foreground_current_turn",
           assertLiveness: input.assertLiveness,
           effectsPort: input.effectsPort,
           expectedDedupeKey: input.assistantDeliveryEffect.fingerprint,
@@ -1444,6 +1445,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           vaultRoot: input.vaultRoot,
         }),
         sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
+          allowCurrentInboundEngagementBypass: input.assistantDeliveryEffect.deliveryPhase === "foreground_current_turn",
           assertLiveness: input.assertLiveness,
           effectsPort: input.effectsPort,
           linqEnv: input.linqEnv,
@@ -1453,6 +1455,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
+          intentId: input.assistantDeliveryEffect.effectId,
           providerFetch: input.providerFetch,
           signal: input.signal,
         }),
@@ -1707,8 +1710,9 @@ function readProviderFetchRequestUrl(request: Parameters<typeof fetch>[0]): stri
 
 function createHostedAssistantLinqSendDependency(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
+  allowCurrentInboundEngagementBypass?: boolean;
   assertLiveness?: () => Promise<void>;
-  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement" | "assertLinqThreadRouteAuthority"> | null;
   expectedDedupeKey?: string | null;
   intentId?: string | null;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
@@ -1750,6 +1754,19 @@ function createHostedAssistantLinqSendDependency(input: {
       effectsPort: input.effectsPort ?? null,
       routeScopedContext: input.linqDeliveryContext ?? null,
       signal: signal ?? null,
+    });
+    await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+      allowCurrentInboundBypass: input.allowCurrentInboundEngagementBypass === true,
+      deliveryContext,
+      directRecipientPhoneNumber,
+      effectsPort: input.effectsPort ?? null,
+      fromPhoneNumber,
+      idempotencyKey: request.idempotencyKey ?? null,
+      intentId: input.intentId ?? null,
+      replyToMessageId: request.replyToMessageId ?? null,
+      signal: signal ?? null,
+      target: request.target,
+      targetKind: request.targetKind ?? null,
     });
     input.onProviderDispatchEntered?.();
     const result = await sendHostedProviderLinqMessage({
@@ -1897,8 +1914,10 @@ function createRetryableHostedVaultFileError(
 }
 
 function createHostedAssistantLinqVoiceMemoSendDependency(input: {
+  allowCurrentInboundEngagementBypass?: boolean;
   assertLiveness?: () => Promise<void>;
-  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement" | "assertLinqThreadRouteAuthority"> | null;
+  intentId?: string | null;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
@@ -1924,6 +1943,19 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       effectsPort: input.effectsPort ?? null,
       routeScopedContext: input.linqDeliveryContext ?? null,
       signal: signal ?? null,
+    });
+    await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+      allowCurrentInboundBypass: input.allowCurrentInboundEngagementBypass === true,
+      deliveryContext,
+      directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
+      effectsPort: input.effectsPort ?? null,
+      fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+      idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
+      intentId: input.intentId ?? null,
+      replyToMessageId: deliveryContext?.replyToMessageId ?? null,
+      signal: signal ?? null,
+      target: deliveryContext?.target ?? request.target,
+      targetKind: "thread",
     });
     input.onProviderDispatchEntered?.();
     const result = await sendHostedProviderLinqVoiceMemo({
@@ -1958,6 +1990,74 @@ async function assertHostedAssistantLinqRouteAuthorityForDelivery(input: {
   await assertAuthority(routeAuthority, {
     signal: input.signal,
   });
+}
+
+async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
+  allowCurrentInboundBypass: boolean;
+  deliveryContext: HostedAssistantLinqDeliveryContext | null;
+  directRecipientPhoneNumber: string | null;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
+  fromPhoneNumber: string | null;
+  idempotencyKey: string | null;
+  intentId: string | null;
+  replyToMessageId: string | null;
+  signal: AbortSignal | null;
+  target: string;
+  targetKind: string | null;
+}): Promise<void> {
+  if (isHostedAssistantCurrentInboundLinqReply(input)) {
+    return;
+  }
+
+  const assertRecentInbound = input.effectsPort?.assertLinqRecentInboundEngagement;
+  if (!assertRecentInbound) {
+    throw new VaultCliError(
+      "ASSISTANT_LINQ_ENGAGEMENT_ASSERT_UNAVAILABLE",
+      "Hosted Linq delivery requires recent-recipient-engagement assertion before provider dispatch.",
+      { retryable: true },
+    );
+  }
+  await assertRecentInbound({
+    directRecipientPhoneNumber: input.directRecipientPhoneNumber,
+    fromPhoneNumber: input.fromPhoneNumber,
+    idempotencyKey: input.idempotencyKey,
+    intentId: input.intentId,
+    routeAuthority: input.deliveryContext?.routeAuthority ?? null,
+    target: input.deliveryContext?.target ?? input.target,
+    targetKind: input.targetKind === "explicit" || input.targetKind === "participant" || input.targetKind === "thread"
+      ? input.targetKind
+      : null,
+  }, {
+    signal: input.signal,
+  });
+}
+
+function isHostedAssistantCurrentInboundLinqReply(input: {
+  allowCurrentInboundBypass: boolean;
+  deliveryContext: HostedAssistantLinqDeliveryContext | null;
+  replyToMessageId: string | null;
+  target: string;
+  targetKind: string | null;
+}): boolean {
+  if (!input.allowCurrentInboundBypass || !input.deliveryContext) {
+    return false;
+  }
+  if (input.targetKind !== "thread" && input.targetKind !== "explicit") {
+    return false;
+  }
+  const target = normalizeHostedLinqDeliveryText(input.target);
+  const replyToMessageId = normalizeHostedLinqDeliveryText(input.replyToMessageId);
+  return (
+    target !== null
+    && target === input.deliveryContext.target
+    && replyToMessageId !== null
+    && replyToMessageId === input.deliveryContext.replyToMessageId
+  );
+}
+
+function normalizeHostedLinqDeliveryText(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
 }
 
 function requireHostedAssistantLinqRouteAuthorityAssert(

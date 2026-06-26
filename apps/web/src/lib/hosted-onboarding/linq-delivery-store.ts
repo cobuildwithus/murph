@@ -6,6 +6,9 @@ import {
   createHostedPhoneLookupKey,
   readHostedPhoneHint,
 } from "./contact-privacy";
+import {
+  upsertHostedLinqLineForPhoneTx,
+} from "./linq-line-store";
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { normalizePhoneNumber } from "./phone";
@@ -27,6 +30,11 @@ export async function recordHostedLinqDeliveryAttemptTx(input: {
   const attemptedAt = input.attemptedAt ?? new Date();
   const idempotencyKey = normalizeNullable(input.idempotencyKey);
   const phoneNumber = normalizePhoneNumber(input.phoneNumber);
+  await ensureHostedLinqDeliveryLineTx({
+    observedAt: attemptedAt,
+    phoneNumber,
+    prisma: input.prisma,
+  });
   const phoneNumberLookupKey = createHostedPhoneLookupKey(phoneNumber);
   const data = {
     attemptedAt,
@@ -112,6 +120,65 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
   });
 }
 
+export async function markHostedLinqDeliverySkippedTx(input: {
+  idempotencyKey?: string | null;
+  linqChatId?: string | null;
+  phoneNumber?: string | null;
+  prisma: HostedLinqDeliveryClient;
+  reason: string;
+  skippedAt?: Date;
+  source: string;
+  sourceRef?: string | null;
+  targetKind?: string | null;
+  template?: string | null;
+}): Promise<{ id: string }> {
+  const skippedAt = input.skippedAt ?? new Date();
+  const idempotencyKey = normalizeNullable(input.idempotencyKey);
+  const phoneNumber = normalizePhoneNumber(input.phoneNumber);
+  await ensureHostedLinqDeliveryLineTx({
+    observedAt: skippedAt,
+    phoneNumber,
+    prisma: input.prisma,
+  });
+  const data = {
+    attemptedAt: skippedAt,
+    failedAt: null,
+    failureCode: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
+    failureReason: "Linq/iMessage send skipped because the recipient has not replied within the allowed window.",
+    linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
+    phoneNumberHint: phoneNumber ? readHostedPhoneHint(phoneNumber) : null,
+    phoneNumberLookupKey: createHostedPhoneLookupKey(phoneNumber),
+    skipReason: input.reason.slice(0, 160),
+    skippedAt,
+    source: input.source,
+    sourceRef: normalizeNullable(input.sourceRef),
+    status: "skipped",
+    targetKind: normalizeNullable(input.targetKind),
+    template: normalizeNullable(input.template),
+  };
+
+  if (!idempotencyKey) {
+    return input.prisma.hostedLinqDelivery.create({
+      data: {
+        ...data,
+        id: generateHostedRandomPrefixedId("hld"),
+      },
+      select: { id: true },
+    });
+  }
+
+  return input.prisma.hostedLinqDelivery.upsert({
+    where: { idempotencyKey },
+    create: {
+      ...data,
+      id: buildHostedLinqDeliveryId(idempotencyKey),
+      idempotencyKey,
+    },
+    update: data,
+    select: { id: true },
+  });
+}
+
 export async function applyHostedLinqDeliveryReceiptTx(input: {
   event: ParsedHostedLinqProviderEvent;
   prisma: HostedLinqDeliveryClient;
@@ -171,4 +238,21 @@ function buildHostedLinqDeliveryId(idempotencyKey: string): string {
 function normalizeNullable(value: string | null | undefined): string | null {
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized : null;
+}
+
+async function ensureHostedLinqDeliveryLineTx(input: {
+  observedAt: Date;
+  phoneNumber: string | null;
+  prisma: HostedLinqDeliveryClient;
+}): Promise<void> {
+  if (!input.phoneNumber) {
+    return;
+  }
+
+  await upsertHostedLinqLineForPhoneTx({
+    observedAt: input.observedAt,
+    phoneNumber: input.phoneNumber,
+    prisma: input.prisma,
+    source: "webhook",
+  });
 }

@@ -12,8 +12,13 @@ import { hostedOnboardingError } from "./errors";
 import {
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
+  markHostedLinqDeliverySkippedTx,
   recordHostedLinqDeliveryAttemptTx,
 } from "./linq-delivery-store";
+import {
+  buildHostedLinqRecentInboundSkipReason,
+  readHostedLinqSideEffectRecentInboundDecision,
+} from "./linq-egress-engagement";
 import { sanitizeHostedOnboardingLogString } from "./http";
 import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { buildHostedInviteUrl } from "./invite-service";
@@ -30,7 +35,6 @@ import {
   sendHostedLinqChatMessage,
 } from "./linq";
 import {
-  assertHostedThreadRouteEgressAuthority,
   type HostedLinqThreadRouteEgressAuthority,
 } from "../hosted-routing/thread-route-store";
 import {
@@ -39,6 +43,11 @@ import {
 } from "./logging";
 
 type HostedLinqTransportPersistenceClient = PrismaClient | Prisma.TransactionClient;
+
+export type HostedLinqCurrentInboundReplyProof = {
+  chatId: string | null;
+  messageId: string | null;
+};
 
 export type HostedLinqConversationHomeRedirectPayload = {
   chatId: string;
@@ -201,6 +210,7 @@ function buildHostedWebhookLinqMessageEffectId(
 }
 
 export async function drainHostedLinqSideEffectsDirect(input: {
+  currentInboundReply?: HostedLinqCurrentInboundReplyProof | null;
   prisma: HostedLinqTransportPersistenceClient;
   sideEffects: readonly HostedLinqMessageSideEffect[];
   signal?: AbortSignal;
@@ -212,10 +222,15 @@ export async function drainHostedLinqSideEffectsDirect(input: {
     }
 
     try {
-      await sendHostedLinqSideEffect(effect, {
+      const result = await sendHostedLinqSideEffect(effect, {
+        currentInboundReply: input.currentInboundReply ?? null,
         prisma: input.prisma,
         signal: input.signal,
       });
+
+      if (result.status === "skipped") {
+        continue;
+      }
     } catch (error) {
       await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
       throw error;
@@ -233,10 +248,11 @@ async function sendHostedLinqSideEffect(
     payload: HostedLinqMessagePayload;
   },
   options: {
+    currentInboundReply: HostedLinqCurrentInboundReplyProof | null;
     prisma: HostedLinqTransportPersistenceClient;
     signal?: AbortSignal;
   },
-): Promise<void> {
+): Promise<{ status: "sent" | "skipped" }> {
   const startedAtMs = Date.now();
   await recordHostedLinqDeliveryAttemptBestEffort({
     effect,
@@ -245,7 +261,27 @@ async function sendHostedLinqSideEffect(
   });
 
   try {
-    await assertHostedLinqSideEffectRouteAuthority(effect, options.prisma);
+    if (!isHostedLinqCurrentInboundSideEffect(effect, options.currentInboundReply)) {
+      const engagementDecision = await readHostedLinqSideEffectRecentInboundDecision({
+        payload: effect.payload,
+        prisma: options.prisma,
+      });
+      if (!engagementDecision.allowed) {
+        await markHostedLinqDeliverySkippedBestEffort({
+          effect,
+          lastInboundAt: engagementDecision.lastInboundAt,
+          prisma: options.prisma,
+        });
+        console.warn("Hosted Linq side-effect skipped by recipient engagement policy.", {
+          effectIdSuffix: toHostedOnboardingLogIdSuffix(effect.effectId) ?? "unknown",
+          lastInboundAt: engagementDecision.lastInboundAt?.toISOString() ?? null,
+          policyDays: 28,
+          template: effect.payload.template,
+        });
+        return { status: "skipped" };
+      }
+    }
+
     const result = await sendHostedLinqChatMessage({
       chatId: effect.payload.chatId,
       idempotencyKey: effect.effectId,
@@ -271,6 +307,8 @@ async function sendHostedLinqSideEffect(
     );
     throw error;
   }
+
+  return { status: "sent" };
 }
 
 async function recordHostedLinqDeliveryAttemptBestEffort(input: {
@@ -296,6 +334,29 @@ async function recordHostedLinqDeliveryAttemptBestEffort(input: {
       template,
     });
   }
+}
+
+function isHostedLinqCurrentInboundSideEffect(
+  effect: HostedLinqMessageSideEffect,
+  currentInboundReply: HostedLinqCurrentInboundReplyProof | null,
+): boolean {
+  if (!currentInboundReply) {
+    return false;
+  }
+
+  const chatId = normalizeTransportText(effect.payload.chatId);
+  const replyToMessageId = normalizeTransportText(effect.payload.replyToMessageId);
+  return (
+    chatId !== null
+    && chatId === normalizeTransportText(currentInboundReply.chatId)
+    && replyToMessageId !== null
+    && replyToMessageId === normalizeTransportText(currentInboundReply.messageId)
+  );
+}
+
+function normalizeTransportText(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
 }
 
 async function markHostedLinqDeliveryAcceptedBestEffort(input: {
@@ -335,23 +396,6 @@ async function markHostedLinqDeliveryFailedBestEffort(input: {
   } catch {
     // Preserve the original delivery error. This telemetry update is non-critical.
   }
-}
-
-async function assertHostedLinqSideEffectRouteAuthority(
-  effect: HostedLinqMessageSideEffect,
-  prisma: HostedLinqTransportPersistenceClient,
-): Promise<void> {
-  const routeAuthority = "routeAuthority" in effect.payload
-    ? effect.payload.routeAuthority
-    : null;
-  if (!routeAuthority) {
-    return;
-  }
-
-  await assertHostedThreadRouteEgressAuthority({
-    authority: routeAuthority,
-    prisma,
-  });
 }
 
 function buildHostedLinqSideEffectLogDetails(
@@ -691,5 +735,26 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
       "Hosted Linq side-effect notice claim release failed.",
       buildHostedLinqSideEffectLogDetails(effect, error, 0),
     );
+  }
+}
+
+async function markHostedLinqDeliverySkippedBestEffort(input: {
+  effect: HostedLinqMessageSideEffect;
+  lastInboundAt: Date | null;
+  prisma: HostedLinqTransportPersistenceClient;
+}): Promise<void> {
+  try {
+    await markHostedLinqDeliverySkippedTx({
+      idempotencyKey: input.effect.effectId,
+      linqChatId: input.effect.payload.chatId,
+      prisma: input.prisma,
+      reason: buildHostedLinqRecentInboundSkipReason(input.lastInboundAt),
+      source: "hosted_webhook_side_effect",
+      sourceRef: input.effect.effectId,
+      targetKind: "thread",
+      template: input.effect.payload.template,
+    });
+  } catch {
+    // Skip logging must never turn a protective no-send into a retrying send failure.
   }
 }

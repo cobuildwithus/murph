@@ -63,6 +63,11 @@ import {
 } from "@/src/lib/hosted-onboarding/webhook-transport";
 
 describe("hosted Linq webhook transport", () => {
+  const currentInboundReply = {
+    chatId: "chat-1",
+    messageId: "message-1",
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -80,6 +85,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
         prisma: {} as never,
         sideEffects: [effect],
       }),
@@ -121,6 +127,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
         prisma: {} as never,
         sideEffects: [effect],
       }),
@@ -152,6 +159,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
         prisma: prisma as never,
         sideEffects: [effect],
       }),
@@ -205,6 +213,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
         prisma: {} as never,
         sideEffects: [effect],
       }),
@@ -285,6 +294,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
         prisma: {} as never,
         sideEffects: [effect],
       }),
@@ -317,6 +327,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
         prisma: {} as never,
         sideEffects: [effect],
       }),
@@ -382,6 +393,7 @@ describe("hosted Linq webhook transport", () => {
     try {
       await expect(
         drainHostedLinqSideEffectsDirect({
+          currentInboundReply,
           prisma: {} as never,
           sideEffects: [effect],
         }),
@@ -486,6 +498,7 @@ describe("hosted Linq webhook transport", () => {
     try {
       await expect(
         drainHostedLinqSideEffectsDirect({
+          currentInboundReply,
           prisma: {} as never,
           sideEffects: [effect],
         }),
@@ -552,6 +565,7 @@ describe("hosted Linq webhook transport", () => {
 
     await expect(
       drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
         prisma: prisma as never,
         sideEffects: [effect],
       }),

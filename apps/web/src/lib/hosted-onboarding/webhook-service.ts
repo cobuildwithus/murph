@@ -43,6 +43,7 @@ import {
 } from "./logging";
 import {
   drainHostedLinqSideEffectsDirect,
+  type HostedLinqCurrentInboundReplyProof,
 } from "./webhook-transport";
 import {
   maybeHandoffHostedExecutionWebhookWake,
@@ -149,9 +150,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       return response;
     }
 
-    if (event.event_type === "message.received") {
-      requireHostedLinqMessageReceivedEvent(event);
-    }
+    const currentInboundReply: HostedLinqCurrentInboundReplyProof | null =
+      event.event_type === "message.received"
+        ? buildHostedLinqCurrentInboundReplyProof(event)
+        : null;
 
     const prisma = input.prisma ?? getPrisma();
     const planTiming = startHostedOnboardingTiming(
@@ -195,6 +197,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     if (plan.desiredSideEffects.length > 0) {
       await drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
         prisma,
         sideEffects: plan.desiredSideEffects,
         signal: input.signal,
@@ -320,6 +323,16 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
       wakeHandoffSignalAccepted,
     });
   }
+}
+
+function buildHostedLinqCurrentInboundReplyProof(
+  event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0],
+): HostedLinqCurrentInboundReplyProof {
+  const messageEvent = requireHostedLinqMessageReceivedEvent(event);
+  return {
+    chatId: messageEvent.data.chat_id,
+    messageId: messageEvent.data.message.id,
+  };
 }
 
 async function ingestHostedLinqProviderEventDirect(input: {

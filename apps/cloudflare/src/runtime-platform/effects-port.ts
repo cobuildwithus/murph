@@ -3,6 +3,7 @@ import type {
   HostedExecutionExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
 } from "@murphai/hosted-execution/routes";
 
@@ -136,6 +137,18 @@ export function createCloudflareEffectsPort(input: {
               description: "Hosted Linq thread route authority assertion",
               fetchImpl: input.fetchImpl,
               path: HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+          },
+          async assertLinqRecentInboundEngagement(request, context) {
+            await fetchHostedWebControlPlaneJson({
+              body: request,
+              boundUserId: input.boundUserId,
+              description: "Hosted Linq recent inbound engagement assertion",
+              fetchImpl: input.fetchImpl,
+              path: HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,

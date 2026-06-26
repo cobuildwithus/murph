@@ -179,6 +179,16 @@ export interface HostedRuntimeLinqSendResponse {
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
 
+export interface HostedRuntimeLinqRecentInboundEngagementRequest {
+  directRecipientPhoneNumber?: string | null;
+  fromPhoneNumber?: string | null;
+  idempotencyKey?: string | null;
+  intentId?: string | null;
+  routeAuthority?: HostedExecutionExternalThreadRouteAuthority | null;
+  target: string | null;
+  targetKind?: HostedRuntimeProviderTargetKind | null;
+}
+
 export interface HostedRuntimeWhatsAppSendRequest {
   message: string;
   replyToMessageId?: string | null;
@@ -224,6 +234,10 @@ type HostedRuntimeEffectsPortBase = {
   ): Promise<HostedAssistantDeliveryRecord | null>;
   assertLinqThreadRouteAuthority?(
     authority: HostedExecutionExternalThreadRouteAuthority,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<void>;
+  assertLinqRecentInboundEngagement?(
+    request: HostedRuntimeLinqRecentInboundEngagementRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
   sendEmail(request: HostedEmailSendRequest): Promise<{ target: string } | void>;
