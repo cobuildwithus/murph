@@ -23,19 +23,21 @@ export const HOSTED_LINQ_CONVERSATION_HEALTH = {
 
 export async function recordHostedLinqConversationInboundTx(input: {
   chatId: string | null | undefined;
+  eventId?: string | null;
   linqChatLookupKey?: string | null;
   linePhoneNumber?: string | null;
   linePhoneNumberLookupKey?: string | null;
   memberId: string;
   occurredAt: Date | string;
   prisma: HostedLinqConversationClient;
-}): Promise<void> {
+}): Promise<boolean> {
   const occurredAt = normalizeConversationDate(input.occurredAt);
   const linqChatLookupKey = normalizeConversationText(input.linqChatLookupKey)
     ?? createHostedLinqChatLookupKey(input.chatId);
   if (!occurredAt || !linqChatLookupKey) {
-    return;
+    return false;
   }
+  const eventId = normalizeConversationText(input.eventId) ?? "";
 
   const linePhoneNumberLookupKey = await resolveConversationLineLookupKey({
     linePhoneNumber: input.linePhoneNumber,
@@ -44,30 +46,46 @@ export async function recordHostedLinqConversationInboundTx(input: {
     prisma: input.prisma,
   });
 
-  await input.prisma.hostedLinqConversationState.upsert({
+  await ensureHostedLinqConversationProjectionRowTx({
+    linePhoneNumberLookupKey,
+    linqChatLookupKey,
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+
+  await input.prisma.hostedLinqConversationState.update({
     where: { linqChatLookupKey },
-    create: {
-      firstInboundAt: occurredAt,
-      healthStatus: HOSTED_LINQ_CONVERSATION_HEALTH.atRisk,
-      lastInboundAt: occurredAt,
-      linePhoneNumberLookupKey,
-      linqChatLookupKey,
-      memberId: input.memberId,
-      outboundSinceLastInboundCount: 0,
-      recipientReplyCount: 1,
-    },
-    update: {
-      ...(linePhoneNumberLookupKey ? { linePhoneNumberLookupKey } : {}),
-      lastInboundAt: occurredAt,
-      memberId: input.memberId,
-      outboundSinceLastInboundCount: 0,
+    data: {
       recipientReplyCount: { increment: 1 },
     },
   });
 
   await input.prisma.hostedLinqConversationState.updateMany({
-    where: { firstInboundAt: null, linqChatLookupKey },
+    where: {
+      linqChatLookupKey,
+      OR: [
+        { firstInboundAt: null },
+        { firstInboundAt: { gt: occurredAt } },
+      ],
+    },
     data: { firstInboundAt: occurredAt },
+  });
+
+  const advanced = await input.prisma.hostedLinqConversationState.updateMany({
+    where: {
+      linqChatLookupKey,
+      OR: buildConversationInboundOrderingWhere({
+        eventId,
+        providerCreatedAt: occurredAt,
+      }),
+    },
+    data: {
+      ...(linePhoneNumberLookupKey ? { linePhoneNumberLookupKey } : {}),
+      lastInboundAt: occurredAt,
+      lastInboundEventId: eventId,
+      memberId: input.memberId,
+      outboundSinceLastInboundCount: 0,
+    },
   });
 
   await input.prisma.hostedLinqConversationState.updateMany({
@@ -78,6 +96,7 @@ export async function recordHostedLinqConversationInboundTx(input: {
     },
     data: { trustedAt: occurredAt },
   });
+  return advanced.count === 1;
 }
 
 export async function projectHostedLinqConversationForProviderEventTx(input: {
@@ -92,12 +111,43 @@ export async function projectHostedLinqConversationForProviderEventTx(input: {
 
   if (input.event.eventType === "message.received") {
     if (input.event.direction === "outbound") {
-      const updated = await input.prisma.hostedLinqConversationState.updateMany({
+      const memberId = await resolveConversationMemberIdForProviderEventTx({
+        event: input.event,
+        prisma: input.prisma,
+      });
+      if (!memberId) {
+        return false;
+      }
+
+      await ensureHostedLinqConversationProjectionRowTx({
+        linePhoneNumberLookupKey: input.lineLookupKey,
+        linqChatLookupKey,
+        memberId,
+        prisma: input.prisma,
+      });
+      await input.prisma.hostedLinqConversationState.update({
         where: { linqChatLookupKey },
         data: {
-          lastOutboundAt: input.event.providerCreatedAt,
-          outboundSinceLastInboundCount: { increment: 1 },
           totalOutboundCount: { increment: 1 },
+        },
+      });
+      await input.prisma.hostedLinqConversationState.updateMany({
+        where: {
+          linqChatLookupKey,
+          OR: buildConversationEventAfterLastInboundWhere(input.event),
+        },
+        data: {
+          outboundSinceLastInboundCount: { increment: 1 },
+        },
+      });
+      const updated = await input.prisma.hostedLinqConversationState.updateMany({
+        where: {
+          linqChatLookupKey,
+          OR: buildConversationOutboundOrderingWhere(input.event),
+        },
+        data: {
+          lastOutboundAt: input.event.providerCreatedAt,
+          lastOutboundEventId: input.event.eventId,
         },
       });
       return updated.count === 1;
@@ -113,6 +163,7 @@ export async function projectHostedLinqConversationForProviderEventTx(input: {
 
     await recordHostedLinqConversationInboundTx({
       chatId: input.event.linqChatId,
+      eventId: input.event.eventId,
       linqChatLookupKey,
       linePhoneNumberLookupKey: input.lineLookupKey,
       memberId,
@@ -123,6 +174,20 @@ export async function projectHostedLinqConversationForProviderEventTx(input: {
   }
 
   if (input.event.deliveryStatus) {
+    const memberId = await resolveConversationMemberIdForProviderEventTx({
+      event: input.event,
+      prisma: input.prisma,
+    });
+    if (!memberId) {
+      return false;
+    }
+
+    await ensureHostedLinqConversationProjectionRowTx({
+      linePhoneNumberLookupKey: input.lineLookupKey,
+      linqChatLookupKey,
+      memberId,
+      prisma: input.prisma,
+    });
     return applyHostedLinqConversationDeliveryReceiptTx({
       event: input.event,
       prisma: input.prisma,
@@ -235,6 +300,78 @@ async function resolveConversationMemberIdForProviderEventTx(input: {
     },
   });
   return route?.containerMemberId ?? null;
+}
+
+async function ensureHostedLinqConversationProjectionRowTx(input: {
+  linePhoneNumberLookupKey: string | null;
+  linqChatLookupKey: string;
+  memberId: string;
+  prisma: HostedLinqConversationClient;
+}): Promise<void> {
+  await input.prisma.hostedLinqConversationState.upsert({
+    where: { linqChatLookupKey: input.linqChatLookupKey },
+    create: {
+      healthStatus: HOSTED_LINQ_CONVERSATION_HEALTH.atRisk,
+      linePhoneNumberLookupKey: input.linePhoneNumberLookupKey,
+      linqChatLookupKey: input.linqChatLookupKey,
+      memberId: input.memberId,
+    },
+    update: {
+      ...(input.linePhoneNumberLookupKey ? { linePhoneNumberLookupKey: input.linePhoneNumberLookupKey } : {}),
+      memberId: input.memberId,
+    },
+  });
+}
+
+function buildConversationInboundOrderingWhere(
+  event: Pick<ParsedHostedLinqProviderEvent, "eventId" | "providerCreatedAt">,
+): Prisma.HostedLinqConversationStateWhereInput[] {
+  return [
+    { lastInboundAt: null },
+    { lastInboundAt: { lt: event.providerCreatedAt } },
+    {
+      lastInboundAt: event.providerCreatedAt,
+      lastInboundEventId: null,
+    },
+    {
+      lastInboundAt: event.providerCreatedAt,
+      lastInboundEventId: { lt: event.eventId },
+    },
+  ];
+}
+
+function buildConversationOutboundOrderingWhere(
+  event: Pick<ParsedHostedLinqProviderEvent, "eventId" | "providerCreatedAt">,
+): Prisma.HostedLinqConversationStateWhereInput[] {
+  return [
+    { lastOutboundAt: null },
+    { lastOutboundAt: { lt: event.providerCreatedAt } },
+    {
+      lastOutboundAt: event.providerCreatedAt,
+      lastOutboundEventId: null,
+    },
+    {
+      lastOutboundAt: event.providerCreatedAt,
+      lastOutboundEventId: { lt: event.eventId },
+    },
+  ];
+}
+
+function buildConversationEventAfterLastInboundWhere(
+  event: Pick<ParsedHostedLinqProviderEvent, "eventId" | "providerCreatedAt">,
+): Prisma.HostedLinqConversationStateWhereInput[] {
+  return [
+    { lastInboundAt: null },
+    { lastInboundAt: { lt: event.providerCreatedAt } },
+    {
+      lastInboundAt: event.providerCreatedAt,
+      lastInboundEventId: null,
+    },
+    {
+      lastInboundAt: event.providerCreatedAt,
+      lastInboundEventId: { lt: event.eventId },
+    },
+  ];
 }
 
 function buildConversationReceiptOrderingWhere(

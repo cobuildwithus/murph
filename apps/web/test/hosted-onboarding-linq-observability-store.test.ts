@@ -182,6 +182,9 @@ describe("hosted Linq observability stores", () => {
 
   it("counts outbound message.received echoes against line pacing", async () => {
     const fixture = createObservabilityPrismaFixture();
+    fixture.hostedMemberRoutingFindFirst.mockResolvedValueOnce({
+      memberId: "member_123",
+    });
     const event = requireParsedProviderEvent(buildMessageReceivedEvent({
       direction: "outbound",
       eventId: "evt_outbound_123",
@@ -202,16 +205,39 @@ describe("hosted Linq observability stores", () => {
         },
       }),
     );
-    expect(fixture.hostedLinqConversationStateUpdateMany).toHaveBeenCalledWith(
+    expect(fixture.hostedLinqConversationStateUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          linqChatLookupKey: event.linqChatLookupKey,
+          memberId: "member_123",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqConversationStateUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
-          lastOutboundAt: new Date("2026-03-26T12:00:00.000Z"),
-          outboundSinceLastInboundCount: { increment: 1 },
           totalOutboundCount: { increment: 1 },
         },
         where: {
           linqChatLookupKey: event.linqChatLookupKey,
         },
+      }),
+    );
+    expect(fixture.hostedLinqConversationStateUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          outboundSinceLastInboundCount: { increment: 1 },
+        },
+        where: expect.objectContaining({
+          linqChatLookupKey: event.linqChatLookupKey,
+          OR: expect.arrayContaining([
+            {
+              lastInboundAt: {
+                lt: new Date("2026-03-26T12:00:00.000Z"),
+              },
+            },
+          ]),
+        }),
       }),
     );
   });
@@ -239,11 +265,39 @@ describe("hosted Linq observability stores", () => {
           linePhoneNumberLookupKey: event.phoneNumberLookupKey,
           linqChatLookupKey: event.linqChatLookupKey,
           memberId: "member_123",
-          recipientReplyCount: 1,
         }),
         where: {
           linqChatLookupKey: event.linqChatLookupKey,
         },
+      }),
+    );
+    expect(fixture.hostedLinqConversationStateUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          recipientReplyCount: { increment: 1 },
+        },
+        where: {
+          linqChatLookupKey: event.linqChatLookupKey,
+        },
+      }),
+    );
+    expect(fixture.hostedLinqConversationStateUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          lastInboundAt: new Date("2026-03-26T12:00:00.000Z"),
+          lastInboundEventId: "evt_inbound_123",
+          outboundSinceLastInboundCount: 0,
+        }),
+        where: expect.objectContaining({
+          linqChatLookupKey: event.linqChatLookupKey,
+          OR: expect.arrayContaining([
+            {
+              lastInboundAt: {
+                lt: new Date("2026-03-26T12:00:00.000Z"),
+              },
+            },
+          ]),
+        }),
       }),
     );
   });
@@ -282,6 +336,95 @@ describe("hosted Linq observability stores", () => {
         create: expect.objectContaining({
           linqChatLookupKey: event.linqChatLookupKey,
           memberId: "member_thread",
+        }),
+      }),
+    );
+  });
+
+  it("upserts conversation state before applying a receipt that arrives before inbound projection", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedMemberRoutingFindFirst.mockResolvedValueOnce({
+      memberId: "member_123",
+    });
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValue({
+      id: "hld_attempt_123",
+    });
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        chat_id: "chat_123",
+        message_id: "msg_delivered_123",
+        phone_number: "+15550000000",
+        service: "sms",
+      },
+      eventId: "evt_delivered_before_inbound",
+      eventType: "message.delivered",
+    }));
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqConversationStateUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          linePhoneNumberLookupKey: event.phoneNumberLookupKey,
+          linqChatLookupKey: event.linqChatLookupKey,
+          memberId: "member_123",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqConversationStateUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          lastDeliveredAt: new Date("2026-03-26T12:00:00.000Z"),
+          lastReceiptEventId: "evt_delivered_before_inbound",
+        }),
+        where: expect.objectContaining({
+          linqChatLookupKey: event.linqChatLookupKey,
+        }),
+      }),
+    );
+  });
+
+  it("guards inbound conversation state against older message.received replays", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedMemberRoutingFindFirst.mockResolvedValueOnce({
+      memberId: "member_123",
+    });
+    const event = requireParsedProviderEvent(buildMessageReceivedEvent({
+      direction: "inbound",
+      eventId: "evt_inbound_older",
+      isFromMe: false,
+      messageId: "msg_inbound_older",
+    }));
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqConversationStateUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          lastInboundAt: new Date("2026-03-26T12:00:00.000Z"),
+          lastInboundEventId: "evt_inbound_older",
+          outboundSinceLastInboundCount: 0,
+        }),
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            {
+              lastInboundAt: {
+                lt: new Date("2026-03-26T12:00:00.000Z"),
+              },
+            },
+            {
+              lastInboundAt: new Date("2026-03-26T12:00:00.000Z"),
+              lastInboundEventId: {
+                lt: "evt_inbound_older",
+              },
+            },
+          ]),
         }),
       }),
     );
@@ -748,6 +891,7 @@ describe("hosted Linq observability stores", () => {
 
 function createObservabilityPrismaFixture() {
   const hostedLinqAlertCreateMany = vi.fn().mockResolvedValue({ count: 1 });
+  const hostedLinqConversationStateUpdate = vi.fn().mockResolvedValue(undefined);
   const hostedLinqConversationStateUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqConversationStateUpsert = vi.fn().mockResolvedValue(undefined);
   const hostedLinqDeliveryCreate = vi.fn().mockResolvedValue({ id: "hld_random" });
@@ -772,6 +916,7 @@ function createObservabilityPrismaFixture() {
   const hostedThreadRouteFindFirst = vi.fn().mockResolvedValue(null);
   const prisma = {
     hostedLinqConversationState: {
+      update: hostedLinqConversationStateUpdate,
       updateMany: hostedLinqConversationStateUpdateMany,
       upsert: hostedLinqConversationStateUpsert,
     },
@@ -806,6 +951,7 @@ function createObservabilityPrismaFixture() {
 
   return {
     hostedLinqAlertCreateMany,
+    hostedLinqConversationStateUpdate,
     hostedLinqConversationStateUpdateMany,
     hostedLinqConversationStateUpsert,
     hostedLinqDeliveryCreate,

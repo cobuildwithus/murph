@@ -831,6 +831,7 @@ function createPrismaStub() {
         outboundSinceLastInboundCount: 0,
         recipientReplyCount: 3,
       }),
+      update: vi.fn().mockResolvedValue(undefined),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       upsert: vi.fn().mockResolvedValue(undefined),
     },
@@ -857,9 +858,11 @@ function createPrismaStub() {
       update: vi.fn().mockResolvedValue(undefined),
     },
     hostedMemberRouting: {
+      findFirst: vi.fn().mockResolvedValue(null),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     hostedThreadRoute: {
+      findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
