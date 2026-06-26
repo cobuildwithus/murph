@@ -3661,6 +3661,9 @@ describe("hosted runtime callbacks", () => {
 
     expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledWith({
       dependencies: expect.any(Object),
+      dispatchHooks: expect.objectContaining({
+        preflightDispatchIntent: expect.any(Function),
+      }),
       intentId: effect.effectId,
       now: expect.any(Date),
       vault: HOSTED_WAKE.vaultRoot,
@@ -3705,6 +3708,9 @@ describe("hosted runtime callbacks", () => {
     const dispatchRequest = mocks.dispatchAssistantOutboxIntent.mock.calls[0]?.[0];
     expect(dispatchRequest).toEqual({
       dependencies: expect.any(Object),
+      dispatchHooks: expect.objectContaining({
+        preflightDispatchIntent: expect.any(Function),
+      }),
       intentId: effect.effectId,
       now: expect.any(Date),
       vault: HOSTED_WAKE.vaultRoot,
@@ -3886,6 +3892,9 @@ describe("hosted runtime callbacks", () => {
 
     expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledWith({
       dependencies: expect.any(Object),
+      dispatchHooks: expect.objectContaining({
+        preflightDispatchIntent: expect.any(Function),
+      }),
       intentId: effect.effectId,
       now: expect.any(Date),
       vault: HOSTED_WAKE.vaultRoot,

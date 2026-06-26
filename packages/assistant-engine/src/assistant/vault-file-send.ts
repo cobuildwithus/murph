@@ -411,8 +411,13 @@ export function deferAssistantVaultFileApprovalCheck(input: {
   return assistantOutboxIntentSchema.parse({
     ...input.intent,
     lastError: {
-      code: 'ASSISTANT_VAULT_FILE_APPROVAL_UNAVAILABLE',
-      message: 'Secure approval could not be checked yet.',
+      code: 'ASSISTANT_VAULT_FILE_APPROVAL_CHECK_DEFERRED',
+      diagnosticContext: {
+        assistantDeliveryFailureClass: 'blocked',
+        assistantDeliveryResumeTrigger: 'approval_state_change',
+        retryable: false,
+      },
+      message: 'Secure vault-file approval could not be checked yet.',
     },
     nextAttemptAt,
     status: 'awaiting_approval',
