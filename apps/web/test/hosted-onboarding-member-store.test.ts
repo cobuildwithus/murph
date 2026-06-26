@@ -1078,6 +1078,7 @@ describe("hosted-member-store", () => {
       data: {
         linqChatIdEncrypted: null,
         linqChatLookupKey: null,
+        linqLastInboundAt: null,
         linqRecipientPhoneEncrypted: null,
         linqRecipientPhoneLookupKey: null,
       },
@@ -1100,6 +1101,7 @@ describe("hosted-member-store", () => {
         pendingLinqParticipantContactObservedAt: null,
         pendingLinqRecipientPhoneEncrypted: null,
         pendingLinqRecipientPhoneLookupKey: null,
+        pendingLinqLastInboundAt: null,
       },
     });
     expect(executeRaw).toHaveBeenCalledTimes(1);
@@ -1131,6 +1133,51 @@ describe("hosted-member-store", () => {
         linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
       },
     });
+  });
+
+  it("promotes pending Linq inbound freshness when pending chat binding becomes home", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const pendingLinqLastInboundAt = new Date("2026-06-25T12:00:00.000Z");
+    const findUnique = vi.fn().mockResolvedValue({
+      linqLastInboundAt: new Date("2026-06-01T12:00:00.000Z"),
+      pendingLinqLastInboundAt,
+    });
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        findUnique,
+        updateMany,
+        upsert,
+      },
+    } as never;
+
+    await upsertHostedMemberHomeLinqBindingTx({
+      clearPending: true,
+      linqChatId: "chat_123",
+      memberId: "member_123",
+      prisma,
+      recipientPhone: "+15550100001",
+    });
+
+    expect(findUnique).toHaveBeenCalledWith({
+      where: {
+        memberId: "member_123",
+      },
+      select: {
+        linqLastInboundAt: true,
+        pendingLinqLastInboundAt: true,
+      },
+    });
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        linqLastInboundAt: pendingLinqLastInboundAt,
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqLastInboundAt: null,
+      }),
+    }));
   });
 
   it("clears Linq chat conflicts across readable blind-index versions before rebinding", async () => {
@@ -1317,9 +1364,11 @@ describe("hosted-member-store", () => {
   });
 
   it("upserts a home Linq recipient phone without creating a home chat binding", async () => {
+    const findUnique = vi.fn().mockResolvedValue(null);
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       hostedMemberRouting: {
+        findUnique,
         upsert,
       },
     } as never;
@@ -1365,8 +1414,40 @@ describe("hosted-member-store", () => {
         pendingLinqParticipantContactObservedAt: null,
         pendingLinqRecipientPhoneEncrypted: null,
         pendingLinqRecipientPhoneLookupKey: null,
+        pendingLinqLastInboundAt: null,
       },
     });
+  });
+
+  it("promotes pending Linq inbound freshness when pending recipient route becomes home", async () => {
+    const pendingLinqLastInboundAt = new Date("2026-06-25T12:00:00.000Z");
+    const findUnique = vi.fn().mockResolvedValue({
+      linqLastInboundAt: null,
+      pendingLinqLastInboundAt,
+    });
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      hostedMemberRouting: {
+        findUnique,
+        upsert,
+      },
+    } as never;
+
+    await upsertHostedMemberHomeLinqRecipientPhoneTx({
+      clearPending: true,
+      memberId: "member_123",
+      prisma,
+      recipientPhone: "+15550100001",
+    });
+
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        linqLastInboundAt: pendingLinqLastInboundAt,
+        pendingLinqChatLookupKey: null,
+        pendingLinqLastInboundAt: null,
+        pendingLinqRecipientPhoneLookupKey: null,
+      }),
+    }));
   });
 
   it("counts active home-line assignments by recipient phone even before a home chat is bound", async () => {
