@@ -627,6 +627,7 @@ Updated: 2026-04-24
       expect(leanEntries).toContain('agent-docs/product-specs/repo.md')
       expect(leanEntries).not.toContain('agent-docs/product-specs/repo-v1.md')
       expect(leanEntries).toContain('docs/architecture.md')
+      expect(leanEntries).toContain('docs/contracts/00-invariants.md')
       expect(leanEntries).not.toContain('agent-docs/generated/doc-inventory.md')
       expect(leanEntries).not.toContain('agent-docs/exec-plans/completed/README.md')
       expect(leanEntries).not.toContain('agent-docs/prompts/coverage-write.md')

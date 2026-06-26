@@ -8443,6 +8443,75 @@ describe('assistant codex runtime', () => {
     })
   })
 
+  it('preserves Codex managed ChatGPT login completion errors', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-managed-auth-error-work-')
+    const codexHome = await createTempDir('assistant-codex-managed-auth-error-home-')
+    const child = new MockChildProcess()
+    const loginStarted = createDeferred<void>()
+    const onDeviceCode = vi.fn()
+
+    codexMocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const initialRead = await waitForRpcMethodCount(child, 'account/read', 1)
+          child.stdout.write(jsonLine({
+            id: initialRead.id,
+            result: {
+              account: null,
+              requiresOpenaiAuth: true,
+            },
+          }))
+
+          const loginStart = await waitForRpcMethod(child, 'account/login/start')
+          child.stdout.write(jsonLine({
+            id: loginStart.id,
+            result: {
+              type: 'chatgptDeviceCode',
+              loginId: 'login-managed-chatgpt-error',
+              verificationUrl: 'https://auth.openai.com/codex/device',
+              userCode: 'WXYZ-9876',
+            },
+          }))
+          loginStarted.resolve()
+        })()
+      })
+
+      return child
+    })
+
+    const operation = executeCodexManagedAccountOperation({
+      action: 'connect',
+      codexHome,
+      onDeviceCode,
+      timeoutMs: 1_000,
+      workingDirectory,
+    })
+
+    await loginStarted.promise
+    await waitForMockCall(onDeviceCode, 1)
+
+    child.stdout.write(jsonLine({
+      method: 'account/login/completed',
+      params: {
+        error: 'device auth failed with status 500',
+        loginId: 'login-managed-chatgpt-error',
+        success: false,
+      },
+    }))
+
+    await expect(operation).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_AUTH_FAILED',
+      context: {
+        codexLoginError: 'device auth failed with status 500',
+        retryable: false,
+      },
+      message: 'ChatGPT account authentication did not complete successfully.',
+    })
+  })
+
   it('preserves missing Codex startup errors emitted before turn binding', async () => {
     const workingDirectory = await createTempDir('assistant-codex-prebind-not-found-')
 

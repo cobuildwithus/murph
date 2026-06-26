@@ -1447,6 +1447,11 @@ export type CodexManagedAccountOperationResult =
   | { kind: 'connected' }
   | { kind: 'disconnected' }
 
+interface CodexManagedAccountLoginCompletion {
+  error: string | null
+  success: boolean
+}
+
 /**
  * Runs one managed ChatGPT account operation through the same app-server
  * transport used by turns. The child is intentionally short lived: account
@@ -1487,9 +1492,9 @@ export async function executeCodexManagedAccountOperation(
     rejectAccountUpdate = reject
   })
   void accountUpdate.catch(() => undefined)
-  let settleCompletion!: (success: boolean) => void
+  let settleCompletion!: (completion: CodexManagedAccountLoginCompletion) => void
   let rejectCompletion!: (error: unknown) => void
-  const completion = new Promise<boolean>((resolve, reject) => {
+  const completion = new Promise<CodexManagedAccountLoginCompletion>((resolve, reject) => {
     settleCompletion = resolve
     rejectCompletion = reject
   })
@@ -1497,7 +1502,7 @@ export async function executeCodexManagedAccountOperation(
   let expectedLoginId: string | null = null
   let acceptChatGptAccountUpdate = false
   let bufferedChatGptAccountUpdate = false
-  const bufferedCompletions = new Map<string, boolean>()
+  const bufferedCompletions = new Map<string, CodexManagedAccountLoginCompletion>()
 
   const binding: CodexAppServerActiveTurnBinding = {
     onClose(code, signal) {
@@ -1581,14 +1586,17 @@ export async function executeCodexManagedAccountOperation(
       }
       const params = asCodexRecord(message.params)
       const loginId = asCodexString(params?.loginId)
-      const success = params?.success === true
       if (!loginId) {
         return
       }
+      const completionResult: CodexManagedAccountLoginCompletion = {
+        error: asCodexString(params?.error),
+        success: params?.success === true,
+      }
       if (loginId === expectedLoginId) {
-        settleCompletion(success)
+        settleCompletion(completionResult)
       } else {
-        bufferedCompletions.set(loginId, success)
+        bufferedCompletions.set(loginId, completionResult)
       }
     },
     onStderrLine: () => {},
@@ -1667,16 +1675,19 @@ export async function executeCodexManagedAccountOperation(
     }
     await input.onDeviceCode?.({ userCode, verificationUrl })
 
-    const succeeded = await withCodexRpcTimeout(
+    const loginCompletion = await withCodexRpcTimeout(
       completion,
       normalizeCodexManagedAccountTimeout(input.timeoutMs),
       'account/login/completed',
     )
-    if (!succeeded) {
+    if (!loginCompletion.success) {
       throw new VaultCliError(
         'ASSISTANT_CODEX_AUTH_FAILED',
         'ChatGPT account authentication did not complete successfully.',
-        { retryable: false },
+        {
+          ...(loginCompletion.error ? { codexLoginError: loginCompletion.error } : {}),
+          retryable: false,
+        },
       )
     }
     await withCodexRpcTimeout(

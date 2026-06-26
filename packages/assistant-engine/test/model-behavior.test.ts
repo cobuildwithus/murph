@@ -1203,7 +1203,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '3bd4e168aadc1b871827878964baa668c063a25d82017fb0a7a4d8f4fa3ca9ee',
+      'f19b8aa894d30b48c4b3ad5ee6aecc5dc0cf421ed035ad3bf672f5112bf73ab6',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1429,6 +1429,19 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('Do not auto-reorder.')
     expect(prompt).toContain(
       'Treat this check-in as the one adjacent next step; do not also offer tracking, reminders, or other follow-ups unless the user asks.',
+    )
+    expect(prompt).toContain('Supplement order logging:')
+    expect(prompt).toContain(
+      'When Murph helps the user order a supplement and the action result gives a reliable delivery date',
+    )
+    expect(prompt).toContain(
+      'proactively save or update the supplement in the user\'s vault with `vault-cli supplement save` and `--started-on <delivery-date>`',
+    )
+    expect(prompt).toContain(
+      'Treat this as part of completing the supplement-ordering task, not as an extra follow-up offer.',
+    )
+    expect(prompt).toContain(
+      'If the delivery date is not reliable, do not invent a start date',
     )
     expect(prompt).toContain('Make at most one proactive offer per completed action.')
     expect(prompt).toContain('Do not re-offer after the user declines.')

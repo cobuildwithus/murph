@@ -334,6 +334,7 @@ vi.mock("@/src/lib/hosted-onboarding/logging", async () => {
 });
 
 import { handleHostedOnboardingLinqWebhook as handleHostedOnboardingLinqWebhookImpl } from "@/src/lib/hosted-onboarding/webhook-service";
+import { HOSTED_LINQ_DAILY_TEXT_LIMIT } from "@/src/lib/hosted-onboarding/linq-daily-state";
 
 type MockedFunction = ReturnType<typeof vi.fn>;
 type HostedOnboardingLinqWebhookInput = Parameters<typeof handleHostedOnboardingLinqWebhookImpl>[0];
@@ -3575,7 +3576,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("sends a deterministic Linq quota reply instead of the daily quota reply when the usage gate denies an active member", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
-      inboundCount: 151,
+      inboundCount: HOSTED_LINQ_DAILY_TEXT_LIMIT + 1,
     }));
     mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
       allowed: false,
@@ -3930,7 +3931,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("sends Linq AI usage quota replies even after the daily quota notice is already marked", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
-      inboundCount: 151,
+      inboundCount: HOSTED_LINQ_DAILY_TEXT_LIMIT + 1,
       quotaReplySentAt: new Date("2026-03-26T12:01:00.000Z"),
     }));
     mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
@@ -4560,9 +4561,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
 
-  it("sends one daily quota reply after the 150th active-member inbound message", async () => {
+  it("sends one daily quota reply after 100 active-member inbound messages", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
-      inboundCount: 151,
+      inboundCount: HOSTED_LINQ_DAILY_TEXT_LIMIT + 1,
     }));
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
@@ -4612,7 +4613,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        message: expect.stringContaining("150"),
+        message: expect.stringContaining(String(HOSTED_LINQ_DAILY_TEXT_LIMIT)),
         replyToMessageId: "msg_123",
       }),
     );
@@ -4623,7 +4624,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("uses the sent quota marker, not a pre-send claim, to suppress repeat quota replies", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
-      inboundCount: 151,
+      inboundCount: HOSTED_LINQ_DAILY_TEXT_LIMIT + 1,
       quotaReplySentAt: new Date("2026-03-26T12:01:00.000Z"),
     }));
     const prisma = asPrismaTransactionClient({
@@ -4670,7 +4671,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("keeps daily quota suppression ahead of repeat trial conversion notices", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
-      inboundCount: 151,
+      inboundCount: HOSTED_LINQ_DAILY_TEXT_LIMIT + 1,
       quotaReplySentAt: new Date("2026-03-26T12:01:00.000Z"),
     }));
     mocks.checkHostedAiUsageGate.mockResolvedValueOnce({
@@ -4737,7 +4738,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("releases the daily quota notice claim when inline active-member quota delivery fails", async () => {
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
-      inboundCount: 151,
+      inboundCount: HOSTED_LINQ_DAILY_TEXT_LIMIT + 1,
     }));
     mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(new Error("linq send failed"));
     const prisma = asPrismaTransactionClient({
