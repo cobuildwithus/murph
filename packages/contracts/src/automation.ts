@@ -95,10 +95,117 @@ export const automationScheduleDeviceActivitySchema = z
   .object({
     kind: z.literal("deviceActivity"),
     after: isoTimestampSchema(),
+    afterOccurredAt: isoTimestampSchema().optional(),
+    afterEntityId: z.string().min(1).optional(),
     source: z.enum(automationDeviceActivitySourceValues).optional(),
     activityKind: automationDeviceActivityKindSchema.optional(),
   })
+  .superRefine((schedule, ctx) => {
+    const hasScalarOccurredAt = schedule.afterOccurredAt !== undefined;
+    const hasScalarEntityId = schedule.afterEntityId !== undefined;
+    if (hasScalarOccurredAt !== hasScalarEntityId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Device activity cursor must include afterOccurredAt and afterEntityId together.",
+        path: hasScalarOccurredAt ? ["afterEntityId"] : ["afterOccurredAt"],
+      });
+    }
+  })
   .strict();
+
+export interface DeviceActivityCoverageCursor {
+  after: string;
+  afterOccurredAt?: string;
+  afterEntityId?: string;
+}
+
+export interface DeviceActivityCoverageKey {
+  entityId: string;
+  occurredAt: string;
+  triggeredAt: string;
+}
+
+export interface DeviceActivityCoverageCursorPosition {
+  after: string;
+  afterOccurredAt: string;
+  afterEntityId: string;
+}
+
+export function compareDeviceActivityCoverageKeys(
+  left: DeviceActivityCoverageKey,
+  right: DeviceActivityCoverageKey,
+): number {
+  return compareIsoTimestamps(left.triggeredAt, right.triggeredAt)
+    || compareIsoTimestamps(left.occurredAt, right.occurredAt)
+    || left.entityId.localeCompare(right.entityId);
+}
+
+export function deviceActivityCoverageKeyIsAfterCursor(
+  key: DeviceActivityCoverageKey,
+  cursor: DeviceActivityCoverageCursor,
+): boolean {
+  const triggeredComparison = compareIsoTimestamps(key.triggeredAt, cursor.after);
+  if (triggeredComparison > 0) {
+    return true;
+  }
+  if (triggeredComparison < 0) {
+    return false;
+  }
+
+  if (cursor.afterOccurredAt && cursor.afterEntityId) {
+    return compareDeviceActivityCoverageKeys(key, {
+      entityId: cursor.afterEntityId,
+      occurredAt: cursor.afterOccurredAt,
+      triggeredAt: cursor.after,
+    }) > 0;
+  }
+
+  return false;
+}
+
+export function resolveNextDeviceActivityCoverageCursor(input: {
+  cursor: DeviceActivityCoverageCursor;
+  keys: readonly DeviceActivityCoverageKey[];
+}): DeviceActivityCoverageCursorPosition | null {
+  const latest = input.keys.reduce<DeviceActivityCoverageKey | null>((candidate, key) => {
+    if (!deviceActivityCoverageKeyIsAfterCursor(key, input.cursor)) {
+      return candidate;
+    }
+    if (!candidate || compareDeviceActivityCoverageKeys(key, candidate) > 0) {
+      return key;
+    }
+    return candidate;
+  }, null);
+  if (!latest) {
+    return null;
+  }
+
+  const next = {
+    after: latest.triggeredAt,
+    afterOccurredAt: latest.occurredAt,
+    afterEntityId: latest.entityId,
+  };
+
+  if (
+    latest.triggeredAt === input.cursor.after &&
+    input.cursor.afterOccurredAt === latest.occurredAt &&
+    input.cursor.afterEntityId === latest.entityId
+  ) {
+    return null;
+  }
+
+  return next;
+}
+
+function compareIsoTimestamps(left: string, right: string): number {
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  if (Number.isFinite(leftMs) && Number.isFinite(rightMs)) {
+    return leftMs - rightMs;
+  }
+
+  return left.localeCompare(right);
+}
 
 export const automationScheduleSchema = z.discriminatedUnion("kind", [
   ...automationTimeScheduleSchema.options,
