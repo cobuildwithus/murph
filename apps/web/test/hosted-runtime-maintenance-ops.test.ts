@@ -2,6 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { HostedBillingStatus, Prisma } from "@prisma/client";
 import {
   createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 vi.mock("server-only", () => ({}));
@@ -435,6 +436,7 @@ describe("hosted runtime maintenance ops", () => {
     expect(mocks.requireActiveHostedAppSessionFromRequest).toHaveBeenCalledWith(request);
     expect(mocks.ensureHostedThreadContainerRoute).toHaveBeenCalledWith({
       accountLookupKey: createHostedPhoneLookupKey("+1 (555) 000-0000"),
+      accountLookupKeys: createHostedPhoneLookupKeyReadCandidates("+1 (555) 000-0000"),
       channel: "linq",
       containerMemberId: null,
       ownerMemberId: "member_owner_123",

@@ -12,6 +12,7 @@ import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
   createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
 } from "../src/lib/hosted-onboarding/contact-privacy";
 import {
   planHostedOnboardingLinqWebhook,
@@ -366,8 +367,10 @@ function createStatefulThreadRoutePrisma() {
   const hostedWorkspace = {
     upsert: vi.fn().mockResolvedValue({}),
   };
+  const executeRaw = vi.fn().mockResolvedValue(undefined);
 
   return {
+    $executeRaw: executeRaw,
     hostedMember,
     hostedMemberRouting,
     hostedThreadContainer,
@@ -559,7 +562,7 @@ describe("Linq explicit external-thread routing", () => {
       await expect(
         ensureHostedThreadContainerRouteTx({
           accountLookupKey: currentAccountLookupKey,
-          accountLookupKeys: [currentAccountLookupKey, priorAccountLookupKey],
+          accountLookupKeys: createHostedPhoneLookupKeyReadCandidates("+15550000000"),
           channel: "linq",
           occurredAt: new Date("2026-06-24T00:00:00.000Z"),
           ownerMemberId: "member_owner_123",
@@ -576,6 +579,10 @@ describe("Linq explicit external-thread routing", () => {
       expect(domainRootStore.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
       expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
       expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(prisma.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.hostedThreadRoute.findMany.mock.invocationCallOrder[0]!,
+      );
       expect(prisma.hostedThreadRoute.update).toHaveBeenCalledWith({
         data: {
           threadIdentityLookupKey: currentThreadIdentityLookupKey,

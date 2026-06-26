@@ -27,12 +27,16 @@ import type {
   HostedRuntimeMaintenanceWakeResult,
   HostedRuntimeMaintenanceWorkspace,
 } from "@/src/lib/hosted-ops/runtime-maintenance";
-import type {
-  HostedOpsLinqThreadRouteEnsureResult,
-} from "@/src/lib/hosted-ops/thread-routes";
 
 interface RuntimeMaintenanceClientProps {
   initialOverview: HostedRuntimeMaintenanceOverview;
+}
+
+interface HostedOpsLinqThreadRouteEnsureResult {
+  activationEventId: string | null;
+  activationMailboxItemId: string | null;
+  containerMemberId: string;
+  created: boolean;
 }
 
 type PendingAction =
