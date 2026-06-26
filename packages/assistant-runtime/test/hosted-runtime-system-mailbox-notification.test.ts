@@ -13,8 +13,8 @@ import {
 import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
-import type {
-  HostedMailboxItem,
+import {
+  type HostedMailboxItem,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   AssistantExecutionContext,
@@ -819,7 +819,7 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("maps legacy connected Codex auth updates to failed after the checkpoint boundary", async () => {
+  it("records connected Codex auth updates after the checkpoint boundary", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const updateCodexAuth = vi.fn(async () => ({
       applied: true,
@@ -886,14 +886,87 @@ describe("hosted system mailbox notification execution context", () => {
       });
       expect(updateCodexAuth).toHaveBeenCalledWith({
         attemptId: "hca_abcdefghijklmnop",
-        phase: "failed",
+        phase: "connected",
       });
     } finally {
       await workspace.cleanup();
     }
   });
 
-  it("removes managed Codex auth when a legacy connected Codex auth update is superseded", async () => {
+  it("keeps connected Codex auth updates after the checkpoint boundary", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const updateCodexAuth = vi.fn(async () => ({
+      applied: true,
+      status: "applied" as const,
+    }));
+    const authPath = path.join(workspace.operatorHomeRoot, ".codex-hosted", "auth.json");
+    const wake = buildHostedExecutionCodexAuthRequestedWake({
+      action: "connect",
+      attemptId: "hca_abcdefghijklmnop",
+      eventId: "runtime-control:codex-auth",
+      occurredAt: FIXED_NOW,
+      userId: "member_123",
+    });
+    mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
+      bootstrapResult: null,
+      conversationMetrics: null,
+      mailboxLane: "runtime-control",
+      nextWakeAt: null,
+      postCheckpointRecord: {
+        attemptId: "hca_abcdefghijklmnop",
+        kind: "codex-auth.updated",
+        phase: "connected",
+      },
+      redactedLogEntries: [],
+    });
+
+    try {
+      await mkdir(path.dirname(authPath), { recursive: true });
+      await writeFile(authPath, "{\"auth_mode\":\"chatgpt\"}\n");
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedCodexAuthRuntimeControlItem(),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+
+      const runtime = createRuntime({
+        codexAuthPort: {
+          update: updateCodexAuth,
+        },
+      });
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        operatorHomeRoot: workspace.operatorHomeRoot,
+        runtime,
+        runtimeEnv: {
+          NODE_ENV: "test",
+        },
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(prepared?.status, "processed");
+
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: prepared.item,
+        operatorHomeRoot: workspace.operatorHomeRoot,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        failed: 0,
+        nextWakeAt: null,
+        recorded: 1,
+      });
+      expect(updateCodexAuth).toHaveBeenCalledWith({
+        attemptId: "hca_abcdefghijklmnop",
+        phase: "connected",
+      });
+      await expect(access(authPath)).resolves.toBeUndefined();
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("removes connected Codex auth when the checkpoint update is superseded", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const updateCodexAuth = vi.fn(async () => ({
       applied: false,
@@ -939,7 +1012,9 @@ describe("hosted system mailbox notification execution context", () => {
         now: () => FIXED_NOW,
         operatorHomeRoot: workspace.operatorHomeRoot,
         runtime,
-        runtimeEnv: {},
+        runtimeEnv: {
+          NODE_ENV: "test",
+        },
         vaultRoot: workspace.vaultRoot,
       });
       assert.equal(prepared?.status, "processed");
@@ -956,7 +1031,7 @@ describe("hosted system mailbox notification execution context", () => {
       });
       expect(updateCodexAuth).toHaveBeenCalledWith({
         attemptId: "hca_abcdefghijklmnop",
-        phase: "failed",
+        phase: "connected",
       });
       await expect(access(authPath)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
@@ -964,7 +1039,7 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("removes managed Codex auth when a legacy connected Codex auth update was already applied", async () => {
+  it("keeps connected Codex auth when the checkpoint update was already applied", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const updateCodexAuth = vi.fn(async () => ({
       applied: true,
@@ -1027,9 +1102,9 @@ describe("hosted system mailbox notification execution context", () => {
       });
       expect(updateCodexAuth).toHaveBeenCalledWith({
         attemptId: "hca_abcdefghijklmnop",
-        phase: "failed",
+        phase: "connected",
       });
-      await expect(access(authPath)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(access(authPath)).resolves.toBeUndefined();
     } finally {
       await workspace.cleanup();
     }

@@ -231,7 +231,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    "Securely send one existing file from the user's vault to the current iMessage conversation. Use a normalized vault-relative file path. This queues the exact file and destination behind passkey approval; when approval is pending, include the returned approval link in your normal reply. It does not reveal file bytes to the model and does not support arbitrary recipients.",
+    "Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. When approval is pending, include the returned approval link in your normal reply. When approval is approved, this attaches the exact approved file to your normal reply. It does not reveal file bytes to the model, does not queue a separate delivery, and does not support arbitrary recipients.",
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1243,7 +1243,13 @@ export async function executeMurphDynamicToolRequest(input: {
       ) {
         return toolTextResult(
           false,
-          'secure vault-file sending is unavailable for this conversation',
+          'secure vault-file approval is unavailable for this conversation',
+        )
+      }
+      if ((input.currentResponseMedia ?? []).length > 0) {
+        return toolTextResult(
+          false,
+          'vault-file sending cannot be combined with other response media',
         )
       }
       try {
@@ -1262,8 +1268,17 @@ export async function executeMurphDynamicToolRequest(input: {
             }
           case 'approved':
             return {
-              ...toolTextResult(true, 'approved vault file queued for delivery'),
-              finalActionPatch: { kind: 'none' },
+              ...toolTextResult(
+                true,
+                JSON.stringify({
+                  filename: result.filename,
+                  status: result.status,
+                }),
+              ),
+              responseMediaPatch: {
+                media: [result.file],
+                op: 'append' as const,
+              },
             }
           case 'denied':
             return toolTextResult(false, 'vault-file delivery was denied')
@@ -1271,7 +1286,7 @@ export async function executeMurphDynamicToolRequest(input: {
             return toolTextResult(false, 'vault-file delivery approval expired')
         }
       } catch {
-        return toolTextResult(false, 'secure vault-file delivery could not be queued')
+        return toolTextResult(false, 'secure vault-file approval could not be prepared')
       }
     }
     case 'submit-product-feedback':
