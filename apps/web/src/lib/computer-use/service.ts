@@ -3033,8 +3033,16 @@ function doesResumeContextPartMatchCheckpoint(input: {
   }
 
   const scoped = readScopedComputerCheckpointPart(input.received);
-  return scoped?.value === input.expected &&
+  if (scoped?.value === input.expected &&
     resolveComputerCheckpointScopedReturnContactKind(scoped.channel) ===
+      input.receivedReturnContactKind
+  ) {
+    return true;
+  }
+
+  const expectedScoped = readScopedComputerCheckpointPart(input.expected);
+  return expectedScoped?.value === input.received &&
+    resolveComputerCheckpointScopedReturnContactKind(expectedScoped.channel) ===
       input.receivedReturnContactKind;
 }
 
