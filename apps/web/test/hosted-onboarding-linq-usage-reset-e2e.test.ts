@@ -1,8 +1,8 @@
 import { HostedBillingStatus, type HostedLinqDailyState } from "@prisma/client";
-import { renderUserFacingMessage } from "@murphai/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildHostedAiUsageGateNoticeIdempotencyKey } from "@/src/lib/hosted-execution/usage-allowance";
+import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
 import { getHostedAiUsageMonthlyAllowanceUsdMicros } from "@/src/lib/hosted-onboarding/billing-plans";
 
 const MEMBER_ID = "member_usage_reset";

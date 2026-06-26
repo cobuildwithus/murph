@@ -4,9 +4,6 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import {
-  renderUserFacingMessage,
-} from "@murphai/contracts";
-import {
   type AssistantUsageCredentialSource,
   type AssistantUsageRecord,
   type AssistantUsageTokenPricingBasis,
@@ -39,6 +36,7 @@ import {
 } from "../hosted-onboarding/entitlement";
 import { getPrisma } from "../prisma";
 import { sha256Hex } from "../primitives";
+import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 
 type HostedAiUsageAllowanceClient = PrismaClient | Prisma.TransactionClient;
 
@@ -1323,6 +1321,7 @@ function buildHostedPulseTrialPendingBillingDeniedPeriod(input: {
 }): Extract<HostedAiUsageAllowancePeriodResolution, { kind: "denied" }> {
   const retryAfter = new Date(input.at.getTime() + 15 * 60_000);
   const periodStart = input.periodStart ?? input.at;
+  const noticePeriodStart = input.periodStart ?? null;
 
   return {
     billingPlanCode: input.billingPlanCode,
@@ -1342,7 +1341,7 @@ function buildHostedPulseTrialPendingBillingDeniedPeriod(input: {
         seed: buildHostedAiUsageNoticeSeed({
           memberId: input.memberId,
           noticeCode: "trial_conversion_pending",
-          periodStart,
+          periodStart: noticePeriodStart,
         }),
       }).text,
     },
@@ -1950,9 +1949,10 @@ function renderHostedAiUsageGateLimitNoticeMessage(input: {
 function buildHostedAiUsageNoticeSeed(input: {
   memberId: string;
   noticeCode: HostedAiUsageGateNoticeCode;
-  periodStart: Date;
+  periodStart: Date | null;
 }): string {
-  return `linq.ai_usage:${input.memberId}:${input.noticeCode}:${input.periodStart.toISOString()}`;
+  const periodStartKey = input.periodStart ? input.periodStart.toISOString() : "pending-billing";
+  return `linq.ai_usage:${input.memberId}:${input.noticeCode}:${periodStartKey}`;
 }
 
 function normalizeTokenCount(value: number | null | undefined): bigint {

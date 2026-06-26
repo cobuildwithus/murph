@@ -4,7 +4,7 @@ import {
   renderUserFacingMessage,
   type UserFacingMessageContextByKey,
   type UserFacingMessageTemplateKey,
-} from "../src/user-facing-messages.ts";
+} from "@/src/lib/hosted-messages/user-facing-messages";
 
 const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20;
 

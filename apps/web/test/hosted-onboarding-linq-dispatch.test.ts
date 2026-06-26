@@ -1,5 +1,4 @@
 import { HostedBillingStatus, type HostedLinqDailyState } from "@prisma/client";
-import { renderUserFacingMessage } from "@murphai/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -19,6 +18,7 @@ import {
 import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { hostedLinqFirstContactContainsBlockedContent } from "@/src/lib/hosted-onboarding/webhook-provider-linq-shared";
+import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
 
 const HOME_URL = "https://withmurph.ai/home";
 

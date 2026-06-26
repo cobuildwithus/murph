@@ -1110,6 +1110,52 @@ describe("resolveHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
+  it("keeps pending Pulse Trial billing notices stable when no trial start exists", async () => {
+    const firstPrisma = createGatePrisma({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+      periodStart: new Date("2026-04-01T12:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      spentUsdMicros: 0n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: null,
+    });
+    const secondPrisma = createGatePrisma({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+      periodStart: new Date("2026-04-01T12:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      spentUsdMicros: 0n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: null,
+    });
+
+    const first = await resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-03T12:00:00.000Z",
+      prisma: firstPrisma as never,
+    });
+    const second = await resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-03T12:05:00.000Z",
+      prisma: secondPrisma as never,
+    });
+
+    if (first.allowed || second.allowed) {
+      throw new Error("Expected stale Pulse Trial billing state to be denied.");
+    }
+
+    expect(first.userNotice).toMatchObject({
+      code: "trial_conversion_pending",
+    });
+    expect(second.userNotice).toMatchObject({
+      code: "trial_conversion_pending",
+    });
+    expect(first.userNotice?.message).toBe(second.userNotice?.message);
+  });
+
   it.each([
     [
       "unknown policy",

@@ -1,4 +1,3 @@
-import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
 import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
@@ -87,6 +86,7 @@ import {
   activateHostedMemberForPositiveSourceTx,
   buildHostedMemberActivationWelcomeRoute,
 } from "@/src/lib/hosted-onboarding/member-activation";
+import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
 
 function expectedTelegramAssistantThreadId(input: {
   memberId: string;
@@ -99,8 +99,18 @@ function expectedTelegramAssistantThreadId(input: {
   return hashHostedAssistantConversationIdentifier(identifierBlind, input.threadId);
 }
 
-function expectedSignupWelcomeText(): string {
-  return MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE;
+function expectedSignupWelcomeText(input: {
+  sourceEventId?: string;
+  sourceType?: string;
+} = {}): string {
+  const sourceEventId = input.sourceEventId ?? "evt_123";
+  const sourceType = input.sourceType ?? "stripe.invoice.paid";
+
+  return renderUserFacingMessage({
+    context: {},
+    key: "assistant.signup_welcome",
+    seed: `assistant.signup_welcome:member_123:${sourceType}:${sourceEventId}`,
+  }).text;
 }
 
 function expectLegacySignupWelcomeCompatibilityWake(input: {
@@ -108,7 +118,9 @@ function expectLegacySignupWelcomeCompatibilityWake(input: {
   route: unknown;
   sourceEventId?: string;
 }): void {
-  const expectedText = expectedSignupWelcomeText();
+  const expectedText = expectedSignupWelcomeText({
+    sourceEventId: input.sourceEventId,
+  });
 
   expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(input.callIndex, {
     envelope: expect.objectContaining({

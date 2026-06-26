@@ -1,4 +1,4 @@
-import { renderUserFacingMessage } from "@murphai/contracts";
+import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 
 import { HOSTED_LINQ_DAILY_TEXT_LIMIT } from "./linq-daily-state";
 
