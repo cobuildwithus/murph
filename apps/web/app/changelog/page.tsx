@@ -43,6 +43,72 @@ import {
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
+  "coach-skills-six-new": (
+    <ChecklistMock
+      label="New coach skills"
+      items={[
+        { label: "Sleep & recovery readiness", done: true },
+        { label: "Stress regulation", done: true },
+        { label: "Nutrition strategy", done: true },
+        { label: "Running & cardio", done: true },
+        { label: "Strength training", done: true },
+        { label: "Competition training", done: true },
+      ]}
+    />
+  ),
+  "linq-first-contact-admission": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "yo new phone who dis" },
+        {
+          from: "murph",
+          body: "(no reply, no invite, no member record — fail-closed)",
+        },
+      ]}
+    />
+  ),
+  "live-browser-replaces-screen-inspection": (
+    <StatBlock
+      label="Browser inspection"
+      before="Static screenshot"
+      after="Live browser"
+      caption="passkey-gated handoff"
+    />
+  ),
+  "checkout-confirm-in-chat": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        {
+          from: "murph",
+          body: "Cart's ready. Reply 'go ahead' to place the order.",
+        },
+        { from: "user", body: "go ahead" },
+        { from: "murph", body: "Done — confirmation incoming." },
+      ]}
+    />
+  ),
+  "linq-off-hours-reminder-guard": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "Remind me to take melatonin at 2am" },
+        {
+          from: "murph",
+          body: "2am can look spammy to iMessage. Want 10pm instead, or keep 2am?",
+        },
+      ]}
+    />
+  ),
+  "longer-tool-loops-before-compaction": (
+    <StatBlock
+      label="Compaction threshold"
+      before="84k"
+      after="100k"
+      caption="tokens — long tool loops finish whole"
+    />
+  ),
   "proactive-chronic-support": (
     <AssessmentCard
       topic="Lower-back tightness"
