@@ -1738,18 +1738,18 @@ function createHostedAssistantLinqSendDependency(input: {
       fetchImplementation: input.providerFetch,
       ...(signal ? { signal } : {}),
     }, "Hosted assistant Linq delivery");
+    await assertHostedAssistantLinqRouteAuthorityForDelivery({
+      deliveryContext,
+      effectsPort: input.effectsPort ?? null,
+      routeScopedContext: input.linqDeliveryContext ?? null,
+      signal: signal ?? null,
+    });
     const verifiedVaultFiles = await preloadApprovedHostedAssistantVaultFiles({
       actionApprovalPort: input.actionApprovalPort ?? null,
       expectedDedupeKey: input.expectedDedupeKey ?? null,
       intentId: input.intentId ?? null,
       media: request.media ?? [],
       vaultRoot: input.vaultRoot ?? null,
-    });
-    await assertHostedAssistantLinqRouteAuthorityForDelivery({
-      deliveryContext,
-      effectsPort: input.effectsPort ?? null,
-      routeScopedContext: input.linqDeliveryContext ?? null,
-      signal: signal ?? null,
     });
     input.onProviderDispatchEntered?.();
     const result = await sendHostedProviderLinqMessage({
@@ -1825,6 +1825,8 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
   const persistedFile = readAssistantVaultFileMedia(intent);
   if (
     !persistedFile
+    || !persistedFile.approvalId
+    || !persistedFile.approvalGeneration
     || buildHostedVaultFileMediaIdentity(persistedFile)
       !== buildHostedVaultFileMediaIdentity(vaultFiles[0]!)
   ) {
@@ -1836,9 +1838,11 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
 
   let approval: HostedActionApprovalResult;
   try {
-    approval = await input.actionApprovalPort.consume(
-      buildAssistantVaultFileSendApprovalRequest(intent),
-    );
+    approval = await input.actionApprovalPort.consume({
+      approvalGeneration: persistedFile.approvalGeneration,
+      consumerId: intent.deliveryIdempotencyKey ?? `assistant-outbox:${intent.intentId}`,
+      request: buildAssistantVaultFileSendApprovalRequest(intent),
+    });
   } catch {
     throw createRetryableHostedVaultFileError(
       "ASSISTANT_VAULT_FILE_APPROVAL_UNAVAILABLE",
@@ -1872,6 +1876,8 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
 }
 
 function buildHostedVaultFileMediaIdentity(input: {
+  approvalGeneration?: string | null;
+  approvalId?: string | null;
   contentType: string;
   filename: string;
   ref: string;
@@ -1884,6 +1890,8 @@ function buildHostedVaultFileMediaIdentity(input: {
     input.filename,
     input.contentType,
     input.sizeBytes,
+    input.approvalId ?? null,
+    input.approvalGeneration ?? null,
   ]);
 }
 

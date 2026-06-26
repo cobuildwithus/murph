@@ -18,6 +18,10 @@ import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/con
 import type { HostedExecutionSnapshotRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
+import type {
+  HostedSensitiveActionChallenge,
+  Prisma,
+} from "@prisma/client";
 
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
 import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
@@ -47,12 +51,30 @@ const hostedTestingHostOnlyEnv = {
 
 type HostedTestPrismaClient =
   & HostedTestPrismaFactoryClient
+  & HostedActionApprovalForTestPrismaClient
   & HostedWorkspaceSeedForTestPrismaClient
   & HostedUsageDiagnosticsForTestPrismaClient;
 
 interface HostedTestPrismaFactoryClient {
   $disconnect(): Promise<void>;
   $transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T>;
+}
+
+interface HostedActionApprovalForTestPrismaClient {
+  hostedSensitiveActionChallenge: {
+    findFirst(
+      args: Prisma.HostedSensitiveActionChallengeFindFirstArgs,
+    ): Promise<HostedSensitiveActionChallenge | null>;
+    update(
+      args: Prisma.HostedSensitiveActionChallengeUpdateArgs,
+    ): Promise<HostedSensitiveActionChallenge>;
+    updateMany(
+      args: Prisma.HostedSensitiveActionChallengeUpdateManyArgs,
+    ): Promise<Prisma.BatchPayload>;
+    upsert(
+      args: Prisma.HostedSensitiveActionChallengeUpsertArgs,
+    ): Promise<HostedSensitiveActionChallenge>;
+  };
 }
 
 interface HostedTestPrismaModule {

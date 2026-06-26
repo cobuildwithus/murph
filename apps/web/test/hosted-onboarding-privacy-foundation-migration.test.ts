@@ -18,6 +18,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'approvalStatus HostedSensitiveActionApprovalStatus? @map("approval_status")',
     'decidedAt DateTime? @map("decided_at")',
     'consumedAt DateTime? @map("consumed_at")',
+    'consumedBy String? @map("consumed_by")',
     'returnContactKind String? @map("return_contact_kind")',
   ],
   HostedConnectedAppConnectIntent: [

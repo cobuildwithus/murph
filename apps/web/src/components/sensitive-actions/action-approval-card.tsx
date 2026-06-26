@@ -67,13 +67,15 @@ export function ActionApprovalCard({
       url: `${endpointBase}/decision`,
     });
 
-    if (typeof response.redirectTo !== "string" || response.redirectTo.length === 0) {
-      throw new Error("The approval was saved. Return to your Murph thread to continue.");
-    }
-
-    setRedirectTo(response.redirectTo);
+    const nextRedirectTo =
+      typeof response.redirectTo === "string" && response.redirectTo.length > 0
+        ? response.redirectTo
+        : null;
+    setRedirectTo(nextRedirectTo);
     setSubmission("returning");
-    window.location.assign(response.redirectTo);
+    if (nextRedirectTo) {
+      window.location.assign(nextRedirectTo);
+    }
   }
 
   const busy = submission !== null;
@@ -120,13 +122,19 @@ export function ActionApprovalCard({
           </Button>
         </div>
 
-        {submission === "returning" && redirectTo ? (
-          <p className="mt-5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            Redirecting…{" "}
-            <a className="text-[#5a6e32] underline-offset-4 hover:underline" href={redirectTo}>
-              Return to Murph
-            </a>
-          </p>
+        {submission === "returning" ? (
+          redirectTo ? (
+            <p className="mt-5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+              Redirecting…{" "}
+              <a className="text-[#5a6e32] underline-offset-4 hover:underline" href={redirectTo}>
+                Return to Murph
+              </a>
+            </p>
+          ) : (
+            <p className="mt-5 text-sm leading-6 text-muted-foreground">
+              Approval saved. Return to the Murph thread where you requested this file.
+            </p>
+          )
         ) : null}
       </div>
     </ActionApprovalScreen>

@@ -110,6 +110,7 @@ import {
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
   requestAssistantVaultFileSend,
+  resolveAssistantVaultFileSendTargetFingerprint,
 } from './vault-file-send.js'
 import type {
   AssistantAcceptedTurnInputJournal,
@@ -519,6 +520,8 @@ export async function sendAssistantMessageLocal(
           session: currentSession,
           sharedPlan,
         })
+        const vaultFileSendTargetFingerprint =
+          resolveAssistantVaultFileSendTargetFingerprint(currentDeliveryFields)
         // Captured once so the narrowing survives into the sendVaultFile
         // closure below. Without this local, TS widens the property access
         // back to `… | null | undefined` inside the async closure body.
@@ -528,6 +531,7 @@ export async function sendAssistantMessageLocal(
           && currentAudienceReplyDeliveryAvailable
           && actionApprovalPort != null
           && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
+          && vaultFileSendTargetFingerprint !== null
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
               connectedApps: hostedExecutionContext.connectedApps ?? null,
@@ -549,6 +553,12 @@ export async function sendAssistantMessageLocal(
                         throw new VaultCliError(
                           'ASSISTANT_VAULT_FILE_CHANNEL_UNSUPPORTED',
                           'Vault files can only be sent to the current iMessage conversation.',
+                        )
+                      }
+                      if (!resolveAssistantVaultFileSendTargetFingerprint(deliveryFields)) {
+                        throw new VaultCliError(
+                          'ASSISTANT_VAULT_FILE_TARGET_UNAVAILABLE',
+                          'Secure vault-file approval requires a concrete destination.',
                         )
                       }
                       const result = await requestAssistantVaultFileSend({

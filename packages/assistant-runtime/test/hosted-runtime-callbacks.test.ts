@@ -4889,6 +4889,8 @@ describe("hosted runtime callbacks", () => {
 
   it("consumes approved vault-file actions before hosted Linq delivery", async () => {
     const vaultFile = {
+      approvalGeneration: "b".repeat(64),
+      approvalId: `haa_${"a".repeat(32)}`,
       contentType: "application/pdf",
       filename: "report.pdf",
       kind: "vault_file" as const,
@@ -4915,6 +4917,7 @@ describe("hosted runtime callbacks", () => {
     };
     const actionApprovalPort = {
       consume: vi.fn(async () => ({
+        approvalGeneration: "b".repeat(64),
         approvalId: `haa_${"a".repeat(32)}`,
         status: "approved" as const,
       })),
@@ -4968,7 +4971,11 @@ describe("hosted runtime callbacks", () => {
       wake: HOSTED_WAKE.wake,
     });
 
-    expect(actionApprovalPort.consume).toHaveBeenCalledWith(approvalRequest);
+    expect(actionApprovalPort.consume).toHaveBeenCalledWith({
+      approvalGeneration: "b".repeat(64),
+      consumerId: "assistant-outbox:intent_123",
+      request: approvalRequest,
+    });
     expect(actionApprovalPort.request).not.toHaveBeenCalled();
     expect(mocks.readVerifiedAssistantVaultFileBytes).toHaveBeenCalledWith({
       file: vaultFile,

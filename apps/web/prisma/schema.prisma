@@ -423,6 +423,7 @@ model HostedSensitiveActionChallenge {
   approvalStatus     HostedSensitiveActionApprovalStatus?  @map("approval_status")
   decidedAt          DateTime?                             @map("decided_at")
   consumedAt         DateTime?                             @map("consumed_at")
+  consumedBy         String?                               @map("consumed_by")
   returnContactKind  String?                               @map("return_contact_kind")
   member             HostedMember                          @relation(fields: [memberId], references: [id], onDelete: Cascade)
 

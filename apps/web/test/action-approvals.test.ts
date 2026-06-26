@@ -1,11 +1,17 @@
-import type {
-  HostedSensitiveActionChallenge,
-  Prisma,
-} from "@prisma/client";
+import { randomUUID } from "node:crypto";
+
+import type { HostedSensitiveActionChallenge } from "@prisma/client";
 import type {
   HostedActionApprovalRequest,
+  HostedActionApprovalResult,
 } from "@murphai/hosted-execution/action-approval";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { HostedWebTestkitDeps } from "./support/hosted-web-testkit";
+import {
+  createHostedWebTestkitDeps,
+  seedHostedActiveMember,
+} from "./support/hosted-web-testkit";
 
 const mocks = vi.hoisted(() => ({
   resolveHostedPublicOrigin: vi.fn(),
@@ -21,7 +27,6 @@ import {
   requestHostedActionApproval,
 } from "@/src/lib/action-approvals";
 
-const MEMBER_ID = "member_action_123";
 const REQUEST: HostedActionApprovalRequest = {
   actionFingerprint: "b".repeat(64),
   actionId: `vault-file-send:${"a".repeat(64)}`,
@@ -34,18 +39,34 @@ const REQUEST: HostedActionApprovalRequest = {
 };
 
 describe("hosted action approvals", () => {
+  let deps: HostedWebTestkitDeps | null = null;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.resolveHostedPublicOrigin.mockReturnValue("https://withmurph.ai");
   });
 
-  it("spends an approved action exactly once and lets a later request create a fresh pending attempt", async () => {
-    const prisma = createActionApprovalPrismaFake();
-    const now = new Date("2026-06-25T16:00:00.000Z");
+  afterEach(async () => {
+    await deps?.prisma.$disconnect();
+    deps = null;
+  });
+
+  async function setup() {
+    deps = await createHostedWebTestkitDeps();
+    const memberId = `member_action_${randomUUID().replaceAll("-", "")}`;
+    await seedHostedActiveMember({
+      environment: deps.environment,
+      memberId,
+    });
+    return { deps, memberId };
+  }
+
+  it("consumes an approved action once per approval generation and refreshes later", async () => {
+    const { deps, memberId } = await setup();
     const requested = await requestHostedActionApproval({
-      memberId: MEMBER_ID,
-      now,
-      prisma,
+      memberId,
+      now: new Date("2026-06-25T16:00:00.000Z"),
+      prisma: deps.prisma,
       request: REQUEST,
     });
 
@@ -57,128 +78,171 @@ describe("hosted action approvals", () => {
       `https://withmurph.ai/approve/${requested.approvalId}`,
     );
 
-    const approvedAt = new Date("2026-06-25T16:01:00.000Z");
-    const row = requireApprovalRow(prisma, requested.approvalId);
-    row.approvalStatus = "approved";
-    row.decidedAt = approvedAt;
-    row.expiresAt = new Date("2026-06-25T16:16:00.000Z");
-
-    await expect(consumeHostedActionApproval({
-      memberId: MEMBER_ID,
-      now: new Date("2026-06-25T16:02:00.000Z"),
-      prisma,
-      request: REQUEST,
-    })).resolves.toEqual({
+    const firstApproved = await approveExistingAction({
       approvalId: requested.approvalId,
-      status: "approved",
+      deps,
+      expiresAt: new Date("2026-06-25T16:16:00.000Z"),
+      memberId,
+      now: new Date("2026-06-25T16:01:30.000Z"),
     });
-    expect(
-      requireApprovalRow(prisma, requested.approvalId).consumedAt?.toISOString(),
-    )
-      .toBe("2026-06-25T16:02:00.000Z");
 
     await expect(consumeHostedActionApproval({
-      memberId: MEMBER_ID,
+      memberId,
+      now: new Date("2026-06-25T16:02:00.000Z"),
+      prisma: deps.prisma,
+      request: consumeRequest(firstApproved, "delivery_1"),
+    })).resolves.toEqual(firstApproved);
+
+    const consumed = await requireApprovalRow(deps, requested.approvalId);
+    expect(consumed.consumedAt?.toISOString()).toBe("2026-06-25T16:02:00.000Z");
+    expect(consumed.consumedBy).toBe("delivery_1");
+
+    await expect(consumeHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:02:30.000Z"),
+      prisma: deps.prisma,
+      request: consumeRequest(firstApproved, "delivery_1"),
+    })).resolves.toEqual(firstApproved);
+
+    await expect(consumeHostedActionApproval({
+      memberId,
       now: new Date("2026-06-25T16:03:00.000Z"),
-      prisma,
-      request: REQUEST,
+      prisma: deps.prisma,
+      request: consumeRequest(firstApproved, "delivery_2"),
     })).resolves.toEqual({
       approvalId: requested.approvalId,
       status: "expired",
     });
 
     const refreshed = await requestHostedActionApproval({
-      memberId: MEMBER_ID,
+      memberId,
       now: new Date("2026-06-25T16:04:00.000Z"),
-      prisma,
+      prisma: deps.prisma,
       request: REQUEST,
     });
-    const refreshedRow = requireApprovalRow(prisma, requested.approvalId);
-
     expect(refreshed).toMatchObject({
       approvalId: requested.approvalId,
       expiresAt: "2026-06-25T16:19:00.000Z",
       status: "pending",
     });
+
+    const refreshedRow = await requireApprovalRow(deps, requested.approvalId);
     expect(refreshedRow.approvalStatus).toBe("pending");
     expect(refreshedRow.consumedAt).toBeNull();
+    expect(refreshedRow.consumedBy).toBeNull();
     expect(refreshedRow.decidedAt).toBeNull();
+
+    const secondApproved = await approveExistingAction({
+      approvalId: requested.approvalId,
+      deps,
+      expiresAt: new Date("2026-06-25T16:20:00.000Z"),
+      memberId,
+      now: new Date("2026-06-25T16:05:30.000Z"),
+    });
+    expect(secondApproved.approvalGeneration).not.toBe(
+      firstApproved.approvalGeneration,
+    );
+
+    await expect(consumeHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:06:00.000Z"),
+      prisma: deps.prisma,
+      request: consumeRequest(firstApproved, "delivery_3"),
+    })).resolves.toEqual({
+      approvalId: requested.approvalId,
+      status: "expired",
+    });
+
+    await expect(consumeHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:06:30.000Z"),
+      prisma: deps.prisma,
+      request: consumeRequest(secondApproved, "delivery_3"),
+    })).resolves.toEqual(secondApproved);
   });
 
   it("refreshes expired or denied attempts instead of permanently blocking retries", async () => {
-    const prisma = createActionApprovalPrismaFake();
+    const { deps, memberId } = await setup();
     const requested = await requestHostedActionApproval({
-      memberId: MEMBER_ID,
+      memberId,
       now: new Date("2026-06-25T16:00:00.000Z"),
-      prisma,
+      prisma: deps.prisma,
       request: REQUEST,
     });
-    const row = requireApprovalRow(prisma, requested.approvalId);
-    row.expiresAt = new Date("2026-06-25T16:10:00.000Z");
+    await deps.prisma.hostedSensitiveActionChallenge.update({
+      data: {
+        expiresAt: new Date("2026-06-25T16:10:00.000Z"),
+      },
+      where: { approvalKey: requested.approvalId },
+    });
 
     const afterExpiry = await requestHostedActionApproval({
-      memberId: MEMBER_ID,
+      memberId,
       now: new Date("2026-06-25T16:11:00.000Z"),
-      prisma,
+      prisma: deps.prisma,
       request: REQUEST,
     });
-
     expect(afterExpiry).toMatchObject({
       approvalId: requested.approvalId,
       expiresAt: "2026-06-25T16:26:00.000Z",
       status: "pending",
     });
 
-    const deniedRow = requireApprovalRow(prisma, requested.approvalId);
-    deniedRow.approvalStatus = "denied";
-    deniedRow.decidedAt = new Date("2026-06-25T16:12:00.000Z");
-
-    const afterDenial = await requestHostedActionApproval({
-      memberId: MEMBER_ID,
-      now: new Date("2026-06-25T16:13:00.000Z"),
-      prisma,
-      request: REQUEST,
+    await deps.prisma.hostedSensitiveActionChallenge.update({
+      data: {
+        approvalStatus: "denied",
+        decidedAt: new Date("2026-06-25T16:12:00.000Z"),
+      },
+      where: { approvalKey: requested.approvalId },
     });
 
+    const afterDenial = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:13:00.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    });
     expect(afterDenial).toMatchObject({
       approvalId: requested.approvalId,
       expiresAt: "2026-06-25T16:28:00.000Z",
       status: "pending",
     });
-    expect(
-      requireApprovalRow(prisma, requested.approvalId).decidedAt,
-    ).toBeNull();
+    expect((await requireApprovalRow(deps, requested.approvalId)).decidedAt)
+      .toBeNull();
   });
 
   it("does not consume an approved action after its delivery window expires", async () => {
-    const prisma = createActionApprovalPrismaFake();
+    const { deps, memberId } = await setup();
     const requested = await requestHostedActionApproval({
-      memberId: MEMBER_ID,
+      memberId,
       now: new Date("2026-06-25T16:00:00.000Z"),
-      prisma,
+      prisma: deps.prisma,
       request: REQUEST,
     });
-    const row = requireApprovalRow(prisma, requested.approvalId);
-    row.approvalStatus = "approved";
-    row.decidedAt = new Date("2026-06-25T16:01:00.000Z");
-    row.expiresAt = new Date("2026-06-25T16:02:00.000Z");
+    const approved = await approveExistingAction({
+      approvalId: requested.approvalId,
+      deps,
+      expiresAt: new Date("2026-06-25T16:02:00.000Z"),
+      memberId,
+      now: new Date("2026-06-25T16:01:00.000Z"),
+    });
 
     await expect(consumeHostedActionApproval({
-      memberId: MEMBER_ID,
+      memberId,
       now: new Date("2026-06-25T16:03:00.000Z"),
-      prisma,
-      request: REQUEST,
+      prisma: deps.prisma,
+      request: consumeRequest(approved, "delivery_expired"),
     })).resolves.toEqual({
       approvalId: requested.approvalId,
       status: "expired",
     });
-    expect(requireApprovalRow(prisma, requested.approvalId).consumedAt)
+    expect((await requireApprovalRow(deps, requested.approvalId)).consumedAt)
       .toBeNull();
 
     await expect(requestHostedActionApproval({
-      memberId: MEMBER_ID,
+      memberId,
       now: new Date("2026-06-25T16:04:00.000Z"),
-      prisma,
+      prisma: deps.prisma,
       request: REQUEST,
     })).resolves.toMatchObject({
       approvalId: requested.approvalId,
@@ -186,238 +250,96 @@ describe("hosted action approvals", () => {
       status: "pending",
     });
   });
+
+  it("only grants one concurrent delivery consumer", async () => {
+    const { deps, memberId } = await setup();
+    const requested = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:00:00.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    });
+    const approved = await approveExistingAction({
+      approvalId: requested.approvalId,
+      deps,
+      expiresAt: new Date("2026-06-25T16:16:00.000Z"),
+      memberId,
+      now: new Date("2026-06-25T16:01:00.000Z"),
+    });
+
+    const outcomes = await Promise.all([
+      consumeHostedActionApproval({
+        memberId,
+        now: new Date("2026-06-25T16:02:00.000Z"),
+        prisma: deps.prisma,
+        request: consumeRequest(approved, "delivery_a"),
+      }),
+      consumeHostedActionApproval({
+        memberId,
+        now: new Date("2026-06-25T16:02:00.000Z"),
+        prisma: deps.prisma,
+        request: consumeRequest(approved, "delivery_b"),
+      }),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "approved"))
+      .toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.status === "expired"))
+      .toEqual([{ approvalId: requested.approvalId, status: "expired" }]);
+  });
 });
 
-interface ActionApprovalPrismaFake {
-  hostedSensitiveActionChallenge: {
-    findFirst(
-      args: Prisma.HostedSensitiveActionChallengeFindFirstArgs,
-    ): Promise<HostedSensitiveActionChallenge | null>;
-    updateMany(
-      args: Prisma.HostedSensitiveActionChallengeUpdateManyArgs,
-    ): Promise<Prisma.BatchPayload>;
-    upsert(
-      args: Prisma.HostedSensitiveActionChallengeUpsertArgs,
-    ): Promise<HostedSensitiveActionChallenge>;
-  };
-  rows: Map<string, HostedSensitiveActionChallenge>;
-}
-
-function createActionApprovalPrismaFake(): ActionApprovalPrismaFake {
-  const rows = new Map<string, HostedSensitiveActionChallenge>();
-  return {
-    hostedSensitiveActionChallenge: {
-      async findFirst(args) {
-        return Array.from(rows.values()).find((row) =>
-          matchesWhere(row, args.where ?? {})
-        ) ?? null;
-      },
-      async updateMany(args) {
-        let count = 0;
-        for (const row of Array.from(rows.values())) {
-          if (!matchesWhere(row, args.where ?? {})) {
-            continue;
-          }
-          rows.delete(row.tokenHash);
-          const updated = applyUpdateData(row, args.data);
-          rows.set(updated.tokenHash, updated);
-          count += 1;
-        }
-        return { count };
-      },
-      async upsert(args) {
-        const approvalKey = requireStringField(args.where, "approvalKey");
-        const existing = Array.from(rows.values()).find((row) =>
-          row.approvalKey === approvalKey
-        );
-        if (existing) {
-          return existing;
-        }
-        const row = buildRowFromCreate(args.create);
-        rows.set(row.tokenHash, row);
-        return row;
-      },
+async function approveExistingAction(input: {
+  approvalId: string;
+  deps: HostedWebTestkitDeps;
+  expiresAt: Date;
+  memberId: string;
+  now: Date;
+}): Promise<Extract<HostedActionApprovalResult, { status: "approved" }>> {
+  await input.deps.prisma.hostedSensitiveActionChallenge.update({
+    data: {
+      approvalStatus: "approved",
+      consumedAt: null,
+      consumedBy: null,
+      decidedAt: input.now,
+      expiresAt: input.expiresAt,
+      tokenHash: `approval-token-${randomUUID()}`,
     },
-    rows,
+    where: { approvalKey: input.approvalId },
+  });
+
+  const approved = await requestHostedActionApproval({
+    memberId: input.memberId,
+    now: input.now,
+    prisma: input.deps.prisma,
+    request: REQUEST,
+  });
+  if (approved.status !== "approved") {
+    throw new Error("Expected approved hosted action approval.");
+  }
+  return approved;
+}
+
+function consumeRequest(
+  approval: Extract<HostedActionApprovalResult, { status: "approved" }>,
+  consumerId: string,
+) {
+  return {
+    approvalGeneration: approval.approvalGeneration,
+    consumerId,
+    request: REQUEST,
   };
 }
 
-function requireApprovalRow(
-  prisma: ActionApprovalPrismaFake,
+async function requireApprovalRow(
+  deps: HostedWebTestkitDeps,
   approvalId: string,
-): HostedSensitiveActionChallenge {
-  const row = Array.from(prisma.rows.values()).find((candidate) =>
-    candidate.approvalKey === approvalId
-  );
+): Promise<HostedSensitiveActionChallenge> {
+  const row = await deps.prisma.hostedSensitiveActionChallenge.findFirst({
+    where: { approvalKey: approvalId },
+  });
   if (!row) {
     throw new Error(`Missing approval row: ${approvalId}`);
   }
   return row;
-}
-
-function buildRowFromCreate(
-  create: Prisma.HostedSensitiveActionChallengeUpsertArgs["create"],
-): HostedSensitiveActionChallenge {
-  return {
-    actionHash: nullableStringField(create, "actionHash"),
-    actionId: nullableStringField(create, "actionId"),
-    approvalKey: nullableStringField(create, "approvalKey"),
-    approvalStatus: approvalStatusField(create, "approvalStatus"),
-    bindingHash: requireStringField(create, "bindingHash"),
-    consumedAt: nullableDateField(create, "consumedAt"),
-    createdAt: requireDateField(create, "createdAt"),
-    decidedAt: nullableDateField(create, "decidedAt"),
-    expiresAt: requireDateField(create, "expiresAt"),
-    kind: requireStringField(create, "kind"),
-    memberId: requireStringField(create, "memberId"),
-    presentationBody: nullableStringField(create, "presentationBody"),
-    presentationTitle: nullableStringField(create, "presentationTitle"),
-    returnContactKind: nullableStringField(create, "returnContactKind"),
-    tokenHash: requireStringField(create, "tokenHash"),
-  };
-}
-
-function applyUpdateData(
-  row: HostedSensitiveActionChallenge,
-  data: Prisma.HostedSensitiveActionChallengeUpdateManyArgs["data"],
-): HostedSensitiveActionChallenge {
-  const updated = { ...row };
-  for (const [key, value] of Object.entries(data)) {
-    if (
-      key in updated
-      && (value === null || value instanceof Date || typeof value === "string")
-    ) {
-      setRowField(updated, key, value);
-    }
-  }
-  return updated;
-}
-
-function matchesWhere(
-  row: HostedSensitiveActionChallenge,
-  where: Prisma.HostedSensitiveActionChallengeWhereInput | undefined,
-): boolean {
-  for (const [key, value] of Object.entries(where ?? {})) {
-    if (key === "OR") {
-      const clauses = Array.isArray(value) ? value : [];
-      if (!clauses.some((clause) => matchesWhere(row, whereInput(clause)))) {
-        return false;
-      }
-      continue;
-    }
-
-    if (!matchesWhereValue(readRowField(row, key), value)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function matchesWhereValue(rowValue: unknown, expected: unknown): boolean {
-  if (
-    expected
-    && typeof expected === "object"
-    && !(expected instanceof Date)
-    && !Array.isArray(expected)
-  ) {
-    const operators = objectRecord(expected);
-    if (
-      "gt" in operators
-      && !(rowValue instanceof Date
-        && operators.gt instanceof Date
-        && rowValue > operators.gt)
-    ) {
-      return false;
-    }
-    if (
-      "lte" in operators
-      && !(rowValue instanceof Date
-        && operators.lte instanceof Date
-        && rowValue <= operators.lte)
-    ) {
-      return false;
-    }
-    if ("not" in operators) {
-      return rowValue !== operators.not;
-    }
-    return true;
-  }
-  return rowValue === expected;
-}
-
-function readRowField(row: HostedSensitiveActionChallenge, key: string): unknown {
-  return objectRecord(row)[key];
-}
-
-function setRowField(
-  row: HostedSensitiveActionChallenge,
-  key: string,
-  value: Date | string | null,
-): void {
-  objectRecord(row)[key] = value;
-}
-
-function objectRecord(input: object): Record<string, unknown> {
-  return input as Record<string, unknown>;
-}
-
-function whereInput(
-  value: unknown,
-): Prisma.HostedSensitiveActionChallengeWhereInput {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-  return value as Prisma.HostedSensitiveActionChallengeWhereInput;
-}
-
-function requireStringField(input: object, key: string): string {
-  const value = objectRecord(input)[key];
-  if (typeof value !== "string") {
-    throw new TypeError(`${key} must be a string.`);
-  }
-  return value;
-}
-
-function nullableStringField(input: object, key: string): string | null {
-  const value = objectRecord(input)[key];
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (typeof value !== "string") {
-    throw new TypeError(`${key} must be a string or null.`);
-  }
-  return value;
-}
-
-function requireDateField(input: object, key: string): Date {
-  const value = objectRecord(input)[key];
-  if (!(value instanceof Date)) {
-    throw new TypeError(`${key} must be a Date.`);
-  }
-  return value;
-}
-
-function nullableDateField(input: object, key: string): Date | null {
-  const value = objectRecord(input)[key];
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (!(value instanceof Date)) {
-    throw new TypeError(`${key} must be a Date or null.`);
-  }
-  return value;
-}
-
-function approvalStatusField(
-  input: object,
-  key: string,
-): HostedSensitiveActionChallenge["approvalStatus"] {
-  const value = objectRecord(input)[key];
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (value === "pending" || value === "approved" || value === "denied") {
-    return value;
-  }
-  throw new TypeError(`${key} must be an action approval status or null.`);
 }

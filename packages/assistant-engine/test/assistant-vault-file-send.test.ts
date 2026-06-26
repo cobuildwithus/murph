@@ -14,6 +14,7 @@ import {
 import {
   applyAssistantVaultFileSendApprovalResult,
   buildAssistantVaultFileSendApprovalRequest,
+  buildAssistantVaultFileSendApprovalRequestForTarget,
   readVerifiedAssistantVaultFileBytes,
   requestAssistantVaultFileSend,
   resolveAssistantVaultFileResponseMedia,
@@ -131,13 +132,37 @@ describe('assistant vault-file send', () => {
     })
   })
 
+  it('does not auto-return from approvals for iMessage group threads', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-group-return-',
+    )
+    tempRoots.push(parentRoot)
+    await mkdir(path.join(vaultRoot, 'documents'), { recursive: true })
+    await writeFile(path.join(vaultRoot, 'documents', 'report.pdf'), 'content')
+    const file = await resolveAssistantVaultFileResponseMedia({
+      ref: 'documents/report.pdf',
+      vaultRoot,
+    })
+
+    expect(buildAssistantVaultFileSendApprovalRequestForTarget({
+      channel: 'linq',
+      file,
+      targetFingerprint: 'target_123',
+      threadIsDirect: true,
+    }).returnContactKind).toBe('text')
+    expect(buildAssistantVaultFileSendApprovalRequestForTarget({
+      channel: 'linq',
+      file,
+      targetFingerprint: 'target_123',
+      threadIsDirect: false,
+    }).returnContactKind).toBeNull()
+  })
+
   it('refuses to create a vault-file approval without a concrete destination', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-targetless-',
     )
     tempRoots.push(parentRoot)
-    await mkdir(path.join(vaultRoot, 'documents'), { recursive: true })
-    await writeFile(path.join(vaultRoot, 'documents', 'report.pdf'), 'content')
 
     const approvalPort = {
       request: vi.fn(),
@@ -147,7 +172,7 @@ describe('assistant vault-file send', () => {
       actionApprovalPort: approvalPort,
       channel: 'linq',
       identityId: 'member_123',
-      ref: 'documents/report.pdf',
+      ref: 'documents/missing.pdf',
       vault: vaultRoot,
     })).rejects.toMatchObject({
       code: 'ASSISTANT_VAULT_FILE_TARGET_UNAVAILABLE',
@@ -161,6 +186,7 @@ describe('assistant vault-file send', () => {
     const request = buildAssistantVaultFileSendApprovalRequest(intent)
     const approved = applyAssistantVaultFileSendApprovalResult({
       approval: {
+        approvalGeneration: 'b'.repeat(64),
         approvalId: `haa_${'b'.repeat(32)}`,
         status: 'approved',
       },
@@ -173,6 +199,12 @@ describe('assistant vault-file send', () => {
       actionKind: 'vault.file.send.v1',
     })
     expect(approved).toMatchObject({
+      media: [
+        expect.objectContaining({
+          approvalGeneration: 'b'.repeat(64),
+          approvalId: `haa_${'b'.repeat(32)}`,
+        }),
+      ],
       nextAttemptAt: now.toISOString(),
       status: 'pending',
     })
@@ -205,6 +237,7 @@ describe('assistant vault-file send', () => {
           )
         }
         return {
+          approvalGeneration: 'd'.repeat(64),
           approvalId: `haa_${'d'.repeat(32)}`,
           status: 'approved' as const,
         }
@@ -242,6 +275,13 @@ describe('assistant vault-file send', () => {
     expect(await listAssistantOutboxIntents(vaultRoot)).toHaveLength(1)
     expect(first.status).toBe('pending')
     expect(approved.status).toBe('approved')
+    if (approved.status !== 'approved') {
+      throw new Error('Expected approved vault-file send result.')
+    }
+    expect(approved.file).toMatchObject({
+      approvalGeneration: 'd'.repeat(64),
+      approvalId: `haa_${'d'.repeat(32)}`,
+    })
     expect(requests).toHaveLength(2)
     expect(requests[1]).toEqual(requests[0])
     expect(buildAssistantVaultFileSendApprovalRequest(replyIntent)).toEqual(
@@ -249,11 +289,7 @@ describe('assistant vault-file send', () => {
     )
   })
 
-  it('repairs approved legacy targetless intents without changing approval identity', async () => {
-    const { parentRoot, vaultRoot } = await createTempVaultContext(
-      'murph-vault-file-approved-legacy-target-',
-    )
-    tempRoots.push(parentRoot)
+  it('abandons approved targetless intents instead of reconstructing a destination', () => {
     const now = new Date('2026-06-24T12:00:00.000Z')
     const legacy = {
       ...createVaultFileIntent(),
@@ -261,10 +297,10 @@ describe('assistant vault-file send', () => {
       explicitTarget: null,
       targetFingerprint: 'legacy-targetless-fingerprint',
     }
-    const approvedRequest = buildAssistantVaultFileSendApprovalRequest(legacy)
 
     const approved = applyAssistantVaultFileSendApprovalResult({
       approval: {
+        approvalGeneration: 'e'.repeat(64),
         approvalId: `haa_${'e'.repeat(32)}`,
         status: 'approved',
       },
@@ -273,38 +309,12 @@ describe('assistant vault-file send', () => {
     })
 
     expect(approved).toMatchObject({
-      bindingDelivery: { kind: 'thread', target: 'chat_123' },
-      nextAttemptAt: now.toISOString(),
-      status: 'pending',
-      targetFingerprint: legacy.targetFingerprint,
+      lastError: {
+        code: 'ASSISTANT_VAULT_FILE_TARGET_UNAVAILABLE',
+      },
+      nextAttemptAt: null,
+      status: 'abandoned',
     })
-    expect(buildAssistantVaultFileSendApprovalRequest(approved)).toEqual(
-      approvedRequest,
-    )
-
-    await saveAssistantOutboxIntent(vaultRoot, approved)
-    const sendLinq = vi.fn().mockResolvedValue({
-      providerMessageId: 'linq-message-created',
-      providerThreadId: 'chat_123',
-      target: 'chat_123',
-      targetKind: 'thread',
-    })
-
-    const dispatched = await dispatchAssistantOutboxIntent({
-      dependencies: { sendLinq },
-      force: true,
-      intentId: approved.intentId,
-      vault: vaultRoot,
-    })
-
-    expect(sendLinq).toHaveBeenCalledWith(expect.objectContaining({
-      idempotencyKey: approved.deliveryIdempotencyKey,
-      media: [expect.objectContaining({ kind: 'vault_file', ref: 'documents/report.pdf' })],
-      target: 'chat_123',
-      targetKind: 'thread',
-    }))
-    expect(dispatched.deliveryError).toBeNull()
-    expect(dispatched.intent.status).toBe('sent')
   })
 
   it('never dispatches an awaiting-approval intent even when forced', async () => {
@@ -367,6 +377,8 @@ describe('assistant vault-file send', () => {
 
   it('attaches an approved vault file to the normal assistant reply path', async () => {
     const file = {
+      approvalGeneration: 'f'.repeat(64),
+      approvalId: `haa_${'f'.repeat(32)}`,
       contentType: 'application/pdf',
       filename: 'report.pdf',
       kind: 'vault_file' as const,
@@ -431,6 +443,8 @@ function createVaultFileIntent() {
     lastAttemptAt: null,
     lastError: null,
     media: [{
+      approvalGeneration: null,
+      approvalId: null,
       contentType: 'application/pdf',
       filename: 'report.pdf',
       kind: 'vault_file' as const,
