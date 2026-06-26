@@ -173,7 +173,9 @@ describe("hosted Linq contact card client", () => {
     runtimeMocks.getHostedOnboardingEnvironment.mockReturnValue({
       linqConversationPhoneNumbers: ["+15550000001", "+15550000002", "+15550000002"],
       linqMaxActiveMembersPerConversationPhone: 1000,
+      publicBaseUrl: "https://app.example.test",
     });
+    const contactCardImageUrl = "https://app.example.test/murph_headshot.png";
     const findMany = vi.fn().mockResolvedValue([
       {
         phoneNumber: "+15550000001",
@@ -207,7 +209,8 @@ describe("hosted Linq contact card client", () => {
         return createJsonResponse({
           contact_cards: [
             {
-              first_name: "Support",
+              first_name: "Murph",
+              image_url: null,
               is_active: true,
               phone_number: "+15550000001",
             },
@@ -226,16 +229,27 @@ describe("hosted Linq contact card client", () => {
       if (url.pathname.endsWith("/contact_card")
         && url.searchParams.get("phone_number") === "+15550000001"
         && init?.method === "PATCH") {
+        expect(readJsonRequestBody(init)).toEqual({
+          first_name: "Murph",
+          image_url: contactCardImageUrl,
+        });
         return createJsonResponse({
           first_name: "Murph",
+          image_url: contactCardImageUrl,
           is_active: true,
           phone_number: "+15550000001",
         });
       }
 
       if (url.pathname.endsWith("/contact_card") && init?.method === "POST") {
+        expect(readJsonRequestBody(init)).toEqual({
+          first_name: "Murph",
+          image_url: contactCardImageUrl,
+          phone_number: "+15550000002",
+        });
         return createJsonResponse({
           first_name: "Murph",
+          image_url: contactCardImageUrl,
           is_active: true,
           phone_number: "+15550000002",
         });

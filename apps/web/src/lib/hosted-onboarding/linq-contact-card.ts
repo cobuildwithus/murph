@@ -14,6 +14,9 @@ import { normalizePhoneNumber } from "./phone";
 
 const HOSTED_LINQ_CONTACT_CARD_CRON_LINE_LIMIT = 50;
 const MURPH_CONTACT_CARD_FIRST_NAME = "Murph";
+const MURPH_CONTACT_CARD_DEFAULT_IMAGE_URL =
+  "https://www.withmurph.ai/murph_headshot.png";
+const MURPH_CONTACT_CARD_IMAGE_PATH = "/murph_headshot.png";
 
 export type HostedLinqContactCard = {
   firstName: string;
@@ -59,6 +62,7 @@ export async function reconcileHostedLinqContactCards(input: {
     observedAt,
     prisma: input.prisma,
   });
+  const murphImageUrl = getMurphContactCardImageUrl();
 
   const result: HostedLinqContactCardReconciliation = {
     activeCards: 0,
@@ -84,6 +88,7 @@ export async function reconcileHostedLinqContactCards(input: {
     });
     const outcome = await reconcileHostedLinqContactCardForLine({
       existingCard,
+      imageUrl: murphImageUrl,
       phoneNumber: line.phoneNumber,
       signal: input.signal,
     });
@@ -228,33 +233,52 @@ async function listHostedLinqConfiguredContactCardLines(input: {
 
 async function reconcileHostedLinqContactCardForLine(input: {
   existingCard: HostedLinqContactCard | null;
+  imageUrl: string | null;
   phoneNumber: string;
   signal?: AbortSignal;
 }): Promise<HostedLinqContactCardOutcome> {
   if (!input.existingCard) {
     const created = await setupHostedLinqContactCard({
       firstName: MURPH_CONTACT_CARD_FIRST_NAME,
+      imageUrl: input.imageUrl,
       phoneNumber: input.phoneNumber,
       signal: input.signal,
     });
     return created.isActive ? "createdCards" : "inactiveCards";
   }
 
-  if (isCurrentMurphContactCard(input.existingCard)) {
+  if (isCurrentMurphContactCard(input.existingCard, input.imageUrl)) {
     return input.existingCard.isActive ? "activeCards" : "inactiveCards";
   }
 
   const updated = await updateHostedLinqContactCard({
     firstName: MURPH_CONTACT_CARD_FIRST_NAME,
+    imageUrl: input.imageUrl,
     phoneNumber: input.phoneNumber,
     signal: input.signal,
   });
   return updated.isActive ? "updatedCards" : "inactiveCards";
 }
 
-function isCurrentMurphContactCard(card: HostedLinqContactCard): boolean {
-  return card.firstName === MURPH_CONTACT_CARD_FIRST_NAME
-    && (card.lastName ?? "") === "";
+function isCurrentMurphContactCard(
+  card: HostedLinqContactCard,
+  imageUrl: string | null,
+): boolean {
+  if (card.firstName !== MURPH_CONTACT_CARD_FIRST_NAME || (card.lastName ?? "") !== "") {
+    return false;
+  }
+
+  return imageUrl ? card.imageUrl === imageUrl : true;
+}
+
+function getMurphContactCardImageUrl(): string | null {
+  const publicBaseUrl = getHostedOnboardingEnvironment().publicBaseUrl;
+  if (!publicBaseUrl) {
+    return MURPH_CONTACT_CARD_DEFAULT_IMAGE_URL;
+  }
+
+  const url = new URL(MURPH_CONTACT_CARD_IMAGE_PATH, `${publicBaseUrl}/`);
+  return url.protocol === "https:" ? url.toString() : MURPH_CONTACT_CARD_DEFAULT_IMAGE_URL;
 }
 
 async function fetchHostedLinqJson<T>(input: {
