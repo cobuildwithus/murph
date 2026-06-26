@@ -131,36 +131,6 @@ export function resolveHostedMemberAssistantNotificationRoute(input: {
     };
   }
 
-  const linqRecipientPhone = normalizePhoneNumber(input.linqRecipientPhone);
-
-  if (memberPhoneNumber && linqRecipientPhone && input.messaging.phoneLookupKey) {
-    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
-      secret: input.messaging.phoneLookupKey,
-      userId: input.memberId,
-    });
-    return {
-      actorId: hashHostedAssistantConversationIdentifier(
-        identifierBlind,
-        memberPhoneNumber,
-      ),
-      channel: "linq",
-      delivery: {
-        kind: "participant",
-        source: {
-          fromPhoneNumber: linqRecipientPhone,
-          kind: "linq",
-        },
-        target: memberPhoneNumber,
-      },
-      identityId: hashHostedAssistantConversationIdentifier(
-        identifierBlind,
-        input.messaging.phoneLookupKey,
-      ),
-      threadId: null,
-      threadIsDirect: true,
-    };
-  }
-
   if (input.messaging.telegramThreadId) {
     const identifierBlind = createHostedAssistantConversationIdentifierBlind({
       secret: input.messaging.telegramThreadId,

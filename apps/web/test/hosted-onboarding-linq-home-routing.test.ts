@@ -203,7 +203,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
   });
 
-  it("assigns the pooled home line and returns a participant welcome route when there is no reusable pending thread", async () => {
+  it("assigns the pooled home line without a welcome route when there is no reusable pending thread", async () => {
     mocks.getHostedOnboardingEnvironment.mockReturnValue({
       linqConversationPhoneNumbers: ["+15550100001", "+15550100002"],
       linqMaxActiveMembersPerConversationPhone: 3,
@@ -224,21 +224,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
         prisma: {} as never,
       }),
     ).resolves.toEqual({
-      welcomeRoute: {
-        actorId: hashHostedLinqRouteIdentifier("+15551234567"),
-        channel: "linq",
-        delivery: {
-          kind: "participant",
-          source: {
-            fromPhoneNumber: "+15550100002",
-            kind: "linq",
-          },
-          target: "+15551234567",
-        },
-        identityId: hashHostedLinqRouteIdentifier("hbidx:phone:v1:test"),
-        threadId: null,
-        threadIsDirect: true,
-      },
+      welcomeRoute: null,
     });
 
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
