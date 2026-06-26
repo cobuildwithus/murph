@@ -56,6 +56,103 @@ export interface ChangelogQuery {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-06-26",
+    publishedOn: "2026-06-26",
+    title: "Coaches for sleep, stress, food, running, lifting, and race day",
+    summary:
+      "Six new domain skills give Murph dedicated reasoning for sleep & recovery, stress regulation, nutrition strategy, running/cardio, strength training, and race prep. Plus: live browser handoffs replace static screenshots, confirmations work in chat, and unknown first contacts get gated before they reach the invite path.",
+    items: [
+      {
+        id: "training-recovery-nutrition-skills",
+        kind: "feature",
+        priority: 5,
+        title: "Six new coach skills for sleep, stress, food, running, lifting, and racing",
+        summary:
+          "Murph now routes through dedicated skills for sleep & recovery readiness, stress regulation, nutrition strategy, running & cardio, strength training, and competition prep — each with its own clinical-style reasoning, safety boundaries, and handoff rules.",
+        details:
+          "Sleep & recovery decides train/modify/rest/care from magnitude, persistence, context, and function — not wearable point totals. Stress regulation gives one brief, low-burden action without claiming an HRV reset. Nutrition strategy owns forward-looking food decisions (food-journal still owns capture). Running/cardio handles capacity, pacing, and modality without forcing 10%/80-20/Zone-2 rules. Strength training fits plans to goal, equipment, schedule, and symptoms. Competition training prepares you for a named race or meet without inventing event facts from memory.",
+        relevanceTags: [
+          "assistant",
+          "health",
+          "sleep",
+          "stress",
+          "nutrition",
+          "running",
+          "strength",
+          "competition",
+        ],
+        sourcePullRequests: [298, 299, 300, 301, 302, 303],
+        tryIt: {
+          label: "Try a coach skill",
+          prompt:
+            "I've got a half marathon in 8 weeks and I'm trying to lift twice a week without wrecking my long runs — what should I actually do?",
+        },
+      },
+      {
+        id: "linq-first-contact-admission",
+        kind: "improvement",
+        priority: 5,
+        title: "Unknown first contacts get gated before the invite path",
+        summary:
+          "When a stranger texts the Murph line for the first time, the message now passes through a fail-closed classifier before any invite, member record, or reply gets created. Wrong numbers, marketing, and personal logistics never reach the join flow.",
+        details:
+          "Active members, explicit routes, group chats, and STOP/URL filters still bypass the classifier. Default rollout is off; enforcement is enabled per environment.",
+        relevanceTags: ["safety", "linq", "imessage", "deliverability", "onboarding"],
+        sourcePullRequests: [309],
+      },
+      {
+        id: "live-browser-replaces-screen-inspection",
+        kind: "improvement",
+        priority: 4,
+        title: "Live browser handoff replaces static screenshot inspections",
+        summary:
+          "When Murph needs you to look at or unstick a paused browser, you now get the same live, passkey-gated browser handoff used everywhere else — not a static screenshot link. Old screenshot links fail closed as expired and the paused run can still recover.",
+        relevanceTags: ["browser", "handoff", "security", "polish"],
+        sourcePullRequests: [296],
+      },
+      {
+        id: "checkout-confirm-in-chat",
+        kind: "improvement",
+        priority: 4,
+        title: "Approve the final checkout step with a chat reply",
+        summary:
+          "Murph no longer asks you to open the handoff and click the final purchase control yourself. A simple \"yes\" or \"go ahead\" lets it resume and complete the order. The handoff link is still available if you want to inspect or take over.",
+        relevanceTags: ["browser", "checkout", "handoff", "polish"],
+        sourcePullRequests: [307],
+      },
+      {
+        id: "linq-off-hours-reminder-guard",
+        kind: "improvement",
+        priority: 3,
+        title: "Off-hours iMessage reminders get a warning before they're scheduled",
+        summary:
+          "Before saving a Linq/iMessage reminder that would deliver between 11pm and 5am in your local timezone, Murph now flags the spam-risk, suggests a nearby waking-hour time, and asks for confirmation. A clear \"yes, that time\" is enough to proceed.",
+        relevanceTags: ["assistant", "linq", "imessage", "reminders", "deliverability"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "longer-tool-loops-before-compaction",
+        kind: "improvement",
+        priority: 3,
+        title: "Longer tool-using turns before context gets compacted",
+        summary:
+          "The hosted runtime's auto-compaction threshold went from 84k to 100k tokens, so long browser/computer-use loops finish in one piece instead of getting compacted mid-loop.",
+        relevanceTags: ["assistant", "runtime", "performance"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "all-current-turn-auto-replies-dispatch",
+        kind: "improvement",
+        priority: 3,
+        title: "Every current-turn reply intent actually goes out",
+        summary:
+          "When Murph plans multiple replies inside a single turn, all of them now dispatch instead of only the first reaching the user.",
+        relevanceTags: ["assistant", "automation", "reliability"],
+        sourcePullRequests: [],
+      },
+    ],
+  },
+  {
     id: "2026-06-25",
     publishedOn: "2026-06-25",
     title: "Pain, rehab, and chronic conditions get real help",
