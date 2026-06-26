@@ -1,6 +1,7 @@
 import { rm } from 'node:fs/promises'
 
 import {
+  initializeVault,
   showAutomation,
   upsertAutomation,
 } from '@murphai/core'
@@ -28,61 +29,10 @@ const defaultRoute = {
   threadId: null,
 }
 
-const MANAGED_CRON_WINDOWS = {
-  digest: {
-    daysOfWeek: [1, 2],
-    startLocalTime: '08:30',
-    endLocalTime: '12:30',
-    slotMinutes: 30,
-  },
-  insight: {
-    daysOfWeek: [0, 1, 2],
-    startLocalTime: '10:00',
-    endLocalTime: '17:00',
-    slotMinutes: 30,
-  },
-  researchScout: {
-    daysOfWeek: [3, 4],
-    startLocalTime: '14:00',
-    endLocalTime: '20:00',
-    slotMinutes: 30,
-  },
-  productUpdates: {
-    daysOfWeek: [4, 5],
-    startLocalTime: '10:00',
-    endLocalTime: '17:00',
-    slotMinutes: 30,
-  },
-} as const
-
-function expectManagedCronInWindow(
+function expectCronSchedule(
   schedule: NonNullable<Awaited<ReturnType<typeof showAutomation>>>['schedule'] | undefined,
-  window: (typeof MANAGED_CRON_WINDOWS)[keyof typeof MANAGED_CRON_WINDOWS],
 ): void {
   expect(schedule?.kind).toBe('cron')
-  if (!schedule || schedule.kind !== 'cron') {
-    throw new Error('Expected a managed automation cron schedule.')
-  }
-
-  const match = /^(?<minute>\d+) (?<hour>\d+) \* \* (?<dayOfWeek>\d+)$/u.exec(
-    schedule.expression,
-  )
-  expect(match?.groups).toBeDefined()
-  const minute = Number.parseInt(match?.groups?.minute ?? '', 10)
-  const hour = Number.parseInt(match?.groups?.hour ?? '', 10)
-  const dayOfWeek = Number.parseInt(match?.groups?.dayOfWeek ?? '', 10)
-  const minuteOfDay = hour * 60 + minute
-
-  expect(window.daysOfWeek).toContain(dayOfWeek)
-  expect(minuteOfDay).toBeGreaterThanOrEqual(localTimeMinutes(window.startLocalTime))
-  expect(minuteOfDay).toBeLessThan(localTimeMinutes(window.endLocalTime))
-  expect(minute % window.slotMinutes).toBe(0)
-}
-
-function localTimeMinutes(value: string): number {
-  const [hourText, minuteText] = value.split(':')
-  return Number.parseInt(hourText ?? '', 10) * 60 +
-    Number.parseInt(minuteText ?? '', 10)
 }
 
 const legacyOnboardingFollowupInstructions = [
@@ -106,6 +56,7 @@ afterEach(async () => {
 async function createVaultRoot(): Promise<string> {
   const context = await createTempVaultContext('murph-managed-automations-core-')
   tempRoots.push(context.parentRoot)
+  await initializeVault({ vaultRoot: context.vaultRoot })
   return context.vaultRoot
 }
 
@@ -148,7 +99,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       status: 'active',
       title: 'Weekly health insight',
     })
-    expectManagedCronInWindow(insightRecord?.schedule, MANAGED_CRON_WINDOWS.insight)
+    expectCronSchedule(insightRecord?.schedule)
     expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
     expect(insightRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(insightRecord?.instructions).toContain('specific to this user')
@@ -213,10 +164,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       status: 'active',
       title: 'Weekly health research scout',
     })
-    expectManagedCronInWindow(
-      researchScoutRecord?.schedule,
-      MANAGED_CRON_WINDOWS.researchScout,
-    )
+    expectCronSchedule(researchScoutRecord?.schedule)
     expect(researchScoutRecord?.tags).toContain('murph-managed:weekly-health-research-scout')
     expect(researchScoutRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(researchScoutRecord?.instructions).toContain('On this scheduled weekly run')
@@ -244,10 +192,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       status: 'active',
       title: 'This week in Murph',
     })
-    expectManagedCronInWindow(
-      productUpdatesRecord?.schedule,
-      MANAGED_CRON_WINDOWS.productUpdates,
-    )
+    expectCronSchedule(productUpdatesRecord?.schedule)
     expect(productUpdatesRecord?.tags).toContain('murph-managed:weekly-product-updates')
     expect(productUpdatesRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(productUpdatesRecord?.instructions).toContain('/api/changelog?days=7&featureLimit=70&improvementLimit=10')
@@ -533,7 +478,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
   })
 
-  it('updates an existing weekly health insight to the managed Sunday noon schedule', async () => {
+  it('updates an existing weekly health insight without rewriting its schedule', async () => {
     const vaultRoot = await createVaultRoot()
     const existingRoute = {
       channel: 'telegram' as const,
@@ -584,7 +529,10 @@ describe('applyMurphManagedAutomations core integration', () => {
       summary: 'A weekly scout for one non-obvious personal health/body finding.',
       title: 'Weekly health insight',
     })
-    expectManagedCronInWindow(insightRecord?.schedule, MANAGED_CRON_WINDOWS.insight)
+    expect(insightRecord?.schedule).toEqual({
+      kind: 'cron',
+      expression: '0 18 * * 3',
+    })
     expect(insightRecord?.instructions).toContain('On this scheduled weekly run')
     expect(insightRecord?.instructions).not.toContain('Sunday at noon local time')
     expect(insightRecord?.instructions).not.toContain('6:00 PM local time')

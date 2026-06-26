@@ -113,62 +113,12 @@ const defaultRoute = {
   threadId: null,
 }
 
-const MANAGED_CRON_WINDOWS = {
-  digest: {
-    daysOfWeek: [1, 2],
-    startLocalTime: '08:30',
-    endLocalTime: '12:30',
-    slotMinutes: 30,
-  },
-  insight: {
-    daysOfWeek: [0, 1, 2],
-    startLocalTime: '10:00',
-    endLocalTime: '17:00',
-    slotMinutes: 30,
-  },
-  researchScout: {
-    daysOfWeek: [3, 4],
-    startLocalTime: '14:00',
-    endLocalTime: '20:00',
-    slotMinutes: 30,
-  },
-  productUpdates: {
-    daysOfWeek: [4, 5],
-    startLocalTime: '10:00',
-    endLocalTime: '17:00',
-    slotMinutes: 30,
-  },
+const EXPECTED_MANAGED_SPREAD_CRONS = {
+  digest: { kind: 'cron', expression: '30 10 * * 2' },
+  insight: { kind: 'cron', expression: '0 13 * * 0' },
+  researchScout: { kind: 'cron', expression: '0 14 * * 3' },
+  productUpdates: { kind: 'cron', expression: '30 12 * * 5' },
 } as const
-
-function expectManagedCronInWindow(
-  schedule: StoredAutomationRecord['schedule'] | undefined,
-  window: (typeof MANAGED_CRON_WINDOWS)[keyof typeof MANAGED_CRON_WINDOWS],
-): void {
-  expect(schedule?.kind).toBe('cron')
-  if (!schedule || schedule.kind !== 'cron') {
-    throw new Error('Expected a managed automation cron schedule.')
-  }
-
-  const match = /^(?<minute>\d+) (?<hour>\d+) \* \* (?<dayOfWeek>\d+)$/u.exec(
-    schedule.expression,
-  )
-  expect(match?.groups).toBeDefined()
-  const minute = Number.parseInt(match?.groups?.minute ?? '', 10)
-  const hour = Number.parseInt(match?.groups?.hour ?? '', 10)
-  const dayOfWeek = Number.parseInt(match?.groups?.dayOfWeek ?? '', 10)
-  const minuteOfDay = hour * 60 + minute
-
-  expect(window.daysOfWeek).toContain(dayOfWeek)
-  expect(minuteOfDay).toBeGreaterThanOrEqual(localTimeMinutes(window.startLocalTime))
-  expect(minuteOfDay).toBeLessThan(localTimeMinutes(window.endLocalTime))
-  expect(minute % window.slotMinutes).toBe(0)
-}
-
-function localTimeMinutes(value: string): number {
-  const [hourText, minuteText] = value.split(':')
-  return Number.parseInt(hourText ?? '', 10) * 60 +
-    Number.parseInt(minuteText ?? '', 10)
-}
 
 const legacyOnboardingFollowupInstructions = [
   'This scheduled check helps continue Murph setup.',
@@ -405,7 +355,7 @@ describe('applyMurphManagedAutomations', () => {
       status: 'active',
       title: 'Weekly health digest',
     })
-    expectManagedCronInWindow(digestRecord?.schedule, MANAGED_CRON_WINDOWS.digest)
+    expect(digestRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.digest)
 
     const insightRecord = managedAutomationMocks.records.get(
       MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
@@ -418,7 +368,7 @@ describe('applyMurphManagedAutomations', () => {
       status: 'active',
       title: 'Weekly health insight',
     })
-    expectManagedCronInWindow(insightRecord?.schedule, MANAGED_CRON_WINDOWS.insight)
+    expect(insightRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.insight)
     expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
     expect(insightRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(insightRecord?.instructions).toContain('On this scheduled weekly run')
@@ -485,10 +435,7 @@ describe('applyMurphManagedAutomations', () => {
       status: 'active',
       title: 'Weekly health research scout',
     })
-    expectManagedCronInWindow(
-      researchScoutRecord?.schedule,
-      MANAGED_CRON_WINDOWS.researchScout,
-    )
+    expect(researchScoutRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.researchScout)
     expect(researchScoutRecord?.tags).toContain('murph-managed:weekly-health-research-scout')
     expect(researchScoutRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(researchScoutRecord?.instructions).toContain('On this scheduled weekly run')
@@ -553,10 +500,7 @@ describe('applyMurphManagedAutomations', () => {
       status: 'active',
       title: 'This week in Murph',
     })
-    expectManagedCronInWindow(
-      productUpdatesRecord?.schedule,
-      MANAGED_CRON_WINDOWS.productUpdates,
-    )
+    expect(productUpdatesRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.productUpdates)
     expect(productUpdatesRecord?.tags).toContain(
       'murph-managed:weekly-product-updates',
     )
@@ -569,7 +513,7 @@ describe('applyMurphManagedAutomations', () => {
     expect(productUpdatesRecord?.instructions).not.toContain('finish_without_reply')
   })
 
-  it('updates existing research-oriented automations to the managed spread cadence', async () => {
+  it('updates existing research-oriented automations without rewriting their cadence', async () => {
     managedAutomationMocks.records.set(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID, {
       automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
       continuityPolicy: 'preserve',
@@ -613,11 +557,12 @@ describe('applyMurphManagedAutomations', () => {
       updated: 2,
     })
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
-      .toEqual(expect.objectContaining({ schedule: expect.any(Object) }))
-    expectManagedCronInWindow(
-      managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID)?.schedule,
-      MANAGED_CRON_WINDOWS.insight,
-    )
+      .toEqual(expect.objectContaining({
+        schedule: {
+          kind: 'cron',
+          expression: '30 14 * * 5',
+        },
+      }))
     expect(
       managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID)
         ?.instructions,
@@ -629,11 +574,12 @@ describe('applyMurphManagedAutomations', () => {
     )
       .not.toContain('Sunday at noon local time')
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID))
-      .toEqual(expect.objectContaining({ schedule: expect.any(Object) }))
-    expectManagedCronInWindow(
-      managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)?.schedule,
-      MANAGED_CRON_WINDOWS.researchScout,
-    )
+      .toEqual(expect.objectContaining({
+        schedule: {
+          kind: 'cron',
+          expression: '0 11 * * 5',
+        },
+      }))
     expect(
       managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)
         ?.instructions,
@@ -671,33 +617,42 @@ describe('applyMurphManagedAutomations', () => {
       .toEqual(firstSchedules.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID))
   })
 
-  it('falls back to vault root when vault metadata cannot be read', async () => {
+  it('defers spread creation when vault metadata cannot be read', async () => {
     managedAutomationMocks.loadVault.mockRejectedValue(new Error('metadata unavailable'))
 
-    await applyMurphManagedAutomations({
+    await expect(applyMurphManagedAutomations({
       defaultRoute,
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
+    })).resolves.toEqual({
+      created: 0,
+      skipped: 4,
+      updated: 0,
     })
-    const firstSchedules = new Map(
-      [...managedAutomationMocks.records.entries()].map(([id, record]) => [id, record.schedule]),
-    )
+    expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
+    expect(managedAutomationMocks.records.size).toBe(0)
 
-    managedAutomationMocks.records.clear()
-    await applyMurphManagedAutomations({
+    managedAutomationMocks.loadVault.mockResolvedValue({
+      metadata: { vaultId: 'vault_managed_automations_test' },
+    })
+    await expect(applyMurphManagedAutomations({
       defaultRoute,
       now: new Date('2026-06-10T12:00:00.000Z'),
       vaultRoot,
+    })).resolves.toEqual({
+      created: 4,
+      skipped: 0,
+      updated: 0,
     })
 
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID)?.schedule)
-      .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID))
+      .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.digest)
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID)?.schedule)
-      .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
+      .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.insight)
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)?.schedule)
-      .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID))
+      .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.researchScout)
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
-      .toEqual(firstSchedules.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID))
+      .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.productUpdates)
   })
 
   it('skips the research scout seed when hosted runtime env lacks Exa', async () => {
