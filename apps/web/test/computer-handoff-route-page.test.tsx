@@ -173,6 +173,9 @@ describe("computer handoff route and page", () => {
       returnContactKind: "email",
       suggestedReply: "private suggested reply",
     });
+    mocks.getHostedMurphContactContext.mockRejectedValue(
+      new Error("contact context unavailable"),
+    );
 
     const response = await computerHandoffDoneRoute.POST(
       new Request("https://join.example.test/computer/handoff/handoff-token/done", {
@@ -186,21 +189,17 @@ describe("computer handoff route and page", () => {
 
     expect(response.status).toBe(200);
     expect(body.redirectTo).toBe("/computer/handoff/handoff-token");
+    expect(mocks.getHostedMurphContactContext).not.toHaveBeenCalled();
   });
 
-  it("falls back to the handoff page path when no contact channel resolves", async () => {
+  it("falls back to the handoff page path when the completed handoff has no source kind", async () => {
     mocks.service.completeHandoff.mockResolvedValueOnce({
       returnContactKind: null,
       suggestedReply: "private suggested reply",
     });
-    mocks.getHostedMurphContactContext.mockResolvedValueOnce(createContactContext({
-      initialContactChannels: {
-        email: false,
-        telegram: false,
-        text: false,
-      },
-      murphPhoneNumber: null,
-    }));
+    mocks.getHostedMurphContactContext.mockRejectedValue(
+      new Error("contact context unavailable"),
+    );
 
     const response = await computerHandoffDoneRoute.POST(
       new Request("https://join.example.test/computer/handoff/handoff-token/done", {
@@ -218,6 +217,36 @@ describe("computer handoff route and page", () => {
       memberId: "member_123",
       token: "handoff-token",
     });
+    expect(mocks.getHostedMurphContactContext).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the completed page when the source auto-return channel is unavailable", async () => {
+    mocks.service.completeHandoff.mockResolvedValueOnce({
+      returnContactKind: "text",
+      suggestedReply: "private suggested reply",
+    });
+    mocks.getHostedMurphContactContext.mockResolvedValueOnce(createContactContext({
+      initialContactChannels: {
+        email: true,
+        telegram: true,
+        text: false,
+      },
+      murphPhoneNumber: null,
+    }));
+
+    const response = await computerHandoffDoneRoute.POST(
+      new Request("https://join.example.test/computer/handoff/handoff-token/done", {
+        method: "POST",
+      }),
+      createRouteContext({ token: "handoff-token" }),
+    );
+    const body = (await response.json()) as {
+      redirectTo: string;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.redirectTo).toBe("/computer/handoff/handoff-token");
+    expect(mocks.getHostedMurphContactContext).toHaveBeenCalledOnce();
   });
 
   it("redirects managed-login handoffs without rendering the Live View", async () => {
