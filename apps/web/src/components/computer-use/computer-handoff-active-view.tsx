@@ -203,12 +203,14 @@ export function ComputerHandoffActiveView({
           aria-busy
           aria-live="polite"
           role="status"
-          className="fixed inset-0 z-20 flex flex-col items-center justify-center gap-6 bg-background px-6 py-12 text-foreground"
+          className="pointer-events-none fixed inset-x-0 top-4 z-20 flex justify-center px-4"
         >
-          <MurphPulseLoader className="h-24 w-auto" />
-          <p className="font-serif text-2xl font-normal text-foreground">
-            Saving your progress
-          </p>
+          <div className="flex items-center gap-3 rounded-full border border-border bg-background/95 px-4 py-2 shadow-lg backdrop-blur">
+            <MurphPulseLoader className="h-6 w-auto" />
+            <p className="text-sm font-medium text-foreground">
+              Saving your progress...
+            </p>
+          </div>
         </div>
       ) : null}
       {phase.kind === "done" ? (

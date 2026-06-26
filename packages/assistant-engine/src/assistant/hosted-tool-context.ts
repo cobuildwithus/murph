@@ -1,4 +1,7 @@
 import type {
+  HostedComputerReturnContactKind,
+} from '@murphai/hosted-execution/computer-use'
+import type {
   AssistantSession,
   AssistantVaultFileResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -13,6 +16,7 @@ import type {
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
   recipientKey: string | null
+  returnContactKind: HostedComputerReturnContactKind | null
 }
 
 export type AssistantHostedVaultFileSendResult =
@@ -66,8 +70,11 @@ export function createAssistantHostedToolContext(input: {
       const context = deliveryContext.messageInput.hostedDeliveryIdempotency
       const conversationId = context?.conversationId ?? null
       const recipientKey = context?.recipientKey ?? null
-      return conversationId || recipientKey
-        ? { conversationId, recipientKey }
+      const returnContactKind = resolveAssistantHostedReturnContactKind(
+        deliveryContext.messageInput.channel,
+      )
+      return conversationId || recipientKey || returnContactKind
+        ? { conversationId, recipientKey, returnContactKind }
         : null
     },
     currentHostedMailboxItemIds: () => {
@@ -79,5 +86,20 @@ export function createAssistantHostedToolContext(input: {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
     vaultFileSendAvailable: typeof input.sendVaultFile === 'function',
+  }
+}
+
+function resolveAssistantHostedReturnContactKind(
+  channel: string | null | undefined,
+): HostedComputerReturnContactKind | null {
+  switch (channel?.trim().toLowerCase()) {
+    case 'linq':
+      return 'text'
+    case 'telegram':
+      return 'telegram'
+    case 'email':
+      return 'email'
+    default:
+      return null
   }
 }

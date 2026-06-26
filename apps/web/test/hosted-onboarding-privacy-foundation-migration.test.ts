@@ -381,6 +381,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const computerHandoffReturnContactKindMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026062600_computer_handoff_return_contact_kind/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -438,6 +445,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260624120000_hosted_thread_routes",
       "20260624150000_hosted_sensitive_action_approval",
       "20260624200000_hosted_action_approval_return_contact_kind",
+      "2026062600_computer_handoff_return_contact_kind",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -512,6 +520,12 @@ describe("hosted Prisma baseline migration", () => {
     expect(sensitiveActionApprovalMigrationSql).not.toContain("wallet_address");
     expect(actionApprovalReturnContactKindMigrationSql).toContain(
       'ADD COLUMN "return_contact_kind" TEXT',
+    );
+    expect(computerHandoffReturnContactKindMigrationSql).toContain(
+      'ADD COLUMN "return_contact_kind" TEXT',
+    );
+    expect(computerHandoffReturnContactKindMigrationSql).toContain(
+      'ADD CONSTRAINT "hosted_computer_handoff_return_contact_kind_check"',
     );
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
     expect(baselineMigrationSql).toContain(

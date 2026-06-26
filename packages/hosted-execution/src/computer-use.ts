@@ -50,6 +50,15 @@ export const HOSTED_COMPUTER_HANDOFF_STATUSES = [
 export type HostedComputerHandoffStatus =
   (typeof HOSTED_COMPUTER_HANDOFF_STATUSES)[number];
 
+export const HOSTED_COMPUTER_RETURN_CONTACT_KINDS = [
+  "text",
+  "telegram",
+  "email",
+] as const;
+
+export type HostedComputerReturnContactKind =
+  (typeof HOSTED_COMPUTER_RETURN_CONTACT_KINDS)[number];
+
 export const HOSTED_COMPUTER_OS_CONTROL_ACTIONS = [
   "clickMouse",
   "moveMouse",
@@ -109,6 +118,8 @@ export const hostedComputerDeliveryContextSchema = z
   .object({
     conversationId: z.string().trim().min(1).max(1_000).nullable().default(null),
     recipientKey: z.string().trim().min(1).max(1_000).nullable().default(null),
+    returnContactKind:
+      z.enum(HOSTED_COMPUTER_RETURN_CONTACT_KINDS).nullable().default(null),
   })
   .strict();
 
