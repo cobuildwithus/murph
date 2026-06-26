@@ -20,6 +20,12 @@ const HOSTED_MAPBOX_ROUTES_ENV = {
   ],
 } as const;
 
+const HOSTED_MURPH_DATA_API_ENV = {
+  codexShellWorkerSecrets: [
+    "MURPH_DATA_API_KEY",
+  ],
+} as const;
+
 const HOSTED_LINQ_DELIVERY_ENV = {
   forwardedConfig: [
     "LINQ_ATTACHMENT_CDN_BASE_URL",
@@ -65,6 +71,10 @@ export const HOSTED_MAPBOX_ROUTES_CODEX_SHELL_ENV_NAMES = [
   ...HOSTED_MAPBOX_ROUTES_ENV.codexShellWorkerSecrets,
 ] as const;
 
+export const HOSTED_MURPH_DATA_API_CODEX_SHELL_ENV_NAMES = [
+  ...HOSTED_MURPH_DATA_API_ENV.codexShellWorkerSecrets,
+] as const;
+
 export const HOSTED_LINQ_DELIVERY_ENV_NAMES = [
   ...HOSTED_LINQ_DELIVERY_ENV.forwardedConfig,
   ...HOSTED_LINQ_DELIVERY_ENV.workerSecrets,
@@ -82,6 +92,7 @@ export const HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES = [
   ...HOSTED_ELEVENLABS_ENV.workerSecrets,
   ...HOSTED_EXA_SEARCH_ENV.codexShellWorkerSecrets,
   ...HOSTED_MAPBOX_ROUTES_ENV.codexShellWorkerSecrets,
+  ...HOSTED_MURPH_DATA_API_ENV.codexShellWorkerSecrets,
   ...HOSTED_LINQ_DELIVERY_ENV.workerSecrets,
   ...HOSTED_TELEGRAM_DELIVERY_ENV.workerSecrets,
   ...HOSTED_WHATSAPP_DELIVERY_ENV.workerSecrets,
@@ -97,4 +108,5 @@ export const HOSTED_ASSISTANT_FORWARDED_CONFIG_ENV_NAMES = [
 export const HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES = [
   ...HOSTED_EXA_SEARCH_CODEX_SHELL_ENV_NAMES,
   ...HOSTED_MAPBOX_ROUTES_CODEX_SHELL_ENV_NAMES,
+  ...HOSTED_MURPH_DATA_API_CODEX_SHELL_ENV_NAMES,
 ] as const;
