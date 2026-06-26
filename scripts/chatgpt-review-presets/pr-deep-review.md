@@ -26,6 +26,8 @@ the PR description alone.
 
 Do not review the diff in isolation.
 
+This run relies on the repo's review:gpt `app_connector="github"` config. Treat missing GitHub connector context as a hard stop: if the connected repository, PR diff, or touched files are unavailable, say so and stop; do not review from pasted context, memory, files attached out of band, or the PR description alone.
+
 Report only:
 
 - Critical/high bugs: incorrect logic, broken invariants, data loss or corruption, auth/privacy/security exposure, race/retry/idempotency failures, deploy/runtime breakage, or user-visible behavior that is likely to fail in a reachable production path or anything else you deem a major issue.

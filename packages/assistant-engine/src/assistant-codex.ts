@@ -159,7 +159,6 @@ const CODEX_RPC_DEFAULT_TIMEOUT_MS = 120_000
 const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
 const CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS = 15_000
 const CODEX_MANAGED_ACCOUNT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000
-const CODEX_PROGRESS_FINAL_DRAIN_TIMEOUT_MS = 2_000
 const CODEX_APP_SERVER_COMMAND = 'app-server'
 const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   'murph.assistant-codex-app-server-timing.v1'
@@ -372,27 +371,12 @@ function resolveCodexAppServerHostedToolContext(
 
 async function waitForCodexProgressDrain(
   pending: readonly Promise<unknown>[],
-): Promise<boolean> {
+): Promise<void> {
   if (pending.length === 0) {
-    return true
+    return
   }
 
-  let timeout: ReturnType<typeof setTimeout> | undefined
-  try {
-    return await Promise.race([
-      Promise.allSettled(pending).then(() => true),
-      new Promise<boolean>((resolve) => {
-        timeout = setTimeout(
-          () => resolve(false),
-          CODEX_PROGRESS_FINAL_DRAIN_TIMEOUT_MS,
-        )
-      }),
-    ])
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout)
-    }
-  }
+  await Promise.allSettled(pending)
 }
 
 function resolveCodexCurrentChannelProgressSource(
@@ -2289,6 +2273,7 @@ async function runCodexAppServerTurnOnProcess(
   let turnTerminal = false
   let providerRequestStartedNotified = false
   let contextCompactionProgressNotified = false
+  let contextCompactionProgressPending = false
   let releaseLiveTurn = () => {}
   const pendingProgressDeliveries = new Set<Promise<void>>()
   let dynamicToolExecutionChain: Promise<void> = Promise.resolve()
@@ -2672,19 +2657,39 @@ async function runCodexAppServerTurnOnProcess(
     const progressDelivery = resolveCodexAppServerProgressDelivery(input)
     if (
       !progressDelivery ||
-      (source === 'system' && contextCompactionProgressNotified)
+      (source === 'system' &&
+        (contextCompactionProgressNotified || contextCompactionProgressPending))
     ) {
       return false
     }
 
-    if (source === 'system') {
-      contextCompactionProgressNotified = true
-    }
     let progressPromise: Promise<AssistantProgressDeliveryResult>
     try {
-      progressPromise = progressDelivery.send(text, { source })
+      if (source === 'system') {
+        contextCompactionProgressPending = true
+      }
+      progressPromise = progressDelivery.send(text, {
+        ...(source === 'system' ? { required: true } : {}),
+        source,
+      })
     } catch {
+      if (source === 'system') {
+        contextCompactionProgressPending = false
+      }
       return false
+    }
+    if (source === 'system') {
+      progressPromise = progressPromise.then((result) => {
+        if (result.kind === 'sent') {
+          contextCompactionProgressNotified = true
+        } else {
+          contextCompactionProgressPending = false
+        }
+        return result
+      }, (error: unknown) => {
+        contextCompactionProgressPending = false
+        throw error
+      })
     }
     trackProgressDelivery(
       trackExternallyVisibleProgressDelivery({
@@ -2704,19 +2709,11 @@ async function runCodexAppServerTurnOnProcess(
     pendingProgressDeliveries.add(tracked)
   }
 
-  const closeProgressDelivery = (): void => {
-    resolveCodexAppServerProgressDelivery(input)?.close?.()
-  }
-
   const drainPendingProgressDeliveries = async (): Promise<void> => {
     while (pendingProgressDeliveries.size > 0) {
-      const drained = await waitForCodexProgressDrain([
+      await waitForCodexProgressDrain([
         ...pendingProgressDeliveries,
       ])
-      if (!drained) {
-        closeProgressDelivery()
-        return
-      }
     }
   }
 
@@ -3883,6 +3880,7 @@ async function runCodexAppServerTurnOnProcess(
     emitActionDiagnosticsTrace()
     dynamicToolAbortController.abort()
     await drainPendingDynamicToolExecutions()
+    await drainPendingProgressDeliveries()
     annotateTurnFailureContext(error)
     closeLiveTurn()
     normalShutdown = true

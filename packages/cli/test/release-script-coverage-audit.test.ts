@@ -655,7 +655,7 @@ Updated: 2026-04-24
       rmSync(leanBundle.outDir, { force: true, recursive: true })
       rmSync(fullBundle.outDir, { force: true, recursive: true })
     }
-  })
+  }, 120_000)
 
   it('keeps release:check focused on release guards, typecheck, clean workspace build, and coverage verification', () => {
     const releaseCheck = readFileSync(

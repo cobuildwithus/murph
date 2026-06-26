@@ -10004,13 +10004,126 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('releases the final turn when current-channel progress never settles', async () => {
+  it('waits for in-flight current-channel progress before returning turn failures', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-progress-drain-failure-')
+    const progressSent = createDeferred<ReturnType<typeof sentProgressResult>>()
+    let progressResolvedBeforeFailure = false
+    const progressDelivery = {
+      send: vi.fn(async (_text: string) => {
+        void _text
+        const result = await progressSent.promise
+        progressResolvedBeforeFailure = true
+        return result
+      }),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-progress-drain-failure',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-progress-drain-failure',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-progress-drain-failure',
+                  type: 'assistant_message',
+                  phase: 'commentary',
+                  message: 'Checking the thread now.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-progress-drain-failure',
+                  status: 'failed',
+                },
+              },
+            }),
+          )
+          child.emit('exit', 0, null)
+          child.emit('close', 0, null)
+        })()
+      })
+
+      return child
+    })
+
+    let settled = false
+    const turnPromise = executeCodexAppServerTurn({
+      prompt: 'fail with delayed progress',
+      progressDelivery,
+      workingDirectory,
+    }).finally(() => {
+      settled = true
+    })
+
+    for (
+      let attempt = 0;
+      attempt < 200 && progressDelivery.send.mock.calls.length === 0;
+      attempt += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(progressDelivery.send).toHaveBeenCalledWith(
+      'Checking the thread now.',
+      { source: 'model' },
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(settled).toBe(false)
+
+    progressSent.resolve(sentProgressResult())
+    const error: unknown = await turnPromise.then(
+      () => {
+        throw new Error('expected the Codex turn to fail')
+      },
+      (turnError: unknown) => turnError,
+    )
+
+    expect(progressResolvedBeforeFailure).toBe(true)
+    expect(error).toMatchObject({
+      code: 'ASSISTANT_CODEX_FAILED',
+    })
+    expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
+      codexThreadId: 'thread-progress-drain-failure',
+      providerTurnId: 'turn-progress-drain-failure',
+    })
+  })
+
+  it('keeps the final turn pending while current-channel progress remains unsettled', async () => {
     const workingDirectory = await createTempDir('assistant-codex-progress-drain-timeout-')
     const stalledProgress = createDeferred<ReturnType<typeof sentProgressResult>>()
     const progressDelivery = {
-      close: vi.fn(() => {
-        stalledProgress.resolve(sentProgressResult())
-      }),
       send: vi.fn(async (_text: string) => {
         void _text
         return await stalledProgress.promise
@@ -10089,10 +10202,13 @@ describe('assistant codex runtime', () => {
       return child
     })
 
+    let settled = false
     const turnPromise = executeCodexAppServerTurn({
       prompt: 'answer with stalled progress',
       progressDelivery,
       workingDirectory,
+    }).finally(() => {
+      settled = true
     })
 
     for (
@@ -10107,12 +10223,15 @@ describe('assistant codex runtime', () => {
       { source: 'model' },
     )
 
+    await new Promise((resolve) => setTimeout(resolve, 2_100))
+    expect(settled).toBe(false)
+
+    stalledProgress.resolve(sentProgressResult())
     await expect(turnPromise).resolves.toMatchObject({
       finalMessage: 'Final answer after stalled progress.',
       sessionId: 'thread-progress-drain-timeout',
       turnId: 'turn-progress-drain-timeout',
     })
-    expect(progressDelivery.close).toHaveBeenCalledTimes(1)
   })
 
   it('returns unavailable for progress tool calls when no progress sink exists', async () => {
@@ -10338,7 +10457,7 @@ describe('assistant codex runtime', () => {
     expect(progressDelivery.send).toHaveBeenCalledTimes(1)
     expect(progressDelivery.send).toHaveBeenCalledWith(
       selectedProgressText,
-      { source: 'system' },
+      { required: true, source: 'system' },
     )
     expect(
       onProgress.mock.calls.some(([event]) => event?.id === 'context-compact-1'),
@@ -14511,6 +14630,7 @@ it('rejects finish_without_reply after context compaction progress was sent', as
   })
 
   expect(progressDelivery.send).toHaveBeenCalledWith(expect.any(String), {
+    required: true,
     source: 'system',
   })
   expect(result.finalMessage).toBe('Final answer after system progress.')

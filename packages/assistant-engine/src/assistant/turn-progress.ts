@@ -11,6 +11,7 @@ import {
 } from './delivery-service.js'
 import {
   MAX_PROGRESS_UPDATES_PER_TURN,
+  MIN_PROGRESS_UPDATE_SPACING_MS,
 } from './progress-constants.js'
 import {
   normalizeNullableString,
@@ -53,7 +54,7 @@ export type AssistantProgressDeliveryResult =
   | { kind: 'sent'; source: AssistantProgressDeliverySource }
   | {
       kind: 'skipped'
-      reason: 'duplicate' | 'empty' | 'limit'
+      reason: 'duplicate' | 'empty' | 'limit' | 'too-soon' | 'unavailable'
       source: AssistantProgressDeliverySource
     }
   | { kind: 'failed'; source: AssistantProgressDeliverySource }
@@ -66,13 +67,18 @@ type AssistantProgressDeliveryContext = {
 type AssistantProgressDeliverInput = Parameters<DeliverAssistantProgressUpdate>[0]
 
 export function shouldCreateAssistantProgressDelivery(
-  input: Pick<AssistantMessageInput, 'deliverResponse' | 'turnTrigger'>,
+  input: Pick<
+    AssistantMessageInput,
+    'channel' | 'deliverResponse' | 'deliveryDispatchMode' | 'turnTrigger'
+  >,
   profile?: {
     promptProfile?: 'conversation' | 'notification-decision' | null
     toolProfile?: 'provider-turn' | 'notification-turn' | null
   } | null,
 ): boolean {
   return input.deliverResponse === true &&
+    input.deliveryDispatchMode !== 'queue-only' &&
+    input.channel !== 'email' &&
     (profile?.toolProfile ?? 'provider-turn') === 'provider-turn' &&
     (profile?.promptProfile ?? 'conversation') !== 'notification-decision'
 }
@@ -121,6 +127,7 @@ export function createAssistantProgressDelivery(input: {
   deliver?: DeliverAssistantProgressUpdate
   getDeliveryContext?: () => AssistantProgressDeliveryContext
   messageInput: AssistantMessageInput
+  onDeliveredSession?: (session: AssistantSession) => void
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
@@ -128,6 +135,7 @@ export function createAssistantProgressDelivery(input: {
   const deliver = input.deliver ?? deliverAssistantProgressUpdate
   const abortController = new AbortController()
   const sentTexts = new Set<string>()
+  let lastSentAtMs: number | null = null
   let sentCount = 0
   let deliveryOrdinal = 0
 
@@ -149,10 +157,33 @@ export function createAssistantProgressDelivery(input: {
           source,
         }
       }
+      const deliveryContext = input.getDeliveryContext?.() ?? {
+        messageInput: input.messageInput,
+        session: input.session,
+      }
+      if (!shouldCreateAssistantProgressDelivery(deliveryContext.messageInput)) {
+        return {
+          kind: 'skipped',
+          reason: 'unavailable',
+          source,
+        }
+      }
       if (!required && sentCount >= MAX_PROGRESS_UPDATES_PER_TURN) {
         return {
           kind: 'skipped',
           reason: 'limit',
+          source,
+        }
+      }
+      const currentTimeMs = Date.now()
+      if (
+        !required &&
+        lastSentAtMs !== null &&
+        currentTimeMs - lastSentAtMs < MIN_PROGRESS_UPDATE_SPACING_MS
+      ) {
+        return {
+          kind: 'skipped',
+          reason: 'too-soon',
           source,
         }
       }
@@ -161,14 +192,11 @@ export function createAssistantProgressDelivery(input: {
       deliveryOrdinal += 1
       if (!required) {
         sentCount += 1
+        lastSentAtMs = currentTimeMs
         sentTexts.add(text)
       }
 
       try {
-        const deliveryContext = input.getDeliveryContext?.() ?? {
-          messageInput: input.messageInput,
-          session: input.session,
-        }
         const progressInput: AssistantProgressDeliverInput = {
           input: deliveryContext.messageInput,
           ordinal,
@@ -178,7 +206,8 @@ export function createAssistantProgressDelivery(input: {
           text,
           turnId: input.turnId,
         }
-        await deliver(progressInput)
+        const deliveredSession = await deliver(progressInput)
+        input.onDeliveredSession?.(deliveredSession)
         return {
           kind: 'sent',
           source,

@@ -291,7 +291,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     });
   }, 300_000);
 
-  it("delivers model-authored progress updates from hosted Linq auto-replies", async () => {
+  it("suppresses model-authored progress updates from hosted queue-only Linq auto-replies", async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(progressToolUserId),
       memberId: progressToolUserId,
@@ -350,7 +350,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     const completionPromise = requireScenario()
       .waitForHostedCompletion(progressToolUserId);
     const matchingSends = await requireLinqStub().waitForMatchingSendCount({
-      expectedCount: outboundCountBeforeReply + 2,
+      expectedCount: outboundCountBeforeReply + 1,
       expectedPath: expectedDirectReplyChatPath,
       scenario: requireScenario(),
       userId: progressToolUserId,
@@ -362,17 +362,14 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       matchingSends
         .slice(outboundCountBeforeReply)
         .map((request) => request.authorizationStatus),
-    ).toEqual(["hosted-sentinel", "hosted-sentinel"]);
-    expect(newSendTexts).toEqual([
-      progressToolAttemptText,
-      progressToolFinalReplyText,
-    ]);
+    ).toEqual(["hosted-sentinel"]);
+    expect(newSendTexts).toEqual([progressToolFinalReplyText]);
 
     const finalStatus = await completionPromise;
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(requireLinqStub().countObservedSends(expectedDirectReplyChatPath)).toBe(
-      outboundCountBeforeReply + 2,
+      outboundCountBeforeReply + 1,
     );
   }, 300_000);
 
@@ -697,6 +694,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
+      progressUpdatesAvailable: false,
       vaultFileSendAvailable: true,
     });
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();

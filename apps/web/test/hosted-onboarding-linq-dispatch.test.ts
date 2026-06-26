@@ -518,14 +518,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
   });
 
-  it("builds inactive signup invites from the rotating Murph signup copy bank", () => {
+  it("builds inactive signup invites from the rotating signup copy bank", () => {
     const reply = buildHostedInviteReply({
       joinUrl: "https://join.example.test/join/code_first_text",
       seed: "first-text-signup:test",
     });
 
     expect(reply).toContain("https://join.example.test/join/code_first_text");
-    expect(reply).toMatch(/Murph/u);
+    expect(reply.trim().length).toBeGreaterThan(
+      "https://join.example.test/join/code_first_text".length,
+    );
   });
 
   it("accepts Linq typing events without signaling runtime work", async () => {

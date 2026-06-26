@@ -97,6 +97,27 @@ describe('assistant protocol index planning', () => {
     expect(plan).not.toHaveProperty(removedRouteEnvProperty)
   })
 
+  it('preserves no-reply execution hooks in Codex execution plans', async () => {
+    const onCodexThreadHistoryUnsafe = vi.fn()
+    const onFinishWithoutReplyAccepted = vi.fn()
+
+    const plan = await buildCodexTurnExecutionPlan({
+      allowFinishWithoutReply: true,
+      input: createMessageInput(),
+      onCodexThreadHistoryUnsafe,
+      onFinishWithoutReplyAccepted,
+      plan: createSharedPlan(),
+      resolvedSession: createSession(),
+      route: createRoute(),
+      turnCreatedAt: '2026-05-04T00:00:00.000Z',
+      turnId: 'turn-no-reply-hooks',
+    })
+
+    expect(plan.allowFinishWithoutReply).toBe(true)
+    expect(plan.onCodexThreadHistoryUnsafe).toBe(onCodexThreadHistoryUnsafe)
+    expect(plan.onFinishWithoutReplyAccepted).toBe(onFinishWithoutReplyAccepted)
+  })
+
   it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)

@@ -407,11 +407,14 @@ export async function deliverAssistantProgressUpdate(input: {
   sharedPlan: AssistantTurnSharedPlan
   text: string
   turnId: string
-}): Promise<void> {
+}): Promise<AssistantSession> {
   // Progress updates are ephemeral current-audience sends, not final-reply
   // delivery or commit-aware outbox decisions.
   if (!input.input.deliverResponse) {
-    return
+    return input.session
+  }
+  if (input.input.deliveryDispatchMode === 'queue-only') {
+    return input.session
   }
 
   const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
@@ -435,7 +438,7 @@ export async function deliverAssistantProgressUpdate(input: {
     input: input.input,
   })
 
-  await sendAssistantOutboxDispatchMessage({
+  const delivery = await sendAssistantOutboxDispatchMessage({
     ...(input.dependencies ? { dependencies: input.dependencies } : {}),
     ...messageDeliveryFields,
     deliveryIdempotencyKey,
@@ -447,6 +450,7 @@ export async function deliverAssistantProgressUpdate(input: {
     vault: input.input.vault,
     signal: input.signal,
   })
+  return delivery.session ?? input.session
 }
 
 export function buildAssistantProgressDeliveryIdempotencyKey(input: {
