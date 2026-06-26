@@ -292,42 +292,52 @@ async function buildLinqAttachments(
   signal?: AbortSignal,
   attachmentDownloadTimeoutMs?: number | null,
 ): Promise<InboundAttachment[]> {
-  const attachments: InboundAttachment[] = [];
-
-  for (const [index, part] of (parts ?? []).entries()) {
-    if (!isLinqAttachmentPart(part)) {
-      continue;
-    }
-
-    const data = await downloadLinqAttachmentInlineBestEffort(
-      part,
-      downloadDriver,
-      signal,
-      attachmentDownloadTimeoutMs,
+  const attachmentParts = (parts ?? [])
+    .map((part, index) => ({ index, part }))
+    .filter((entry): entry is { index: number; part: LinqMediaPart } =>
+      isLinqAttachmentPart(entry.part)
     );
-    const mime = normalizeTextValue(part.mime_type ?? null);
-    const fileName = normalizeTextValue(part.filename ?? null)
-      ?? inferAttachmentFileName(part)
-      ?? inferFallbackAttachmentFileName(part, mime, index);
+  const normalizedTimeoutMs = normalizeAttachmentDownloadTimeout(attachmentDownloadTimeoutMs);
+  const budgetController = normalizedTimeoutMs !== null ? new AbortController() : null;
+  const downloadSignal = budgetController?.signal ?? signal;
+  const releaseRelay = signal && budgetController ? relayAbort(signal, budgetController) : () => {};
+  const timeout = budgetController && normalizedTimeoutMs !== null
+    ? setTimeout(() => budgetController.abort(), normalizedTimeoutMs)
+    : null;
 
-    attachments.push({
-      externalId: normalizeTextValue(part.attachment_id ?? null) ?? `part:${index + 1}`,
-      kind: inferLinqAttachmentKind(part.type, mime, fileName),
-      mime,
-      fileName,
-      byteSize: normalizeAttachmentByteSize(part.size, data),
-      data,
-    });
+  try {
+    return await Promise.all(attachmentParts.map(async ({ index, part }) => {
+      const data = await downloadLinqAttachmentInlineBestEffort(
+        part,
+        downloadDriver,
+        downloadSignal,
+      );
+      const mime = normalizeTextValue(part.mime_type ?? null);
+      const fileName = normalizeTextValue(part.filename ?? null)
+        ?? inferAttachmentFileName(part)
+        ?? inferFallbackAttachmentFileName(part, mime, index);
+
+      return {
+        externalId: normalizeTextValue(part.attachment_id ?? null) ?? `part:${index + 1}`,
+        kind: inferLinqAttachmentKind(part.type, mime, fileName),
+        mime,
+        fileName,
+        byteSize: normalizeAttachmentByteSize(part.size, data),
+        data,
+      };
+    }));
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+    releaseRelay();
   }
-
-  return attachments;
 }
 
 async function downloadLinqAttachmentInlineBestEffort(
   part: LinqMediaPart,
   downloadDriver: LinqAttachmentDownloadDriver | null,
   signal?: AbortSignal,
-  attachmentDownloadTimeoutMs?: number | null,
 ): Promise<Uint8Array | null> {
   const url = normalizeTextValue(part.url ?? null);
   if (!downloadDriver || (!url && !downloadDriver.downloadPart)) {
@@ -335,7 +345,6 @@ async function downloadLinqAttachmentInlineBestEffort(
   }
 
   try {
-    const normalizedTimeoutMs = normalizeAttachmentDownloadTimeout(attachmentDownloadTimeoutMs);
     const attachmentDownloadPart = {
       attachmentId: normalizeTextValue(part.attachment_id ?? null),
       fileName: normalizeTextValue(part.filename ?? null),
@@ -356,43 +365,9 @@ async function downloadLinqAttachmentInlineBestEffort(
       return Promise.resolve<Uint8Array | null>(null);
     };
 
-    if (normalizedTimeoutMs !== null) {
-      return await runLinqAttachmentDownloadWithTimeout(downloadOperation, normalizedTimeoutMs, signal);
-    }
-
     return await downloadOperation(signal);
   } catch {
     return null;
-  }
-}
-
-async function runLinqAttachmentDownloadWithTimeout(
-  downloadOperation: (signal?: AbortSignal) => Promise<Uint8Array | null>,
-  timeoutMs: number,
-  signal?: AbortSignal,
-): Promise<Uint8Array | null> {
-  const controller = new AbortController();
-  const releaseRelay = signal ? relayAbort(signal, controller) : () => {};
-
-  try {
-    return await new Promise<Uint8Array | null>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        controller.abort();
-        resolve(null);
-      }, timeoutMs);
-
-      void downloadOperation(controller.signal)
-        .then((data) => {
-          clearTimeout(timeout);
-          resolve(data);
-        })
-        .catch((error) => {
-          clearTimeout(timeout);
-          reject(error);
-        });
-    });
-  } finally {
-    releaseRelay();
   }
 }
 

@@ -697,6 +697,94 @@ test("normalizeHostedLinqConversationMessage uses downloadUrl when downloadPart 
   ]);
 });
 
+test("normalizeHostedLinqConversationMessage applies one timeout budget across attachments", async () => {
+  vi.useFakeTimers();
+
+  try {
+    const started: string[] = [];
+    const aborted: string[] = [];
+    const downloadPart = vi.fn(async (part: {
+      attachmentId?: string | null;
+      fileName?: string | null;
+      mimeType?: string | null;
+      size?: number | null;
+      type: "media" | "voice_memo";
+      url?: string | null;
+    }, signal?: AbortSignal) => {
+      const attachmentId = part.attachmentId ?? "missing";
+      started.push(attachmentId);
+      return await new Promise<Uint8Array>((_resolve, reject) => {
+        signal?.addEventListener(
+          "abort",
+          () => {
+            aborted.push(attachmentId);
+            reject(new Error("aborted"));
+          },
+          { once: true },
+        );
+      });
+    });
+
+    const capturePromise = normalizeHostedLinqConversationMessage({
+      accountId: "hbid:linq.recipient:v1:test",
+      attachmentDownloadTimeoutMs: 10,
+      downloadDriver: {
+        downloadPart,
+        async downloadUrl() {
+          throw new Error("downloadUrl should not run when downloadPart is available");
+        },
+      },
+      linqMessage: {
+        chatId: "chat_stored",
+        from: "hbid:linq.from:v1:test",
+        isFromMe: false,
+        messageId: "msg_multi_timeout_123",
+        parts: [
+          {
+            attachmentId: "voice_att_one",
+            mimeType: "audio/m4a",
+            type: "voice_memo",
+          },
+          {
+            attachmentId: "voice_att_two",
+            mimeType: "audio/m4a",
+            type: "voice_memo",
+          },
+          {
+            attachmentId: "media_att_three",
+            fileName: "photo.jpg",
+            mimeType: "image/jpeg",
+            type: "media",
+          },
+        ],
+        service: "iMessage",
+      },
+      occurredAt: "2026-04-02T04:00:01.000Z",
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    assert.deepEqual(started, ["voice_att_one", "voice_att_two", "media_att_three"]);
+
+    await vi.advanceTimersByTimeAsync(10);
+    const capture = await capturePromise;
+
+    assert.deepEqual(aborted.sort(), ["media_att_three", "voice_att_one", "voice_att_two"]);
+    assert.deepEqual(
+      capture.attachments.map((attachment) => ({
+        data: attachment.data,
+        externalId: attachment.externalId,
+      })),
+      [
+        { data: null, externalId: "voice_att_one" },
+        { data: null, externalId: "voice_att_two" },
+        { data: null, externalId: "media_att_three" },
+      ],
+    );
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("toLinqChatMessage validates stable message and chat ids", async () => {
   await assert.rejects(
     () =>

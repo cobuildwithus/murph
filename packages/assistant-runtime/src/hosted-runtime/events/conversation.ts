@@ -333,6 +333,7 @@ async function normalizeHostedConversationMessageWake(input: {
       ),
       linqMessage: input.wake.message.linqMessage,
       occurredAt: input.wake.occurredAt,
+      signal: input.signal ?? undefined,
     });
   }
 
