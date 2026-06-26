@@ -139,6 +139,7 @@ export async function consumeHostedActionApproval(input: {
 
   assertHostedActionApprovalMatchesRequest(approval, prepared);
 
+  const approvalGeneration = buildHostedActionApprovalGeneration(approval);
   const consumedBy = normalizeActionApprovalConsumerId(approval.consumedBy);
   if (
     approval.approvalStatus === "approved"
@@ -146,7 +147,7 @@ export async function consumeHostedActionApproval(input: {
     && consumedBy === consumeRequest.consumerId
     && approval.consumedAt !== null
     && approval.expiresAt > prepared.now
-    && buildHostedActionApprovalGeneration(approval) === consumeRequest.approvalGeneration
+    && approvalGeneration === consumeRequest.approvalGeneration
   ) {
     return buildApprovedHostedActionApprovalResult(approval);
   }
@@ -155,7 +156,7 @@ export async function consumeHostedActionApproval(input: {
   if (status !== "approved") {
     return buildHostedActionApprovalResult(approval, prepared.now);
   }
-  if (buildHostedActionApprovalGeneration(approval) !== consumeRequest.approvalGeneration) {
+  if (approvalGeneration !== consumeRequest.approvalGeneration) {
     return {
       approvalId: prepared.approvalId,
       status: "expired",
@@ -173,6 +174,7 @@ export async function consumeHostedActionApproval(input: {
       expiresAt: { gt: prepared.now },
       kind: ACTION_APPROVAL_KIND,
       memberId: prepared.memberId,
+      tokenHash: approval.tokenHash,
     },
     data: {
       consumedAt: prepared.now,
@@ -187,12 +189,19 @@ export async function consumeHostedActionApproval(input: {
     });
     assertHostedActionApprovalMatchesRequest(current, prepared);
     const currentConsumedBy = normalizeActionApprovalConsumerId(current.consumedBy);
+    const currentGeneration = buildHostedActionApprovalGeneration(current);
+    if (currentGeneration !== consumeRequest.approvalGeneration) {
+      return {
+        approvalId: prepared.approvalId,
+        status: "expired",
+      };
+    }
     if (
       current.approvalStatus === "approved"
       && current.consumedAt !== null
       && currentConsumedBy === consumeRequest.consumerId
       && current.expiresAt > prepared.now
-      && buildHostedActionApprovalGeneration(current) === consumeRequest.approvalGeneration
+      && currentGeneration === consumeRequest.approvalGeneration
     ) {
       return buildApprovedHostedActionApprovalResult(current);
     }

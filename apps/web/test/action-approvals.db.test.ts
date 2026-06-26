@@ -323,6 +323,86 @@ describe("hosted action approvals", () => {
     expect(outcomes.filter((outcome) => outcome.status === "expired"))
       .toEqual([{ approvalId: requested.approvalId, status: "expired" }]);
   });
+
+  it("does not let a stale delivery consume a refreshed approval generation", async () => {
+    const { deps, memberId } = await setup();
+    const requested = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:00:00.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    });
+    const firstApproved = await approveExistingAction({
+      approvalId: requested.approvalId,
+      deps,
+      expiresAt: new Date("2026-06-25T16:16:00.000Z"),
+      memberId,
+      now: new Date("2026-06-25T16:01:00.000Z"),
+    });
+    const firstRow = await requireApprovalRow(deps, requested.approvalId);
+    const challenges = deps.prisma.hostedSensitiveActionChallenge;
+    let refreshedBeforeConsume = false;
+    const staleRacePrisma = {
+      hostedSensitiveActionChallenge: {
+        findFirst: (args: unknown) => challenges.findFirst(args),
+        updateMany: async (args: unknown) => {
+          if (!refreshedBeforeConsume) {
+            refreshedBeforeConsume = true;
+            await challenges.update({
+              data: {
+                approvalStatus: "approved",
+                consumedAt: null,
+                consumedBy: null,
+                decidedAt: new Date("2026-06-25T16:02:00.000Z"),
+                expiresAt: new Date("2026-06-25T16:17:00.000Z"),
+                tokenHash: `approval-token-${randomUUID()}`,
+              },
+              where: { approvalKey: requested.approvalId },
+            });
+          }
+          return challenges.updateMany(args);
+        },
+        upsert: (args: unknown) => challenges.upsert(args),
+      },
+    };
+
+    await expect(consumeHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:02:00.000Z"),
+      prisma: staleRacePrisma,
+      request: consumeRequest(firstApproved, "delivery_stale"),
+    })).resolves.toEqual({
+      approvalId: requested.approvalId,
+      status: "expired",
+    });
+    expect(refreshedBeforeConsume).toBe(true);
+
+    const afterStaleConsume = await requireApprovalRow(deps, requested.approvalId);
+    expect(afterStaleConsume.approvalStatus).toBe("approved");
+    expect(afterStaleConsume.consumedAt).toBeNull();
+    expect(afterStaleConsume.consumedBy).toBeNull();
+    expect(afterStaleConsume.tokenHash).not.toBe(firstRow.tokenHash);
+
+    const secondApproved = await requestHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:02:30.000Z"),
+      prisma: deps.prisma,
+      request: REQUEST,
+    });
+    if (secondApproved.status !== "approved") {
+      throw new Error("Expected refreshed hosted action approval to be approved.");
+    }
+    expect(secondApproved.approvalGeneration).not.toBe(
+      firstApproved.approvalGeneration,
+    );
+
+    await expect(consumeHostedActionApproval({
+      memberId,
+      now: new Date("2026-06-25T16:03:00.000Z"),
+      prisma: deps.prisma,
+      request: consumeRequest(secondApproved, "delivery_current"),
+    })).resolves.toEqual(secondApproved);
+  });
 });
 
 async function approveExistingAction(input: {
