@@ -3,14 +3,17 @@
 import {
   AlertCircleIcon,
   CheckCircle2Icon,
+  Link2Icon,
   PlayIcon,
   RefreshCwIcon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { Alert, AlertDescription } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
+import { Input } from "@/src/components/ui/input";
+import { Label } from "@/src/components/ui/label";
 import {
   Table,
   TableBody,
@@ -24,12 +27,16 @@ import type {
   HostedRuntimeMaintenanceWakeResult,
   HostedRuntimeMaintenanceWorkspace,
 } from "@/src/lib/hosted-ops/runtime-maintenance";
+import type {
+  HostedOpsLinqThreadRouteEnsureResult,
+} from "@/src/lib/hosted-ops/thread-routes";
 
 interface RuntimeMaintenanceClientProps {
   initialOverview: HostedRuntimeMaintenanceOverview;
 }
 
 type PendingAction =
+  | { kind: "ensure-thread-route" }
   | { kind: "refresh" }
   | { kind: "wake-batch"; limit: number }
   | { kind: "wake-user"; userId: string };
@@ -40,13 +47,16 @@ export function RuntimeMaintenanceClient({
   const [overview, setOverview] = useState(initialOverview);
   const [currentCursor, setCurrentCursor] = useState<string | null>(null);
   const [wakeResult, setWakeResult] = useState<HostedRuntimeMaintenanceWakeResult | null>(null);
+  const [threadRouteResult, setThreadRouteResult] =
+    useState<HostedOpsLinqThreadRouteEnsureResult | null>(null);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [threadRouteError, setThreadRouteError] = useState<string | null>(null);
   const generatedAt = useMemo(
     () => formatDateTime(overview.generatedAt),
     [overview.generatedAt],
   );
-  const pendingLabel = describePendingAction(pending);
+  const pendingLabel = describeMaintenancePendingAction(pending);
 
   async function refreshOverview(cursor = overview.nextCursor): Promise<void> {
     setPending({ kind: "refresh" });
@@ -117,6 +127,34 @@ export function RuntimeMaintenanceClient({
     }
   }
 
+  async function ensureThreadRoute(formData: FormData): Promise<void> {
+    setPending({ kind: "ensure-thread-route" });
+    setThreadRouteError(null);
+    setThreadRouteResult(null);
+    try {
+      const result = await requestJson<HostedOpsLinqThreadRouteEnsureResult>(
+        "/api/ops/thread-routes",
+        {
+          body: JSON.stringify({
+            containerMemberId: readFormDataString(formData, "containerMemberId"),
+            linqAccountPhoneNumber: readFormDataString(formData, "linqAccountPhoneNumber"),
+            linqChatId: readFormDataString(formData, "linqChatId"),
+            ownerMemberId: readFormDataString(formData, "ownerMemberId"),
+          }),
+          headers: {
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+        },
+      );
+      setThreadRouteResult(result);
+    } catch (routeError) {
+      setThreadRouteError(describeClientError(routeError));
+    } finally {
+      setPending(null);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-8">
       <header className="border-b border-border/70 pb-6">
@@ -139,6 +177,107 @@ export function RuntimeMaintenanceClient({
           </div>
         </div>
       </header>
+
+      <section
+        aria-busy={pending?.kind === "ensure-thread-route"}
+        aria-labelledby="runtime-thread-routes-title"
+        className="rounded-xl border border-border/70 bg-card/90 p-5"
+      >
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-chart-5">
+              External threads
+            </span>
+            <h2
+              className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground"
+              id="runtime-thread-routes-title"
+            >
+              Add Linq groupchat route
+            </h2>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+              Creates or reuses a thread-container runtime for one Linq chat. Uses the default monthly cap.
+            </p>
+          </div>
+          {threadRouteResult ? (
+            <Badge variant={threadRouteResult.created ? "secondary" : "outline"}>
+              <CheckCircle2Icon data-icon="inline-start" />
+              {threadRouteResult.created ? "Created" : "Already routed"}
+            </Badge>
+          ) : null}
+        </div>
+
+        <form
+          className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void ensureThreadRoute(new FormData(event.currentTarget));
+          }}
+        >
+          <Field label="Owner member id" htmlFor="thread-route-owner-member-id">
+            <Input
+              autoComplete="off"
+              id="thread-route-owner-member-id"
+              name="ownerMemberId"
+              placeholder="member_..."
+              required
+              spellCheck={false}
+            />
+          </Field>
+          <Field label="Linq recipient phone" htmlFor="thread-route-linq-account-phone">
+            <Input
+              autoComplete="off"
+              id="thread-route-linq-account-phone"
+              inputMode="tel"
+              name="linqAccountPhoneNumber"
+              placeholder="+15550000000"
+              required
+              spellCheck={false}
+            />
+          </Field>
+          <Field label="Linq chat id" htmlFor="thread-route-linq-chat-id">
+            <Input
+              autoComplete="off"
+              id="thread-route-linq-chat-id"
+              name="linqChatId"
+              placeholder="chat_..."
+              required
+              spellCheck={false}
+            />
+          </Field>
+          <Field label="Container member id" htmlFor="thread-route-container-member-id" optional>
+            <Input
+              autoComplete="off"
+              id="thread-route-container-member-id"
+              name="containerMemberId"
+              placeholder="Auto-generate"
+              spellCheck={false}
+            />
+          </Field>
+          <div className="flex flex-col gap-3 lg:col-span-2 sm:flex-row sm:items-center sm:justify-between">
+            <div aria-live="polite" className="min-h-5 text-sm text-muted-foreground">
+              {pending?.kind === "ensure-thread-route" ? "Ensuring Linq thread route." : ""}
+            </div>
+            <Button
+              disabled={pending !== null}
+              type="submit"
+            >
+              <Link2Icon data-icon="inline-start" />
+              {pending?.kind === "ensure-thread-route" ? "Ensuring..." : "Ensure route"}
+            </Button>
+          </div>
+        </form>
+
+        {threadRouteError ? (
+          <Alert className="mt-4" variant="destructive">
+            <AlertCircleIcon data-icon="inline-start" />
+            <AlertDescription className="min-w-0 break-words">{threadRouteError}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {threadRouteResult ? (
+          <ThreadRouteResultPanel result={threadRouteResult} />
+        ) : null}
+      </section>
 
       <section
         aria-busy={pending !== null}
@@ -267,6 +406,76 @@ export function RuntimeMaintenanceClient({
           </TableBody>
         </Table>
       </section>
+    </div>
+  );
+}
+
+function Field({
+  children,
+  htmlFor,
+  label,
+  optional = false,
+}: {
+  children: ReactNode;
+  htmlFor: string;
+  label: string;
+  optional?: boolean;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex items-center justify-between gap-3">
+        <Label
+          className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground"
+          htmlFor={htmlFor}
+        >
+          {label}
+        </Label>
+        {optional ? (
+          <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Optional
+          </span>
+        ) : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function ThreadRouteResultPanel({
+  result,
+}: {
+  result: HostedOpsLinqThreadRouteEnsureResult;
+}) {
+  return (
+    <div className="mt-4 rounded-lg border border-border/70 bg-muted/20 px-4 py-3">
+      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+        Container member
+      </div>
+      <div className="mt-1 break-all font-mono text-xs text-foreground">
+        {result.containerMemberId}
+      </div>
+      {result.activationMailboxItemId ? (
+        <div className="mt-3 grid gap-3 text-xs text-muted-foreground sm:grid-cols-2">
+          <ResultValue label="Activation item" value={result.activationMailboxItemId} />
+          <ResultValue label="Activation event" value={result.activationEventId ?? "-"} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ResultValue(input: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="font-mono text-[9px] uppercase tracking-[0.12em]">
+        {input.label}
+      </div>
+      <div className="mt-1 break-all font-mono text-[11px] text-foreground">
+        {input.value}
+      </div>
     </div>
   );
 }
@@ -435,17 +644,30 @@ function describeClientError(error: unknown): string {
   return error instanceof Error ? error.message : "Runtime maintenance request failed.";
 }
 
-function describePendingAction(pending: PendingAction | null): string {
+function describeMaintenancePendingAction(pending: PendingAction | null): string {
   if (!pending) {
     return "";
   }
   if (pending.kind === "refresh") {
     return "Refreshing maintenance candidates.";
   }
+  if (pending.kind === "ensure-thread-route") {
+    return "";
+  }
   if (pending.kind === "wake-batch") {
     return `Waking ${formatInteger(pending.limit)} workspace${pending.limit === 1 ? "" : "s"}.`;
   }
   return `Waking ${pending.userId}.`;
+}
+
+function readFormDataString(formData: FormData, key: string): string | null {
+  const value = formData.get(key);
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function isBatchWakePending(pending: PendingAction | null, limit: number): boolean {

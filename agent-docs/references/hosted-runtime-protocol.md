@@ -313,6 +313,13 @@ can wake one explicit workspace, and caps batch wakes to a tiny window that
 stops on the first signal failure. It is not a scheduler, queue, or generic
 admin job framework.
 
+The same ops page may also expose narrow hosted-runtime setup actions that reuse
+existing source-of-truth services, such as manually ensuring a Linq
+external-thread route through `/api/ops/thread-routes`. Those actions must use
+the same hosted app-session, allowlist, and same-origin mutation gate, and must
+delegate to the owning service primitive rather than hand-writing persisted
+runtime rows.
+
 For hard-cut rollouts, deploy consumers before producers: Cloudflare and the
 runtime parser must understand the new mailbox kind before web emits it. After
 deploy, set `HOSTED_OPS_MEMBER_IDS`, open `/ops/runtime-maintenance`, wake a
