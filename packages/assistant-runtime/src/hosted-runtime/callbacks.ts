@@ -5,7 +5,6 @@ import type {
 } from "@murphai/hosted-execution";
 import {
   compareIsoTimestampsAscending as compareHostedIsoTimestampsAscending,
-  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
 import {
   emitHostedExecutionStructuredLog,
@@ -448,11 +447,7 @@ function isHostedSignupWelcomeDeliveryPayload(
     return false;
   }
   const tokenTarget = payload.idempotencyKey.slice(prefix.length);
-  return (
-    tokenTarget.length > 0
-    && !tokenTarget.includes(":")
-    && payload.message === MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE
-  );
+  return tokenTarget.length > 0 && !tokenTarget.includes(":");
 }
 
 function hostedAssistantDeliveryRecipientKeysOverlap(
@@ -1774,6 +1769,12 @@ function createHostedAssistantLinqSendDependency(input: {
       fetchImplementation: input.providerFetch,
       ...(signal ? { signal } : {}),
     }, "Hosted assistant Linq delivery");
+    await assertHostedAssistantLinqRouteAuthorityForDelivery({
+      deliveryContext,
+      effectsPort: input.effectsPort ?? null,
+      routeScopedContext: input.linqDeliveryContext ?? null,
+      signal: signal ?? null,
+    });
     const verifiedVaultFiles = await preloadApprovedHostedAssistantVaultFiles({
       actionApprovalPort: input.actionApprovalPort ?? null,
       expectedDedupeKey: input.expectedDedupeKey ?? null,
@@ -1855,6 +1856,8 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
   const persistedFile = readAssistantVaultFileMedia(intent);
   if (
     !persistedFile
+    || !persistedFile.approvalId
+    || !persistedFile.approvalGeneration
     || buildHostedVaultFileMediaIdentity(persistedFile)
       !== buildHostedVaultFileMediaIdentity(vaultFiles[0]!)
   ) {
@@ -1866,9 +1869,11 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
 
   let approval: HostedActionApprovalResult;
   try {
-    approval = await input.actionApprovalPort.request(
-      buildAssistantVaultFileSendApprovalRequest(intent),
-    );
+    approval = await input.actionApprovalPort.consume({
+      approvalGeneration: persistedFile.approvalGeneration,
+      consumerId: intent.deliveryIdempotencyKey ?? `assistant-outbox:${intent.intentId}`,
+      request: buildAssistantVaultFileSendApprovalRequest(intent),
+    });
   } catch {
     throw createRetryableHostedVaultFileError(
       "ASSISTANT_VAULT_FILE_APPROVAL_UNAVAILABLE",
@@ -1902,6 +1907,8 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
 }
 
 function buildHostedVaultFileMediaIdentity(input: {
+  approvalGeneration?: string | null;
+  approvalId?: string | null;
   contentType: string;
   filename: string;
   ref: string;
@@ -1914,6 +1921,8 @@ function buildHostedVaultFileMediaIdentity(input: {
     input.filename,
     input.contentType,
     input.sizeBytes,
+    input.approvalId ?? null,
+    input.approvalGeneration ?? null,
   ]);
 }
 

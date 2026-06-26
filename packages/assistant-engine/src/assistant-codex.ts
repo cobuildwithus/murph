@@ -1463,6 +1463,11 @@ export type CodexManagedAccountOperationResult =
   | { kind: 'connected' }
   | { kind: 'disconnected' }
 
+interface CodexManagedAccountLoginCompletion {
+  error: string | null
+  success: boolean
+}
+
 /**
  * Runs one managed ChatGPT account operation through the same app-server
  * transport used by turns. The child is intentionally short lived: account
@@ -1503,9 +1508,9 @@ export async function executeCodexManagedAccountOperation(
     rejectAccountUpdate = reject
   })
   void accountUpdate.catch(() => undefined)
-  let settleCompletion!: (success: boolean) => void
+  let settleCompletion!: (completion: CodexManagedAccountLoginCompletion) => void
   let rejectCompletion!: (error: unknown) => void
-  const completion = new Promise<boolean>((resolve, reject) => {
+  const completion = new Promise<CodexManagedAccountLoginCompletion>((resolve, reject) => {
     settleCompletion = resolve
     rejectCompletion = reject
   })
@@ -1513,7 +1518,7 @@ export async function executeCodexManagedAccountOperation(
   let expectedLoginId: string | null = null
   let acceptChatGptAccountUpdate = false
   let bufferedChatGptAccountUpdate = false
-  const bufferedCompletions = new Map<string, boolean>()
+  const bufferedCompletions = new Map<string, CodexManagedAccountLoginCompletion>()
 
   const binding: CodexAppServerActiveTurnBinding = {
     onClose(code, signal) {
@@ -1597,14 +1602,17 @@ export async function executeCodexManagedAccountOperation(
       }
       const params = asCodexRecord(message.params)
       const loginId = asCodexString(params?.loginId)
-      const success = params?.success === true
       if (!loginId) {
         return
       }
+      const completionResult: CodexManagedAccountLoginCompletion = {
+        error: asCodexString(params?.error),
+        success: params?.success === true,
+      }
       if (loginId === expectedLoginId) {
-        settleCompletion(success)
+        settleCompletion(completionResult)
       } else {
-        bufferedCompletions.set(loginId, success)
+        bufferedCompletions.set(loginId, completionResult)
       }
     },
     onStderrLine: () => {},
@@ -1683,16 +1691,19 @@ export async function executeCodexManagedAccountOperation(
     }
     await input.onDeviceCode?.({ userCode, verificationUrl })
 
-    const succeeded = await withCodexRpcTimeout(
+    const loginCompletion = await withCodexRpcTimeout(
       completion,
       normalizeCodexManagedAccountTimeout(input.timeoutMs),
       'account/login/completed',
     )
-    if (!succeeded) {
+    if (!loginCompletion.success) {
       throw new VaultCliError(
         'ASSISTANT_CODEX_AUTH_FAILED',
         'ChatGPT account authentication did not complete successfully.',
-        { retryable: false },
+        {
+          ...(loginCompletion.error ? { codexLoginError: loginCompletion.error } : {}),
+          retryable: false,
+        },
       )
     }
     await withCodexRpcTimeout(
@@ -2731,10 +2742,27 @@ async function runCodexAppServerTurnOnProcess(
     } while (drained !== dynamicToolExecutionChain)
   }
 
-  const applyResponseMediaPatch = (patch: {
-    media: AssistantResponseMedia[]
-    op: 'append' | 'replace'
-  }): void => {
+  const hasAcceptedNoReplyPatchForDeliveryContext = (
+    deliveryContextOrdinal: number,
+  ): boolean =>
+    finalActionPatches.some((entry) =>
+      entry.deliveryContextOrdinal === deliveryContextOrdinal &&
+      entry.patch.kind === 'none'
+    )
+
+  const applyResponseMediaPatch = (
+    patch: {
+      media: AssistantResponseMedia[]
+      op: 'append' | 'replace'
+    },
+    deliveryContextOrdinal: number,
+  ): void => {
+    if (hasAcceptedNoReplyPatchForDeliveryContext(deliveryContextOrdinal)) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY',
+        'Response media cannot be attached after finish_without_reply.',
+      )
+    }
     responseMedia = patch.op === 'replace'
       ? patch.media
       : normalizeAssistantResponseMediaList([...responseMedia, ...patch.media])
@@ -2752,6 +2780,9 @@ async function runCodexAppServerTurnOnProcess(
       trailingSteerCandidateDeliveryContextOrdinal !== null &&
       trailingSteerCandidateDeliveryContextOrdinal < deliveryContextOrdinal
     ) {
+      return false
+    }
+    if (responseMedia.length > 0) {
       return false
     }
     if (
@@ -3063,11 +3094,13 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    const dynamicToolRequestDeliveryContextOrdinal =
+      currentDeliveryContextOrdinal()
     const dynamicToolDeliveryContextOrdinal =
       dynamicToolRequest.kind === 'finish-without-reply' ||
       dynamicToolRequest.kind === 'react-to-message' ||
       dynamicToolRequest.kind === 'send-progress-update'
-        ? Math.max(0, completedUserMessageOrdinal)
+        ? dynamicToolRequestDeliveryContextOrdinal
         : null
     const dynamicToolProgressDelivery =
       dynamicToolRequest.kind === 'send-progress-update'
@@ -3153,8 +3186,15 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (result.responseMediaPatch) {
         try {
-          applyResponseMediaPatch(result.responseMediaPatch)
-        } catch {
+          applyResponseMediaPatch(
+            result.responseMediaPatch,
+            dynamicToolRequestDeliveryContextOrdinal,
+          )
+        } catch (error) {
+          const text = error instanceof VaultCliError &&
+            error.code === 'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY'
+            ? 'response media unavailable after finish_without_reply'
+            : 'response media limit reached'
           void tryWriteRpcMessage({
             id: requestId,
             result: {
@@ -3162,7 +3202,7 @@ async function runCodexAppServerTurnOnProcess(
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'response media limit reached',
+                  text,
                 },
               ],
             },

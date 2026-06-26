@@ -15,7 +15,6 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 
-import { resolveAssistantBindingDelivery } from './bindings.js'
 import {
   buildAssistantOutboxPersistedTarget,
   buildAssistantOutboxRawTargetIdentity,
@@ -73,22 +72,26 @@ export async function requestAssistantVaultFileSend(input: {
   threadIsDirect?: boolean | null
   vault: string
 }): Promise<AssistantVaultFileSendRequestResult> {
+  const targetFingerprint = requireAssistantVaultFileSendTargetFingerprint(input)
   const file = await resolveAssistantVaultFileResponseMedia({
     ref: input.ref,
     vaultRoot: input.vault,
   })
-  const targetFingerprint = buildAssistantVaultFileSendTargetFingerprint(input)
   const approval = await input.actionApprovalPort.request(
     buildAssistantVaultFileSendApprovalRequestForTarget({
       channel: input.channel ?? null,
       file,
       targetFingerprint,
+      threadIsDirect: input.threadIsDirect ?? null,
     }),
   )
 
+  const approvedFile = approval.status === 'approved'
+    ? applyAssistantVaultFileApprovalToMedia({ approval, file })
+    : file
   return {
     approvalId: approval.approvalId,
-    file,
+    file: approvedFile,
     filename: file.filename,
     ...(approval.status === 'pending'
       ? {
@@ -96,7 +99,12 @@ export async function requestAssistantVaultFileSend(input: {
           expiresAt: approval.expiresAt,
           status: approval.status,
         }
-      : { status: approval.status }),
+      : approval.status === 'approved'
+        ? {
+            approvalGeneration: approval.approvalGeneration,
+            status: approval.status,
+          }
+        : { status: approval.status }),
   }
 }
 
@@ -166,14 +174,16 @@ export function buildAssistantVaultFileSendApprovalRequest(
   return buildAssistantVaultFileSendApprovalRequestForTarget({
     channel: intent.channel,
     file,
-    targetFingerprint: buildAssistantVaultFileSendTargetFingerprint(intent),
+    targetFingerprint: requireAssistantVaultFileSendTargetFingerprint(intent),
+    threadIsDirect: intent.threadIsDirect,
   })
 }
 
 export function buildAssistantVaultFileSendApprovalRequestForTarget(input: {
   channel?: string | null
   file: AssistantVaultFileResponseMedia
-  targetFingerprint: string
+  targetFingerprint?: string | null
+  threadIsDirect?: boolean | null
 }): HostedActionApprovalRequest {
   const targetFingerprint = normalizeNullableString(input.targetFingerprint)
   if (!targetFingerprint) {
@@ -183,8 +193,11 @@ export function buildAssistantVaultFileSendApprovalRequestForTarget(input: {
     )
   }
   const channel = normalizeNullableString(input.channel)
+  const returnContactKind = resolveAssistantHostedReturnContactKind(channel, {
+    threadIsDirect: input.threadIsDirect ?? null,
+  })
   const actionIdentity = sha256Hex(JSON.stringify([
-    'murph.vault-file-send-action.v2',
+    'murph.vault-file-send-action.v3',
     input.file.ref,
     input.file.sha256,
     input.file.filename,
@@ -192,9 +205,10 @@ export function buildAssistantVaultFileSendApprovalRequestForTarget(input: {
     input.file.sizeBytes,
     channel,
     targetFingerprint,
+    returnContactKind,
   ]))
   const actionFingerprint = sha256Hex(JSON.stringify([
-    'murph.vault-file-send-approval.v2',
+    'murph.vault-file-send-approval.v3',
     actionIdentity,
     input.file.ref,
     input.file.sha256,
@@ -203,6 +217,7 @@ export function buildAssistantVaultFileSendApprovalRequestForTarget(input: {
     input.file.sizeBytes,
     channel,
     targetFingerprint,
+    returnContactKind,
   ]))
 
   return {
@@ -213,11 +228,11 @@ export function buildAssistantVaultFileSendApprovalRequestForTarget(input: {
       body: `Murph will send “${input.file.filename}” (${formatByteCount(input.file.sizeBytes)}) to your current iMessage conversation. This approval applies only to this file and destination.`,
       title: 'Send a file from your vault?',
     },
-    returnContactKind: resolveAssistantHostedReturnContactKind(channel),
+    returnContactKind,
   }
 }
 
-function buildAssistantVaultFileSendTargetFingerprint(input: {
+export function resolveAssistantVaultFileSendTargetFingerprint(input: {
   actorId?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
@@ -227,10 +242,12 @@ function buildAssistantVaultFileSendTargetFingerprint(input: {
   replyToMessageId?: string | null
   threadId?: string | null
   threadIsDirect?: boolean | null
-}): string {
+}): string | null {
   const persistedTarget = buildAssistantOutboxPersistedTarget({
     actorId: input.actorId ?? null,
-    bindingDelivery: input.bindingDelivery ?? undefined,
+    bindingDelivery: input.bindingDelivery === undefined
+      ? undefined
+      : input.bindingDelivery,
     channel: input.channel ?? null,
     deliverySource: null,
     explicitTarget: input.explicitTarget ?? null,
@@ -239,9 +256,31 @@ function buildAssistantVaultFileSendTargetFingerprint(input: {
     threadId: input.threadId ?? null,
     threadIsDirect: input.threadIsDirect ?? null,
   })
+  const bindingDeliveryTarget = persistedTarget.bindingDelivery
+    ? normalizeNullableString(persistedTarget.bindingDelivery.target)
+    : null
+  if (
+    !bindingDeliveryTarget
+    && !normalizeNullableString(persistedTarget.explicitTarget)
+  ) {
+    return null
+  }
   return hashAssistantOutboxTargetFingerprint(
     buildAssistantOutboxRawTargetIdentity(persistedTarget),
   )
+}
+
+function requireAssistantVaultFileSendTargetFingerprint(input: Parameters<
+  typeof resolveAssistantVaultFileSendTargetFingerprint
+>[0]): string {
+  const targetFingerprint = resolveAssistantVaultFileSendTargetFingerprint(input)
+  if (!targetFingerprint) {
+    throw new VaultCliError(
+      'ASSISTANT_VAULT_FILE_TARGET_UNAVAILABLE',
+      'Secure vault-file approval requires a concrete destination.',
+    )
+  }
+  return targetFingerprint
 }
 
 export function applyAssistantVaultFileSendApprovalResult(input: {
@@ -265,6 +304,7 @@ export function applyAssistantVaultFileSendApprovalResult(input: {
         return input.intent
       }
       return approveAssistantVaultFileSendIntent({
+        approval: input.approval,
         intent: input.intent,
         updatedAt,
       })
@@ -315,11 +355,11 @@ export function applyAssistantVaultFileSendApprovalResult(input: {
 }
 
 function approveAssistantVaultFileSendIntent(input: {
+  approval: Extract<HostedActionApprovalResult, { status: 'approved' }>
   intent: AssistantOutboxIntent
   updatedAt: string
 }): AssistantOutboxIntent {
-  const repair = materializeApprovedAssistantVaultFileLegacyTarget(input.intent)
-  if (!repair) {
+  if (!resolveAssistantVaultFileSendTargetFingerprint(input.intent)) {
     return assistantOutboxIntentSchema.parse({
       ...input.intent,
       lastError: {
@@ -333,37 +373,19 @@ function approveAssistantVaultFileSendIntent(input: {
   }
 
   return assistantOutboxIntentSchema.parse({
-    ...repair,
+    ...input.intent,
+    media: input.intent.media.map((item) =>
+      item.kind === 'vault_file'
+        ? applyAssistantVaultFileApprovalToMedia({
+            approval: input.approval,
+            file: item,
+          })
+        : item
+    ),
     lastError: null,
     nextAttemptAt: input.updatedAt,
     status: 'pending',
     updatedAt: input.updatedAt,
-  })
-}
-
-function materializeApprovedAssistantVaultFileLegacyTarget(
-  intent: AssistantOutboxIntent,
-): AssistantOutboxIntent | null {
-  if (intent.bindingDelivery !== null || intent.explicitTarget !== null) {
-    return intent
-  }
-
-  const bindingDelivery = resolveAssistantBindingDelivery({
-    actorId: intent.actorId,
-    channel: intent.channel,
-    threadId: intent.threadId,
-    threadIsDirect: intent.threadIsDirect,
-  })
-  if (!bindingDelivery) {
-    return null
-  }
-
-  return assistantOutboxIntentSchema.parse({
-    ...intent,
-    bindingDelivery,
-    // Keep persisted outbox identity stable while repairing the concrete
-    // destination needed for delivery.
-    targetFingerprint: intent.targetFingerprint,
   })
 }
 
@@ -440,10 +462,23 @@ async function readAssistantVaultFileSnapshot(input: {
       contentType: resolveAssistantVaultFileContentType(filename),
       filename,
       kind: 'vault_file',
+      approvalGeneration: null,
+      approvalId: null,
       ref,
       sha256: sha256Hex(bytes),
       sizeBytes: bytes.byteLength,
     },
+  }
+}
+
+function applyAssistantVaultFileApprovalToMedia(input: {
+  approval: Extract<HostedActionApprovalResult, { status: 'approved' }>
+  file: AssistantVaultFileResponseMedia
+}): AssistantVaultFileResponseMedia {
+  return {
+    ...input.file,
+    approvalGeneration: input.approval.approvalGeneration,
+    approvalId: input.approval.approvalId,
   }
 }
 

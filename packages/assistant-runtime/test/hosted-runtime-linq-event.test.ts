@@ -9,6 +9,7 @@ import {
   HOSTED_LINQ_ATTACHMENT_MAX_DOWNLOAD_BYTES,
   HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
   normalizeHostedLinqAttachmentUrl,
+  withHostedLinqAttachmentDownloadRetry,
 } from "../src/hosted-runtime/events/linq.ts";
 
 const originalLinqApiBaseUrl = process.env.LINQ_API_BASE_URL;
@@ -106,6 +107,28 @@ describe("normalizeHostedLinqAttachmentUrl", () => {
       normalizeHostedLinqAttachmentUrl("https://cdn.linqapp.com/uploads/photo.jpg"),
       "https://cdn.linqapp.com/uploads/photo.jpg",
     );
+  });
+});
+
+describe("withHostedLinqAttachmentDownloadRetry", () => {
+  it("retries short-lived hosted Linq CDN misses", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        return new Response("not ready", { status: 404 });
+      }
+      return new Response(Uint8Array.from([9, 8, 7]), { status: 200 });
+    });
+    const driver = createInjectedFetchLinqDriver(fetchMock as typeof fetch);
+    assert.ok(driver);
+    const retrying = withHostedLinqAttachmentDownloadRetry(driver, {
+      retryDelaysMs: [0],
+    });
+
+    assert.ok(retrying);
+    await expect(
+      retrying.downloadUrl("https://cdn.linqapp.com/files/voice.m4a"),
+    ).resolves.toEqual(Uint8Array.from([9, 8, 7]));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -418,7 +441,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       size: 38_000,
       type: "voice_memo",
       url: "https://cdn.linqapp.com/files/voice.m4a",
-    }, undefined)).resolves.toBeNull();
+    }, undefined)).rejects.toThrow("Hosted Linq attachment metadata lookup failed.");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(logRequests).toHaveLength(1);
@@ -426,7 +449,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     assert.ok(entry);
     expect(entry.eventCode).toBe("mailbox.linq_attachment_download_finished");
     expect(entry.errorCode).toBe("metadata_fetch_failed");
-    expect(entry.level).toBe("warn");
+    expect(entry.level).toBe("info");
     expect(entry.redactedJson).toMatchObject({
       apiBaseKind: "local",
       apiConfigured: true,
@@ -438,6 +461,9 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       directLocatorAllowed: false,
       directLocatorPresent: true,
       failureCode: "metadata_fetch_failed",
+      errorCause: "fetch failed",
+      errorDetailPresent: true,
+      errorRetryable: true,
       metadataLocatorAllowed: false,
       metadataLocatorPresent: false,
       metadataLookupAttempted: true,
@@ -445,7 +471,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       mimeCategory: "audio/mp4",
       operation: "downloadPart",
       partKind: "voice_memo",
-      result: "not_downloaded",
+      result: "failed",
     });
     const serializedLog = JSON.stringify(entry.redactedJson);
     expect(serializedLog).not.toContain("att_voice_private");
@@ -526,6 +552,66 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       type: "voice_memo",
       url: "https://cdn.linqapp.com/files/stale-voice.m4a",
     }, undefined)).resolves.toEqual(Uint8Array.from([4, 5, 6]));
+  });
+
+  it("refreshes hosted attachment downloads when the direct URL stalls", async () => {
+    vi.useFakeTimers();
+    process.env.LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
+    process.env.LINQ_API_TOKEN = "linq-token";
+
+    const providerFetch = vi.fn<typeof fetch>(async (input, init) => {
+      assert.equal(
+        String(input),
+        "https://api.linqapp.com/api/partner/v3/attachments/att_voice_stalled_direct",
+      );
+      expect(init?.signal?.aborted).toBe(false);
+      return new Response(JSON.stringify({
+        download_url: "https://cdn.linqapp.com/files/fresh-stalled-voice.m4a",
+      }), {
+        headers: {
+          "content-type": "application/json",
+        },
+        status: 200,
+      });
+    });
+    const publicInternetFetch = vi.fn<typeof fetch>((input, init) => {
+      const url = String(input);
+      if (url === "https://cdn.linqapp.com/files/stalled-voice.m4a") {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      }
+
+      assert.equal(url, "https://cdn.linqapp.com/files/fresh-stalled-voice.m4a");
+      expect(init?.signal?.aborted).toBe(false);
+      return Promise.resolve(new Response(Uint8Array.from([6, 5, 4]), { status: 200 }));
+    });
+
+    const driver = createHostedLinqAttachmentDownloadDriver({
+      platform: {
+        providerFetch,
+        publicInternetFetch,
+      },
+    });
+    assert.ok(driver);
+    assert.ok(driver.downloadPart);
+
+    const downloadPromise = driver.downloadPart({
+      attachmentId: "att_voice_stalled_direct",
+      mimeType: "audio/m4a",
+      type: "voice_memo",
+      url: "https://cdn.linqapp.com/files/stalled-voice.m4a",
+    }, undefined);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await expect(downloadPromise).resolves.toEqual(Uint8Array.from([6, 5, 4]));
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+    expect(publicInternetFetch).toHaveBeenCalledTimes(2);
   });
 
   it("downloads hosted voice memos from an explicit local CDN override after metadata lookup", async () => {
@@ -614,6 +700,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
   it("falls back to the original direct-download error when metadata returns an untrusted local url", async () => {
     process.env.LINQ_API_BASE_URL = "http://host.docker.internal:4011";
     process.env.LINQ_API_TOKEN = "linq-token";
+    const logRequests: HostedRuntimeLogRequest[] = [];
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -643,7 +730,9 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       throw new Error(`Unexpected fetch url: ${url}`);
     });
 
-    const driver = createInjectedFetchLinqDriver(fetchMock as typeof fetch);
+    const driver = createInjectedFetchLinqDriver(fetchMock as typeof fetch, {
+      platform: createLogPlatform(logRequests),
+    });
     assert.ok(driver);
     assert.ok(driver.downloadPart);
 
@@ -655,6 +744,70 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     }, undefined)).rejects.toThrow(
       "Hosted Linq attachment download failed with 403 Forbidden.",
     );
+    expect(logRequests).toHaveLength(1);
+    const entry = logRequests[0]?.entries[0];
+    assert.ok(entry);
+    expect(entry.eventCode).toBe("mailbox.linq_attachment_download_finished");
+    expect(entry.errorCode).toBe("download_http_status");
+    expect(entry.redactedJson).toMatchObject({
+      directFetchAttempted: true,
+      directFetchSucceeded: false,
+      downloadStatus: 403,
+      errorDetailPresent: true,
+      errorMessage: "Hosted execution authorization failed.",
+      errorRetryable: true,
+      failureCode: "download_http_status",
+      metadataLocatorAllowed: false,
+      metadataLocatorPresent: true,
+      metadataLookupAttempted: true,
+      metadataStatus: 200,
+      result: "failed",
+    });
+  });
+
+  it("logs redacted direct-download diagnostics when attachment id is missing", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      assert.equal(String(input), "https://cdn.linqapp.com/files/missing-key.m4a");
+      return new Response("not found", {
+        status: 404,
+        statusText: "Not Found",
+      });
+    });
+
+    const driver = createInjectedFetchLinqDriver(fetchMock as typeof fetch, {
+      platform: createLogPlatform(logRequests),
+    });
+    assert.ok(driver);
+    assert.ok(driver.downloadPart);
+
+    await expect(driver.downloadPart?.({
+      mimeType: "audio/m4a",
+      type: "voice_memo",
+      url: "https://cdn.linqapp.com/files/missing-key.m4a",
+    }, undefined)).rejects.toThrow(
+      "Hosted Linq attachment download failed with 404 Not Found.",
+    );
+
+    expect(logRequests).toHaveLength(1);
+    const entry = logRequests[0]?.entries[0];
+    assert.ok(entry);
+    expect(entry.eventCode).toBe("mailbox.linq_attachment_download_finished");
+    expect(entry.errorCode).toBe("download_http_status");
+    expect(entry.redactedJson).toMatchObject({
+      directFetchAttempted: true,
+      directFetchSucceeded: false,
+      downloadStatus: 404,
+      errorDetailPresent: true,
+      errorMessage: "Hosted execution rejected an invalid request.",
+      errorRetryable: true,
+      failureCode: "download_http_status",
+      metadataLookupAttempted: false,
+      result: "failed",
+    });
+    const serializedLog = JSON.stringify(entry.redactedJson);
+    expect(serializedLog).not.toContain("missing-key.m4a");
+    expect(serializedLog).not.toContain("cdn.linqapp.com");
   });
 
   it("falls back to the original direct-download error when metadata returns a local url outside the attachment path", async () => {
@@ -791,6 +944,142 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       mimeType: "audio/wav",
       type: "voice_memo",
     }, controller.signal)).resolves.toBeNull();
+  });
+
+  it("retries hosted voice memo metadata lag before degrading to descriptor-only capture", async () => {
+    process.env.LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
+    process.env.LINQ_API_TOKEN = "linq-token";
+
+    const providerFetch = vi.fn<typeof fetch>(async (input) => {
+      assert.equal(
+        String(input),
+        "https://api.linqapp.com/api/partner/v3/attachments/att_voice_lag",
+      );
+      if (providerFetch.mock.calls.length === 1) {
+        return new Response("not ready", { status: 404 });
+      }
+
+      return new Response(JSON.stringify({
+        download_url: "https://cdn.linqapp.com/files/voice-lag.m4a",
+      }), {
+        headers: {
+          "content-type": "application/json",
+        },
+        status: 200,
+      });
+    });
+    const publicInternetFetch = vi.fn<typeof fetch>(async (input) => {
+      assert.equal(String(input), "https://cdn.linqapp.com/files/voice-lag.m4a");
+      return new Response(Uint8Array.from([9, 8, 7]), { status: 200 });
+    });
+    const driver = createHostedLinqAttachmentDownloadDriver({
+      platform: {
+        providerFetch,
+        publicInternetFetch,
+      },
+    });
+    const retrying = withHostedLinqAttachmentDownloadRetry(driver, {
+      retryDelaysMs: [0],
+    });
+
+    const capture = await normalizeHostedLinqConversationCapture({
+      accountId: "hbidx:phone:v1:test",
+      attachmentDownloadTimeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
+      downloadDriver: retrying,
+      linqMessage: {
+        chatId: "chat_voice",
+        from: "+15551234567",
+        isFromMe: false,
+        messageId: "msg_voice_metadata_lag",
+        parts: [
+          {
+            attachmentId: "att_voice_lag",
+            mimeType: "audio/m4a",
+            type: "voice_memo",
+          },
+        ],
+      },
+      occurredAt: "2026-04-23T06:17:45.000Z",
+    });
+
+    expect(providerFetch).toHaveBeenCalledTimes(2);
+    expect(publicInternetFetch).toHaveBeenCalledTimes(1);
+    expect(capture.attachments).toHaveLength(1);
+    expect(capture.attachments[0]?.data).toEqual(Uint8Array.from([9, 8, 7]));
+    expect(capture.attachments[0]?.kind).toBe("audio");
+  });
+
+  it("retries hosted voice memo metadata timeout before degrading to descriptor-only capture", async () => {
+    vi.useFakeTimers();
+    process.env.LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
+    process.env.LINQ_API_TOKEN = "linq-token";
+
+    const providerFetch = vi.fn<typeof fetch>((input, init) => {
+      assert.equal(
+        String(input),
+        "https://api.linqapp.com/api/partner/v3/attachments/att_voice_timeout",
+      );
+      if (providerFetch.mock.calls.length === 1) {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      }
+
+      return Promise.resolve(new Response(JSON.stringify({
+        download_url: "https://cdn.linqapp.com/files/voice-timeout.m4a",
+      }), {
+        headers: {
+          "content-type": "application/json",
+        },
+        status: 200,
+      }));
+    });
+    const publicInternetFetch = vi.fn<typeof fetch>(async (input) => {
+      assert.equal(String(input), "https://cdn.linqapp.com/files/voice-timeout.m4a");
+      return new Response(Uint8Array.from([7, 8, 9]), { status: 200 });
+    });
+    const driver = createHostedLinqAttachmentDownloadDriver({
+      platform: {
+        providerFetch,
+        publicInternetFetch,
+      },
+    });
+    const retrying = withHostedLinqAttachmentDownloadRetry(driver, {
+      retryDelaysMs: [0],
+    });
+
+    const capturePromise = normalizeHostedLinqConversationCapture({
+      accountId: "hbidx:phone:v1:test",
+      attachmentDownloadTimeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
+      downloadDriver: retrying,
+      linqMessage: {
+        chatId: "chat_voice",
+        from: "+15551234567",
+        isFromMe: false,
+        messageId: "msg_voice_metadata_timeout",
+        parts: [
+          {
+            attachmentId: "att_voice_timeout",
+            mimeType: "audio/m4a",
+            type: "voice_memo",
+          },
+        ],
+      },
+      occurredAt: "2026-04-23T06:17:45.000Z",
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    const capture = await capturePromise;
+
+    expect(providerFetch).toHaveBeenCalledTimes(2);
+    expect(publicInternetFetch).toHaveBeenCalledTimes(1);
+    expect(capture.attachments).toHaveLength(1);
+    expect(capture.attachments[0]?.data).toEqual(Uint8Array.from([7, 8, 9]));
+    expect(capture.attachments[0]?.kind).toBe("audio");
   });
 
   it("gives hosted voice memo downloads enough time to finish", async () => {

@@ -2,14 +2,27 @@ import { HostedBillingStatus, type HostedLinqDailyState } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildHostedAiUsageGateNoticeIdempotencyKey } from "@/src/lib/hosted-execution/usage-allowance";
+import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
 import { getHostedAiUsageMonthlyAllowanceUsdMicros } from "@/src/lib/hosted-onboarding/billing-plans";
 
 const MEMBER_ID = "member_usage_reset";
 const CHAT_ID = "chat_usage_reset";
 const OWNER_PHONE = "+14155550100";
 const SENDER_PHONE = "+14155550101";
-const USAGE_LIMIT_MESSAGE =
-  "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home";
+const HOME_URL = "https://withmurph.ai/home";
+
+function buildPulseUpgradeEdgeMessage(input: {
+  memberId: string;
+  periodStart: Date;
+}): string {
+  return renderUserFacingMessage({
+    context: {
+      homeUrl: HOME_URL,
+    },
+    key: "linq.ai_usage.pulse_upgrade_edge",
+    seed: `linq.ai_usage:${input.memberId}:pulse_upgrade_edge:${input.periodStart.toISOString()}`,
+  }).text;
+}
 
 const activeMember = {
   billingStatus: HostedBillingStatus.active,
@@ -424,7 +437,10 @@ describe("hosted Linq usage reset e2e", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
       chatId: CHAT_ID,
       idempotencyKey: expectedUsageLimitIdempotencyKey,
-      message: USAGE_LIMIT_MESSAGE,
+      message: buildPulseUpgradeEdgeMessage({
+        memberId: MEMBER_ID,
+        periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      }),
       replyToMessageId: "msg_before_reset",
       signal: undefined,
     });

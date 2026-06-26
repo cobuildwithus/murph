@@ -10,7 +10,7 @@ describe("hosted web testing helper boundary", () => {
     );
 
     expect(source).not.toMatch(
-      /import\s+(?!type\s)(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)\s+from\s+["']@prisma\/client["']/,
+      /from\s+["']@prisma\/client["']/,
     );
     expect(source).not.toMatch(
       /import\s+(?!type\s)(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)\s+from\s+["'][^"']*src\/lib\/prisma(?:\.ts)?["']/,

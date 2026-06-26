@@ -21,5 +21,5 @@ export interface HostedActionApprovalView {
 
 export interface HostedActionApprovalDecisionResponse
   extends HostedActionApprovalView {
-  redirectTo: string;
+  redirectTo: string | null;
 }

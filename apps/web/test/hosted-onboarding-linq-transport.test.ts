@@ -91,9 +91,9 @@ describe("hosted Linq webhook transport", () => {
       }),
     ).resolves.toBeUndefined();
 
-    expect(buildHostedLinqConversationHomeRedirectReply).toHaveBeenCalledWith({
+    expect(buildHostedLinqConversationHomeRedirectReply).toHaveBeenCalledWith(expect.objectContaining({
       homeRecipientPhone: "+15555550100",
-    });
+    }));
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat-1",
@@ -199,9 +199,9 @@ describe("hosted Linq webhook transport", () => {
       }),
     ).resolves.toBeUndefined();
 
-    expect(buildHostedLinqConversationHomeRedirectReply).toHaveBeenCalledWith({
+    expect(buildHostedLinqConversationHomeRedirectReply).toHaveBeenCalledWith(expect.objectContaining({
       homeRecipientPhone: "+15555550200",
-    });
+    }));
   });
 
   it("delivers legacy invite_signin side effects as invite signup replies", async () => {

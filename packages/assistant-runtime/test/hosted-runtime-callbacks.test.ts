@@ -478,16 +478,11 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
-  it("does not pre-claim prefix-only non-canonical signup welcome delivery effects", async () => {
+  it("does not pre-claim non-canonical signup welcome delivery effects", async () => {
     const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
       assistantDeliveryEffects: [
         createEffect({
           idempotencyKey: "signup-welcome:member_placeholder:retry",
-          message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-          transportIdempotent: false,
-        }),
-        createEffect({
-          idempotencyKey: "signup-welcome:member_placeholder",
           message: "Fixed setup reminder.",
           transportIdempotent: false,
         }),
@@ -4963,6 +4958,8 @@ describe("hosted runtime callbacks", () => {
       userId: "member_123",
     });
     const media = {
+      approvalGeneration: "b".repeat(64),
+      approvalId: `haa_${"a".repeat(32)}`,
       contentType: "application/pdf",
       filename: "report.pdf",
       kind: "vault_file" as const,
@@ -4980,18 +4977,13 @@ describe("hosted runtime callbacks", () => {
       transportIdempotent: true,
     });
     const actionApprovalPort = {
+      consume: vi.fn(),
       request: vi.fn(async () => ({
+        approvalGeneration: "b".repeat(64),
         approvalId: "approval_123",
         status: "approved" as const,
       })),
     };
-    mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
-      dedupeKey: effect.fingerprint,
-      intentId: effect.effectId,
-      media: [media],
-      status: "sending",
-    });
-    mocks.readAssistantVaultFileMedia.mockReturnValueOnce(media);
     const assertAuthority = vi.fn(async () => {
       throw new Error("route revoked before media work");
     });
@@ -5028,6 +5020,118 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.readAssistantOutboxIntent).not.toHaveBeenCalled();
     expect(mocks.readVerifiedAssistantVaultFileBytes).not.toHaveBeenCalled();
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it("consumes approved vault-file actions before hosted Linq delivery", async () => {
+    const vaultFile = {
+      approvalGeneration: "b".repeat(64),
+      approvalId: `haa_${"a".repeat(32)}`,
+      contentType: "application/pdf",
+      filename: "report.pdf",
+      kind: "vault_file" as const,
+      ref: "documents/report.pdf",
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "chat_123",
+      channel: "linq",
+      media: [vaultFile],
+      transportIdempotent: true,
+    });
+    const approvalRequest = {
+      actionFingerprint: "a".repeat(64),
+      actionId: "vault-file-send:approved",
+      actionKind: "vault.file.send.v1",
+      presentation: {
+        body: "Send a vault file.",
+        title: "Send a file?",
+      },
+      returnContactKind: "text" as const,
+    };
+    const actionApprovalPort = {
+      consume: vi.fn(async () => ({
+        approvalGeneration: "b".repeat(64),
+        approvalId: `haa_${"a".repeat(32)}`,
+        status: "approved" as const,
+      })),
+      request: vi.fn(),
+    };
+    mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValueOnce(
+      approvalRequest,
+    );
+    mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
+      dedupeKey: "dedupe_123",
+      intentId: "intent_123",
+      media: [vaultFile],
+    });
+    mocks.readAssistantVaultFileMedia.mockReturnValueOnce(vaultFile);
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_vault_file_sent",
+      providerThreadId: "chat_123",
+      target: "chat_123",
+      targetKind: "thread",
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        idempotencyKey: "assistant-outbox:intent_123",
+        media: [vaultFile],
+        message: "Attached.",
+        replyToMessageId: null,
+        target: "chat_123",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      actionApprovalPort,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch: vi.fn<typeof fetch>(
+        async () => new Response(null, { status: 204 }),
+      ),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(actionApprovalPort.consume).toHaveBeenCalledWith({
+      approvalGeneration: "b".repeat(64),
+      consumerId: "assistant-outbox:intent_123",
+      request: approvalRequest,
+    });
+    expect(actionApprovalPort.request).not.toHaveBeenCalled();
+    expect(mocks.readVerifiedAssistantVaultFileBytes).toHaveBeenCalledWith({
+      file: vaultFile,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        media: [vaultFile],
+        target: "chat_123",
+      }),
+      expect.objectContaining({
+        loadVaultFile: expect.any(Function),
+      }),
+    );
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+        providerMessageId: "linq_vault_file_sent",
+      }),
+    ]);
   });
 
   it("uses providerFetch for hosted Linq voice memo deliveries when the runtime can intercept egress", async () => {

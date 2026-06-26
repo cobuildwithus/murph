@@ -110,6 +110,9 @@ const hostedWebVitestProjectSpecs = resolveVitestBucketFiles(
     },
   ],
   {
+    ignorePatterns: [
+      "*.db.test.ts",
+    ],
     label: "apps/web/test",
   },
 );

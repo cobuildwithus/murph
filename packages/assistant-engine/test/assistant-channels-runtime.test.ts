@@ -1152,6 +1152,8 @@ describe('assistant channels runtime seam', () => {
     await expect(sendLinqMessage({
       idempotencyKey: 'delivery_123',
       media: [{
+        approvalGeneration: null,
+        approvalId: null,
         contentType: 'application/pdf',
         filename: 'report.pdf',
         kind: 'vault_file',

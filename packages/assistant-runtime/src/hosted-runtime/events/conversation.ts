@@ -39,6 +39,7 @@ import { readHostedRawEmailMessage } from "./email.ts";
 import {
   createHostedLinqAttachmentDownloadDriver,
   HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
+  withHostedLinqAttachmentDownloadRetry,
 } from "./linq.ts";
 import {
   createHostedTelegramAttachmentDownloadDriver,
@@ -324,12 +325,15 @@ async function normalizeHostedConversationMessageWake(input: {
     return normalizeHostedLinqConversationCapture({
       accountId: readHostedLinqConversationMessageAccountLookupKey(input.wake.message),
       attachmentDownloadTimeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
-      downloadDriver: createHostedLinqAttachmentDownloadDriver({
-        env: buildHostedLinqAttachmentDownloadEnv(input.runtime),
-        platform: input.runtime.platform,
-      }),
+      downloadDriver: withHostedLinqAttachmentDownloadRetry(
+        createHostedLinqAttachmentDownloadDriver({
+          env: buildHostedLinqAttachmentDownloadEnv(input.runtime),
+          platform: input.runtime.platform,
+        }),
+      ),
       linqMessage: input.wake.message.linqMessage,
       occurredAt: input.wake.occurredAt,
+      signal: input.signal ?? undefined,
     });
   }
 

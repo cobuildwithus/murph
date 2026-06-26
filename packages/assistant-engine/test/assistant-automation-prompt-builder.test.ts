@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -26,6 +29,8 @@ const promptBuilderMocks = vi.hoisted(() => ({
   hasAssistantInputAttachmentEvidenceCandidate: vi.fn(),
   prepareAssistantInputMultimodalUserMessageContent: vi.fn(),
 }))
+
+const tempVaultRoots: string[] = []
 
 vi.mock('../src/assistant/attachment-evidence-model.js', async () => {
   const actual = await vi.importActual<typeof import('../src/assistant/attachment-evidence-model.ts')>(
@@ -60,10 +65,34 @@ beforeEach(() => {
   })
 })
 
-afterEach(() => {
+afterEach(async () => {
+  await Promise.all(
+    tempVaultRoots.splice(0).map((rootPath) =>
+      rm(rootPath, {
+        force: true,
+        recursive: true,
+      }),
+    ),
+  )
   vi.clearAllMocks()
   vi.restoreAllMocks()
 })
+
+async function createTempVaultRoot(): Promise<string> {
+  const root = await mkdtemp(path.join(tmpdir(), 'assistant-prompt-builder-'))
+  tempVaultRoots.push(root)
+  return root
+}
+
+async function writeVaultFile(
+  vaultRoot: string,
+  relativePath: string,
+  bytes: Buffer | string,
+): Promise<void> {
+  const absolutePath = path.join(vaultRoot, relativePath)
+  await mkdir(path.dirname(absolutePath), { recursive: true })
+  await writeFile(absolutePath, bytes)
+}
 
 function createAttachment(
   overrides: Partial<InboxShowResult['capture']['attachments'][number]> = {},
@@ -505,7 +534,9 @@ describe('buildAssistantAutoReplyPrompt', () => {
     }
     expect(result.prompt).not.toContain('raw/assistant-input/')
     expect(result.prompt).not.toContain('storedPath:')
-    expect(result.prompt).toContain('rawPath: missing')
+    expect(result.prompt).not.toContain('rawPath: missing')
+    expect(result.prompt).toContain('content: unavailable')
+    expect(result.prompt).toContain('Attachment contents are unavailable in this turn.')
     expect(result.prompt).not.toContain(
       'Raw attachment file is available at the storedPath above.',
     )
@@ -646,7 +677,7 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).toContain('kind: image')
     expect(result.prompt).toContain('mime: image/jpeg')
     expect(result.prompt).toContain('byteSize: 1024')
-    expect(result.prompt).toContain('rawPath: missing')
+    expect(result.prompt).toContain('content: unavailable')
     expect(result.prompt).not.toContain('parseState: unknown')
     expect(result.prompt).toContain('Attachment 2\nfileName: private-voice.ogg')
     expect(result.prompt).toContain('kind: voice_memo')
@@ -1095,6 +1126,132 @@ describe('prepareAssistantAutoReplyInput', () => {
     ).toHaveBeenCalled()
   })
 
+  it('preserves raw prompt evidence when derived attachment materialization fails', async () => {
+    const actualAttachmentEvidenceModel =
+      await vi.importActual<typeof import('../src/assistant/attachment-evidence-model.ts')>(
+        '../src/assistant/attachment-evidence-model.ts',
+      )
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockImplementation(
+      actualAttachmentEvidenceModel.buildAssistantInputAttachmentPromptBundles,
+    )
+    promptBuilderMocks.hasAssistantInputAttachmentEvidenceCandidate.mockImplementation(
+      actualAttachmentEvidenceModel.hasAssistantInputAttachmentEvidenceCandidate,
+    )
+    promptBuilderMocks.prepareAssistantInputMultimodalUserMessageContent.mockImplementation(
+      actualAttachmentEvidenceModel.prepareAssistantInputMultimodalUserMessageContent,
+    )
+
+    const vaultRoot = await createTempVaultRoot()
+    const imagePath = 'raw/inbox/capture-1/attachments/meal.jpg'
+    const audioPath = 'raw/inbox/capture-1/attachments/voice-note.m4a'
+    const manifestPath = 'derived/inbox/capture-1/attachments/att-2/manifest.json'
+    await writeVaultFile(vaultRoot, imagePath, Buffer.from([0xff, 0xd8, 0xff, 0xdb]))
+    await writeVaultFile(vaultRoot, audioPath, Buffer.from([1, 2, 3]))
+    const materializeWorkspaceArtifacts = vi.fn(async (paths: readonly string[]) => {
+      if (paths.includes(manifestPath)) {
+        throw new Error('derived manifest unavailable')
+      }
+      return {
+        materializedArtifactPaths: new Set(paths.map((item) => `vault:${item}`)),
+        missingArtifactPaths: new Set<string>(),
+      }
+    })
+    const events: unknown[] = []
+
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          attachmentEvidence: {
+            attachments: [
+              {
+                byteSize: 4,
+                derived: null,
+                descriptorAttachmentId: 'att_image_1',
+                fileName: 'meal.jpg',
+                inlineFragments: [],
+                kind: 'image',
+                mime: 'image/jpeg',
+                ordinal: 1,
+                parseState: null,
+                raw: {
+                  byteSize: 4,
+                  kind: 'vault-relative-file',
+                  mediaType: 'image/jpeg',
+                  path: imagePath,
+                  sha256: null,
+                },
+                sourceAttachmentId: 'att_image_1',
+              },
+              {
+                byteSize: 3,
+                derived: {
+                  allowedRoot: 'derived/inbox/capture-1/attachments/att-2',
+                  kind: 'parser-manifest',
+                  manifestPath,
+                },
+                descriptorAttachmentId: 'att_audio_1',
+                fileName: 'voice-note.m4a',
+                inlineFragments: [],
+                kind: 'audio',
+                mime: 'audio/m4a',
+                ordinal: 2,
+                parseState: 'succeeded',
+                raw: {
+                  byteSize: 3,
+                  kind: 'vault-relative-file',
+                  mediaType: 'audio/m4a',
+                  path: audioPath,
+                  sha256: null,
+                },
+                sourceAttachmentId: 'att_audio_1',
+              },
+            ],
+            optionalInboxCaptureId: 'capture-1',
+            reasonCode: null,
+            source: 'manual',
+            status: 'available',
+            updatedAt: '2026-04-08T00:00:01.000Z',
+          },
+        }),
+      ],
+      vaultRoot,
+      {
+        materializeWorkspaceArtifacts,
+        onEvent: (event) => events.push(event),
+      },
+    )
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(result.prompt).toContain('- raw evidence: available')
+    expect(result.prompt).toContain('Attachment 1\nfileName: meal.jpg')
+    expect(result.prompt).toContain(`rawPath: ${imagePath}`)
+    expect(result.prompt).toContain('Attachment 2\nfileName: voice-note.m4a')
+    expect(result.prompt).toContain(`rawPath: ${audioPath}`)
+    expect(result.prompt).toContain('Attachment 2 (audio)')
+    expect(result.prompt).toContain(`storedPath: ${audioPath}`)
+    expect(result.prompt).toContain(
+      'Raw attachment file is available at the storedPath above.',
+    )
+    expect(result.prompt).not.toContain('Attachment contents are unavailable in this turn.')
+    expect(result.prompt).not.toContain('derived-plain-text')
+    expect(result.userMessageContent?.some((part) => part.type === 'image')).toBe(true)
+    expect(events).toContainEqual({
+      type: 'input.reply-progress',
+      inputId: 'event-1',
+      details: 'nonblocking attachment evidence read failed',
+      errorCode: 'derived_read_failed',
+      failureContext: {
+        attachmentOrdinal: 2,
+      },
+      safeDetails: 'attachment_evidence_read_failed_nonblocking',
+      providerKind: 'status',
+      providerState: 'completed',
+    })
+  })
+
   it('prepares raw non-image non-PDF attachment evidence with unsupported parser status', async () => {
     promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
       createAttachmentBundle({
@@ -1350,11 +1507,76 @@ describe('prepareAssistantAutoReplyInput', () => {
       throw new Error('Expected a ready prepared input.')
     }
     expect(result.prompt).toContain('Attachment 1 (other)')
-    expect(result.prompt).toContain('storedPath: missing')
+    expect(result.prompt).not.toContain('storedPath: missing')
+    expect(result.prompt).toContain('Attachment contents are unavailable in this turn.')
     expect(result.prompt).not.toContain('parseState: succeeded')
     expect(result.prompt).not.toContain(
       'Raw attachment file is available at the storedPath above.',
     )
+  })
+
+  it('redacts internal routing labels for unavailable image attachments', async () => {
+    promptBuilderMocks.buildAssistantInputAttachmentPromptBundles.mockResolvedValue([
+      createAttachmentBundle({
+        kind: 'image',
+        mime: 'image/jpeg',
+        fileName: 'missing-image.jpg',
+        byteSize: 1024,
+        storedPath: null,
+        parseState: null,
+        routingImage: {
+          eligible: false,
+          reason: 'stored-path-missing',
+          mediaType: 'image/jpeg',
+          extension: '.jpg',
+        },
+        fragments: [
+          {
+            kind: 'attachment_metadata',
+            label: 'attachment-1-metadata',
+            path: null,
+            text: [
+              'routingImageEligible: false',
+              'routingImageReason: stored-path-missing',
+            ].join('\n'),
+            truncated: false,
+          },
+        ],
+        combinedText: [
+          '[attachment-1-metadata]',
+          'routingImageEligible: false',
+          'routingImageReason: stored-path-missing',
+        ].join('\n'),
+      }),
+    ])
+
+    const result = await prepareAssistantAutoReplyInput(
+      [
+        createPromptInput({
+          attachments: [
+            createAttachment({
+              kind: 'image',
+              mime: 'image/jpeg',
+              parseState: null,
+              storedPath: null,
+            }),
+          ],
+        }),
+      ],
+      '/tmp/assistant-engine-prompt-builder-vault',
+    )
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prepared input.')
+    }
+    expect(result.prompt).toContain('Attachment 1 (image)')
+    expect(result.prompt).toContain('Attachment contents are unavailable in this turn.')
+    expect(result.prompt).not.toContain('routingImageEligible')
+    expect(result.prompt).not.toContain('routingImageReason')
+    expect(result.prompt).not.toContain('stored-path-missing')
+    expect(result.prompt).not.toContain('storedPath: missing')
+    expect(result.prompt).not.toContain('rawPath: missing')
   })
 
   it('does not render stale raw lifecycle paths when prepared evidence is missing', async () => {
@@ -1402,8 +1624,10 @@ describe('prepareAssistantAutoReplyInput', () => {
       throw new Error('Expected a ready prepared input.')
     }
     expect(result.prompt).toContain('- raw evidence: partial')
-    expect(result.prompt).toContain('rawPath: missing')
-    expect(result.prompt).toContain('storedPath: missing')
+    expect(result.prompt).not.toContain('rawPath: missing')
+    expect(result.prompt).not.toContain('storedPath: missing')
+    expect(result.prompt).toContain('content: unavailable')
+    expect(result.prompt).toContain('Attachment contents are unavailable in this turn.')
     expect(result.prompt).not.toContain('raw/inbox/capture-1/attachments/expired.zip')
     expect(result.prompt).not.toContain(
       'Raw attachment file is available at the storedPath above.',
@@ -1482,7 +1706,10 @@ describe('prepareAssistantAutoReplyInput', () => {
     const result = await prepareAssistantAutoReplyInput(
       [
         createPromptInput({
-          attachments: [createAttachment()],
+          attachmentEvidence: createRawZipAttachmentEvidence({
+            parseState: null,
+            rawPath: 'raw/inbox/capture-1/attachments/private.zip',
+          }),
           captureOverrides: {
             text: 'Please review the attachment.',
           },
@@ -1497,6 +1724,10 @@ describe('prepareAssistantAutoReplyInput', () => {
       throw new Error('Expected a ready prepared input.')
     }
     expect(result.prompt).toContain('Message text:\nPlease review the attachment.')
+    expect(result.prompt).toContain('content: unavailable')
+    expect(result.prompt).toContain('Attachment contents are unavailable in this turn.')
+    expect(result.prompt).not.toContain('raw/inbox/capture-1/attachments/private.zip')
+    expect(result.prompt).not.toContain('rawPath: raw/inbox/')
     expect(onEvent).toHaveBeenCalledWith({
       type: 'input.reply-progress',
       inputId: 'event-1',

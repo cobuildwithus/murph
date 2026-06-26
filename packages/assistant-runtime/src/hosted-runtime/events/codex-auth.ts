@@ -8,6 +8,9 @@ import type {
   HostedExecutionCodexAuthRequestedWake,
 } from "@murphai/hosted-execution";
 import {
+  buildHostedExecutionSafeErrorDetails,
+  buildHostedExecutionSafeErrorDiagnostics,
+  deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
@@ -15,6 +18,10 @@ import {
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 
 import type { HostedRuntimePlatform } from "../platform.ts";
+import {
+  toHostedRuntimeLogCode,
+  writeHostedRuntimeLogBestEffort,
+} from "../runtime-logs.ts";
 import {
   createNoopMailboxEffect,
   type HostedMailboxOutcome,
@@ -105,6 +112,12 @@ export async function executeHostedCodexAuthWake(input: {
       phase: "wake.running",
       wake: input.wake,
     });
+    await writeHostedCodexAuthFailureRuntimeLog({
+      action: input.wake.action,
+      attemptId: input.wake.attemptId,
+      error,
+      platform: input.platform,
+    });
     await port.update({
       attemptId: input.wake.attemptId,
       phase: "failed",
@@ -114,6 +127,51 @@ export async function executeHostedCodexAuthWake(input: {
       mailboxLane: "runtime-control",
     });
   }
+}
+
+async function writeHostedCodexAuthFailureRuntimeLog(input: {
+  action: HostedExecutionCodexAuthRequestedWake["action"];
+  attemptId: string;
+  error: unknown;
+  platform: Pick<HostedRuntimePlatform, "logPort">;
+}): Promise<void> {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(input.error);
+  const details = buildHostedExecutionSafeErrorDetails(input.error);
+  const errorCode = toHostedRuntimeLogCode(deriveHostedExecutionErrorCode(input.error));
+  const errorCause = typeof details?.codexLoginError === "string"
+    ? details.codexLoginError
+    : typeof diagnostics?.errorCause === "string"
+    ? diagnostics.errorCause
+    : null;
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      attemptId: input.attemptId,
+      component: "assistant",
+      errorCode,
+      eventCode: "assistant.codex_auth_failed",
+      level: "warn",
+      phase: "error",
+      redactedJson: {
+        action: input.action,
+        errorCode,
+        safeErrorMessage:
+          typeof diagnostics?.errorMessage === "string"
+            ? diagnostics.errorMessage
+            : "Hosted Codex account operation failed.",
+        ...(errorCause
+          ? { errorCause }
+          : {}),
+        ...(typeof diagnostics?.errorDetail === "string"
+          ? { errorDetail: diagnostics.errorDetail }
+          : {}),
+        ...(typeof diagnostics?.errorStatus === "number"
+          ? { errorStatus: diagnostics.errorStatus }
+          : {}),
+        retryable: diagnostics?.retryable === true,
+      },
+    },
+    platform: input.platform,
+  });
 }
 
 async function removeHostedCodexAuthJsonBestEffort(input: {

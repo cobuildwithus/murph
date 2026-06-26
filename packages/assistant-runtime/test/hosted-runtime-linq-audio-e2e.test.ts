@@ -98,7 +98,10 @@ describe("hosted Linq audio conversation ingestion", () => {
       },
     };
     const downloadDriver = {
-      downloadPart: vi.fn(),
+      downloadPart: vi.fn(async (part: { url?: string | null }) => {
+        assert.equal(part.url, "https://cdn.example.test/attachments/audio-message.m4a");
+        return audioBytes;
+      }),
       downloadUrl: vi.fn(async (url: string) => {
         assert.equal(url, "https://cdn.example.test/attachments/audio-message.m4a");
         return audioBytes;
@@ -162,8 +165,8 @@ describe("hosted Linq audio conversation ingestion", () => {
         nextWakeAt: null,
         parserProcessed: 1,
       });
-      expect(downloadDriver.downloadUrl).toHaveBeenCalledTimes(1);
-      expect(downloadDriver.downloadPart).not.toHaveBeenCalled();
+      expect(downloadDriver.downloadPart).toHaveBeenCalledTimes(1);
+      expect(downloadDriver.downloadUrl).not.toHaveBeenCalled();
       assert.equal(parserInputs.length, 1);
       assert.equal(parserInputs[0]?.preparedKind, "audio");
 

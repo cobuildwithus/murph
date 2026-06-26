@@ -63,6 +63,8 @@ import {
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
+  HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
+  HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
@@ -573,6 +575,17 @@ describe("handleRunnerOutboundRequest", () => {
       error: "Not found",
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("allowlists hosted action approval request and consume routes", () => {
+    expect(isAllowedHostedRunnerWebControlRequest({
+      method: "POST",
+      path: HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
+    })).toBe(true);
+    expect(isAllowedHostedRunnerWebControlRequest({
+      method: "POST",
+      path: HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
+    })).toBe(true);
   });
 
   it.each(ALLOWLISTED_WEB_CONTROL_CASES)(
