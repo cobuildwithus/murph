@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
+import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { createComputerUseService } from "@/src/lib/computer-use/service";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
@@ -20,11 +20,11 @@ export async function POST(
     token,
   });
 
-  const contactOption = await resolveHostedMurphContactOption({
+  const contactOptions = await resolveHostedMurphContactOptions({
     message: { body: HANDOFF_DONE_REPLY_BODY },
   });
-  const redirectTo = contactOption?.href
-    ?? `/computer/handoff/${encodeURIComponent(token)}`;
+  const fallbackHref = `/computer/handoff/${encodeURIComponent(token)}`;
+  const redirectTo = contactOptions[0]?.href ?? fallbackHref;
 
-  return NextResponse.json({ redirectTo });
+  return NextResponse.json({ contactOptions, fallbackHref, redirectTo });
 }
