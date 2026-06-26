@@ -568,20 +568,14 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"linq_last_inbound_at" TIMESTAMP(3)');
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"pending_linq_last_inbound_at" TIMESTAMP(3)');
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"last_inbound_at" TIMESTAMP(3)');
-    expect(hostedLinqEgressEngagementMigrationSql).toContain(
-      'UPDATE "hosted_member_routing"\nSET "linq_last_inbound_at" = CURRENT_TIMESTAMP',
+    expect(hostedLinqEgressEngagementMigrationSql).not.toContain(
+      'SET "linq_last_inbound_at" = CURRENT_TIMESTAMP',
     );
-    expect(hostedLinqEgressEngagementMigrationSql).toContain(
-      'WHERE "linq_chat_lookup_key" IS NOT NULL',
+    expect(hostedLinqEgressEngagementMigrationSql).not.toContain(
+      'SET "pending_linq_last_inbound_at" = CURRENT_TIMESTAMP',
     );
-    expect(hostedLinqEgressEngagementMigrationSql).toContain(
-      'UPDATE "hosted_member_routing"\nSET "pending_linq_last_inbound_at" = CURRENT_TIMESTAMP',
-    );
-    expect(hostedLinqEgressEngagementMigrationSql).toContain(
-      'WHERE "pending_linq_chat_lookup_key" IS NOT NULL',
-    );
-    expect(hostedLinqEgressEngagementMigrationSql).toContain(
-      'UPDATE "hosted_thread_route"\nSET "last_inbound_at" = CURRENT_TIMESTAMP',
+    expect(hostedLinqEgressEngagementMigrationSql).not.toContain(
+      'SET "last_inbound_at" = CURRENT_TIMESTAMP',
     );
     expect(hostedLinqObservabilityMigrationSql).toContain('"skipped_at" TIMESTAMP(3)');
     expect(hostedLinqObservabilityMigrationSql).toContain('"skip_reason" TEXT');

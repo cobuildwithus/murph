@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const linqLineStoreMocks = vi.hoisted(() => ({
@@ -60,6 +62,14 @@ function readJsonRequestBody(init: RequestInit | undefined): unknown {
 }
 
 describe("hosted Linq contact card client", () => {
+  it("ships the Murph contact-card headshot as a public PNG asset", () => {
+    const bytes = readFileSync(new URL("../public/murph_headshot.png", import.meta.url));
+
+    expect(bytes.subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+  });
+
   it("lists contact cards", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => createJsonResponse({
       contact_cards: [
