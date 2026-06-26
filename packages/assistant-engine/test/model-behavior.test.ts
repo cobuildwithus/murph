@@ -198,13 +198,25 @@ describe('assistant execution prompt contract', () => {
       'Keep the text to one or two short conversational sentences, specific to the immediate next step',
     )
     expect(prompt).toContain(
-      '3. Use `send_progress_update` first only for genuinely long, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work when silence would hurt the user experience.',
+      '3. Follow the progress-update rules in the execution behavior guidance before genuinely long work, but never let progress updates outrank immediate safe action or create extra tool/status churn.',
     )
-    expect(prompt).toContain(
-      'If the turn becomes unusually long-running after substantial tool work, you may send one more brief update so the user is not left hanging; never send a third.',
-    )
-    expect(prompt).toContain(
-      'Never send progress updates for individual tool loops, searches, reads, observes, clicks, or status churn.',
+    expect(
+      prompt.match(
+        /If the turn becomes unusually long-running after substantial tool work, you may send one more brief update so the user is not left hanging; never send a third\./g,
+      ) ?? [],
+    ).toHaveLength(1)
+    expect(
+      prompt.match(
+        /Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq\/iMessage/g,
+      ) ?? [],
+    ).toHaveLength(1)
+    expect(
+      prompt.match(
+        /never send progress updates for individual tool loops, searches, reads, observes, clicks, or status churn/g,
+      ) ?? [],
+    ).toHaveLength(1)
+    expect(prompt).not.toContain(
+      '3. Use `send_progress_update` first only for genuinely long',
     )
     expect(prompt).toContain(
       'Prefer using available sources over giving the user busywork such as sending logs, restating device-derived facts, or reporting completion of an activity that Murph can verify itself.',

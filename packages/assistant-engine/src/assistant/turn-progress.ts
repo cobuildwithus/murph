@@ -122,13 +122,11 @@ export function createAssistantProgressDelivery(input: {
   deliver?: DeliverAssistantProgressUpdate
   getDeliveryContext?: () => AssistantProgressDeliveryContext
   messageInput: AssistantMessageInput
-  now?: () => number
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
   turnId: string
 }): AssistantProgressDelivery {
   const deliver = input.deliver ?? deliverAssistantProgressUpdate
-  const now = input.now ?? Date.now
   const abortController = new AbortController()
   const sentTexts = new Set<string>()
   let lastSentAtMs: number | null = null
@@ -160,7 +158,7 @@ export function createAssistantProgressDelivery(input: {
           source,
         }
       }
-      const currentTimeMs = now()
+      const currentTimeMs = Date.now()
       if (
         !required &&
         lastSentAtMs !== null &&

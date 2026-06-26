@@ -8,7 +8,7 @@ import {
   normalizeAssistantProviderConfig,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   buildAssistantProgressDeliveryIdempotencyKey,
@@ -33,6 +33,10 @@ import {
 type DeliverProgressInput = Parameters<typeof deliverAssistantProgressUpdate>[0]
 
 describe('assistant turn progress', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('normalizes user-facing progress text before delivery', () => {
     expect(
       normalizeAssistantProgressText(
@@ -53,11 +57,11 @@ describe('assistant turn progress', () => {
     const progress = createAssistantProgressDelivery({
       deliver,
       messageInput: createMessageInput(),
-      now: () => nowMs,
       session: createSession(),
       sharedPlan: createSharedPlan(),
       turnId: 'turn-progress',
     })
+    vi.spyOn(Date, 'now').mockImplementation(() => nowMs)
 
     await expect(
       progress.send('Extracting the PDF and checking relevant results.'),
@@ -118,11 +122,11 @@ describe('assistant turn progress', () => {
     const progress = createAssistantProgressDelivery({
       deliver,
       messageInput: createMessageInput(),
-      now: () => nowMs,
       session: createSession(),
       sharedPlan: createSharedPlan(),
       turnId: 'turn-progress',
     })
+    vi.spyOn(Date, 'now').mockImplementation(() => nowMs)
 
     await expect(
       progress.send('Hang on, refreshing my memory real quick.', {
