@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+  HOSTED_RETURN_CONTACT_KINDS,
+  type HostedReturnContactKind,
+} from "./return-contact.ts";
+
 export const HOSTED_COMPUTER_RUNS_PATH = "/api/internal/computer/runs";
 export const HOSTED_COMPUTER_RUN_OPERATION_PATH_PATTERN =
   /^\/api\/internal\/computer\/runs\/(?<runId>[^/]+)\/(?<operation>observe|act|os-control|pause-for-user|finish)$/u;
@@ -49,6 +54,11 @@ export const HOSTED_COMPUTER_HANDOFF_STATUSES = [
 ] as const;
 export type HostedComputerHandoffStatus =
   (typeof HOSTED_COMPUTER_HANDOFF_STATUSES)[number];
+
+export const HOSTED_COMPUTER_RETURN_CONTACT_KINDS = HOSTED_RETURN_CONTACT_KINDS;
+
+export type HostedComputerReturnContactKind =
+  HostedReturnContactKind;
 
 export const HOSTED_COMPUTER_OS_CONTROL_ACTIONS = [
   "clickMouse",
@@ -109,6 +119,8 @@ export const hostedComputerDeliveryContextSchema = z
   .object({
     conversationId: z.string().trim().min(1).max(1_000).nullable().default(null),
     recipientKey: z.string().trim().min(1).max(1_000).nullable().default(null),
+    returnContactKind:
+      z.enum(HOSTED_COMPUTER_RETURN_CONTACT_KINDS).nullable().default(null),
   })
   .strict();
 

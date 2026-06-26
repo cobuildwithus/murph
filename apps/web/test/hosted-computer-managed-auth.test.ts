@@ -461,6 +461,7 @@ describe("Kernel managed-login handoffs", () => {
     expect(store.createHandoff).toHaveBeenCalledWith(expect.objectContaining({
       memberId: run.memberId,
       purpose: "login",
+      returnContactKind: handoff.returnContactKind,
       runId: run.id,
       suggestedReply: "Done",
     }));
@@ -672,6 +673,7 @@ function createHandoff(
     id: "hch_handoff123",
     memberId: "member_123",
     purpose: "managed_login",
+    returnContactKind: null,
     runId: "hcr_run123",
     status: "open",
     suggestedReply: "Done",
@@ -789,6 +791,7 @@ function createStore(input: {
       id: "hch_fallback",
       memberId: handoffInput.memberId,
       purpose: handoffInput.purpose,
+      returnContactKind: handoffInput.returnContactKind,
       runId: handoffInput.runId,
       suggestedReply: handoffInput.suggestedReply,
       tokenHash: handoffInput.tokenHash,

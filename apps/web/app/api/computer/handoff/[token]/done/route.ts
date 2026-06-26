@@ -15,16 +15,22 @@ export async function POST(
   const session = await requireActiveHostedAppSessionFromRequest(request);
   const service = createComputerUseService();
 
-  await service.completeHandoff({
+  const completed = await service.completeHandoff({
     memberId: session.member.id,
     token,
   });
 
+  const fallbackPath = `/computer/handoff/${encodeURIComponent(token)}`;
+  if (completed.returnContactKind === "email") {
+    return NextResponse.json({ redirectTo: fallbackPath });
+  }
+
   const contactOption = await resolveHostedMurphContactOption({
     message: { body: HANDOFF_DONE_REPLY_BODY },
+    preferredKind: completed.returnContactKind,
   });
   const redirectTo = contactOption?.href
-    ?? `/computer/handoff/${encodeURIComponent(token)}`;
+    ?? fallbackPath;
 
   return NextResponse.json({ redirectTo });
 }

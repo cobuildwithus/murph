@@ -11,6 +11,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/hosted-execution/dashboard-replica": "./src/dashboard-replica.ts",
   "@murphai/hosted-execution/legacy-dashboard-replica": "./src/legacy-dashboard-replica.ts",
   "@murphai/hosted-execution/orchestration-control": "./src/orchestration-control.ts",
+  "@murphai/hosted-execution/return-contact": "./src/return-contact.ts",
   "@murphai/hosted-execution/runtime-control": "./src/runtime-control.ts",
   "@murphai/hosted-execution/temporal-env": "./src/temporal-env.ts",
 } as const;
