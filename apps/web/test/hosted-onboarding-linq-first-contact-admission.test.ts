@@ -442,6 +442,7 @@ describe("Linq first-contact admission", () => {
     });
     expect(prisma.hostedLinqFirstContactEventReceipt.updateMany).toHaveBeenCalledWith({
       data: {
+        processingOwnerToken: expect.any(String),
         status: "processing",
       },
       where: {

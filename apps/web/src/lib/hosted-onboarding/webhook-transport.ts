@@ -21,6 +21,7 @@ import {
   resolveHostedLinqDayUtc,
 } from "./linq-daily-state";
 import {
+  assertHostedLinqFirstContactEventProcessingOwner,
   buildHostedLinqFirstContactEventProcessingError,
   deleteHostedLinqFirstContactEventReceipt,
   recordHostedLinqFirstContactEventConsumed,
@@ -95,6 +96,7 @@ export type HostedLinqInviteSignupMessagePayload = {
   inviteId: string;
   memberId: string;
   occurredAt: string;
+  processingOwnerToken: string;
   replyToMessageId: string | null;
   sourceEventId: string;
   template: "invite_signup";
@@ -178,6 +180,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       inviteId: string;
       memberId: string;
       occurredAt: string;
+      processingOwnerToken: string;
       replyToMessageId?: string | null;
       sourceEventId: string;
       template: "invite_signup";
@@ -282,6 +285,7 @@ async function recordSkippedHostedLinqInviteSignupSideEffectConsumed(
   await recordHostedLinqFirstContactEventConsumed({
     eventId: effect.payload.sourceEventId,
     prisma,
+    processingOwnerToken: effect.payload.processingOwnerToken,
   });
 }
 
@@ -296,6 +300,7 @@ async function recordDeliveredHostedLinqInviteSignupSideEffectConsumed(
   await recordHostedLinqFirstContactEventConsumed({
     eventId: effect.payload.sourceEventId,
     prisma,
+    processingOwnerToken: effect.payload.processingOwnerToken,
   });
 }
 
@@ -310,6 +315,7 @@ async function deleteHostedLinqInviteSignupSideEffectReceipt(
   await deleteHostedLinqFirstContactEventReceipt({
     eventId: effect.payload.sourceEventId,
     prisma,
+    processingOwnerToken: effect.payload.processingOwnerToken,
   });
 }
 
@@ -347,6 +353,14 @@ async function assertHostedLinqSideEffectRouteAuthority(
   effect: HostedLinqMessageSideEffect,
   prisma: HostedLinqTransportPersistenceClient,
 ): Promise<void> {
+  if (effect.payload.template === "invite_signup") {
+    await assertHostedLinqFirstContactEventProcessingOwner({
+      eventId: effect.payload.sourceEventId,
+      prisma,
+      processingOwnerToken: effect.payload.processingOwnerToken,
+    });
+  }
+
   const routeAuthority = "routeAuthority" in effect.payload
     ? effect.payload.routeAuthority
     : null;
@@ -580,6 +594,7 @@ function buildHostedWebhookLinqMessagePayload(
         inviteId: input.inviteId,
         memberId: input.memberId,
         occurredAt: input.occurredAt,
+        processingOwnerToken: input.processingOwnerToken,
         replyToMessageId,
         sourceEventId: input.sourceEventId,
         template: input.template,

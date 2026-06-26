@@ -3144,6 +3144,183 @@ https://join.example.test/join/code_first_text`);
     );
   });
 
+  it("rejects a stale first-contact classifier owner after another delivery reclaims the event lease", async () => {
+    mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
+
+    let releaseStaleOwner: () => void = () => {};
+    const staleOwnerReleased = new Promise<void>((resolve) => {
+      releaseStaleOwner = resolve;
+    });
+    let releaseCurrentOwner: () => void = () => {};
+    const currentOwnerReleased = new Promise<void>((resolve) => {
+      releaseCurrentOwner = resolve;
+    });
+    const classifierUnavailable = hostedOnboardingError({
+      cause: new Error("fetch failed"),
+      code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
+      details: {
+        operationName: "hosted_linq_first_contact_admission",
+        type: "transport",
+      },
+      httpStatus: 503,
+      message: "Linq first-contact admission classifier is unavailable.",
+      retryable: true,
+    });
+    mocks.classifyHostedLinqFirstContactAdmission
+      .mockImplementationOnce(async () => {
+        await staleOwnerReleased;
+        throw classifierUnavailable;
+      })
+      .mockImplementationOnce(async () => {
+        await currentOwnerReleased;
+        return {
+          category: "wrong_number_or_personal_logistics",
+          confidence: 0.96,
+          kind: "block",
+          source: "model",
+        };
+      });
+
+    let receiptRecord: Record<string, unknown> | null = null;
+    let resolveInitialClaim: () => void = () => {};
+    const initialClaimed = new Promise<void>((resolve) => {
+      resolveInitialClaim = resolve;
+    });
+    let resolveReclaimed: () => void = () => {};
+    const reclaimed = new Promise<void>((resolve) => {
+      resolveReclaimed = resolve;
+    });
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn(),
+        findUnique: vi.fn(),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedLinqFirstContactEventReceipt: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          if (receiptRecord) {
+            throw {
+              code: "P2002",
+            };
+          }
+          receiptRecord = {
+            ...data,
+            updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+          };
+          resolveInitialClaim();
+          return receiptRecord;
+        }),
+        deleteMany: vi.fn(),
+        findUnique: vi.fn(async () => receiptRecord),
+        updateMany: vi.fn(async ({ data, where }: { data: Record<string, unknown>; where: Record<string, unknown> }) => {
+          if (
+            !receiptRecord
+            || receiptRecord.status !== where.status
+          ) {
+            return { count: 0 };
+          }
+          if (
+            typeof where.processingOwnerToken === "string"
+            && receiptRecord.processingOwnerToken !== where.processingOwnerToken
+          ) {
+            return { count: 0 };
+          }
+          if (where.updatedAt && typeof where.updatedAt === "object") {
+            if (!(receiptRecord.updatedAt instanceof Date)) {
+              return { count: 0 };
+            }
+            const cutoff = (where.updatedAt as { lt?: Date }).lt;
+            if (!(cutoff instanceof Date) || receiptRecord.updatedAt.getTime() >= cutoff.getTime()) {
+              return { count: 0 };
+            }
+          }
+          receiptRecord = {
+            ...receiptRecord,
+            ...data,
+            updatedAt: new Date(),
+          };
+          resolveReclaimed();
+          return { count: 1 };
+        }),
+        upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
+          receiptRecord = {
+            ...(receiptRecord ?? create),
+            ...update,
+            updatedAt: new Date(),
+          };
+          return receiptRecord;
+        }),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+    };
+    const prisma = withSerializedPrismaTransactions(prismaMocks);
+    const rawBody = buildHostedLinqWebhookBody({
+      eventId: "evt_classifier_stale_owner_reclaim",
+    });
+
+    const staleOwner = handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    });
+    await initialClaimed;
+    if (receiptRecord) {
+      receiptRecord.updatedAt = new Date("2026-03-26T11:59:00.000Z");
+    }
+
+    const currentOwner = handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    });
+    await reclaimed;
+
+    releaseStaleOwner();
+    await expect(staleOwner).rejects.toMatchObject({
+      code: "LINQ_FIRST_CONTACT_EVENT_PROCESSING",
+      retryable: true,
+    });
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+
+    releaseCurrentOwner();
+    await expect(currentOwner).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "blocked-first-contact-admission",
+    });
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("treats an allowed first-contact signup-link event as handled after later activation", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValueOnce({
@@ -3409,7 +3586,7 @@ https://join.example.test/join/code_first_text`);
     };
     let member: Record<string, unknown> | null = null;
     const admissionDecisions = new Map<string, Record<string, unknown>>();
-    const firstContactReceipts = new Map<string, Record<string, unknown>>();
+    const firstContactReceipts = createHostedLinqFirstContactEventReceiptFixture();
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedWebhookReceipt: {
@@ -3444,14 +3621,7 @@ https://join.example.test/join/code_first_text`);
         findUnique: vi.fn(async ({ where }: { where: { eventId: string } }) =>
           admissionDecisions.get(where.eventId) ?? null),
       },
-      hostedLinqFirstContactEventReceipt: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-          firstContactReceipts.set(String(data.eventId), data);
-          return data;
-        }),
-        findUnique: vi.fn(async ({ where }: { where: { eventId: string } }) =>
-          firstContactReceipts.get(where.eventId) ?? null),
-      },
+      hostedLinqFirstContactEventReceipt: firstContactReceipts,
       hostedMember: {
         create: vi.fn(async () => {
           member = {
@@ -3494,7 +3664,14 @@ https://join.example.test/join/code_first_text`);
       ok: true,
       reason: "signup-link-already-sent",
     });
-    expect(firstContactReceipts.has("evt_already_sent_first_contact_b")).toBe(true);
+    expect(await firstContactReceipts.findUnique({
+      where: {
+        eventId: "evt_already_sent_first_contact_b",
+      },
+    })).toMatchObject({
+      eventId: "evt_already_sent_first_contact_b",
+      status: "consumed",
+    });
     if (member) {
       member.billingStatus = HostedBillingStatus.active;
     }
@@ -3512,7 +3689,7 @@ https://join.example.test/join/code_first_text`);
     });
 
     expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
-    expect(prismaMocks.hostedLinqFirstContactEventReceipt.create).toHaveBeenCalledTimes(3);
+    expect(prismaMocks.hostedLinqFirstContactEventReceipt.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
@@ -3686,19 +3863,21 @@ https://join.example.test/join/code_first_text`);
     expect(prismaMocks.hostedLinqFirstContactEventReceipt.create).toHaveBeenCalledWith({
       data: {
         eventId: "evt_block_after_member_state_change",
+        processingOwnerToken: expect.any(String),
         status: "processing",
       },
     });
-    expect(prismaMocks.hostedLinqFirstContactEventReceipt.upsert).toHaveBeenCalledWith({
-      create: {
-        eventId: "evt_block_after_member_state_change",
-        status: "consumed",
-      },
-      update: {
+    const processingOwnerToken = prismaMocks.hostedLinqFirstContactEventReceipt.create.mock.calls[0]?.[0]?.data
+      ?.processingOwnerToken;
+    expect(prismaMocks.hostedLinqFirstContactEventReceipt.updateMany).toHaveBeenCalledWith({
+      data: {
+        processingOwnerToken: null,
         status: "consumed",
       },
       where: {
         eventId: "evt_block_after_member_state_change",
+        processingOwnerToken,
+        status: "processing",
       },
     });
     expect(await firstContactReceipt.findUnique({
@@ -5631,6 +5810,7 @@ https://join.example.test/join/code_first_text`);
     expect(hostedFirstContactEventReceiptCreate).toHaveBeenCalledWith({
       data: {
         eventId: "evt_signup_mark_after_send",
+        processingOwnerToken: expect.any(String),
         status: "processing",
       },
     });
@@ -6175,16 +6355,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   if (!hostedLinqFirstContactEventReceipt) {
     Object.defineProperty(prisma, "hostedLinqFirstContactEventReceipt", {
       configurable: true,
-      value: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
-        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
-        findUnique: vi.fn().mockResolvedValue(null),
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-        upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
-          ...create,
-          ...update,
-        })),
-      },
+      value: createHostedLinqFirstContactEventReceiptFixture(),
     });
   } else {
     hostedLinqFirstContactEventReceipt.create ??= vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
@@ -6254,6 +6425,15 @@ function createHostedLinqFirstContactEventReceiptFixture(): Required<HostedLinqF
     }),
     deleteMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
       const eventId = typeof where.eventId === "string" ? where.eventId : "";
+      const existing = receipts.get(eventId);
+      if (
+        typeof where.processingOwnerToken === "string"
+        && existing?.processingOwnerToken !== where.processingOwnerToken
+      ) {
+        return {
+          count: 0,
+        };
+      }
       const existed = receipts.delete(eventId);
       return {
         count: existed ? 1 : 0,
@@ -6272,6 +6452,14 @@ function createHostedLinqFirstContactEventReceiptFixture(): Required<HostedLinqF
         };
       }
       if (typeof where.status === "string" && existing.status !== where.status) {
+        return {
+          count: 0,
+        };
+      }
+      if (
+        typeof where.processingOwnerToken === "string"
+        && existing.processingOwnerToken !== where.processingOwnerToken
+      ) {
         return {
           count: 0,
         };

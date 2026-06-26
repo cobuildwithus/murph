@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { HostedLinqFirstContactAdmissionMode } from "./env";
 import { hostedOnboardingError } from "./errors";
 import {
@@ -58,6 +60,7 @@ type HostedLinqFirstContactAdmissionDecisionRecord = {
 
 export type HostedLinqFirstContactEventReceipt = {
   eventId: string;
+  processingOwnerToken: string | null;
   status: HostedLinqFirstContactEventReceiptStatus;
   updatedAt: Date;
 };
@@ -85,6 +88,7 @@ type HostedLinqFirstContactAdmissionDecisionStore = {
 
 type HostedLinqFirstContactEventReceiptRecord = {
   eventId: string;
+  processingOwnerToken?: string | null;
   status: string;
   updatedAt?: Date | string | null;
 };
@@ -94,12 +98,14 @@ type HostedLinqFirstContactEventReceiptStore = {
     create(input: {
       data: {
         eventId: string;
+        processingOwnerToken?: string | null;
         status: HostedLinqFirstContactEventReceiptStatus;
       };
     }): Promise<HostedLinqFirstContactEventReceiptRecord>;
     deleteMany(input: {
       where: {
         eventId: string;
+        processingOwnerToken?: string | null;
       };
     }): Promise<{ count: number }>;
     findUnique(input: {
@@ -109,10 +115,12 @@ type HostedLinqFirstContactEventReceiptStore = {
     }): Promise<HostedLinqFirstContactEventReceiptRecord | null>;
     updateMany(input: {
       data: {
+        processingOwnerToken?: string | null;
         status: HostedLinqFirstContactEventReceiptStatus;
       };
       where: {
         eventId: string;
+        processingOwnerToken?: string | null;
         status?: HostedLinqFirstContactEventReceiptStatus;
         updatedAt?: {
           lt?: Date;
@@ -123,9 +131,11 @@ type HostedLinqFirstContactEventReceiptStore = {
     upsert(input: {
       create: {
         eventId: string;
+        processingOwnerToken?: string | null;
         status: HostedLinqFirstContactEventReceiptStatus;
       };
       update: {
+        processingOwnerToken?: string | null;
         status: HostedLinqFirstContactEventReceiptStatus;
       };
       where: {
@@ -308,13 +318,49 @@ export async function readHostedLinqFirstContactEventReceipt(input: {
 export async function recordHostedLinqFirstContactEventConsumed(input: {
   eventId: string;
   prisma: HostedLinqFirstContactEventReceiptStore;
+  processingOwnerToken?: string | null;
 }): Promise<HostedLinqFirstContactEventReceipt> {
+  if (input.processingOwnerToken) {
+    const consumed = await input.prisma.hostedLinqFirstContactEventReceipt.updateMany({
+      data: {
+        processingOwnerToken: null,
+        status: "consumed",
+      },
+      where: {
+        eventId: input.eventId,
+        processingOwnerToken: input.processingOwnerToken,
+        status: "processing",
+      },
+    });
+    if (consumed.count === 1) {
+      return {
+        eventId: input.eventId,
+        processingOwnerToken: null,
+        status: "consumed",
+        updatedAt: new Date(),
+      };
+    }
+
+    const current = await readHostedLinqFirstContactEventReceipt({
+      eventId: input.eventId,
+      prisma: input.prisma,
+    });
+    if (current?.status === "consumed") {
+      return current;
+    }
+    throw buildHostedLinqFirstContactEventProcessingError({
+      eventId: input.eventId,
+    });
+  }
+
   const receipt = await input.prisma.hostedLinqFirstContactEventReceipt.upsert({
     create: {
       eventId: input.eventId,
+      processingOwnerToken: null,
       status: "consumed",
     },
     update: {
+      processingOwnerToken: null,
       status: "consumed",
     },
     where: {
@@ -323,6 +369,7 @@ export async function recordHostedLinqFirstContactEventConsumed(input: {
   });
   return parseHostedLinqFirstContactEventReceiptRecord(receipt) ?? {
     eventId: input.eventId,
+    processingOwnerToken: null,
     status: "consumed",
     updatedAt: new Date(),
   };
@@ -334,15 +381,18 @@ export async function recordHostedLinqFirstContactEventProcessing(input: {
   prisma: HostedLinqFirstContactEventReceiptStore;
 }): Promise<HostedLinqFirstContactEventReceipt> {
   const now = input.now ?? new Date();
+  const processingOwnerToken = buildHostedLinqFirstContactEventProcessingOwnerToken();
   try {
     const created = await input.prisma.hostedLinqFirstContactEventReceipt.create({
       data: {
         eventId: input.eventId,
+        processingOwnerToken,
         status: "processing",
       },
     });
     return parseHostedLinqFirstContactEventReceiptRecord(created) ?? {
       eventId: input.eventId,
+      processingOwnerToken,
       status: "processing",
       updatedAt: now,
     };
@@ -359,6 +409,7 @@ export async function recordHostedLinqFirstContactEventProcessing(input: {
       if (!isHostedLinqFirstContactEventProcessingFresh(existing, now)) {
         const reclaimed = await input.prisma.hostedLinqFirstContactEventReceipt.updateMany({
           data: {
+            processingOwnerToken,
             status: "processing",
           },
           where: {
@@ -372,6 +423,7 @@ export async function recordHostedLinqFirstContactEventProcessing(input: {
         if (reclaimed.count === 1) {
           return {
             eventId: input.eventId,
+            processingOwnerToken,
             status: "processing",
             updatedAt: now,
           };
@@ -403,6 +455,23 @@ export function isHostedLinqFirstContactEventProcessingFresh(
     && receipt.updatedAt.getTime() >= buildHostedLinqFirstContactEventProcessingLeaseCutoff(now).getTime();
 }
 
+export async function assertHostedLinqFirstContactEventProcessingOwner(input: {
+  eventId: string;
+  prisma: HostedLinqFirstContactEventReceiptStore;
+  processingOwnerToken: string | null | undefined;
+}): Promise<HostedLinqFirstContactEventReceipt> {
+  const receipt = await readHostedLinqFirstContactEventReceipt({
+    eventId: input.eventId,
+    prisma: input.prisma,
+  });
+  if (receipt?.status === "processing" && receipt.processingOwnerToken === input.processingOwnerToken) {
+    return receipt;
+  }
+  throw buildHostedLinqFirstContactEventProcessingError({
+    eventId: input.eventId,
+  });
+}
+
 function buildHostedLinqFirstContactEventProcessingLeaseCutoff(now: Date): Date {
   return new Date(now.getTime() - HOSTED_LINQ_FIRST_CONTACT_EVENT_PROCESSING_LEASE_MS);
 }
@@ -426,10 +495,16 @@ export function buildHostedLinqFirstContactEventProcessingError(input: {
 export async function deleteHostedLinqFirstContactEventReceipt(input: {
   eventId: string;
   prisma: HostedLinqFirstContactEventReceiptStore;
+  processingOwnerToken?: string | null;
 }): Promise<void> {
   await input.prisma.hostedLinqFirstContactEventReceipt.deleteMany({
     where: {
       eventId: input.eventId,
+      ...(input.processingOwnerToken
+        ? {
+            processingOwnerToken: input.processingOwnerToken,
+          }
+        : {}),
     },
   });
 }
@@ -613,9 +688,14 @@ function parseHostedLinqFirstContactEventReceiptRecord(
 
   return {
     eventId: record.eventId,
+    processingOwnerToken: readString(record.processingOwnerToken),
     status: record.status === "processing" ? "processing" : "consumed",
     updatedAt: readHostedLinqFirstContactReceiptUpdatedAt(record.updatedAt),
   };
+}
+
+function buildHostedLinqFirstContactEventProcessingOwnerToken(): string {
+  return randomUUID();
 }
 
 function readHostedLinqFirstContactReceiptUpdatedAt(value: Date | string | null | undefined): Date {

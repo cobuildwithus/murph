@@ -121,7 +121,7 @@ type HostedLinqUsageGate = Awaited<ReturnType<typeof checkHostedAiUsageGate>>;
 export async function planHostedOnboardingLinqWebhook(input: {
   event: HostedLinqWebhookEvent;
   firstContactAdmitted?: boolean;
-  firstContactEventProcessingOwned?: boolean;
+  firstContactEventProcessingOwnerToken?: string | null;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
 }): Promise<HostedOnboardingLinqDirectPlan> {
@@ -150,14 +150,24 @@ export async function planHostedOnboardingLinqWebhook(input: {
     eventId: input.event.event_id,
     prisma: input.prisma,
   });
+  let firstContactEventProcessingOwnerToken = input.firstContactEventProcessingOwnerToken ?? null;
   if (existingFirstContactReceipt?.status === "processing") {
     if (
-      input.firstContactEventProcessingOwned !== true
+      (
+        !firstContactEventProcessingOwnerToken
+        || existingFirstContactReceipt.processingOwnerToken !== firstContactEventProcessingOwnerToken
+      )
       && isHostedLinqFirstContactEventProcessingFresh(existingFirstContactReceipt)
     ) {
       throw buildHostedLinqFirstContactEventProcessingError({
         eventId: input.event.event_id,
       });
+    }
+    if (
+      firstContactEventProcessingOwnerToken
+      && existingFirstContactReceipt.processingOwnerToken === firstContactEventProcessingOwnerToken
+    ) {
+      firstContactEventProcessingOwnerToken = existingFirstContactReceipt.processingOwnerToken;
     }
   }
   if (existingFirstContactReceipt?.status === "consumed") {
@@ -630,7 +640,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     }
   }
 
-  if (input.firstContactEventProcessingOwned !== true) {
+  if (!firstContactEventProcessingOwnerToken) {
     const firstContactEventReceipt = await recordHostedLinqFirstContactEventProcessing({
       eventId: input.event.event_id,
       prisma: input.prisma,
@@ -647,6 +657,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
         }),
       );
     }
+    if (!firstContactEventReceipt.processingOwnerToken) {
+      throw buildHostedLinqFirstContactEventProcessingError({
+        eventId: input.event.event_id,
+      });
+    }
+    firstContactEventProcessingOwnerToken = firstContactEventReceipt.processingOwnerToken;
   }
   const invite = await issueHostedInviteTx({
     channel: "linq",
@@ -662,6 +678,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       memberId: member.id,
       messageId: summary.messageId,
       occurredAt,
+      processingOwnerToken: firstContactEventProcessingOwnerToken,
       sourceEventId: input.event.event_id,
     }),
     buildHostedLinqWebhookPlannerDetails(input.event, context, {

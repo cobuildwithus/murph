@@ -81,6 +81,7 @@ describe("hosted Linq webhook transport", () => {
       inviteId: "invite-1",
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
+      processingOwnerToken: "owner-1",
       replyToMessageId: "message-1",
       sourceEventId: "event-1",
       template: "invite_signup",
@@ -90,6 +91,7 @@ describe("hosted Linq webhook transport", () => {
       inviteId: "invite-1",
       memberId: "member-1",
       occurredAt: "2026-03-26T23:59:59.000Z",
+      processingOwnerToken: "owner-2",
       replyToMessageId: "message-2",
       sourceEventId: "event-2",
       template: "invite_signup",
@@ -99,6 +101,7 @@ describe("hosted Linq webhook transport", () => {
       inviteId: "invite-1",
       memberId: "member-1",
       occurredAt: "2026-03-27T00:00:00.000Z",
+      processingOwnerToken: "owner-3",
       replyToMessageId: "message-3",
       sourceEventId: "event-3",
       template: "invite_signup",
@@ -584,10 +587,7 @@ describe("hosted Linq webhook transport", () => {
         }),
       },
       hostedLinqFirstContactEventReceipt: {
-        upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
-          ...create,
-          ...update,
-        })),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     };
     const effect = createHostedWebhookLinqMessageSideEffect({
@@ -595,6 +595,7 @@ describe("hosted Linq webhook transport", () => {
       inviteId: "invite-1",
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
+      processingOwnerToken: "owner-1",
       replyToMessageId: "message-1",
       sourceEventId: "event-1",
       template: "invite_signup",
@@ -613,16 +614,15 @@ describe("hosted Linq webhook transport", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
-    expect(prisma.hostedLinqFirstContactEventReceipt.upsert).toHaveBeenCalledWith({
-      create: {
-        eventId: "event-1",
-        status: "consumed",
-      },
-      update: {
+    expect(prisma.hostedLinqFirstContactEventReceipt.updateMany).toHaveBeenCalledWith({
+      data: {
+        processingOwnerToken: null,
         status: "consumed",
       },
       where: {
         eventId: "event-1",
+        processingOwnerToken: "owner-1",
+        status: "processing",
       },
     });
   });
@@ -639,7 +639,7 @@ describe("hosted Linq webhook transport", () => {
         }),
       },
       hostedLinqFirstContactEventReceipt: {
-        upsert: vi.fn(),
+        updateMany: vi.fn(),
       },
     };
     const effect = createHostedWebhookLinqMessageSideEffect({
@@ -647,6 +647,7 @@ describe("hosted Linq webhook transport", () => {
       inviteId: "invite-1",
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
+      processingOwnerToken: "owner-1",
       replyToMessageId: "message-1",
       sourceEventId: "event-1",
       template: "invite_signup",
@@ -663,7 +664,7 @@ describe("hosted Linq webhook transport", () => {
     });
 
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(prisma.hostedLinqFirstContactEventReceipt.upsert).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqFirstContactEventReceipt.updateMany).not.toHaveBeenCalled();
   });
 
   it("releases invite signup notice claims when delivery fails", async () => {
@@ -677,6 +678,12 @@ describe("hosted Linq webhook transport", () => {
       },
       hostedLinqFirstContactEventReceipt: {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue({
+          eventId: "event-1",
+          processingOwnerToken: "owner-1",
+          status: "processing",
+          updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+        }),
       },
     };
     const effect = createHostedWebhookLinqMessageSideEffect({
@@ -684,6 +691,7 @@ describe("hosted Linq webhook transport", () => {
       inviteId: "invite-1",
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
+      processingOwnerToken: "owner-1",
       replyToMessageId: "message-1",
       sourceEventId: "event-1",
       template: "invite_signup",
@@ -713,6 +721,7 @@ describe("hosted Linq webhook transport", () => {
     expect(prisma.hostedLinqFirstContactEventReceipt.deleteMany).toHaveBeenCalledWith({
       where: {
         eventId: "event-1",
+        processingOwnerToken: "owner-1",
       },
     });
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
@@ -732,6 +741,12 @@ describe("hosted Linq webhook transport", () => {
         },
         hostedLinqFirstContactEventReceipt: {
           deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+          findUnique: vi.fn().mockResolvedValue({
+            eventId: "event-1",
+            processingOwnerToken: "owner-1",
+            status: "processing",
+            updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+          }),
         },
       };
       const effect = createHostedWebhookLinqMessageSideEffect({
@@ -739,6 +754,7 @@ describe("hosted Linq webhook transport", () => {
         inviteId: "invite-1",
         memberId: "member-1",
         occurredAt: "2026-03-26T12:00:00.000Z",
+        processingOwnerToken: "owner-1",
         replyToMessageId: "message-1",
         sourceEventId: "event-1",
         template: "invite_signup",

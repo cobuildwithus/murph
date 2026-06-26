@@ -128,6 +128,7 @@ export function buildSignupLinkResponse(input: {
   memberId: string;
   messageId: string;
   occurredAt: string;
+  processingOwnerToken: string;
   sourceEventId: string;
 }): HostedOnboardingLinqDirectPlan {
   const joinUrl = buildHostedInviteUrl(input.inviteCode);
@@ -139,6 +140,7 @@ export function buildSignupLinkResponse(input: {
         inviteId: input.inviteId,
         memberId: input.memberId,
         occurredAt: input.occurredAt,
+        processingOwnerToken: input.processingOwnerToken,
         replyToMessageId: input.messageId,
         sourceEventId: input.sourceEventId,
         template: "invite_signup",
