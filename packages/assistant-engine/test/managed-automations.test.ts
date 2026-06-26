@@ -633,6 +633,56 @@ describe('applyMurphManagedAutomations', () => {
       }))
   })
 
+  it('does not overwrite a queued device activity occurrence payload', async () => {
+    const queuedSchedule = {
+      at: '2026-06-20T12:01:00.000Z',
+      kind: 'at' as const,
+    }
+    const queuedInstructions = [
+      'After my next workout, find one old finding.',
+      '',
+      'Device activity context:',
+      'Kind: workout',
+      'Occurred at: 2026-06-20T12:00:00.000Z',
+      'Source: whoop',
+    ].join('\n')
+    const queuedTags = [
+      'assistant',
+      'scheduled',
+      'murph-managed',
+      ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
+    ]
+    managedAutomationMocks.records.set(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID, {
+      automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      continuityPolicy: 'preserve',
+      instructions: queuedInstructions,
+      route: defaultRoute,
+      schedule: queuedSchedule,
+      slug: 'weekly-health-insight',
+      status: 'active',
+      summary: 'Old weekly insight.',
+      tags: queuedTags,
+      title: 'Weekly health insight',
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-20T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 3,
+      skipped: 1,
+      updated: 0,
+    })
+
+    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID))
+      .toEqual(expect.objectContaining({
+        instructions: queuedInstructions,
+        schedule: queuedSchedule,
+        tags: queuedTags,
+      }))
+  })
+
   it('spreads managed recurring schedules deterministically by vault id', async () => {
     await applyMurphManagedAutomations({
       defaultRoute,

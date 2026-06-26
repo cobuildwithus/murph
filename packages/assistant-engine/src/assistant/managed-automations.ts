@@ -472,6 +472,17 @@ export async function applyMurphManagedAutomations(
       continue
     }
 
+    if (
+      preserveExistingSchedule &&
+      existing.schedule.kind === 'at'
+    ) {
+      // Device-activity matching rewrites the reusable managed record into a
+      // due one-shot with occurrence-specific prompt context. Do not reconcile
+      // the weekly seed over that queued payload before the automation lane runs.
+      result.skipped += 1
+      continue
+    }
+
     if (!murphManagedAutomationSeedChanged(
       existing,
       seed,
