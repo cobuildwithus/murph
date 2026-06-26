@@ -8,6 +8,7 @@ import {
   releaseHostedAiUsageLimitNotice,
   type HostedAiUsageGateNoticeCode,
 } from "../hosted-execution/usage-allowance";
+import { sha256Hex } from "../primitives";
 import { hostedOnboardingError } from "./errors";
 import {
   markHostedLinqDeliveryAcceptedTx,
@@ -20,8 +21,8 @@ import {
   readHostedLinqSideEffectRecentInboundDecision,
 } from "./linq-egress-engagement";
 import { sanitizeHostedOnboardingLogString } from "./http";
-import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { buildHostedInviteUrl } from "./invite-service";
+import { normalizePhoneNumber } from "./phone";
 import {
   claimHostedLinqOnboardingLinkNotice,
   claimHostedLinqQuotaReplyNotice,
@@ -53,8 +54,8 @@ export type HostedLinqCurrentInboundReplyProof = {
 
 export type HostedLinqConversationHomeRedirectPayload = {
   chatId: string;
-  homeRecipientPhone: string | null;
-  memberId: string | null;
+  homeRecipientPhone: string;
+  memberId: string;
   replyToMessageId: string | null;
   template: "conversation_home_redirect";
 };
@@ -133,7 +134,7 @@ export type HostedLinqMessageSideEffect = {
 export type CreateHostedWebhookLinqMessageSideEffectInput =
   | {
       chatId: string;
-      homeRecipientPhone?: string | null;
+      homeRecipientPhone: string;
       memberId: string;
       replyToMessageId?: string | null;
       sourceEventId: string;
@@ -208,7 +209,37 @@ function buildHostedWebhookLinqMessageEffectId(
     });
   }
 
+  if (input.template === "conversation_home_redirect") {
+    return buildHostedLinqConversationHomeRedirectEffectId(input);
+  }
+
   return `linq-message:${input.sourceEventId}`;
+}
+
+// One redirect per wrong Linq chat + home line + member. If the member's home
+// line changes later, the new target hashes differently and is announced once.
+// Hashes normalized raw inputs directly; the contact-privacy lookup keys are
+// not stable across keyring rotation and would let a rotation re-send a duplicate.
+function buildHostedLinqConversationHomeRedirectEffectId(
+  input: Extract<
+    CreateHostedWebhookLinqMessageSideEffectInput,
+    { template: "conversation_home_redirect" }
+  >,
+): string {
+  const chatId = input.chatId.trim();
+  const homeRecipientPhone = normalizePhoneNumber(input.homeRecipientPhone);
+  const memberId = input.memberId.trim();
+
+  if (!chatId || !homeRecipientPhone || !memberId) {
+    return `linq-message:${input.sourceEventId}`;
+  }
+
+  const hash = sha256Hex(JSON.stringify({
+    chatId,
+    homeRecipientPhone,
+    memberId,
+  })).slice(0, 32);
+  return `linq-home-redirect:${hash}`;
 }
 
 export async function drainHostedLinqSideEffectsDirect(input: {
@@ -541,12 +572,12 @@ async function buildHostedLinqSideEffectMessage(
         seed: effect.effectId,
       });
     case "conversation_home_redirect": {
-      const homeRecipientPhone = await resolveHostedHomeRecipientPhone(effect.payload, prisma);
+      const homeRecipientPhone = normalizePhoneNumber(effect.payload.homeRecipientPhone);
 
       if (!homeRecipientPhone) {
         throw hostedOnboardingError({
           code: "LINQ_HOME_PHONE_REQUIRED",
-          message: `Hosted webhook side effect ${effect.effectId} requires a home recipient phone.`,
+          message: `Hosted webhook side effect ${effect.effectId} requires a valid home recipient phone.`,
           httpStatus: 500,
           retryable: false,
         });
@@ -565,24 +596,6 @@ async function buildHostedLinqSideEffectMessage(
         prisma,
       });
   }
-}
-
-async function resolveHostedHomeRecipientPhone(
-  payload: HostedLinqConversationHomeRedirectPayload,
-  prisma: HostedLinqTransportPersistenceClient,
-): Promise<string | null> {
-  if (payload.memberId) {
-    const routing = await readHostedMemberRoutingState({
-      memberId: payload.memberId,
-      prisma,
-    });
-
-    if (routing?.linqRecipientPhone) {
-      return routing.linqRecipientPhone;
-    }
-  }
-
-  return payload.homeRecipientPhone;
 }
 
 async function buildHostedInviteSideEffectMessage(input: {
@@ -666,7 +679,7 @@ function buildHostedWebhookLinqMessagePayload(
     case "conversation_home_redirect":
       return {
         chatId: input.chatId,
-        homeRecipientPhone: input.homeRecipientPhone ?? null,
+        homeRecipientPhone: input.homeRecipientPhone,
         memberId: input.memberId,
         replyToMessageId,
         template: input.template,
