@@ -36,7 +36,7 @@ import { resolveAssistantStatePaths } from './store/paths.js'
 
 export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA =
   'murph.assistant-context-snapshot'
-export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 1
+export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 2
 export const ASSISTANT_CONTEXT_SNAPSHOT_FILE_NAME = 'context-snapshot.json'
 
 export const ASSISTANT_CONTEXT_SNAPSHOT_DIRTY_DOMAINS = [

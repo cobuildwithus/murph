@@ -383,6 +383,68 @@ describe('assistant context snapshot', () => {
     }
   })
 
+  it('rebuilds existing pre-renderer snapshots so the active safety context lands on the next refresh', async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-context-snapshot-'))
+    const snapshotPath = resolveAssistantContextSnapshotPath(vaultRoot)
+
+    try {
+      await writeVaultDocument({
+        attributes: {
+          schemaVersion: CONTRACT_SCHEMA_VERSION.allergyFrontmatter,
+          docType: FRONTMATTER_DOC_TYPES.allergy,
+          allergyId: generateContractId(ID_PREFIXES.allergy),
+          slug: 'penicillin-allergy',
+          title: 'Penicillin allergy',
+          substance: 'Penicillin',
+          status: 'active',
+          criticality: 'high',
+        },
+        relativePath: `${VAULT_LAYOUT.allergiesDirectory}/penicillin-allergy.md`,
+        vaultRoot,
+      })
+
+      await mkdir(path.dirname(snapshotPath), { recursive: true })
+      await writeFile(
+        snapshotPath,
+        JSON.stringify({
+          schema: 'murph.assistant-context-snapshot',
+          schemaVersion: 1,
+          value: {
+            dirtySequence: 0,
+            lastCompleted: {
+              generatedAt: '2026-06-01T00:00:00.000Z',
+              includedDomains: ['experiments', 'blood_tests', 'health_context'],
+              promptBlock: 'Assistant context snapshot for navigation only:\n- Saved health context includes 1 allergy.',
+              sectionPresence: {
+                activeExperiments: false,
+                bloodTests: false,
+                healthContext: true,
+              },
+              sourceDirtySequence: 0,
+            },
+            lastRefreshAttempt: null,
+            pendingDirtyDomains: [],
+          },
+        }),
+        'utf8',
+      )
+
+      await expect(refreshAssistantContextSnapshot({
+        now: () => '2026-06-26T12:00:00.000Z',
+        vaultRoot,
+      })).resolves.toMatchObject({
+        refreshed: true,
+        skipped: false,
+      })
+
+      const promptText = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
+      expect(promptText).toContain('Active allergies:')
+      expect(promptText).toContain('Penicillin allergy')
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true })
+    }
+  })
+
   it('does not surface inactive conditions through active allergy or active regimen related-condition lookups', async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-context-snapshot-'))
     const resolvedConditionId = generateContractId(ID_PREFIXES.condition)
