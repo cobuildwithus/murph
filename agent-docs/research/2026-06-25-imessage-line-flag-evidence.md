@@ -44,6 +44,8 @@ role-based label such as `dominant account/line` or `flagged line` instead.
   - `hosted_ingress_latency_trace`
   - `hosted_linq_daily_state`
   - `hosted_mailbox_item`
+- Related OpenAI egress handoff:
+  - `docs/incidents/2026-06-25-hosted-openai-egress-401.md`
 
 ## Best-Practice Baseline
 
@@ -65,9 +67,12 @@ suspected or known flagged.
 ## High-Level Conclusion
 
 The evidence does not support the initial hypothesis of a Linq/iMessage `401`
-storm. The evidence does support a deliverability-risk incident caused by high
-provider activity, especially typing-indicator churn and outbound message
-volume, concentrated around the estimated flag time.
+storm. A separate OpenAI/Codex `401` storm did occur earlier in the incident
+window and produced scoped assistant reply failures, but the provider-facing
+Linq evidence does not show Linq `401` responses. The evidence does support a
+deliverability-risk incident caused by high Linq provider activity, especially
+typing-indicator churn and outbound message volume, concentrated around the
+estimated flag time.
 
 The most suspicious provider-visible behavior was:
 
@@ -91,10 +96,13 @@ All timestamps are UTC unless otherwise noted.
 | Time | Evidence |
 | --- | --- |
 | 2026-06-25 00:00-18:53 | DB outbox summaries recorded 90 successful Linq deliveries before the estimated flag time, plus 69 retryable Linq attempts. |
+| 2026-06-25 16:17-16:58 | Scoped runtime logs recorded 142 `ASSISTANT_CODEX_FAILED` reply failures and 142 Codex resume-failure diagnostics. This was OpenAI/Codex-side, not Linq-side. |
 | 2026-06-25 17:30-19:30 | Cloudflare logged 306 successful Linq typing starts, 102 successful typing/message stops/deletes, 80 successful Linq message sends, 53 successful message deletes, 4 attachment fetches, 4 message-delete 404s, 2 malformed typing 400s, 2 voice memo sends, 1 chat creation, and 1 reaction send. |
+| 2026-06-25 18:38 | Scoped runtime logs recorded an OpenAI `responses_compact` provider-egress diagnostic for `gpt-5.5`. |
 | 2026-06-25 18:30-19:15 | Cloudflare logged 143 successful typing starts, 17 successful typing stops, 26 successful message sends, 34 successful message deletes, and 3 attachment fetches. |
 | 2026-06-25 18:52-18:56 | Cloudflare logged 58 successful typing starts, 3 successful typing stops, 7 successful message sends, and 7 successful message deletes. This is the tightest spike around the estimated flag time. |
 | Approximately 2026-06-25 18:54 | Estimated Apple flag time if the 3:34 PM provider confirmation was Eastern time and "40 minutes ago" was exact. |
+| 2026-06-25 18:54 | Scoped runtime logs recorded another OpenAI `responses_compact` provider-egress diagnostic for `gpt-5.5`. This is not a Linq diagnostic. |
 | 2026-06-25 18:54-23:37 | DB outbox summaries recorded 14 successful Linq sends and 28 retryable Linq attempts after the estimated flag time. |
 | 2026-06-25 22:30-23:15 | Alternate Pacific-time interpretation was checked. Cloudflare did not show a comparable Linq provider-egress burst in this window. |
 
@@ -121,6 +129,21 @@ Full-day Linq `401` count:
 - No aggregation rows were returned for `details.responseStatus = 401`.
 - This was checked across the full UTC day, not just the incident window.
 - This weakens the `401 storm` hypothesis.
+
+OpenAI/Codex `401` evidence, 16:00-21:00 UTC:
+
+| Provider/method/status | Count | Interpretation |
+| --- | ---: | --- |
+| OpenAI `GET 401` | 600 | Worker refused/failed OpenAI egress authorization. |
+| OpenAI `POST 401` | 565 | Worker refused/failed OpenAI egress authorization. |
+| OpenAI total `401` | 1,165 | Confirms a real OpenAI/Codex-side `401` storm. |
+
+Interpretation:
+
+- The `401` storm was real, but it was not a Linq/iMessage auth storm.
+- This matches the scoped DB evidence where `ASSISTANT_CODEX_FAILED` reply
+  failures occurred before the estimated Apple flag time.
+- The related handoff file has the deeper OpenAI egress failure analysis.
 
 Broad incident window, 17:30-19:30 UTC:
 
@@ -155,6 +178,32 @@ Interpretation:
 - The provider did not see a Linq auth failure storm.
 
 ## Database Evidence
+
+### Runtime Failure Evidence
+
+For the dominant account/line, scoped `hosted_runtime_log` evidence from
+16:00-21:00 UTC included:
+
+| Event shape | Count | Window |
+| --- | ---: | --- |
+| `assistant.automation_detail`, info/no error | 5,995 | 16:03:10-20:58:11 |
+| `assistant.pass_finished` | 239 | 16:03-20:58 |
+| `mailbox.imported` | 462 | 16:03-20:58 |
+| `mailbox.appended` | 60 | 16:03-20:58 |
+| `outbox.delivery_finished`, info | 36 | 16:03-20:54 |
+| `outbox.delivery_finished`, warn | 24 | 16:03-20:50 |
+| `assistant.automation_detail` with `ASSISTANT_CODEX_FAILED` | 142 | 16:17:02-16:58:52 |
+| `runner.provider_egress_diagnostic` | 2 | 18:38:34 and 18:54:56 |
+
+The two scoped `runner.provider_egress_diagnostic` rows were OpenAI
+`responses_compact` requests for model `gpt-5.5`. They were not Linq egress
+diagnostics.
+
+`checkpoint.snapshot_failed` scoped rows in the same 16:00-21:00 UTC window:
+
+- 3 `authorization_error` rows from 16:14:06-18:13:37.
+- 7 `checkpoint_error` rows from 18:29:33-20:57:56.
+- 1 `runtime_error` row at 19:36:32.
 
 ### Outbox Delivery Summaries
 
