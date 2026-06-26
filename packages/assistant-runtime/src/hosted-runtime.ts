@@ -1686,7 +1686,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             nextWakeReason: accumulatedProjection.nextWakeReason,
           });
           const projectedRuntimeWakeAt =
-            !accumulatedProjection.projectedWakeRequiresCheckpoint
+            pendingDurableCheckpointEffects.length === 0
+              && !accumulatedProjection.projectedWakeRequiresCheckpoint
               && projectedRuntimeWakeKey !== servicedProjectedRuntimeWakeKey
               ? accumulatedProjection.nextWakeAt
               : null;

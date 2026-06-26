@@ -98,6 +98,10 @@
       "types": "./dist/runtime-control.d.ts",
       "default": "./dist/runtime-control.js"
     },
+    "./return-contact": {
+      "types": "./dist/return-contact.d.ts",
+      "default": "./dist/return-contact.js"
+    },
     "./side-effects": {
       "types": "./dist/side-effects.d.ts",
       "default": "./dist/side-effects.js"
