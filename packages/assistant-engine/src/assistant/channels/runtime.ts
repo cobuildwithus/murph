@@ -737,6 +737,9 @@ export async function startAssistantChannelActivitySession(input: {
   let maxSessionTimer: ReturnType<typeof setTimeout> | null = null
   let refreshFailure: unknown = null
   let refreshInFlight: Promise<void> | null = null
+  let manualRefreshDrain: Promise<void> | null = null
+  let manualRefreshRequestId = 0
+  let completedManualRefreshRequestId = 0
   let stopped = false
   let stopPromise: Promise<void> | null = null
 
@@ -751,7 +754,13 @@ export async function startAssistantChannelActivitySession(input: {
   return {
     refreshNow: async () => {
       clearRefreshTimer()
-      await runRefresh()
+      manualRefreshRequestId += 1
+      if (!manualRefreshDrain) {
+        manualRefreshDrain = drainManualRefreshes().finally(() => {
+          manualRefreshDrain = null
+        })
+      }
+      await manualRefreshDrain
       scheduleNextRefresh()
     },
     stop: stopActivity,
@@ -790,6 +799,27 @@ export async function startAssistantChannelActivitySession(input: {
     }
 
     await refreshInFlight
+  }
+
+  async function drainManualRefreshes(): Promise<void> {
+    while (
+      completedManualRefreshRequestId < manualRefreshRequestId &&
+      !stopped &&
+      !linkedStopSignal.signal.aborted &&
+      !refreshFailure
+    ) {
+      if (refreshInFlight) {
+        await refreshInFlight
+      }
+      if (stopped || linkedStopSignal.signal.aborted || refreshFailure) {
+        return
+      }
+
+      clearRefreshTimer()
+      const requestId = manualRefreshRequestId
+      await runRefresh()
+      completedManualRefreshRequestId = requestId
+    }
   }
 
   async function stopActivity(): Promise<void> {

@@ -4819,6 +4819,7 @@ test('sendAssistantMessageLocal exposes hosted progress and computer context for
 })
 
 test('sendAssistantMessageLocal routes hosted Linq model progress through progress delivery dependencies', async () => {
+  const refreshTyping = vi.fn(async () => undefined)
   const progressDeliveryDependencies = {
     sendLinq: vi.fn(async () => ({
       providerMessageId: 'progress-message',
@@ -4830,6 +4831,12 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
   const sharedPlan = createSharedPlan()
   sharedPlan.conversationPolicy.audience.channel = 'linq'
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      startTypingIndicator: vi.fn(async () => ({
+        refreshNow: refreshTyping,
+        stop: vi.fn(async () => undefined),
+      })),
+    },
     plan: {
       ...sharedPlan,
       persistUserPromptOnFailure: false,
@@ -4870,6 +4877,7 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
     mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.text,
     'Checking the iMessage thread.',
   )
+  expect(refreshTyping).toHaveBeenCalledTimes(1)
 })
 
 test('sendAssistantMessageLocal requires hosted Linq text delivery for model progress', async () => {

@@ -1399,6 +1399,47 @@ describe('assistant channels runtime seam', () => {
     await handle.stop()
   })
 
+  it('runs a trailing Linq typing refresh when an explicit activity refresh overlaps an in-flight refresh', async () => {
+    vi.useFakeTimers()
+    let resolveInFlightRefresh: () => void = () => {
+      throw new Error('in-flight refresh was not started')
+    }
+    runtimeMocks.startLinqChatTypingIndicator
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          resolveInFlightRefresh = resolve
+        })
+      })
+      .mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    vi.advanceTimersByTime(45_000)
+    await Promise.resolve()
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+
+    const explicitRefresh = handle.refreshNow?.()
+    await Promise.resolve()
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+
+    resolveInFlightRefresh()
+    await explicitRefresh
+
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
+    await handle.stop()
+  })
+
   it('stops the Linq typing indicator after the max session cap', async () => {
     vi.useFakeTimers()
     runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
