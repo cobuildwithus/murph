@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   environment: {
     linqFirstContactAdmissionMode: "enforce" as "enforce" | "off",
-    linqFirstContactAdmissionModel: "gpt-5.4-nano",
+    linqFirstContactAdmissionModel: "gpt-5.5",
     linqFirstContactAdmissionOpenAiApiKey: "test-openai-key" as string | null,
   },
 }));
@@ -32,7 +32,7 @@ describe("Linq first-contact admission", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mocks.environment.linqFirstContactAdmissionMode = "enforce";
-    mocks.environment.linqFirstContactAdmissionModel = "gpt-5.4-nano";
+    mocks.environment.linqFirstContactAdmissionModel = "gpt-5.5";
     mocks.environment.linqFirstContactAdmissionOpenAiApiKey = "test-openai-key";
   });
 
@@ -110,7 +110,7 @@ describe("Linq first-contact admission", () => {
       }),
     );
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
-      model: "gpt-5.4-nano",
+      model: "gpt-5.5",
       store: false,
       text: {
         format: {

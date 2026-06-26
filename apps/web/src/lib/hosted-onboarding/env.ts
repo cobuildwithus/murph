@@ -21,7 +21,7 @@ export interface HostedContactPrivacyKeyring {
 
 export type HostedLinqFirstContactAdmissionMode = "enforce" | "off";
 
-const DEFAULT_HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MODEL = "gpt-5.4-nano";
+const DEFAULT_HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MODEL = "gpt-5.5";
 
 export interface HostedOnboardingEnvironment {
   allowedMutationOrigins?: readonly string[];
@@ -371,7 +371,7 @@ function readHostedLinqFirstContactAdmissionMode(
 ): HostedLinqFirstContactAdmissionMode {
   const configured = readEnv(source, "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE");
   if (!configured) {
-    return "off";
+    return "enforce";
   }
 
   const normalized = configured.trim().toLowerCase();

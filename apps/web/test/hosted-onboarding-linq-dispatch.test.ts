@@ -47,7 +47,7 @@ const mocks = vi.hoisted(() => {
       linqApiToken: "linq-token",
       linqConversationPhoneNumbers: [],
       linqFirstContactAdmissionMode: "off" as "enforce" | "off",
-      linqFirstContactAdmissionModel: "gpt-5.4-nano",
+      linqFirstContactAdmissionModel: "gpt-5.5",
       linqFirstContactAdmissionOpenAiApiKey: "test-first-contact-openai-key",
       linqLocalAllowedInboundPhoneNumbers: undefined as readonly string[] | undefined,
       linqMaxActiveMembersPerConversationPhone: null,

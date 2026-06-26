@@ -340,6 +340,7 @@ function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
     ],
     max_output_tokens: 200,
     model: input.model,
+    reasoning: { effort: "low" },
     store: false,
     text: {
       format: {

@@ -26,7 +26,7 @@ function createHostedOnboardingEnvironment(
     linqApiToken: null,
     linqConversationPhoneNumbers: [],
     linqFirstContactAdmissionMode: "off",
-    linqFirstContactAdmissionModel: "gpt-5.4-nano",
+    linqFirstContactAdmissionModel: "gpt-5.5",
     linqFirstContactAdmissionOpenAiApiKey: null,
     linqMaxActiveMembersPerConversationPhone: 1000,
     linqWebhookSecret: null,
