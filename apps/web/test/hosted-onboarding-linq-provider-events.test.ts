@@ -124,6 +124,27 @@ describe("parseHostedLinqProviderEvent", () => {
     });
   });
 
+  it("does not let healthy reputation mask a flagged provider status", () => {
+    const parsed = parseHostedLinqProviderEvent({
+      event: buildGenericEvent({
+        createdAt: "2026-03-26T11:59:59.000Z",
+        data: {
+          changed_at: "2026-03-26T12:00:00.000Z",
+          new_reputation: "HEALTHY",
+          new_status: "FLAGGED",
+          phone_number: "+15550000000",
+        },
+        eventType: "phone_number.status_updated",
+      }),
+    });
+
+    expect(parsed).toMatchObject({
+      eventType: "phone_number.status_updated",
+      providerCreatedAt: new Date("2026-03-26T12:00:00.000Z"),
+      providerStatus: "FLAGGED",
+    });
+  });
+
   it("does not store participant phone lookup keys in the line FK column", () => {
     const parsed = parseHostedLinqProviderEvent({
       event: buildGenericEvent({

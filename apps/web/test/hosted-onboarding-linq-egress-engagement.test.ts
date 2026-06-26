@@ -37,10 +37,6 @@ describe("hosted Linq egress engagement", () => {
 
   it("projects real inbound Linq messages onto active and pending member routes", async () => {
     const prisma = {
-      hostedLinqConversationState: {
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        upsert: vi.fn().mockResolvedValue(undefined),
-      },
       hostedMemberRouting: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
@@ -54,8 +50,6 @@ describe("hosted Linq egress engagement", () => {
     });
 
     expect(prisma.hostedMemberRouting.updateMany).toHaveBeenCalledTimes(2);
-    expect(prisma.hostedLinqConversationState.upsert).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedLinqConversationState.updateMany).toHaveBeenCalledTimes(2);
     expect(prisma.hostedMemberRouting.updateMany).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({

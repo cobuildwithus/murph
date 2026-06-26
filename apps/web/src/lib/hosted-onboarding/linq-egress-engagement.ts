@@ -12,9 +12,6 @@ import {
 import {
   markHostedLinqDeliverySkippedTx,
 } from "./linq-delivery-store";
-import {
-  recordHostedLinqConversationInboundTx,
-} from "./linq-conversation-state";
 import type {
   HostedLinqMessagePayload,
 } from "./webhook-transport";
@@ -112,13 +109,6 @@ export async function recordHostedMemberLinqInboundEngagementTx(input: {
     },
   });
 
-  await recordHostedLinqConversationInboundTx({
-    chatId: input.chatId,
-    linePhoneNumber: input.linePhoneNumber,
-    memberId: input.memberId,
-    occurredAt,
-    prisma: input.prisma,
-  });
 }
 
 export async function recordHostedThreadRouteLinqInboundEngagementTx(input: {
@@ -154,13 +144,6 @@ export async function recordHostedThreadRouteLinqInboundEngagementTx(input: {
     },
   });
 
-  await recordHostedLinqConversationInboundTx({
-    chatId: input.chatId,
-    linePhoneNumberLookupKey: input.linePhoneNumberLookupKey,
-    memberId: input.memberId,
-    occurredAt,
-    prisma: input.prisma,
-  });
 }
 
 export async function readHostedLinqSideEffectRecentInboundDecision(input: {

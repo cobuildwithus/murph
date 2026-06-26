@@ -175,7 +175,7 @@ function parseGenericHostedLinqProviderEvent(input: {
     ["sender_handle", "service"],
     ["line", "service"],
   ] as const);
-  const providerStatus = readFirstStringAtPaths(data, [
+  const providerStatus = chooseMostSevereProviderStatus(readStringsAtPaths(data, [
     ["new_reputation"],
     ["new_reputation", "status"],
     ["new_health_status"],
@@ -185,7 +185,7 @@ function parseGenericHostedLinqProviderEvent(input: {
     ["phone_number", "status"],
     ["line", "status"],
     ["state"],
-  ] as const);
+  ] as const));
   const providerReason = readFirstStringAtPaths(data, [
     ["new_reputation", "doc_url"],
     ["new_health_status", "doc_url"],
@@ -362,6 +362,20 @@ function readFirstStringAtPaths(
   return null;
 }
 
+function readStringsAtPaths(
+  record: Record<string, unknown> | null,
+  paths: ReadonlyArray<readonly string[]>,
+): string[] {
+  const values: string[] = [];
+  for (const path of paths) {
+    const value = readStringAtPath(record, path);
+    if (value) {
+      values.push(value);
+    }
+  }
+  return values;
+}
+
 function readStringAtPath(record: Record<string, unknown> | null, path: readonly string[]): string | null {
   let value: unknown = record;
   for (const key of path) {
@@ -396,6 +410,37 @@ function normalizeSafeProviderToken(value: string | null): string | null {
 
 function normalizeProviderFreeText(value: string | null): string | null {
   return sanitizeHostedOnboardingPersistedErrorMessage(normalizeNullableString(value));
+}
+
+function chooseMostSevereProviderStatus(values: readonly string[]): string | null {
+  let selected: string | null = null;
+  let selectedRank = -1;
+  for (const value of values) {
+    const normalized = normalizeSafeProviderToken(value);
+    if (!normalized) {
+      continue;
+    }
+    const rank = rankHostedLinqProviderStatus(normalized);
+    if (rank > selectedRank) {
+      selected = normalized;
+      selectedRank = rank;
+    }
+  }
+  return selected;
+}
+
+function rankHostedLinqProviderStatus(value: string): number {
+  const normalized = value.trim().toLowerCase();
+  if (/critical|flagged|blocked|disabled|suspended|banned/u.test(normalized)) {
+    return 4;
+  }
+  if (/at_risk|at-risk|degraded|warning|limited|throttled/u.test(normalized)) {
+    return 3;
+  }
+  if (["active", "healthy", "ok", "ready"].includes(normalized)) {
+    return 2;
+  }
+  return 1;
 }
 
 function buildPayloadHash(rawBody: string | null | undefined, event: HostedLinqWebhookEvent): string | null {

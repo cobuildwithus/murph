@@ -321,6 +321,43 @@ describe("hosted Linq observability stores", () => {
     expect(updateInput?.data).not.toHaveProperty("egressPolicy");
   });
 
+  it("lets flagged status dominate healthy reputation in line projection", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        changed_at: "2026-03-26T12:00:00.000Z",
+        new_reputation: "HEALTHY",
+        new_status: "FLAGGED",
+        phone_number: "+15550000000",
+      },
+      eventId: "evt_status_flagged",
+      eventType: "phone_number.status_updated",
+    }));
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventId: "evt_status_flagged",
+          providerStatus: "FLAGGED",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          egressPolicy: "disabled",
+          healthStatus: "unhealthy",
+          providerStatus: "FLAGGED",
+        }),
+      }),
+    );
+  });
+
   it("guards line status projection against stale status webhooks", async () => {
     const fixture = createObservabilityPrismaFixture();
     const event = requireParsedProviderEvent(buildProviderEvent({

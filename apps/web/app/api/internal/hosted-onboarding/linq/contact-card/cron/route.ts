@@ -8,13 +8,17 @@ export const GET = withJsonError(async (request: Request) => {
   requireVercelCronRequest(request);
 
   const prisma = getPrisma();
-  const result = await reconcileHostedLinqContactCards({
-    prisma,
-    signal: request.signal,
-  });
-  await sendRecoverableHostedLinqAlertsBestEffort({
-    prisma,
-  });
+  let result;
+  try {
+    result = await reconcileHostedLinqContactCards({
+      prisma,
+      signal: request.signal,
+    });
+  } finally {
+    await sendRecoverableHostedLinqAlertsBestEffort({
+      prisma,
+    });
+  }
 
   return jsonOk({
     linqContactCards: result,
