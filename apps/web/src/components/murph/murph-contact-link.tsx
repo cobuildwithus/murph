@@ -26,17 +26,18 @@ export const MurphContactLink = forwardRef<HTMLAnchorElement, MurphContactLinkPr
     option,
     ...props
   }, ref) {
-    const opensInNewTab = option.target === "_blank";
+    const link = resolveMurphContactLink(option);
+    const opensInNewTab = link.target === "_blank";
 
     return (
       <a
         {...props}
         ref={ref}
         className={className}
-        href={option.href}
-        target={option.target}
-        rel={option.rel}
-        aria-label={`${actionLabel} in ${option.label}${
+        href={link.href}
+        target={link.target}
+        rel={link.rel}
+        aria-label={`${actionLabel} in ${link.label}${
           opensInNewTab ? " (opens in a new tab)" : ""
         }`}
       >
@@ -46,3 +47,26 @@ export const MurphContactLink = forwardRef<HTMLAnchorElement, MurphContactLinkPr
     );
   },
 );
+
+function resolveMurphContactLink(option: MurphContactOption): {
+  href: string;
+  label: string;
+  rel?: string;
+  target?: string;
+} {
+  if (option.kind === "email" && option.webmail) {
+    return {
+      href: option.webmail.href,
+      label: option.webmail.label,
+      rel: "noopener noreferrer",
+      target: "_blank",
+    };
+  }
+
+  return {
+    href: option.href,
+    label: option.label,
+    rel: option.rel,
+    target: option.target,
+  };
+}
