@@ -522,7 +522,10 @@ export async function sendAssistantMessageLocal(
               messageInput: input,
               onDeliveredSession: (session) => {
                 progressDeliveredSessionRef.value = session
-                currentSession = session
+                currentSession = applyAssistantProgressDeliveredSession({
+                  progressDeliveredSession: session,
+                  session: currentSession,
+                })
               },
               session: resolved.session,
               sharedPlan,
