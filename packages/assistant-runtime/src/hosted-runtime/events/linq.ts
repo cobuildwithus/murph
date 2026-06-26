@@ -1,4 +1,7 @@
 import type { LinqAttachmentDownloadDriver as HostedConversationLinqAttachmentDownloadDriver } from "@murphai/inboxd/connectors/hosted-conversation";
+import {
+  buildHostedExecutionSafeErrorDiagnostics,
+} from "@murphai/hosted-execution";
 import type { HostedRuntimeRedactedJson } from "@murphai/hosted-execution/runtime-control";
 
 import type { NormalizedHostedAssistantRuntimeConfig } from "../models.ts";
@@ -45,6 +48,14 @@ interface HostedLinqAttachmentDownloadAttemptLog {
   directLocatorAllowed?: boolean | null;
   directLocatorPresent?: boolean | null;
   downloadStatus?: number | null;
+  errorCause?: string | null;
+  errorCodeDetail?: string | null;
+  errorDetail?: string | null;
+  errorDetailPresent?: boolean | null;
+  errorMessage?: string | null;
+  errorName?: string | null;
+  errorRetryable?: boolean | null;
+  errorStatus?: number | null;
   failureCode?: string | null;
   metadataByteFetchAttempted?: boolean | null;
   metadataByteFetchSucceeded?: boolean | null;
@@ -136,7 +147,7 @@ export function createHostedLinqAttachmentDownloadDriver(
       } catch (error) {
         const failure = classifyHostedLinqAttachmentDownloadError(error);
         await writeHostedLinqAttachmentDownloadAttemptLog({
-          attempt: {
+          attempt: appendHostedLinqAttachmentDownloadErrorDiagnostics({
             cdnBaseKind: resolveHostedLinqAttachmentCdnBaseKind(env),
             directFetchAttempted: true,
             directFetchSucceeded: false,
@@ -146,7 +157,7 @@ export function createHostedLinqAttachmentDownloadDriver(
             failureCode: failure.code,
             operation: "downloadUrl",
             result: "failed",
-          },
+          }, error, shouldRetryHostedLinqAttachmentDownloadError(error, signal)),
           platform,
         });
         throw error;
@@ -273,11 +284,11 @@ async function downloadHostedLinqAttachmentPart(input: {
   } catch (error) {
     const failure = classifyHostedLinqAttachmentDownloadError(error);
     await writeHostedLinqAttachmentDownloadAttemptLog({
-      attempt: {
+      attempt: appendHostedLinqAttachmentDownloadErrorDiagnostics({
         ...baseAttempt,
         failureCode: failure.code,
         result: "failed",
-      },
+      }, error, false),
       platform: input.platform,
     });
     throw error;
@@ -350,7 +361,7 @@ async function downloadHostedLinqAttachmentPart(input: {
   } catch (error) {
     const failure = classifyHostedLinqAttachmentDownloadError(error);
     await writeHostedLinqAttachmentDownloadAttemptLog({
-      attempt: {
+      attempt: appendHostedLinqAttachmentDownloadErrorDiagnostics({
         ...baseAttempt,
         directFetchAttempted: Boolean(directUrl),
         directFetchSucceeded: false,
@@ -362,7 +373,7 @@ async function downloadHostedLinqAttachmentPart(input: {
         metadataLookupAttempted: true,
         metadataStatus: failure.status,
         result: "failed",
-      },
+      }, error, shouldRetryHostedLinqAttachmentDownloadError(error, input.signal)),
       platform: input.platform,
     });
     throw error;
@@ -424,7 +435,7 @@ async function downloadHostedLinqAttachmentPart(input: {
   } catch (error) {
     const failure = classifyHostedLinqAttachmentDownloadError(error);
     await writeHostedLinqAttachmentDownloadAttemptLog({
-      attempt: {
+      attempt: appendHostedLinqAttachmentDownloadErrorDiagnostics({
         ...baseAttempt,
         directFetchAttempted: Boolean(directUrl),
         directFetchSucceeded: false,
@@ -438,7 +449,7 @@ async function downloadHostedLinqAttachmentPart(input: {
         metadataLookupAttempted: true,
         metadataStatus: metadataResult.status,
         result: "failed",
-      },
+      }, error, shouldRetryHostedLinqAttachmentDownloadError(error, input.signal)),
       platform: input.platform,
     });
     throw error;
@@ -632,13 +643,52 @@ async function waitHostedLinqAttachmentDownloadRetryDelay(
   });
 }
 
+function appendHostedLinqAttachmentDownloadErrorDiagnostics(
+  attempt: HostedLinqAttachmentDownloadAttemptLog,
+  error: unknown,
+  retryable: boolean,
+): HostedLinqAttachmentDownloadAttemptLog {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  if (!diagnostics) {
+    return {
+      ...attempt,
+      errorRetryable: retryable,
+    };
+  }
+
+  return {
+    ...attempt,
+    errorCause: readHostedLinqAttachmentDiagnosticString(diagnostics.errorCause),
+    errorCodeDetail: readHostedLinqAttachmentDiagnosticString(diagnostics.errorCodeDetail),
+    errorDetail: readHostedLinqAttachmentDiagnosticString(diagnostics.errorDetail),
+    errorDetailPresent: typeof diagnostics.errorDetail === "string",
+    errorMessage: readHostedLinqAttachmentDiagnosticString(diagnostics.errorMessage),
+    errorName: readHostedLinqAttachmentDiagnosticString(diagnostics.errorName),
+    errorRetryable: retryable,
+    errorStatus: readHostedLinqAttachmentDiagnosticNumber(diagnostics.errorStatus),
+  };
+}
+
+function readHostedLinqAttachmentDiagnosticString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value
+    : null;
+}
+
+function readHostedLinqAttachmentDiagnosticNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : null;
+}
+
 class HostedLinqAttachmentDownloadError extends Error {
   constructor(
     readonly code: string,
     message: string,
     readonly status: number | null = null,
+    options?: { cause?: unknown },
   ) {
-    super(message);
+    super(message, options);
     this.name = "HostedLinqAttachmentDownloadError";
   }
 }
@@ -716,7 +766,9 @@ async function fetchHostedLinqAttachmentDownloadUrl(input: {
   signal?: AbortSignal;
 }): Promise<HostedLinqAttachmentMetadataLookupResult> {
   const controller = new AbortController();
+  let timedOut = false;
   const timeout = setTimeout(() => {
+    timedOut = true;
     controller.abort();
   }, HOSTED_LINQ_ATTACHMENT_METADATA_TIMEOUT_MS);
   const releaseRelay = input.signal ? relayAbortSignal(input.signal, controller) : () => {};
@@ -762,12 +814,26 @@ async function fetchHostedLinqAttachmentDownloadUrl(input: {
       throw error;
     }
     if (
+      timedOut
+      && !input.signal?.aborted
+      && isAbortLikeHostedLinqAttachmentError(error)
+    ) {
+      throw new HostedLinqAttachmentDownloadError(
+        "metadata_timeout",
+        "Hosted Linq attachment metadata lookup timed out.",
+        408,
+        { cause: error },
+      );
+    }
+    if (
       !isAbortLikeHostedLinqAttachmentError(error)
       && isHostedLinqTransientTransportError(error)
     ) {
       throw new HostedLinqAttachmentDownloadError(
         "metadata_fetch_failed",
         "Hosted Linq attachment metadata lookup failed.",
+        null,
+        { cause: error },
       );
     }
 

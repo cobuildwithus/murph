@@ -461,6 +461,9 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       directLocatorAllowed: false,
       directLocatorPresent: true,
       failureCode: "metadata_fetch_failed",
+      errorCause: "fetch failed",
+      errorDetailPresent: true,
+      errorRetryable: true,
       metadataLocatorAllowed: false,
       metadataLocatorPresent: false,
       metadataLookupAttempted: true,
@@ -876,6 +879,79 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     expect(publicInternetFetch).toHaveBeenCalledTimes(1);
     expect(capture.attachments).toHaveLength(1);
     expect(capture.attachments[0]?.data).toEqual(Uint8Array.from([9, 8, 7]));
+    expect(capture.attachments[0]?.kind).toBe("audio");
+  });
+
+  it("retries hosted voice memo metadata timeout before degrading to descriptor-only capture", async () => {
+    vi.useFakeTimers();
+    process.env.LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
+    process.env.LINQ_API_TOKEN = "linq-token";
+
+    const providerFetch = vi.fn<typeof fetch>((input, init) => {
+      assert.equal(
+        String(input),
+        "https://api.linqapp.com/api/partner/v3/attachments/att_voice_timeout",
+      );
+      if (providerFetch.mock.calls.length === 1) {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      }
+
+      return Promise.resolve(new Response(JSON.stringify({
+        download_url: "https://cdn.linqapp.com/files/voice-timeout.m4a",
+      }), {
+        headers: {
+          "content-type": "application/json",
+        },
+        status: 200,
+      }));
+    });
+    const publicInternetFetch = vi.fn<typeof fetch>(async (input) => {
+      assert.equal(String(input), "https://cdn.linqapp.com/files/voice-timeout.m4a");
+      return new Response(Uint8Array.from([7, 8, 9]), { status: 200 });
+    });
+    const driver = createHostedLinqAttachmentDownloadDriver({
+      platform: {
+        providerFetch,
+        publicInternetFetch,
+      },
+    });
+    const retrying = withHostedLinqAttachmentDownloadRetry(driver, {
+      retryDelaysMs: [0],
+    });
+
+    const capturePromise = normalizeHostedLinqConversationCapture({
+      accountId: "hbidx:phone:v1:test",
+      attachmentDownloadTimeoutMs: HOSTED_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
+      downloadDriver: retrying,
+      linqMessage: {
+        chatId: "chat_voice",
+        from: "+15551234567",
+        isFromMe: false,
+        messageId: "msg_voice_metadata_timeout",
+        parts: [
+          {
+            attachmentId: "att_voice_timeout",
+            mimeType: "audio/m4a",
+            type: "voice_memo",
+          },
+        ],
+      },
+      occurredAt: "2026-04-23T06:17:45.000Z",
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    const capture = await capturePromise;
+
+    expect(providerFetch).toHaveBeenCalledTimes(2);
+    expect(publicInternetFetch).toHaveBeenCalledTimes(1);
+    expect(capture.attachments).toHaveLength(1);
+    expect(capture.attachments[0]?.data).toEqual(Uint8Array.from([7, 8, 9]));
     expect(capture.attachments[0]?.kind).toBe("audio");
   });
 

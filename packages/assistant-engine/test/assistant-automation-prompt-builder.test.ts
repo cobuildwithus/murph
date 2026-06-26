@@ -1551,7 +1551,10 @@ describe('prepareAssistantAutoReplyInput', () => {
     const result = await prepareAssistantAutoReplyInput(
       [
         createPromptInput({
-          attachments: [createAttachment()],
+          attachmentEvidence: createRawZipAttachmentEvidence({
+            parseState: null,
+            rawPath: 'raw/inbox/capture-1/attachments/private.zip',
+          }),
           captureOverrides: {
             text: 'Please review the attachment.',
           },
@@ -1566,6 +1569,10 @@ describe('prepareAssistantAutoReplyInput', () => {
       throw new Error('Expected a ready prepared input.')
     }
     expect(result.prompt).toContain('Message text:\nPlease review the attachment.')
+    expect(result.prompt).toContain('content: unavailable')
+    expect(result.prompt).toContain('Attachment contents are unavailable in this turn.')
+    expect(result.prompt).not.toContain('raw/inbox/capture-1/attachments/private.zip')
+    expect(result.prompt).not.toContain('rawPath: raw/inbox/')
     expect(onEvent).toHaveBeenCalledWith({
       type: 'input.reply-progress',
       inputId: 'event-1',

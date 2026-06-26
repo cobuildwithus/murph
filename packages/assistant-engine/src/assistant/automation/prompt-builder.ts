@@ -350,7 +350,14 @@ function buildAssistantAutoReplyAttachmentSections(input: {
   renderedAttachmentSections: readonly string[]
 }): string[] {
   if (input.lifecycleSection) {
-    return [input.lifecycleSection, ...input.renderedAttachmentSections]
+    const sections = [input.lifecycleSection, ...input.renderedAttachmentSections]
+    if (
+      input.renderedAttachmentSections.length === 0 &&
+      input.lifecycleSection.includes('content: unavailable')
+    ) {
+      sections.push(ATTACHMENT_CONTENT_UNAVAILABLE_INSTRUCTION)
+    }
+    return sections
   }
 
   return [...input.renderedAttachmentSections]
@@ -782,7 +789,7 @@ function resolveLifecycleRawAttachmentPath(input: {
   attachment: AssistantInputAttachmentEvidenceItem
   rawPathByOrdinal: ReadonlyMap<number, string | null> | null
 }): string | null {
-  if (input.rawPathByOrdinal?.has(input.attachment.ordinal)) {
+  if (input.rawPathByOrdinal !== null) {
     return input.rawPathByOrdinal.get(input.attachment.ordinal) ?? null
   }
 
