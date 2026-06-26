@@ -51,6 +51,7 @@ Constraints:
 
 - ground every finding in the actual PR diff and surrounding code, not generic best practices
 - if you cannot read the PR diff or the touched files through either the connected repository or attached zip files, say so explicitly and stop; do not review from memory or from the PR description alone
+- if you see a ChatGPT rate-limit message, do not assume the review failed immediately; a rate-limit dialog can be overlaid on top of an otherwise active chat, so inspect whether the underlying thread still has accessible PR context or a completed response before reporting context failure
 - rank findings by importance: critical/high production bugs first, then complexity collapse opportunities
 - do not report style, naming, or formatting nits unless they hide a real high-impact problem
 
