@@ -4608,6 +4608,47 @@ test("Junction sleep_cycle normalizer vectorizes parallel offset stage arrays", 
   assert.equal(new Set(samples.map((sample) => sample.externalRef?.resourceId)).size, 4);
 });
 
+test("Junction sleep_cycle direct intervals use timezone for local sleep-stage day", () => {
+  const payload = normalizeJunctionSnapshot(
+    {
+      importedAt: "2026-01-02T12:00:00.000Z",
+      summaries: {
+        sleep_cycle: [
+          {
+            id: "sleep-cycle-parent-zone-1",
+            source_provider: "whoop",
+            source_type: "wearable",
+            time_zone: "America/New_York",
+            stages: [{
+              start: "2026-01-02T04:30:00.000Z",
+              end: "2026-01-02T05:00:00.000Z",
+              stage: "light",
+            }],
+          },
+          {
+            id: "sleep-cycle-default-zone-1",
+            source_provider: "garmin",
+            source_type: "watch",
+            stages: [{
+              start: "2026-01-02T04:30:00.000Z",
+              end: "2026-01-02T05:00:00.000Z",
+              stage: "deep",
+            }],
+          },
+        ],
+      },
+    },
+    { defaultTimeZone: "America/New_York" },
+  );
+  const samples = payload.samples ?? [];
+
+  assert.equal(samples.length, 2);
+  assert.deepEqual(samples.map((sample) => sample.sample.stage), ["light", "deep"]);
+  assert.deepEqual(samples.map((sample) => sample.dayKey), ["2026-01-01", "2026-01-01"]);
+  assert.equal(samples[0]?.timeZone, "America/New_York");
+  assert.equal(samples[1]?.timeZone, undefined);
+});
+
 test("Junction hypnogram alias emits canonical sleep-stage records", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",

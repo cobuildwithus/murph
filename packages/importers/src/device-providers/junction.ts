@@ -1756,7 +1756,7 @@ function pushSleepCycle(
     const stageTimestamp = withTimestampOverride(intervalTimestamp, {
       occurredAt: resolvedStartAt,
       recordedAt: intervalTimestamp.recordedAt ?? parentTimestamp.recordedAt ?? resolvedStartAt,
-      dayKey: resolveSleepStageDayKey(intervalEntry, resolvedStartAt) ??
+      dayKey: resolveSleepStageDayKey(intervalEntry, entry, resolvedStartAt, context.defaultTimeZone) ??
         intervalTimestamp.dayKey ??
         parentTimestamp.dayKey,
       observedAtRaw: stringId(startAtRaw) ?? intervalTimestamp.observedAtRaw ?? parentTimestamp.observedAtRaw ?? resolvedStartAt,
@@ -1786,8 +1786,24 @@ function pushSleepCycle(
   }
 }
 
-function resolveSleepStageDayKey(intervalEntry: PlainObject, resolvedStartAt: string): string | undefined {
+function resolveSleepStageDayKey(
+  intervalEntry: PlainObject,
+  parentEntry: PlainObject,
+  resolvedStartAt: string,
+  defaultTimeZone: string | undefined,
+): string | undefined {
+  const explicitTimeZone = firstStringFromPaths(intervalEntry, ["timeZone", "timezone", "time_zone"])
+    ?? firstStringFromPaths(parentEntry, ["timeZone", "timezone", "time_zone"]);
+  // Samples do not yet have event-style legacyExternalRefs, so offset-only
+  // sleep-stage rows keep their historic UTC-day identity for stable replay.
+  const hasOffsetOnlyEvidence = !explicitTimeZone && (
+    readJunctionTimeZoneOffsetSeconds(intervalEntry) !== undefined ||
+    readJunctionTimeZoneOffsetSeconds(parentEntry) !== undefined
+  );
+  const timeZone = explicitTimeZone ?? (hasOffsetOnlyEvidence ? undefined : defaultTimeZone);
+
   return firstIsoDateFromPaths(intervalEntry, JUNCTION_LOCAL_CALENDAR_DATE_PATHS) ??
+    resolveVaultLocalDayKey(resolvedStartAt, timeZone) ??
     extractIsoDatePrefix(resolvedStartAt) ??
     undefined;
 }
