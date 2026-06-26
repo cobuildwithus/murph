@@ -198,7 +198,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
     readHostedLinqDailyState: mocks.readHostedLinqDailyState,
     releaseHostedLinqOnboardingLinkNoticeClaim: mocks.releaseHostedLinqOnboardingLinkNoticeClaim,
     releaseHostedLinqQuotaReplyNoticeClaim: mocks.releaseHostedLinqQuotaReplyNoticeClaim,
-    resolveHostedLinqDayUtc: vi.fn(),
   };
 });
 
@@ -2063,6 +2062,7 @@ https://join.example.test/join/code_first_text`);
       memberId: "member_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
+      sentAt: expect.any(Date),
     });
     expect(mocks.claimHostedLinqOnboardingLinkNotice.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
@@ -2512,6 +2512,7 @@ https://join.example.test/join/code_first_text`);
       memberId: "member_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
+      sentAt: expect.any(Date),
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2981,6 +2982,7 @@ https://join.example.test/join/code_first_text`);
       memberId: "member_classifier_unavailable",
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
+      sentAt: expect.any(Date),
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4012,6 +4014,7 @@ https://join.example.test/join/code_first_text`);
         memberId: "member_123",
         occurredAt: "2026-03-26T12:00:00.000Z",
         prisma,
+        sentAt: expect.any(Date),
       });
       expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -5644,6 +5647,7 @@ https://join.example.test/join/code_first_text`);
       memberId: "member_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
+      sentAt: expect.any(Date),
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();

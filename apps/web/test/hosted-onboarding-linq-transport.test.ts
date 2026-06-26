@@ -25,6 +25,15 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   claimHostedLinqQuotaReplyNotice: vi.fn().mockResolvedValue(true),
   releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn().mockResolvedValue(undefined),
   releaseHostedLinqQuotaReplyNoticeClaim: vi.fn().mockResolvedValue(undefined),
+  resolveHostedLinqDayUtc: vi.fn((value: Date | string) => {
+    const occurredAt = value instanceof Date ? value : new Date(value);
+
+    return new Date(Date.UTC(
+      occurredAt.getUTCFullYear(),
+      occurredAt.getUTCMonth(),
+      occurredAt.getUTCDate(),
+    ));
+  }),
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
@@ -62,6 +71,40 @@ import {
 describe("hosted Linq webhook transport", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("keys signup-link side effects by member, UTC day, and invite", () => {
+    const firstEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-1",
+      template: "invite_signup",
+    });
+    const sameDayEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T23:59:59.000Z",
+      replyToMessageId: "message-2",
+      sourceEventId: "event-2",
+      template: "invite_signup",
+    });
+    const nextDayEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-27T00:00:00.000Z",
+      replyToMessageId: "message-3",
+      sourceEventId: "event-3",
+      template: "invite_signup",
+    });
+
+    expect(firstEffect.effectId).toBe("linq-invite-signup:member-1:2026-03-26:invite-1");
+    expect(sameDayEffect.effectId).toBe(firstEffect.effectId);
+    expect(nextDayEffect.effectId).toBe("linq-invite-signup:member-1:2026-03-27:invite-1");
   });
 
   it("uses the stored redirect phone fallback when current routing is unavailable", async () => {
@@ -608,11 +651,15 @@ describe("hosted Linq webhook transport", () => {
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
+      sentAt: expect.any(Date),
     });
+    const claimSentAt = vi.mocked(claimHostedLinqOnboardingLinkNotice).mock.calls[0]?.[0]?.sentAt;
+    expect(claimSentAt).toBeInstanceOf(Date);
     expect(releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalledWith({
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
+      sentAt: claimSentAt,
     });
     expect(prisma.hostedLinqFirstContactEventReceipt.deleteMany).toHaveBeenCalledWith({
       where: {
@@ -659,6 +706,7 @@ describe("hosted Linq webhook transport", () => {
         memberId: "member-1",
         occurredAt: "2026-03-26T12:00:00.000Z",
         prisma,
+        sentAt: vi.mocked(claimHostedLinqOnboardingLinkNotice).mock.calls[0]?.[0]?.sentAt,
       });
       expect(prisma.hostedLinqFirstContactEventReceipt.deleteMany).not.toHaveBeenCalled();
       expect(prisma.hostedInvite.update).not.toHaveBeenCalled();

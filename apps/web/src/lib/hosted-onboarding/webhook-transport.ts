@@ -17,6 +17,7 @@ import {
   claimHostedLinqQuotaReplyNotice,
   releaseHostedLinqOnboardingLinkNoticeClaim,
   releaseHostedLinqQuotaReplyNoticeClaim,
+  resolveHostedLinqDayUtc,
 } from "./linq-daily-state";
 import {
   buildHostedLinqFirstContactEventProcessingError,
@@ -120,6 +121,15 @@ export type HostedLinqMessageSideEffect = {
   payload: HostedLinqMessagePayload;
 };
 
+type HostedLinqNoticeClaimResult =
+  | {
+      claimed: false;
+    }
+  | {
+      claimed: true;
+      onboardingLinkClaimSentAt?: Date;
+    };
+
 export type CreateHostedWebhookLinqMessageSideEffectInput =
   | {
       chatId: string;
@@ -187,7 +197,8 @@ function buildHostedWebhookLinqMessageEffectId(
   input: CreateHostedWebhookLinqMessageSideEffectInput,
 ): string {
   if (input.template === "invite_signup") {
-    return `linq-invite-signup:${input.inviteId}`;
+    const dayUtc = resolveHostedLinqDayUtc(input.occurredAt).toISOString().slice(0, 10);
+    return `linq-invite-signup:${input.memberId}:${dayUtc}:${input.inviteId}`;
   }
 
   if (input.template === "ai_usage_quota" && input.claimToken) {
@@ -207,8 +218,8 @@ export async function drainHostedLinqSideEffectsDirect(input: {
   signal?: AbortSignal;
 }): Promise<void> {
   for (const effect of input.sideEffects) {
-    const noticeClaimed = await claimHostedLinqNoticeForSideEffect(effect, input.prisma);
-    if (!noticeClaimed) {
+    const noticeClaim = await claimHostedLinqNoticeForSideEffect(effect, input.prisma);
+    if (!noticeClaim.claimed) {
       await recordSkippedHostedLinqInviteSignupSideEffectConsumed(effect, input.prisma);
       continue;
     }
@@ -221,7 +232,7 @@ export async function drainHostedLinqSideEffectsDirect(input: {
       await recordDeliveredHostedLinqInviteSignupSideEffectConsumed(effect, input.prisma);
 
     } catch (error) {
-      await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
+      await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma, noticeClaim);
       await deleteHostedLinqInviteSignupSideEffectReceipt(effect, input.prisma);
       throw error;
     }
@@ -606,40 +617,51 @@ function buildHostedLinqAiUsageQuotaPayload(
 async function claimHostedLinqNoticeForSideEffect(
   effect: HostedLinqMessageSideEffect,
   prisma: HostedLinqTransportPersistenceClient,
-): Promise<boolean> {
+): Promise<HostedLinqNoticeClaimResult> {
   switch (effect.payload.template) {
-    case "invite_signup":
-      return claimHostedLinqOnboardingLinkNotice({
+    case "invite_signup": {
+      const sentAt = new Date();
+      const claimed = await claimHostedLinqOnboardingLinkNotice({
         memberId: effect.payload.memberId,
         occurredAt: effect.payload.occurredAt,
         prisma,
+        sentAt,
       });
+      return claimed ? { claimed: true, onboardingLinkClaimSentAt: sentAt } : { claimed: false };
+    }
     case "invite_signin":
-      return true;
+      return { claimed: true };
     case "ai_usage_quota":
-      return true;
-    case "daily_quota":
-      return claimHostedLinqQuotaReplyNotice({
+      return { claimed: true };
+    case "daily_quota": {
+      const claimed = await claimHostedLinqQuotaReplyNotice({
         memberId: effect.payload.memberId,
         occurredAt: effect.payload.occurredAt,
         prisma,
       });
+      return claimed ? { claimed: true } : { claimed: false };
+    }
     case "conversation_home_redirect":
-      return true;
+      return { claimed: true };
   }
 }
 
 async function releaseHostedLinqNoticeClaimForSideEffect(
   effect: HostedLinqMessageSideEffect,
   prisma: HostedLinqTransportPersistenceClient,
+  claim: Extract<HostedLinqNoticeClaimResult, { claimed: true }>,
 ): Promise<void> {
   try {
     switch (effect.payload.template) {
       case "invite_signup":
+        if (!claim.onboardingLinkClaimSentAt) {
+          throw new TypeError("Hosted Linq invite signup claim release requires claim metadata.");
+        }
         await releaseHostedLinqOnboardingLinkNoticeClaim({
           memberId: effect.payload.memberId,
           occurredAt: effect.payload.occurredAt,
           prisma,
+          sentAt: claim.onboardingLinkClaimSentAt,
         });
         return;
       case "daily_quota":
