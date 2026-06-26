@@ -46,6 +46,7 @@ import {
   readHostedLinqFirstContactAdmissionMode,
   readHostedLinqFirstContactEventReceipt,
   recordHostedLinqFirstContactEventConsumed,
+  recordHostedLinqFirstContactEventProcessing,
   readRecordedHostedLinqFirstContactAdmissionDecision,
   recordHostedLinqFirstContactAdmissionDecision,
 } from "./linq-first-contact-admission";
@@ -361,6 +362,7 @@ async function planHostedOnboardingLinqWebhookWithFirstContactAdmission(input: {
   return await resolveHostedOnboardingLinqWebhookClassifiedAdmission({
     classification,
     event: input.event,
+    firstContactEventProcessingOwned: initialPlan.firstContactEventProcessingOwned,
     prisma: input.prisma,
   });
 }
@@ -371,6 +373,7 @@ async function planHostedOnboardingLinqWebhookForCurrentAdmissionState(input: {
 }): Promise<
   | HostedOnboardingLinqAdmissionPlanResult
   | {
+      firstContactEventProcessingOwned: true;
       request: HostedOnboardingLinqFirstContactAdmissionRequest;
     }
 > {
@@ -385,13 +388,34 @@ async function planHostedOnboardingLinqWebhookForCurrentAdmissionState(input: {
         event: input.event,
         transaction,
       });
-      return plan.firstContactAdmissionRequest
-        ? { request: plan.firstContactAdmissionRequest }
-        : {
-            firstContactAdmissionClassified: false,
-            firstContactAdmissionUnavailable: false,
-            plan,
-          };
+      if (!plan.firstContactAdmissionRequest) {
+        return {
+          firstContactAdmissionClassified: false,
+          firstContactAdmissionUnavailable: false,
+          plan,
+        };
+      }
+
+      const receipt = await recordHostedLinqFirstContactEventProcessing({
+        eventId: input.event.event_id,
+        prisma: transaction,
+      });
+      if (receipt.status === "consumed") {
+        const duplicatePlan = await planHostedOnboardingLinqWebhookForRecordedAdmission({
+          event: input.event,
+          transaction,
+        });
+        return {
+          firstContactAdmissionClassified: false,
+          firstContactAdmissionUnavailable: false,
+          plan: duplicatePlan,
+        };
+      }
+
+      return {
+        firstContactEventProcessingOwned: true,
+        request: plan.firstContactAdmissionRequest,
+      };
     },
   );
 }
@@ -407,6 +431,7 @@ async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
         kind: "unavailable";
       };
   event: Parameters<typeof planHostedOnboardingLinqWebhook>[0]["event"];
+  firstContactEventProcessingOwned: boolean;
   prisma: PrismaClient;
 }): Promise<HostedOnboardingLinqAdmissionPlanResult> {
   return await runHostedOnboardingWebhookTransaction(
@@ -422,6 +447,7 @@ async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
       });
       if (
         existingReceipt?.status === "processing"
+        && !input.firstContactEventProcessingOwned
         && isHostedLinqFirstContactEventProcessingFresh(existingReceipt)
       ) {
         throw buildHostedLinqFirstContactEventProcessingError({
@@ -478,6 +504,7 @@ async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
       let plan = await planHostedOnboardingLinqWebhook({
         event: input.event,
         firstContactAdmitted: recordedAdmission?.kind === "allow",
+        firstContactEventProcessingOwned: input.firstContactEventProcessingOwned,
         requireFirstContactAdmission: true,
         prisma: transaction,
       });
@@ -510,6 +537,7 @@ async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
         plan = await planHostedOnboardingLinqWebhook({
           event: input.event,
           firstContactAdmitted: true,
+          firstContactEventProcessingOwned: input.firstContactEventProcessingOwned,
           requireFirstContactAdmission: true,
           prisma: transaction,
         });
@@ -524,6 +552,7 @@ async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
       plan = await planHostedOnboardingLinqWebhook({
         event: input.event,
         firstContactAdmitted: true,
+        firstContactEventProcessingOwned: input.firstContactEventProcessingOwned,
         requireFirstContactAdmission: true,
         prisma: transaction,
       });

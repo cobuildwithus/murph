@@ -121,6 +121,7 @@ type HostedLinqUsageGate = Awaited<ReturnType<typeof checkHostedAiUsageGate>>;
 export async function planHostedOnboardingLinqWebhook(input: {
   event: HostedLinqWebhookEvent;
   firstContactAdmitted?: boolean;
+  firstContactEventProcessingOwned?: boolean;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
 }): Promise<HostedOnboardingLinqDirectPlan> {
@@ -150,7 +151,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
     prisma: input.prisma,
   });
   if (existingFirstContactReceipt?.status === "processing") {
-    if (isHostedLinqFirstContactEventProcessingFresh(existingFirstContactReceipt)) {
+    if (
+      input.firstContactEventProcessingOwned !== true
+      && isHostedLinqFirstContactEventProcessingFresh(existingFirstContactReceipt)
+    ) {
       throw buildHostedLinqFirstContactEventProcessingError({
         eventId: input.event.event_id,
       });
@@ -626,21 +630,23 @@ export async function planHostedOnboardingLinqWebhook(input: {
     }
   }
 
-  const firstContactEventReceipt = await recordHostedLinqFirstContactEventProcessing({
-    eventId: input.event.event_id,
-    prisma: input.prisma,
-  });
-  if (firstContactEventReceipt.status === "consumed") {
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildLinqDuplicateWebhookEventPlan(),
-      buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        duplicate: true,
-        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
-        existingMemberMatch,
-        reason: "duplicate-webhook-event",
-        routeStage: "first-contact-event-duplicate",
-      }),
-    );
+  if (input.firstContactEventProcessingOwned !== true) {
+    const firstContactEventReceipt = await recordHostedLinqFirstContactEventProcessing({
+      eventId: input.event.event_id,
+      prisma: input.prisma,
+    });
+    if (firstContactEventReceipt.status === "consumed") {
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildLinqDuplicateWebhookEventPlan(),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
+          duplicate: true,
+          existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
+          existingMemberMatch,
+          reason: "duplicate-webhook-event",
+          routeStage: "first-contact-event-duplicate",
+        }),
+      );
+    }
   }
   const invite = await issueHostedInviteTx({
     channel: "linq",
