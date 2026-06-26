@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
   readHostedLinqFirstContactEventReceipt: vi.fn(),
-  recordHostedLinqFirstContactSignupLinkSent: vi.fn(),
+  recordHostedLinqFirstContactEventConsumed: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMailboxItemOwnerById: vi.fn(),
@@ -128,7 +128,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-first-contact-admission", async () => 
   return {
     ...actual,
     readHostedLinqFirstContactEventReceipt: mocks.readHostedLinqFirstContactEventReceipt,
-    recordHostedLinqFirstContactSignupLinkSent: mocks.recordHostedLinqFirstContactSignupLinkSent,
+    recordHostedLinqFirstContactEventConsumed: mocks.recordHostedLinqFirstContactEventConsumed,
   };
 });
 
@@ -164,11 +164,8 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.releaseHostedLinqQuotaReplyNoticeClaim.mockResolvedValue(undefined);
     mocks.readHostedLinqDailyState.mockResolvedValue(null);
     mocks.readHostedLinqFirstContactEventReceipt.mockResolvedValue(null);
-    mocks.recordHostedLinqFirstContactSignupLinkSent.mockResolvedValue({
+    mocks.recordHostedLinqFirstContactEventConsumed.mockResolvedValue({
       eventId: "evt_123",
-      handling: "signup_link_sent",
-      inviteId: "invite_123",
-      memberId: "member_123",
     });
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValue({

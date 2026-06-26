@@ -57,9 +57,6 @@ type HostedLinqFirstContactAdmissionDecisionRecord = {
 
 export type HostedLinqFirstContactEventReceipt = {
   eventId: string;
-  handling: "signup_link_sent";
-  inviteId: string;
-  memberId: string;
 };
 
 type HostedLinqFirstContactAdmissionDecisionStore = {
@@ -83,9 +80,6 @@ type HostedLinqFirstContactAdmissionDecisionStore = {
 
 type HostedLinqFirstContactEventReceiptRecord = {
   eventId: string;
-  handling: string;
-  inviteId: string;
-  memberId: string;
 };
 
 type HostedLinqFirstContactEventReceiptStore = {
@@ -93,9 +87,6 @@ type HostedLinqFirstContactEventReceiptStore = {
     create(input: {
       data: {
         eventId: string;
-        handling: HostedLinqFirstContactEventReceipt["handling"];
-        inviteId: string;
-        memberId: string;
       };
     }): Promise<HostedLinqFirstContactEventReceiptRecord>;
     findUnique(input: {
@@ -276,26 +267,18 @@ export async function readHostedLinqFirstContactEventReceipt(input: {
   return parseHostedLinqFirstContactEventReceiptRecord(record);
 }
 
-export async function recordHostedLinqFirstContactSignupLinkSent(input: {
+export async function recordHostedLinqFirstContactEventConsumed(input: {
   eventId: string;
-  inviteId: string;
-  memberId: string;
   prisma: HostedLinqFirstContactEventReceiptStore;
 }): Promise<HostedLinqFirstContactEventReceipt> {
   try {
     const created = await input.prisma.hostedLinqFirstContactEventReceipt.create({
       data: {
         eventId: input.eventId,
-        handling: "signup_link_sent",
-        inviteId: input.inviteId,
-        memberId: input.memberId,
       },
     });
     return parseHostedLinqFirstContactEventReceiptRecord(created) ?? {
       eventId: input.eventId,
-      handling: "signup_link_sent",
-      inviteId: input.inviteId,
-      memberId: input.memberId,
     };
   } catch (error) {
     if (!isPrismaUniqueConstraintError(error)) {
@@ -484,19 +467,13 @@ function parseHostedLinqFirstContactEventReceiptRecord(
 ): HostedLinqFirstContactEventReceipt | null {
   if (
     !record
-    || record.handling !== "signup_link_sent"
     || record.eventId.trim().length === 0
-    || record.inviteId.trim().length === 0
-    || record.memberId.trim().length === 0
   ) {
     return null;
   }
 
   return {
     eventId: record.eventId,
-    handling: "signup_link_sent",
-    inviteId: record.inviteId,
-    memberId: record.memberId,
   };
 }
 

@@ -45,6 +45,7 @@ import {
 import {
   classifyHostedLinqFirstContactAdmission,
   readHostedLinqFirstContactAdmissionMode,
+  recordHostedLinqFirstContactEventConsumed,
   readRecordedHostedLinqFirstContactAdmissionDecision,
   recordHostedLinqFirstContactAdmissionDecision,
 } from "./linq-first-contact-admission";
@@ -434,6 +435,10 @@ async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
           prisma: transaction,
         });
         if (firstContactAdmission.kind === "block") {
+          await recordHostedLinqFirstContactEventConsumed({
+            eventId: input.event.event_id,
+            prisma: transaction,
+          });
           return {
             firstContactAdmissionClassified: true,
             firstContactAdmissionUnavailable: false,

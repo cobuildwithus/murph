@@ -545,7 +545,7 @@ describe("hosted Prisma baseline migration", () => {
       'CREATE TABLE "hosted_linq_first_contact_event_receipt"',
     );
     expect(linqFirstContactEventReceiptMigrationSql).toContain(
-      "CHECK (\"handling\" IN ('signup_link_sent'))",
+      'PRIMARY KEY ("event_id")',
     );
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
     expect(baselineMigrationSql).toContain(

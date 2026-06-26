@@ -814,9 +814,6 @@ model HostedLinqFirstContactAdmissionDecision {
 
 model HostedLinqFirstContactEventReceipt {
   eventId   String   @id @map("event_id")
-  handling  String
-  memberId  String   @map("member_id")
-  inviteId  String   @map("invite_id")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

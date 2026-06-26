@@ -72,6 +72,7 @@ import type {
   HostedLinqFirstContactAdmissionRequest,
 } from "./linq-first-contact-admission";
 import {
+  recordHostedLinqFirstContactEventConsumed,
   readHostedLinqFirstContactEventReceipt,
 } from "./linq-first-contact-admission";
 import {
@@ -501,6 +502,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
     event: messageEvent,
     participantContact,
   })) {
+    await recordHostedLinqFirstContactEventConsumed({
+      eventId: input.event.event_id,
+      prisma: input.prisma,
+    });
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("undeliverable-first-contact"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
@@ -516,6 +521,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
     event: messageEvent,
     participantContact,
   })) {
+    await recordHostedLinqFirstContactEventConsumed({
+      eventId: input.event.event_id,
+      prisma: input.prisma,
+    });
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("blocked-first-contact-content"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
@@ -566,6 +575,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
   });
 
   if (existingDailyState?.onboardingLinkSentAt) {
+    await recordHostedLinqFirstContactEventConsumed({
+      eventId: input.event.event_id,
+      prisma: input.prisma,
+    });
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("signup-link-already-sent"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
@@ -587,6 +600,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
   });
 
   if (dailyState.onboardingLinkSentAt) {
+    await recordHostedLinqFirstContactEventConsumed({
+      eventId: input.event.event_id,
+      prisma: input.prisma,
+    });
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("signup-link-already-sent"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {

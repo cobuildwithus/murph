@@ -19,7 +19,7 @@ import {
   releaseHostedLinqQuotaReplyNoticeClaim,
 } from "./linq-daily-state";
 import {
-  recordHostedLinqFirstContactSignupLinkSent,
+  recordHostedLinqFirstContactEventConsumed,
 } from "./linq-first-contact-admission";
 import {
   buildHostedDailyQuotaReply,
@@ -217,10 +217,8 @@ export async function drainHostedLinqSideEffectsDirect(input: {
       });
 
       if (effect.payload.template === "invite_signup") {
-        await recordHostedLinqFirstContactSignupLinkSent({
+        await recordHostedLinqFirstContactEventConsumed({
           eventId: effect.payload.sourceEventId,
-          inviteId: effect.payload.inviteId,
-          memberId: effect.payload.memberId,
           prisma: input.prisma,
         });
       }
