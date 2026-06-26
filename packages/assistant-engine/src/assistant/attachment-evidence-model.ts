@@ -79,6 +79,7 @@ export interface AssistantInputAttachmentEvidenceReadFailure {
 export async function buildAssistantInputAttachmentPromptBundle(input: {
   attachment: AssistantInputAttachmentEvidenceItem
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  onEvidenceReadFailure?: (failure: AssistantInputAttachmentEvidenceReadFailure) => void
   vaultRoot: string
 }): Promise<AssistantInputAttachmentPromptBundle> {
   const rawPath = await resolveAvailableAssistantInputRawArtifactPath({
@@ -94,14 +95,18 @@ export async function buildAssistantInputAttachmentPromptBundle(input: {
   const parseState = useParserOutput
     ? normalizeAttachmentEvidenceParseState(input.attachment.parseState)
     : null
+  const derivedTextSources = useParserOutput
+    ? await buildDerivedTextSourcesBestEffort({
+        attachment: input.attachment,
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+        onEvidenceReadFailure: input.onEvidenceReadFailure,
+        vaultRoot: input.vaultRoot,
+      })
+    : []
   const evidenceSources = useParserOutput
     ? [
         ...buildInlineTextSources(input.attachment),
-        ...(await buildDerivedTextSources({
-          attachment: input.attachment,
-          materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
-          vaultRoot: input.vaultRoot,
-        })),
+        ...derivedTextSources,
       ]
     : []
   const fragments = [
@@ -144,16 +149,21 @@ export async function buildAssistantInputAttachmentPromptBundle(input: {
 export async function buildAssistantInputAttachmentPromptBundles(input: {
   attachments: readonly AssistantInputAttachmentEvidenceItem[]
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  onEvidenceReadFailure?: (failure: AssistantInputAttachmentEvidenceReadFailure) => void
   vaultRoot: string
 }): Promise<AssistantInputAttachmentPromptBundle[]> {
-  return Promise.all(
+  const results = await Promise.allSettled(
     input.attachments.map((attachment) =>
       buildAssistantInputAttachmentPromptBundle({
         attachment,
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+        onEvidenceReadFailure: input.onEvidenceReadFailure,
         vaultRoot: input.vaultRoot,
       }),
     ),
+  )
+  return results.flatMap((result) =>
+    result.status === 'fulfilled' ? [result.value] : [],
   )
 }
 
@@ -335,6 +345,29 @@ function buildInlineTextSources(
     path: attachment.derived?.manifestPath ?? attachment.raw?.path ?? null,
     text: fragment.text,
   }))
+}
+
+async function buildDerivedTextSourcesBestEffort(input: {
+  attachment: AssistantInputAttachmentEvidenceItem
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  onEvidenceReadFailure?: (failure: AssistantInputAttachmentEvidenceReadFailure) => void
+  vaultRoot: string
+}): Promise<ModelEvidenceSource[]> {
+  try {
+    return await buildDerivedTextSources({
+      attachment: input.attachment,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      vaultRoot: input.vaultRoot,
+    })
+  } catch {
+    input.onEvidenceReadFailure?.({
+      attachmentOrdinal: input.attachment.ordinal,
+      details: `attachment ${input.attachment.ordinal} derived evidence unavailable`,
+      errorCode: 'derived_read_failed',
+      kind: 'derived',
+    })
+    return []
+  }
 }
 
 async function buildDerivedTextSources(input: {
