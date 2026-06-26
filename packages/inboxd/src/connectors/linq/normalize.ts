@@ -311,8 +311,8 @@ async function buildLinqAttachments(
     );
     const mime = normalizeTextValue(part.mime_type ?? null);
     const fileName = normalizeTextValue(part.filename ?? null)
-      ?? inferAttachmentFileName(part)
-      ?? inferFallbackAttachmentFileName(part, mime, index);
+      ?? inferAttachmentFileName(part, data)
+      ?? inferFallbackAttachmentFileName(part, mime, index, data);
 
     return {
       externalId: normalizeTextValue(part.attachment_id ?? null) ?? `part:${index + 1}`,
@@ -514,7 +514,14 @@ function buildLinqCaptureRawMetadata(input: {
   return raw;
 }
 
-function inferAttachmentFileName(part: LinqMediaPart): string | null {
+function inferAttachmentFileName(
+  part: LinqMediaPart,
+  data: Uint8Array | null,
+): string | null {
+  if (data === null) {
+    return null;
+  }
+
   const url = normalizeTextValue(part.url ?? null);
   if (!url) {
     return null;
@@ -533,7 +540,17 @@ function inferFallbackAttachmentFileName(
   part: LinqMediaPart,
   mime: string | null,
   index: number,
+  data: Uint8Array | null,
 ): string | null {
+  if (data === null) {
+    const isVoiceMemo = part.type === "voice_memo";
+    const suffix = inferFileExtensionFromMime(mime) ?? (isVoiceMemo ? "m4a" : null);
+    const prefix = isVoiceMemo ? "voice-memo" : "attachment";
+    return suffix
+      ? `${prefix}-part-${index + 1}.${suffix}`
+      : `${prefix}-part-${index + 1}`;
+  }
+
   if (part.type !== "voice_memo") {
     return null;
   }

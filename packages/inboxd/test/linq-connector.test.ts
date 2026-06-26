@@ -245,7 +245,7 @@ test("normalizeLinqWebhookEvent keeps metadata-only voice memo attachments when 
       byteSize: 512,
       data: null,
       externalId: "att_voice_2",
-      fileName: "voice-2.amr",
+      fileName: "attachment-part-1.amr",
       kind: "audio",
       mime: "audio/amr",
     },
@@ -898,7 +898,7 @@ test("toLinqChatMessage infers filenames, kinds, byte sizes, and timestamp fallb
         {
           byteSize: null,
           externalId: "part:2",
-          fileName: null,
+          fileName: "attachment-part-2",
           kind: "video",
         },
         {
@@ -910,7 +910,7 @@ test("toLinqChatMessage infers filenames, kinds, byte sizes, and timestamp fallb
         {
           byteSize: null,
           externalId: "voice_1",
-          fileName: "voice-memo-voice_1.amr",
+          fileName: "voice-memo-part-4.amr",
           kind: "audio",
         },
         {
@@ -942,6 +942,11 @@ test("toLinqChatMessage uses service-only thread titles and timed-out downloads 
               mime_type: "audio/wav",
               type: "voice_memo",
               url: "https://cdn.example.test/voice-timeout",
+            },
+            {
+              attachment_id: "voice_private_id_only",
+              mime_type: "audio/m4a",
+              type: "voice_memo",
             },
             {
               attachment_id: "other_attachment",
@@ -982,7 +987,12 @@ test("toLinqChatMessage uses service-only thread titles and timed-out downloads 
     [
       {
         data: null,
-        fileName: "voice-timeout",
+        fileName: "voice-memo-part-1.wav",
+        kind: "audio",
+      },
+      {
+        data: null,
+        fileName: "voice-memo-part-2.m4a",
         kind: "audio",
       },
       {
