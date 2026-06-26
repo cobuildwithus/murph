@@ -478,16 +478,11 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
-  it("does not pre-claim prefix-only non-canonical signup welcome delivery effects", async () => {
+  it("does not pre-claim non-canonical signup welcome delivery effects", async () => {
     const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
       assistantDeliveryEffects: [
         createEffect({
           idempotencyKey: "signup-welcome:member_placeholder:retry",
-          message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-          transportIdempotent: false,
-        }),
-        createEffect({
-          idempotencyKey: "signup-welcome:member_placeholder",
           message: "Fixed setup reminder.",
           transportIdempotent: false,
         }),

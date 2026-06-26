@@ -849,8 +849,7 @@ describe("resolveHostedAiUsageGate", () => {
       allowed: false,
       userNotice: {
         code: "pulse_upgrade_edge",
-        message:
-          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+        message: expect.stringContaining("https://withmurph.ai/home"),
       },
       reason: "ai_usage_limit_exceeded",
       retryAfter: new Date("2026-04-01T00:00:00.000Z"),
@@ -922,8 +921,7 @@ describe("resolveHostedAiUsageGate", () => {
       allowed: false,
       userNotice: {
         code: "edge_usage_limit_reached",
-        message:
-          "Hey, you've reached your usage limit for the month. Murph will resume when your included allowance resets: https://withmurph.ai/home",
+        message: expect.stringContaining("https://withmurph.ai/home"),
       },
     });
   });
@@ -1019,8 +1017,7 @@ describe("resolveHostedAiUsageGate", () => {
       retryAfter: new Date("2026-04-08T12:00:00.000Z"),
       userNotice: {
         code: "trial_usage_limit_reached",
-        message:
-          "You've reached the hosted AI usage included in your trial. Please finish checkout: https://withmurph.ai/home",
+        message: expect.stringContaining("https://withmurph.ai/home"),
       },
     });
   });
@@ -1107,7 +1104,7 @@ describe("resolveHostedAiUsageGate", () => {
       retryAfter: new Date("2026-04-08T12:15:01.000Z"),
       userNotice: {
         code: "trial_conversion_pending",
-        message: "Your trial has ended. Start Pulse to keep Murph replying: https://withmurph.ai/home",
+        message: expect.stringContaining("https://withmurph.ai/home"),
       },
     });
     expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
@@ -1162,7 +1159,7 @@ describe("resolveHostedAiUsageGate", () => {
       reason: "trial_expired_pending_billing",
       userNotice: {
         code: "trial_conversion_pending",
-        message: "Your trial has ended. Start Pulse to keep Murph replying: https://withmurph.ai/home",
+        message: expect.stringContaining("https://withmurph.ai/home"),
       },
     });
     expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();

@@ -1,4 +1,4 @@
-import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
+import { renderUserFacingMessage } from "@murphai/contracts";
 import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
@@ -99,10 +99,29 @@ function expectedTelegramAssistantThreadId(input: {
   return hashHostedAssistantConversationIdentifier(identifierBlind, input.threadId);
 }
 
+function expectedSignupWelcomeText(input: {
+  sourceEventId?: string;
+  sourceType?: string;
+} = {}): string {
+  const sourceEventId = input.sourceEventId ?? "evt_123";
+  const sourceType = input.sourceType ?? "stripe.invoice.paid";
+
+  return renderUserFacingMessage({
+    context: {},
+    key: "assistant.signup_welcome",
+    seed: `assistant.signup_welcome:member_123:${sourceType}:${sourceEventId}`,
+  }).text;
+}
+
 function expectLegacySignupWelcomeCompatibilityWake(input: {
   callIndex: number;
   route: unknown;
+  sourceEventId?: string;
 }): void {
+  const expectedText = expectedSignupWelcomeText({
+    sourceEventId: input.sourceEventId,
+  });
+
   expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(input.callIndex, {
     envelope: expect.objectContaining({
       eventId: expect.stringContaining(
@@ -119,11 +138,11 @@ function expectLegacySignupWelcomeCompatibilityWake(input: {
         instructions: [
           "Prepare the first in-chat onboarding reply.",
           "Use this user-facing reply only:",
-          MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+          expectedText,
         ].join("\n\n"),
         responsePolicy: {
           kind: "require_send_exact_text",
-          text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+          text: expectedText,
         },
         route: input.route,
       }),
@@ -179,6 +198,7 @@ describe("hosted onboarding member activation", () => {
       sourceEventId: "evt_123",
       sourceType: "stripe.invoice.paid",
     };
+    const expectedText = expectedSignupWelcomeText();
 
     await expect(
       activateHostedMemberForPositiveSourceTx({
@@ -223,7 +243,7 @@ describe("hosted onboarding member activation", () => {
             threadId: "chat_home_123",
             threadIsDirect: true,
           },
-          text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+          text: expectedText,
         }),
       }),
       tx: expect.anything(),
@@ -241,7 +261,7 @@ describe("hosted onboarding member activation", () => {
         threadId: "chat_home_123",
         threadIsDirect: true,
       },
-      text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      text: expectedText,
     });
     expectLegacySignupWelcomeCompatibilityWake({
       callIndex: 2,
@@ -322,6 +342,7 @@ describe("hosted onboarding member activation", () => {
     });
     expectLegacySignupWelcomeCompatibilityWake({
       callIndex: 2,
+      sourceEventId: "evt_materialize",
       route: {
         actorId: "+15550100001",
         channel: "linq",
@@ -440,6 +461,7 @@ describe("hosted onboarding member activation", () => {
     });
     expectLegacySignupWelcomeCompatibilityWake({
       callIndex: 2,
+      sourceEventId: "evt_telegram",
       route: {
         actorId: null,
         channel: "telegram",
@@ -535,6 +557,7 @@ describe("hosted onboarding member activation", () => {
     });
     expectLegacySignupWelcomeCompatibilityWake({
       callIndex: 2,
+      sourceEventId: "evt_email_telegram",
       route: {
         actorId: null,
         channel: "telegram",

@@ -12,6 +12,7 @@ export * from "./ids.ts";
 export * from "./automation.ts";
 export * from "./scheduled-log.ts";
 export * from "./assistant.ts";
+export * from "./user-facing-messages.ts";
 export * from "./memory.ts";
 export * from "./preferences.ts";
 export * from "./relation-links.ts";

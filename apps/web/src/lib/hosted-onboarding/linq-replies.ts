@@ -1,23 +1,41 @@
+import { renderUserFacingMessage } from "@murphai/contracts";
+
 import { HOSTED_LINQ_DAILY_TEXT_LIMIT } from "./linq-daily-state";
 
 export function buildHostedInviteReply(input: {
   joinUrl: string;
+  seed?: string | null;
 }): string {
-  return `Welcome to Murph, your personal health assistant.
-
-Verify your phone to finish signup here:
-${input.joinUrl}`;
+  return renderUserFacingMessage({
+    context: {
+      joinUrl: input.joinUrl,
+    },
+    key: "linq.invite_signup",
+    seed: input.seed ?? input.joinUrl,
+  }).text;
 }
 
-export function buildHostedDailyQuotaReply(): string {
-  return `You have reached Murph's daily text limit of ${HOSTED_LINQ_DAILY_TEXT_LIMIT} messages. Try again tomorrow.`;
+export function buildHostedDailyQuotaReply(input: {
+  seed?: string | null;
+} = {}): string {
+  return renderUserFacingMessage({
+    context: {
+      dailyTextLimit: HOSTED_LINQ_DAILY_TEXT_LIMIT,
+    },
+    key: "linq.daily_quota",
+    seed: input.seed ?? `daily-quota:${HOSTED_LINQ_DAILY_TEXT_LIMIT}`,
+  }).text;
 }
 
 export function buildHostedLinqConversationHomeRedirectReply(input: {
   homeRecipientPhone: string;
+  seed?: string | null;
 }): string {
-  return `You're already set up with Murph.
-
-Save this number and text me here instead:
-${input.homeRecipientPhone}`;
+  return renderUserFacingMessage({
+    context: {
+      homeRecipientPhone: input.homeRecipientPhone,
+    },
+    key: "linq.home_redirect",
+    seed: input.seed ?? input.homeRecipientPhone,
+  }).text;
 }

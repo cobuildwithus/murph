@@ -3,7 +3,7 @@ import {
   type Prisma,
 } from "@prisma/client";
 import {
-  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+  renderUserFacingMessage,
 } from "@murphai/contracts";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
@@ -482,6 +482,7 @@ function buildHostedMemberActivationWake(input: {
     occurredAt: input.occurredAt,
     signupWelcome: buildHostedMemberSignupWelcomePayload({
       route: input.signupWelcomeRoute ?? null,
+      seed: buildHostedMemberSignupWelcomeMessageSeed(input),
     }),
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
   });
@@ -489,6 +490,7 @@ function buildHostedMemberActivationWake(input: {
 
 function buildHostedMemberSignupWelcomePayload(input: {
   route: HostedExecutionAssistantNotificationRoute | null;
+  seed: string;
 }): HostedExecutionMemberActivationSignupWelcome | null {
   if (!input.route) {
     return null;
@@ -496,8 +498,20 @@ function buildHostedMemberSignupWelcomePayload(input: {
 
   return {
     route: input.route,
-    text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+    text: renderUserFacingMessage({
+      context: {},
+      key: "assistant.signup_welcome",
+      seed: input.seed,
+    }).text,
   };
+}
+
+function buildHostedMemberSignupWelcomeMessageSeed(input: {
+  memberId: string;
+  sourceEventId: string;
+  sourceType: string;
+}): string {
+  return `assistant.signup_welcome:${input.memberId}:${input.sourceType}:${input.sourceEventId}`;
 }
 
 function buildHostedMemberSignupWelcomeNotificationWake(input: {

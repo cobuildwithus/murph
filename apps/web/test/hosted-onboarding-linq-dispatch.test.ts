@@ -1,4 +1,5 @@
 import { HostedBillingStatus, type HostedLinqDailyState } from "@prisma/client";
+import { renderUserFacingMessage } from "@murphai/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -12,12 +13,39 @@ import {
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   buildHostedInviteReply,
-  buildHostedLinqConversationHomeRedirectReply,
   parseHostedLinqWebhookEvent,
   requireHostedLinqMessageReceivedEvent,
 } from "@/src/lib/hosted-onboarding/linq";
 import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import { hostedLinqFirstContactContainsBlockedContent } from "@/src/lib/hosted-onboarding/webhook-provider-linq-shared";
+
+const HOME_URL = "https://withmurph.ai/home";
+
+function buildPulseUpgradeEdgeMessage(input: {
+  memberId: string;
+  periodStart: Date;
+}): string {
+  return renderUserFacingMessage({
+    context: {
+      homeUrl: HOME_URL,
+    },
+    key: "linq.ai_usage.pulse_upgrade_edge",
+    seed: `linq.ai_usage:${input.memberId}:pulse_upgrade_edge:${input.periodStart.toISOString()}`,
+  }).text;
+}
+
+function buildTrialConversionPendingMessage(input: {
+  memberId: string;
+  periodStart: Date;
+}): string {
+  return renderUserFacingMessage({
+    context: {
+      homeUrl: HOME_URL,
+    },
+    key: "linq.ai_usage.trial_conversion_pending",
+    seed: `linq.ai_usage:${input.memberId}:trial_conversion_pending:${input.periodStart.toISOString()}`,
+  }).text;
+}
 
 const mocks = vi.hoisted(() => {
   const state = {
@@ -458,13 +486,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
   });
 
-  it("builds the inactive signup invite with the concise Murph positioning line", () => {
-    expect(buildHostedInviteReply({
+  it("builds inactive signup invites from the rotating Murph signup copy bank", () => {
+    const reply = buildHostedInviteReply({
       joinUrl: "https://join.example.test/join/code_first_text",
-    })).toBe(`Welcome to Murph, your personal health assistant.
+      seed: "first-text-signup:test",
+    });
 
-Verify your phone to finish signup here:
-https://join.example.test/join/code_first_text`);
+    expect(reply).toContain("https://join.example.test/join/code_first_text");
+    expect(reply).toMatch(/Murph/u);
   });
 
   it("accepts Linq typing events without signaling runtime work", async () => {
@@ -2009,9 +2038,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        message: buildHostedInviteReply({
-          joinUrl: "https://join.example.test/join/code_first_text",
-        }),
+        message: expect.stringContaining("https://join.example.test/join/code_first_text"),
         replyToMessageId: "msg_123",
       }),
     );
@@ -2140,9 +2167,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        message: buildHostedInviteReply({
-          joinUrl: "https://join.example.test/join/code_email_handle",
-        }),
+        message: expect.stringContaining("https://join.example.test/join/code_email_handle"),
         replyToMessageId: "msg_123",
       }),
     );
@@ -2230,9 +2255,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        message: buildHostedInviteReply({
-          joinUrl: "https://join.example.test/join/code_many_parts",
-        }),
+        message: expect.stringContaining("https://join.example.test/join/code_many_parts"),
         replyToMessageId: "msg_123",
       }),
     );
@@ -2315,9 +2338,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        message: buildHostedInviteReply({
-          joinUrl: "https://join.example.test/join/code_sms",
-        }),
+        message: expect.stringContaining("https://join.example.test/join/code_sms"),
         replyToMessageId: "msg_123",
       }),
     );
@@ -2474,9 +2495,7 @@ https://join.example.test/join/code_first_text`);
       expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           chatId: "chat_123",
-          message: buildHostedInviteReply({
-            joinUrl: `https://join.example.test/join/${invite.inviteCode}`,
-          }),
+          message: expect.stringContaining(`https://join.example.test/join/${invite.inviteCode}`),
           replyToMessageId: "msg_123",
         }),
       );
@@ -2843,9 +2862,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        message: buildHostedInviteReply({
-          joinUrl: "https://join.example.test/join/code_deferred",
-        }),
+        message: expect.stringContaining("https://join.example.test/join/code_deferred"),
         replyToMessageId: "msg_123",
       }),
     );
@@ -2913,9 +2930,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        message: buildHostedInviteReply({
-          joinUrl: "https://join.example.test/join/code_aborted",
-        }),
+        message: expect.stringContaining("https://join.example.test/join/code_aborted"),
         replyToMessageId: "msg_123",
         signal: controller.signal,
       }),
@@ -3000,9 +3015,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        message: buildHostedInviteReply({
-          joinUrl: "https://join.example.test/join/code_non_text",
-        }),
+        message: expect.stringContaining("https://join.example.test/join/code_non_text"),
         replyToMessageId: "msg_123",
       }),
     );
@@ -3097,9 +3110,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_other",
-        message: buildHostedLinqConversationHomeRedirectReply({
-          homeRecipientPhone: "+15550100001",
-        }),
+        message: expect.stringContaining("+15550100001"),
         replyToMessageId: "msg_123",
       }),
     );
@@ -3126,8 +3137,10 @@ https://join.example.test/join/code_first_text`);
       spentUsdMicros: 100_000n,
       userNotice: {
         code: "pulse_upgrade_edge",
-        message:
-          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+        message: buildPulseUpgradeEdgeMessage({
+          memberId: "member_123",
+          periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        }),
       },
     });
     const prisma = asPrismaTransactionClient({
@@ -3186,8 +3199,10 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         chatId: "chat_123",
         idempotencyKey: expectedIdempotencyKey,
-        message:
-          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+        message: buildPulseUpgradeEdgeMessage({
+          memberId: "member_123",
+          periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        }),
         replyToMessageId: "msg_123",
       }),
     );
@@ -3208,7 +3223,10 @@ https://join.example.test/join/code_first_text`);
       spentUsdMicros: 4_500_000n,
       userNotice: {
         code: "trial_conversion_pending",
-        message: "Your trial has ended. Start Pulse to keep Murph replying: https://withmurph.ai/home",
+        message: buildTrialConversionPendingMessage({
+          memberId: "member_123",
+          periodStart: new Date("2026-04-01T12:00:00.000Z"),
+        }),
       },
     });
     const prisma = asPrismaTransactionClient({
@@ -3257,7 +3275,10 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         chatId: "chat_123",
         idempotencyKey: "linq-message:evt_trial_expired",
-        message: "Your trial has ended. Start Pulse to keep Murph replying: https://withmurph.ai/home",
+        message: buildTrialConversionPendingMessage({
+          memberId: "member_123",
+          periodStart: new Date("2026-04-01T12:00:00.000Z"),
+        }),
         replyToMessageId: "msg_123",
       }),
     );
@@ -3277,8 +3298,10 @@ https://join.example.test/join/code_first_text`);
       spentUsdMicros: 100_000n,
       userNotice: {
         code: "pulse_upgrade_edge",
-        message:
-          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+        message: buildPulseUpgradeEdgeMessage({
+          memberId: "member_123",
+          periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        }),
       },
     });
     const staleHomeRoute = {
@@ -3364,8 +3387,10 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_current_inbound",
-        message:
-          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+        message: buildPulseUpgradeEdgeMessage({
+          memberId: "member_123",
+          periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        }),
         replyToMessageId: "msg_123",
       }),
     );
@@ -3392,8 +3417,10 @@ https://join.example.test/join/code_first_text`);
       spentUsdMicros: 100_000n,
       userNotice: {
         code: "pulse_upgrade_edge",
-        message:
-          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+        message: buildPulseUpgradeEdgeMessage({
+          memberId: "member_123",
+          periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        }),
       },
     });
     mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(new Error("linq send failed"));
@@ -3466,8 +3493,10 @@ https://join.example.test/join/code_first_text`);
       spentUsdMicros: 100_000n,
       userNotice: {
         code: "pulse_upgrade_edge",
-        message:
-          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+        message: buildPulseUpgradeEdgeMessage({
+          memberId: "member_123",
+          periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        }),
       },
     });
     const prisma = asPrismaTransactionClient({
@@ -3516,8 +3545,10 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         chatId: "chat_123",
         idempotencyKey: expectedIdempotencyKey,
-        message:
-          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+        message: buildPulseUpgradeEdgeMessage({
+          memberId: "member_123",
+          periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        }),
         replyToMessageId: "msg_123",
       }),
     );
@@ -3540,8 +3571,10 @@ https://join.example.test/join/code_first_text`);
       spentUsdMicros: 100_000n,
       userNotice: {
         code: "pulse_upgrade_edge",
-        message:
-          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+        message: buildPulseUpgradeEdgeMessage({
+          memberId: "member_123",
+          periodStart: new Date("2026-03-01T00:00:00.000Z"),
+        }),
       },
     });
     const prisma = asPrismaTransactionClient({
@@ -3682,9 +3715,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_other",
-        message: buildHostedLinqConversationHomeRedirectReply({
-          homeRecipientPhone: "+15550100001",
-        }),
+        message: expect.stringContaining("+15550100001"),
         replyToMessageId: "msg_123",
       }),
     );
@@ -4128,7 +4159,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        message: "You have reached Murph's daily text limit of 150 messages. Try again tomorrow.",
+        message: expect.stringContaining("150"),
         replyToMessageId: "msg_123",
       }),
     );
@@ -4202,7 +4233,10 @@ https://join.example.test/join/code_first_text`);
       spentUsdMicros: 0n,
       userNotice: {
         code: "trial_conversion_pending",
-        message: "Your trial has ended. Start Pulse to keep Murph replying: https://withmurph.ai/home",
+        message: buildTrialConversionPendingMessage({
+          memberId: "member_123",
+          periodStart: new Date("2026-03-26T12:00:00.000Z"),
+        }),
       },
     });
     const prisma = asPrismaTransactionClient({
