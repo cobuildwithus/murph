@@ -84,6 +84,7 @@ export default async function ComputerHandoffPage({
   ) {
     const isCompleted = state.kind === "completed";
     const canSendDoneReply = isCompleted;
+    const isEmailReturn = isCompleted && state.returnContactKind === "email";
     const Icon = isCompleted ? CheckCircle2 : Clock3;
     const title = isCompleted
       ? "All set"
@@ -93,15 +94,17 @@ export default async function ComputerHandoffPage({
     const iconClassName = isCompleted
       ? "mb-4 h-8 w-8 text-primary"
       : "mb-4 h-8 w-8 text-muted-foreground";
-    const nextStep = isCompleted
-      ? "Reply to Murph to continue."
+    const nextStep = isEmailReturn
+      ? "Reply with Done in your existing Murph email thread to continue."
+      : isCompleted
+        ? "Reply to Murph to continue."
       : state.kind === "checkpointing"
         ? "Keep this tab open for a moment, then return to Murph when saving finishes."
         : "Return to Murph and ask for a new link.";
-    const contactOptions = canSendDoneReply
+    const contactOptions = canSendDoneReply && !isEmailReturn
       ? await resolveHostedMurphContactOptions({
           message: { body: HANDOFF_DONE_REPLY_BODY },
-          preferredKind: preferredContactKind,
+          preferredKind: preferredContactKind ?? state.returnContactKind,
         })
       : [];
 
@@ -112,7 +115,16 @@ export default async function ComputerHandoffPage({
             <Icon className={iconClassName} aria-hidden="true" />
             <h1 className="font-serif text-3xl text-balance">{title}</h1>
             <p className="mt-4 text-sm text-muted-foreground text-pretty">{nextStep}</p>
-            {contactOptions.length > 0 ? (
+            {isEmailReturn ? (
+              <div className="mt-6 border-t border-border pt-4">
+                <p className="text-sm text-muted-foreground">
+                  Reply in the existing email thread with:
+                </p>
+                <p className="mt-3 break-words font-mono text-sm text-foreground">
+                  {HANDOFF_DONE_REPLY_BODY}
+                </p>
+              </div>
+            ) : contactOptions.length > 0 ? (
               <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                 {contactOptions.map((option) => (
                   <MurphContactLink

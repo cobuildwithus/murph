@@ -9,6 +9,7 @@ import {
 } from "../shared.js";
 
 export interface RemoteTranscriptionProviderOptions {
+  authorizationHeader?: string;
   endpoint: string;
   requestTimeoutMs?: number;
   maxInputBytes?: number;
@@ -28,6 +29,7 @@ export function createRemoteTranscriptionProvider(
   options: RemoteTranscriptionProviderOptions,
 ): ParserProvider {
   const endpoint = parseTranscriptionEndpoint(options.endpoint);
+  const authorizationHeader = normalizeAuthorizationHeader(options.authorizationHeader);
 
   return {
     id: "remote-transcription",
@@ -59,15 +61,19 @@ export function createRemoteTranscriptionProvider(
 
       const fetchImpl = options.fetchImpl ?? fetch;
       const timeoutMs = options.requestTimeoutMs ?? REMOTE_TRANSCRIPTION_TIMEOUT_MS;
+      const headers = new Headers({
+        accept: "application/json",
+        // The endpoint transcodes from raw bytes; the body may be WAV or a
+        // passthrough compressed original, so avoid claiming a format.
+        "content-type": "application/octet-stream",
+      });
+      if (authorizationHeader) {
+        headers.set("authorization", authorizationHeader);
+      }
       const postOnce = async (): Promise<Response> =>
         await fetchImpl(url, {
           body: new Uint8Array(audio),
-          headers: {
-            accept: "application/json",
-            // The endpoint transcodes from raw bytes; the body may be WAV or a
-            // passthrough compressed original, so avoid claiming a format.
-            "content-type": "application/octet-stream",
-          },
+          headers,
           method: "POST",
           signal: request.signal
             ? AbortSignal.any([request.signal, AbortSignal.timeout(timeoutMs)])
@@ -130,6 +136,15 @@ function parseTranscriptionEndpoint(value: string): URL {
   }
 
   return parsed;
+}
+
+function normalizeAuthorizationHeader(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 async function readBoundedJsonResponse(

@@ -58,10 +58,85 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-06-25",
     publishedOn: "2026-06-25",
-    title: "Pain, rehab, and chronic conditions get real help",
+    title: "Six new coaches, plus real help for pain and chronic conditions",
     summary:
-      "Clinical-style reasoning for pain and rehab, real recommendations for chronic conditions, and goals that stay pinned across sessions.",
+      "Sleep, stress, food, running, lifting, and race-prep each get their own coach. Clinical-style pain and rehab help, recommendations for chronic conditions, and goals that pin across sessions.",
     items: [
+      {
+        id: "coach-skills-six-new",
+        kind: "feature",
+        priority: 5,
+        title: "Six new coaches: sleep, stress, food, running, lifting, race prep",
+        summary:
+          "Each gets its own routing and reasoning — sleep & recovery readiness, stress regulation, nutrition strategy, running & cardio, strength training, and competition prep.",
+        relevanceTags: ["assistant", "health", "coaching", "skills"],
+        sourcePullRequests: [298, 299, 300, 301, 302, 303],
+        tryIt: {
+          label: "Try a coach skill",
+          prompt:
+            "Half marathon in 8 weeks and I'm lifting twice a week — what should I actually do?",
+        },
+      },
+      {
+        id: "linq-first-contact-admission",
+        kind: "improvement",
+        priority: 5,
+        title: "Unknown first contacts get gated before the invite path",
+        summary:
+          "Strangers texting the Murph line now pass a fail-closed classifier before any invite, member record, or reply gets created.",
+        relevanceTags: ["safety", "linq", "onboarding"],
+        sourcePullRequests: [309],
+      },
+      {
+        id: "live-browser-replaces-screen-inspection",
+        kind: "improvement",
+        priority: 4,
+        title: "Live browser handoff replaces static screenshots",
+        summary:
+          "When Murph needs you to look at a paused browser, you get the live, passkey-gated handoff used everywhere else — not a static screenshot.",
+        relevanceTags: ["browser", "handoff"],
+        sourcePullRequests: [296],
+      },
+      {
+        id: "checkout-confirm-in-chat",
+        kind: "improvement",
+        priority: 4,
+        title: "Confirm the final checkout step in chat",
+        summary:
+          "A simple \"yes\" or \"go ahead\" lets Murph place the order. The handoff link is still there if you want to take over.",
+        relevanceTags: ["browser", "checkout"],
+        sourcePullRequests: [307],
+      },
+      {
+        id: "linq-off-hours-reminder-guard",
+        kind: "improvement",
+        priority: 3,
+        title: "Off-hours iMessage reminders ask first",
+        summary:
+          "Before scheduling a Linq reminder for 11pm–5am local time, Murph flags the spam risk, suggests a nearby waking-hour time, and asks.",
+        relevanceTags: ["assistant", "linq", "reminders"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "longer-tool-loops-before-compaction",
+        kind: "improvement",
+        priority: 3,
+        title: "Longer tool-using turns before context compacts",
+        summary:
+          "Hosted auto-compaction now waits until 100k tokens instead of 84k, so long browser/computer-use loops finish in one piece.",
+        relevanceTags: ["assistant", "runtime"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "all-current-turn-auto-replies-dispatch",
+        kind: "improvement",
+        priority: 3,
+        title: "Every planned reply in a turn actually sends",
+        summary:
+          "When Murph plans multiple replies in one turn, all of them dispatch instead of only the first reaching you.",
+        relevanceTags: ["assistant", "automation"],
+        sourcePullRequests: [],
+      },
       {
         id: "proactive-chronic-support",
         kind: "feature",

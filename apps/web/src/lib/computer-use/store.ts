@@ -11,6 +11,7 @@ import type {
   HostedComputerHandoffPurpose,
   HostedComputerHandoffStatus,
   HostedComputerRunStatus,
+  HostedComputerReturnContactKind,
 } from "@murphai/hosted-execution/computer-use";
 
 import { getPrisma } from "../prisma";
@@ -65,6 +66,7 @@ export interface ComputerHandoffRecord {
   memberId: string;
   purpose: PersistedComputerHandoffPurpose;
   runId: string;
+  returnContactKind: HostedComputerReturnContactKind | null;
   status: HostedComputerHandoffStatus;
   suggestedReply: string | null;
   tokenHash: string;
@@ -100,6 +102,7 @@ export interface ComputerUseStore {
     memberId: string;
     purpose: HostedComputerHandoffPurpose;
     runId: string;
+    returnContactKind: HostedComputerReturnContactKind | null;
     suggestedReply: string | null;
     tokenHash: string;
   }): Promise<ComputerHandoffRecord>;
@@ -483,6 +486,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     memberId: string;
     purpose: HostedComputerHandoffPurpose;
     runId: string;
+    returnContactKind: HostedComputerReturnContactKind | null;
     suggestedReply: string | null;
     tokenHash: string;
   }): Promise<ComputerHandoffRecord> {
@@ -493,6 +497,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         memberId: input.memberId,
         purpose: input.purpose,
         runId: input.runId,
+        returnContactKind: input.returnContactKind,
         suggestedReply: input.suggestedReply,
         tokenHash: input.tokenHash,
       },
@@ -1301,12 +1306,27 @@ function mapHandoff(handoff: PrismaHostedComputerHandoff): ComputerHandoffRecord
     id: handoff.id,
     memberId: handoff.memberId,
     purpose: readHandoffPurpose(handoff.purpose),
+    returnContactKind: readHandoffReturnContactKind(handoff.returnContactKind),
     runId: handoff.runId,
     status: readHandoffStatus(handoff.status),
     suggestedReply: handoff.suggestedReply,
     tokenHash: handoff.tokenHash,
     updatedAt: handoff.updatedAt,
   };
+}
+
+function readHandoffReturnContactKind(
+  value: string | null,
+): HostedComputerReturnContactKind | null {
+  switch (value) {
+    case null:
+    case "text":
+    case "telegram":
+    case "email":
+      return value;
+    default:
+      throw new TypeError("Hosted computer handoff returnContactKind is invalid.");
+  }
 }
 
 function readRunStatus(value: string): HostedComputerRunStatus {

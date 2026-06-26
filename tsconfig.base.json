@@ -100,6 +100,9 @@
       "@murphai/hosted-execution/runtime-control": [
         "packages/hosted-execution/src/runtime-control.ts"
       ],
+      "@murphai/hosted-execution/return-contact": [
+        "packages/hosted-execution/src/return-contact.ts"
+      ],
       "@murphai/hosted-execution/side-effects": [
         "packages/hosted-execution/src/side-effects.ts"
       ],

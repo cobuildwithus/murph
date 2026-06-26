@@ -548,8 +548,7 @@ function isHostedRuntimeEgressAuthFailureLog(log: HostedRuntimeLogForTestRow): b
     return serialized.includes("401 Unauthorized");
   }
   if (log.eventCode !== "runner.provider_egress_diagnostic") {
-    return serialized.includes("active_user_context_missing")
-      || serialized.includes("missing_identity");
+    return serialized.includes("missing_identity");
   }
   const details = log.redactedJson ?? {};
   const providerKind = readHostedRuntimeLogString(details, "providerKind");
@@ -557,7 +556,6 @@ function isHostedRuntimeEgressAuthFailureLog(log: HostedRuntimeLogForTestRow): b
     return false;
   }
   return readHostedRuntimeLogString(details, "writeFenceValidationMode") === "missing_identity"
-    || readHostedRuntimeLogString(details, "writeFenceValidationRejectReason") === "active_user_context_missing"
     || details.responseStatus === 401
     || serialized.includes("401 Unauthorized");
 }

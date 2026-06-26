@@ -11,6 +11,8 @@ import {
 } from './delivery-service.js'
 import type { AssistantMessageInput, AssistantTurnSharedPlan } from './service-contracts.js'
 
+const ASSISTANT_TYPING_STOP_WAIT_MS = 2_000
+
 export function startAssistantChannelTypingIndicator(input: {
   channelDependencies?: AssistantChannelDependencies | null
   input: AssistantMessageInput
@@ -53,7 +55,9 @@ export function startAssistantChannelTypingIndicator(input: {
       }
 
       if (stopRequested) {
-        await runAssistantTypingBestEffort(() => indicator.stop())
+        void runAssistantTypingBestEffort(() => indicator.stop(), {
+          timeoutMs: ASSISTANT_TYPING_STOP_WAIT_MS,
+        })
         return null
       }
 
@@ -63,23 +67,37 @@ export function startAssistantChannelTypingIndicator(input: {
     .catch(() => null)
 
   return {
+    async refreshNow() {
+      if (stopRequested) {
+        return
+      }
+
+      if (activeIndicator?.refreshNow) {
+        const indicator = activeIndicator
+        await runAssistantTypingBestEffort(() => indicator.refreshNow!())
+        return
+      }
+
+      await indicatorReady.then((indicator) => {
+        if (!stopRequested && indicator?.refreshNow) {
+          return runAssistantTypingBestEffort(() => indicator.refreshNow!())
+        }
+
+        return undefined
+      })
+    },
     async stop() {
       stopRequested = true
       if (activeIndicator) {
         const indicator = activeIndicator
         activeIndicator = null
-        void runAssistantTypingBestEffort(() => indicator.stop())
+        await runAssistantTypingBestEffort(() => indicator.stop(), {
+          timeoutMs: ASSISTANT_TYPING_STOP_WAIT_MS,
+        })
         return
       }
 
-      void indicatorReady.then((indicator) => {
-        if (indicator) {
-          activeIndicator = null
-          return runAssistantTypingBestEffort(() => indicator.stop())
-        }
-
-        return undefined
-      })
+      return
     },
   }
 }
@@ -96,8 +114,41 @@ export async function stopAssistantChannelTypingIndicator(
 
 async function runAssistantTypingBestEffort(
   task: () => Promise<unknown>,
+  options: {
+    timeoutMs?: number
+  } = {},
 ): Promise<void> {
   try {
-    await task()
+    const taskPromise = task()
+    if (options.timeoutMs) {
+      await withAssistantTypingTimeout(taskPromise, options.timeoutMs)
+      return
+    }
+
+    await taskPromise
   } catch {}
+}
+
+async function withAssistantTypingTimeout(
+  taskPromise: Promise<unknown>,
+  timeoutMs: number,
+): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | null = null
+  const timeoutPromise = new Promise<void>((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error('ASSISTANT_TYPING_STOP_TIMEOUT'))
+    }, timeoutMs)
+    if (typeof timeout.unref === 'function') {
+      timeout.unref()
+    }
+  })
+  taskPromise.catch(() => {})
+
+  try {
+    await Promise.race([taskPromise, timeoutPromise])
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout)
+    }
+  }
 }

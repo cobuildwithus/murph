@@ -97,7 +97,7 @@ test("ComputerHandoffActiveView can refocus the live view after takeover", async
   ).toHaveLength(1);
 });
 
-test("ComputerHandoffActiveView covers the iframe with the saving overlay while completing a handoff", async () => {
+test("ComputerHandoffActiveView unmounts the iframe while completing a handoff", async () => {
   let resolveDone!: (response: Response) => void;
   const donePromise = new Promise<Response>((resolve) => {
     resolveDone = resolve;
@@ -129,11 +129,9 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
   assert.ok(savingStatus);
   expect(savingStatus.textContent).toContain("Saving your progress");
   expect(savingStatus.querySelector("svg .murph-loader-dot")).toBeTruthy();
-  expect(container.querySelector("iframe")).toBe(iframe);
-  expect(findDoneButton(container)).toBe(doneButton);
-  expect(findFocusButton(container)).toBe(focusButton);
-  expect(doneButton.disabled).toBe(true);
-  expect(focusButton.disabled).toBe(true);
+  expect(container.querySelector("iframe")).toBeNull();
+  expect(findDoneButton(container)).toBeNull();
+  expect(findFocusButton(container)).toBeNull();
 
   await act(async () => {
     resolveDone(new Response(JSON.stringify({ redirectTo: "sms:+15550100001?body=Done" }), {
@@ -216,7 +214,11 @@ test.each([
   ["HTTP error", new Response("server error", { status: 500 })],
   ["invalid JSON", new Response("not-json", { status: 200 })],
 ])("ComputerHandoffActiveView clears the saving overlay after %s", async (_label, response) => {
-  vi.mocked(fetch).mockResolvedValue(response);
+  let resolveDone!: (doneResponse: Response) => void;
+  const donePromise = new Promise<Response>((resolve) => {
+    resolveDone = resolve;
+  });
+  vi.mocked(fetch).mockReturnValue(donePromise);
 
   const { cleanup, container, window } = await renderHandoff({
     iframeAllow: "clipboard-read",
@@ -234,13 +236,24 @@ test.each([
 
   await click(window, doneButton);
 
-  expect(container.querySelector("iframe")).toBe(iframeBeforeClick);
+  expect(container.querySelector("iframe")).toBeNull();
+  expect(container.querySelector('[aria-busy="true"]')?.textContent).toContain(
+    "Saving your progress",
+  );
+
+  await act(async () => {
+    resolveDone(response);
+    await donePromise;
+    await flushMicrotasks();
+  });
+
   expect(container.querySelector('[aria-busy="true"]')).toBeNull();
   expect(container.querySelector('[role="alert"]')?.textContent).toBe(
     "Could not complete. Try again.",
   );
-  expect(findDoneButton(container)).toBe(doneButton);
-  expect(findFocusButton(container)).toBe(focusButton);
+  expect(container.querySelector("iframe")).not.toBe(iframeBeforeClick);
+  expect(findDoneButton(container)).not.toBe(doneButton);
+  expect(findFocusButton(container)).not.toBe(focusButton);
   expect(findDoneButton(container)?.disabled).toBe(false);
   expect(findFocusButton(container)?.disabled).toBe(false);
 });

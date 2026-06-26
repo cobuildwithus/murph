@@ -21,6 +21,7 @@ export interface ObservationEventOptions {
   note?: string;
   evidenceRoles?: string[];
   externalRef: DeviceExternalRefPayload;
+  legacyExternalRefs?: DeviceExternalRefPayload[];
 }
 
 export interface MetricEmissionContext<T> {
@@ -32,6 +33,7 @@ export interface MetricEmissionContext<T> {
   timeZone?: string;
   evidenceRoles?: string[];
   externalRef: (facet?: string) => DeviceExternalRefPayload;
+  legacyExternalRefs?: (facet?: string) => DeviceExternalRefPayload[];
 }
 
 export interface ObservationMetricDescriptor<T> {
@@ -368,6 +370,7 @@ export function pushObservationEvent(
       note: options.note ? trimToLength(options.note, 4000) : undefined,
       evidenceRoles: options.evidenceRoles,
       externalRef: options.externalRef,
+      legacyExternalRefs: options.legacyExternalRefs,
       fields: stripUndefined({
         metric: options.metric,
         observationGrain: options.observationGrain,
@@ -393,6 +396,10 @@ export function emitObservationMetrics<T>(
   for (const descriptor of descriptors) {
     const rawValue = descriptor.value(context.source);
     const value = descriptor.transform ? descriptor.transform(rawValue, context.source) : rawValue;
+    const facet = descriptor.facet
+      ? resolveMetricDescriptorValue(descriptor.facet, context.source)
+      : undefined;
+    const legacyExternalRefs = context.legacyExternalRefs?.(facet);
 
     pushObservationEvent(events, {
       metric: descriptor.metric,
@@ -408,11 +415,8 @@ export function emitObservationMetrics<T>(
         ? resolveMetricDescriptorValue(descriptor.note, context.source)
         : undefined,
       evidenceRoles: context.evidenceRoles,
-      externalRef: context.externalRef(
-        descriptor.facet
-          ? resolveMetricDescriptorValue(descriptor.facet, context.source)
-          : undefined,
-      ),
+      externalRef: context.externalRef(facet),
+      legacyExternalRefs: legacyExternalRefs && legacyExternalRefs.length > 0 ? legacyExternalRefs : undefined,
     });
   }
 }

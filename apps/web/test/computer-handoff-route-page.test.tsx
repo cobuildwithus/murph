@@ -18,7 +18,6 @@ const mocks = vi.hoisted(() => {
   return {
     createComputerUseService: vi.fn(() => service),
     getHostedMurphContactContext: vi.fn(),
-    getPrisma: vi.fn(),
     headers: vi.fn(),
     requireActiveHostedAppSession: vi.fn(),
     redirect: vi.fn((url: string) => {
@@ -53,10 +52,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-contact-context", () => ({
   getHostedMurphContactContext: mocks.getHostedMurphContactContext,
 }));
 
-vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: mocks.getPrisma,
-}));
-
 type ComputerHandoffDoneRouteModule = typeof import(
   "../app/api/computer/handoff/[token]/done/route"
 );
@@ -87,6 +82,7 @@ describe("computer handoff route and page", () => {
     mocks.requireActiveHostedAppSession.mockResolvedValue(createSession());
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue(createSession());
     mocks.service.completeHandoff.mockResolvedValue({
+      returnContactKind: "text",
       suggestedReply: "private suggested reply",
     });
     mocks.service.continueManagedLoginHandoff.mockResolvedValue({
@@ -96,13 +92,11 @@ describe("computer handoff route and page", () => {
     mocks.service.ensureHandoffViewport.mockResolvedValue(undefined);
     mocks.service.readHandoffPageState.mockResolvedValue({
       kind: "completed",
+      returnContactKind: "text",
       suggestedReply: "finished_browser_step",
     });
     mocks.headers.mockResolvedValue(createHeaders(null));
     mocks.getHostedMurphContactContext.mockResolvedValue(createContactContext());
-    mocks.getPrisma.mockReturnValue(createPrisma({
-      metadataJson: createCheckpointMetadata("linq"),
-    }));
   });
 
   it("requires an active hosted app session before completing a handoff", async () => {
@@ -181,9 +175,10 @@ describe("computer handoff route and page", () => {
   });
 
   it("returns email handoffs to the completed page instead of opening another app", async () => {
-    mocks.getPrisma.mockReturnValueOnce(createPrisma({
-      metadataJson: createCheckpointMetadata("email"),
-    }));
+    mocks.service.completeHandoff.mockResolvedValueOnce({
+      returnContactKind: "email",
+      suggestedReply: "private suggested reply",
+    });
 
     const response = await computerHandoffDoneRoute.POST(
       new Request("https://join.example.test/computer/handoff/handoff-token/done", {
@@ -206,9 +201,10 @@ describe("computer handoff route and page", () => {
   });
 
   it("falls back to the handoff page path when no contact channel resolves", async () => {
-    mocks.getPrisma.mockReturnValueOnce(createPrisma({
-      metadataJson: null,
-    }));
+    mocks.service.completeHandoff.mockResolvedValueOnce({
+      returnContactKind: null,
+      suggestedReply: "private suggested reply",
+    });
     mocks.getHostedMurphContactContext.mockResolvedValueOnce(createContactContext({
       initialContactChannels: {
         email: false,
@@ -293,6 +289,26 @@ describe("computer handoff route and page", () => {
       memberId: "member_123",
       token: "handoff-token",
     });
+  });
+
+  it("renders email-origin completed handoffs as reply-in-thread instructions", async () => {
+    mocks.service.readHandoffPageState.mockResolvedValueOnce({
+      kind: "completed",
+      returnContactKind: "email",
+      suggestedReply: "finished_browser_step",
+    });
+
+    const markup = renderToStaticMarkup(await computerHandoffPage.default({
+      params: Promise.resolve({ token: "handoff-token" }),
+    }));
+
+    assert.match(markup, /All set/);
+    assert.match(markup, /existing Murph email thread/);
+    assert.match(markup, /Reply in the existing email thread with:/);
+    assert.match(markup, />Done</);
+    assert.equal(markup.includes("Reply in Messages"), false);
+    assert.equal(markup.includes("Reply in Telegram"), false);
+    assert.equal(markup.includes("Reply in Email"), false);
   });
 
   it("renders completed handoff contact CTAs without echoing the suggested reply", async () => {
@@ -463,36 +479,5 @@ function createContactContext(input: {
     murphEmailAddress: input.murphEmailAddress ?? "murph+alias123@mail.withmurph.ai",
     murphPhoneNumber: input.murphPhoneNumber ?? "+15550100001",
     userEmailAddress: input.userEmailAddress ?? "member@example.test",
-  };
-}
-
-function createPrisma(input: {
-  memberId?: string;
-  metadataJson?: unknown;
-  runId?: string;
-} = {}) {
-  return {
-    hostedComputerHandoff: {
-      findUnique: vi.fn(async () => ({
-        memberId: input.memberId ?? "member_123",
-        runId: input.runId ?? "hcr_run123",
-      })),
-    },
-    hostedComputerRun: {
-      findFirst: vi.fn(async () => ({
-        metadataJson: input.metadataJson ?? null,
-      })),
-    },
-  };
-}
-
-function createCheckpointMetadata(channel: string) {
-  return {
-    pause: {
-      checkpointContext: {
-        conversationId: JSON.stringify([channel, "conversation-123"]),
-        recipientKey: JSON.stringify([channel, "recipient-123"]),
-      },
-    },
   };
 }

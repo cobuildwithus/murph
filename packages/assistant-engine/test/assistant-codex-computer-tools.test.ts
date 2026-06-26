@@ -204,6 +204,7 @@ describe("murph computer dynamic tools", () => {
         resumeDeliveryContext: {
           conversationId: "conversation-123",
           recipientKey: "recipient-123",
+          returnContactKind: null,
         },
         startUrl: "https://shop.example.test/checkout",
       });
@@ -329,6 +330,7 @@ describe("murph computer dynamic tools", () => {
         resumeDeliveryContext: {
           conversationId: "conversation-123",
           recipientKey: "recipient-123",
+          returnContactKind: null,
         },
       }),
     ]);
@@ -780,6 +782,7 @@ describe("murph computer dynamic tools", () => {
         pauseDeliveryContext: {
           conversationId: "conversation-123",
           recipientKey: "recipient-123",
+          returnContactKind: null,
         },
         reason: "final_confirmation",
         suggestedReply: "done",
@@ -812,6 +815,7 @@ describe("murph computer dynamic tools", () => {
           pauseDeliveryContext: {
             conversationId: "model-authored-conversation",
             recipientKey: "model-authored-recipient",
+            returnContactKind: null,
           },
           reason: "final_confirmation",
           runId: "run_123",
@@ -1019,11 +1023,17 @@ function createHostedToolContext(input: {
   deliveryContext?: {
     conversationId: string | null;
     recipientKey: string | null;
+    returnContactKind?: "text" | "telegram" | "email" | null;
   };
   hostedMailboxItemIds?: string[];
 } = {}): AssistantHostedToolContext {
   return {
-    currentHostedDeliveryContext: () => input.deliveryContext ?? null,
+    currentHostedDeliveryContext: () => input.deliveryContext
+      ? {
+          returnContactKind: null,
+          ...input.deliveryContext,
+        }
+      : null,
     currentHostedMailboxItemIds: () => input.hostedMailboxItemIds ?? [],
     computerToolsAvailable: input.computerToolsAvailable ?? true,
     sendVaultFile: vi.fn(async () => {
