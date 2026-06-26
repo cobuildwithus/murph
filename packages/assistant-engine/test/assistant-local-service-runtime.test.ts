@@ -5811,12 +5811,9 @@ test('sendAssistantMessageLocal recovers reaction no-reply before draining later
   ).toBe(false)
 })
 
-test('sendAssistantMessageLocal stops a typing indicator that resolves after the turn already finished', async () => {
+test('sendAssistantMessageLocal does not wait for a pending typing indicator start', async () => {
   const typingIndicatorDeferred = createDeferred<{ stop(): Promise<void> }>()
-  const stopCompleted = createDeferred<void>()
-  const stopTyping = vi.fn(async () => {
-    stopCompleted.resolve()
-  })
+  const stopTyping = vi.fn(async () => undefined)
   const { sendAssistantMessageLocal } = await loadLocalServiceModule({
     adapter: {
       startTypingIndicator: vi.fn(() => typingIndicatorDeferred.promise),
@@ -5835,14 +5832,16 @@ test('sendAssistantMessageLocal stops a typing indicator that resolves after the
   await Promise.resolve()
   assert.equal(resultResolved, false)
 
+  const result = await resultPromise
+  assert.equal(result.status, 'completed')
+  assert.equal(stopTyping.mock.calls.length, 0)
+
   typingIndicatorDeferred.resolve({
     stop: stopTyping,
   })
-  const result = await resultPromise
-  await stopCompleted.promise
-
-  assert.equal(result.status, 'completed')
-  assert.equal(stopTyping.mock.calls.length, 1)
+  await vi.waitFor(() => {
+    expect(stopTyping).toHaveBeenCalledTimes(1)
+  })
 })
 
 test('sendAssistantMessageLocal returns deferred delivery results and keeps typing in queue-only mode', async () => {

@@ -55,7 +55,7 @@ export function startAssistantChannelTypingIndicator(input: {
       }
 
       if (stopRequested) {
-        await runAssistantTypingBestEffort(() => indicator.stop(), {
+        void runAssistantTypingBestEffort(() => indicator.stop(), {
           timeoutMs: ASSISTANT_TYPING_STOP_WAIT_MS,
         })
         return null
@@ -97,16 +97,7 @@ export function startAssistantChannelTypingIndicator(input: {
         return
       }
 
-      await indicatorReady.then((indicator) => {
-        if (indicator) {
-          activeIndicator = null
-          return runAssistantTypingBestEffort(() => indicator.stop(), {
-            timeoutMs: ASSISTANT_TYPING_STOP_WAIT_MS,
-          })
-        }
-
-        return undefined
-      })
+      return
     },
   }
 }

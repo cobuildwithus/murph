@@ -475,6 +475,69 @@ test('typing indicator stop waits for underlying stop and blocks later refreshes
   expect(stopResolved).toBe(true)
 })
 
+test('typing indicator stop does not wait for a pending start', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: 'linq-participant',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'thread',
+        target: 'linq-thread',
+      },
+      identityId: null,
+      threadId: 'linq-thread',
+      threadIsDirect: false,
+    },
+  })
+  const input: AssistantMessageInput = {
+    channel: 'linq',
+    deliverResponse: true,
+    participantId: 'linq-participant',
+    prompt: 'Send the reminder.',
+    threadId: 'linq-thread',
+    vault: '/vaults/test',
+  }
+  const stop = vi.fn(async () => undefined)
+  let resolveStart!: (indicator: { stop(): Promise<void> }) => void
+  const startPromise = new Promise<{ stop(): Promise<void> }>((resolve) => {
+    resolveStart = resolve
+  })
+  const startLinqTyping = vi.fn(() => startPromise)
+
+  const indicator = startAssistantChannelTypingIndicator({
+    channelDependencies: {
+      startLinqTyping,
+    },
+    input,
+    precedence: 'audience-first',
+    session,
+    sharedPlan: createSharedPlan({
+      audience: {
+        actorId: 'linq-participant',
+        channel: 'linq',
+        threadId: 'linq-thread',
+        threadIsDirect: false,
+      },
+    }),
+  })
+
+  expect(indicator).not.toBeNull()
+  const stopPromise = indicator?.stop()
+  let stopResolved = false
+  stopPromise?.then(() => {
+    stopResolved = true
+  })
+  await Promise.resolve()
+  expect(stopResolved).toBe(true)
+  expect(stop).not.toHaveBeenCalled()
+
+  resolveStart({ stop })
+  await vi.waitFor(() => {
+    expect(stop).toHaveBeenCalledTimes(1)
+  })
+})
+
 test('typing indicator stop is bounded when the underlying stop stalls', async () => {
   vi.useFakeTimers()
   try {
@@ -501,7 +564,9 @@ test('typing indicator stop is bounded when the underlying stop stalls', async (
       vault: '/vaults/test',
     }
     const stopStarted = vi.fn()
+    const refreshNow = vi.fn(async () => undefined)
     const startLinqTyping = vi.fn(async () => ({
+      refreshNow,
       stop: vi.fn(
         () =>
           new Promise<void>(() => {
@@ -530,7 +595,8 @@ test('typing indicator stop is bounded when the underlying stop stalls', async (
     if (!indicator) {
       throw new Error('expected typing indicator')
     }
-    await Promise.resolve()
+    await indicator.refreshNow?.()
+    expect(refreshNow).toHaveBeenCalledTimes(1)
 
     const stopPromise = indicator.stop()
     await vi.advanceTimersByTimeAsync(0)
