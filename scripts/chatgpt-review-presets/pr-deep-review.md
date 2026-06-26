@@ -17,6 +17,8 @@ Use the connected GitHub repository to read:
 - enough surrounding callers, invariants, state owners, and tests to judge the change in context
 - the baseline invariants doc at `docs/contracts/00-invariants.md` (and any topic-specific contract files it links, e.g. `docs/contracts/06-hosted-workspace-file-count.md`) — read this before reporting so invariant checks are grounded in the current rules, not memory
 
+The repo's review:gpt `app_connector="github"` config is the source of truth for PR context. Treat missing GitHub connector context as a hard stop: if you cannot read the PR and repository through that connector, say so and stop. In that case, do not review from pasted context, memory, files attached out of band, or the PR description alone.
+
 Do not review the diff in isolation.
 
 Report only:

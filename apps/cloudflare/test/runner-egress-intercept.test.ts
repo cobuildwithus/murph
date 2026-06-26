@@ -182,11 +182,21 @@ async function createTestProviderEgressCredential(input: {
   });
 }
 
+async function createProviderCredentialAuthorizationHeader(
+  providerKind: string,
+): Promise<Record<"authorization", string>> {
+  return {
+    authorization: `Bearer ${await createTestProviderEgressCredential({
+      providerKind,
+    })}`,
+  };
+}
+
 function createActiveRuntimeWriteFenceValidationResult(input: {
   userId: string;
 }): WorkerActiveRuntimeWriteFenceValidationResult {
   return {
-    attemptId: "attempt_active_user_fence",
+    attemptId: "attempt_active_runtime",
     leaseGeneration: "7",
     owns: true,
     userId: input.userId,
@@ -457,14 +467,14 @@ describe("hostedRunnerIntercept", () => {
       status: 200,
     }));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
       userId: string;
-    }) => createActiveRuntimeWriteFenceValidationResult(input));
+    }) => createProviderEgressCredentialValidationResult(input));
 
     const response = await hostedRunnerIntercept(
       new Request(`http://murph-data-api.worker${path}?q=${query}&limit=3`, {
         headers: {
-          authorization: "Bearer user-supplied-token",
+          ...await createProviderCredentialAuthorizationHeader("murph_data_api"),
           cookie: "session=user-supplied-cookie",
           "x-api-key": "user-supplied-api-key",
         },
@@ -473,14 +483,15 @@ describe("hostedRunnerIntercept", () => {
       createInterceptEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         MURPH_DATA_API_KEY: "data-api-worker-secret",
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        validateActiveRuntimeWriteFence,
+        validateRuntimeProviderEgressCredential,
       }),
       { containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(200);
-    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+    expect(validateRuntimeProviderEgressCredential).toHaveBeenCalledWith({
+      providerKind: "murph_data_api",
+      runnerContainerName: RUNNER_CONTAINER_NAME,
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
@@ -497,7 +508,7 @@ describe("hostedRunnerIntercept", () => {
           host: "murph-data-api.worker",
           providerKind: "murph_data_api",
           providerRequestAuthorized: true,
-          writeFenceValidationMode: "active_user_fence",
+          writeFenceValidationMode: "provider_egress_credential",
         }),
         message: "Hosted runner provider egress completed.",
       }),
@@ -507,9 +518,9 @@ describe("hostedRunnerIntercept", () => {
   it("rejects non-label data API paths before upstream fetch", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
       userId: string;
-    }) => createActiveRuntimeWriteFenceValidationResult(input));
+    }) => createProviderEgressCredentialValidationResult(input));
 
     const response = await hostedRunnerIntercept(
       new Request("http://murph-data-api.worker/api/other", {
@@ -518,27 +529,25 @@ describe("hostedRunnerIntercept", () => {
       createInterceptEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         MURPH_DATA_API_KEY: "data-api-worker-secret",
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        validateActiveRuntimeWriteFence,
+        validateRuntimeProviderEgressCredential,
       }),
       { containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(403);
-    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateRuntimeProviderEgressCredential).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("fails closed when data API upstream configuration is missing", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
       userId: string;
-    }) => createActiveRuntimeWriteFenceValidationResult(input));
+    }) => createProviderEgressCredentialValidationResult(input));
     const env = createInterceptEnv({
       MURPH_DATA_API_KEY: "data-api-worker-secret",
-      readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-      validateActiveRuntimeWriteFence,
+      validateRuntimeProviderEgressCredential,
     });
     delete env.HOSTED_WEB_BASE_URL;
 
@@ -552,7 +561,7 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(500);
     expect(await response.text()).toBe("Hosted data API upstream is not configured.");
-    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateRuntimeProviderEgressCredential).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -560,24 +569,26 @@ describe("hostedRunnerIntercept", () => {
     for (const dataApiKey of [undefined, HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL]) {
       const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
       vi.stubGlobal("fetch", fetchMock);
-      const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+      const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
         userId: string;
-      }) => createActiveRuntimeWriteFenceValidationResult(input));
+      }) => createProviderEgressCredentialValidationResult(input));
 
       await expect(hostedRunnerIntercept(
         new Request("http://murph-data-api.worker/api/supplements?q=creatine", {
+          headers: await createProviderCredentialAuthorizationHeader("murph_data_api"),
           method: "GET",
         }),
         createInterceptEnv({
           HOSTED_WEB_BASE_URL: "https://web.example.test",
           MURPH_DATA_API_KEY: dataApiKey,
-          readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-          validateActiveRuntimeWriteFence,
+          validateRuntimeProviderEgressCredential,
         }),
         { containerId: "opaque-container-id" },
       )).rejects.toThrow("Hosted runner intercept requires Worker secret MURPH_DATA_API_KEY.");
 
-      expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+      expect(validateRuntimeProviderEgressCredential).toHaveBeenCalledWith({
+        providerKind: "murph_data_api",
+        runnerContainerName: RUNNER_CONTAINER_NAME,
         userId: "member_123",
       });
       expect(fetchMock).not.toHaveBeenCalled();
@@ -594,9 +605,9 @@ describe("hostedRunnerIntercept", () => {
       status: 200,
     }));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
       userId: string;
-    }) => createActiveRuntimeWriteFenceValidationResult(input));
+    }) => createProviderEgressCredentialValidationResult(input));
 
     const response = await hostedRunnerIntercept(
       new Request("http://murph-data-api.worker/api/supplements", {
@@ -605,7 +616,7 @@ describe("hostedRunnerIntercept", () => {
           limit: 3,
         }),
         headers: {
-          authorization: "Bearer user-supplied-token",
+          ...await createProviderCredentialAuthorizationHeader("murph_data_api"),
           cookie: "session=user-supplied-cookie",
           "content-type": "application/json",
           "x-api-key": "user-supplied-api-key",
@@ -617,14 +628,15 @@ describe("hostedRunnerIntercept", () => {
       createInterceptEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         MURPH_DATA_API_KEY: "data-api-worker-secret",
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        validateActiveRuntimeWriteFence,
+        validateRuntimeProviderEgressCredential,
       }),
       { containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(200);
-    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+    expect(validateRuntimeProviderEgressCredential).toHaveBeenCalledWith({
+      providerKind: "murph_data_api",
+      runnerContainerName: RUNNER_CONTAINER_NAME,
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
@@ -653,14 +665,15 @@ describe("hostedRunnerIntercept", () => {
       status: 200,
     }));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
       userId: string;
-    }) => createActiveRuntimeWriteFenceValidationResult(input));
+    }) => createProviderEgressCredentialValidationResult(input));
 
     const response = await hostedRunnerIntercept(
       new Request("http://murph-data-api.worker/api/foods", {
         body: "a".repeat(32 * 1024),
         headers: {
+          ...await createProviderCredentialAuthorizationHeader("murph_data_api"),
           "content-type": "text/plain",
         },
         method: "POST",
@@ -668,14 +681,15 @@ describe("hostedRunnerIntercept", () => {
       createInterceptEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         MURPH_DATA_API_KEY: "data-api-worker-secret",
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        validateActiveRuntimeWriteFence,
+        validateRuntimeProviderEgressCredential,
       }),
       { containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(200);
-    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+    expect(validateRuntimeProviderEgressCredential).toHaveBeenCalledWith({
+      providerKind: "murph_data_api",
+      runnerContainerName: RUNNER_CONTAINER_NAME,
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
@@ -688,14 +702,15 @@ describe("hostedRunnerIntercept", () => {
   it("rejects hosted data API POST bodies over 32KB before upstream fetch", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
       userId: string;
-    }) => createActiveRuntimeWriteFenceValidationResult(input));
+    }) => createProviderEgressCredentialValidationResult(input));
 
     const response = await hostedRunnerIntercept(
       new Request("http://murph-data-api.worker/api/foods", {
         body: "a".repeat(32 * 1024 + 1),
         headers: {
+          ...await createProviderCredentialAuthorizationHeader("murph_data_api"),
           "content-type": "text/plain",
         },
         method: "POST",
@@ -703,14 +718,15 @@ describe("hostedRunnerIntercept", () => {
       createInterceptEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         MURPH_DATA_API_KEY: "data-api-worker-secret",
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        validateActiveRuntimeWriteFence,
+        validateRuntimeProviderEgressCredential,
       }),
       { containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(413);
-    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+    expect(validateRuntimeProviderEgressCredential).toHaveBeenCalledWith({
+      providerKind: "murph_data_api",
+      runnerContainerName: RUNNER_CONTAINER_NAME,
       userId: "member_123",
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -801,25 +817,31 @@ describe("hostedRunnerIntercept", () => {
   it("rejects data API injection when the container has no active runtime", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
-      userId: string;
-    }) => createActiveRuntimeWriteFenceValidationResult(input));
+    const validateRuntimeProviderEgressCredential = vi.fn(async () =>
+      ({
+        owns: false,
+        reason: "missing_write_fence",
+      }) as const);
 
     const response = await hostedRunnerIntercept(
       new Request("http://murph-data-api.worker/api/supplements?q=creatine", {
+        headers: await createProviderCredentialAuthorizationHeader("murph_data_api"),
         method: "GET",
       }),
       createInterceptEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
         MURPH_DATA_API_KEY: "data-api-worker-secret",
-        readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
-        validateActiveRuntimeWriteFence,
+        validateRuntimeProviderEgressCredential,
       }),
       { containerId: "opaque-container-id" },
     );
 
     expect(response.status).toBe(401);
-    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateRuntimeProviderEgressCredential).toHaveBeenCalledWith({
+      providerKind: "murph_data_api",
+      runnerContainerName: RUNNER_CONTAINER_NAME,
+      userId: "member_123",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -833,12 +855,13 @@ describe("hostedRunnerIntercept", () => {
       status: 200,
     }));
     vi.stubGlobal("fetch", fetchMock);
-    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
       userId: string;
-    }) => createActiveRuntimeWriteFenceValidationResult(input));
+    }) => createProviderEgressCredentialValidationResult(input));
 
     const response = await hostedRunnerIntercept(
       new Request("http://murph-data-api.worker/api/supplements?q=magnesium", {
+        headers: await createProviderCredentialAuthorizationHeader("murph_data_api"),
         method: "GET",
       }),
       createInterceptEnv({
@@ -846,8 +869,7 @@ describe("hostedRunnerIntercept", () => {
         HOSTED_WEB_BASE_URL: "http://localhost:3000",
         MURPH_DATA_API_KEY: "data-api-worker-secret",
         MURPH_HOSTED_LOCAL_PROFILE: "dev",
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        validateActiveRuntimeWriteFence,
+        validateRuntimeProviderEgressCredential,
       }),
       { containerId: "opaque-container-id" },
     );
@@ -1568,7 +1590,6 @@ describe("hostedRunnerIntercept", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
-          activeContainerIdentitySource: null,
           providerKind: "openai",
           providerBearerCredentialKind: "provider_egress",
           providerEgressAuthMode: "provider_egress_credential",
@@ -1868,7 +1889,6 @@ describe("hostedRunnerIntercept", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
-          activeContainerIdentitySource: null,
           providerKind: "openai",
           providerRequestAuthorized: false,
           providerEgressAuthMode: "provider_egress_token",
@@ -1964,7 +1984,6 @@ describe("hostedRunnerIntercept", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
-          activeContainerIdentitySource: null,
           providerKind: "openai",
           providerBearerCredentialKind: "provider_egress",
           providerRequestAuthorized: false,
@@ -2017,6 +2036,9 @@ describe("hostedRunnerIntercept", () => {
           writeFenceValidationMode: "provider_egress_credential",
           writeFenceValidationRejectReason: "provider_egress_credential_validation_error",
         }),
+        error: expect.objectContaining({
+          message: "provider credential validation failed",
+        }),
         message: "Hosted runner provider egress completed.",
       }),
     );
@@ -2064,6 +2086,7 @@ describe("hostedRunnerIntercept", () => {
           writeFenceValidationMode: "provider_egress_credential",
           writeFenceValidationRejectReason: "provider_egress_credential_validation_error",
         }),
+        error: expect.any(Error),
         message: "Hosted runner provider egress completed.",
       }),
     );
@@ -4064,34 +4087,30 @@ describe("hostedRunnerIntercept", () => {
     expect(forwardedBody.endPublishedDate).toBe("2026-06-17T00:00:00.000Z");
   });
 
-  it("authorizes Exa egress from a child process via container-identity active-user fence with no caller headers", async () => {
+  it("authorizes Exa egress from a child process via provider credential with no caller headers", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => {
-      throw new Error("Exa from a child process must not require write-fence headers.");
+      throw new Error("Exa provider credentials must not require write-fence headers.");
     });
-    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
       userId: string;
-    }) => createActiveRuntimeWriteFenceValidationResult(input));
+    }) => createProviderEgressCredentialValidationResult(input));
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.exa.ai/search", {
         body: JSON.stringify(createHostedExaResearchScoutRequestBody()),
         headers: {
           "content-type": "application/json; charset=utf-8",
-          "x-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+          "x-api-key": await createTestProviderEgressCredential({
+            providerKind: "exa",
+          }),
         },
         method: "POST",
       }),
       createInterceptEnv({
         EXA_API_KEY: "exa-worker-secret",
-        readActiveRuntimeUserFence: async () => ({
-          active: true,
-          attemptId: "attempt-1",
-          leaseGeneration: "1",
-          userId: "member_123",
-        }),
-        validateActiveRuntimeWriteFence,
+        validateRuntimeProviderEgressCredential,
         validateRuntimeWriteFence,
       }),
       { containerId: "opaque-container-id" },
@@ -4099,7 +4118,9 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(200);
     expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
-    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+    expect(validateRuntimeProviderEgressCredential).toHaveBeenCalledWith({
+      providerKind: "exa",
+      runnerContainerName: RUNNER_CONTAINER_NAME,
       userId: "member_123",
     });
     const forwarded = readForwardedRequest(fetchMock);
@@ -4109,7 +4130,7 @@ describe("hostedRunnerIntercept", () => {
         details: expect.objectContaining({
           providerKind: "exa",
           providerRequestAuthorized: true,
-          writeFenceValidationMode: "active_user_fence",
+          writeFenceValidationMode: "provider_egress_credential",
         }),
         message: "Hosted runner provider egress completed.",
       }),
@@ -6277,13 +6298,40 @@ describe("hostedRunnerIntercept", () => {
 describe("maybeHandleHostedTranscribeRequest", () => {
   const TRANSCRIBE_URL = "http://murph-transcribe.worker/v1/transcribe";
 
+  async function createAuthorizedTranscribeRequest(init: RequestInit = {}): Promise<Request> {
+    const headers = new Headers(init.headers);
+    headers.set(
+      "authorization",
+      `Bearer ${await createTestProviderEgressCredential({
+        providerKind: "workers_ai_transcribe",
+      })}`,
+    );
+    return new Request(TRANSCRIBE_URL, {
+      ...init,
+      headers,
+    });
+  }
+
+  function createTranscribeInterceptEnv(
+    input: Parameters<typeof createInterceptEnv>[0],
+  ): RunnerOutboundEnvironmentSource {
+    return createInterceptEnv({
+      ...input,
+      validateRuntimeProviderEgressCredential:
+        input.validateRuntimeProviderEgressCredential ??
+        (async (validationInput) => createProviderEgressCredentialValidationResult(
+          validationInput,
+        )),
+    });
+  }
+
   it("routes the transcribe host through the open-internet multiplexer", () => {
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.transcribe])
       .toBe(handleHostedRunnerOpenInternetOutbound);
     expect(HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.transcribe).toBe("murph-transcribe.worker");
   });
 
-  it("authorizes via the active user fence and maps Workers AI output to the transcript payload", async () => {
+  it("authorizes via a runner-scoped provider credential and maps Workers AI output to the transcript payload", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
       Response.json({ recorded: true, usageId: "usage_1" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -6299,23 +6347,24 @@ describe("maybeHandleHostedTranscribeRequest", () => {
         transcription_info: { duration: 2.94, language: "en" },
       };
     });
-    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
+      providerKind: string;
+      runnerContainerName: string;
       userId: string;
-    }) => createActiveRuntimeWriteFenceValidationResult(input));
+    }) => createProviderEgressCredentialValidationResult(input));
     const waitUntilPromises: Promise<unknown>[] = [];
 
     const response = await hostedRunnerIntercept(
-      new Request(TRANSCRIBE_URL, {
+      await createAuthorizedTranscribeRequest({
         body: "wav-bytes",
         headers: {
           "content-type": "audio/wav",
         },
         method: "POST",
       }),
-      createInterceptEnv({
+      createTranscribeInterceptEnv({
         AI: { run: aiRun },
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        validateActiveRuntimeWriteFence,
+        validateRuntimeProviderEgressCredential,
       }),
       {
         containerId: "opaque-container-id",
@@ -6335,7 +6384,9 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       ],
       text: "Remember to log the voice note",
     });
-    expect(validateActiveRuntimeWriteFence).toHaveBeenCalledWith({
+    expect(validateRuntimeProviderEgressCredential).toHaveBeenCalledWith({
+      providerKind: "workers_ai_transcribe",
+      runnerContainerName: RUNNER_CONTAINER_NAME,
       userId: "member_123",
     });
 
@@ -6373,7 +6424,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
           providerKind: "workers_ai_transcribe",
           providerRequestAuthorized: true,
           transcriptDurationMs: 2_940,
-          writeFenceValidationMode: "active_user_fence",
+          writeFenceValidationMode: "provider_egress_credential",
         }),
         message: "Hosted runner provider egress completed.",
       }),
@@ -6390,20 +6441,17 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     const waitUntilPromises: Promise<unknown>[] = [];
 
     const response = await hostedRunnerIntercept(
-      new Request(TRANSCRIBE_URL, {
+      await createAuthorizedTranscribeRequest({
         body: "wav-bytes",
         method: "POST",
       }),
-      createInterceptEnv({
+      createTranscribeInterceptEnv({
         AI: {
           run: vi.fn(async () => ({
             text: "transcript",
             transcription_info: { duration: 2.94, language: "en" },
           })),
         },
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        validateActiveRuntimeWriteFence: async (input) =>
-          createActiveRuntimeWriteFenceValidationResult(input),
       }),
       {
         containerId: "opaque-container-id",
@@ -6436,20 +6484,17 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await hostedRunnerIntercept(
-      new Request(TRANSCRIBE_URL, {
+      await createAuthorizedTranscribeRequest({
         body: "wav-bytes",
         method: "POST",
       }),
-      createInterceptEnv({
+      createTranscribeInterceptEnv({
         AI: {
           run: vi.fn(async () => ({
             text: "transcript",
             transcription_info: { duration: 2.94, language: "en" },
           })),
         },
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        validateActiveRuntimeWriteFence: async (input) =>
-          createActiveRuntimeWriteFenceValidationResult(input),
       }),
       // Production containers proxy through a ctx without waitUntil; a
       // floating recording promise would be canceled with the invocation.
@@ -6465,13 +6510,14 @@ describe("maybeHandleHostedTranscribeRequest", () => {
 
   it("rejects unknown transcribe paths and non-POST methods before authorization", async () => {
     const aiRun = vi.fn();
-    const validateActiveRuntimeWriteFence = vi.fn(async (input: {
+    const validateRuntimeProviderEgressCredential = vi.fn(async (input: {
+      providerKind: string;
+      runnerContainerName: string;
       userId: string;
-    }) => createActiveRuntimeWriteFenceValidationResult(input));
-    const env = createInterceptEnv({
+    }) => createProviderEgressCredentialValidationResult(input));
+    const env = createTranscribeInterceptEnv({
       AI: { run: aiRun },
-      readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-      validateActiveRuntimeWriteFence,
+      validateRuntimeProviderEgressCredential,
     });
 
     const wrongPath = await hostedRunnerIntercept(
@@ -6482,44 +6528,54 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     expect(wrongPath.status).toBe(403);
 
     const wrongMethod = await hostedRunnerIntercept(
-      new Request(TRANSCRIBE_URL, { method: "GET" }),
+      await createAuthorizedTranscribeRequest({ method: "GET" }),
       env,
       { containerId: "opaque-container-id" },
     );
     expect(wrongMethod.status).toBe(403);
-    expect(validateActiveRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateRuntimeProviderEgressCredential).not.toHaveBeenCalled();
     expect(aiRun).not.toHaveBeenCalled();
   });
 
   it("rejects unauthorized transcribe requests without calling Workers AI", async () => {
     const aiRun = vi.fn();
+    const validateRuntimeWriteFence = vi.fn(async () => {
+      throw new Error("Transcribe without a provider credential must not use write-fence validation.");
+    });
+    const validateProviderEgressToken = vi.fn(async () => {
+      throw new Error("Transcribe without a provider credential must not use provider-token validation.");
+    });
 
     const response = await hostedRunnerIntercept(
       new Request(TRANSCRIBE_URL, {
         body: "wav-bytes",
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          ...BOUND_USER_PROVIDER_EGRESS_HEADERS,
+        },
         method: "POST",
       }),
       createInterceptEnv({
         AI: { run: aiRun },
+        validateRuntimeProviderEgressToken: validateProviderEgressToken,
+        validateRuntimeWriteFence,
       }),
       { containerId: "opaque-container-id" },
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(403);
     expect(aiRun).not.toHaveBeenCalled();
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(validateProviderEgressToken).not.toHaveBeenCalled();
   });
 
   it("fails closed when the Workers AI binding is missing", async () => {
     const response = await hostedRunnerIntercept(
-      new Request(TRANSCRIBE_URL, {
+      await createAuthorizedTranscribeRequest({
         body: "wav-bytes",
         method: "POST",
       }),
-      createInterceptEnv({
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        validateActiveRuntimeWriteFence: async (input) =>
-          createActiveRuntimeWriteFenceValidationResult(input),
-      }),
+      createTranscribeInterceptEnv({}),
       { containerId: "opaque-container-id" },
     );
 
@@ -6540,37 +6596,31 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       waitUntilPromises.push(promise);
     };
     const oversized = await hostedRunnerIntercept(
-      new Request(TRANSCRIBE_URL, {
+      await createAuthorizedTranscribeRequest({
         body: "wav-bytes",
         headers: {
           "content-length": String(64 * 1024 * 1024),
         },
         method: "POST",
       }),
-      createInterceptEnv({
+      createTranscribeInterceptEnv({
         AI: { run: vi.fn() },
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        validateActiveRuntimeWriteFence: async (input) =>
-          createActiveRuntimeWriteFenceValidationResult(input),
       }),
       { containerId: "opaque-container-id", waitUntil },
     );
     expect(oversized.status).toBe(413);
 
     const failing = await hostedRunnerIntercept(
-      new Request(TRANSCRIBE_URL, {
+      await createAuthorizedTranscribeRequest({
         body: "wav-bytes",
         method: "POST",
       }),
-      createInterceptEnv({
+      createTranscribeInterceptEnv({
         AI: {
           run: vi.fn(async () => {
             throw new Error("Workers AI unavailable");
           }),
         },
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        validateActiveRuntimeWriteFence: async (input) =>
-          createActiveRuntimeWriteFenceValidationResult(input),
       }),
       { containerId: "opaque-container-id", waitUntil },
     );
@@ -6584,7 +6634,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
           host: "murph-transcribe.worker",
           providerKind: "workers_ai_transcribe",
           providerRequestAuthorized: true,
-          writeFenceValidationMode: "active_user_fence",
+          writeFenceValidationMode: "provider_egress_credential",
         }),
         message: "Hosted runner provider egress completed.",
       }),
@@ -6606,19 +6656,16 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       waitUntilPromises.push(promise);
     };
     const response = await hostedRunnerIntercept(
-      new Request(TRANSCRIBE_URL, {
+      await createAuthorizedTranscribeRequest({
         body: "wav-bytes",
         method: "POST",
       }),
-      createInterceptEnv({
+      createTranscribeInterceptEnv({
         AI: {
           run: vi.fn(async () => ({
             text: "  text-only transcript  ",
           })),
         },
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        validateActiveRuntimeWriteFence: async (input) =>
-          createActiveRuntimeWriteFenceValidationResult(input),
       }),
       { containerId: "opaque-container-id", waitUntil },
     );
@@ -6643,11 +6690,11 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     );
 
     const malformedSegments = await hostedRunnerIntercept(
-      new Request(TRANSCRIBE_URL, {
+      await createAuthorizedTranscribeRequest({
         body: "wav-bytes",
         method: "POST",
       }),
-      createInterceptEnv({
+      createTranscribeInterceptEnv({
         AI: {
           run: vi.fn(async () => ({
             segments: [
@@ -6660,9 +6707,6 @@ describe("maybeHandleHostedTranscribeRequest", () => {
             transcription_info: { duration: -2, language: "   " },
           })),
         },
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        validateActiveRuntimeWriteFence: async (input) =>
-          createActiveRuntimeWriteFenceValidationResult(input),
       }),
       { containerId: "opaque-container-id", waitUntil },
     );
@@ -6707,25 +6751,17 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     }));
 
     const response = await hostedRunnerIntercept(
-      new Request(TRANSCRIBE_URL, {
+      await createAuthorizedTranscribeRequest({
         body: "wav-bytes",
         method: "POST",
       }),
-      createInterceptEnv({
+      createTranscribeInterceptEnv({
         AI: {
           run: vi.fn(async () => ({
             segments,
             text: "long transcript",
           })),
         },
-        readActiveRuntimeUserFence: async () => ({
-          active: true,
-          attemptId: "attempt-1",
-          leaseGeneration: "1",
-          userId: "member_123",
-        }),
-        validateActiveRuntimeWriteFence: async (input) =>
-          createActiveRuntimeWriteFenceValidationResult(input),
       }),
       { containerId: "opaque-container-id", waitUntil },
     );
@@ -6760,12 +6796,9 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       waitUntilPromises.push(promise);
     };
     const emptyBody = await hostedRunnerIntercept(
-      new Request(TRANSCRIBE_URL, { method: "POST" }),
-      createInterceptEnv({
+      await createAuthorizedTranscribeRequest({ method: "POST" }),
+      createTranscribeInterceptEnv({
         AI: { run: vi.fn() },
-        readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-        validateActiveRuntimeWriteFence: async (input) =>
-          createActiveRuntimeWriteFenceValidationResult(input),
       }),
       { containerId: "opaque-container-id", waitUntil },
     );
@@ -6785,15 +6818,12 @@ describe("maybeHandleHostedTranscribeRequest", () => {
     ];
     for (const output of outputs) {
       const response = await hostedRunnerIntercept(
-        new Request(TRANSCRIBE_URL, {
+        await createAuthorizedTranscribeRequest({
           body: "wav-bytes",
           method: "POST",
         }),
-        createInterceptEnv({
+        createTranscribeInterceptEnv({
           AI: { run: vi.fn(async () => output) },
-          readActiveRuntimeUserFence: async () => ({ active: true, attemptId: "attempt-1", leaseGeneration: "1", userId: "member_123" }),
-          validateActiveRuntimeWriteFence: async (input) =>
-            createActiveRuntimeWriteFenceValidationResult(input),
         }),
         { containerId: "opaque-container-id", waitUntil },
       );
