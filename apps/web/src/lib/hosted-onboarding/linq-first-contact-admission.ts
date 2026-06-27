@@ -15,7 +15,6 @@ import { getHostedOnboardingEnvironment } from "./runtime";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_TIMEOUT_MS = 10_000;
-const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_REJECTED_MESSAGE_MAX_CHARS = 2_000;
 export const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS = 4;
 
 export type HostedLinqFirstContactAdmissionDecision = {
@@ -36,21 +35,20 @@ type HostedLinqFirstContactAdmissionDecisionRecord = {
   confidence: number;
   decision: string;
   eventId: string;
-  rejectedMessageText?: string | null;
   source: string;
 };
 
 type HostedLinqFirstContactAdmissionDecisionStore = {
   hostedLinqFirstContactAdmissionDecision: {
-    create(input: {
+    createMany(input: {
       data: {
         confidence: number;
         decision: HostedLinqFirstContactAdmissionDecision["kind"];
         eventId: string;
-        rejectedMessageText?: string | null;
         source: HostedLinqFirstContactAdmissionDecision["source"];
       };
-    }): Promise<HostedLinqFirstContactAdmissionDecisionRecord>;
+      skipDuplicates: true;
+    }): Promise<{ count: number }>;
     findUnique(input: {
       where: {
         eventId: string;
@@ -277,50 +275,26 @@ export async function recordHostedLinqFirstContactAdmissionDecision(input: {
   decision: HostedLinqFirstContactAdmissionDecision;
   eventId: string;
   prisma: HostedLinqFirstContactAdmissionDecisionStore;
-  rejectedMessageText?: string | null;
 }): Promise<HostedLinqFirstContactAdmissionDecision> {
-  try {
-    const rejectedMessageText = buildHostedLinqFirstContactAdmissionRejectedMessageText({
-      decision: input.decision,
-      text: input.rejectedMessageText,
-    });
-    const created = await input.prisma.hostedLinqFirstContactAdmissionDecision.create({
-      data: {
-        confidence: input.decision.confidence,
-        decision: input.decision.kind,
-        eventId: input.eventId,
-        ...(rejectedMessageText ? { rejectedMessageText } : {}),
-        source: input.decision.source,
-      },
-    });
-    return parseHostedLinqFirstContactAdmissionDecisionRecord(created) ?? input.decision;
-  } catch (error) {
-    if (!isPrismaUniqueConstraintError(error)) {
-      throw error;
-    }
-
-    const existing = await readRecordedHostedLinqFirstContactAdmissionDecision({
+  await input.prisma.hostedLinqFirstContactAdmissionDecision.createMany({
+    data: {
+      confidence: input.decision.confidence,
+      decision: input.decision.kind,
       eventId: input.eventId,
-      prisma: input.prisma,
-    });
-    if (existing) {
-      return existing;
-    }
-    throw error;
-  }
-}
+      source: input.decision.source,
+    },
+    skipDuplicates: true,
+  });
 
-function buildHostedLinqFirstContactAdmissionRejectedMessageText(input: {
-  decision: HostedLinqFirstContactAdmissionDecision;
-  text?: string | null;
-}): string | null {
-  if (input.decision.kind !== "block" || typeof input.text !== "string") {
-    return null;
+  const recorded = await readRecordedHostedLinqFirstContactAdmissionDecision({
+    eventId: input.eventId,
+    prisma: input.prisma,
+  });
+  if (!recorded) {
+    throw new Error("Hosted Linq first-contact admission decision was not recorded.");
   }
-  const text = input.text
-    .slice(0, HOSTED_LINQ_FIRST_CONTACT_ADMISSION_REJECTED_MESSAGE_MAX_CHARS)
-    .trim();
-  return text.length > 0 ? text : null;
+
+  return recorded;
 }
 
 // Cheap read-only check of whether the per-contact classifier budget is
@@ -825,10 +799,6 @@ function isHostedLinqFirstContactAdmissionQuotaExhausted(input: {
     || message.includes("billing hard limit")
     || message.includes("out of credits")
     || message.includes("credit balance");
-}
-
-function isPrismaUniqueConstraintError(error: unknown): boolean {
-  return readRecord(error)?.code === "P2002";
 }
 
 function buildHostedLinqFirstContactAdmissionUnavailableError(input: {

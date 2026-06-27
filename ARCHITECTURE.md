@@ -148,6 +148,9 @@ classifier payload or response body, and fails closed without sending a reply
 when enforcement is enabled and the classifier explicitly blocks. OpenAI
 refusal and content-filter outcomes are terminal unsupported content blocks, and
 first-contact budget exhaustion also blocks before side effects.
+Classifier-path budget claims and decision recording commit together, and the
+event-id decision write is duplicate-safe so webhook retries can observe the
+same terminal decision without replaying a failing unique-constraint path.
 Classifier-unavailable states, including missing keys, timeouts, ordinary
 non-2xx responses, malformed output, non-completed responses, max-output
 exhaustion, and OpenAI quota or credits exhaustion, intentionally fail open by

@@ -169,7 +169,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             decision: deterministicDecision,
             eventId: event.event_id,
             prisma,
-            rejectedMessageText: firstContactAdmissionRequest.text,
           });
           plan = firstContactAdmission.kind === "block"
             ? buildBlockedHostedLinqFirstContactAdmissionPlan()
@@ -241,7 +240,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                     decision: classifiedAdmission,
                     eventId: event.event_id,
                     prisma: transaction,
-                    rejectedMessageText: firstContactAdmissionRequest.text,
                   }),
                 };
               },

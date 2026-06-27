@@ -616,12 +616,9 @@ describe("Linq first-contact admission", () => {
   });
 
   it("returns the stored decision when a concurrent insert already won the event", async () => {
-    const uniqueConflict = Object.assign(new Error("Unique constraint failed"), {
-      code: "P2002",
-    });
     const prisma = {
       hostedLinqFirstContactAdmissionDecision: {
-        create: vi.fn().mockRejectedValueOnce(uniqueConflict),
+        createMany: vi.fn().mockResolvedValueOnce({ count: 0 }),
         findUnique: vi.fn().mockResolvedValueOnce({
           confidence: 0.99,
           decision: "block",
@@ -644,13 +641,27 @@ describe("Linq first-contact admission", () => {
       kind: "block",
       source: "model",
     });
+    expect(prisma.hostedLinqFirstContactAdmissionDecision.createMany).toHaveBeenCalledWith({
+      data: {
+        confidence: 0.9,
+        decision: "allow",
+        eventId: BASE_REQUEST.eventId,
+        source: "model",
+      },
+      skipDuplicates: true,
+    });
   });
 
-  it("stores bounded rejected-message text only for block decisions", async () => {
-    const blockPrisma = {
+  it("records block decisions without storing rejected-message text", async () => {
+    const prisma = {
       hostedLinqFirstContactAdmissionDecision: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
-        findUnique: vi.fn(),
+        createMany: vi.fn().mockResolvedValueOnce({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValueOnce({
+          confidence: 0.94,
+          decision: "block",
+          eventId: BASE_REQUEST.eventId,
+          source: "model",
+        }),
       },
     };
 
@@ -661,49 +672,21 @@ describe("Linq first-contact admission", () => {
         source: "model",
       },
       eventId: BASE_REQUEST.eventId,
-      prisma: blockPrisma,
-      rejectedMessageText: `${"x".repeat(2_100)}   `,
+      prisma,
     })).resolves.toMatchObject({
       confidence: 0.94,
       kind: "block",
       source: "model",
     });
 
-    expect(blockPrisma.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledWith({
+    expect(prisma.hostedLinqFirstContactAdmissionDecision.createMany).toHaveBeenCalledWith({
       data: {
         confidence: 0.94,
         decision: "block",
         eventId: BASE_REQUEST.eventId,
-        rejectedMessageText: "x".repeat(2_000),
         source: "model",
       },
-    });
-
-    const allowPrisma = {
-      hostedLinqFirstContactAdmissionDecision: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
-        findUnique: vi.fn(),
-      },
-    };
-
-    await recordHostedLinqFirstContactAdmissionDecision({
-      decision: {
-        confidence: 0.9,
-        kind: "allow",
-        source: "model",
-      },
-      eventId: "evt_allowed_with_text",
-      prisma: allowPrisma,
-      rejectedMessageText: "blocked text should not persist",
-    });
-
-    expect(allowPrisma.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledWith({
-      data: {
-        confidence: 0.9,
-        decision: "allow",
-        eventId: "evt_allowed_with_text",
-        source: "model",
-      },
+      skipDuplicates: true,
     });
   });
 });
