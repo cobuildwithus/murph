@@ -828,7 +828,6 @@ async function planHostedLinqStaleFirstContactBeforeActiveRouting(input: {
 }): Promise<HostedOnboardingLinqDirectPlan | null> {
   if (
     input.existingFirstContactReceipt?.status !== "processing"
-    || !input.requireFirstContactAdmission
     || !input.existingMember
     || !input.memberId
   ) {
@@ -856,7 +855,11 @@ async function planHostedLinqStaleFirstContactBeforeActiveRouting(input: {
     }
   }
 
-  if (!input.firstContactAdmitted || !hasHostedMemberActiveAccess(input.existingMember)) {
+  if (!hasHostedMemberActiveAccess(input.existingMember)) {
+    return null;
+  }
+
+  if (input.requireFirstContactAdmission && !input.firstContactAdmitted) {
     return null;
   }
 

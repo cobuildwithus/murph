@@ -4087,6 +4087,138 @@ https://join.example.test/join/code_first_text`);
     });
   });
 
+  it("consumes stale first-contact receipts before active routing when admission is disabled", async () => {
+    mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "off";
+    mocks.classifyHostedLinqFirstContactAdmission.mockReset();
+    mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(new Error("linq send failed"));
+
+    const eventId = "evt_admission_off_pre_send_failure";
+    let member = null as HostedMemberRecord | null;
+    let invite: Record<string, unknown> | null = null;
+    const firstContactReceipt = createHostedLinqFirstContactEventReceiptFixture();
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          invite = {
+            channel: data.channel,
+            expiresAt: data.expiresAt,
+            id: "invite_admission_off_pre_send_failure",
+            inviteCode: "code_admission_off_pre_send_failure",
+            memberId: data.memberId,
+            sentAt: null,
+            status: "pending",
+          };
+          return invite;
+        }),
+        findFirst: vi.fn(async ({ where }: { where?: Record<string, unknown> }) => {
+          if (!invite) {
+            return null;
+          }
+          if (where?.sentAt) {
+            return invite.sentAt ? invite : null;
+          }
+          if (where?.expiresAt) {
+            return invite;
+          }
+          return null;
+        }),
+        findUnique: vi.fn(async () => invite),
+        update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          invite = {
+            ...(invite ?? {}),
+            ...data,
+          };
+          return invite;
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqFirstContactEventReceipt: firstContactReceipt,
+      hostedMember: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          member = {
+            billingStatus: HostedBillingStatus.not_started,
+            id: "member_admission_off_pre_send_failure",
+            phoneLookupKey: data.phoneLookupKey,
+            suspendedAt: null,
+          };
+          return member;
+        }),
+        findUnique: vi.fn(async () => member),
+        update: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+    const rawBody = buildHostedLinqWebhookBody({
+      eventId,
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).rejects.toThrow("linq send failed");
+
+    expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(mocks.releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalledTimes(1);
+    const retainedReceipt = await firstContactReceipt.findUnique({
+      where: {
+        eventId,
+      },
+    }) as HostedLinqReceiptRecord | null;
+    expect(retainedReceipt).toMatchObject({
+      eventId,
+      status: "processing",
+    });
+
+    if (!member || !retainedReceipt) {
+      throw new Error("Expected failed signup send to leave member and first-contact receipt.");
+    }
+    member.billingStatus = HostedBillingStatus.active;
+    retainedReceipt.updatedAt = new Date("2026-03-26T11:54:00.000Z");
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "stale-first-contact",
+    });
+
+    expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(await firstContactReceipt.findUnique({
+      where: {
+        eventId,
+      },
+    })).toMatchObject({
+      eventId,
+      status: "consumed",
+    });
+  });
+
   it("claims first-contact admission processing before classification so overlapping deliveries cannot classify independently", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     mocks.readHostedLinqDailyState
