@@ -83,6 +83,10 @@ type HostedLinqFirstContactAdmissionBudgetRecord = {
 };
 
 type HostedLinqFirstContactAdmissionBudgetStore = {
+  $executeRaw(
+    template: TemplateStringsArray,
+    ...values: readonly unknown[]
+  ): Promise<number>;
   hostedLinqFirstContactAdmissionBudget: {
     count(input: {
       where: {
@@ -297,9 +301,19 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
   eventId: string;
   participantContactKind: HostedLinqFirstContactAdmissionRequest["participantContactKind"];
   participantContactLookupKey: string;
-  prisma: HostedLinqFirstContactAdmissionBudgetStore;
+  tx: HostedLinqFirstContactAdmissionBudgetStore;
 }): Promise<HostedLinqFirstContactAdmissionBudgetClaim> {
-  const alreadyCounted = await input.prisma.hostedLinqFirstContactAdmissionBudget.findUnique({
+  // Per-contact advisory lock serializes concurrent distinct-event claims so
+  // the cap check and insert observe a consistent attempt count. Released on
+  // transaction commit. Mirrors acquireHostedLinqRoutingWriteLockTx.
+  await input.tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtext(${"hosted-linq-first-contact-admission-budget"}),
+      hashtext(${input.participantContactLookupKey})
+    )
+  `;
+
+  const alreadyCounted = await input.tx.hostedLinqFirstContactAdmissionBudget.findUnique({
     where: {
       participantContactLookupKey_eventId: {
         eventId: input.eventId,
@@ -309,7 +323,7 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
   });
   if (alreadyCounted) {
     return {
-      attemptCount: await input.prisma.hostedLinqFirstContactAdmissionBudget.count({
+      attemptCount: await input.tx.hostedLinqFirstContactAdmissionBudget.count({
         where: {
           participantContactLookupKey: input.participantContactLookupKey,
         },
@@ -318,7 +332,7 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
     };
   }
 
-  const existingCount = await input.prisma.hostedLinqFirstContactAdmissionBudget.count({
+  const existingCount = await input.tx.hostedLinqFirstContactAdmissionBudget.count({
     where: {
       participantContactLookupKey: input.participantContactLookupKey,
     },
@@ -330,26 +344,16 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
     };
   }
 
-  try {
-    await input.prisma.hostedLinqFirstContactAdmissionBudget.create({
-      data: {
-        eventId: input.eventId,
-        participantContactKind: input.participantContactKind,
-        participantContactLookupKey: input.participantContactLookupKey,
-      },
-    });
-  } catch (error) {
-    if (!isPrismaUniqueConstraintError(error)) {
-      throw error;
-    }
-  }
+  await input.tx.hostedLinqFirstContactAdmissionBudget.create({
+    data: {
+      eventId: input.eventId,
+      participantContactKind: input.participantContactKind,
+      participantContactLookupKey: input.participantContactLookupKey,
+    },
+  });
 
   return {
-    attemptCount: await input.prisma.hostedLinqFirstContactAdmissionBudget.count({
-      where: {
-        participantContactLookupKey: input.participantContactLookupKey,
-      },
-    }),
+    attemptCount: existingCount + 1,
     kind: "claimed",
   };
 }

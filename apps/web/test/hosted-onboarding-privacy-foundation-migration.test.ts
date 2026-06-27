@@ -591,10 +591,7 @@ describe("hosted Prisma baseline migration", () => {
       'CREATE TABLE "hosted_linq_first_contact_admission_budget"',
     );
     expect(linqFirstContactAdmissionBudgetMigrationSql).toContain(
-      'PRIMARY KEY ("participant_contact_lookup_key")',
-    );
-    expect(linqFirstContactAdmissionBudgetMigrationSql).toContain(
-      '"attempt_count" INTEGER NOT NULL DEFAULT 0',
+      'PRIMARY KEY ("participant_contact_lookup_key", "event_id")',
     );
     expect(linqFirstContactAdmissionBudgetMigrationSql).not.toContain(
       "prompt",
@@ -604,6 +601,9 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(linqFirstContactAdmissionBudgetMigrationSql).not.toContain(
       "phone_number",
+    );
+    expect(linqFirstContactAdmissionBudgetMigrationSql).not.toContain(
+      '"text"',
     );
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
     expect(baselineMigrationSql).toContain(

@@ -153,13 +153,18 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       }
 
       if (plan.firstContactAdmissionRequest) {
-        const admissionBudget = await claimHostedLinqFirstContactAdmissionBudget({
-          eventId: event.event_id,
-          participantContactKind: plan.firstContactAdmissionRequest.participantContactKind,
-          participantContactLookupKey:
-            plan.firstContactAdmissionRequest.participantContactLookupKey,
+        const firstContactAdmissionRequest = plan.firstContactAdmissionRequest;
+        const admissionBudget = await runHostedOnboardingWebhookTransaction(
           prisma,
-        });
+          (transaction) =>
+            claimHostedLinqFirstContactAdmissionBudget({
+              eventId: event.event_id,
+              participantContactKind: firstContactAdmissionRequest.participantContactKind,
+              participantContactLookupKey:
+                firstContactAdmissionRequest.participantContactLookupKey,
+              tx: transaction,
+            }),
+        );
 
         if (admissionBudget.kind === "exhausted") {
           plan = buildBlockedHostedLinqFirstContactAdmissionPlan(

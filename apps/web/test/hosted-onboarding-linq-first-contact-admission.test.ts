@@ -346,7 +346,8 @@ describe("Linq first-contact admission", () => {
   });
 
   it("does not spend another first-contact admission budget attempt for the same event replay", async () => {
-    const prisma = {
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
       hostedLinqFirstContactAdmissionBudget: {
         count: vi.fn().mockResolvedValueOnce(3),
         create: vi.fn(),
@@ -362,16 +363,18 @@ describe("Linq first-contact admission", () => {
       eventId: BASE_REQUEST.eventId,
       participantContactKind: BASE_REQUEST.participantContactKind,
       participantContactLookupKey: BASE_REQUEST.participantContactLookupKey,
-      prisma,
+      tx,
     })).resolves.toEqual({
       attemptCount: 3,
       kind: "claimed",
     });
-    expect(prisma.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
+    expect(tx.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
   });
 
   it("does not spend another budget attempt when a previously counted event is replayed after a different event has been counted", async () => {
-    const prisma = {
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
       hostedLinqFirstContactAdmissionBudget: {
         count: vi.fn().mockResolvedValueOnce(2),
         create: vi.fn(),
@@ -387,16 +390,17 @@ describe("Linq first-contact admission", () => {
       eventId: BASE_REQUEST.eventId,
       participantContactKind: BASE_REQUEST.participantContactKind,
       participantContactLookupKey: BASE_REQUEST.participantContactLookupKey,
-      prisma,
+      tx,
     })).resolves.toEqual({
       attemptCount: 2,
       kind: "claimed",
     });
-    expect(prisma.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
+    expect(tx.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
   });
 
   it("reports the contact budget as exhausted without spending another attempt once the cap has been reached", async () => {
-    const prisma = {
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
       hostedLinqFirstContactAdmissionBudget: {
         count: vi.fn().mockResolvedValueOnce(4),
         create: vi.fn(),
@@ -408,18 +412,19 @@ describe("Linq first-contact admission", () => {
       eventId: BASE_REQUEST.eventId,
       participantContactKind: BASE_REQUEST.participantContactKind,
       participantContactLookupKey: BASE_REQUEST.participantContactLookupKey,
-      prisma,
+      tx,
     })).resolves.toEqual({
       attemptCount: 4,
       kind: "exhausted",
     });
-    expect(prisma.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
+    expect(tx.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
   });
 
   it("counts a fresh first-contact event as a single new attempt", async () => {
-    const prisma = {
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
       hostedLinqFirstContactAdmissionBudget: {
-        count: vi.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(2),
+        count: vi.fn().mockResolvedValueOnce(1),
         create: vi.fn().mockResolvedValueOnce({
           eventId: BASE_REQUEST.eventId,
           participantContactKind: BASE_REQUEST.participantContactKind,
@@ -433,36 +438,52 @@ describe("Linq first-contact admission", () => {
       eventId: BASE_REQUEST.eventId,
       participantContactKind: BASE_REQUEST.participantContactKind,
       participantContactLookupKey: BASE_REQUEST.participantContactLookupKey,
-      prisma,
+      tx,
     })).resolves.toEqual({
       attemptCount: 2,
       kind: "claimed",
     });
-    expect(prisma.hostedLinqFirstContactAdmissionBudget.create).toHaveBeenCalledTimes(1);
+    expect(tx.hostedLinqFirstContactAdmissionBudget.create).toHaveBeenCalledTimes(1);
   });
 
-  it("treats a concurrent same-event insert race as already counted rather than spending another attempt", async () => {
-    const uniqueConflict = Object.assign(new Error("Unique constraint failed"), {
-      code: "P2002",
-    });
-    const prisma = {
+  it("runs the per-contact advisory lock before any cap read or budget write so the cap decision is serialized", async () => {
+    const callOrder: string[] = [];
+    let lockSqlSegments: readonly string[] = [];
+    const tx = {
+      $executeRaw: vi.fn(async (template: TemplateStringsArray) => {
+        callOrder.push("$executeRaw");
+        lockSqlSegments = [...template];
+        return 0;
+      }),
       hostedLinqFirstContactAdmissionBudget: {
-        count: vi.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(2),
-        create: vi.fn().mockRejectedValueOnce(uniqueConflict),
-        findUnique: vi.fn().mockResolvedValueOnce(null),
+        count: vi.fn(async () => {
+          callOrder.push("count");
+          return 0;
+        }),
+        create: vi.fn(async () => {
+          callOrder.push("create");
+          return {
+            eventId: BASE_REQUEST.eventId,
+            participantContactKind: BASE_REQUEST.participantContactKind,
+            participantContactLookupKey: BASE_REQUEST.participantContactLookupKey,
+          };
+        }),
+        findUnique: vi.fn(async () => {
+          callOrder.push("findUnique");
+          return null;
+        }),
       },
     };
 
-    await expect(claimHostedLinqFirstContactAdmissionBudget({
+    await claimHostedLinqFirstContactAdmissionBudget({
       eventId: BASE_REQUEST.eventId,
       participantContactKind: BASE_REQUEST.participantContactKind,
       participantContactLookupKey: BASE_REQUEST.participantContactLookupKey,
-      prisma,
-    })).resolves.toEqual({
-      attemptCount: 2,
-      kind: "claimed",
+      tx,
     });
-    expect(prisma.hostedLinqFirstContactAdmissionBudget.create).toHaveBeenCalledTimes(1);
+
+    expect(callOrder[0]).toBe("$executeRaw");
+    expect(lockSqlSegments.join("")).toContain("pg_advisory_xact_lock");
   });
 
   it("returns the stored decision when a concurrent insert already won the event", async () => {
