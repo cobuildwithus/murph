@@ -3916,9 +3916,11 @@ https://join.example.test/join/code_first_text`);
       });
     mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(new Error("linq send failed"));
 
+    const eventId = "evt_fail_open_pre_send_failure";
     let member = null as HostedMemberRecord | null;
     let invite: Record<string, unknown> | null = null;
     const admissionDecisions = new Map<string, Record<string, unknown>>();
+    const firstContactReceipt = createHostedLinqFirstContactEventReceiptFixture();
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedWebhookReceipt: {
@@ -3975,6 +3977,7 @@ https://join.example.test/join/code_first_text`);
         findUnique: vi.fn(async ({ where }: { where: { eventId: string } }) =>
           admissionDecisions.get(where.eventId) ?? null),
       },
+      hostedLinqFirstContactEventReceipt: firstContactReceipt,
       hostedMember: {
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
           member = {
@@ -3991,7 +3994,7 @@ https://join.example.test/join/code_first_text`);
     };
     const prisma = asPrismaTransactionClient(prismaMocks);
     const rawBody = buildHostedLinqWebhookBody({
-      eventId: "evt_fail_open_pre_send_failure",
+      eventId,
     });
 
     await expect(handleHostedOnboardingLinqWebhook({
@@ -4005,6 +4008,43 @@ https://join.example.test/join/code_first_text`);
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).not.toHaveBeenCalled();
     expect(mocks.releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalledTimes(1);
+    expect(await firstContactReceipt.findUnique({
+      where: {
+        eventId,
+      },
+    })).toMatchObject({
+      eventId,
+      status: "processing",
+    });
+
+    if (!member) {
+      throw new Error("Expected fail-open attempt to create a pending member.");
+    }
+    member.billingStatus = HostedBillingStatus.active;
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      code: "LINQ_FIRST_CONTACT_EVENT_PROCESSING",
+    });
+
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+
+    const retainedReceipt = await firstContactReceipt.findUnique({
+      where: {
+        eventId,
+      },
+    }) as HostedLinqReceiptRecord | null;
+    if (!retainedReceipt) {
+      throw new Error("Expected pre-send failure to retain the first-contact receipt.");
+    }
+    retainedReceipt.updatedAt = new Date("2026-03-26T11:54:00.000Z");
 
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
@@ -4025,14 +4065,25 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         data: expect.objectContaining({
           decision: "block",
-          eventId: "evt_fail_open_pre_send_failure",
+          eventId,
         }),
       }),
     );
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(invite).toMatchObject({
       id: "invite_fail_open_pre_send_failure",
       sentAt: null,
+    });
+    expect(await firstContactReceipt.findUnique({
+      where: {
+        eventId,
+      },
+    })).toMatchObject({
+      eventId,
+      status: "consumed",
     });
   });
 

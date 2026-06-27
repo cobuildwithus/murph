@@ -23,7 +23,6 @@ import {
 import {
   assertHostedLinqFirstContactEventProcessingOwner,
   buildHostedLinqFirstContactEventProcessingError,
-  deleteHostedLinqFirstContactEventReceipt,
   recordHostedLinqFirstContactEventConsumed,
 } from "./linq-first-contact-admission";
 import {
@@ -245,7 +244,6 @@ export async function drainHostedLinqSideEffectsDirect(input: {
     } catch (error) {
       if (!sent) {
         await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma, noticeClaim);
-        await deleteHostedLinqInviteSignupSideEffectReceipt(effect, input.prisma);
       }
       throw error;
     }
@@ -303,21 +301,6 @@ async function recordDeliveredHostedLinqInviteSignupSideEffectConsumed(
   }
 
   await recordHostedLinqFirstContactEventConsumed({
-    eventId: effect.payload.sourceEventId,
-    prisma,
-    processingOwnerToken: effect.payload.processingOwnerToken,
-  });
-}
-
-async function deleteHostedLinqInviteSignupSideEffectReceipt(
-  effect: HostedLinqMessageSideEffect,
-  prisma: HostedLinqTransportPersistenceClient,
-): Promise<void> {
-  if (effect.payload.template !== "invite_signup") {
-    return;
-  }
-
-  await deleteHostedLinqFirstContactEventReceipt({
     eventId: effect.payload.sourceEventId,
     prisma,
     processingOwnerToken: effect.payload.processingOwnerToken,

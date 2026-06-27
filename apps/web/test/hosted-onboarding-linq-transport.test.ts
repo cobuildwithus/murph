@@ -723,12 +723,7 @@ describe("hosted Linq webhook transport", () => {
       prisma,
       sentAt: claimSentAt,
     });
-    expect(prisma.hostedLinqFirstContactEventReceipt.deleteMany).toHaveBeenCalledWith({
-      where: {
-        eventId: "event-1",
-        processingOwnerToken: "owner-1",
-      },
-    });
+    expect(prisma.hostedLinqFirstContactEventReceipt.deleteMany).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
   });
 
