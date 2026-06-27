@@ -58,6 +58,27 @@ export function resolveHostedAssistantLinqDeliveryContextForRequest(input: {
     : null;
 }
 
+export function resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest(input: {
+  contexts: readonly HostedAssistantLinqDeliveryContext[];
+  replyToMessageId: string | null;
+  target: string;
+  targetKind: string | null;
+}): HostedAssistantLinqDeliveryContext | null {
+  for (const context of input.contexts) {
+    const resolved = resolveHostedAssistantLinqDeliveryContextForRequest({
+      context,
+      replyToMessageId: input.replyToMessageId,
+      target: input.target,
+      targetKind: input.targetKind,
+    });
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  return null;
+}
+
 export function resolveHostedAssistantLinqReactionDeliveryContextForRequest(input: {
   context: HostedAssistantLinqDeliveryContext | null;
   target: string;
@@ -78,6 +99,25 @@ export function resolveHostedAssistantLinqReactionDeliveryContextForRequest(inpu
   return targetMessageId && targetMessageId === context.replyToMessageId
     ? context
     : null;
+}
+
+export function resolveHostedAssistantLinqReactionDeliveryContextFromCandidatesForRequest(input: {
+  contexts: readonly HostedAssistantLinqDeliveryContext[];
+  target: string;
+  targetMessageId: string;
+}): HostedAssistantLinqDeliveryContext | null {
+  for (const context of input.contexts) {
+    const resolved = resolveHostedAssistantLinqReactionDeliveryContextForRequest({
+      context,
+      target: input.target,
+      targetMessageId: input.targetMessageId,
+    });
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  return null;
 }
 
 function normalizeHostedLinqDeliveryContextText(value: string | null | undefined): string | null {

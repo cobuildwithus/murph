@@ -5307,7 +5307,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.createHostedAssistantProgressDeliveryDependencies).toHaveBeenCalledWith(
       expect.objectContaining({
-        linqDeliveryContext,
+        linqDeliveryContexts: [linqDeliveryContext],
         signal: expect.any(AbortSignal),
       }),
     );
@@ -5334,7 +5334,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
       expect.objectContaining({
         assistantDeliveryEffects: [effect],
-        linqDeliveryContext,
+        linqDeliveryContexts: [linqDeliveryContext],
       }),
     );
   });
@@ -6887,6 +6887,7 @@ function createPhaseInput(input: {
         fetchedCount: input.importedCount ?? 0,
         importedCount: input.importedCount ?? 0,
         ...(input.linqDeliveryContext ? { latestLinqDeliveryContext: input.linqDeliveryContext } : {}),
+        ...(input.linqDeliveryContext ? { linqDeliveryContexts: [input.linqDeliveryContext] } : {}),
         state: {
           recentStatuses: [],
           watermarks: {
