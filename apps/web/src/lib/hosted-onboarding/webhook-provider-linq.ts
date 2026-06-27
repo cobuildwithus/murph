@@ -563,6 +563,47 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   if (
+    existingMember
+    && input.requireFirstContactAdmission === true
+    && input.firstContactAdmitted !== true
+  ) {
+    const existingDailyState = await readHostedLinqDailyState({
+      memberId: existingMember.id,
+      occurredAt,
+      prisma: input.prisma,
+    });
+    if (existingDailyState?.onboardingLinkSentAt) {
+      const alreadySentPlan = await planHostedLinqSignupLinkAlreadySentIfDelivered({
+        claimSentAt: existingDailyState.onboardingLinkSentAt,
+        context,
+        event: input.event,
+        existingMember,
+        existingMemberMatch,
+        memberId: existingMember.id,
+        prisma: input.prisma,
+      });
+      if (alreadySentPlan) {
+        return alreadySentPlan;
+      }
+    }
+
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildFirstContactAdmissionRequiredPlan({
+        request: buildHostedLinqFirstContactAdmissionRequest({
+          context,
+          event: input.event,
+        }),
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: hasHostedMemberActiveAccess(existingMember),
+        existingMemberMatch,
+        reason: "first-contact-admission-required",
+        routeStage: "first-contact-admission-required",
+      }),
+    );
+  }
+
+  if (
     existingMember === null
     && input.requireFirstContactAdmission === true
     && input.firstContactAdmitted !== true

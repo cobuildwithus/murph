@@ -307,14 +307,26 @@ vi.mock("@/src/lib/hosted-onboarding/logging", async () => {
 import { handleHostedOnboardingLinqWebhook as handleHostedOnboardingLinqWebhookImpl } from "@/src/lib/hosted-onboarding/webhook-service";
 
 type MockedFunction = ReturnType<typeof vi.fn>;
+type HostedLinqReceiptRecord = Record<string, unknown> & {
+  processingOwnerToken?: unknown;
+  status?: unknown;
+  updatedAt?: Date;
+};
+type HostedMemberRecord = Record<string, unknown> & {
+  billingStatus: HostedBillingStatus;
+};
+type MockedAsyncFunction<TInput, TResult = unknown> = MockedFunction & ((input: TInput) => Promise<TResult>);
 type HostedOnboardingLinqWebhookInput = Parameters<typeof handleHostedOnboardingLinqWebhookImpl>[0];
 
 type HostedInviteFixture = {
+  create?: MockedFunction;
   findFirst?: (input: {
     where?: Record<string, unknown>;
     select?: Record<string, unknown>;
   }) => Promise<unknown>;
   findUnique?: MockedFunction;
+  update?: MockedFunction;
+  updateMany?: MockedFunction;
 };
 
 type HostedLinqDailyStateFixture = {
@@ -331,11 +343,18 @@ type HostedLinqFirstContactAdmissionDecisionFixture = {
 };
 
 type HostedLinqFirstContactEventReceiptFixture = {
-  create?: MockedFunction;
-  deleteMany?: MockedFunction;
-  findUnique?: MockedFunction;
-  updateMany?: MockedFunction;
-  upsert?: MockedFunction;
+  create?: MockedAsyncFunction<{ data: Record<string, unknown> }>;
+  deleteMany?: MockedAsyncFunction<{ where: Record<string, unknown> }>;
+  findUnique?: MockedAsyncFunction<{ where: Record<string, unknown> }>;
+  updateMany?: MockedAsyncFunction<{
+    data: Record<string, unknown>;
+    where: Record<string, unknown>;
+  }>;
+  upsert?: MockedAsyncFunction<{
+    create: Record<string, unknown>;
+    update: Record<string, unknown>;
+    where?: Record<string, unknown>;
+  }>;
 };
 
 type HostedMemberFixture = {
@@ -2105,8 +2124,9 @@ https://join.example.test/join/code_first_text`);
       },
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
-        findFirst: vi.fn(async ({ where }: { where: { sentAt?: unknown } }) =>
-          where.sentAt ? null : invite),
+        findFirst: vi.fn(async (
+          { where }: { select?: Record<string, unknown>; where?: Record<string, unknown> } = {},
+        ) => where?.sentAt ? null : invite),
         findUnique: vi.fn().mockResolvedValue(invite),
         update: vi.fn(async ({ data }: { data: { sentAt?: Date } }) => {
           if (data.sentAt) {
@@ -3036,6 +3056,149 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
+  it("does not treat pending fail-open member state as admission after pre-send signup delivery failure", async () => {
+    mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
+    mocks.classifyHostedLinqFirstContactAdmission.mockReset();
+    mocks.classifyHostedLinqFirstContactAdmission
+      .mockRejectedValueOnce(hostedOnboardingError({
+        cause: new Error("fetch failed"),
+        code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
+        details: {
+          operationName: "hosted_linq_first_contact_admission",
+          type: "transport",
+        },
+        httpStatus: 503,
+        message: "Linq first-contact admission classifier is unavailable.",
+        retryable: true,
+      }))
+      .mockResolvedValueOnce({
+        category: "wrong_number_or_personal_logistics",
+        confidence: 0.94,
+        kind: "block",
+        source: "model",
+      });
+    mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(new Error("linq send failed"));
+
+    let member = null as HostedMemberRecord | null;
+    let invite: Record<string, unknown> | null = null;
+    const admissionDecisions = new Map<string, Record<string, unknown>>();
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          invite = {
+            channel: data.channel,
+            expiresAt: data.expiresAt,
+            id: "invite_fail_open_pre_send_failure",
+            inviteCode: "code_fail_open_pre_send_failure",
+            memberId: data.memberId,
+            sentAt: null,
+            status: "pending",
+          };
+          return invite;
+        }),
+        findFirst: vi.fn(async ({ where }: { where?: Record<string, unknown> }) => {
+          if (!invite) {
+            return null;
+          }
+          if (where?.sentAt) {
+            return invite.sentAt ? invite : null;
+          }
+          if (where?.expiresAt) {
+            return invite;
+          }
+          return null;
+        }),
+        findUnique: vi.fn(async () => invite),
+        update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          invite = {
+            ...(invite ?? {}),
+            ...data,
+          };
+          return invite;
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          admissionDecisions.set(String(data.eventId), data);
+          return data;
+        }),
+        findUnique: vi.fn(async ({ where }: { where: { eventId: string } }) =>
+          admissionDecisions.get(where.eventId) ?? null),
+      },
+      hostedMember: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          member = {
+            billingStatus: HostedBillingStatus.not_started,
+            id: "member_fail_open_pre_send_failure",
+            phoneLookupKey: data.phoneLookupKey,
+            suspendedAt: null,
+          };
+          return member;
+        }),
+        findUnique: vi.fn(async () => member),
+        update: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+    const rawBody = buildHostedLinqWebhookBody({
+      eventId: "evt_fail_open_pre_send_failure",
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).rejects.toThrow("linq send failed");
+
+    expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).not.toHaveBeenCalled();
+    expect(mocks.releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalledTimes(1);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "blocked-first-contact-admission",
+    });
+
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(2);
+    expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          decision: "block",
+          eventId: "evt_fail_open_pre_send_failure",
+        }),
+      }),
+    );
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(invite).toMatchObject({
+      id: "invite_fail_open_pre_send_failure",
+      sentAt: null,
+    });
+  });
+
   it("claims first-contact admission processing before classification so overlapping deliveries cannot classify independently", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     mocks.readHostedLinqDailyState
@@ -3066,7 +3229,7 @@ https://join.example.test/join/code_first_text`);
       sentAt: null,
       status: "pending",
     };
-    let member: Record<string, unknown> | null = null;
+    let member = null as HostedMemberRecord | null;
     const firstContactReceipts = createHostedLinqFirstContactEventReceiptFixture();
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -3206,7 +3369,7 @@ https://join.example.test/join/code_first_text`);
         };
       });
 
-    let receiptRecord: Record<string, unknown> | null = null;
+    let receiptRecord = null as HostedLinqReceiptRecord | null;
     let resolveInitialClaim: () => void = () => {};
     const initialClaimed = new Promise<void>((resolve) => {
       resolveInitialClaim = resolve;
@@ -3365,7 +3528,7 @@ https://join.example.test/join/code_first_text`);
       sentAt: null,
       status: "pending",
     };
-    let member: Record<string, unknown> | null = null;
+    let member = null as HostedMemberRecord | null;
     let recordedDecision: Record<string, unknown> | null = null;
     const firstContactReceipt = createHostedLinqFirstContactEventReceiptFixture();
     const prismaMocks = {
@@ -3487,7 +3650,7 @@ https://join.example.test/join/code_first_text`);
       sentAt: null,
       status: "pending",
     };
-    let member: Record<string, unknown> | null = null;
+    let member = null as HostedMemberRecord | null;
     const firstContactReceipt = createHostedLinqFirstContactEventReceiptFixture();
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -3612,7 +3775,7 @@ https://join.example.test/join/code_first_text`);
       sentAt: null,
       status: "pending",
     };
-    let member: Record<string, unknown> | null = null;
+    let member = null as HostedMemberRecord | null;
     const admissionDecisions = new Map<string, Record<string, unknown>>();
     const firstContactReceipts = createHostedLinqFirstContactEventReceiptFixture();
     const prismaMocks = {
@@ -3728,7 +3891,7 @@ https://join.example.test/join/code_first_text`);
 
   it("treats a deterministic blocked first-contact event as handled after later activation", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
-    let member: Record<string, unknown> | null = null;
+    let member = null as HostedMemberRecord | null;
     const firstContactReceipts = new Map<string, Record<string, unknown>>();
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -3759,8 +3922,8 @@ https://join.example.test/join/code_first_text`);
           firstContactReceipts.set(String(data.eventId), data);
           return data;
         }),
-        findUnique: vi.fn(async ({ where }: { where: { eventId: string } }) =>
-          firstContactReceipts.get(where.eventId) ?? null),
+        findUnique: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+          typeof where.eventId === "string" ? firstContactReceipts.get(where.eventId) ?? null : null),
       },
       hostedMember: {
         create: vi.fn(),
@@ -3824,7 +3987,7 @@ https://join.example.test/join/code_first_text`);
 
   it("honors a classifier block when member state changes before admission resolution", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
-    let member: Record<string, unknown> | null = null;
+    let member = null as HostedMemberRecord | null;
     mocks.classifyHostedLinqFirstContactAdmission.mockImplementationOnce(async () => {
       member = {
         billingStatus: HostedBillingStatus.not_started,
@@ -4132,13 +4295,14 @@ https://join.example.test/join/code_first_text`);
   });
 
   it.each(["sms", "RCS"] as const)(
-    "sends signup links for existing inactive phone first-contact %s texts",
+    "classifies existing inactive phone first-contact %s texts before sending signup links",
     async (service) => {
       mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
-      mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValueOnce({
-        category: "wrong_number_or_personal_logistics",
+      mocks.classifyHostedLinqFirstContactAdmission.mockReset();
+      mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValue({
+        category: "join_intent",
         confidence: 0.94,
-        kind: "block",
+        kind: "allow",
         source: "model",
       });
       const invite = {
@@ -4183,6 +4347,10 @@ https://join.example.test/join/code_first_text`);
           }),
           update: vi.fn(),
         },
+        hostedLinqFirstContactAdmissionDecision: {
+          create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+          findUnique: vi.fn().mockResolvedValue(null),
+        },
       };
       const prisma = asPrismaTransactionClient(prismaMocks);
 
@@ -4203,7 +4371,8 @@ https://join.example.test/join/code_first_text`);
         reason: "sent-signup-link",
       });
       expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
-      expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
+      expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
+      expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledTimes(1);
       expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
       expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
       expect(readHostedMemberRoutingUpsertMock(prisma)).toHaveBeenCalled();
@@ -5809,7 +5978,7 @@ https://join.example.test/join/code_first_text`);
       },
       hostedLinqFirstContactEventReceipt: {
         create: hostedFirstContactEventReceiptCreate,
-        deleteMany: vi.fn(),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
         findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedMember: {
@@ -6524,10 +6693,10 @@ function createHostedLinqFirstContactEventReceiptFixture(): Required<HostedLinqF
       { create, update, where }: {
         create: Record<string, unknown>;
         update: Record<string, unknown>;
-        where: Record<string, unknown>;
+        where?: Record<string, unknown>;
       },
     ) => {
-      const eventId = typeof where.eventId === "string"
+      const eventId = typeof where?.eventId === "string"
         ? where.eventId
         : typeof create.eventId === "string"
           ? create.eventId
