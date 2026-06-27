@@ -309,12 +309,21 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         replyToMessageId: "msg_123",
       }),
     );
-    expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
+    expect(prisma.hostedInvite.updateMany).toHaveBeenCalledWith({
       data: {
+        linqFirstContactEventId: "evt_123",
         sentAt: expect.any(Date),
       },
       where: {
         id: "invite_123",
+        OR: [
+          {
+            sentAt: null,
+          },
+          {
+            linqFirstContactEventId: "evt_123",
+          },
+        ],
       },
     });
     expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
@@ -661,6 +670,7 @@ function createPrismaStub() {
         inviteCode: "code_first_contact",
       }),
       update: vi.fn().mockResolvedValue(undefined),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     hostedLinqFirstContactAdmissionDecision: {
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),

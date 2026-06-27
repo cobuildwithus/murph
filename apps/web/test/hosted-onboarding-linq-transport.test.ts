@@ -113,6 +113,73 @@ describe("hosted Linq webhook transport", () => {
     expect(nextDayEffect.effectId).toBe(firstEffect.effectId);
   });
 
+  it("persists signup delivery proof for the event that actually sends", async () => {
+    const invite = {
+      inviteCode: "invite-code",
+      linqFirstContactEventId: "event-b",
+      sentAt: null as Date | null,
+    };
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(invite),
+        updateMany: vi.fn(async ({ data }: { data: { linqFirstContactEventId: string; sentAt: Date } }) => {
+          invite.linqFirstContactEventId = data.linqFirstContactEventId;
+          invite.sentAt = data.sentAt;
+          return { count: 1 };
+        }),
+      },
+      hostedLinqFirstContactEventReceipt: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue({
+          eventId: "event-a",
+          processingOwnerToken: "owner-a",
+          status: "processing",
+          updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+        }),
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      processingOwnerToken: "owner-a",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-a",
+      template: "invite_signup",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toBeUndefined();
+
+    const claimSentAt = vi.mocked(claimHostedLinqOnboardingLinkNotice).mock.calls[0]?.[0]?.sentAt;
+    expect(claimSentAt).toBeInstanceOf(Date);
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedInvite.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "invite-1",
+        OR: [
+          {
+            sentAt: null,
+          },
+          {
+            linqFirstContactEventId: "event-a",
+          },
+        ],
+      },
+      data: {
+        linqFirstContactEventId: "event-a",
+        sentAt: claimSentAt,
+      },
+    });
+    expect(invite.linqFirstContactEventId).toBe("event-a");
+    expect(invite.sentAt).toBe(claimSentAt);
+  });
+
   it("uses the stored redirect phone fallback when current routing is unavailable", async () => {
     vi.mocked(readHostedMemberRoutingState).mockResolvedValue(null);
     const effect = createHostedWebhookLinqMessageSideEffect({
@@ -679,6 +746,7 @@ describe("hosted Linq webhook transport", () => {
           inviteCode: "invite-code",
         }),
         update: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactEventReceipt: {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -724,7 +792,7 @@ describe("hosted Linq webhook transport", () => {
       sentAt: claimSentAt,
     });
     expect(prisma.hostedLinqFirstContactEventReceipt.deleteMany).not.toHaveBeenCalled();
-    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
   });
 
   it("keeps invite signup send fences when sentAt persistence fails after delivery", async () => {
@@ -733,7 +801,7 @@ describe("hosted Linq webhook transport", () => {
         findUnique: vi.fn().mockResolvedValue({
           inviteCode: "invite-code",
         }),
-        update: vi.fn().mockRejectedValueOnce(new Error("sentAt failed")),
+        updateMany: vi.fn().mockRejectedValueOnce(new Error("sentAt failed")),
       },
       hostedLinqFirstContactEventReceipt: {
         deleteMany: vi.fn(),
@@ -776,7 +844,7 @@ describe("hosted Linq webhook transport", () => {
         findUnique: vi.fn().mockResolvedValue({
           inviteCode: "invite-code",
         }),
-        update: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactEventReceipt: {
         deleteMany: vi.fn(),
@@ -810,11 +878,20 @@ describe("hosted Linq webhook transport", () => {
     ).rejects.toThrow("consume failed");
 
     expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
+    expect(prisma.hostedInvite.updateMany).toHaveBeenCalledWith({
       where: {
         id: "invite-1",
+        OR: [
+          {
+            sentAt: null,
+          },
+          {
+            linqFirstContactEventId: "event-1",
+          },
+        ],
       },
       data: {
+        linqFirstContactEventId: "event-1",
         sentAt: expect.any(Date),
       },
     });
@@ -832,7 +909,7 @@ describe("hosted Linq webhook transport", () => {
           findUnique: vi.fn().mockResolvedValue({
             inviteCode: "invite-code",
           }),
-          update: vi.fn().mockResolvedValue({}),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         },
         hostedLinqFirstContactEventReceipt: {
           deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -870,7 +947,7 @@ describe("hosted Linq webhook transport", () => {
         sentAt: vi.mocked(claimHostedLinqOnboardingLinkNotice).mock.calls[0]?.[0]?.sentAt,
       });
       expect(prisma.hostedLinqFirstContactEventReceipt.deleteMany).not.toHaveBeenCalled();
-      expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
+      expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
     } finally {
       errorSpy.mockRestore();
     }

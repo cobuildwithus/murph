@@ -2371,11 +2371,20 @@ https://join.example.test/join/code_first_text`);
     expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(2);
     expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledTimes(2);
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
-    expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith({
+    expect(prismaMocks.hostedInvite.updateMany).toHaveBeenCalledWith({
       where: {
         id: "invite_123",
+        OR: [
+          {
+            sentAt: null,
+          },
+          {
+            linqFirstContactEventId: "evt_non_trigger",
+          },
+        ],
       },
       data: {
+        linqFirstContactEventId: "evt_non_trigger",
         sentAt: expect.any(Date),
       },
     });
@@ -2520,11 +2529,20 @@ https://join.example.test/join/code_first_text`);
         linqFirstContactEventId: "evt_stale_daily_claim_retry",
       },
     });
-    expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith({
+    expect(prismaMocks.hostedInvite.updateMany).toHaveBeenCalledWith({
       where: {
         id: "invite_stale_claim",
+        OR: [
+          {
+            sentAt: null,
+          },
+          {
+            linqFirstContactEventId: "evt_stale_daily_claim_retry",
+          },
+        ],
       },
       data: {
+        linqFirstContactEventId: "evt_stale_daily_claim_retry",
         sentAt: expect.any(Date),
       },
     });
@@ -2581,7 +2599,7 @@ https://join.example.test/join/code_first_text`);
             ...data,
           };
         }),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue({
@@ -2668,7 +2686,7 @@ https://join.example.test/join/code_first_text`);
             ...data,
           };
         }),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue({
@@ -2760,7 +2778,7 @@ https://join.example.test/join/code_first_text`);
             ...data,
           };
         }),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue({
@@ -3012,7 +3030,7 @@ https://join.example.test/join/code_first_text`);
           id: "invite_many_parts",
           sentAt: new Date("2026-03-26T12:00:01.000Z"),
         }),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue({
@@ -3051,11 +3069,20 @@ https://join.example.test/join/code_first_text`);
     expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledTimes(2);
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
-    expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith({
+    expect(prismaMocks.hostedInvite.updateMany).toHaveBeenCalledWith({
       where: {
         id: "invite_many_parts",
+        OR: [
+          {
+            sentAt: null,
+          },
+          {
+            linqFirstContactEventId: "evt_first_contact_many_parts",
+          },
+        ],
       },
       data: {
+        linqFirstContactEventId: "evt_first_contact_many_parts",
         sentAt: expect.any(Date),
       },
     });
@@ -3189,7 +3216,7 @@ https://join.example.test/join/code_first_text`);
       hostedInvite: {
         create: vi.fn(),
         findFirst: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     };
     const prisma = asPrismaTransactionClient(prismaMocks);
@@ -3255,7 +3282,7 @@ https://join.example.test/join/code_first_text`);
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
@@ -3345,7 +3372,7 @@ https://join.example.test/join/code_first_text`);
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(),
@@ -3417,7 +3444,7 @@ https://join.example.test/join/code_first_text`);
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(),
@@ -3578,7 +3605,7 @@ https://join.example.test/join/code_first_text`);
           id: invite.id,
           sentAt: new Date("2026-03-26T12:00:01.000Z"),
         }),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(),
@@ -3663,7 +3690,6 @@ https://join.example.test/join/code_first_text`);
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     const eventId = "evt_fail_open_delivered_retry_blocks";
     const claimSentAt = new Date("2026-03-26T12:00:00.500Z");
-    const deliveredSentAt = new Date("2026-03-26T12:00:01.000Z");
     mocks.readHostedLinqDailyState
       .mockResolvedValueOnce(null)
       .mockResolvedValue(makeHostedLinqDailyState({
@@ -3785,14 +3811,16 @@ https://join.example.test/join/code_first_text`);
           return null;
         }),
         findUnique: vi.fn().mockResolvedValue(invite),
-        update: vi.fn(async () => {
-          invite.sentAt = deliveredSentAt;
-          return {
-            id: invite.id,
-            sentAt: invite.sentAt,
-          };
+        update: vi.fn(),
+        updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          if (typeof data.linqFirstContactEventId === "string") {
+            invite.linqFirstContactEventId = data.linqFirstContactEventId;
+          }
+          if (data.sentAt instanceof Date) {
+            invite.sentAt = data.sentAt;
+          }
+          return { count: 1 };
         }),
-        updateMany: vi.fn(),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(),
@@ -3833,7 +3861,8 @@ https://join.example.test/join/code_first_text`);
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(invite.linqFirstContactEventId).toBe(eventId);
-    expect(invite.sentAt).toEqual(deliveredSentAt);
+    expect(invite.sentAt).toBeInstanceOf(Date);
+    expect(invite.sentAt?.getTime()).toBeGreaterThanOrEqual(claimSentAt.getTime());
     const staleReceipt = await firstContactReceipt.findUnique({
       where: {
         eventId,
@@ -3944,7 +3973,7 @@ https://join.example.test/join/code_first_text`);
         }),
         findUnique: vi.fn().mockResolvedValue(deliveredInvite),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
@@ -4476,7 +4505,7 @@ https://join.example.test/join/code_first_text`);
           id: invite.id,
           sentAt: new Date("2026-03-26T12:00:01.000Z"),
         }),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(),
@@ -4618,7 +4647,7 @@ https://join.example.test/join/code_first_text`);
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
@@ -4777,7 +4806,7 @@ https://join.example.test/join/code_first_text`);
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
@@ -4926,7 +4955,7 @@ https://join.example.test/join/code_first_text`);
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
@@ -5042,7 +5071,7 @@ https://join.example.test/join/code_first_text`);
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(),
@@ -5159,7 +5188,7 @@ https://join.example.test/join/code_first_text`);
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(),
@@ -5252,7 +5281,7 @@ https://join.example.test/join/code_first_text`);
           id: invite.id,
           sentAt: new Date("2026-03-26T12:00:01.000Z"),
         }),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -5373,7 +5402,7 @@ https://join.example.test/join/code_first_text`);
           id: invite.id,
           sentAt: new Date("2026-03-26T12:00:01.000Z"),
         }),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(),
@@ -5465,12 +5494,14 @@ https://join.example.test/join/code_first_text`);
       id: string;
       inviteCode: string;
       memberId: string;
+      linqFirstContactEventId: string | null;
       sentAt: Date | null;
       status: string;
     } = {
       channel: "linq",
       id: "invite_already_sent_replay",
       inviteCode: "code_already_sent_replay",
+      linqFirstContactEventId: null,
       memberId: "member_already_sent_replay",
       sentAt: null,
       status: "pending",
@@ -5495,14 +5526,16 @@ https://join.example.test/join/code_first_text`);
         create: vi.fn().mockResolvedValue(invite),
         findFirst: vi.fn(async () => invite.sentAt ? invite : null),
         findUnique: vi.fn().mockResolvedValue(invite),
-        update: vi.fn().mockImplementation(async () => {
-          invite.sentAt = new Date("2026-03-26T12:00:01.000Z");
-          return {
-            id: invite.id,
-            sentAt: invite.sentAt,
-          };
+        update: vi.fn(),
+        updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          if (typeof data.linqFirstContactEventId === "string") {
+            invite.linqFirstContactEventId = data.linqFirstContactEventId;
+          }
+          if (data.sentAt instanceof Date) {
+            invite.sentAt = data.sentAt;
+          }
+          return { count: 1 };
         }),
-        updateMany: vi.fn(),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -5611,7 +5644,7 @@ https://join.example.test/join/code_first_text`);
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(),
@@ -5721,7 +5754,7 @@ https://join.example.test/join/code_first_text`);
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
@@ -5831,7 +5864,7 @@ https://join.example.test/join/code_first_text`);
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
@@ -5941,7 +5974,7 @@ https://join.example.test/join/code_first_text`);
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -6068,7 +6101,7 @@ https://join.example.test/join/code_first_text`);
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(),
@@ -6161,7 +6194,7 @@ https://join.example.test/join/code_first_text`);
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactEventReceipt: firstContactReceipt,
       hostedMember: {
@@ -6256,7 +6289,7 @@ https://join.example.test/join/code_first_text`);
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
@@ -6347,7 +6380,7 @@ https://join.example.test/join/code_first_text`);
         findFirst: vi.fn(),
         findUnique: vi.fn(),
         update: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(),
@@ -6747,7 +6780,7 @@ https://join.example.test/join/code_first_text`);
       hostedInvite: {
         create: vi.fn(),
         findFirst: vi.fn(),
-        updateMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedMember: {
         create: vi.fn(),

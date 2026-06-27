@@ -233,7 +233,11 @@ export async function drainHostedLinqSideEffectsDirect(input: {
       });
       sent = true;
       if (effect.payload.template === "invite_signup") {
-        await markHostedInviteSent(effect.payload.inviteId, input.prisma);
+        await markHostedInviteSignupSent(
+          effect.payload,
+          input.prisma,
+          noticeClaim.onboardingLinkClaimSentAt,
+        );
         await recordDeliveredHostedLinqInviteSignupSideEffectConsumed(effect, input.prisma);
       } else if (isHostedInviteLinqMessagePayload(effect.payload)) {
         await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
@@ -530,6 +534,66 @@ async function markHostedInviteSentBestEffort(
       ) ?? "Unknown error.",
     );
   }
+}
+
+async function markHostedInviteSignupSent(
+  payload: HostedLinqInviteSignupMessagePayload,
+  prisma: HostedLinqTransportPersistenceClient,
+  sentAt: Date | undefined,
+): Promise<void> {
+  if (!sentAt) {
+    throw new TypeError("Hosted Linq invite signup sent proof requires claim metadata.");
+  }
+
+  const updated = await prisma.hostedInvite.updateMany({
+    where: {
+      id: payload.inviteId,
+      OR: [
+        {
+          sentAt: null,
+        },
+        {
+          linqFirstContactEventId: payload.sourceEventId,
+        },
+      ],
+    },
+    data: {
+      linqFirstContactEventId: payload.sourceEventId,
+      sentAt,
+    },
+  });
+  if (updated.count === 1) {
+    return;
+  }
+
+  const existingInvite = await prisma.hostedInvite.findUnique({
+    select: {
+      linqFirstContactEventId: true,
+      sentAt: true,
+    },
+    where: {
+      id: payload.inviteId,
+    },
+  });
+  if (
+    existingInvite?.sentAt
+    && existingInvite.linqFirstContactEventId
+    && existingInvite.linqFirstContactEventId !== payload.sourceEventId
+  ) {
+    throw hostedOnboardingError({
+      code: "LINQ_INVITE_SIGNUP_DELIVERY_PROOF_MISMATCH",
+      message: "Hosted Linq invite signup delivery proof is owned by a different event.",
+      httpStatus: 409,
+      retryable: false,
+    });
+  }
+
+  throw hostedOnboardingError({
+    code: "LINQ_INVITE_SIGNUP_DELIVERY_PROOF_UNAVAILABLE",
+    message: "Hosted Linq invite signup delivery proof could not be persisted.",
+    httpStatus: 409,
+    retryable: true,
+  });
 }
 
 async function markHostedInviteSent(
