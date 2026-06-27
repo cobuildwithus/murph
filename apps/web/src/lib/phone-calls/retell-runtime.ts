@@ -18,6 +18,7 @@ import type {
 } from "./types";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
+const RETELL_API_BASE_URL = "https://api.retellai.com";
 const RETELL_START_TIMEOUT_MS = 15_000;
 const RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING = "basic_attributes_only";
 
@@ -35,11 +36,11 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime {
     const client = this.buildClient();
     const response = await client.call.createPhoneCall(params);
 
-    const providerCallId = response.call_id.trim();
+    const providerCallId = readRetellProviderCallId(response.call_id);
     if (!providerCallId) {
       throw new TypeError("Retell create phone call returned no call_id.");
     }
-    const storageSetting = response.data_storage_setting ?? null;
+    const storageSetting = readRetellDataStorageSetting(response.data_storage_setting);
     if (storageSetting !== RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING) {
       throw buildRetellStorageModeMismatchError({
         storageSetting,
@@ -53,6 +54,8 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime {
   private buildClient(): Retell {
     const options: ClientOptions = {
       apiKey: requireEnv("RETELL_API_KEY"),
+      baseURL: RETELL_API_BASE_URL,
+      fetchOptions: { redirect: "error" },
       maxRetries: 0,
       timeout: RETELL_START_TIMEOUT_MS,
     };
@@ -168,6 +171,22 @@ function requireEnv(name: string): string {
     throw new TypeError(`${name} must be configured for Retell phone calls.`);
   }
   return value;
+}
+
+function readRetellProviderCallId(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function readRetellDataStorageSetting(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed.toLowerCase() : null;
 }
 
 function formatRetellStorageSetting(value: string | null): string {
