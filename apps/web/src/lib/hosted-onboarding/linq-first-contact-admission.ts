@@ -402,6 +402,13 @@ function parseHostedLinqFirstContactAdmissionDecisionRecord(
   };
 }
 
+// Custom-boundary parse of the OpenAI Responses API payload (canonical SDK shape:
+// `OpenAiResponse` from `openai/resources/responses/responses`). We use raw fetch
+// instead of the openai SDK client to keep auth/timeout/retry on our owners, and
+// the API output is a deep discriminated union of which we consume only a few
+// fields (`status`, `output_text`, `output[].content[].text`); defensively walking
+// `unknown` matches that minimal consumption. Shape coverage lives in
+// `test/hosted-onboarding-linq-first-contact-admission.test.ts`.
 function readHostedLinqFirstContactAdmissionTerminalBlock(
   payload: unknown,
 ): HostedLinqFirstContactAdmissionDecision | null {

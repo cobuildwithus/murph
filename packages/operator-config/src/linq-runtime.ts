@@ -3,22 +3,22 @@ import { isIP } from 'node:net'
 import type {
   AttachmentCreateParams,
   ChatCreateParams,
+  ChatCreateResponse,
   ChatSendVoicememoParams,
   MediaPart,
   MessageContent,
+  PhoneNumberListResponse,
   SupportedContentType,
   TextPart,
   WebhookEventType,
   WebhookSubscriptionCreateParams,
+  WebhookSubscriptionCreateResponse,
 } from '@linqapp/sdk/resources'
-import type { MessageSendParams } from '@linqapp/sdk/resources/chats'
-import type { MessageAddReactionParams } from '@linqapp/sdk/resources/messages'
 import type {
-  LinqCreateChatResponse,
-  LinqCreateWebhookSubscriptionResponse,
-  LinqListPhoneNumbersResponse,
-  LinqSendMessageResponse,
-} from '@murphai/messaging-ingress/linq-webhook'
+  MessageSendParams,
+  MessageSendResponse,
+} from '@linqapp/sdk/resources/chats'
+import type { MessageAddReactionParams } from '@linqapp/sdk/resources/messages'
 import {
   createTimeoutAbortController,
   waitForRetryDelay,
@@ -298,7 +298,7 @@ export async function probeLinqApi(
   } = {},
 ): Promise<ProbeLinqApiResult> {
   const env = dependencies.env ?? process.env
-  const response = await requestLinqJson<LinqListPhoneNumbersResponse>({
+  const response = await requestLinqJson<PhoneNumberListResponse>({
     details: {
       operation: 'list_phone_numbers',
       provider: 'linq',
@@ -345,7 +345,7 @@ export async function sendLinqChatMessage(
     fetchImplementation?: LinqFetch
     signal?: AbortSignal
   } = {},
-): Promise<LinqSendMessageResponse> {
+): Promise<MessageSendResponse> {
   const chatId = normalizeRequiredString(input.chatId, 'chat id')
   const message = normalizeRequiredString(input.message, 'message')
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
@@ -357,7 +357,7 @@ export async function sendLinqChatMessage(
     replyToMessageId,
   })
 
-  return requestLinqJson<LinqSendMessageResponse>({
+  return requestLinqJson<MessageSendResponse>({
     details: {
       hasIdempotencyKey: idempotencyKey !== null,
       hasReplyToMessageId: replyToMessageId !== null,
@@ -707,7 +707,7 @@ export async function createLinqChat(
     }).message,
     to: recipients,
   }
-  const response = await requestLinqJson<LinqCreateChatResponse>({
+  const response = await requestLinqJson<ChatCreateResponse>({
     details: {
       hasIdempotencyKey: idempotencyKey !== null,
       operation: 'create_chat',
@@ -753,7 +753,7 @@ export async function createLinqWebhookSubscription(
     subscribed_events: subscribedEvents,
     target_url: normalizeRequiredString(input.targetUrl, 'target url'),
   }
-  const response = await requestLinqJson<LinqCreateWebhookSubscriptionResponse>({
+  const response = await requestLinqJson<WebhookSubscriptionCreateResponse>({
     details: {
       operation: 'create_webhook_subscription',
       phoneNumberCount: phoneNumbers?.length ?? 0,

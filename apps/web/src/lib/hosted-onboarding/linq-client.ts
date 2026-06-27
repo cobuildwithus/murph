@@ -1,14 +1,12 @@
 import type {
   ChatCreateParams,
+  ChatCreateResponse,
   TextPart,
   WebhookEventType,
   WebhookSubscriptionCreateParams,
+  WebhookSubscriptionCreateResponse,
 } from "@linqapp/sdk/resources";
 import type { MessageSendParams } from "@linqapp/sdk/resources/chats";
-import type {
-  LinqCreateChatResponse,
-  LinqCreateWebhookSubscriptionResponse,
-} from "@murphai/messaging-ingress/linq-webhook";
 
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError } from "./errors";
@@ -172,7 +170,7 @@ export async function createHostedLinqChat(input: {
     });
   }
 
-  const payload = (await response.json()) as LinqCreateChatResponse;
+  const payload = (await response.json()) as ChatCreateResponse;
   return {
     chatId: normalizeNullableString(payload.chat?.id),
     messageId: normalizeNullableString(payload.chat?.message?.id),
@@ -215,7 +213,7 @@ export async function createHostedLinqWebhookSubscription(input: {
     });
   }
 
-  const payload = (await response.json()) as LinqCreateWebhookSubscriptionResponse;
+  const payload = (await response.json()) as WebhookSubscriptionCreateResponse;
   return {
     createdAt: normalizeNullableString(payload.created_at),
     id: normalizeNullableString(payload.id),

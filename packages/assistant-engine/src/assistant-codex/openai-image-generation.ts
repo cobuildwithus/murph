@@ -114,6 +114,12 @@ async function readOpenAiJsonResponse(response: Response): Promise<unknown> {
   }
 }
 
+// Custom-boundary parse of the OpenAI Images API payload (canonical SDK shape:
+// `ImagesResponse` from `openai/resources/images`). We use raw fetch instead of
+// the openai SDK client to keep auth/timeout/retry on our owners, and the
+// response includes optional usage shapes we want to defend against drift; the
+// runtime only consumes `data[0].b64_json` and an optional usage breakdown.
+// Shape coverage lives in `test/assistant-codex-generate-image-tool.test.ts`.
 function parseOpenAiImageGenerationPayload(
   payload: unknown,
   providerRequestId: string | null,
