@@ -125,6 +125,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   firstContactEventReclaimedStale?: boolean;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
+  settleCurrentEventDeliveredSignupProof?: boolean;
 }): Promise<HostedOnboardingLinqDirectPlan> {
   if (input.event.event_type !== "message.received") {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
@@ -563,19 +564,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
-  if (
-    existingFirstContactReceipt?.status === "processing"
-    && input.requireFirstContactAdmission === true
-    && !firstContactAdmitted
-  ) {
-    return planHostedLinqFirstContactAdmissionRequired({
-      context,
-      event: input.event,
-      existingMember,
-      existingMemberMatch,
-    });
-  }
-
   if (!isHostedLinqDeliverableFirstContact({
     event: messageEvent,
     participantContact,
@@ -619,12 +607,45 @@ export async function planHostedOnboardingLinqWebhook(input: {
     && input.requireFirstContactAdmission === true
     && !firstContactAdmitted
   ) {
+    if (
+      input.settleCurrentEventDeliveredSignupProof === true
+      && existingFirstContactReceipt?.status === "processing"
+    ) {
+      const currentEventAlreadySentFromInviteProof = await planHostedLinqCurrentEventSignupLinkAlreadySentFromInviteProof({
+        context,
+        event: input.event,
+        existingMember,
+        existingMemberMatch,
+        firstContactEventProcessingOwnerToken,
+        memberId: existingMember.id,
+        prisma: input.prisma,
+      });
+      if (currentEventAlreadySentFromInviteProof) {
+        return currentEventAlreadySentFromInviteProof;
+      }
+    }
+
     const existingDailyState = await readHostedLinqDailyState({
       memberId: existingMember.id,
       occurredAt,
       prisma: input.prisma,
     });
     if (existingDailyState?.onboardingLinkSentAt) {
+      const currentEventAlreadySentPlan = await planHostedLinqCurrentEventSignupLinkAlreadySentIfDelivered({
+        claimSentAt: existingDailyState.onboardingLinkSentAt,
+        context,
+        event: input.event,
+        eventId: input.event.event_id,
+        existingMember,
+        existingMemberMatch,
+        firstContactEventProcessingOwnerToken,
+        memberId: existingMember.id,
+        prisma: input.prisma,
+      });
+      if (currentEventAlreadySentPlan) {
+        return currentEventAlreadySentPlan;
+      }
+
       const alreadySentPlan = await planHostedLinqSignupLinkAlreadySentIfDelivered({
         claimSentAt: existingDailyState.onboardingLinkSentAt,
         context,
@@ -639,6 +660,19 @@ export async function planHostedOnboardingLinqWebhook(input: {
       }
     }
 
+    return planHostedLinqFirstContactAdmissionRequired({
+      context,
+      event: input.event,
+      existingMember,
+      existingMemberMatch,
+    });
+  }
+
+  if (
+    existingFirstContactReceipt?.status === "processing"
+    && input.requireFirstContactAdmission === true
+    && !firstContactAdmitted
+  ) {
     return planHostedLinqFirstContactAdmissionRequired({
       context,
       event: input.event,
@@ -943,6 +977,46 @@ async function planHostedLinqStaleFirstContactBeforeActiveRouting(input: {
   );
 }
 
+async function planHostedLinqCurrentEventSignupLinkAlreadySentFromInviteProof(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  event: HostedLinqWebhookEvent;
+  existingMember: Parameters<typeof hasHostedMemberActiveAccess>[0] | null;
+  existingMemberMatch: HostedLinqExistingMemberMatch;
+  firstContactEventProcessingOwnerToken?: string | null;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedOnboardingLinqDirectPlan | null> {
+  const deliveredInvite = await readHostedLinqCurrentEventDeliveredSignupInviteByEvent({
+    eventId: input.event.event_id,
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  if (!deliveredInvite?.sentAt) {
+    return null;
+  }
+
+  const dailyState = await readHostedLinqDailyState({
+    memberId: input.memberId,
+    occurredAt: input.context.occurredAt,
+    prisma: input.prisma,
+  });
+  if (
+    dailyState?.onboardingLinkSentAt
+    && deliveredInvite.sentAt.getTime() < dailyState.onboardingLinkSentAt.getTime()
+  ) {
+    return null;
+  }
+
+  return await buildHostedLinqSignupLinkAlreadySentPlan({
+    context: input.context,
+    event: input.event,
+    existingMember: input.existingMember,
+    existingMemberMatch: input.existingMemberMatch,
+    firstContactEventProcessingOwnerToken: input.firstContactEventProcessingOwnerToken,
+    prisma: input.prisma,
+  });
+}
+
 async function planHostedLinqCurrentEventSignupLinkAlreadySentIfDelivered(input: {
   claimSentAt: Date;
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
@@ -950,6 +1024,7 @@ async function planHostedLinqCurrentEventSignupLinkAlreadySentIfDelivered(input:
   eventId: string;
   existingMember: Parameters<typeof hasHostedMemberActiveAccess>[0] | null;
   existingMemberMatch: HostedLinqExistingMemberMatch;
+  firstContactEventProcessingOwnerToken?: string | null;
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedOnboardingLinqDirectPlan | null> {
@@ -968,6 +1043,7 @@ async function planHostedLinqCurrentEventSignupLinkAlreadySentIfDelivered(input:
     event: input.event,
     existingMember: input.existingMember,
     existingMemberMatch: input.existingMemberMatch,
+    firstContactEventProcessingOwnerToken: input.firstContactEventProcessingOwnerToken,
     prisma: input.prisma,
   });
 }
@@ -978,11 +1054,13 @@ async function buildHostedLinqSignupLinkAlreadySentPlan(input: {
   event: HostedLinqWebhookEvent;
   existingMember: Parameters<typeof hasHostedMemberActiveAccess>[0] | null;
   existingMemberMatch: HostedLinqExistingMemberMatch;
+  firstContactEventProcessingOwnerToken?: string | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedOnboardingLinqDirectPlan> {
   await recordHostedLinqFirstContactEventConsumed({
     eventId: input.event.event_id,
     prisma: input.prisma,
+    processingOwnerToken: input.firstContactEventProcessingOwnerToken,
   });
   return logHostedLinqWebhookPlannerDecisionAndReturn(
     buildIgnoredLinqWebhookPlan("signup-link-already-sent"),
@@ -1014,6 +1092,26 @@ async function readHostedLinqDeliveredSignupInvite(input: {
       memberId: input.memberId,
       sentAt: {
         gte: input.claimSentAt,
+        not: null,
+      },
+    },
+  });
+}
+
+async function readHostedLinqCurrentEventDeliveredSignupInviteByEvent(input: {
+  eventId: string;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<{ sentAt: Date | null } | null> {
+  return await input.prisma.hostedInvite.findFirst({
+    orderBy: {
+      sentAt: "desc",
+    },
+    where: {
+      channel: "linq",
+      linqFirstContactEventId: input.eventId,
+      memberId: input.memberId,
+      sentAt: {
         not: null,
       },
     },

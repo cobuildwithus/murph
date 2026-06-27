@@ -444,6 +444,7 @@ async function planHostedOnboardingLinqWebhookForCurrentAdmissionState(input: {
         firstContactEventReclaimedStale: existingProcessingClaim?.reclaimedStale,
         requireFirstContactAdmission: true,
         prisma: transaction,
+        settleCurrentEventDeliveredSignupProof: existingProcessingClaim?.reclaimedStale === true,
       });
       if (!plan.firstContactAdmissionRequest) {
         if (
@@ -579,6 +580,26 @@ async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
       }
 
       if (input.classification.kind === "classified" && input.classification.decision.kind === "block") {
+        const preBlockPlan = await planHostedOnboardingLinqWebhook({
+          event: input.event,
+          firstContactAdmitted: recordedAdmission?.kind === "allow",
+          firstContactEventProcessingOwnerToken: input.firstContactEventProcessingOwnerToken,
+          firstContactEventReclaimedStale: input.firstContactEventReclaimedStale,
+          requireFirstContactAdmission: true,
+          prisma: transaction,
+          settleCurrentEventDeliveredSignupProof: true,
+        });
+        if (!preBlockPlan.firstContactAdmissionRequest) {
+          return {
+            firstContactAdmissionClassified: true,
+            firstContactAdmissionUnavailable: false,
+            plan: attachHostedLinqFirstContactEventProcessingOwnerToken({
+              plan: preBlockPlan,
+              processingOwnerToken: input.firstContactEventProcessingOwnerToken,
+            }),
+          };
+        }
+
         const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecision({
           decision: input.classification.decision,
           eventId: input.event.event_id,

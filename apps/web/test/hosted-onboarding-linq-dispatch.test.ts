@@ -3316,7 +3316,7 @@ https://join.example.test/join/code_first_text`);
       signal: undefined,
     });
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(2);
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
     expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledWith({
@@ -3671,7 +3671,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("consumes a stale fail-open signup receipt with same-event delivered proof before active routing", async () => {
+  it("consumes a stale fail-open signup receipt with same-event delivered proof before pending-member reclassification", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     const eventId = "evt_fail_open_delivered_retry_blocks";
     const claimSentAt = new Date("2026-03-26T12:00:00.500Z");
@@ -3844,6 +3844,7 @@ https://join.example.test/join/code_first_text`);
     })).rejects.toThrow("receipt consume failed");
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(invite.linqFirstContactEventId).toBe(eventId);
     expect(invite.sentAt).toEqual(deliveredSentAt);
     const staleReceipt = await firstContactReceipt.findUnique({
       where: {
@@ -3857,10 +3858,6 @@ https://join.example.test/join/code_first_text`);
       throw new Error("Expected stale first-contact receipt.");
     }
     staleReceipt.updatedAt = new Date("2026-03-26T11:54:00.000Z");
-    if (member) {
-      member.billingStatus = HostedBillingStatus.active;
-    }
-
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody,
