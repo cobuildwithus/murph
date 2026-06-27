@@ -127,14 +127,13 @@ export async function readAssistantContextSnapshotPrompt(input: {
     maxBytes: MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES,
     vaultRoot: input.vaultRoot,
   })
-  const promptBlock = normalizeNullableString(state?.lastCompleted?.promptBlock)
   if (state?.pendingDirtyDomains.includes('health_context')) {
     return ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT
   }
-  if (promptBlock === null) {
+  if (state === null || state.lastCompleted === null) {
     return ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT
   }
-  return promptBlock
+  return normalizeNullableString(state.lastCompleted.promptBlock)
 }
 
 export async function isAssistantContextSnapshotRefreshPending(input: {

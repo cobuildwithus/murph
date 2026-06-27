@@ -580,6 +580,31 @@ describe('assistant context snapshot', () => {
     }
   })
 
+  it('returns null (not the fail-closed safety prompt) when a refresh succeeds on an empty vault', async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), 'assistant-context-snapshot-'))
+    const vaultRoot = path.join(parentRoot, 'vault')
+
+    try {
+      await initializeVault({
+        createdAt: '2026-06-01T00:00:00.000Z',
+        vaultRoot,
+      })
+      await markAssistantContextSnapshotDirty({
+        domains: ['health_context'],
+        vaultRoot,
+      })
+      await refreshAssistantContextSnapshot({
+        now: () => '2026-06-01T00:05:00.000Z',
+        vaultRoot,
+      })
+
+      await expect(readAssistantContextSnapshotPrompt({ vaultRoot }))
+        .resolves.toBeNull()
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true })
+    }
+  })
+
   it('emits the fail-closed safety guidance when a safety-source file has unparseable frontmatter', async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-context-snapshot-'))
 
