@@ -88,7 +88,17 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS \
   "agent-docs/exec-plans/completed/**" \
   "agent-docs/prompts/**" \
   "apps/web/app/.well-known/workflow/**" \
-  "**/.next-smoke*/**"
+  "**/.next-smoke*/**" \
+  "packages/*/test/**" \
+  "packages/*/tests/**" \
+  "packages/*/**/__tests__/**" \
+  "packages/*/**/*.test.*" \
+  "packages/*/**/*.spec.*" \
+  "apps/*/test/**" \
+  "apps/*/tests/**" \
+  "apps/*/**/__tests__/**" \
+  "apps/*/**/*.test.*" \
+  "apps/*/**/*.spec.*"
 repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   ".dockerignore" \
   "AGENTS.md" \

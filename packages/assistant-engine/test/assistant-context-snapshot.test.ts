@@ -335,7 +335,7 @@ describe('assistant context snapshot', () => {
     }
   })
 
-  it('suppresses stale safety context when health_context is pending dirty', async () => {
+  it('returns a fail-closed safety guidance prompt when health_context is pending dirty', async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-context-snapshot-'))
 
     try {
@@ -376,8 +376,13 @@ describe('assistant context snapshot', () => {
         vaultRoot,
       })
 
-      await expect(readAssistantContextSnapshotPrompt({ vaultRoot }))
-        .resolves.toBeNull()
+      const stalePrompt = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
+      expect(stalePrompt).toContain('Active safety-critical health context is currently unavailable')
+      expect(stalePrompt).toContain('`vault-cli condition show`')
+      expect(stalePrompt).toContain('`vault-cli allergy show`')
+      expect(stalePrompt).toContain('`vault-cli regimen show`')
+      expect(stalePrompt).toContain('`vault-cli goal show`')
+      expect(stalePrompt).not.toContain('Pregabalin')
     } finally {
       await rm(vaultRoot, { force: true, recursive: true })
     }
@@ -518,7 +523,79 @@ describe('assistant context snapshot', () => {
     }
   })
 
-  it('self-heals corrupt snapshots while oversized prompt reads return null', async () => {
+  it('does not leak inactive-condition IDs into active allergy or regimen related-condition lines', async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-context-snapshot-'))
+    const resolvedConditionId = generateContractId(ID_PREFIXES.condition)
+
+    try {
+      await writeVaultDocument({
+        attributes: {
+          schemaVersion: CONTRACT_SCHEMA_VERSION.conditionFrontmatter,
+          docType: FRONTMATTER_DOC_TYPES.condition,
+          conditionId: resolvedConditionId,
+          slug: 'resolved-infection',
+          title: 'Resolved infection',
+          clinicalStatus: 'resolved',
+          verificationStatus: 'confirmed',
+          assertedOn: '2024-01-01',
+          resolvedOn: '2024-03-01',
+        },
+        relativePath: `${VAULT_LAYOUT.conditionsDirectory}/resolved-infection.md`,
+        vaultRoot,
+      })
+      await writeVaultDocument({
+        attributes: {
+          schemaVersion: CONTRACT_SCHEMA_VERSION.allergyFrontmatter,
+          docType: FRONTMATTER_DOC_TYPES.allergy,
+          allergyId: generateContractId(ID_PREFIXES.allergy),
+          slug: 'amoxicillin-allergy',
+          title: 'Amoxicillin allergy',
+          substance: 'Amoxicillin',
+          status: 'active',
+          criticality: 'high',
+          relatedConditionIds: [resolvedConditionId],
+        },
+        relativePath: `${VAULT_LAYOUT.allergiesDirectory}/amoxicillin-allergy.md`,
+        vaultRoot,
+      })
+
+      await markAssistantContextSnapshotDirty({
+        domains: ['health_context'],
+        vaultRoot,
+      })
+      await refreshAssistantContextSnapshot({
+        now: () => '2026-06-26T12:00:00.000Z',
+        vaultRoot,
+      })
+
+      const promptText = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
+
+      expect(promptText).toContain('Amoxicillin allergy')
+      expect(promptText).not.toContain('Resolved infection')
+      expect(promptText).not.toContain(resolvedConditionId)
+      expect(promptText).not.toContain('related conditions')
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('returns the fail-closed safety guidance when the snapshot envelope is unreadable', async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-context-snapshot-'))
+    const snapshotPath = resolveAssistantContextSnapshotPath(vaultRoot)
+
+    try {
+      await mkdir(path.dirname(snapshotPath), { recursive: true })
+      await writeFile(snapshotPath, '{not-json', 'utf8')
+
+      const prompt = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
+      expect(prompt).toContain('Active safety-critical health context is currently unavailable')
+      expect(prompt).toContain('`vault-cli condition show`')
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('self-heals corrupt snapshots and returns the safety guidance prompt when reads are oversized', async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), 'assistant-context-snapshot-'))
     const vaultRoot = path.join(parentRoot, 'vault')
     const snapshotPath = resolveAssistantContextSnapshotPath(vaultRoot)
@@ -567,9 +644,9 @@ describe('assistant context snapshot', () => {
         }),
         'utf8',
       )
-      await expect(readAssistantContextSnapshotPrompt({
-        vaultRoot,
-      })).resolves.toBeNull()
+      const oversizedPrompt = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
+      expect(oversizedPrompt).toContain('Active safety-critical health context is currently unavailable')
+      expect(oversizedPrompt).toContain('`vault-cli condition show`')
     } finally {
       await rm(parentRoot, {
         force: true,

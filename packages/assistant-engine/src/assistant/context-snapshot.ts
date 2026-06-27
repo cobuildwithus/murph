@@ -39,6 +39,12 @@ export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA =
 export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 2
 export const ASSISTANT_CONTEXT_SNAPSHOT_FILE_NAME = 'context-snapshot.json'
 
+const ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT = [
+  'Assistant context snapshot for navigation only:',
+  '- Active safety-critical health context is currently unavailable in the snapshot (recent canonical edit or pending rebuild).',
+  '- Before any safety-relevant guidance, query `vault-cli condition show`, `vault-cli allergy show`, `vault-cli regimen show`, and `vault-cli goal show` for the user\'s current active records.',
+].join('\n')
+
 export const ASSISTANT_CONTEXT_SNAPSHOT_DIRTY_DOMAINS = [
   'experiments',
   'blood_tests',
@@ -117,12 +123,15 @@ export function resolveAssistantContextSnapshotPath(vaultRoot: string): string {
 export async function readAssistantContextSnapshotPrompt(input: {
   vaultRoot: string
 }): Promise<string | null> {
-  const { state } = await readAssistantContextSnapshotStateStatus({
+  const { exists, state } = await readAssistantContextSnapshotStateStatus({
     maxBytes: MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES,
     vaultRoot: input.vaultRoot,
   })
   if (state?.pendingDirtyDomains.includes('health_context')) {
-    return null
+    return ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT
+  }
+  if (exists && state === null) {
+    return ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT
   }
   return normalizeNullableString(state?.lastCompleted?.promptBlock)
 }
@@ -1273,18 +1282,18 @@ function renderRelatedLookups(
   ids: readonly string[],
   recordsById: ReadonlyMap<string, PromptLookupRecord>,
 ): string | null {
-  const uniqueIds = uniqueStrings(ids)
-  if (uniqueIds.length === 0) {
+  const presentIds = uniqueStrings(ids).filter((id) => recordsById.has(id))
+  if (presentIds.length === 0) {
     return null
   }
 
-  const visible = uniqueIds.slice(0, MAX_ASSISTANT_CONTEXT_RELATED_RECORDS)
+  const visible = presentIds.slice(0, MAX_ASSISTANT_CONTEXT_RELATED_RECORDS)
   const rendered = visible.map((id) => {
-    const record = recordsById.get(id)
-    return record ? renderPromptLookup(record.title, record.slug, id) : renderPromptField(id)
+    const record = recordsById.get(id)!
+    return renderPromptLookup(record.title, record.slug, id)
   })
-  const omitted = uniqueIds.length > visible.length
-    ? `, +${uniqueIds.length - visible.length}`
+  const omitted = presentIds.length > visible.length
+    ? `, +${presentIds.length - visible.length}`
     : ''
 
   return `${label} ${rendered.join(', ')}${omitted}`
