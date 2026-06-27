@@ -169,6 +169,9 @@ importers:
       '@base-ui/react':
         specifier: 1.4.1
         version: 1.4.1(@types/react@19.2.14)(date-fns@4.1.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      '@linqapp/sdk':
+        specifier: 0.28.0
+        version: 0.28.0
       '@murphai/cloudflare-hosted-control':
         specifier: workspace:*
         version: link:../../packages/cloudflare-hosted-control
