@@ -41,8 +41,8 @@ export const ASSISTANT_CONTEXT_SNAPSHOT_FILE_NAME = 'context-snapshot.json'
 
 const ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT = [
   'Assistant context snapshot for navigation only:',
-  '- Active safety-critical health context is currently unavailable in the snapshot (recent canonical edit or pending rebuild).',
-  '- Before any safety-relevant guidance, query `vault-cli condition show`, `vault-cli allergy show`, `vault-cli regimen show`, and `vault-cli goal show` for the user\'s current active records.',
+  '- Active safety-critical health context is currently unavailable in the snapshot (recent canonical edit, pending rebuild, or incomplete source read).',
+  '- Before any safety-relevant guidance, enumerate the user\'s current active records with `vault-cli condition list --status active`, `vault-cli allergy list --status active`, `vault-cli regimen list --status active`, and `vault-cli goal list --status active`, then read individual records with the matching `vault-cli condition show <id>` / `vault-cli allergy show <id>` / `vault-cli regimen show <id>` / `vault-cli goal show <id>` as needed.',
 ].join('\n')
 
 export const ASSISTANT_CONTEXT_SNAPSHOT_DIRTY_DOMAINS = [
@@ -123,17 +123,18 @@ export function resolveAssistantContextSnapshotPath(vaultRoot: string): string {
 export async function readAssistantContextSnapshotPrompt(input: {
   vaultRoot: string
 }): Promise<string | null> {
-  const { exists, state } = await readAssistantContextSnapshotStateStatus({
+  const { state } = await readAssistantContextSnapshotStateStatus({
     maxBytes: MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES,
     vaultRoot: input.vaultRoot,
   })
+  const promptBlock = normalizeNullableString(state?.lastCompleted?.promptBlock)
   if (state?.pendingDirtyDomains.includes('health_context')) {
     return ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT
   }
-  if (exists && state === null) {
+  if (promptBlock === null) {
     return ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT
   }
-  return normalizeNullableString(state?.lastCompleted?.promptBlock)
+  return promptBlock
 }
 
 export async function isAssistantContextSnapshotRefreshPending(input: {
@@ -367,16 +368,21 @@ async function buildAssistantContextSnapshotPrompt(input: {
   const coverage = await buildAssistantSnapshotCoverage(input)
   assertAssistantContextSnapshotCanContinue(input)
 
+  const safetyLines = coverage.safetyComplete
+    ? [
+        coverage.activeAllergiesLine,
+        coverage.activeConditionsLine,
+        coverage.activeMedicationRegimensLine,
+        coverage.activeSupplementRegimensLine,
+      ]
+    : [ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT]
   const lines = [
     'Assistant context snapshot for navigation only:',
     '- This is a compact, possibly stale snapshot. Treat it as orientation, not canonical evidence.',
     '- Before making factual claims about current values, dates, counts, progress, or outcomes, query the relevant vault surface.',
     coverage.bloodTestsLine,
     coverage.healthContextLine,
-    coverage.activeAllergiesLine,
-    coverage.activeConditionsLine,
-    coverage.activeMedicationRegimensLine,
-    coverage.activeSupplementRegimensLine,
+    ...safetyLines,
     coverage.activeGoalsLine,
     coverage.regimensLine,
     coverage.activeHabitRegimensLine,
@@ -431,29 +437,37 @@ async function buildAssistantSnapshotCoverage(input: {
   healthContextLine: string | null
   regimenCount: number
   regimensLine: string | null
+  safetyComplete: boolean
   supplementCount: number
 }> {
   const eventCoverage = await collectAssistantSnapshotEventLedgerCoverage(input)
-  const goals = await listAssistantSnapshotFrontmatterRecords(
+  const goalRead = await listAssistantSnapshotFrontmatterRecords(
     input,
     VAULT_LAYOUT.goalsDirectory,
     goalFrontmatterSchema,
   )
-  const conditions = await listAssistantSnapshotFrontmatterRecords(
+  const conditionRead = await listAssistantSnapshotFrontmatterRecords(
     input,
     VAULT_LAYOUT.conditionsDirectory,
     conditionFrontmatterSchema,
   )
-  const allergies = await listAssistantSnapshotFrontmatterRecords(
+  const allergyRead = await listAssistantSnapshotFrontmatterRecords(
     input,
     VAULT_LAYOUT.allergiesDirectory,
     allergyFrontmatterSchema,
   )
-  const regimens = await listAssistantSnapshotFrontmatterRecords(
+  const regimenRead = await listAssistantSnapshotFrontmatterRecords(
     input,
     VAULT_LAYOUT.regimensDirectory,
     regimenFrontmatterSchema,
   )
+  const goals = goalRead.records
+  const conditions = conditionRead.records
+  const allergies = allergyRead.records
+  const regimens = regimenRead.records
+  const safetyComplete = conditionRead.complete
+    && allergyRead.complete
+    && regimenRead.complete
   const activeRegimens = regimens.filter(isActiveRegimen)
   const activeRegimensById = new Map<string, PromptLookupRecord>(
     activeRegimens.map((regimen): [string, PromptLookupRecord] => [
@@ -592,6 +606,7 @@ async function buildAssistantSnapshotCoverage(input: {
     regimensLine: regimenParts.length > 0
       ? `- Bank coverage includes ${joinWithAnd(regimenParts)}.`
       : null,
+    safetyComplete,
     supplementCount,
   }
 }
@@ -604,23 +619,28 @@ async function listAssistantSnapshotFrontmatterRecords<TRecord>(
   },
   relativeDirectory: string,
   schema: ContractSchema<TRecord>,
-): Promise<TRecord[]> {
+): Promise<{ complete: boolean; records: TRecord[] }> {
   assertAssistantContextSnapshotCanContinue(input)
   const { relativePaths } = await walkVaultFilesInterruptible(
     input.vaultRoot,
     relativeDirectory,
     {
       extension: '.md',
-      maxMatches: MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR,
+      maxMatches: MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR + 1,
       shouldContinue: () => {
         assertAssistantContextSnapshotCanContinue(input)
         return true
       },
     },
   )
+  const truncated = relativePaths.length > MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR
   const records: TRecord[] = []
+  let parseFailed = false
 
-  for (const relativePath of relativePaths) {
+  const visible = truncated
+    ? relativePaths.slice(0, MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR)
+    : relativePaths
+  for (const relativePath of visible) {
     assertAssistantContextSnapshotCanContinue(input)
     try {
       const resolved = resolveVaultPath(input.vaultRoot, relativePath)
@@ -631,16 +651,19 @@ async function listAssistantSnapshotFrontmatterRecords<TRecord>(
       const result = safeParseContract(schema, document.attributes)
       if (result.success) {
         records.push(result.data)
+      } else {
+        parseFailed = true
       }
     } catch (error) {
       if (isAssistantContextSnapshotPreemptionError(error)) {
         throw error
       }
+      parseFailed = true
       continue
     }
   }
 
-  return records
+  return { complete: !truncated && !parseFailed, records }
 }
 
 async function collectAssistantSnapshotEventLedgerCoverage(input: {

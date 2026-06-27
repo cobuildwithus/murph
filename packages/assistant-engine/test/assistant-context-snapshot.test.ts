@@ -378,10 +378,11 @@ describe('assistant context snapshot', () => {
 
       const stalePrompt = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
       expect(stalePrompt).toContain('Active safety-critical health context is currently unavailable')
-      expect(stalePrompt).toContain('`vault-cli condition show`')
-      expect(stalePrompt).toContain('`vault-cli allergy show`')
-      expect(stalePrompt).toContain('`vault-cli regimen show`')
-      expect(stalePrompt).toContain('`vault-cli goal show`')
+      expect(stalePrompt).toContain('`vault-cli condition list --status active`')
+      expect(stalePrompt).toContain('`vault-cli allergy list --status active`')
+      expect(stalePrompt).toContain('`vault-cli regimen list --status active`')
+      expect(stalePrompt).toContain('`vault-cli goal list --status active`')
+      expect(stalePrompt).toContain('`vault-cli condition show <id>`')
       expect(stalePrompt).not.toContain('Pregabalin')
     } finally {
       await rm(vaultRoot, { force: true, recursive: true })
@@ -579,6 +580,50 @@ describe('assistant context snapshot', () => {
     }
   })
 
+  it('emits the fail-closed safety guidance when a safety-source file has unparseable frontmatter', async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-context-snapshot-'))
+
+    try {
+      await writeVaultDocument({
+        attributes: {
+          schemaVersion: CONTRACT_SCHEMA_VERSION.allergyFrontmatter,
+          docType: FRONTMATTER_DOC_TYPES.allergy,
+          allergyId: generateContractId(ID_PREFIXES.allergy),
+          slug: 'penicillin-allergy',
+          title: 'Penicillin allergy',
+          substance: 'Penicillin',
+          status: 'active',
+          criticality: 'high',
+        },
+        relativePath: `${VAULT_LAYOUT.allergiesDirectory}/penicillin-allergy.md`,
+        vaultRoot,
+      })
+
+      const corruptAllergyPath = path.join(
+        vaultRoot,
+        VAULT_LAYOUT.allergiesDirectory,
+        'corrupt-allergy.md',
+      )
+      await writeFile(corruptAllergyPath, '---\nnot: valid frontmatter for a record\n---\n', 'utf8')
+
+      await markAssistantContextSnapshotDirty({
+        domains: ['health_context'],
+        vaultRoot,
+      })
+      await refreshAssistantContextSnapshot({
+        now: () => '2026-06-26T12:00:00.000Z',
+        vaultRoot,
+      })
+
+      const promptText = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
+      expect(promptText).toContain('Active safety-critical health context is currently unavailable')
+      expect(promptText).toContain('`vault-cli allergy list --status active`')
+      expect(promptText).not.toContain('Penicillin allergy')
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true })
+    }
+  })
+
   it('returns the fail-closed safety guidance when the snapshot envelope is unreadable', async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-context-snapshot-'))
     const snapshotPath = resolveAssistantContextSnapshotPath(vaultRoot)
@@ -589,7 +634,7 @@ describe('assistant context snapshot', () => {
 
       const prompt = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
       expect(prompt).toContain('Active safety-critical health context is currently unavailable')
-      expect(prompt).toContain('`vault-cli condition show`')
+      expect(prompt).toContain('`vault-cli condition list --status active`')
     } finally {
       await rm(vaultRoot, { force: true, recursive: true })
     }
@@ -646,7 +691,7 @@ describe('assistant context snapshot', () => {
       )
       const oversizedPrompt = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
       expect(oversizedPrompt).toContain('Active safety-critical health context is currently unavailable')
-      expect(oversizedPrompt).toContain('`vault-cli condition show`')
+      expect(oversizedPrompt).toContain('`vault-cli condition list --status active`')
     } finally {
       await rm(parentRoot, {
         force: true,
