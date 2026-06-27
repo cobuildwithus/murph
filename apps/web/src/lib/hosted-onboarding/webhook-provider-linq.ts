@@ -1005,7 +1005,7 @@ async function planHostedLinqCurrentEventSignupLinkAlreadySentFromInviteProof(in
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedOnboardingLinqDirectPlan | null> {
-  const deliveredInvite = await readHostedLinqCurrentEventDeliveredSignupInviteByEvent({
+  const deliveredInvite = await readHostedLinqDeliveredSignupInvite({
     eventId: input.event.event_id,
     memberId: input.memberId,
     prisma: input.prisma,
@@ -1047,7 +1047,7 @@ async function planHostedLinqCurrentEventSignupLinkAlreadySentIfDelivered(input:
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedOnboardingLinqDirectPlan | null> {
-  const deliveredInvite = await readHostedLinqCurrentEventDeliveredSignupInvite({
+  const deliveredInvite = await readHostedLinqDeliveredSignupInvite({
     claimSentAt: input.claimSentAt,
     eventId: input.eventId,
     memberId: input.memberId,
@@ -1098,62 +1098,20 @@ async function buildHostedLinqSignupLinkAlreadySentPlan(input: {
 }
 
 async function readHostedLinqDeliveredSignupInvite(input: {
-  claimSentAt: Date;
   memberId: string;
   prisma: Prisma.TransactionClient;
+  claimSentAt?: Date;
+  eventId?: string;
 }): Promise<{ sentAt: Date | null } | null> {
   return await input.prisma.hostedInvite.findFirst({
-    orderBy: {
-      sentAt: "desc",
-    },
+    orderBy: { sentAt: "desc" },
     where: {
       channel: "linq",
       memberId: input.memberId,
-      sentAt: {
-        gte: input.claimSentAt,
-        not: null,
-      },
-    },
-  });
-}
-
-async function readHostedLinqCurrentEventDeliveredSignupInviteByEvent(input: {
-  eventId: string;
-  memberId: string;
-  prisma: Prisma.TransactionClient;
-}): Promise<{ sentAt: Date | null } | null> {
-  return await input.prisma.hostedInvite.findFirst({
-    orderBy: {
-      sentAt: "desc",
-    },
-    where: {
-      channel: "linq",
-      linqFirstContactEventId: input.eventId,
-      memberId: input.memberId,
+      ...(input.eventId ? { linqFirstContactEventId: input.eventId } : {}),
       sentAt: {
         not: null,
-      },
-    },
-  });
-}
-
-async function readHostedLinqCurrentEventDeliveredSignupInvite(input: {
-  claimSentAt: Date;
-  eventId: string;
-  memberId: string;
-  prisma: Prisma.TransactionClient;
-}): Promise<{ sentAt: Date | null } | null> {
-  return await input.prisma.hostedInvite.findFirst({
-    orderBy: {
-      sentAt: "desc",
-    },
-    where: {
-      channel: "linq",
-      linqFirstContactEventId: input.eventId,
-      memberId: input.memberId,
-      sentAt: {
-        gte: input.claimSentAt,
-        not: null,
+        ...(input.claimSentAt ? { gte: input.claimSentAt } : {}),
       },
     },
   });

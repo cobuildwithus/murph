@@ -238,7 +238,7 @@ export async function classifyHostedLinqFirstContactAdmission(input: {
     return terminalBlock;
   }
 
-  if (!responseHasHostedLinqFirstContactAdmissionCompletedStatus(payload)) {
+  if (readString(readRecord(payload)?.status) !== "completed") {
     throw buildHostedLinqFirstContactAdmissionUnavailableError({
       failureCategory: "invalid_output",
       retryable: true,
@@ -390,7 +390,7 @@ export async function recordHostedLinqFirstContactEventProcessing(input: {
   prisma: HostedLinqFirstContactEventReceiptStore;
 }): Promise<HostedLinqFirstContactEventReceipt> {
   const now = input.now ?? new Date();
-  const processingOwnerToken = buildHostedLinqFirstContactEventProcessingOwnerToken();
+  const processingOwnerToken = randomUUID();
   try {
     const created = await input.prisma.hostedLinqFirstContactEventReceipt.create({
       data: {
@@ -616,7 +616,7 @@ function buildHostedLinqFirstContactAdmissionBlock(input: {
 }): HostedLinqFirstContactAdmissionDecision {
   return {
     category: input.category,
-    confidence: clampHostedLinqFirstContactAdmissionConfidence(input.confidence),
+    confidence: Math.min(1, Math.max(0, input.confidence)),
     kind: "block",
     source: input.source,
   };
@@ -709,10 +709,6 @@ function parseHostedLinqFirstContactEventReceiptRecord(
   };
 }
 
-function buildHostedLinqFirstContactEventProcessingOwnerToken(): string {
-  return randomUUID();
-}
-
 function readHostedLinqFirstContactReceiptUpdatedAt(value: Date | string | null | undefined): Date {
   if (value instanceof Date && Number.isFinite(value.getTime())) {
     return value;
@@ -782,13 +778,6 @@ function responseHasHostedLinqFirstContactAdmissionRefusal(
   return false;
 }
 
-function responseHasHostedLinqFirstContactAdmissionCompletedStatus(
-  payload: unknown,
-): boolean {
-  const record = readRecord(payload);
-  return readString(record?.status) === "completed";
-}
-
 function readHostedLinqFirstContactAdmissionOutputText(payload: unknown): string | null {
   const record = readRecord(payload);
   if (!record) {
@@ -847,10 +836,6 @@ function isHostedLinqFirstContactAdmissionCategory(
   );
 }
 
-function clampHostedLinqFirstContactAdmissionConfidence(value: number): number {
-  return Math.min(1, Math.max(0, value));
-}
-
 function readString(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
@@ -889,22 +874,14 @@ async function readHostedLinqFirstContactAdmissionProviderError(
     };
   }
 
-  const parsedRecord = readRecord(parsed);
-  const errorRecord = readRecord(parsedRecord?.error);
+  const errorRecord = readRecord(readRecord(parsed)?.error);
+  const code = readString(errorRecord?.code)?.slice(0, 240);
+  const type = readString(errorRecord?.type)?.slice(0, 240);
   return {
-    ...(readBoundedProviderErrorString(errorRecord?.code)
-      ? { code: readBoundedProviderErrorString(errorRecord?.code) }
-      : {}),
+    ...(code ? { code } : {}),
     requestIdPresent,
-    ...(readBoundedProviderErrorString(errorRecord?.type)
-      ? { type: readBoundedProviderErrorString(errorRecord?.type) }
-      : {}),
+    ...(type ? { type } : {}),
   };
-}
-
-function readBoundedProviderErrorString(value: unknown): string | undefined {
-  const text = readString(value);
-  return text ? text.slice(0, 240) : undefined;
 }
 
 function isPrismaUniqueConstraintError(error: unknown): boolean {
