@@ -48,6 +48,7 @@ import {
 import {
   claimHostedLinqFirstContactAdmissionBudget,
   classifyHostedLinqFirstContactAdmission,
+  isHostedLinqFirstContactAdmissionBudgetExhausted,
   readHostedLinqFirstContactAdmissionMode,
   readRecordedHostedLinqFirstContactAdmissionDecision,
   recordHostedLinqFirstContactAdmissionDecision,
@@ -233,44 +234,63 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               "Hosted Linq first-contact admission plan missing participant contact for budget claim.",
             );
           }
-          const admissionBudget = await runHostedOnboardingWebhookTransaction(
+          // Pre-flight: skip the classifier call entirely for contacts whose
+          // per-contact attempt cap is already burned. The cheap count-read
+          // here is the read-only side of the same budget guard; the
+          // authoritative claim still runs after a successful classification
+          // under its advisory lock + composite-PK idempotency.
+          const budgetAlreadyExhausted = await isHostedLinqFirstContactAdmissionBudgetExhausted({
+            participantContact: firstContactAdmissionParticipantContact,
             prisma,
-            (transaction) =>
-              claimHostedLinqFirstContactAdmissionBudget({
-                eventId: event.event_id,
-                participantContact: firstContactAdmissionParticipantContact,
-                tx: transaction,
-              }),
-          );
-
-          if (admissionBudget.kind === "exhausted") {
+          });
+          if (budgetAlreadyExhausted) {
             plan = buildBlockedHostedLinqFirstContactAdmissionPlan(
               "first-contact-admission-budget-exhausted",
             );
           } else {
+            // Classify before claiming the slot so transport/timeout/invalid-
+            // output failures do not consume budget. The post-classification
+            // claim still surfaces "exhausted" if a concurrent event filled the
+            // cap between the pre-flight read and the lock acquisition.
             const classifiedAdmission = await classifyHostedLinqFirstContactAdmission({
               request: plan.firstContactAdmissionRequest,
               signal: input.signal,
             });
             firstContactAdmissionClassified = true;
-            const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecision({
-              decision: classifiedAdmission,
-              eventId: event.event_id,
+            const admissionBudget = await runHostedOnboardingWebhookTransaction(
               prisma,
-            });
-            if (firstContactAdmission.kind === "block") {
-              plan = buildBlockedHostedLinqFirstContactAdmissionPlan();
-            } else {
-              plan = await runHostedOnboardingWebhookTransaction(
-                prisma,
-                (transaction) =>
-                  planHostedOnboardingLinqWebhook({
-                    event,
-                    firstContactAdmitted: true,
-                    requireFirstContactAdmission,
-                    prisma: transaction,
-                  }),
+              (transaction) =>
+                claimHostedLinqFirstContactAdmissionBudget({
+                  eventId: event.event_id,
+                  participantContact: firstContactAdmissionParticipantContact,
+                  tx: transaction,
+                }),
+            );
+
+            if (admissionBudget.kind === "exhausted") {
+              plan = buildBlockedHostedLinqFirstContactAdmissionPlan(
+                "first-contact-admission-budget-exhausted",
               );
+            } else {
+              const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecision({
+                decision: classifiedAdmission,
+                eventId: event.event_id,
+                prisma,
+              });
+              if (firstContactAdmission.kind === "block") {
+                plan = buildBlockedHostedLinqFirstContactAdmissionPlan();
+              } else {
+                plan = await runHostedOnboardingWebhookTransaction(
+                  prisma,
+                  (transaction) =>
+                    planHostedOnboardingLinqWebhook({
+                      event,
+                      firstContactAdmitted: true,
+                      requireFirstContactAdmission,
+                      prisma: transaction,
+                    }),
+                );
+              }
             }
           }
         }

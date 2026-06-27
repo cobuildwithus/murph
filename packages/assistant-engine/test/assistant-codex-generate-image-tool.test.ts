@@ -681,6 +681,54 @@ describe('murph.generate_image dynamic tool execution', () => {
       },
     })
   })
+
+  it('does not invoke the per-turn authority loader when no reference refs are requested', async () => {
+    const webpBytes = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46,
+      0x10, 0x00, 0x00, 0x00,
+      0x57, 0x45, 0x42, 0x50,
+      0x56, 0x50, 0x38, 0x4c,
+    ])
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      jsonResponse({
+        data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      }, { headers: { 'x-request-id': 'req_no_ref' } }),
+    )
+    const loadAuthorizedReferenceImageRefs = vi.fn(async () => {
+      throw new Error('attachment-journal-unreadable')
+    })
+
+    const request = readMurphDynamicToolRequest({
+      id: 99,
+      method: 'item/tool/call',
+      params: {
+        arguments: { prompt: 'Make a tiny webp.' },
+        namespace: 'murph',
+        tool: 'generate_image',
+      },
+    })
+    if (!request || request.kind !== 'generate-image') {
+      throw new Error('expected generate-image request')
+    }
+
+    const codexHome = await createTempDir('murph-generate-image-no-refs-')
+    const result = await executeMurphDynamicToolRequest({
+      codexHome,
+      env: { OPENAI_API_KEY: 'openai-test-key' },
+      fetchImpl,
+      loadAuthorizedReferenceImageRefs,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+    })
+
+    expect(loadAuthorizedReferenceImageRefs).not.toHaveBeenCalled()
+    expect(result.rpcResult.success).toBe(true)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    const url = fetchImpl.mock.calls[0]?.[0]
+    expect(String(url)).toBe('https://api.openai.com/v1/images/generations')
+  })
 })
 
 async function createTempDir(prefix: string): Promise<string> {

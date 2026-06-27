@@ -318,6 +318,33 @@ export async function recordHostedLinqFirstContactAdmissionDecision(input: {
   }
 }
 
+// Cheap read-only check of whether the per-contact classifier budget is
+// already exhausted across distinct events. Webhook-service uses this as a
+// pre-flight gate so it can skip the OpenAI call for permanently-blocked
+// contacts. Unlike `claimHostedLinqFirstContactAdmissionBudget` this does not
+// take the advisory lock or try to insert a row, so it must not be used to
+// authorize a slot — only to short-circuit when no slot is available.
+export async function isHostedLinqFirstContactAdmissionBudgetExhausted(input: {
+  participantContact: HostedLinqParticipantContact;
+  prisma: Pick<HostedLinqFirstContactAdmissionBudgetStore, "hostedLinqFirstContactAdmissionBudget">;
+}): Promise<boolean> {
+  const lookupKeyCandidates = createHostedLinqParticipantContactLookupKeyReadCandidates({
+    kind: input.participantContact.kind,
+    value: input.participantContact.value,
+  });
+  if (lookupKeyCandidates.length === 0) {
+    return false;
+  }
+  const existingCount = await input.prisma.hostedLinqFirstContactAdmissionBudget.count({
+    where: {
+      participantContactLookupKey: {
+        in: lookupKeyCandidates,
+      },
+    },
+  });
+  return existingCount >= HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS;
+}
+
 export async function claimHostedLinqFirstContactAdmissionBudget(input: {
   eventId: string;
   participantContact: HostedLinqParticipantContact;
@@ -435,8 +462,8 @@ function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
         role: "user",
       },
     ],
-    max_output_tokens: 200,
     model: input.model,
+    reasoning: { effort: "low" },
     store: false,
     text: {
       format: {
