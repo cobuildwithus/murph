@@ -342,10 +342,16 @@ async function servePlannedVaultCliInvocation(input: {
   }
 
   const { createVaultCliWithOptions } = await import('./vault-cli.js')
+  const { vaultCliLlmsHiddenCommandNames } = await import(
+    './vault-cli-llms-normalizer.js'
+  )
   const cli = createVaultCliWithOptions({
     commandName: input.programName,
     ...(isMcpServerInvocation(input.argv)
-      ? { excludeCommandDescriptorIds: new Set(['batch']) }
+      ? {
+          excludeCommandDescriptorIds: new Set(['batch']),
+          excludeAgentLeafPaths: vaultCliLlmsHiddenCommandNames,
+        }
       : {}),
     vaultContext: input.vaultContext,
   })

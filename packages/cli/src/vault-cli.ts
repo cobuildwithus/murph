@@ -27,6 +27,7 @@ export {
 export interface CreateVaultCliOptions {
   commandName?: string
   excludeCommandDescriptorIds?: ReadonlySet<string>
+  excludeAgentLeafPaths?: ReadonlySet<string>
   inboxServices?: InboxServices
   services?: VaultServices | CliVaultServices
   vaultContext?: VaultCliVaultContext
@@ -47,6 +48,9 @@ export function createVaultCliWithOptions(
     cli,
     ...(input.excludeCommandDescriptorIds
       ? { excludeDescriptorIds: input.excludeCommandDescriptorIds }
+      : {}),
+    ...(input.excludeAgentLeafPaths
+      ? { excludeLeafPaths: input.excludeAgentLeafPaths }
       : {}),
     services,
     inboxServices,

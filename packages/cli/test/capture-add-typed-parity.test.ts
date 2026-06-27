@@ -177,6 +177,45 @@ test('capture import-json is excluded from the vault-cli --llms manifest because
   assert.equal(vaultCliLlmsHiddenCommandNames.has('capture import-json'), true)
 })
 
+test('vault-cli capture --help filters the import-json leaf line through the LLM normalizer wrapper', async () => {
+  const { createVaultCli } = await import('../src/vault-cli.js')
+  const cli = createVaultCli()
+  let stdout = ''
+  await cli.serve(['capture', '--help'], {
+    stdout(chunk: string) {
+      stdout += chunk
+    },
+    exit() {},
+  })
+  assert.match(stdout, /capture/u)
+  assert.equal(stdout.includes('import-json'), false)
+  // Sanity: a non-hidden leaf is still listed.
+  assert.match(stdout, /\badd\b/u)
+})
+
+test('registerCaptureCommands skips the import-json leaf when the agent-leaf exclude set lists it (so MCP and --help cannot expose it)', async () => {
+  const { Cli } = await import('incur')
+  const { createUnwiredVaultServices } = await import('@murphai/vault-usecases')
+
+  const cli = Cli.create('vault-cli', {
+    description: 'capture exclude test cli',
+    version: '0.0.0-test',
+  })
+  const services = createUnwiredVaultServices()
+  registerCaptureCommands(cli, services, {
+    excludeLeafPaths: new Set(['capture import-json']),
+  })
+
+  const rootCommands = Cli.toCommands.get(cli)
+  assert.ok(rootCommands, 'root commands registered')
+  const captureEntry = rootCommands.get('capture') as
+    | { commands?: Map<string, unknown> }
+    | undefined
+  assert.ok(captureEntry?.commands, 'capture group registered')
+  assert.equal(captureEntry.commands.has('import-json'), false)
+  assert.equal(captureEntry.commands.has('add'), true)
+})
+
 test('capture add hint steers agents to vault-cli batch instead of capture import-json and fits the assistant contract hint budget', () => {
   assert.match(
     captureCommandDescriptions.addHint,

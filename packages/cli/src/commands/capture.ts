@@ -60,10 +60,13 @@ function stringArrayOption(value: unknown): string[] | undefined {
 export function registerCaptureCommands(
   cli: Cli.Cli,
   _services: VaultServices,
+  options: { excludeLeafPaths?: ReadonlySet<string> } = {},
 ) {
   const capture = Cli.create('capture', {
     description: captureCommandDescriptions.root,
   })
+
+  const excludeLeafPaths = options.excludeLeafPaths ?? new Set<string>()
 
   const captureAddOptionShape = {
     media: z
@@ -181,29 +184,31 @@ export function registerCaptureCommands(
     },
   })
 
-  capture.command('import-json', {
-    description: captureCommandDescriptions.importJson,
-    args: z.object({}),
-    examples: [
-      {
-        description: 'Record a batch of separate captures from a structured JSON file.',
-        args: {},
-        options: {
-          vault: './vault',
-          input: '@captures.json',
+  if (!excludeLeafPaths.has('capture import-json')) {
+    capture.command('import-json', {
+      description: captureCommandDescriptions.importJson,
+      args: z.object({}),
+      examples: [
+        {
+          description: 'Record a batch of separate captures from a structured JSON file.',
+          args: {},
+          options: {
+            vault: './vault',
+            input: '@captures.json',
+          },
         },
+      ],
+      hint: captureCommandDescriptions.importJsonHint,
+      options: withBaseOptions({
+        input: inputFileOptionSchema.describe('Structured capture payload in @file.json form or - for stdin.'),
+        ...captureAddOptionShape,
+      }),
+      output: captureAddResultSchema,
+      async run({ options }) {
+        return runCaptureAdd(options, normalizeInputFileOption(options.input))
       },
-    ],
-    hint: captureCommandDescriptions.importJsonHint,
-    options: withBaseOptions({
-      input: inputFileOptionSchema.describe('Structured capture payload in @file.json form or - for stdin.'),
-      ...captureAddOptionShape,
-    }),
-    output: captureAddResultSchema,
-    async run({ options }) {
-      return runCaptureAdd(options, normalizeInputFileOption(options.input))
-    },
-  })
+    })
+  }
 
   capture.command('show', {
     description: captureCommandDescriptions.show,

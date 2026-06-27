@@ -39,9 +39,15 @@ interface ScopedLlmsMarkdownNormalizationRequest extends ScopedLlmsMarkdownReque
   kind: 'scoped-markdown'
 }
 
+interface ScopedHelpNormalizationRequest {
+  commandPath: string[]
+  kind: 'scoped-help'
+}
+
 type LlmsNormalizationRequest =
   | LlmsJsonManifestRequest
   | RootLlmsMarkdownNormalizationRequest
+  | ScopedHelpNormalizationRequest
   | ScopedLlmsMarkdownNormalizationRequest
 
 export function installVaultCliLlmsNormalizer(
@@ -63,6 +69,8 @@ export function installVaultCliLlmsNormalizer(
       output = await normalizeLlmsJsonManifestOutput(result.output)
     } else if (request.kind === 'root-markdown') {
       output = normalizeRootLlmsMarkdownOutput(result.output, commandName)
+    } else if (request.kind === 'scoped-help') {
+      output = normalizeScopedHelpOutput(result.output, request.commandPath)
     } else {
       output = normalizeScopedLlmsMarkdownOutput(
         result.output,
@@ -82,6 +90,7 @@ function parseLlmsNormalizationRequest(
   argv: readonly string[],
 ): LlmsNormalizationRequest | null {
   let hasLlmsFlag = false
+  let hasHelpFlag = false
   let explicitFormat: string | null = null
   const commandPath: string[] = []
 
@@ -93,6 +102,11 @@ function parseLlmsNormalizationRequest(
 
     if (token === '--llms' || token === '--llms-full') {
       hasLlmsFlag = true
+      continue
+    }
+
+    if (token === '--help' || token === '-h') {
+      hasHelpFlag = true
       continue
     }
 
@@ -135,6 +149,16 @@ function parseLlmsNormalizationRequest(
     }
 
     commandPath.push(token)
+  }
+
+  if (hasHelpFlag && !hasLlmsFlag) {
+    if (
+      commandPath.length > 0 &&
+      scopedCommandHasHiddenChild(commandPath)
+    ) {
+      return { commandPath, kind: 'scoped-help' }
+    }
+    return null
   }
 
   if (!hasLlmsFlag) {
@@ -194,6 +218,45 @@ function normalizeRootLlmsMarkdownOutput(
   commandName: string,
 ): string {
   return stripHiddenCommandsFromLlmsMarkdownOutput(output, commandName)
+}
+
+function scopedCommandHasHiddenChild(commandPath: readonly string[]): boolean {
+  if (vaultCliLlmsHiddenCommandNames.size === 0) {
+    return false
+  }
+
+  const prefix = `${commandPath.join(' ')} `
+  for (const hiddenName of vaultCliLlmsHiddenCommandNames) {
+    if (hiddenName.startsWith(prefix)) {
+      return true
+    }
+  }
+  return false
+}
+
+function normalizeScopedHelpOutput(
+  output: string,
+  commandPath: readonly string[],
+): string {
+  const prefix = `${commandPath.join(' ')} `
+  const childLeafNames: string[] = []
+  for (const hiddenName of vaultCliLlmsHiddenCommandNames) {
+    if (hiddenName.startsWith(prefix)) {
+      childLeafNames.push(hiddenName.slice(prefix.length))
+    }
+  }
+  if (childLeafNames.length === 0) {
+    return output
+  }
+
+  const leafLinePattern = new RegExp(
+    `^\\s+(${childLeafNames.map(escapeRegExp).join('|')})\\s`,
+    'u',
+  )
+
+  const lines = output.split('\n')
+  const filtered = lines.filter((line) => !leafLinePattern.test(line))
+  return filtered.join('\n')
 }
 
 function normalizeScopedLlmsMarkdownOutput(

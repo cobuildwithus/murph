@@ -205,6 +205,7 @@ interface BaseVaultCliCommandDescriptor {
     cli: Cli.Cli
     services: CliVaultServices
     inboxServices: InboxServices
+    excludeLeafPaths?: ReadonlySet<string>
   }): void
 }
 
@@ -738,8 +739,8 @@ export const vaultCliCommandDescriptors = [
         description: captureCommandDescriptions.manifest,
       },
     ],
-    register({ cli, services }) {
-      registerCaptureCommands(cli, services)
+    register({ cli, services, excludeLeafPaths }) {
+      registerCaptureCommands(cli, services, { excludeLeafPaths })
     },
   },
   {
@@ -1943,6 +1944,7 @@ export function registerVaultCliCommandDescriptors(input: {
   services: VaultServices | CliVaultServices
   inboxServices: InboxServices
   excludeDescriptorIds?: ReadonlySet<string>
+  excludeLeafPaths?: ReadonlySet<string>
 }) {
   const descriptorInput = {
     ...input,
