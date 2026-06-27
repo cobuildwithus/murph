@@ -287,8 +287,23 @@ export async function issueHostedInviteTx(input: {
     && existingInvite?.sentAt
     && existingInviteEventId !== requestedInviteEventId,
   );
+  const existingInviteMatchesRequestedProof = Boolean(
+    existingInvite
+    && existingInvite.channel === input.channel
+    && existingInviteEventId === requestedInviteEventId,
+  );
+  const existingInviteDeliveryProofCannotBeRetagged = Boolean(
+    existingInvite
+    && (existingInvite.sentAt || existingInviteEventId)
+    && !existingInviteMatchesRequestedProof,
+  );
 
-  if (existingInvite && !existingInviteOwnedByAnotherEvent && !existingSentInviteCannotBeClaimed) {
+  if (
+    existingInvite
+    && !existingInviteOwnedByAnotherEvent
+    && !existingSentInviteCannotBeClaimed
+    && !existingInviteDeliveryProofCannotBeRetagged
+  ) {
     return input.prisma.hostedInvite.update({
       where: {
         id: existingInvite.id,

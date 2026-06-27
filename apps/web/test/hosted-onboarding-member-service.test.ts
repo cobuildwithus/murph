@@ -13,6 +13,7 @@ import {
   getHostedInviteStatus,
   issueHostedInvite,
   issueHostedInviteForPhone,
+  issueHostedInviteTx,
   prepareHostedInvitePhoneCode,
   requireHostedInviteForAuthentication,
 } from "@/src/lib/hosted-onboarding/invite-service";
@@ -366,6 +367,57 @@ describe("hosted-onboarding member-service barrel", () => {
     expect(barrel.requireHostedInviteForAuthentication).toBe(requireHostedInviteForAuthentication);
     expect(barrel.ensureHostedMemberForPhone).toBe(ensureHostedMemberForPhone);
     expect(barrel.completeHostedPrivyVerification).toBe(completeHostedPrivyVerification);
+  });
+});
+
+describe("issueHostedInviteTx", () => {
+  it("does not retag delivered Linq first-contact proof for a later web invite", async () => {
+    const deliveredLinqInvite = {
+      channel: "linq",
+      createdAt: new Date("2026-04-07T00:00:00.000Z"),
+      expiresAt: new Date("2026-04-08T00:00:00.000Z"),
+      id: "invite_delivered_linq",
+      inviteCode: "code_delivered_linq",
+      linqFirstContactEventId: "evt_delivered_linq",
+      memberId: "member_123",
+      sentAt: new Date("2026-04-07T00:01:00.000Z"),
+      updatedAt: new Date("2026-04-07T00:01:00.000Z"),
+    };
+    const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      ...data,
+      createdAt: NOW,
+      sentAt: null,
+      updatedAt: NOW,
+    }));
+    const update = vi.fn();
+    const prisma = asRootPrisma({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        create,
+        findFirst: vi.fn().mockResolvedValue(deliveredLinqInvite),
+        update,
+      },
+    });
+
+    const invite = await issueHostedInviteTx({
+      channel: "web",
+      memberId: "member_123",
+      prisma: prisma as never,
+    });
+
+    expect(update).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        channel: "web",
+        linqFirstContactEventId: null,
+        memberId: "member_123",
+      }),
+    });
+    expect(invite).toMatchObject({
+      channel: "web",
+      linqFirstContactEventId: null,
+      memberId: "member_123",
+    });
   });
 });
 
