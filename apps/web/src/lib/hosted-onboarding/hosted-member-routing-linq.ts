@@ -194,6 +194,7 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
 }): Promise<void> {
   const recipientPhone = normalizePhoneNumber(input.recipientPhone);
   const recipientPhoneLookupKey = createHostedPhoneLookupKey(recipientPhone);
+  const recipientPhoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(recipientPhone);
 
   if (!recipientPhone || !recipientPhoneLookupKey) {
     throw new TypeError(
@@ -217,6 +218,7 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
       clearPending: input.clearPending ?? false,
       memberId: input.memberId,
       prisma: input.prisma,
+      recipientPhoneLookupKeys,
     });
 
   await input.prisma.hostedMemberRouting.upsert({
@@ -247,9 +249,7 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
       linqRecipientPhoneLookupKey: recipientPhoneLookupKey,
       ...(input.clearPending
         ? {
-            ...(promotedLinqLastInboundAt
-              ? { linqLastInboundAt: promotedLinqLastInboundAt }
-              : {}),
+            linqLastInboundAt: promotedLinqLastInboundAt,
             pendingLinqChatIdEncrypted: null,
             pendingLinqChatLookupKey: null,
             pendingLinqParticipantContactEncrypted: null,
@@ -391,9 +391,17 @@ async function writeHostedMemberLinqBindingTx(input: {
   const promotedLinqLastInboundAt =
     await readHostedMemberPromotedLinqLastInboundAtTx({
       clearPending: input.clearPending,
+      linqChatLookupKeys,
       memberId: input.memberId,
       prisma: input.prisma,
     });
+  const scopedPendingLinqLastInboundAt = input.kind === "pending"
+    ? await readHostedMemberPendingLinqLastInboundAtTx({
+        linqChatLookupKeys,
+        memberId: input.memberId,
+        prisma: input.prisma,
+      })
+    : null;
 
   await input.prisma.hostedMemberRouting.upsert({
     where: {
@@ -414,6 +422,7 @@ async function writeHostedMemberLinqBindingTx(input: {
       linqChatLookupKey,
       participantContact: input.participantContact,
       participantContactObservedAt: input.participantContactObservedAt,
+      pendingLinqLastInboundAt: scopedPendingLinqLastInboundAt,
       recipientPhoneLookupKey,
       routingPrivateColumns,
       promotedLinqLastInboundAt,
@@ -475,6 +484,7 @@ function buildHostedMemberLinqBindingUpdateData(input: {
   linqChatLookupKey: string;
   participantContact: HostedLinqParticipantContact | null;
   participantContactObservedAt: Date | null;
+  pendingLinqLastInboundAt: Date | null;
   promotedLinqLastInboundAt: Date | null;
   recipientPhoneLookupKey: string | null;
   routingPrivateColumns: Awaited<ReturnType<typeof buildHostedMemberRoutingPrivateColumns>>;
@@ -487,9 +497,7 @@ function buildHostedMemberLinqBindingUpdateData(input: {
       linqRecipientPhoneLookupKey: input.recipientPhoneLookupKey,
       ...(input.clearPending
         ? {
-            ...(input.promotedLinqLastInboundAt
-              ? { linqLastInboundAt: input.promotedLinqLastInboundAt }
-              : {}),
+            linqLastInboundAt: input.promotedLinqLastInboundAt,
             pendingLinqChatIdEncrypted: null,
             pendingLinqChatLookupKey: null,
             pendingLinqParticipantContactEncrypted: null,
@@ -518,39 +526,114 @@ function buildHostedMemberLinqBindingUpdateData(input: {
       : {}),
     pendingLinqRecipientPhoneEncrypted:
       input.routingPrivateColumns.pendingLinqRecipientPhoneEncrypted,
+    pendingLinqLastInboundAt: input.pendingLinqLastInboundAt,
     pendingLinqRecipientPhoneLookupKey: input.recipientPhoneLookupKey,
   };
 }
 
 async function readHostedMemberPromotedLinqLastInboundAtTx(input: {
   clearPending: boolean;
+  linqChatLookupKeys?: readonly string[];
   memberId: string;
   prisma: Prisma.TransactionClient;
+  recipientPhoneLookupKeys?: readonly string[];
 }): Promise<Date | null> {
   if (!input.clearPending) {
     return null;
   }
+  const linqChatLookupKeys = new Set(input.linqChatLookupKeys ?? []);
+  const recipientPhoneLookupKeys = new Set(input.recipientPhoneLookupKeys ?? []);
 
   const routing = await input.prisma.hostedMemberRouting.findUnique({
     where: {
       memberId: input.memberId,
     },
     select: {
+      linqChatLookupKey: true,
       linqLastInboundAt: true,
+      linqRecipientPhoneLookupKey: true,
+      pendingLinqChatLookupKey: true,
+      pendingLinqLastInboundAt: true,
+      pendingLinqRecipientPhoneLookupKey: true,
+    },
+  });
+
+  if (!routing) {
+    return null;
+  }
+
+  const candidates: Date[] = [];
+  if (
+    routing.linqLastInboundAt
+    && routeLookupMatches({
+      linqChatLookupKey: routing.linqChatLookupKey,
+      linqChatLookupKeys,
+      recipientPhoneLookupKey: routing.linqRecipientPhoneLookupKey,
+      recipientPhoneLookupKeys,
+    })
+  ) {
+    candidates.push(routing.linqLastInboundAt);
+  }
+  if (
+    routing.pendingLinqLastInboundAt
+    && routeLookupMatches({
+      linqChatLookupKey: routing.pendingLinqChatLookupKey,
+      linqChatLookupKeys,
+      recipientPhoneLookupKey: routing.pendingLinqRecipientPhoneLookupKey,
+      recipientPhoneLookupKeys,
+    })
+  ) {
+    candidates.push(routing.pendingLinqLastInboundAt);
+  }
+
+  return readLatestDate(candidates);
+}
+
+async function readHostedMemberPendingLinqLastInboundAtTx(input: {
+  linqChatLookupKeys: readonly string[];
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<Date | null> {
+  const linqChatLookupKeys = new Set(input.linqChatLookupKeys);
+  const routing = await input.prisma.hostedMemberRouting.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: {
+      pendingLinqChatLookupKey: true,
       pendingLinqLastInboundAt: true,
     },
   });
 
-  if (!routing?.pendingLinqLastInboundAt) {
-    return routing?.linqLastInboundAt ?? null;
-  }
-  if (!routing.linqLastInboundAt) {
-    return routing.pendingLinqLastInboundAt;
-  }
-
-  return routing.pendingLinqLastInboundAt.getTime() > routing.linqLastInboundAt.getTime()
+  return routing?.pendingLinqChatLookupKey
+    && linqChatLookupKeys.has(routing.pendingLinqChatLookupKey)
     ? routing.pendingLinqLastInboundAt
-    : routing.linqLastInboundAt;
+    : null;
+}
+
+function routeLookupMatches(input: {
+  linqChatLookupKey: string | null;
+  linqChatLookupKeys: ReadonlySet<string>;
+  recipientPhoneLookupKey: string | null;
+  recipientPhoneLookupKeys: ReadonlySet<string>;
+}): boolean {
+  return Boolean(
+    (input.linqChatLookupKey && input.linqChatLookupKeys.has(input.linqChatLookupKey))
+      || (
+        input.recipientPhoneLookupKey
+        && input.recipientPhoneLookupKeys.has(input.recipientPhoneLookupKey)
+      ),
+  );
+}
+
+function readLatestDate(dates: readonly Date[]): Date | null {
+  let latest: Date | null = null;
+  for (const date of dates) {
+    if (!latest || date.getTime() > latest.getTime()) {
+      latest = date;
+    }
+  }
+  return latest;
 }
 
 async function clearHostedMemberLinqChatConflicts(input: {

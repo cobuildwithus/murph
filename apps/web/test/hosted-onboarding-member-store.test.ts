@@ -51,6 +51,7 @@ import {
   readHostedMemberRoutingState,
   type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberHomeLinqBindingTx,
+  upsertHostedMemberPendingLinqBindingTx,
   upsertHostedMemberReplyAliasLookupKeyTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberPendingLinqParticipantContactTx,
@@ -1139,9 +1140,14 @@ describe("hosted-member-store", () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const pendingLinqLastInboundAt = new Date("2026-06-25T12:00:00.000Z");
+    const pendingLinqChatLookupKey = createHostedLinqChatLookupKeyReadCandidates("chat_123")[0];
     const findUnique = vi.fn().mockResolvedValue({
+      linqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_old")[0],
       linqLastInboundAt: new Date("2026-06-01T12:00:00.000Z"),
+      linqRecipientPhoneLookupKey: null,
+      pendingLinqChatLookupKey,
       pendingLinqLastInboundAt,
+      pendingLinqRecipientPhoneLookupKey: null,
     });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
@@ -1166,8 +1172,12 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
       },
       select: {
+        linqChatLookupKey: true,
         linqLastInboundAt: true,
+        linqRecipientPhoneLookupKey: true,
+        pendingLinqChatLookupKey: true,
         pendingLinqLastInboundAt: true,
+        pendingLinqRecipientPhoneLookupKey: true,
       },
     });
     expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
@@ -1175,6 +1185,77 @@ describe("hosted-member-store", () => {
         linqLastInboundAt: pendingLinqLastInboundAt,
         pendingLinqChatIdEncrypted: null,
         pendingLinqChatLookupKey: null,
+        pendingLinqLastInboundAt: null,
+      }),
+    }));
+  });
+
+  it("clears Linq inbound freshness when a different pending chat becomes home", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const findUnique = vi.fn().mockResolvedValue({
+      linqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_a")[0],
+      linqLastInboundAt: new Date("2026-06-25T12:00:00.000Z"),
+      linqRecipientPhoneLookupKey: null,
+      pendingLinqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_b")[0],
+      pendingLinqLastInboundAt: new Date("2026-06-26T12:00:00.000Z"),
+      pendingLinqRecipientPhoneLookupKey: null,
+    });
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        findUnique,
+        updateMany,
+        upsert,
+      },
+    } as never;
+
+    await upsertHostedMemberHomeLinqBindingTx({
+      clearPending: true,
+      linqChatId: "chat_c",
+      memberId: "member_123",
+      prisma,
+      recipientPhone: "+15550100001",
+    });
+
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        linqLastInboundAt: null,
+        linqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_c")[0],
+        pendingLinqChatLookupKey: null,
+        pendingLinqLastInboundAt: null,
+      }),
+    }));
+  });
+
+  it("clears pending Linq inbound freshness when pending chat binding is rewritten", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const findUnique = vi.fn().mockResolvedValue({
+      pendingLinqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_old")[0],
+      pendingLinqLastInboundAt: new Date("2026-06-25T12:00:00.000Z"),
+    });
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        findUnique,
+        updateMany,
+        upsert,
+      },
+    } as never;
+
+    await upsertHostedMemberPendingLinqBindingTx({
+      linqChatId: "chat_new",
+      memberId: "member_123",
+      prisma,
+      recipientPhone: "+15550100001",
+    });
+
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        pendingLinqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_new")[0],
         pendingLinqLastInboundAt: null,
       }),
     }));
@@ -1404,6 +1485,7 @@ describe("hosted-member-store", () => {
       update: {
         linqChatIdEncrypted: null,
         linqChatLookupKey: null,
+        linqLastInboundAt: null,
         linqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
         linqRecipientPhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         pendingLinqChatIdEncrypted: null,
@@ -1422,8 +1504,12 @@ describe("hosted-member-store", () => {
   it("promotes pending Linq inbound freshness when pending recipient route becomes home", async () => {
     const pendingLinqLastInboundAt = new Date("2026-06-25T12:00:00.000Z");
     const findUnique = vi.fn().mockResolvedValue({
+      linqChatLookupKey: null,
       linqLastInboundAt: null,
+      linqRecipientPhoneLookupKey: null,
+      pendingLinqChatLookupKey: null,
       pendingLinqLastInboundAt,
+      pendingLinqRecipientPhoneLookupKey: createHostedPhoneLookupKeyReadCandidates("+15550100001")[0],
     });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
