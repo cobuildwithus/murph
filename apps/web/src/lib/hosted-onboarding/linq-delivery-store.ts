@@ -15,6 +15,10 @@ import {
   createHostedLinqProviderEventLookupKey,
 } from "./linq-observability-identifiers";
 import {
+  compareHostedLinqProviderEventOrder,
+  createHostedLinqProviderEventOrderId,
+} from "./linq-provider-ordering";
+import {
   sanitizeHostedOnboardingPersistedErrorCode,
   sanitizeHostedOnboardingPersistedErrorMessage,
 } from "./http";
@@ -348,8 +352,6 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
       deliveryId: null,
     };
   }
-  const deliveryStatus = input.event.deliveryStatus;
-
   const delivery = await input.prisma.hostedLinqDelivery.findFirst({
     where: {
       messageLookupKey: {
@@ -374,7 +376,7 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
     where: {
       id: delivery.id,
       OR: buildReceiptOrderingWhere({
-        deliveryStatus,
+        eventId: input.event.eventId,
         providerCreatedAt: input.event.providerCreatedAt,
       }),
     },
@@ -451,6 +453,7 @@ async function applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx(input: {
     },
     orderBy: [
       { providerCreatedAt: "desc" },
+      { eventId: "desc" },
     ],
     select: {
       deliveryStatus: true,
@@ -478,19 +481,15 @@ async function applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx(input: {
 }
 
 function buildReceiptOrderingWhere(
-  receipt: Pick<HostedLinqDeliveryReceiptData, "deliveryStatus" | "providerCreatedAt">,
+  receipt: Pick<HostedLinqDeliveryReceiptData, "eventId" | "providerCreatedAt">,
 ): Prisma.HostedLinqDeliveryWhereInput[] {
-  const orderingWhere: Prisma.HostedLinqDeliveryWhereInput[] = [
+  const eventId = createHostedLinqProviderEventOrderId(receipt.eventId);
+  return [
     { lastReceiptAt: null },
     { lastReceiptAt: { lt: receipt.providerCreatedAt } },
+    { lastReceiptAt: receipt.providerCreatedAt, lastProviderEventId: null },
+    { lastReceiptAt: receipt.providerCreatedAt, lastProviderEventId: { lt: eventId } },
   ];
-  if (receipt.deliveryStatus === "failed") {
-    orderingWhere.push({
-      lastReceiptAt: receipt.providerCreatedAt,
-      status: { not: "failed" },
-    });
-  }
-  return orderingWhere;
 }
 
 function isHostedLinqTerminalReceiptData(
@@ -525,16 +524,7 @@ function selectLatestHostedLinqReceiptData(
       selected = receipt;
       continue;
     }
-    const receiptTime = receipt.providerCreatedAt.getTime();
-    const selectedTime = selected.providerCreatedAt.getTime();
-    if (
-      receiptTime > selectedTime
-      || (
-        receiptTime === selectedTime
-        && selected.deliveryStatus === "delivered"
-        && receipt.deliveryStatus === "failed"
-      )
-    ) {
+    if (compareHostedLinqProviderEventOrder(receipt, selected) > 0) {
       selected = receipt;
     }
   }

@@ -10,10 +10,11 @@ import {
   decideHostedLinqRecentInbound,
   recordHostedMemberLinqInboundEngagementTx,
   recordHostedThreadRouteLinqInboundEngagementTx,
+  readHostedLinqSideEffectRecentInboundDecision,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 
 describe("hosted Linq egress engagement", () => {
-  it("allows first contact and blocks only when prior inbound went stale", () => {
+  it("allows recent inbound and blocks missing or stale inbound proof", () => {
     const now = new Date("2026-06-25T12:00:00.000Z");
 
     expect(decideHostedLinqRecentInbound({
@@ -26,8 +27,9 @@ describe("hosted Linq egress engagement", () => {
       lastInboundAt: null,
       now,
     })).toMatchObject({
-      allowed: true,
+      allowed: false,
       lastInboundAt: null,
+      reason: "missing_inbound",
     });
     expect(decideHostedLinqRecentInbound({
       lastInboundAt: new Date("2026-05-01T12:00:00.000Z"),
@@ -42,6 +44,75 @@ describe("hosted Linq egress engagement", () => {
     })).toMatchObject({
       allowed: false,
       reason: "stale_inbound",
+    });
+  });
+
+  it("allows explicit signup welcome first contact for the bound runtime user", async () => {
+    const prisma = {
+      hostedLinqDelivery: {
+        create: vi.fn(),
+        findUnique: vi.fn(),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn(),
+      },
+      hostedThreadRoute: {
+        findUnique: vi.fn(),
+      },
+    };
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      engagementKind: "first_contact",
+      idempotencyKey: "signup-welcome:member-1",
+      intentId: "intent-1",
+      memberId: "member-1",
+      prisma: prisma as never,
+      target: "chat-1",
+      targetKind: "thread",
+    })).resolves.toBeUndefined();
+
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects first-contact runtime egress without signup welcome authority", async () => {
+    const prisma = {
+      hostedLinqDelivery: {
+        create: vi.fn(),
+        findUnique: vi.fn(),
+      },
+    };
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      engagementKind: "first_contact",
+      idempotencyKey: "signup-welcome:member-2",
+      memberId: "member-1",
+      prisma: prisma as never,
+      target: "chat-1",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_FIRST_CONTACT_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
+  });
+
+  it("allows invite side effects as explicit first contact", async () => {
+    await expect(readHostedLinqSideEffectRecentInboundDecision({
+      payload: {
+        chatId: "chat-1",
+        inviteId: "invite-1",
+        memberId: "member-1",
+        occurredAt: "2026-06-25T12:00:00.000Z",
+        replyToMessageId: null,
+        template: "invite_signup",
+      },
+      prisma: {} as never,
+    })).resolves.toEqual({
+      allowed: true,
+      lastInboundAt: null,
     });
   });
 
@@ -212,6 +283,67 @@ describe("hosted Linq egress engagement", () => {
           skippedAt: new Date("2026-06-25T12:00:00.000Z"),
           sourceRef: expect.stringMatching(/^hbid:linq\.delivery-source-ref:/u),
           source: "hosted_runtime_linq_egress_guard",
+          status: "skipped",
+        }),
+      }),
+    );
+  });
+
+  it("records skipped runtime sends when inbound proof is missing", async () => {
+    const chatLookupKey = createHostedLinqChatLookupKey("chat-1");
+    if (!chatLookupKey) {
+      throw new Error("Expected test Linq chat lookup key.");
+    }
+    const prisma = {
+      hostedLinqDelivery: {
+        create: vi.fn().mockResolvedValue({ id: "hld_skip" }),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedLinqLine: {
+        upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) =>
+          Promise.resolve({
+            phoneNumberLookupKey: input.create.phoneNumberLookupKey,
+          })),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
+          Promise.resolve({
+            phoneNumberLookupKey: input.where?.phoneNumberLookupKey ?? "hbidx:phone:updated",
+          })),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatLookupKey: chatLookupKey,
+          linqLastInboundAt: null,
+          linqRecipientPhoneLookupKey: null,
+          pendingLinqChatLookupKey: null,
+          pendingLinqLastInboundAt: null,
+          pendingLinqRecipientPhoneLookupKey: null,
+        }),
+      },
+    };
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      fromPhoneNumber: "+15550100001",
+      idempotencyKey: "delivery-key-1",
+      intentId: "intent-1",
+      memberId: "member-1",
+      now: new Date("2026-06-25T12:00:00.000Z"),
+      prisma: prisma as never,
+      target: "chat-1",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
+      details: {
+        lastInboundAt: null,
+        reason: "missing_inbound",
+      },
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedLinqDelivery.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          skipReason: `last_inbound_at=null; window_days=28`,
           status: "skipped",
         }),
       }),

@@ -73,6 +73,7 @@ import type {
 import type {
   HostedRuntimeActionApprovalPort,
   HostedRuntimeEffectsPort,
+  HostedRuntimeLinqEngagementKind,
 } from "./platform.ts";
 import {
   buildHostedLinqChannelEnv,
@@ -505,11 +506,18 @@ async function abandonStaleSignupWelcomeBackgroundCandidatesAfterForegroundReply
 function isHostedSignupWelcomeDeliveryPayload(
   payload: HostedAssistantDeliveryPayload,
 ): boolean {
+  return isHostedSignupWelcomeDeliveryIdempotencyKey(payload.idempotencyKey);
+}
+
+function isHostedSignupWelcomeDeliveryIdempotencyKey(
+  idempotencyKey: string | null | undefined,
+): boolean {
   const prefix = "signup-welcome:";
-  if (!payload.idempotencyKey.startsWith(prefix)) {
+  const normalized = idempotencyKey?.trim() ?? "";
+  if (!normalized.startsWith(prefix)) {
     return false;
   }
-  const tokenTarget = payload.idempotencyKey.slice(prefix.length);
+  const tokenTarget = normalized.slice(prefix.length);
   return tokenTarget.length > 0 && !tokenTarget.includes(":");
 }
 
@@ -2135,6 +2143,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   }
   await assertRecentInbound({
     directRecipientPhoneNumber: input.directRecipientPhoneNumber,
+    engagementKind: readHostedAssistantLinqEngagementKind(input.idempotencyKey),
     fromPhoneNumber: input.fromPhoneNumber,
     idempotencyKey: input.idempotencyKey,
     intentId: input.intentId,
@@ -2146,6 +2155,14 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   }, {
     signal: input.signal,
   });
+}
+
+function readHostedAssistantLinqEngagementKind(
+  idempotencyKey: string | null,
+): HostedRuntimeLinqEngagementKind {
+  return isHostedSignupWelcomeDeliveryIdempotencyKey(idempotencyKey)
+    ? "first_contact"
+    : "requires_recent_inbound";
 }
 
 function isHostedAssistantCurrentInboundLinqReply(input: {

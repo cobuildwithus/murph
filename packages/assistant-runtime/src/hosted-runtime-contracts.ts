@@ -24,6 +24,7 @@ export type {
   HostedRuntimeIssueRecordResponse,
   HostedRuntimeLinqChatActionRequest,
   HostedRuntimeLinqDeleteMessagesRequest,
+  HostedRuntimeLinqEngagementKind,
   HostedRuntimeLinqMarkReadRequest,
   HostedRuntimeLinqSendRequest,
   HostedRuntimeLinqSendResponse,

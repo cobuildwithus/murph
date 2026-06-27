@@ -4371,6 +4371,7 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
+        engagementKind: "requires_recent_inbound",
         idempotencyKey: "assistant-outbox:intent_123",
         intentId: "intent_123",
         target: "linq_chat_123",
@@ -4381,6 +4382,70 @@ describe("hosted runtime callbacks", () => {
       },
     );
     expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
+  });
+
+  it("marks signup welcome Linq sends as first-contact engagement", async () => {
+    const effect = createEffect({
+      channel: "linq",
+      idempotencyKey: "signup-welcome:member_123",
+      message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      transportIdempotent: false,
+    });
+    const assertRecentInbound = vi.fn(async () => undefined);
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "participant" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey: "signup-welcome:member_123",
+        message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+        replyToMessageId: null,
+        target: "linq_chat_123",
+        targetKind: "participant",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          idempotencyKey: "signup-welcome:member_123",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        engagementKind: "first_contact",
+        idempotencyKey: "signup-welcome:member_123",
+      }),
+      {
+        signal: null,
+      },
+    );
+    expect(mocks.sendLinqMessage).toHaveBeenCalled();
   });
 
   it("does not reuse mismatched routed Linq authority for reactions", async () => {
@@ -4462,6 +4527,7 @@ describe("hosted runtime callbacks", () => {
     expect(assertAuthority).not.toHaveBeenCalled();
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: null,
+      engagementKind: "requires_recent_inbound",
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_123",
       intentId: "intent_123",
@@ -5037,6 +5103,7 @@ describe("hosted runtime callbacks", () => {
     expect(assertAuthority).toHaveBeenCalledTimes(1);
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: "+15550000001",
+      engagementKind: "requires_recent_inbound",
       fromPhoneNumber: "+15559990000",
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
@@ -5142,6 +5209,7 @@ describe("hosted runtime callbacks", () => {
     expect(assertAuthority).not.toHaveBeenCalled();
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: null,
+      engagementKind: "requires_recent_inbound",
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",
@@ -5236,6 +5304,7 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith({
       directRecipientPhoneNumber: "+15550001",
+      engagementKind: "requires_recent_inbound",
       fromPhoneNumber: null,
       idempotencyKey: "assistant-outbox:intent_hashed_target",
       intentId: "intent_123",

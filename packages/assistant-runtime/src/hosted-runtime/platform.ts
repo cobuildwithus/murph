@@ -184,8 +184,13 @@ export interface HostedRuntimeLinqSendResponse {
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
 
+export type HostedRuntimeLinqEngagementKind =
+  | "first_contact"
+  | "requires_recent_inbound";
+
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   directRecipientPhoneNumber?: string | null;
+  engagementKind?: HostedRuntimeLinqEngagementKind | null;
   fromPhoneNumber?: string | null;
   idempotencyKey?: string | null;
   intentId?: string | null;

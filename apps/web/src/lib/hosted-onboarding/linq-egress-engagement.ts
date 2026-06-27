@@ -24,11 +24,13 @@ import {
 } from "./errors";
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
+type HostedLinqEgressEngagementKind = "first_contact" | "requires_recent_inbound";
 
 export const HOSTED_LINQ_RECENT_INBOUND_WINDOW_DAYS = 28;
 const HOSTED_LINQ_RECENT_INBOUND_WINDOW_MS =
   HOSTED_LINQ_RECENT_INBOUND_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 const HOSTED_LINQ_FUTURE_INBOUND_SKEW_MS = 5 * 60 * 1000;
+const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
 
 export type HostedLinqRecentInboundDecision =
   | {
@@ -37,8 +39,8 @@ export type HostedLinqRecentInboundDecision =
     }
   | {
       allowed: false;
-      lastInboundAt: Date;
-      reason: "stale_inbound";
+      lastInboundAt: Date | null;
+      reason: "missing_inbound" | "stale_inbound";
     };
 
 export function decideHostedLinqRecentInbound(input: {
@@ -48,7 +50,7 @@ export function decideHostedLinqRecentInbound(input: {
   const now = input.now ?? new Date();
   const lastInboundAt = input.lastInboundAt;
   if (!lastInboundAt) {
-    return { allowed: true, lastInboundAt: null };
+    return { allowed: false, lastInboundAt: null, reason: "missing_inbound" };
   }
   if (lastInboundAt.getTime() > now.getTime() + HOSTED_LINQ_FUTURE_INBOUND_SKEW_MS) {
     return { allowed: false, lastInboundAt, reason: "stale_inbound" };
@@ -157,6 +159,9 @@ export async function readHostedLinqSideEffectRecentInboundDecision(input: {
   route?: { lastInboundAt: Date | null } | null;
 }): Promise<HostedLinqRecentInboundDecision> {
   const now = input.now ?? new Date();
+  if (isHostedLinqFirstContactSideEffectPayload(input.payload)) {
+    return { allowed: true, lastInboundAt: null };
+  }
   const memberId = await resolveHostedLinqSideEffectMemberId(input);
   const routeAuthority = "routeAuthority" in input.payload
     ? input.payload.routeAuthority ?? null
@@ -222,6 +227,7 @@ export function assertHostedLinqRouteAuthorityMatchesTarget(input: {
 
 export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   directRecipientPhoneNumber?: string | null;
+  engagementKind?: HostedLinqEgressEngagementKind | null;
   fromPhoneNumber?: string | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
@@ -246,6 +252,13 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
       message: "Linq egress engagement authority does not match the runtime user.",
       retryable: false,
     });
+  }
+  if ((input.engagementKind ?? "requires_recent_inbound") === "first_contact") {
+    assertHostedLinqFirstContactEgressAuthority({
+      idempotencyKey: input.idempotencyKey,
+      memberId: input.memberId,
+    });
+    return;
   }
 
   const route = routeAuthority
@@ -300,6 +313,36 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     message: `Linq/iMessage delivery requires a recipient reply within the last ${HOSTED_LINQ_RECENT_INBOUND_WINDOW_DAYS} days.`,
     retryable: false,
   });
+}
+
+function assertHostedLinqFirstContactEgressAuthority(input: {
+  idempotencyKey?: string | null;
+  memberId: string;
+}): void {
+  if (isHostedLinqSignupWelcomeFirstContact(input)) {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_FIRST_CONTACT_AUTHORITY_MISMATCH",
+    httpStatus: 403,
+    message: "Linq first-contact egress requires signup welcome authority for the runtime user.",
+    retryable: false,
+  });
+}
+
+function isHostedLinqSignupWelcomeFirstContact(input: {
+  idempotencyKey?: string | null;
+  memberId: string;
+}): boolean {
+  return normalizeNullable(input.idempotencyKey)
+    === `${HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX}${input.memberId}`;
+}
+
+function isHostedLinqFirstContactSideEffectPayload(
+  payload: HostedLinqMessagePayload,
+): boolean {
+  return payload.template === "invite_signup" || payload.template === "invite_signin";
 }
 
 function normalizeHostedLinqRouteAuthorityForEgress(input: {

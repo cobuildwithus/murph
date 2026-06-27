@@ -502,7 +502,7 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("guards line status projection against stale status webhooks without event-id ordering", async () => {
+  it("guards line status projection with provider event-id ordering", async () => {
     const fixture = createObservabilityPrismaFixture();
     const event = requireParsedProviderEvent(buildProviderEvent({
       data: {
@@ -533,8 +533,12 @@ describe("hosted Linq observability stores", () => {
               },
             },
             {
-              egressPolicy: {
-                not: "disabled",
+              lastStatusEventId: null,
+              providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
+            },
+            {
+              lastStatusEventId: {
+                lt: createHostedLinqProviderEventLookupKey("evt_status_older"),
               },
               providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
             },
@@ -544,7 +548,7 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("lets critical same-timestamp status callbacks tighten line egress", async () => {
+  it("uses provider event id as the same-timestamp status tie breaker", async () => {
     const fixture = createObservabilityPrismaFixture();
     const event = requireParsedProviderEvent(buildProviderEvent({
       data: {
@@ -570,6 +574,9 @@ describe("hosted Linq observability stores", () => {
         where: expect.objectContaining({
           OR: expect.arrayContaining([
             {
+              lastStatusEventId: {
+                lt: createHostedLinqProviderEventLookupKey("evt_status_critical"),
+              },
               providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
             },
           ]),
@@ -936,6 +943,7 @@ describe("hosted Linq observability stores", () => {
       expect.objectContaining({
         orderBy: [
           { providerCreatedAt: "desc" },
+          { eventId: "desc" },
         ],
         take: 20,
         where: expect.objectContaining({
@@ -970,10 +978,14 @@ describe("hosted Linq observability stores", () => {
               },
             },
             {
+              lastProviderEventId: null,
               lastReceiptAt: new Date("2026-03-26T12:00:05.000Z"),
-              status: {
-                not: "failed",
+            },
+            {
+              lastProviderEventId: {
+                lt: createHostedLinqProviderEventLookupKey("evt_failed_123"),
               },
+              lastReceiptAt: new Date("2026-03-26T12:00:05.000Z"),
             },
           ]),
         }),

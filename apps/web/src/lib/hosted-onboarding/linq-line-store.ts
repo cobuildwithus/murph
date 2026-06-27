@@ -8,6 +8,9 @@ import {
 import {
   createHostedLinqProviderEventLookupKey,
 } from "./linq-observability-identifiers";
+import {
+  createHostedLinqProviderEventOrderId,
+} from "./linq-provider-ordering";
 import { normalizePhoneNumber } from "./phone";
 
 type HostedLinqLineClient = PrismaClient | Prisma.TransactionClient;
@@ -231,7 +234,7 @@ async function projectPhoneNumberStatusUpdated(
   const healthStatus = classifyHostedLinqProviderStatus(event.providerStatus);
   const egressPolicy = deriveHostedLinqEgressPolicy(event.providerStatus);
   const updated = await prisma.hostedLinqLine.updateMany({
-    where: buildPhoneNumberStatusProjectionWhere(phoneNumberLookupKey, event, egressPolicy),
+    where: buildPhoneNumberStatusProjectionWhere(phoneNumberLookupKey, event),
     data: {
       ...(egressPolicy ? { egressPolicy } : {}),
       healthStatus,
@@ -248,57 +251,59 @@ function buildMessageReceiptLineProjectionWhere(
   phoneNumberLookupKey: string,
   event: ParsedHostedLinqProviderEvent,
 ): Prisma.HostedLinqLineWhereInput {
-  const orderingWhere: Prisma.HostedLinqLineWhereInput[] = [
-    {
-      lastReceiptAt: null,
-    },
-    {
-      lastReceiptAt: {
-        lt: event.providerCreatedAt,
-      },
-    },
-  ];
-  if (event.deliveryStatus === "failed") {
-    orderingWhere.push({
-      lastFailedAt: null,
-      lastReceiptAt: event.providerCreatedAt,
-    });
-  }
+  const eventId = createHostedLinqProviderEventOrderId(event.eventId);
   return {
     phoneNumberLookupKey,
-    OR: orderingWhere,
+    OR: [
+      {
+        lastReceiptAt: null,
+      },
+      {
+        lastReceiptAt: {
+          lt: event.providerCreatedAt,
+        },
+      },
+      {
+        lastReceiptAt: event.providerCreatedAt,
+        lastReceiptEventId: null,
+      },
+      {
+        lastReceiptAt: event.providerCreatedAt,
+        lastReceiptEventId: {
+          lt: eventId,
+        },
+      },
+    ],
   };
 }
 
 function buildPhoneNumberStatusProjectionWhere(
   phoneNumberLookupKey: string,
   event: ParsedHostedLinqProviderEvent,
-  egressPolicy: string | null,
 ): Prisma.HostedLinqLineWhereInput {
-  const orderingWhere: Prisma.HostedLinqLineWhereInput[] = [
-    {
-      providerUpdatedAt: null,
-    },
-    {
-      providerUpdatedAt: {
-        lt: event.providerCreatedAt,
-      },
-    },
-  ];
-  if (egressPolicy === "disabled") {
-    orderingWhere.push({
-      providerUpdatedAt: event.providerCreatedAt,
-    });
-  } else if (egressPolicy === "avoid_new_assignments") {
-    orderingWhere.push({
-      egressPolicy: { not: "disabled" },
-      providerUpdatedAt: event.providerCreatedAt,
-    });
-  }
-
+  const eventId = createHostedLinqProviderEventOrderId(event.eventId);
   return {
     phoneNumberLookupKey,
-    OR: orderingWhere,
+    OR: [
+      {
+        providerUpdatedAt: null,
+      },
+      {
+        providerUpdatedAt: {
+          lt: event.providerCreatedAt,
+        },
+      },
+      {
+        lastStatusEventId: null,
+        providerUpdatedAt: event.providerCreatedAt,
+      },
+      {
+        lastStatusEventId: {
+          lt: eventId,
+        },
+        providerUpdatedAt: event.providerCreatedAt,
+      },
+    ],
   };
 }
 

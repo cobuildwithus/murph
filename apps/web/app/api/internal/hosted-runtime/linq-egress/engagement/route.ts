@@ -32,6 +32,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   await assertHostedLinqRecentInboundEngagementForRuntime({
     directRecipientPhoneNumber: readOptionalBodyString(body.directRecipientPhoneNumber),
+    engagementKind: parseHostedLinqEgressEngagementKind(body.engagementKind),
     fromPhoneNumber: readOptionalBodyString(body.fromPhoneNumber),
     idempotencyKey: readOptionalBodyString(body.idempotencyKey),
     intentId: readOptionalBodyString(body.intentId),
@@ -50,6 +51,23 @@ export const POST = withJsonError(async (request: Request) => {
 function readOptionalBodyString(value: unknown): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized.length > 0 ? normalized : null;
+}
+
+function parseHostedLinqEgressEngagementKind(
+  value: unknown,
+): "first_contact" | "requires_recent_inbound" | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (value === "first_contact" || value === "requires_recent_inbound") {
+    return value;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_EGRESS_ENGAGEMENT_KIND_INVALID",
+    httpStatus: 400,
+    message: "Hosted Linq egress engagement kind is invalid.",
+    retryable: false,
+  });
 }
 
 function parseHostedLinqEgressRouteAuthority(
