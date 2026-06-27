@@ -503,6 +503,16 @@ describe('channel helper seams', () => {
     expect(startLinqTyping).toHaveBeenCalledWith({
       target: 'explicit-chat',
     })
+    expect(
+      await startTyping(
+        {
+          bindingDelivery: createAssistantBindingDelivery('thread', 'thread-linq'),
+          explicitTarget: null,
+          identityId: null,
+        },
+        {},
+      ),
+    ).toBeNull()
   })
 
   it('routes descriptor sends through channel-specific helpers and enforces email identity requirements', async () => {
