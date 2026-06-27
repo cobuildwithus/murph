@@ -842,7 +842,7 @@ model HostedInvite {
 model HostedLinqFirstContactAdmissionDecision {
   eventId    String   @id @map("event_id")
   decision   String
-  category   String
+  category   String?
   confidence Float
   source     String
   createdAt  DateTime @default(now()) @map("created_at")

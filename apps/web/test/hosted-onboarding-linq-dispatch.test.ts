@@ -484,7 +484,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
     mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValue({
-      category: "join_intent",
       confidence: 0.9,
       kind: "allow",
       source: "model",
@@ -2481,7 +2480,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   it("blocks classifier-denied unknown Linq first contacts before member or invite side effects", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValueOnce({
-      category: "wrong_number_or_personal_logistics",
       confidence: 0.94,
       kind: "block",
       source: "model",
@@ -2568,8 +2566,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
     expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledWith({
       data: {
-        category: "wrong_number_or_personal_logistics",
-        confidence: 0.94,
+          confidence: 0.94,
         decision: "block",
         eventId: "evt_wrong_person_first_contact",
         source: "model",
@@ -2652,7 +2649,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledWith({
       data: {
-        category: "unsupported_content",
         confidence: 1,
         decision: "block",
         eventId: "evt_media_only_first_contact",
@@ -2732,6 +2728,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "first-contact-admission-budget-exhausted",
     });
+    // Pre-flight checks same-event idempotency first (findFirst) so transport
+    // retries of an already-claimed event can re-run the classifier; only
+    // brand-new events for an already-exhausted contact short-circuit on the
+    // total-count read, before the advisory lock or any insert.
     expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.findFirst).toHaveBeenCalledWith({
       where: {
         eventId: "evt_first_contact_budget_exhausted",
@@ -2786,8 +2786,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue({
-          category: "wrong_number_or_personal_logistics",
-          confidence: 0.94,
+              confidence: 0.94,
           decision: "block",
           eventId: "evt_recorded_wrong_person_first_contact",
           source: "model",
@@ -2858,8 +2857,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue({
-          category: "wrong_number_or_personal_logistics",
-          confidence: 0.94,
+              confidence: 0.94,
           decision: "block",
           eventId: "evt_recorded_block_after_member_state",
           source: "model",
@@ -2907,7 +2905,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   it("bounds first-contact classifier service metadata before OpenAI egress", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValueOnce({
-      category: "wrong_number_or_personal_logistics",
       confidence: 0.94,
       kind: "block",
       source: "model",
@@ -3150,8 +3147,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     async (service) => {
       mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
       mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValueOnce({
-        category: "wrong_number_or_personal_logistics",
-        confidence: 0.94,
+          confidence: 0.94,
         kind: "block",
         source: "model",
       });
