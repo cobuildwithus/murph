@@ -176,7 +176,6 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
-    "@linqapp/sdk": "0.28.0",
     "@murphai/contracts": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
     "@murphai/gateway-core": "workspace:*",
@@ -184,6 +183,9 @@
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@linqapp/sdk": "0.28.0"
   },
   "engines": {
     "node": ">=24.14.1"

@@ -169,9 +169,6 @@ importers:
       '@base-ui/react':
         specifier: 1.4.1
         version: 1.4.1(@types/react@19.2.14)(date-fns@4.1.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
-      '@linqapp/sdk':
-        specifier: 0.28.0
-        version: 0.28.0
       '@murphai/cloudflare-hosted-control':
         specifier: workspace:*
         version: link:../../packages/cloudflare-hosted-control
@@ -244,9 +241,6 @@ importers:
       next:
         specifier: ^16.2.6
         version: 16.2.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.0)(@playwright/test@1.59.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
-      openai:
-        specifier: 6.45.0
-        version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))(zod@4.3.6)
       pg:
         specifier: ^8.16.3
         version: 8.20.0
@@ -284,6 +278,9 @@ importers:
         specifier: 4.2.4
         version: 4.2.4(@nestjs/common@11.1.19(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.19(@nestjs/common@11.1.19(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.0)(@swc/cli@0.8.1(@swc/core@1.15.3(@swc/helpers@0.5.21))(chokidar@5.0.0))(@swc/core@1.15.3(@swc/helpers@0.5.21))(@swc/helpers@0.5.21)(magicast@0.5.2)(next@16.2.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.0)(@playwright/test@1.59.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(typescript@5.9.3)
     devDependencies:
+      '@linqapp/sdk':
+        specifier: 0.28.0
+        version: 0.28.0
       '@playwright/test':
         specifier: ^1.59.1
         version: 1.59.1
@@ -308,6 +305,9 @@ importers:
       linkedom:
         specifier: 0.18.12
         version: 0.18.12
+      openai:
+        specifier: 6.45.0
+        version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))(zod@4.3.6)
       prisma:
         specifier: ^7.8.0
         version: 7.8.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(better-sqlite3@12.6.2)(magicast@0.5.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@5.9.3)
@@ -390,9 +390,6 @@ importers:
       '@murphai/vault-usecases':
         specifier: workspace:*
         version: link:../vault-usecases
-      openai:
-        specifier: 6.45.0
-        version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -400,6 +397,9 @@ importers:
       '@openai/codex':
         specifier: 0.135.0
         version: 0.135.0
+      openai:
+        specifier: 6.45.0
+        version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
 
   packages/assistant-runtime:
     dependencies:
@@ -787,9 +787,6 @@ importers:
 
   packages/operator-config:
     dependencies:
-      '@linqapp/sdk':
-        specifier: 0.28.0
-        version: 0.28.0
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -811,6 +808,10 @@ importers:
       zod:
         specifier: ^4.4.3
         version: 4.4.3
+    devDependencies:
+      '@linqapp/sdk':
+        specifier: 0.28.0
+        version: 0.28.0
 
   packages/parsers:
     dependencies:

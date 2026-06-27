@@ -33,7 +33,6 @@
   },
   "dependencies": {
     "@base-ui/react": "1.4.1",
-    "@linqapp/sdk": "0.28.0",
     "@murphai/cloudflare-hosted-control": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
@@ -58,7 +57,6 @@
     "lucide-react": "1.14.0",
     "markdown-to-jsx": "9.8.0",
     "next": "^16.2.6",
-    "openai": "6.45.0",
     "pg": "^8.16.3",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
@@ -73,6 +71,7 @@
     "workflow": "4.2.4"
   },
   "devDependencies": {
+    "@linqapp/sdk": "0.28.0",
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4.3.0",
     "@types/pg": "8.20.0",
@@ -81,6 +80,7 @@
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.6",
     "linkedom": "0.18.12",
+    "openai": "6.45.0",
     "prisma": "^7.8.0",
     "tailwindcss": "^4.3.0"
   }

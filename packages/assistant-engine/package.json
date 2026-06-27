@@ -119,13 +119,13 @@
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "@murphai/vault-usecases": "workspace:*",
-    "openai": "6.45.0",
     "zod": "^4.4.3"
   },
   "engines": {
     "node": ">=24.14.1"
   },
   "devDependencies": {
-    "@openai/codex": "0.135.0"
+    "@openai/codex": "0.135.0",
+    "openai": "6.45.0"
   }
 }
