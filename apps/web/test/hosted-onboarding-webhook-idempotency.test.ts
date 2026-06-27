@@ -302,7 +302,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        idempotencyKey: "linq-invite-signup:member_123:2026-03-26:invite_123",
+        idempotencyKey: "linq-invite-signup:member_123:invite_123",
         message: buildHostedInviteReply({
           joinUrl: "https://join.example.test/join/code_first_contact",
         }),
@@ -369,7 +369,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        idempotencyKey: "linq-invite-signup:member_123:2026-03-26:invite_123",
+        idempotencyKey: "linq-invite-signup:member_123:invite_123",
         message: buildHostedInviteReply({
           joinUrl: "https://join.example.test/join/code_first_contact",
         }),
@@ -379,7 +379,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        idempotencyKey: "linq-invite-signup:member_123:2026-03-26:invite_123",
+        idempotencyKey: "linq-invite-signup:member_123:invite_123",
         message: buildHostedInviteReply({
           joinUrl: "https://join.example.test/join/code_first_contact",
         }),

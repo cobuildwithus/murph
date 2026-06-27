@@ -76,7 +76,7 @@ describe("hosted Linq webhook transport", () => {
     vi.mocked(sendHostedLinqChatMessage).mockResolvedValue(undefined);
   });
 
-  it("keys signup-link side effects by member, UTC day, and invite", () => {
+  it("keys signup-link side effects by member and invite", () => {
     const firstEffect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       inviteId: "invite-1",
@@ -108,9 +108,9 @@ describe("hosted Linq webhook transport", () => {
       template: "invite_signup",
     });
 
-    expect(firstEffect.effectId).toBe("linq-invite-signup:member-1:2026-03-26:invite-1");
+    expect(firstEffect.effectId).toBe("linq-invite-signup:member-1:invite-1");
     expect(sameDayEffect.effectId).toBe(firstEffect.effectId);
-    expect(nextDayEffect.effectId).toBe("linq-invite-signup:member-1:2026-03-27:invite-1");
+    expect(nextDayEffect.effectId).toBe(firstEffect.effectId);
   });
 
   it("uses the stored redirect phone fallback when current routing is unavailable", async () => {

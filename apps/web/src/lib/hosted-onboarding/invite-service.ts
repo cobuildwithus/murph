@@ -320,7 +320,7 @@ export async function issueHostedInviteTx(input: {
       },
       data: {
         channel: input.channel,
-        ...(requestedInviteEventId && !existingInviteEventId && !existingInvite.sentAt
+        ...(requestedInviteEventId && existingInviteEventId !== requestedInviteEventId && !existingInvite.sentAt
           ? {
               linqFirstContactEventId: requestedInviteEventId,
             }

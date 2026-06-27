@@ -2626,7 +2626,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("reuses an in-flight first-contact invite without rebinding its event proof", async () => {
+  it("reuses an in-flight first-contact invite and rebinds its event proof", async () => {
     mocks.readHostedLinqDailyState.mockResolvedValueOnce(null);
     const inFlightInvite = {
       channel: "linq",
@@ -2657,6 +2657,9 @@ https://join.example.test/join/code_first_text`);
         ),
         findUnique: vi.fn().mockResolvedValue(inFlightInvite),
         update: vi.fn(async ({ data, where }: { data: Record<string, unknown>; where: Record<string, unknown> }) => {
+          if (where.id === inFlightInvite.id && typeof data.linqFirstContactEventId === "string") {
+            inFlightInvite.linqFirstContactEventId = data.linqFirstContactEventId;
+          }
           if (where.id === inFlightInvite.id && data.sentAt instanceof Date) {
             inFlightInvite.sentAt = data.sentAt;
           }
@@ -2694,22 +2697,16 @@ https://join.example.test/join/code_first_text`);
     });
 
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedInvite.update).not.toHaveBeenCalledWith({
-      where: {
-        id: inFlightInvite.id,
-      },
-      data: expect.objectContaining({
-        linqFirstContactEventId: "evt_in_flight_event_b",
-      }),
-    });
     expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith({
       where: {
         id: inFlightInvite.id,
       },
       data: {
         channel: "linq",
+        linqFirstContactEventId: "evt_in_flight_event_b",
       },
     });
+    expect(inFlightInvite.linqFirstContactEventId).toBe("evt_in_flight_event_b");
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
   });
 
