@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import type { Cli } from 'incur'
 
 import { installSqliteExperimentalWarningFilterWithOptions } from '@murphai/runtime-state/node/sqlite-warning-filter'
+import { resolveEffectiveTopLevelToken } from '@murphai/operator-config/command-helpers'
 import { formatStructuredErrorMessage } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -381,18 +382,13 @@ function isMcpServerInvocation(argv: readonly string[]): boolean {
 // discovery surface so the same hide list that filters --llms / --help / MCP
 // also keeps generated skills from advertising commands without a paired
 // Incur-discoverable payload-schema. The `skill` alias (incur exposes both)
-// routes through the same path.
+// routes through the same path. Defers root-token parsing to
+// resolveEffectiveTopLevelToken so leading value-taking flags such as
+// `--format json` or `--config <file>` do not hide the `skills` token from
+// detection.
 function isSkillsSyncInvocation(argv: readonly string[]): boolean {
-  for (const token of argv) {
-    if (token === '--') {
-      return false
-    }
-    if (token === '--' || token.startsWith('-')) {
-      continue
-    }
-    return token === 'skills' || token === 'skill'
-  }
-  return false
+  const token = resolveEffectiveTopLevelToken(argv)
+  return token === 'skills' || token === 'skill'
 }
 
 async function hasInstalledIncurSkillsForCli(commandName: string): Promise<boolean> {

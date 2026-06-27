@@ -177,6 +177,44 @@ test('capture import-json is excluded from the vault-cli --llms manifest because
   assert.equal(vaultCliLlmsHiddenCommandNames.has('capture import-json'), true)
 })
 
+test('resolveEffectiveTopLevelToken-based skills detection treats argv variants with leading value-taking root flags as skills-sync invocations', async () => {
+  const { resolveEffectiveTopLevelToken } = await import(
+    '@murphai/operator-config/command-helpers'
+  )
+
+  const skillsArgvVariants = [
+    ['skills', 'list'],
+    ['skills', 'add'],
+    ['skill', 'list'],
+    ['--format', 'json', 'skills', 'list'],
+    ['--format=json', 'skills', 'list'],
+    ['--config', '/tmp/cfg.json', 'skills', 'list'],
+    ['--no-config', 'skills', 'list'],
+  ]
+  for (const argv of skillsArgvVariants) {
+    const token = resolveEffectiveTopLevelToken(argv)
+    assert.equal(
+      token === 'skills' || token === 'skill',
+      true,
+      `argv ${JSON.stringify(argv)} should resolve to skills/skill root token`,
+    )
+  }
+
+  const nonSkillsArgv = [
+    ['capture', 'add'],
+    ['--mcp'],
+    ['--format', 'json', 'capture', 'list'],
+  ]
+  for (const argv of nonSkillsArgv) {
+    const token = resolveEffectiveTopLevelToken(argv)
+    assert.equal(
+      token !== 'skills' && token !== 'skill',
+      true,
+      `argv ${JSON.stringify(argv)} should not be classified as skills-sync`,
+    )
+  }
+})
+
 test('createVaultCliWithOptions honors excludeAgentLeafPaths so MCP and skills-sync invocations never register capture import-json', async () => {
   const { Cli } = await import('incur')
   const { createVaultCliWithOptions } = await import('../src/vault-cli.js')
