@@ -69,6 +69,19 @@ describe('image-reference-resolver', () => {
     }
   })
 
+  it('rejects vault refs outside the user-attached raw inbox prefix', () => {
+    for (const ref of [
+      'bank/private/passport.png',
+      'derived/inbox/processed.png',
+      'journal/photos/private.png',
+      'raw/other/photo.png',
+    ]) {
+      expect(() => normalizeGenerateImageReferenceRef(ref)).toThrow(
+        /user-attached inbox artifacts/u,
+      )
+    }
+  })
+
   it('resolves supported vault image references with neutral filenames and hashes', async () => {
     await withTempVault(async (vaultRoot) => {
       await writeVaultFile(vaultRoot, 'raw/inbox/front.png', PNG_BYTES)

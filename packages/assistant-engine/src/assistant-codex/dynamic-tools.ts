@@ -196,7 +196,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
         maxItems: 4,
         default: [],
         description:
-          'Optional ordered vault-relative JPG, PNG, or WebP image refs to use as visual references. Use only refs already visible in the current context or explicitly found in the vault. Describe in the prompt how image 1, image 2, etc. should be used.',
+          'Optional ordered vault-relative JPG, PNG, or WebP image refs to use as visual references. Refs MUST point at user-attached inbox artifacts (paths starting with raw/inbox/); other vault paths are rejected. Describe in the prompt how image 1, image 2, etc. should be used.',
         items: {
           type: 'string',
           minLength: 1,
