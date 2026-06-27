@@ -1404,9 +1404,16 @@ export async function executeMurphDynamicToolRequest(input: {
         return toolTextResult(false, 'image generation cannot be combined with a voice memo')
       }
 
-      const authorizedRefs = input.loadAuthorizedReferenceImageRefs
-        ? await input.loadAuthorizedReferenceImageRefs()
-        : null
+      // Only resolve the per-turn authority allowlist when the model is
+      // actually requesting reference images. A plain no-refs generate_image
+      // call must keep working even if the accepted-input journal is
+      // transiently unreadable; gating the loader keeps the existing
+      // /v1/images/generations path independent of attachment-runtime state.
+      const requestedRefs = input.request.args.referenceImageRefs ?? []
+      const authorizedRefs =
+        requestedRefs.length > 0 && input.loadAuthorizedReferenceImageRefs
+          ? await input.loadAuthorizedReferenceImageRefs()
+          : null
       const result = await executeGenerateImageTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
