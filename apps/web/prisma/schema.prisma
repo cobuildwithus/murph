@@ -846,6 +846,14 @@ model HostedLinqFirstContactAdmissionDecision {
   @@map("hosted_linq_first_contact_admission_decision")
 }
 
+model HostedLinqProcessedEvent {
+  eventId   String   @id @map("event_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("hosted_linq_processed_event")
+}
+
 model HostedLinqFirstContactAdmissionBudget {
   participantContactLookupKey String   @map("participant_contact_lookup_key")
   eventId                     String   @map("event_id")

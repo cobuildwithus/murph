@@ -1,6 +1,6 @@
-import type {
+import {
   Prisma,
-  PrismaClient,
+  type PrismaClient,
 } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
@@ -119,6 +119,21 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     }
 
     const prisma = input.prisma ?? getPrisma();
+
+    const duplicateResponse = await admitHostedLinqWebhookEventOnce({
+      eventId: event.event_id,
+      prisma,
+    });
+    if (duplicateResponse) {
+      responseReason = duplicateResponse.reason ?? null;
+      finishHostedOnboardingTiming(timing, "completed", {
+        eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+        eventType,
+        responseReason,
+        signalAbortedBeforeReturn: input.signal?.aborted ?? false,
+      });
+      return duplicateResponse;
+    }
     const planTiming = startHostedOnboardingTiming(
       "hosted-onboarding.webhook.linq.plan",
       {
@@ -508,4 +523,32 @@ async function runHostedOnboardingWebhookTransaction<TResult>(
   return typeof prisma.$transaction === "function"
     ? prisma.$transaction(callback)
     : callback(prisma as Prisma.TransactionClient);
+}
+
+// Admit each Linq webhook event_id exactly once. A retry with the same
+// event_id collides on the PK and returns a duplicate-event no-op response;
+// the original delivery proceeds to side effects, which carry their own
+// dedupe (mailbox keys, invite uniqueness, member upserts).
+async function admitHostedLinqWebhookEventOnce(input: {
+  eventId: string;
+  prisma: PrismaClient;
+}): Promise<HostedOnboardingLinqWebhookResponse | null> {
+  try {
+    await input.prisma.hostedLinqProcessedEvent.create({
+      data: { eventId: input.eventId },
+    });
+    return null;
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError
+      && error.code === "P2002"
+    ) {
+      return {
+        ignored: true,
+        ok: true,
+        reason: "duplicate-event",
+      };
+    }
+    throw error;
+  }
 }

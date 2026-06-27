@@ -481,6 +481,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260626000000_linq_first_contact_admission_decision",
       "2026062600_computer_handoff_return_contact_kind",
       "20260626010000_linq_first_contact_admission_budget",
+      "20260627150000_linq_processed_event",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');

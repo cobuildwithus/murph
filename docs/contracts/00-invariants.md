@@ -22,6 +22,12 @@
 - If two paths intentionally overlap — retry, replay, push+pull ingestion, warm/cold runtime restart, provider webhook reorder, outbox resend, media normalization, or migration re-entry — the shared identity must make overlap safe by construction.
 - A new write path is not complete until it names the stable identity it uses for idempotency, explains which mutable fields are excluded, and has a regression proving retry/replay/cold-start overlap does not duplicate or lose the user-visible fact.
 
+## Minimal Mechanism Bias
+
+- For "do this exactly once," start with a stable identity, a uniqueness constraint, and an idempotent write the losing caller can no-op on. Reach for processing-state columns, leases, owner tokens, or fences only when a concrete downstream failure cannot be expressed as a uniqueness or dedupe key at the layer where it actually lives.
+- Trust idempotency at the side-effect layer first. If each write, send, or row a path produces is individually retry-safe via its own unique key or upsert, a top-level processing fence usually adds failure modes (stuck leases, owner mismatch on redeploy, replay-vs-reclaim races) without removing any.
+- Treat fix-loop length as a design signal. When a single protocol picks up double-digit "fix: preserve/scope/fence/reclaim" commits chasing edge cases, the abstraction is wrong; fall back to the smallest primitive the proven failure requires. PR 320 is the named anti-pattern.
+
 ## Ordered Progress And Causal Anchors
 
 - Any persisted cursor, mailbox sequence, pending-input index, consume ack, wake gate, receipt watermark, or paginated read must use a total, transitive, owner-shared ordering primitive. Do not duplicate timestamp comparators, pick timestamp fields pairwise, or rely on ordering that can make persisted records unreachable or repeated.

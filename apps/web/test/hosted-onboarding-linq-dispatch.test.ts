@@ -430,6 +430,7 @@ type PrismaFixtureBase = {
   hostedLinqDailyState?: HostedLinqDailyStateFixture;
   hostedLinqFirstContactAdmissionBudget?: HostedLinqFirstContactAdmissionBudgetFixture;
   hostedLinqFirstContactAdmissionDecision?: HostedLinqFirstContactAdmissionDecisionFixture;
+  hostedLinqProcessedEvent?: { create?: MockedFunction };
   hostedMember?: HostedMemberFixture;
   hostedMemberEmailAuthorization?: HostedMemberEmailAuthorizationFixture;
   hostedMemberIdentity?: HostedMemberIdentityFixture;
@@ -2587,6 +2588,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         count: vi.fn().mockResolvedValue(0),
         create: vi.fn(),
         findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedLinqProcessedEvent: {
+        create: vi.fn().mockResolvedValue(undefined),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
@@ -5364,6 +5368,15 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
         count: vi.fn().mockResolvedValue(0),
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
         findFirst: vi.fn().mockResolvedValue(null),
+      },
+    });
+  }
+
+  if (!prisma.hostedLinqProcessedEvent?.create) {
+    Object.defineProperty(prisma, "hostedLinqProcessedEvent", {
+      configurable: true,
+      value: {
+        create: vi.fn().mockResolvedValue(undefined),
       },
     });
   }

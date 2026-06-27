@@ -1,4 +1,4 @@
-import { HostedBillingStatus } from "@prisma/client";
+import { HostedBillingStatus, Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -583,6 +583,38 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
+
+  it("no-ops on a duplicate Linq webhook event_id without invoking any side effects", async () => {
+    const prisma = createPrismaStub();
+    prisma.hostedLinqProcessedEvent.create.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("duplicate", {
+        clientVersion: "test",
+        code: "P2002",
+      }),
+    );
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        rawBody: buildLinqMessageWebhookBody(),
+        signature: null,
+        timestamp: null,
+      }),
+    ).resolves.toStrictEqual({
+      ignored: true,
+      ok: true,
+      reason: "duplicate-event",
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+    expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
 });
 
 function buildLinqMessageWebhookBody(input: {
@@ -639,6 +671,9 @@ function createPrismaStub() {
         inviteCode: "code_first_contact",
       }),
       update: vi.fn().mockResolvedValue(undefined),
+    },
+    hostedLinqProcessedEvent: {
+      create: vi.fn().mockResolvedValue(undefined),
     },
     hostedThreadRoute: {
       findMany: vi.fn().mockResolvedValue([]),
