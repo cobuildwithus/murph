@@ -1,6 +1,14 @@
 import type { AssistantAcceptedTurnInputItemInput } from '../assistant/active-turn-input-journal.js'
+import type {
+  AssistantInputAttachmentEvidenceItem,
+} from '../assistant/automation.js'
 import { readAssistantInputEvent } from '../assistant/input-store.js'
+import { getRoutingImageEligibility } from '../inbox-routing-vision.js'
 
+// generate_image edits ship JPEG/PNG/WebP bytes. GIF is reachable through the
+// shared routing-vision eligibility surface but is not a supported OpenAI
+// images.edits input format, so we narrow the eligibility result to the three
+// formats the resolver actually sends.
 const AUTHORIZED_REFERENCE_IMAGE_MEDIA_TYPES = new Set([
   'image/jpeg',
   'image/png',
@@ -49,20 +57,45 @@ export async function collectAuthorizedTurnAttachmentImageRefs(input: {
       continue
     }
     for (const attachment of event.attachmentEvidence?.attachments ?? []) {
-      const rawPath = attachment.raw?.path
-      if (!rawPath) {
+      const authorized = authorizeReferenceImageEvidence(attachment)
+      if (!authorized) {
         continue
       }
-      const mime = attachment.mime ?? null
-      if (!mime || !AUTHORIZED_REFERENCE_IMAGE_MEDIA_TYPES.has(mime)) {
-        continue
-      }
-      const sha256 = attachment.raw?.sha256 ?? null
-      if (!sha256) {
-        continue
-      }
-      refs.set(rawPath, { sha256 })
+      refs.set(authorized.rawPath, { sha256: authorized.sha256 })
     }
   }
   return refs
+}
+
+// Pure projection: takes one attachment evidence row and returns the (path,
+// sha256) authority tuple iff the attachment is a JPEG/PNG/WebP image-edits
+// candidate the upstream pipeline would already route through the vision lane.
+// Exported so the eligibility surface stays unit-testable without the input
+// store round-trip.
+export function authorizeReferenceImageEvidence(
+  attachment: AssistantInputAttachmentEvidenceItem,
+): { rawPath: string; sha256: string } | null {
+  const rawPath = attachment.raw?.path
+  if (!rawPath) {
+    return null
+  }
+  const eligibility = getRoutingImageEligibility({
+    fileName: attachment.fileName,
+    kind: attachment.kind,
+    mediaType: attachment.raw?.mediaType ?? null,
+    mime: attachment.mime,
+    storedPath: rawPath,
+  })
+  if (
+    !eligibility.eligible ||
+    !eligibility.mediaType ||
+    !AUTHORIZED_REFERENCE_IMAGE_MEDIA_TYPES.has(eligibility.mediaType)
+  ) {
+    return null
+  }
+  const sha256 = attachment.raw?.sha256 ?? null
+  if (!sha256) {
+    return null
+  }
+  return { rawPath, sha256 }
 }
