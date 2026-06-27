@@ -112,6 +112,7 @@ import {
 } from './assistant-codex/images.js'
 import type {
   AssistantHostedGeneratedImageUploader,
+  AssistantWorkspaceArtifactMaterializer,
 } from './assistant/execution-context.js'
 import type {
   AssistantHostedToolContext,
@@ -432,6 +433,7 @@ export interface CodexAppServerTurnInput {
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   oss?: boolean
   profile?: string | null
@@ -448,6 +450,7 @@ export interface CodexAppServerTurnInput {
   providerRequestOrdinal?: number | null
   publicInternetFetch?: typeof fetch | null
   requireHostedGeneratedImageUploader?: boolean | null
+  vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
   workingDirectory: string
 }
@@ -613,6 +616,7 @@ export async function executeCodexAppServerTurn(
     env: childEnv,
     fetchImpl: input.fetchImpl ?? fetch,
     hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     imagePaths,
     launchKey,
     publicInternetFetch: input.publicInternetFetch ?? null,
@@ -3161,6 +3165,7 @@ async function runCodexAppServerTurnOnProcess(
       fetchImpl: input.fetchImpl,
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
       hostedToolContext: resolveCodexAppServerHostedToolContext(input),
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
       currentResponseMedia: responseMedia,
       nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
       productFeedbackRecorder: input.productFeedbackRecorder ?? null,
@@ -3172,6 +3177,7 @@ async function runCodexAppServerTurnOnProcess(
       request: dynamicToolRequest,
       requireHostedGeneratedImageUploader:
         input.requireHostedGeneratedImageUploader ?? false,
+      vaultRoot: input.vaultRoot ?? null,
       voiceMemoRuntime:
         dynamicToolRequest.kind === 'generate-voice-memo' ||
         dynamicToolRequest.kind === 'generate-song'

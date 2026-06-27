@@ -460,6 +460,8 @@ async function executeAssistantCodexAttempt(input: {
         generatedImageUploader:
           executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
         hostedToolContext: executionPlan.hostedToolContext ?? null,
+        materializeWorkspaceArtifacts:
+          executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
         onCodexThreadHistoryUnsafe:
           executionPlan.onCodexThreadHistoryUnsafe ?? null,
         onEvent: executionPlan.input.onProviderEvent ?? undefined,
@@ -499,6 +501,7 @@ async function executeAssistantCodexAttempt(input: {
         systemPrompt: attemptPlan.routePlan.systemPrompt,
         turnContextPrompt: attemptPlan.routePlan.turnContextPrompt,
         usageAttribution,
+        vaultRoot: executionPlan.input.vault,
         userMessageContent: resolveCodexRouteUserMessageContent({
           route: attemptPlan.route,
           userMessageContent: executionPlan.input.userMessageContent,

@@ -15,6 +15,12 @@ export type OpenAiImageOutputFormat = 'jpeg' | 'png' | 'webp'
 export type OpenAiImageQuality = 'high' | 'low' | 'medium'
 export type OpenAiImageSize = '1024x1024' | '1024x1536' | '1536x1024'
 
+export interface OpenAiImageReferenceInput {
+  bytes: Uint8Array
+  filename: string
+  mediaType: 'image/jpeg' | 'image/png' | 'image/webp'
+}
+
 export interface OpenAiImageGenerationUsage {
   input_tokens?: number
   input_tokens_details?: {
@@ -45,6 +51,25 @@ export async function generateOpenAiImage(input: {
   outputFormat: OpenAiImageOutputFormat
   prompt: string
   quality: OpenAiImageQuality
+  referenceImages?: readonly OpenAiImageReferenceInput[]
+  size: OpenAiImageSize
+}): Promise<OpenAiImageGenerationResult> {
+  const referenceImages = input.referenceImages ?? []
+  return referenceImages.length === 0
+    ? await generateOpenAiImageFromPrompt(input)
+    : await editOpenAiImageWithReferences({
+        ...input,
+        referenceImages,
+      })
+}
+
+async function generateOpenAiImageFromPrompt(input: {
+  abortSignal?: AbortSignal | null
+  apiKey: string
+  fetchImpl: typeof fetch
+  outputFormat: OpenAiImageOutputFormat
+  prompt: string
+  quality: OpenAiImageQuality
   size: OpenAiImageSize
 }): Promise<OpenAiImageGenerationResult> {
   const response = await input.fetchImpl(`${OPENAI_IMAGES_BASE_URL}/images/generations`, {
@@ -60,13 +85,61 @@ export async function generateOpenAiImage(input: {
       'content-type': 'application/json',
     },
     method: 'POST',
-    signal: input.abortSignal
-      ? AbortSignal.any([
-          input.abortSignal,
-          AbortSignal.timeout(OPENAI_IMAGE_GENERATION_TIMEOUT_MS),
-        ])
-      : AbortSignal.timeout(OPENAI_IMAGE_GENERATION_TIMEOUT_MS),
+    signal: buildOpenAiImageAbortSignal(input.abortSignal ?? null),
   })
+
+  return await readOpenAiImageGenerationResult(response)
+}
+
+async function editOpenAiImageWithReferences(input: {
+  abortSignal?: AbortSignal | null
+  apiKey: string
+  fetchImpl: typeof fetch
+  outputFormat: OpenAiImageOutputFormat
+  prompt: string
+  quality: OpenAiImageQuality
+  referenceImages: readonly OpenAiImageReferenceInput[]
+  size: OpenAiImageSize
+}): Promise<OpenAiImageGenerationResult> {
+  const form = new FormData()
+  form.set('model', OPENAI_IMAGE_GENERATION_MODEL)
+  form.set('prompt', input.prompt)
+  form.set('quality', input.quality)
+  form.set('size', input.size)
+  form.set('output_format', input.outputFormat)
+
+  for (const reference of input.referenceImages) {
+    form.append(
+      'image[]',
+      new Blob([Buffer.from(reference.bytes)], { type: reference.mediaType }),
+      reference.filename,
+    )
+  }
+
+  const response = await input.fetchImpl(`${OPENAI_IMAGES_BASE_URL}/images/edits`, {
+    body: form,
+    headers: {
+      authorization: `Bearer ${input.apiKey}`,
+    },
+    method: 'POST',
+    signal: buildOpenAiImageAbortSignal(input.abortSignal ?? null),
+  })
+
+  return await readOpenAiImageGenerationResult(response)
+}
+
+function buildOpenAiImageAbortSignal(abortSignal: AbortSignal | null): AbortSignal {
+  return abortSignal
+    ? AbortSignal.any([
+        abortSignal,
+        AbortSignal.timeout(OPENAI_IMAGE_GENERATION_TIMEOUT_MS),
+      ])
+    : AbortSignal.timeout(OPENAI_IMAGE_GENERATION_TIMEOUT_MS)
+}
+
+async function readOpenAiImageGenerationResult(
+  response: Response,
+): Promise<OpenAiImageGenerationResult> {
   const providerRequestId =
     normalizeNullableString(response.headers.get('x-request-id')) ??
     normalizeNullableString(response.headers.get('openai-request-id')) ??

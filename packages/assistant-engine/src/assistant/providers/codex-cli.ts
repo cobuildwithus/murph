@@ -208,6 +208,7 @@ export async function executeCodexAssistantTurnAttempt(
     fetchImpl: input.providerFetch ?? undefined,
     hostedGeneratedImageUploader: input.generatedImageUploader ?? null,
     hostedToolContext: input.hostedToolContext ?? null,
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     model: providerConfig.target.model ?? undefined,
     modelProvider: providerConfig.target.modelProvider ?? undefined,
     onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe ?? null,
@@ -254,6 +255,7 @@ export async function executeCodexAssistantTurnAttempt(
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
     sandbox: providerConfig.policy.sandbox ?? undefined,
     serviceTier: input.serviceTier ?? null,
+    vaultRoot: input.vaultRoot ?? null,
     voiceMemoRuntime,
     workingDirectory: input.workingDirectory,
   } as const
