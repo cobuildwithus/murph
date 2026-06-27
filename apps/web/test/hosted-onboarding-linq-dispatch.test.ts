@@ -3433,8 +3433,8 @@ https://join.example.test/join/code_first_text`);
 
   it("admits unknown Linq first contacts when the classifier is unavailable", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
-    const rawProviderBodyMarker = "RAW_PROVIDER_BODY_SHOULD_NOT_LOG";
-    const invalidJsonCause = await new Response(`${rawProviderBodyMarker} user@example.com`, {
+    const rawProviderBodyMarker = "RAW_PROVIDER_SENTINEL_SHOULD_NOT_LOG";
+    const invalidJsonCause = await new Response(`{"k": bad ${rawProviderBodyMarker} user@example.com}`, {
       headers: {
         "content-type": "application/json",
       },
@@ -3546,7 +3546,7 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         admissionDisposition: "fail_open",
         errorCode: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
-        errorCauseMessage: "Unexpected token 'R', [redacted JSON body excerpt] is not valid JSON",
+        errorCauseMessage: "Unexpected token 'b', [redacted JSON body excerpt] is not valid JSON",
         errorCauseType: "SyntaxError",
         errorMessage: "Linq first-contact admission classifier is unavailable.",
         eventIdSuffix: "_retry",
@@ -3557,6 +3557,9 @@ https://join.example.test/join/code_first_text`);
     );
     const warnPayload = warnSpy.mock.calls[0]?.[1];
     expect(JSON.stringify(warnPayload)).not.toContain(rawProviderBodyMarker);
+    expect(JSON.stringify(warnPayload)).not.toContain("RAW_PROVIDER");
+    expect(JSON.stringify(warnPayload)).not.toContain("SENTINEL");
+    expect(JSON.stringify(warnPayload)).not.toContain("bad RAW_PR");
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();

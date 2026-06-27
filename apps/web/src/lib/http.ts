@@ -585,7 +585,7 @@ export function sanitizeJsonLogString(
     .replace(/\bwhsec_[A-Z0-9]+\b/giu, "<redacted-secret>")
     .replace(/\b(Unexpected token .+? in JSON at position \d+:\s*).+/giu, "$1[redacted]")
     .replace(
-      /\b(Unexpected token [^,]+,\s*)(?:"[^"]*"|'[^']*'|[^\s]+)(?:\.\.\.)?(\s+is not valid JSON)/giu,
+      /\b(Unexpected token [^,]+,\s*).+?(\s+is not valid JSON)/giu,
       "$1[redacted JSON body excerpt]$2",
     )
     .replace(/\bfile:\/\/\S+/giu, "<redacted-path>")
