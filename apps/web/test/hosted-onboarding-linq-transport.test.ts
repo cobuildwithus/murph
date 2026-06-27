@@ -44,7 +44,10 @@ import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
   releaseHostedAiUsageLimitNotice,
 } from "@/src/lib/hosted-execution/usage-allowance";
-import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  createHostedLinqChatLookupKey,
+  createHostedPhoneLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   buildHostedLinqConversationHomeRedirectReply,
   sendHostedLinqChatMessage,
@@ -339,6 +342,10 @@ describe("hosted Linq webhook transport", () => {
   });
 
   it("releases AI usage quota notice claims when the egress guard skips delivery", async () => {
+    const chatLookupKey = createHostedLinqChatLookupKey("chat-1");
+    if (!chatLookupKey) {
+      throw new Error("Expected test Linq chat lookup key.");
+    }
     const prisma = {
       hostedLinqDelivery: {
         findUnique: vi.fn().mockResolvedValue({
@@ -354,8 +361,26 @@ describe("hosted Linq webhook transport", () => {
         update: vi.fn().mockResolvedValue({ id: "hld_ai_usage_skip" }),
         upsert: vi.fn().mockResolvedValue({ id: "hld_ai_usage_skip" }),
       },
-      hostedMemberRouting: {
+      hostedLinqLine: {
+        upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) =>
+          Promise.resolve({
+            phoneNumberLookupKey: input.create.phoneNumberLookupKey,
+          })),
         findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
+          Promise.resolve({
+            phoneNumberLookupKey: input.where?.phoneNumberLookupKey ?? "hbidx:phone:updated",
+          })),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatLookupKey: chatLookupKey,
+          linqLastInboundAt: new Date("2026-02-01T12:00:00.000Z"),
+          linqRecipientPhoneLookupKey: null,
+          pendingLinqChatLookupKey: null,
+          pendingLinqLastInboundAt: null,
+          pendingLinqRecipientPhoneLookupKey: null,
+        }),
       },
     };
     const effect = createHostedWebhookLinqMessageSideEffect({
