@@ -3058,7 +3058,7 @@
                         },
                         "input": {
                           "type": "string",
-                          "description": "Structured capture payload in @file.json form or - for stdin."
+                          "description": "Structured capture payload in @file.json form or - for stdin. Run capture payload-schema --format json for the exact file-body contract."
                         },
                         "media": {
                           "description": "Media file paths for one capture. Repeat --media for multiple views of the same observation.",
@@ -3150,6 +3150,10 @@
                       }
                     }
                   }
+                },
+                "payload-schema": {
+                  "type": "object",
+                  "additionalProperties": false
                 },
                 "show": {
                   "type": "object",

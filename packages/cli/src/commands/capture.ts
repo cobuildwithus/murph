@@ -17,6 +17,7 @@ import {
 import {
   addCaptureRecord,
   captureImportManifestResultSchema,
+  captureImportPayloadSchema,
   captureLookupSchema,
   listCaptureRecords,
   showCaptureManifest,
@@ -30,6 +31,7 @@ import {
   registerFactoryCommand,
 } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
+import { registerPayloadSchemaCommand } from './payload-schema-command.js'
 
 export const captureCommandDescriptions = {
   root: 'Dated media-capture commands for photos, videos, and other lightweight evidence with simple tags and context.',
@@ -37,7 +39,11 @@ export const captureCommandDescriptions = {
   importJson:
     'Import one or more dated media captures from a structured JSON payload file or stdin.',
   addHint:
-    'Use --media for one capture with one or more files. Use capture import-json --input @captures.json for batches.',
+    'Use --media for one capture with one or more files. Use capture import-json --input @captures.json for batches; run capture payload-schema --format json for the exact file-body contract.',
+  importJsonHint:
+    '--input accepts @file.json or - for stdin. Run capture payload-schema --format json for the exact file-body contract.',
+  payloadSchema:
+    'Emit the exact JSON payload schema for capture import-json.',
   show: 'Show one capture by canonical event id or stable label.',
   list: 'List capture events with optional date, label, body-site, collection, and tag filters.',
   manifest: 'Show the immutable raw import manifest for one capture event id or stable label.',
@@ -192,16 +198,33 @@ export function registerCaptureCommands(
         },
       },
     ],
-    hint:
-      '--input accepts @file.json or - for stdin. The payload retains the full structured capture import surface, including batch capture metadata, media refs, raw refs, labels, body sites, collections, tags, and related ids.',
+    hint: captureCommandDescriptions.importJsonHint,
     options: withBaseOptions({
-      input: inputFileOptionSchema.describe('Structured capture payload in @file.json form or - for stdin.'),
+      input: inputFileOptionSchema.describe('Structured capture payload in @file.json form or - for stdin. Run capture payload-schema --format json for the exact file-body contract.'),
       ...captureAddOptionShape,
     }),
     output: captureAddResultSchema,
     async run({ options }) {
       return runCaptureAdd(options, normalizeInputFileOption(options.input))
     },
+  })
+
+  registerPayloadSchemaCommand(capture, {
+    command: 'capture import-json',
+    description: captureCommandDescriptions.payloadSchema,
+    schemaName: 'capture-import-payload',
+    schema: captureImportPayloadSchema,
+    examples: [
+      {
+        label: 'mole-left-forearm-1',
+        bodySite: 'Left forearm, dorsal side',
+        collection: 'skin-check-2026-04',
+        captures: [
+          { media: ['./left-forearm-1.jpg'], label: 'mole-left-forearm-1' },
+          { media: ['./right-forearm-1.jpg'], label: 'mole-right-forearm-1' },
+        ],
+      },
+    ],
   })
 
   capture.command('show', {

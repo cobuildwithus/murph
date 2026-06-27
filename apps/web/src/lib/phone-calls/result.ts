@@ -47,16 +47,18 @@ interface HostedPhoneCallWebhookTx {
         resultJson?: HostedPhoneCallResult;
         status: HostedPhoneCallStatus;
       };
-      where: {
-        analyzedAt?: null;
-        endedAt?: null;
-        id: string;
-        provider: "retell";
-        providerCallId?: string;
-        status?: { in: HostedPhoneCallStatus[] };
-      };
+      where: HostedPhoneCallWebhookUpdateWhere;
     }): Promise<{ count: number }>;
   };
+}
+
+interface HostedPhoneCallWebhookUpdateWhere {
+  analyzedAt?: null;
+  endedAt?: null | { not: null };
+  id: string;
+  provider: "retell";
+  providerCallId?: string;
+  status?: { in: HostedPhoneCallStatus[] };
 }
 
 interface HostedPhoneCallWebhookStore {
@@ -75,6 +77,14 @@ interface RetellWebhookCallTarget {
 const HOSTED_PHONE_CALL_RESULT_SUMMARY_MAX_LENGTH = 2_000;
 const HOSTED_PHONE_CALL_RESULT_FOLLOW_UP_MAX_LENGTH = 1_000;
 const HOSTED_PHONE_CALL_RESULT_TRUNCATION_MARKER = " [truncated]";
+const RETELL_CALL_ANALYZED_LIVE_STATUSES: HostedPhoneCallStatus[] = [
+  "starting",
+  "calling",
+  "ended",
+];
+const RETELL_CALL_ANALYZED_ENDED_FAILED_STATUSES: HostedPhoneCallStatus[] = [
+  "failed",
+];
 
 export async function handleRetellCallEnded(input: {
   call: RetellCallPayload;
@@ -126,6 +136,19 @@ export async function handleRetellCallAnalyzed(input: {
       return;
     }
 
+    if (target.call.analyzedAt && target.call.resultJson) {
+      await tx.appendResultNotification(target.call);
+      return;
+    }
+
+    const authorityWhere = readRetellCallAnalyzedAuthorityWhere({
+      call: target.call,
+      providerCallId: input.call.call_id,
+    });
+    if (!authorityWhere) {
+      return;
+    }
+
     const updated = await tx.hostedPhoneCall.updateMany({
       data: {
         ...target.providerCallIdData,
@@ -138,7 +161,7 @@ export async function handleRetellCallAnalyzed(input: {
         analyzedAt: null,
         id: target.call.id,
         provider: "retell",
-        ...(target.call.providerCallId ? { providerCallId: input.call.call_id } : {}),
+        ...authorityWhere,
       },
     });
 
@@ -148,7 +171,7 @@ export async function handleRetellCallAnalyzed(input: {
           id: target.call.id,
         },
       });
-      if (stored.resultJson) {
+      if (stored.analyzedAt && stored.resultJson) {
         await tx.appendResultNotification(stored);
       }
       return;
@@ -358,6 +381,39 @@ export function buildPhoneCallResultNotificationInstructions(input: {
   }
 
   return lines.join("\n\n");
+}
+
+function readRetellCallAnalyzedAuthorityWhere(input: {
+  call: HostedPhoneCall;
+  providerCallId: string;
+}): Pick<
+  HostedPhoneCallWebhookUpdateWhere,
+  "endedAt" | "providerCallId" | "status"
+> | null {
+  if (input.call.status === "failed") {
+    if (!input.call.endedAt || input.call.providerCallId !== input.providerCallId) {
+      return null;
+    }
+
+    return {
+      endedAt: { not: null },
+      providerCallId: input.providerCallId,
+      status: {
+        in: RETELL_CALL_ANALYZED_ENDED_FAILED_STATUSES,
+      },
+    };
+  }
+
+  if (!RETELL_CALL_ANALYZED_LIVE_STATUSES.includes(input.call.status)) {
+    return null;
+  }
+
+  return {
+    ...(input.call.providerCallId ? { providerCallId: input.providerCallId } : {}),
+    status: {
+      in: RETELL_CALL_ANALYZED_LIVE_STATUSES,
+    },
+  };
 }
 
 function mapPhoneCallStatus(outcome: HostedPhoneCallResult["outcome"]): HostedPhoneCallStatus {

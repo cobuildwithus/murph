@@ -723,8 +723,11 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['capture', 'import-json'],
         description: captureCommandDescriptions.importJson,
-        hint:
-          'JSON escape hatch for batch capture metadata, media/raw refs, labels, body sites, tags, and related ids.',
+        hint: captureCommandDescriptions.importJsonHint,
+      },
+      {
+        path: ['capture', 'payload-schema'],
+        description: captureCommandDescriptions.payloadSchema,
       },
       {
         path: ['capture', 'show'],

@@ -1,11 +1,29 @@
 import { isIP } from 'node:net'
 
 import type {
-  LinqCreateChatResponse,
-  LinqCreateWebhookSubscriptionResponse,
-  LinqListPhoneNumbersResponse,
-  LinqSendMessageResponse,
-} from '@murphai/messaging-ingress/linq-webhook'
+  AttachmentCreateParams,
+  AttachmentCreateResponse,
+  ChatCreateParams,
+  ChatCreateResponse,
+  ChatSendVoicememoParams,
+  ChatSendVoicememoResponse,
+  MediaPart,
+  MessageContent,
+  PhoneNumberListResponse,
+  SupportedContentType,
+  TextPart,
+  WebhookEventType,
+  WebhookSubscriptionCreateParams,
+  WebhookSubscriptionCreateResponse,
+} from '@linqapp/sdk/resources'
+import type {
+  MessageSendParams,
+  MessageSendResponse,
+} from '@linqapp/sdk/resources/chats'
+import type {
+  MessageAddReactionParams,
+  MessageAddReactionResponse,
+} from '@linqapp/sdk/resources/messages'
 import {
   createTimeoutAbortController,
   waitForRetryDelay,
@@ -23,7 +41,6 @@ import {
 import { normalizeAssistantResponseMediaUrl } from './assistant-cli-contracts.js'
 import {
   renderMarkdownMessageText,
-  type MessageTextDecoration,
 } from './message-formatting.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import {
@@ -41,6 +58,91 @@ const LINQ_CHAT_NOT_FOUND_CODES = new Set(['CHAT_NOT_FOUND', 'chat_not_found'])
 const LINQ_CHAT_NOT_FOUND_MESSAGES = new Set(['Chat not found'])
 const LINQ_MAX_MESSAGE_PARTS = 100
 const LINQ_MAX_MEDIA_PARTS = 40
+const LINQ_SUPPORTED_ATTACHMENT_CONTENT_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/heic',
+  'image/heif',
+  'image/tiff',
+  'image/bmp',
+  'image/svg+xml',
+  'image/webp',
+  'image/x-icon',
+  'video/mp4',
+  'video/quicktime',
+  'video/mpeg',
+  'video/mpeg2',
+  'video/x-m4v',
+  'video/x-msvideo',
+  'video/3gpp',
+  'audio/mpeg',
+  'audio/mp3',
+  'audio/x-m4a',
+  'audio/mp4',
+  'audio/x-caf',
+  'audio/x-wav',
+  'audio/x-aiff',
+  'audio/aiff',
+  'audio/aac',
+  'audio/midi',
+  'audio/amr',
+  'application/pdf',
+  'text/plain',
+  'text/markdown',
+  'text/vcard',
+  'text/rtf',
+  'text/csv',
+  'text/html',
+  'text/calendar',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/x-iwork-pages-sffpages',
+  'application/x-iwork-numbers-sffnumbers',
+  'application/x-iwork-keynote-sffkey',
+  'application/epub+zip',
+  'text/xml',
+  'application/json',
+  'application/zip',
+  'application/x-gzip',
+] as const satisfies readonly SupportedContentType[]
+const LINQ_SUPPORTED_ATTACHMENT_CONTENT_TYPE_SET: ReadonlySet<string> =
+  new Set(LINQ_SUPPORTED_ATTACHMENT_CONTENT_TYPES)
+const LINQ_WEBHOOK_EVENT_TYPES = [
+  'message.sent',
+  'message.received',
+  'message.read',
+  'message.delivered',
+  'message.failed',
+  'message.edited',
+  'reaction.added',
+  'reaction.removed',
+  'participant.added',
+  'participant.removed',
+  'chat.created',
+  'chat.group_name_updated',
+  'chat.group_icon_updated',
+  'chat.group_name_update_failed',
+  'chat.group_icon_update_failed',
+  'chat.typing_indicator.started',
+  'chat.typing_indicator.stopped',
+  'phone_number.status_updated',
+  'call.initiated',
+  'call.ringing',
+  'call.answered',
+  'call.ended',
+  'call.failed',
+  'call.declined',
+  'call.no_answer',
+  'location.sharing.started',
+  'location.sharing.stopped',
+] as const satisfies readonly WebhookEventType[]
+const LINQ_WEBHOOK_EVENT_TYPE_SET: ReadonlySet<string> =
+  new Set(LINQ_WEBHOOK_EVENT_TYPES)
 const LINQ_SAFE_RESPONSE_BODY_KEYS = new Set([
   'code',
   'detail',
@@ -69,6 +171,14 @@ type LinqOperation =
   | 'typing_stop'
 
 type LinqFailureKind = 'chat_not_found'
+
+type LinqJsonRequestBody =
+  | AttachmentCreateParams
+  | ChatCreateParams
+  | ChatSendVoicememoParams
+  | MessageAddReactionParams
+  | MessageSendParams
+  | WebhookSubscriptionCreateParams
 
 type LinqSafeRequestDetails = {
   failureStage?: 'configuration' | 'http' | 'transport'
@@ -193,7 +303,7 @@ export async function probeLinqApi(
   } = {},
 ): Promise<ProbeLinqApiResult> {
   const env = dependencies.env ?? process.env
-  const response = await requestLinqJson<LinqListPhoneNumbersResponse>({
+  const response = await requestLinqJson<PhoneNumberListResponse>({
     details: {
       operation: 'list_phone_numbers',
       provider: 'linq',
@@ -240,13 +350,19 @@ export async function sendLinqChatMessage(
     fetchImplementation?: LinqFetch
     signal?: AbortSignal
   } = {},
-): Promise<LinqSendMessageResponse> {
+): Promise<MessageSendResponse> {
   const chatId = normalizeRequiredString(input.chatId, 'chat id')
   const message = normalizeRequiredString(input.message, 'message')
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
   const replyToMessageId = normalizeNullableString(input.replyToMessageId)
+  const body = buildLinqMessageBody({
+    idempotencyKey: input.idempotencyKey,
+    media: input.media ?? [],
+    message,
+    replyToMessageId,
+  })
 
-  return requestLinqJson<LinqSendMessageResponse>({
+  return requestLinqJson<MessageSendResponse>({
     details: {
       hasIdempotencyKey: idempotencyKey !== null,
       hasReplyToMessageId: replyToMessageId !== null,
@@ -257,12 +373,7 @@ export async function sendLinqChatMessage(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: `/chats/${encodeURIComponent(chatId)}/messages`,
-    body: buildLinqMessageBody({
-      idempotencyKey: input.idempotencyKey,
-      media: input.media ?? [],
-      message,
-      replyToMessageId,
-    }),
+    body,
     signal: dependencies.signal,
   })
 }
@@ -282,7 +393,12 @@ export async function createLinqAttachmentUpload(
   const contentType = normalizeRequiredString(input.contentType, 'attachment content type')
   const filename = normalizeRequiredString(input.filename, 'attachment filename')
   const sizeBytes = normalizeLinqAttachmentSizeBytes(input.sizeBytes)
-  const response = await requestLinqJson<unknown>({
+  const body: AttachmentCreateParams = {
+    content_type: normalizeLinqSupportedContentType(contentType),
+    filename,
+    size_bytes: sizeBytes,
+  }
+  const response = await requestLinqJson<AttachmentCreateResponse>({
     allowRateLimitRetries: false,
     details: {
       operation: 'create_attachment_upload',
@@ -294,11 +410,7 @@ export async function createLinqAttachmentUpload(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: '/attachments',
-    body: {
-      content_type: contentType,
-      filename,
-      size_bytes: sizeBytes,
-    },
+    body,
     signal: dependencies.signal,
   })
 
@@ -401,7 +513,10 @@ export async function sendLinqVoiceMemo(
 ): Promise<SendLinqVoiceMemoResult> {
   const chatId = normalizeRequiredString(input.chatId, 'chat id')
   const attachmentId = normalizeRequiredString(input.attachmentId, 'attachment id')
-  const response = await requestLinqJson<unknown>({
+  const body: ChatSendVoicememoParams = {
+    attachment_id: attachmentId,
+  }
+  const response = await requestLinqJson<ChatSendVoicememoResponse>({
     details: {
       hasIdempotencyKey: false,
       operation: 'send_voice_memo',
@@ -411,9 +526,7 @@ export async function sendLinqVoiceMemo(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: `/chats/${encodeURIComponent(chatId)}/voicememo`,
-    body: {
-      attachment_id: attachmentId,
-    },
+    body,
     signal: dependencies.signal,
   })
 
@@ -473,8 +586,12 @@ export async function setLinqMessageReaction(
     input.targetMessageId,
     'message id',
   )
+  const body: MessageAddReactionParams = {
+    operation: 'add',
+    type: resolveLinqReactionType(input.reaction),
+  }
 
-  await requestLinqJson<unknown>({
+  await requestLinqJson<MessageAddReactionResponse>({
     details: {
       hasIdempotencyKey: false,
       operation: 'set_message_reaction',
@@ -484,10 +601,7 @@ export async function setLinqMessageReaction(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: `/messages/${encodeURIComponent(targetMessageId)}/reactions`,
-    body: {
-      operation: 'add',
-      type: resolveLinqReactionType(input.reaction),
-    },
+    body,
     signal: dependencies.signal,
   })
 
@@ -589,7 +703,16 @@ export async function createLinqChat(
   const from = normalizeRequiredString(input.from, 'from')
   const recipients = normalizeLinqStringList(input.to, 'recipient')
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
-  const response = await requestLinqJson<LinqCreateChatResponse>({
+  const body: ChatCreateParams = {
+    from,
+    message: buildLinqMessageBody({
+      idempotencyKey: input.idempotencyKey,
+      media: input.media ?? [],
+      message: input.message,
+    }).message,
+    to: recipients,
+  }
+  const response = await requestLinqJson<ChatCreateResponse>({
     details: {
       hasIdempotencyKey: idempotencyKey !== null,
       operation: 'create_chat',
@@ -600,15 +723,7 @@ export async function createLinqChat(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: '/chats',
-    body: {
-      from,
-      message: buildLinqMessageBody({
-        idempotencyKey: input.idempotencyKey,
-        media: input.media ?? [],
-        message: input.message,
-      }).message,
-      to: recipients,
-    },
+    body,
     signal: dependencies.signal,
   })
 
@@ -633,8 +748,17 @@ export async function createLinqWebhookSubscription(
   const phoneNumbers = input.phoneNumbers && input.phoneNumbers.length > 0
     ? normalizeLinqStringList(input.phoneNumbers, 'phone number')
     : null
-  const subscribedEvents = normalizeLinqStringList(input.subscribedEvents, 'subscribed event')
-  const response = await requestLinqJson<LinqCreateWebhookSubscriptionResponse>({
+  const subscribedEvents = normalizeLinqWebhookEventTypeList(input.subscribedEvents)
+  const body: WebhookSubscriptionCreateParams = {
+    ...(phoneNumbers
+      ? {
+          phone_numbers: phoneNumbers,
+        }
+      : {}),
+    subscribed_events: subscribedEvents,
+    target_url: normalizeRequiredString(input.targetUrl, 'target url'),
+  }
+  const response = await requestLinqJson<WebhookSubscriptionCreateResponse>({
     details: {
       operation: 'create_webhook_subscription',
       phoneNumberCount: phoneNumbers?.length ?? 0,
@@ -645,15 +769,7 @@ export async function createLinqWebhookSubscription(
     fetchImplementation: dependencies.fetchImplementation,
     method: 'POST',
     path: '/webhook-subscriptions',
-    body: {
-      ...(phoneNumbers
-        ? {
-            phone_numbers: phoneNumbers,
-          }
-        : {}),
-      subscribed_events: subscribedEvents,
-      target_url: normalizeRequiredString(input.targetUrl, 'target url'),
-    },
+    body,
     signal: dependencies.signal,
   })
 
@@ -676,7 +792,7 @@ async function requestLinqJson<T>(input: {
   fetchImplementation?: LinqFetch
   method: LinqHttpMethod
   path: string
-  body?: Record<string, unknown>
+  body?: LinqJsonRequestBody
   signal?: AbortSignal
 }): Promise<T> {
   return requestLinq<T>({
@@ -711,7 +827,7 @@ async function requestLinq<T>(input: {
   fetchImplementation?: LinqFetch
   method: LinqHttpMethod
   path: string
-  body?: Record<string, unknown>
+  body?: LinqJsonRequestBody
   parseResponse(response: LinqFetchResponse): Promise<T>
   signal?: AbortSignal
 }): Promise<T> {
@@ -759,7 +875,7 @@ function resolveLinqRequest(input: {
   env: NodeJS.ProcessEnv
   fetchImplementation?: LinqFetch
   path: string
-  body?: Record<string, unknown>
+  body?: LinqJsonRequestBody
 }): {
   body?: string
   fetchImplementation: LinqFetch
@@ -887,14 +1003,19 @@ async function createLinqHttpError(
 }
 
 function buildLinqRequestBodyDiagnostics(
-  body: Record<string, unknown> | undefined,
+  body: LinqJsonRequestBody | undefined,
   serializedBody: string | undefined,
 ): Partial<LinqSafeRequestDetails> {
   if (!body || !serializedBody) {
     return {}
   }
 
-  const message = readRecord(body.message)
+  const record = readRecord(body)
+  if (!record) {
+    return {}
+  }
+
+  const message = readRecord(record.message)
   const parts = Array.isArray(message?.parts) ? message.parts : []
   const requestMessageLength = parts.reduce((total, part) => {
     const record = readRecord(part)
@@ -902,7 +1023,7 @@ function buildLinqRequestBodyDiagnostics(
   }, 0)
 
   return {
-    requestBodyShape: summarizeLinqJsonObjectShape(body),
+    requestBodyShape: summarizeLinqJsonObjectShape(record),
     requestMessageLength,
     requestMessagePartCount: parts.length,
   }
@@ -958,7 +1079,7 @@ function buildLinqErrorResponseDiagnostics(
 
 function resolveLinqReactionType(
   reaction: AssistantMessageReaction,
-): 'laugh' | 'like' | 'love' {
+): MessageAddReactionParams['type'] {
   switch (reaction) {
     case 'heart':
       return 'love'
@@ -1090,7 +1211,7 @@ function shouldRetryLinqHttpStatus(
 }
 
 function parseLinqAttachmentUploadResponse(
-  value: unknown,
+  value: AttachmentCreateResponse,
 ): CreateLinqAttachmentUploadResult {
   const record = readRecord(value)
   const attachmentId = normalizeNullableString(readStringField(record, 'attachment_id'))
@@ -1191,7 +1312,7 @@ function isPublicLinqAttachmentUploadHost(hostname: string): boolean {
 function parseLinqVoiceMemoResponse(input: {
   attachmentId: string
   chatId: string
-  response: unknown
+  response: ChatSendVoicememoResponse
 }): SendLinqVoiceMemoResult {
   const record = readRecord(input.response)
   const voiceMemoRecord = readRecord(record?.voice_memo)
@@ -1403,40 +1524,14 @@ function buildLinqMessageBody(input: {
   media?: readonly LinqMessageMediaInput[] | null
   message: string
   replyToMessageId?: string | null
-}): {
-  message: {
-    idempotency_key?: string
-    parts: Array<
-      | {
-          text_decorations?: MessageTextDecoration[]
-          type: 'text'
-          value: string
-        }
-      | {
-          attachment_id: string
-          type: 'media'
-        }
-      | {
-          type: 'media'
-          url: string
-        }
-    >
-    reply_to?: {
-      message_id: string
-    }
-  }
-} {
+}): MessageSendParams {
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
   const replyToMessageId = normalizeNullableString(input.replyToMessageId)
   const media = normalizeLinqMediaList(input.media ?? [])
   const renderedText = renderMarkdownMessageText(
     normalizeRequiredString(input.message, 'message'),
   )
-  const textPart: {
-    text_decorations?: MessageTextDecoration[]
-    type: 'text'
-    value: string
-  } = {
+  const textPart: TextPart = {
     ...(renderedText.decorations.length > 0
       ? {
           text_decorations: renderedText.decorations,
@@ -1445,7 +1540,7 @@ function buildLinqMessageBody(input: {
     type: 'text' as const,
     value: renderedText.text,
   }
-  const parts = [textPart, ...media]
+  const parts: MessageContent['parts'] = [textPart, ...media]
   if (parts.length > LINQ_MAX_MESSAGE_PARTS) {
     throw new VaultCliError('LINQ_INVALID_INPUT', `Linq message must contain at most ${LINQ_MAX_MESSAGE_PARTS} parts.`)
   }
@@ -1471,16 +1566,7 @@ function buildLinqMessageBody(input: {
 
 function normalizeLinqMediaList(
   values: readonly LinqMessageMediaInput[],
-): Array<
-  | {
-      attachment_id: string
-      type: 'media'
-    }
-  | {
-      type: 'media'
-      url: string
-    }
-> {
+): MediaPart[] {
   const parts = values
     .map((value) => {
       if ('attachmentId' in value) {
@@ -1514,6 +1600,39 @@ function normalizeLinqMediaList(
   }
 
   return parts
+}
+
+function normalizeLinqSupportedContentType(value: string): SupportedContentType {
+  const normalized = normalizeRequiredString(value, 'attachment content type').toLowerCase()
+  if (isLinqSupportedContentType(normalized)) {
+    return normalized
+  }
+
+  throw new VaultCliError(
+    'LINQ_INVALID_INPUT',
+    'Linq attachment content type is not supported by the Linq SDK contract.',
+  )
+}
+
+function isLinqSupportedContentType(value: string): value is SupportedContentType {
+  return LINQ_SUPPORTED_ATTACHMENT_CONTENT_TYPE_SET.has(value)
+}
+
+function normalizeLinqWebhookEventTypeList(values: readonly string[]): WebhookEventType[] {
+  return normalizeLinqStringList(values, 'subscribed event').map((value) => {
+    if (isLinqWebhookEventType(value)) {
+      return value
+    }
+
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      'Linq subscribed event is not supported by the Linq SDK contract.',
+    )
+  })
+}
+
+function isLinqWebhookEventType(value: string): value is WebhookEventType {
+  return LINQ_WEBHOOK_EVENT_TYPE_SET.has(value)
 }
 
 function normalizeLinqHttpsUrl(value: string): string {

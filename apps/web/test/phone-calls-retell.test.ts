@@ -91,23 +91,23 @@ describe("Retell phone-call runtime", () => {
     const headers = new Headers(fetchCalls[0]!.init?.headers);
     expect(headers.get("authorization")).toBe(["Bearer", process.env.RETELL_API_KEY].join(" "));
     expect(headers.get("content-type")).toBe("application/json");
-    expect(JSON.parse(String(fetchCalls[0]!.init?.body))).toEqual({
-      agent_override: {
-        metadata: {
-          murph_phone_call_id: "hpc_123",
-        },
-        retell_llm_dynamic_variables: {
-          call_brief: JSON.stringify(VALID_BRIEF),
-          murph_timezone: "America/New_York",
-          opening_line: "Hi, this is Murph, an AI assistant calling on the user's behalf. I'm calling Eye doctor's office to Schedule a routine eye examination for Friday, June 26, 2026.",
-          transfer_number: "+12125550000",
-        },
-      },
+    const body = JSON.parse(String(fetchCalls[0]!.init?.body));
+    expect(body).toEqual({
       from_number: "+12125559999",
+      metadata: {
+        murph_phone_call_id: "hpc_123",
+      },
       override_agent_id: "agent_123",
       override_agent_version: "prod",
+      retell_llm_dynamic_variables: {
+        call_brief: JSON.stringify(VALID_BRIEF),
+        murph_timezone: "America/New_York",
+        opening_line: "Hi, this is Murph, an AI assistant calling on the user's behalf. I'm calling Eye doctor's office to Schedule a routine eye examination for Friday, June 26, 2026.",
+        transfer_number: "+12125550000",
+      },
       to_number: "+12125550123",
     });
+    expect(body).not.toHaveProperty("agent_override");
   });
 
   it("stops the Retell call and fails when the returned storage mode is not basic attributes only", async () => {
@@ -397,7 +397,7 @@ describe("Retell phone-call result handling", () => {
       prisma: store.prisma,
     });
 
-    expect(store.updateManyCalls).toHaveLength(2);
+    expect(store.updateManyCalls).toHaveLength(1);
     expect(store.updateManyCalls[0]).toMatchObject({
       data: {
         resultJson: {
@@ -411,14 +411,12 @@ describe("Retell phone-call result handling", () => {
         id: "hpc_123",
         provider: "retell",
         providerCallId: "retell_call_123",
+        status: {
+          in: ["starting", "calling", "ended"],
+        },
       },
     });
     expect(store.findUniqueOrThrowCalls).toEqual([
-      {
-        where: {
-          id: "hpc_123",
-        },
-      },
       {
         where: {
           id: "hpc_123",
@@ -577,6 +575,120 @@ describe("Retell phone-call result handling", () => {
       },
     });
     expect(store.updateManyCalls[0]!.where).not.toHaveProperty("providerCallId");
+    expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
+      "hpc_123",
+    ]);
+  });
+
+  it("does not let call_analyzed resurrect a stale unstarted row web already failed", async () => {
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({
+        endedAt: null,
+        id: "hpc_123",
+        providerCallId: null,
+        resultJson: {
+          outcome: "not_completed",
+          summary: "Murph could not start the phone call.",
+        },
+        status: "failed",
+      }),
+    });
+
+    await handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "Booked from a stale provider replay.",
+          },
+        },
+        call_id: "retell_stale",
+        data_storage_setting: "basic_attributes_only",
+        metadata: {
+          murph_phone_call_id: "hpc_123",
+        },
+      },
+      prisma: store.prisma,
+    });
+
+    expect(store.findUniqueCalls).toEqual([{
+      where: {
+        id: "hpc_123",
+      },
+    }]);
+    expect(store.updateManyCalls).toEqual([]);
+    expect(store.appendResultNotificationCalls).toEqual([]);
+    expect(store.currentCall()).toMatchObject({
+      endedAt: null,
+      providerCallId: null,
+      resultJson: {
+        outcome: "not_completed",
+        summary: "Murph could not start the phone call.",
+      },
+      status: "failed",
+    });
+  });
+
+  it("allows call_analyzed to finalize a failed call already ended by the same Retell call", async () => {
+    const endedAt = new Date("2026-06-25T12:00:00.000Z");
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({
+        endedAt,
+        id: "hpc_123",
+        providerCallId: "retell_busy",
+        status: "failed",
+      }),
+    });
+
+    await handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "not_completed",
+            result: "The office line was busy.",
+          },
+        },
+        call_id: "retell_busy",
+        data_storage_setting: "basic_attributes_only",
+        end_timestamp: "2026-06-25T12:00:00.000Z",
+        metadata: {
+          murph_phone_call_id: "hpc_123",
+        },
+      },
+      prisma: store.prisma,
+    });
+
+    expect(store.updateManyCalls[0]).toMatchObject({
+      data: {
+        resultJson: {
+          outcome: "not_completed",
+          summary: "The office line was busy.",
+        },
+        status: "failed",
+      },
+      where: {
+        analyzedAt: null,
+        endedAt: {
+          not: null,
+        },
+        id: "hpc_123",
+        provider: "retell",
+        providerCallId: "retell_busy",
+        status: {
+          in: ["failed"],
+        },
+      },
+    });
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: expect.any(Date),
+      endedAt,
+      providerCallId: "retell_busy",
+      resultJson: {
+        outcome: "not_completed",
+        summary: "The office line was busy.",
+      },
+      status: "failed",
+    });
     expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
       "hpc_123",
     ]);
@@ -901,6 +1013,9 @@ function matchesWebhookUpdateWhere(
     return false;
   }
   if (where.endedAt === null && call.endedAt !== null) {
+    return false;
+  }
+  if (where.endedAt && typeof where.endedAt === "object" && where.endedAt.not === null && call.endedAt === null) {
     return false;
   }
   if (where.status && !where.status.in.includes(call.status)) {

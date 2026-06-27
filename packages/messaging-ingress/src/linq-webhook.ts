@@ -91,39 +91,6 @@ export interface LinqMediaPart {
 
 export type LinqMessagePart = LinqTextPart | LinqLinkPart | LinqMediaPart;
 
-export interface LinqSendMessageResponse {
-  chat_id?: string | null;
-  message?: {
-    id?: string | null;
-  } | null;
-}
-
-export interface LinqCreateChatResponse {
-  chat?: {
-    id?: string | null;
-    message?: {
-      id?: string | null;
-    } | null;
-  } | null;
-}
-
-export interface LinqCreateWebhookSubscriptionResponse {
-  id?: string | null;
-  target_url?: string | null;
-  signing_secret?: string | null;
-  subscribed_events?: string[] | null;
-  phone_numbers?: string[] | null;
-  is_active?: boolean | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-}
-
-export interface LinqListPhoneNumbersResponse {
-  phone_numbers?: Array<{
-    phone_number?: string | null;
-  }> | null;
-}
-
 type LinqWebhookHeaders = Headers | IncomingHttpHeaders | Record<string, string | string[] | undefined>;
 
 export interface VerifyAndParseLinqWebhookRequestInput {

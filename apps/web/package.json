@@ -61,6 +61,7 @@
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "recharts": "3.8.1",
+    "retell-sdk": "5.39.0",
     "server-only": "0.0.1",
     "shadcn": "4.7.0",
     "stripe": "^22.1.1",
@@ -71,6 +72,7 @@
     "workflow": "4.2.4"
   },
   "devDependencies": {
+    "@linqapp/sdk": "0.28.0",
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4.3.0",
     "@types/pg": "8.20.0",
@@ -79,6 +81,7 @@
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.6",
     "linkedom": "0.18.12",
+    "openai": "6.45.0",
     "prisma": "^7.8.0",
     "tailwindcss": "^4.3.0"
   }
