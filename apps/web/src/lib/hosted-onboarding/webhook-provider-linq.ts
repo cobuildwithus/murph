@@ -315,6 +315,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       existingDailyState?.onboardingLinkSentAt
       && await hasHostedLinqDeliveredSignupProof({
         claimSentAt: existingDailyState.onboardingLinkSentAt,
+        eventId: input.event.event_id,
         memberId: existingMember.id,
         prisma: input.prisma,
       })
@@ -750,6 +751,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
   const invite = await issueHostedInviteTx({
     channel: "linq",
+    linqFirstContactEventId: input.event.event_id,
     memberId: member.id,
     prisma: input.prisma,
   });
@@ -788,6 +790,7 @@ async function planHostedLinqSignupLinkAlreadySentIfDelivered(input: {
 }): Promise<HostedOnboardingLinqDirectPlan | null> {
   const deliveredInvite = await readHostedLinqDeliveredSignupInvite({
     claimSentAt: input.claimSentAt,
+    eventId: input.event.event_id,
     memberId: input.memberId,
     prisma: input.prisma,
   });
@@ -829,6 +832,7 @@ async function planHostedLinqSignupLinkAlreadySentIfDelivered(input: {
 
 async function hasHostedLinqDeliveredSignupProof(input: {
   claimSentAt: Date;
+  eventId: string;
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<boolean> {
@@ -838,6 +842,7 @@ async function hasHostedLinqDeliveredSignupProof(input: {
 
 async function readHostedLinqDeliveredSignupInvite(input: {
   claimSentAt: Date;
+  eventId: string;
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<{ sentAt: Date | null } | null> {
@@ -847,6 +852,7 @@ async function readHostedLinqDeliveredSignupInvite(input: {
     },
     where: {
       channel: "linq",
+      linqFirstContactEventId: input.eventId,
       memberId: input.memberId,
       sentAt: {
         gte: input.claimSentAt,

@@ -2173,6 +2173,7 @@ https://join.example.test/join/code_first_text`);
       },
       where: {
         channel: "linq",
+        linqFirstContactEventId: "evt_stale_daily_claim_retry",
         memberId: "member_stale_claim",
         sentAt: {
           gte: new Date("2026-03-26T12:00:01.000Z"),
@@ -2199,6 +2200,7 @@ https://join.example.test/join/code_first_text`);
       },
       data: {
         channel: "linq",
+        linqFirstContactEventId: "evt_stale_daily_claim_retry",
       },
     });
     expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith({
@@ -2264,6 +2266,7 @@ https://join.example.test/join/code_first_text`);
       },
       where: {
         channel: "linq",
+        linqFirstContactEventId: "evt_in_flight_daily_claim",
         memberId: "member_in_flight_claim",
         sentAt: {
           gte: claimSentAt,
@@ -3093,6 +3096,7 @@ https://join.example.test/join/code_first_text`);
       channel: "linq",
       id: "invite_fail_open_delivered_retry_blocks",
       inviteCode: "code_fail_open_delivered_retry_blocks",
+      linqFirstContactEventId: null as string | null,
       memberId: "member_fail_open_delivered_retry_blocks",
       sentAt: null as Date | null,
       status: "pending",
@@ -3169,10 +3173,17 @@ https://join.example.test/join/code_first_text`);
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedInvite: {
-        create: vi.fn().mockResolvedValue(invite),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          invite.linqFirstContactEventId = typeof data.linqFirstContactEventId === "string"
+            ? data.linqFirstContactEventId
+            : null;
+          return invite;
+        }),
         findFirst: vi.fn(async ({ where }: { where?: Record<string, unknown> }) => {
           if (where?.sentAt) {
-            return invite.sentAt ? invite : null;
+            return invite.sentAt && where.linqFirstContactEventId === invite.linqFirstContactEventId
+              ? invite
+              : null;
           }
           return null;
         }),
@@ -3263,6 +3274,119 @@ https://join.example.test/join/code_first_text`);
     })).toMatchObject({
       status: "consumed",
     });
+  });
+
+  it("does not use another event's delivered signup proof to admit a stale retry", async () => {
+    mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
+    const staleEventId = "evt_stale_fail_open_cross_event_a";
+    const deliveredEventId = "evt_delivered_fail_open_cross_event_b";
+    const memberId = "member_fail_open_cross_event";
+    const claimSentAt = new Date("2026-03-26T12:00:00.500Z");
+    const firstContactReceipt = createHostedLinqFirstContactEventReceiptFixture();
+    const staleReceipt = await firstContactReceipt.create({
+      data: {
+        eventId: staleEventId,
+        processingOwnerToken: "owner_stale_cross_event_a",
+        status: "processing",
+      },
+    }) as HostedLinqReceiptRecord;
+    staleReceipt.updatedAt = new Date("2026-03-26T11:54:00.000Z");
+    mocks.readHostedLinqDailyState.mockResolvedValue(makeHostedLinqDailyState({
+      onboardingLinkSentAt: claimSentAt,
+    }));
+    mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValueOnce({
+      category: "wrong_number_or_personal_logistics",
+      confidence: 0.94,
+      kind: "block",
+      source: "model",
+    });
+
+    const deliveredInvite = {
+      channel: "linq",
+      id: "invite_fail_open_cross_event_b",
+      inviteCode: "code_fail_open_cross_event_b",
+      linqFirstContactEventId: deliveredEventId,
+      memberId,
+      sentAt: new Date("2026-03-26T12:00:01.000Z"),
+      status: "pending",
+    };
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn(async ({ where }: { where?: Record<string, unknown> }) => {
+          if (
+            where?.sentAt
+            && where.linqFirstContactEventId === deliveredInvite.linqFirstContactEventId
+          ) {
+            return deliveredInvite;
+          }
+          return null;
+        }),
+        findUnique: vi.fn().mockResolvedValue(deliveredInvite),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedLinqFirstContactEventReceipt: firstContactReceipt,
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: memberId,
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+        update: vi.fn(),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: staleEventId,
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "blocked-first-contact-admission",
+    });
+
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          decision: "block",
+          eventId: staleEventId,
+        }),
+      }),
+    );
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("does not treat pending fail-open member state as admission after pre-send signup delivery failure", async () => {
@@ -6618,6 +6742,7 @@ https://join.example.test/join/code_first_text`);
       },
       where: {
         channel: "linq",
+        linqFirstContactEventId: "evt_repeat_signup",
         memberId: "member_123",
         sentAt: {
           gte: new Date("2026-03-26T12:00:01.000Z"),

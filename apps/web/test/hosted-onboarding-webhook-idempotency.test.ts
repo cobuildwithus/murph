@@ -295,6 +295,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
     expect(mocks.issueHostedInviteTx).toHaveBeenCalledWith({
       channel: "linq",
+      linqFirstContactEventId: "evt_123",
       memberId: "member_123",
       prisma,
     });

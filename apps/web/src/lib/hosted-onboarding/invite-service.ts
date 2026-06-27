@@ -240,6 +240,7 @@ export async function issueHostedInvite(input: {
 
 export async function issueHostedInviteTx(input: {
   channel: "linq" | "share" | "web";
+  linqFirstContactEventId?: string | null;
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedInvite> {
@@ -266,6 +267,11 @@ export async function issueHostedInviteTx(input: {
       },
       data: {
         channel: input.channel,
+        ...(input.linqFirstContactEventId
+          ? {
+              linqFirstContactEventId: input.linqFirstContactEventId,
+            }
+          : {}),
       },
     });
   }
@@ -276,6 +282,7 @@ export async function issueHostedInviteTx(input: {
       memberId: input.memberId,
       inviteCode: generateHostedInviteCode(),
       channel: input.channel,
+      linqFirstContactEventId: input.linqFirstContactEventId ?? null,
       expiresAt: inviteExpiresAt(now, getHostedOnboardingEnvironment().inviteTtlHours),
     },
   });

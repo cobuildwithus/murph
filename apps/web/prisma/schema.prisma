@@ -785,17 +785,19 @@ model HostedRuntimeLog {
 }
 
 model HostedInvite {
-  id         String       @id
-  memberId   String       @map("member_id")
-  inviteCode String       @unique @map("invite_code")
-  channel    String       @default("linq")
-  sentAt     DateTime?    @map("sent_at")
-  expiresAt  DateTime     @map("expires_at")
-  createdAt  DateTime     @default(now()) @map("created_at")
-  updatedAt  DateTime     @updatedAt @map("updated_at")
-  member     HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  id                      String       @id
+  memberId                String       @map("member_id")
+  inviteCode              String       @unique @map("invite_code")
+  channel                 String       @default("linq")
+  sentAt                  DateTime?    @map("sent_at")
+  linqFirstContactEventId String?      @map("linq_first_contact_event_id")
+  expiresAt               DateTime     @map("expires_at")
+  createdAt               DateTime     @default(now()) @map("created_at")
+  updatedAt               DateTime     @updatedAt @map("updated_at")
+  member                  HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId, createdAt])
+  @@index([linqFirstContactEventId])
   @@index([expiresAt])
   @@map("hosted_invite")
 }
