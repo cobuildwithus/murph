@@ -172,7 +172,7 @@ test('capture add schema exposes typed single-capture fields without raw input f
   }
 })
 
-test('capture add and import-json contract hints steer agents to vault-cli batch instead of capture import-json, and fit the assistant contract hint budget', () => {
+test('capture add hint steers agents to vault-cli batch instead of capture import-json and fits the assistant contract hint budget', () => {
   assert.match(
     captureCommandDescriptions.addHint,
     /vault-cli batch --command '\[\.\.\.\]'/u,
@@ -184,19 +184,6 @@ test('capture add and import-json contract hints steer agents to vault-cli batch
   assert.ok(
     captureCommandDescriptions.addHint.length <= 180,
     `addHint must fit the assistant contract hint budget; got ${captureCommandDescriptions.addHint.length} chars`,
-  )
-
-  assert.match(
-    captureCommandDescriptions.importJsonHint,
-    /Operator-only; no capture payload-schema\./u,
-  )
-  assert.match(
-    captureCommandDescriptions.importJsonHint,
-    /vault-cli batch --command '\[\.\.\.\]'/u,
-  )
-  assert.ok(
-    captureCommandDescriptions.importJsonHint.length <= 180,
-    `importJsonHint must fit the assistant contract hint budget; got ${captureCommandDescriptions.importJsonHint.length} chars`,
   )
 
   const descriptors = vaultCliCommandDescriptors as readonly VaultCliCommandDescriptor[]

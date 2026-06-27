@@ -39,7 +39,7 @@ export const captureCommandDescriptions = {
   addHint:
     "Use --media for one capture with one or more files. For multiple distinct captures, run capture add per observation grouped through vault-cli batch --command '[...]'.",
   importJsonHint:
-    "Operator-only; no capture payload-schema. For agent batches, use repeated capture add through vault-cli batch --command '[...]'.",
+    '--input accepts @file.json or - for stdin. The payload retains the full structured capture import surface, including batch capture metadata, media refs, raw refs, labels, body sites, collections, tags, and related ids.',
   show: 'Show one capture by canonical event id or stable label.',
   list: 'List capture events with optional date, label, body-site, collection, and tag filters.',
   manifest: 'Show the immutable raw import manifest for one capture event id or stable label.',

@@ -431,7 +431,7 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders detailed 
   assert.doesNotMatch(contract, /`model`/u)
 })
 
-test('buildAssistantCliSurfaceContract steers agents away from capture import-json when the leaf hint marks it operator-only', async () => {
+test('buildAssistantCliSurfaceContract hides capture import-json from the agent contract so the agent-visible payload invariant cannot be reached', async () => {
   const {
     buildAssistantCliSurfaceContract,
   } = await import('../src/assistant/cli-surface-bootstrap.ts')
@@ -449,7 +449,7 @@ test('buildAssistantCliSurfaceContract steers agents away from capture import-js
         description:
           'Import one or more dated media captures from a structured JSON payload file or stdin.',
         hint:
-          "Operator-only; no capture payload-schema. For agent batches, use repeated capture add through vault-cli batch --command '[...]'.",
+          '--input accepts @file.json or - for stdin. The payload retains the full structured capture import surface, including batch capture metadata, media refs, raw refs, labels, body sites, collections, tags, and related ids.',
         name: 'capture import-json',
       },
     ],
@@ -461,16 +461,8 @@ test('buildAssistantCliSurfaceContract steers agents away from capture import-js
     contract,
     /run capture add per observation grouped through vault-cli batch --command '\[\.\.\.\]'/u,
   )
-  assert.match(contract, /`capture import-json`/u)
-  assert.match(
-    contract,
-    /Operator-only; no capture payload-schema\. For agent batches, use repeated capture add through vault-cli batch --command '\[\.\.\.\]'\./u,
-  )
-  assert.doesNotMatch(contract, /import-json --input @captures\.json for batches/u)
-  assert.doesNotMatch(
-    contract,
-    /batch capture metadata, media\/raw refs, labels, body sites/u,
-  )
+  assert.doesNotMatch(contract, /`capture import-json`/u)
+  assert.doesNotMatch(contract, /batch capture metadata, media refs, raw refs/u)
 })
 
 test('buildAssistantCliProcessEnv keeps manifest subprocess env credential-free', async () => {

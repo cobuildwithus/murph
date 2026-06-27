@@ -176,9 +176,7 @@ describe("canonical CLI JSON input split", () => {
 
   it("routes raw payloads through explicit import-json commands without dropping nested import surfaces", () => {
     expect(captureSource).toContain("capture.command('import-json'");
-    expect(captureSource).toContain(
-      "Operator-only; no capture payload-schema. For agent batches, use repeated capture add through vault-cli batch --command '[...]'.",
-    );
+    expect(captureSource).toContain("batch capture metadata, media refs, raw refs");
     expect(captureSource).toContain("runCaptureAdd(options, normalizeInputFileOption(options.input))");
 
     expect(mealSource).toContain("name: 'import-json'");
