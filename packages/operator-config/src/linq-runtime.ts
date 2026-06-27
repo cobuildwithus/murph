@@ -2,9 +2,11 @@ import { isIP } from 'node:net'
 
 import type {
   AttachmentCreateParams,
+  AttachmentCreateResponse,
   ChatCreateParams,
   ChatCreateResponse,
   ChatSendVoicememoParams,
+  ChatSendVoicememoResponse,
   MediaPart,
   MessageContent,
   PhoneNumberListResponse,
@@ -18,7 +20,10 @@ import type {
   MessageSendParams,
   MessageSendResponse,
 } from '@linqapp/sdk/resources/chats'
-import type { MessageAddReactionParams } from '@linqapp/sdk/resources/messages'
+import type {
+  MessageAddReactionParams,
+  MessageAddReactionResponse,
+} from '@linqapp/sdk/resources/messages'
 import {
   createTimeoutAbortController,
   waitForRetryDelay,
@@ -393,7 +398,7 @@ export async function createLinqAttachmentUpload(
     filename,
     size_bytes: sizeBytes,
   }
-  const response = await requestLinqJson<unknown>({
+  const response = await requestLinqJson<AttachmentCreateResponse>({
     allowRateLimitRetries: false,
     details: {
       operation: 'create_attachment_upload',
@@ -511,7 +516,7 @@ export async function sendLinqVoiceMemo(
   const body: ChatSendVoicememoParams = {
     attachment_id: attachmentId,
   }
-  const response = await requestLinqJson<unknown>({
+  const response = await requestLinqJson<ChatSendVoicememoResponse>({
     details: {
       hasIdempotencyKey: false,
       operation: 'send_voice_memo',
@@ -586,7 +591,7 @@ export async function setLinqMessageReaction(
     type: resolveLinqReactionType(input.reaction),
   }
 
-  await requestLinqJson<unknown>({
+  await requestLinqJson<MessageAddReactionResponse>({
     details: {
       hasIdempotencyKey: false,
       operation: 'set_message_reaction',
@@ -1206,7 +1211,7 @@ function shouldRetryLinqHttpStatus(
 }
 
 function parseLinqAttachmentUploadResponse(
-  value: unknown,
+  value: AttachmentCreateResponse,
 ): CreateLinqAttachmentUploadResult {
   const record = readRecord(value)
   const attachmentId = normalizeNullableString(readStringField(record, 'attachment_id'))
@@ -1307,7 +1312,7 @@ function isPublicLinqAttachmentUploadHost(hostname: string): boolean {
 function parseLinqVoiceMemoResponse(input: {
   attachmentId: string
   chatId: string
-  response: unknown
+  response: ChatSendVoicememoResponse
 }): SendLinqVoiceMemoResult {
   const record = readRecord(input.response)
   const voiceMemoRecord = readRecord(record?.voice_memo)
