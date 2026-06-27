@@ -4,6 +4,7 @@ import {
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS,
   HOSTED_MAILBOX_RETENTION_MS,
+  HOSTED_RUN_LOG_AUTOMATION_DETAIL_RETENTION_MS,
   HOSTED_RUN_LOG_RETENTION_MS,
   HOSTED_WEB_SESSION_RETENTION_MS,
   runHostedRetentionCleanup,
@@ -63,9 +64,21 @@ describe("hosted retention cleanup", () => {
     ]);
     expect(hostedRuntimeLogDeleteMany).toHaveBeenCalledWith({
       where: {
-        at: {
-          lt: new Date(now.getTime() - HOSTED_RUN_LOG_RETENTION_MS),
-        },
+        OR: [
+          {
+            at: {
+              lt: new Date(now.getTime() - HOSTED_RUN_LOG_RETENTION_MS),
+            },
+          },
+          {
+            eventCode: "assistant.automation_detail",
+            at: {
+              lt: new Date(
+                now.getTime() - HOSTED_RUN_LOG_AUTOMATION_DETAIL_RETENTION_MS,
+              ),
+            },
+          },
+        ],
       },
     });
     expect(hostedWebSessionDeleteMany).toHaveBeenCalledWith({

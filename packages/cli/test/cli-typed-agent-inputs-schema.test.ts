@@ -532,6 +532,14 @@ test('legacy hard-cut command aliases stay out of the agent command manifest', a
   }
 })
 
+test('capture import-json exposes a paired Incur-discoverable payload-schema sibling so its complex --input @file body satisfies the agent-visible payload invariant', async () => {
+  const commands = await loadFullLlmCommands()
+  const commandNames = new Set(commands.map((command) => command.name))
+
+  assert.equal(commandNames.has('capture import-json'), true)
+  assert.equal(commandNames.has('capture payload-schema'), true)
+})
+
 test('agent-visible input-file command surfaces stay explicitly reviewed', async () => {
   const commands = await loadFullLlmCommands()
   const reviewedInputCommands = [

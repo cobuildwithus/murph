@@ -7,8 +7,16 @@ import { Cli } from 'incur'
 import { test } from 'vitest'
 
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import { captureImportPayloadSchema } from '@murphai/vault-usecases/captures'
 
-import { registerCaptureCommands } from '../src/commands/capture.js'
+import {
+  captureCommandDescriptions,
+  registerCaptureCommands,
+} from '../src/commands/capture.js'
+import {
+  vaultCliCommandDescriptors,
+  type VaultCliCommandDescriptor,
+} from '../src/vault-cli-command-manifest.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
@@ -163,6 +171,100 @@ test('capture add schema exposes typed single-capture fields without raw input f
   ]) {
     assert.equal(field in schema.options.properties, true, field)
   }
+})
+
+test('capture payload-schema is registered alongside capture import-json so the agent-visible payload invariant is satisfied via the discoverable sibling', async () => {
+  const schemaEnvelope = await readCommandSchema(createCaptureCli(), ['capture', 'payload-schema'])
+  assert.deepEqual(schemaEnvelope.args.required ?? [], [])
+  // payload-schema accepts no options beyond the global ones; the file body
+  // contract is emitted as the command output.
+
+  const descriptors = vaultCliCommandDescriptors as readonly VaultCliCommandDescriptor[]
+  const captureDescriptor = descriptors.find(
+    (descriptor) => descriptor.id === 'capture',
+  )
+  assert.ok(captureDescriptor, 'capture command descriptor present')
+  const importJsonLeaf = captureDescriptor.leafCommands?.find(
+    (leaf) => leaf.path.join(' ') === 'capture import-json',
+  )
+  const payloadSchemaLeaf = captureDescriptor.leafCommands?.find(
+    (leaf) => leaf.path.join(' ') === 'capture payload-schema',
+  )
+  assert.ok(importJsonLeaf, 'capture import-json leaf present')
+  assert.ok(payloadSchemaLeaf, 'capture payload-schema leaf present')
+  // The import-json hint must point at the payload-schema sibling so agents
+  // do not have to infer the file-body shape from source/tests/prompts.
+  assert.match(
+    importJsonLeaf.hint ?? '',
+    /capture payload-schema --format json/u,
+  )
+  assert.match(
+    captureCommandDescriptions.addHint,
+    /capture payload-schema --format json/u,
+  )
+})
+
+test('captureImportPayloadSchema is the exact wire-format contract the runtime importer accepts', () => {
+  // Single capture at root.
+  assert.doesNotThrow(() =>
+    captureImportPayloadSchema.parse({
+      media: ['./left-forearm-1.jpg'],
+      label: 'mole-left-forearm-1',
+      bodySite: 'Left forearm, dorsal side',
+      collection: 'skin-check-2026-04',
+      links: [{ type: 'related_to', targetId: 'evt_abc' }],
+    }),
+  )
+
+  // Batch via captures[].
+  assert.doesNotThrow(() =>
+    captureImportPayloadSchema.parse({
+      collection: 'skin-check-2026-04',
+      captures: [
+        { media: ['./left-forearm-1.jpg'], label: 'mole-left-forearm-1' },
+        { mediaPaths: ['./right-forearm-1.jpg'], label: 'mole-right-forearm-1' },
+      ],
+    }),
+  )
+
+  // Empty captures[] is rejected.
+  assert.throws(() =>
+    captureImportPayloadSchema.parse({
+      collection: 'skin-check-2026-04',
+      captures: [],
+    }),
+  )
+
+  // Each captures[] entry must carry its own media (root defaults are stripped
+  // by the runtime). Schema mirrors that so the contract does not falsely
+  // claim entry-level media is optional.
+  assert.throws(() =>
+    captureImportPayloadSchema.parse({
+      media: ['./root-default.jpg'],
+      collection: 'skin-check-2026-04',
+      captures: [{ label: 'mole-left-forearm-1' }],
+    }),
+  )
+
+  // The runtime caps batches at 100; the schema enforces the same upper bound.
+  assert.throws(() =>
+    captureImportPayloadSchema.parse({
+      collection: 'skin-check-2026-04',
+      captures: Array.from({ length: 101 }, (_unused, index) => ({
+        media: [`./photo-${index + 1}.jpg`],
+        label: `mole-${index + 1}`,
+      })),
+    }),
+  )
+
+  // The runtime intentionally rejects `attachments`; the strict schema rejects
+  // it (and any other unknown wire-level field) so the contract cannot
+  // silently drift.
+  assert.throws(() =>
+    captureImportPayloadSchema.parse({
+      attachments: [{ kind: 'photo', path: './ignored.jpg' }],
+    }),
+  )
 })
 
 test('capture import-json schema exposes the batch payload escape hatch', async () => {

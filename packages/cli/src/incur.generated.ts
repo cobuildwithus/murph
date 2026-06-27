@@ -57,6 +57,7 @@ declare module 'incur' {
       'capture import-json': { args: {}; options: { requestId?: string; input: string; media?: string[]; label?: string; bodySite?: string; collection?: string; tag?: string[]; relatedId?: string[]; note?: string; title?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; timeZone?: string } }
       'capture list': { args: {}; options: { requestId?: string; from?: string; to?: string; tag?: string[]; limit: number; label?: string; bodySite?: string; collection?: string } }
       'capture manifest': { args: { id: string }; options: { requestId?: string } }
+      'capture payload-schema': { args: {}; options: {} }
       'capture show': { args: { id: string }; options: { requestId?: string } }
       'chat': { args: { prompt?: string }; options: { requestId?: string; session?: string; alias?: string; channel?: string; identity?: string; participant?: string; thread?: string; codexCommand?: string; codexHome?: string; model?: string; modelProvider?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; sandbox?: "read-only" | "workspace-write" | "danger-full-access"; approvalPolicy?: "never"; profile?: string } }
       'clinical-note import-json': { args: {}; options: { requestId?: string; input: string } }

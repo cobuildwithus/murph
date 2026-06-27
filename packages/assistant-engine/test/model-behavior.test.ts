@@ -637,7 +637,7 @@ describe('assistant consumption lookup guidance', () => {
       'when the user asks to log/import/save it or simply sends the data for Murph to use',
     )
     expect(prompt).toContain(
-      'Do not save when the user clearly asks only for analysis/advice',
+      'Do not save when the user clearly asks only for ephemeral analysis/advice without retention',
     )
     expect(prompt).toContain(
       'evidence is too ambiguous to create a meaningful record without one targeted follow-up',
