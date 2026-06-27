@@ -2,12 +2,10 @@ import {
   buildHostedExecutionSafeErrorDiagnostics,
   buildHostedExecutionRuntimeTimerWake,
   deriveHostedExecutionErrorCode,
-  emitHostedExecutionStructuredLog,
   sanitizeHostedExecutionStructuredLogDetails,
   sanitizeHostedExecutionStructuredLogText,
   type HostedExecutionRedactedLogEntry,
   type HostedExecutionStructuredLogDetails,
-  type HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
   type HostedWorkspaceCheckpointReason,
@@ -342,13 +340,13 @@ export async function runHostedWorkspaceAssistantPhase(
         vaultRoot: input.restored.vaultRoot,
         wake,
       });
-      emitHostedWorkspaceAssistantTurnTimingTrace({
+      writeHostedAssistantTurnTimingRuntimeLog({
         currentTurnDeliveryIntentCount:
           assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds?.length ?? 0,
         elapsedMs: elapsedSince(assistantPhaseStartedAt),
+        input,
         stage: "automation-pass-finished",
         stepElapsedMs: elapsedSince(automationLaneStartedAt),
-        wake,
       });
       return assistantMetrics;
     };
@@ -424,12 +422,12 @@ export async function runHostedWorkspaceAssistantPhase(
       terminalLinqCleanup,
     });
     if (foregroundAssistantPass) {
-      emitHostedWorkspaceAssistantTurnTimingTrace({
+      writeHostedAssistantTurnTimingRuntimeLog({
         currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
         elapsedMs: elapsedSince(assistantPhaseStartedAt),
         foregroundAssistantPass,
+        input,
         stage: "foreground-delivery-phase-started",
-        wake,
       });
       const foregroundAssistantPhaseStartedAt = Date.now();
       const foregroundAssistantResult = await runForegroundAssistantReplyPhase({
@@ -442,13 +440,13 @@ export async function runHostedWorkspaceAssistantPhase(
         systemMailboxWakeAt,
         wake,
       });
-      emitHostedWorkspaceAssistantTurnTimingTrace({
+      writeHostedAssistantTurnTimingRuntimeLog({
         currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
         elapsedMs: elapsedSince(assistantPhaseStartedAt),
         foregroundAssistantPass,
+        input,
         stage: "foreground-delivery-phase-finished",
         stepElapsedMs: elapsedSince(foregroundAssistantPhaseStartedAt),
-        wake,
       });
       return mergeContinuingSystemMailboxResult(
         withFreshHostedManagedAutomationsAfterCheckpoint({
@@ -3697,19 +3695,25 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
   });
 }
 
-function emitHostedWorkspaceAssistantTurnTimingTrace(input: {
+// Hot-path-safe: writeHostedRuntimeLogBestEffort queues info-level entries
+// and returns synchronously, so foreground delivery is never blocked on the
+// underlying log port write (invariant: "observability writes are never
+// user latency", docs/contracts/00-invariants.md § Hosted Foreground
+// Priority).
+function writeHostedAssistantTurnTimingRuntimeLog(input: {
   currentTurnDeliveryIntentCount?: number | null;
   elapsedMs: number;
   foregroundAssistantPass?: boolean | null;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
   stage: HostedAssistantTurnTimingStage;
   stepElapsedMs?: number | null;
-  wake: HostedRuntimeEvent;
 }): void {
-  const details: HostedExecutionStructuredLogDetails = {
+  const redactedJson: HostedRuntimeRedactedJson = {
+    currentTurnDeliveryIntentCount: input.currentTurnDeliveryIntentCount ?? null,
+    detailLabel: "Hosted assistant turn timing milestone captured.",
+    foregroundAssistantPass: input.foregroundAssistantPass ?? null,
     schema: HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
     type: HOSTED_ASSISTANT_TURN_TIMING_TYPE,
-    currentTurnDeliveryIntentCount: input.currentTurnDeliveryIntentCount ?? null,
-    foregroundAssistantPass: input.foregroundAssistantPass ?? null,
     turnTimingElapsedMs: input.elapsedMs,
     turnTimingStage: input.stage,
     ...(input.stepElapsedMs === undefined
@@ -3717,17 +3721,21 @@ function emitHostedWorkspaceAssistantTurnTimingTrace(input: {
       : { turnTimingStepElapsedMs: input.stepElapsedMs }),
   };
 
-  try {
-    emitHostedExecutionStructuredLog({
-      component: "runtime",
-      details: sanitizeHostedExecutionStructuredLogDetails(details),
-      message: "Hosted assistant turn timing milestone captured.",
-      phase: "wake.running",
-      wake: input.wake,
-    });
-  } catch {
-    // Diagnostic emission must not block the assistant phase.
-  }
+  void writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields({
+        attemptId: input.input.request.attemptId,
+        leaseGeneration: input.input.request.leaseGeneration,
+        workspaceVersion: input.input.request.workspaceVersion,
+      }),
+      component: "assistant",
+      eventCode: "assistant.automation_detail",
+      level: "info",
+      phase: "invoke",
+      redactedJson,
+    },
+    platform: input.input.platform,
+  });
 }
 
 async function writeHostedAssistantPassRuntimeLog(input: {

@@ -7,10 +7,7 @@ import type {
   HostedExecutionStructuredLogDetails,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
-import {
-  emitHostedExecutionStructuredLog,
-  sanitizeHostedExecutionStructuredLogDetails,
-} from "@murphai/hosted-execution";
+import { sanitizeHostedExecutionStructuredLogDetails } from "@murphai/hosted-execution";
 
 const HOSTED_ASSISTANT_TURN_TIMING_STAGES = new Set([
   "provider-result-returned",
@@ -58,6 +55,11 @@ const hostedTurnTimingDetailReaders = {
   turnTimingStepElapsedMs: readHostedTurnTimingNonnegativeNumber,
 } as const satisfies Record<string, HostedTurnTimingDetailReader>;
 
+// "Observability writes are never user latency" — turn timing surfaces only
+// through the durable pass-finished log entries (queued, non-blocking).
+// Returning a redacted log entry lets the caller append it to the pass's
+// existing redactedLogEntries; we deliberately do not emit a synchronous
+// structured log here.
 export function emitHostedAssistantTurnTimingTraceLog(input: {
   event: unknown;
   wake: HostedRuntimeEvent;
@@ -67,24 +69,13 @@ export function emitHostedAssistantTurnTimingTraceLog(input: {
     return null;
   }
 
-  const redactedDetails = sanitizeHostedExecutionStructuredLogDetails(diagnostic);
-  const message = "Hosted assistant turn timing milestone captured.";
-
-  emitHostedExecutionStructuredLog({
-    component: "runtime",
-    details: redactedDetails,
-    message,
-    phase: "wake.running",
-    wake: input.wake,
-  });
-
   return {
     component: "runtime",
     eventId: input.wake.eventId,
     level: "info",
-    message,
+    message: "Hosted assistant turn timing milestone captured.",
     phase: "wake.running",
-    redacted: redactedDetails,
+    redacted: sanitizeHostedExecutionStructuredLogDetails(diagnostic),
   };
 }
 

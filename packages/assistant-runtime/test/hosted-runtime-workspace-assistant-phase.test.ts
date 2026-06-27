@@ -183,6 +183,16 @@ type RuntimeDeviceSyncConnectLinkRequest = Parameters<
   RuntimeDeviceSyncPort["createConnectLink"]
 >[0];
 
+function withoutAssistantTurnTimingLogs(
+  logRequests: HostedRuntimeLogRequest[],
+): HostedRuntimeLogRequest[] {
+  return logRequests.filter(
+    (request) =>
+      request.entries[0]?.redactedJson?.schema
+        !== "murph.assistant-turn-timing.v1",
+  );
+}
+
 function extractTopLevelFunctionBody(source: string, functionName: string): string {
   const declarationIndex = source.indexOf(`function ${functionName}`);
   if (declarationIndex < 0) {
@@ -3185,13 +3195,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       logRequests,
       now: () => "2026-04-27T00:00:00.000Z",
     }));
+    const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(result.progressed).toBe(true);
-    expect(logRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
+    expect(filteredLogRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
       "assistant.automation_detail",
       "assistant.pass_finished",
     ]);
-    expect(logRequests[0]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests[0]?.entries[0]).toEqual(expect.objectContaining({
       attemptId: "attempt_synthetic_phase",
       component: "assistant",
       eventCode: "assistant.automation_detail",
@@ -3206,10 +3217,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
       workspaceVersion: "8",
     }));
-    expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(expect.objectContaining({
+    expect(filteredLogRequests[0]?.entries[0]?.redactedJson).not.toEqual(expect.objectContaining({
       assistantProviderRequest: expect.anything(),
     }));
-    expect(logRequests[1]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests[1]?.entries[0]).toEqual(expect.objectContaining({
       attemptId: "attempt_synthetic_phase",
       component: "assistant",
       eventCode: "assistant.pass_finished",
@@ -3278,7 +3289,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
-    expect(logRequests[0]?.entries[0]).toEqual(expect.objectContaining({
+    const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
+    expect(filteredLogRequests[0]?.entries[0]).toEqual(expect.objectContaining({
       component: "assistant",
       errorCode: "ASSISTANT_CODEX_FAILED",
       eventCode: "assistant.automation_detail",
@@ -3334,8 +3346,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
-    expect(logRequests[0]?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
+    expect(filteredLogRequests[0]?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
       errorCode: "ASSISTANT_CODEX_FAILED",
       safeErrorLength:
         "Bearer raw-token-value https://api.openai.com/v1/responses".length,
@@ -3373,8 +3386,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
-    expect(logRequests[0]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests[0]?.entries[0]).toEqual(expect.objectContaining({
       errorCode: "ASSISTANT_CODEX_FAILED",
       redactedJson: expect.objectContaining({
         errorCode: "ASSISTANT_CODEX_FAILED",
@@ -3389,7 +3403,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         type: "input.reply-failed",
       }),
     }));
-    expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(expect.objectContaining({
+    expect(filteredLogRequests[0]?.entries[0]?.redactedJson).not.toEqual(expect.objectContaining({
       providerFailureRawPayloadReason: expect.anything(),
     }));
     expect(JSON.stringify(logRequests)).not.toContain("raw-provider-token");
@@ -3427,12 +3441,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       workspace: createDueAssistantWorkspace(),
     }));
     await result.afterCheckpoint?.();
+    const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
-    expect(logRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
+    expect(filteredLogRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
       "assistant.pass_finished",
       "outbox.delivery_finished",
     ]);
-    expect(logRequests[1]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests[1]?.entries[0]).toEqual(expect.objectContaining({
       component: "outbox",
       eventCode: "outbox.delivery_finished",
       level: "info",
@@ -4015,12 +4030,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       workspace: createDueAssistantWorkspace(),
     }));
     await result.afterCheckpoint?.();
+    const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
-    expect(logRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
+    expect(filteredLogRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
       "assistant.pass_finished",
       "outbox.delivery_finished",
     ]);
-    expect(logRequests[1]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests[1]?.entries[0]).toEqual(expect.objectContaining({
       component: "outbox",
       eventCode: "outbox.delivery_finished",
       level: "warn",
@@ -4074,8 +4090,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       workspace: createDueAssistantWorkspace(),
     }));
     await result.afterCheckpoint?.();
+    const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
-    expect(logRequests[1]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests[1]?.entries[0]).toEqual(expect.objectContaining({
       component: "outbox",
       eventCode: "outbox.delivery_finished",
       level: "warn",
@@ -4150,8 +4167,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       workspace: createDueAssistantWorkspace(),
     }));
     await result.afterCheckpoint?.();
+    const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
-    expect(logRequests[1]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests[1]?.entries[0]).toEqual(expect.objectContaining({
       component: "outbox",
       eventCode: "outbox.delivery_finished",
       level: "warn",
@@ -5203,12 +5221,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     const postCheckpoint = await result.afterCheckpoint?.();
+    const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(postCheckpoint).toBeUndefined();
-    expect(logRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
+    expect(filteredLogRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
       "assistant.pass_finished",
     ]);
-    expect(logRequests[0]?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
+    expect(filteredLogRequests[0]?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
       nextWakeAtPresent: true,
       progressed: false,
       systemWakeAtPresent: true,
