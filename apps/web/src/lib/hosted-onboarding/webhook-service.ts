@@ -202,18 +202,20 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         );
       }
 
-      if (plan.firstContactAdmissionRequest) {
+      const firstContactAdmissionRequest = plan.firstContactAdmissionRequest;
+      if (firstContactAdmissionRequest) {
         // Resolve deterministic blocks (no OpenAI call) before claiming the
         // per-contact budget so unsupported/textless events cannot exhaust the
         // classifier-attempt cap.
         const deterministicDecision = tryHostedLinqFirstContactAdmissionDeterministicDecision(
-          plan.firstContactAdmissionRequest,
+          firstContactAdmissionRequest,
         );
         if (deterministicDecision) {
           const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecision({
             decision: deterministicDecision,
             eventId: event.event_id,
             prisma,
+            rejectedMessageText: firstContactAdmissionRequest.text,
           });
           plan = firstContactAdmission.kind === "block"
             ? buildBlockedHostedLinqFirstContactAdmissionPlan()
@@ -254,7 +256,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             // claim still surfaces "exhausted" if a concurrent event filled the
             // cap between the pre-flight read and the lock acquisition.
             const classifiedAdmission = await classifyHostedLinqFirstContactAdmission({
-              request: plan.firstContactAdmissionRequest,
+              request: firstContactAdmissionRequest,
               signal: input.signal,
             });
             firstContactAdmissionClassified = true;
@@ -277,6 +279,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 decision: classifiedAdmission,
                 eventId: event.event_id,
                 prisma,
+                rejectedMessageText: firstContactAdmissionRequest.text,
               });
               if (firstContactAdmission.kind === "block") {
                 plan = buildBlockedHostedLinqFirstContactAdmissionPlan();

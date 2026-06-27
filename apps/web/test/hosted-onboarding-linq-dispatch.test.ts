@@ -2327,6 +2327,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("sends the signup link on the first inbound SMS phone message", async () => {
+    mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
+    mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValueOnce({
+      confidence: 1,
+      kind: "allow",
+      source: "deterministic",
+    });
     const invite = {
       channel: "linq",
       id: "invite_sms",
@@ -2347,6 +2353,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           },
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValue(0),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+        findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
@@ -2373,6 +2388,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const response = await handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            {
+              type: "text",
+              value: "Murph can you help me start?",
+            },
+          ],
+        },
         eventId: "evt_sms_first_contact",
       }),
       signature: null,
@@ -2386,6 +2409,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "sent-signup-link",
     });
     expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledWith({
+      data: {
+        confidence: 1,
+        decision: "allow",
+        eventId: "evt_sms_first_contact",
+        source: "deterministic",
+      },
+    });
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
@@ -2484,6 +2516,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       kind: "block",
       source: "model",
     });
+    const rejectedMessageText = `Hey Gail! ${"x".repeat(2_050)}`;
+    const boundedRejectedMessageText = rejectedMessageText.slice(0, 2_000);
 
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -2533,8 +2567,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           parts: [
             {
               type: "text",
-              value:
-                "Hey Gail! I was on a hike, just got home. I will leave the plates and box next to the garage door.",
+              value: rejectedMessageText,
             },
           ],
         },
@@ -2556,7 +2589,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         participantContactKind: "phone",
         partTypes: ["text"],
         service: "imessage",
-        text: expect.stringContaining("Hey Gail!"),
+        text: boundedRejectedMessageText,
       }),
       signal: undefined,
     });
@@ -2566,9 +2599,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
     expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledWith({
       data: {
-          confidence: 0.94,
+        confidence: 0.94,
         decision: "block",
         eventId: "evt_wrong_person_first_contact",
+        rejectedMessageText: boundedRejectedMessageText,
         source: "model",
       },
     });
