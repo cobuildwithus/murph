@@ -29,6 +29,7 @@ import type {
 } from '../hosted-tool-context.js'
 import type {
   AssistantHostedGeneratedImageUploader,
+  AssistantWorkspaceArtifactMaterializer,
 } from '../execution-context.js'
 import type {
   AssistantRuntimeIssueInput,
@@ -123,12 +124,17 @@ export interface AssistantProviderTurn {
   showThinkingTraces?: boolean
   systemPrompt?: string | null
   progressDelivery?: AssistantProgressDelivery | null
+  loadAuthorizedReferenceImageRefs?:
+    | (() => Promise<ReadonlyMap<string, { sha256: string }>>)
+    | null
   hostedToolContext?: AssistantHostedToolContext | null
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   turnContextPrompt?: string | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   usageAttribution?: AssistantUsageAttribution | null
   voiceMemoDeliveryChannel?: 'linq' | 'telegram' | null
+  vaultRoot?: string | null
   workingDirectory: string
 }
 

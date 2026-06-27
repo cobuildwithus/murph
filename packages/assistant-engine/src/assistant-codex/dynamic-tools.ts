@@ -29,6 +29,7 @@ import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 import type {
   AssistantHostedGeneratedImageUploader,
+  AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
 import type {
   AssistantHostedToolContext,
@@ -158,7 +159,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   namespace: 'murph',
   name: 'generate_image',
   description:
-    'Generate one image with GPT Image 2. Hosted runs attach the generated image to the final response; local runs save it under CODEX_HOME/generated_images.',
+    'Generate one image with GPT Image 2, optionally using ordered vault image references. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. Hosted runs attach the generated image to the final response; local runs save it under CODEX_HOME/generated_images.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -189,6 +190,18 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
           { type: 'null' },
         ],
         default: null,
+      },
+      referenceImageRefs: {
+        type: 'array',
+        maxItems: 16,
+        default: [],
+        description:
+          'Optional ordered vault-relative JPG, PNG, or WebP image refs to use as visual references (up to 16). Use only refs the user attached as part of the current turn (other vault paths are rejected as unauthorized). Describe in the prompt how image 1, image 2, etc. should be used.',
+        items: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 1024,
+        },
       },
     },
     required: ['prompt'],
@@ -557,6 +570,10 @@ const generateImageArgumentsSchema = z
     outputFormat: z.enum(['webp', 'png', 'jpeg']).default('webp'),
     prompt: z.string().trim().min(1).max(4000),
     quality: z.enum(['low', 'medium', 'high']).default('medium'),
+    referenceImageRefs: z
+      .array(z.string().trim().min(1).max(1024))
+      .max(16)
+      .default([]),
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
   })
   .strict()
@@ -1187,18 +1204,23 @@ function currentHostedMailboxItemId(
 
 export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
+  loadAuthorizedReferenceImageRefs?:
+    | (() => Promise<ReadonlyMap<string, { sha256: string }>>)
+    | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext?: AssistantHostedToolContext | null
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   progressDelivery: AssistantProgressDelivery | null
   publicFetchImpl?: typeof fetch | null
   request: MurphDynamicToolRequest
   requireHostedGeneratedImageUploader?: boolean | null
+  vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (
@@ -1382,16 +1404,29 @@ export async function executeMurphDynamicToolRequest(input: {
         return toolTextResult(false, 'image generation cannot be combined with a voice memo')
       }
 
+      // Only resolve the per-turn authority allowlist when the model is
+      // actually requesting reference images. A plain no-refs generate_image
+      // call must keep working even if the accepted-input journal is
+      // transiently unreadable; gating the loader keeps the existing
+      // /v1/images/generations path independent of attachment-runtime state.
+      const requestedRefs = input.request.args.referenceImageRefs ?? []
+      const authorizedRefs =
+        requestedRefs.length > 0 && input.loadAuthorizedReferenceImageRefs
+          ? await input.loadAuthorizedReferenceImageRefs()
+          : null
       const result = await executeGenerateImageTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
+        authorizedReferenceImageRefs: authorizedRefs,
         codexHome: input.codexHome ?? null,
         env: input.env,
         fetchImpl: input.fetchImpl,
         hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
         providerRequestOrdinal: input.nextUsageOrdinal(),
         requireHostedGeneratedImageUploader:
           input.requireHostedGeneratedImageUploader ?? false,
+        vaultRoot: input.vaultRoot ?? null,
       })
       return {
         ...(result.responseMedia && result.responseMedia.length > 0

@@ -9,6 +9,7 @@ import type {
 
 import type {
   AssistantHostedGeneratedImageUploader,
+  AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
 import { hashAssistantProviderStableJson } from '../assistant/providers/helpers.js'
 import type {
@@ -16,10 +17,15 @@ import type {
 } from '../assistant/providers/types.js'
 import { normalizeNullableString } from '../assistant/shared.js'
 import {
+  resolveGenerateImageReferences,
+  type ResolvedGenerateImageReference,
+} from './image-reference-resolver.js'
+import {
   generateOpenAiImage,
   OPENAI_IMAGE_GENERATION_MODEL,
   OPENAI_IMAGE_GENERATION_USAGE_EXTRACTION_VERSION,
   OPENAI_IMAGES_BASE_URL,
+  type OpenAiImageGenerationUsage,
   type OpenAiImageOutputFormat,
   type OpenAiImageQuality,
   type OpenAiImageSize,
@@ -30,6 +36,7 @@ export interface GenerateImageToolArgs {
   outputFormat: OpenAiImageOutputFormat
   prompt: string
   quality: OpenAiImageQuality
+  referenceImageRefs?: readonly string[]
   size: OpenAiImageSize
 }
 
@@ -40,18 +47,29 @@ export interface GenerateImageToolResult {
   usageDraft?: AssistantProviderUsageDraft | null
 }
 
+type GenerateImageOperation =
+  | 'image_generation'
+  | 'image_generation_with_references'
+
+type GenerateImageUsageExtractionSourcePath =
+  | 'openai.images.generate'
+  | 'openai.images.edit'
+
 const LOCAL_GENERATED_IMAGES_DIR = 'generated_images'
 const MAX_GENERATED_IMAGE_BYTES = 10 * 1024 * 1024
 
 export async function executeGenerateImageTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateImageToolArgs
+  authorizedReferenceImageRefs?: ReadonlyMap<string, { sha256: string }> | null
   codexHome?: string | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   providerRequestOrdinal: number
   requireHostedGeneratedImageUploader?: boolean | null
+  vaultRoot?: string | null
 }): Promise<GenerateImageToolResult> {
   const apiKey = normalizeNullableString(input.env.OPENAI_API_KEY)
   if (!apiKey) {
@@ -71,7 +89,42 @@ export async function executeGenerateImageTool(input: {
     }
   }
 
+  const referenceImageRefs = input.args.referenceImageRefs ?? []
+  const vaultRoot = normalizeNullableString(input.vaultRoot)
+  if (referenceImageRefs.length > 0 && !vaultRoot) {
+    return {
+      rpcSuccess: false,
+      rpcText: 'image references are unavailable for this turn',
+    }
+  }
+
+  let referenceImages: ResolvedGenerateImageReference[] = []
+  try {
+    referenceImages = referenceImageRefs.length > 0
+      ? await resolveGenerateImageReferences({
+          authorizedReferenceImageRefs:
+            input.authorizedReferenceImageRefs ?? null,
+          materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+          refs: referenceImageRefs,
+          vaultRoot: vaultRoot ?? '',
+        })
+      : []
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error
+    }
+    return {
+      rpcSuccess: false,
+      rpcText: 'image references could not be loaded',
+    }
+  }
+
   const promptHash = hashGeneratedImagePrompt(input.args.prompt)
+  const operation: GenerateImageOperation = referenceImages.length > 0
+    ? 'image_generation_with_references'
+    : 'image_generation'
+  const usageExtractionSourcePath: GenerateImageUsageExtractionSourcePath =
+    referenceImages.length > 0 ? 'openai.images.edit' : 'openai.images.generate'
   let openAiResult: Awaited<ReturnType<typeof generateOpenAiImage>>
   try {
     openAiResult = await generateOpenAiImage({
@@ -79,8 +132,12 @@ export async function executeGenerateImageTool(input: {
       apiKey,
       fetchImpl: input.fetchImpl,
       outputFormat: input.args.outputFormat,
-      prompt: input.args.prompt,
+      prompt: buildGenerateImagePromptWithReferences({
+        prompt: input.args.prompt,
+        referenceImageCount: referenceImages.length,
+      }),
       quality: input.args.quality,
+      referenceImages,
       size: input.args.size,
     })
   } catch (error) {
@@ -95,10 +152,18 @@ export async function executeGenerateImageTool(input: {
 
   const usageDraft = buildGeneratedImageUsageDraft({
     args: input.args,
+    operation,
     providerRequestId: openAiResult.providerRequestId,
     providerRequestOrdinal: input.providerRequestOrdinal,
     rawUsageJson: openAiResult.rawUsageJson,
+    referenceImageCount: referenceImages.length,
+    referenceImageSha256s: referenceImages.map((reference) => reference.sha256),
+    referenceImageSourceRefSha256s: referenceImages.map(
+      (reference) => reference.sourceRefSha256,
+    ),
+    referenceImageTotalBytes: sumReferenceImageBytes(referenceImages),
     usage: openAiResult.usage,
+    usageExtractionSourcePath,
   })
 
   if (
@@ -124,6 +189,12 @@ export async function executeGenerateImageTool(input: {
         metadata: {
           model: OPENAI_IMAGE_GENERATION_MODEL,
           promptHash,
+          ...(referenceImages.length > 0
+            ? {
+                referenceImageCount: String(referenceImages.length),
+                referenceImageSetHash: hashReferenceImageSet(referenceImages),
+              }
+            : {}),
           schema: 'murph.generated-image.v1',
         },
         source: OPENAI_IMAGE_GENERATION_MODEL,
@@ -159,20 +230,16 @@ export async function executeGenerateImageTool(input: {
 
 function buildGeneratedImageUsageDraft(input: {
   args: GenerateImageToolArgs
+  operation: GenerateImageOperation
   providerRequestId: string | null
   providerRequestOrdinal: number
   rawUsageJson: Record<string, unknown> | null
-  usage: {
-    input_tokens?: number
-    input_tokens_details?: {
-      cached_tokens?: number
-    }
-    output_tokens?: number
-    output_tokens_details?: {
-      reasoning_tokens?: number
-    }
-    total_tokens?: number
-  } | null
+  referenceImageCount: number
+  referenceImageSha256s: readonly string[]
+  referenceImageSourceRefSha256s: readonly string[]
+  referenceImageTotalBytes: number
+  usage: OpenAiImageGenerationUsage | null
+  usageExtractionSourcePath: GenerateImageUsageExtractionSourcePath
 }): AssistantProviderUsageDraft {
   return {
     provider: 'openai-images',
@@ -189,7 +256,11 @@ function buildGeneratedImageUsageDraft(input: {
         imageOutputFormat: input.args.outputFormat,
         imageQuality: input.args.quality,
         imageSize: input.args.size,
-        operation: 'image_generation',
+        operation: input.operation,
+        referenceImageCount: input.referenceImageCount,
+        referenceImageSha256s: input.referenceImageSha256s,
+        referenceImageSourceRefSha256s: input.referenceImageSourceRefSha256s,
+        referenceImageTotalBytes: input.referenceImageTotalBytes,
       },
       providerName: 'OpenAI Images',
       providerRequestId: input.providerRequestId,
@@ -201,7 +272,7 @@ function buildGeneratedImageUsageDraft(input: {
       requestedModel: OPENAI_IMAGE_GENERATION_MODEL,
       servedModel: null,
       totalTokens: input.usage?.total_tokens ?? null,
-      usageExtractionSourcePath: 'openai.images.generate',
+      usageExtractionSourcePath: input.usageExtractionSourcePath,
       usageExtractionVersion: OPENAI_IMAGE_GENERATION_USAGE_EXTRACTION_VERSION,
     },
   }
@@ -284,4 +355,40 @@ function hashGeneratedImagePrompt(prompt: string): string {
     .update(prompt)
     .digest('base64url')
     .slice(0, 32)
+}
+
+function buildGenerateImagePromptWithReferences(input: {
+  prompt: string
+  referenceImageCount: number
+}): string {
+  if (input.referenceImageCount === 0) {
+    return input.prompt
+  }
+
+  return [
+    `Use the attached reference image${input.referenceImageCount === 1 ? '' : 's'} in the provided order.`,
+    'The user prompt may refer to them as image 1, image 2, etc.',
+    '',
+    input.prompt,
+  ].join('\n')
+}
+
+function hashReferenceImageSet(
+  referenceImages: readonly ResolvedGenerateImageReference[],
+): string {
+  const hash = createHash('sha256')
+  hash.update('murph.generated-image.reference-set.v1')
+  for (const reference of referenceImages) {
+    hash.update('\0')
+    hash.update(reference.sha256)
+    hash.update('\0')
+    hash.update(reference.sourceRefSha256)
+  }
+  return hash.digest('base64url').slice(0, 32)
+}
+
+function sumReferenceImageBytes(
+  referenceImages: readonly ResolvedGenerateImageReference[],
+): number {
+  return referenceImages.reduce((sum, reference) => sum + reference.bytes.byteLength, 0)
 }

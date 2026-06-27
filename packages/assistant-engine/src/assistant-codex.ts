@@ -112,6 +112,7 @@ import {
 } from './assistant-codex/images.js'
 import type {
   AssistantHostedGeneratedImageUploader,
+  AssistantWorkspaceArtifactMaterializer,
 } from './assistant/execution-context.js'
 import type {
   AssistantHostedToolContext,
@@ -431,7 +432,11 @@ export interface CodexAppServerTurnInput {
   }) => Promise<void> | void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
+  loadAuthorizedReferenceImageRefs?:
+    | (() => Promise<ReadonlyMap<string, { sha256: string }>>)
+    | null
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   oss?: boolean
   profile?: string | null
@@ -448,6 +453,7 @@ export interface CodexAppServerTurnInput {
   providerRequestOrdinal?: number | null
   publicInternetFetch?: typeof fetch | null
   requireHostedGeneratedImageUploader?: boolean | null
+  vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
   workingDirectory: string
 }
@@ -609,10 +615,12 @@ export async function executeCodexAppServerTurn(
   const preparedInput: CodexAppServerPreparedTurnInput = {
     ...normalizedInput,
     args,
+    loadAuthorizedReferenceImageRefs: input.loadAuthorizedReferenceImageRefs ?? null,
     codexCommand,
     env: childEnv,
     fetchImpl: input.fetchImpl ?? fetch,
     hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     imagePaths,
     launchKey,
     publicInternetFetch: input.publicInternetFetch ?? null,
@@ -3156,11 +3164,14 @@ async function runCodexAppServerTurnOnProcess(
       abortSignal: input.abortSignal
         ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
         : dynamicToolAbortController.signal,
+      loadAuthorizedReferenceImageRefs:
+        input.loadAuthorizedReferenceImageRefs ?? null,
       codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
       hostedToolContext: resolveCodexAppServerHostedToolContext(input),
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
       currentResponseMedia: responseMedia,
       nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
       productFeedbackRecorder: input.productFeedbackRecorder ?? null,
@@ -3172,6 +3183,7 @@ async function runCodexAppServerTurnOnProcess(
       request: dynamicToolRequest,
       requireHostedGeneratedImageUploader:
         input.requireHostedGeneratedImageUploader ?? false,
+      vaultRoot: input.vaultRoot ?? null,
       voiceMemoRuntime:
         dynamicToolRequest.kind === 'generate-voice-memo' ||
         dynamicToolRequest.kind === 'generate-song'
