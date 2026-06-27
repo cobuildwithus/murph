@@ -5,7 +5,7 @@ import type {
 } from "@murphai/hosted-execution";
 
 import {
-  createHostedExternalThreadIdentityLookupKeyReadCandidates,
+  createHostedExternalThreadLookupKeyReadCandidates,
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
@@ -138,18 +138,20 @@ export async function recordHostedThreadRouteLinqInboundEngagementTx(input: {
   if (!occurredAt) {
     return;
   }
-  const threadIdentityLookupKeys = createHostedExternalThreadIdentityLookupKeyReadCandidates({
+  const threadLookupKeys = createHostedExternalThreadLookupKeyReadCandidates({
+    accountLookupKey: input.linePhoneNumberLookupKey,
     channel: "linq",
     threadId: input.chatId,
   });
-  if (threadIdentityLookupKeys.length === 0) {
+  if (threadLookupKeys.length === 0) {
     return;
   }
 
   await input.prisma.hostedThreadRoute.updateMany({
     where: {
       channel: "linq",
-      threadIdentityLookupKey: { in: threadIdentityLookupKeys },
+      containerMemberId: input.memberId,
+      threadLookupKey: { in: threadLookupKeys },
       OR: [
         { lastInboundAt: null },
         { lastInboundAt: { lt: occurredAt } },

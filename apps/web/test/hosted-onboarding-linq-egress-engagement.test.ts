@@ -117,6 +117,10 @@ describe("hosted Linq egress engagement", () => {
   });
 
   it("caps future-dated inbound thread-route engagement at server receipt time", async () => {
+    const lineLookupKey = createHostedPhoneLookupKey("+15550100001");
+    if (!lineLookupKey) {
+      throw new Error("Expected test Linq line lookup key.");
+    }
     const prisma = {
       hostedThreadRoute: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -125,7 +129,7 @@ describe("hosted Linq egress engagement", () => {
 
     await recordHostedThreadRouteLinqInboundEngagementTx({
       chatId: "chat-1",
-      linePhoneNumberLookupKey: null,
+      linePhoneNumberLookupKey: lineLookupKey,
       memberId: "member-1",
       now: new Date("2026-06-25T12:00:00.000Z"),
       occurredAt: "2026-08-25T12:00:00.000Z",
@@ -137,8 +141,19 @@ describe("hosted Linq egress engagement", () => {
         data: {
           lastInboundAt: new Date("2026-06-25T12:00:00.000Z"),
         },
+        where: expect.objectContaining({
+          channel: "linq",
+          containerMemberId: "member-1",
+          threadLookupKey: {
+            in: expect.arrayContaining([
+              expect.stringMatching(/^hbidx:external-thread:/u),
+            ]),
+          },
+        }),
       }),
     );
+    expect(prisma.hostedThreadRoute.updateMany.mock.calls[0]?.[0]?.where)
+      .not.toHaveProperty("threadIdentityLookupKey");
   });
 
   it("records skipped runtime sends when no recent inbound exists", async () => {

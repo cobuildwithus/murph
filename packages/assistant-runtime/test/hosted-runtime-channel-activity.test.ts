@@ -492,3 +492,53 @@ test("hosted progress Linq delivery recovers same-wake direct recipient only", a
     targetKind: "thread",
   });
 });
+
+test("hosted progress Linq delivery sends recovered same-wake chat when request target is blinded", async () => {
+  const wake = buildHostedExecutionLinqConversationMessageWake({
+    eventId: "evt_linq_progress_blinded_target",
+    linqMessage: {
+      chatId: "linq_chat_current",
+      from: "+15550000001",
+      isFromMe: false,
+      messageId: "linq_message_current",
+      parts: [],
+    },
+    occurredAt: "2026-04-08T00:00:00.000Z",
+    phoneLookupKey: "+15550000002",
+    userId: "member_123",
+  });
+  const delivery = createHostedAssistantProgressDeliveryDependencies({
+    effectsPort: {
+      async assertLinqRecentInboundEngagement() {},
+      sendEmail: mocks.sendEmail,
+    },
+    forwardedEnv: {
+      LINQ_API_BASE_URL: "https://api.linq.example",
+      LINQ_API_TOKEN: "platform-linq-token",
+    },
+    providerFetch: vi.fn<typeof fetch>(),
+    userEnv: {},
+    wake,
+  });
+
+  await delivery.sendLinq?.({
+    directRecipientPhoneNumber: null,
+    fromPhoneNumber: null,
+    idempotencyKey: "progress-key",
+    message: "Checking the current thread.",
+    replyToMessageId: "linq_message_current",
+    target: "hbid:linq-chat:v1:redacted",
+    targetKind: "thread",
+  });
+
+  assert.deepEqual(mocks.sendHostedProviderLinqMessage.mock.calls[0]?.[0], {
+    directRecipientPhoneNumber: "+15550000001",
+    fromPhoneNumber: null,
+    idempotencyKey: "progress-key",
+    media: null,
+    message: "Checking the current thread.",
+    replyToMessageId: "linq_message_current",
+    target: "linq_chat_current",
+    targetKind: "thread",
+  });
+});

@@ -4730,8 +4730,8 @@ describe("hosted runtime callbacks", () => {
       ],
       message: "hello from hosted",
       replyToMessageId: "linq_message_current",
-      target: "+15550001",
-      targetKind: "participant",
+      target: "linq_chat_current",
+      targetKind: "thread",
     }, {
       env: {},
       fetchImplementation: expect.any(Function),
@@ -5639,7 +5639,7 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("does not use same-wake contact fields as Linq sender authority", async () => {
+  it("sends to the recovered same-wake Linq chat without using contact fields as sender authority", async () => {
     const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq_hashed_target",
       linqMessage: {
@@ -5666,8 +5666,14 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "ain_hashed_thread",
       transportIdempotent: true,
     });
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_current",
+      target: "linq_chat_current",
+      targetKind: "thread" as const,
+    });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
-      await dependencies.sendLinq({
+      const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
         fromPhoneNumber: null,
         idempotencyKey: "assistant-outbox:intent_hashed_target",
@@ -5677,28 +5683,50 @@ describe("hosted runtime callbacks", () => {
         targetKind: "thread",
       });
 
-      throw new Error("Linq recovery without an explicit sender should fail.");
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
     });
 
-    await expect(drainHostedPreparedAssistantDeliveries({
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake,
       effectsPort: createHostedRuntimeEffectsPortStub(),
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
-    })).rejects.toMatchObject({
-      code: "ASSISTANT_HOSTED_LINQ_RECOVERY_SENDER_REQUIRED",
-      context: expect.objectContaining({
-        retryable: false,
-      }),
     });
 
     expect(JSON.stringify(effect.payload)).not.toContain("+15550001");
     expect(JSON.stringify(effect.payload)).not.toContain("+15559990000");
-    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
+      fromPhoneNumber: null,
+      idempotencyKey: "assistant-outbox:intent_hashed_target",
+      media: null,
+      message: "hello from hosted",
+      replyToMessageId: "linq_message_current",
+      target: "linq_chat_current",
+      targetKind: "thread",
+    }, {
+      env: {},
+      fetchImplementation: expect.any(Function),
+      signal: undefined,
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+      }),
+    ]);
   });
 
-  it("materializes same-wake Linq direct targets when explicit sender authority is present", async () => {
+  it("keeps recovered same-wake Linq chat targets even when explicit sender authority is present", async () => {
     const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq_hashed_target_sender",
       linqMessage: {
@@ -5727,9 +5755,9 @@ describe("hosted runtime callbacks", () => {
     });
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
-      providerThreadId: "linq_chat_materialized",
-      target: "linq_chat_materialized",
-      targetKind: "participant" as const,
+      providerThreadId: "linq_chat_current",
+      target: "linq_chat_current",
+      targetKind: "thread" as const,
     });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
@@ -5770,8 +5798,8 @@ describe("hosted runtime callbacks", () => {
       media: null,
       message: "hello from hosted",
       replyToMessageId: "linq_message_current",
-      target: "+15550001",
-      targetKind: "participant",
+      target: "linq_chat_current",
+      targetKind: "thread",
     }, {
       env: {},
       fetchImplementation: expect.any(Function),
