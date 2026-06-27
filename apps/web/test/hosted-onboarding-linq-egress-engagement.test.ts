@@ -192,8 +192,9 @@ describe("hosted Linq egress engagement", () => {
     expect(prisma.hostedLinqDelivery.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          idempotencyKey: "delivery-key-1",
+          idempotencyKey: expect.stringMatching(/^hbid:linq\.delivery-idempotency:/u),
           skippedAt: new Date("2026-06-25T12:00:00.000Z"),
+          sourceRef: expect.stringMatching(/^hbid:linq\.delivery-source-ref:/u),
           source: "hosted_runtime_linq_egress_guard",
           status: "skipped",
         }),
@@ -252,10 +253,70 @@ describe("hosted Linq egress engagement", () => {
     expect(prisma.hostedLinqDelivery.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          idempotencyKey: "delivery-key-2",
+          idempotencyKey: expect.stringMatching(/^hbid:linq\.delivery-idempotency:/u),
           source: "hosted_runtime_linq_egress_guard",
           status: "skipped",
           targetKind: "participant",
+        }),
+      }),
+    );
+  });
+
+  it("does not authorize a chat send from a different chat's recipient-phone freshness", async () => {
+    const activeChatLookupKey = createHostedLinqChatLookupKey("chat-a");
+    const recipientLookupKey = createHostedPhoneLookupKey("+15550199999");
+    if (!activeChatLookupKey || !recipientLookupKey) {
+      throw new Error("Expected test lookup keys.");
+    }
+    const prisma = {
+      hostedLinqDelivery: {
+        create: vi.fn().mockResolvedValue({ id: "hld_skip" }),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedLinqLine: {
+        upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) =>
+          Promise.resolve({
+            phoneNumberLookupKey: input.create.phoneNumberLookupKey,
+          })),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
+          Promise.resolve({
+            phoneNumberLookupKey: input.where?.phoneNumberLookupKey ?? "hbidx:phone:updated",
+          })),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatLookupKey: activeChatLookupKey,
+          linqLastInboundAt: new Date("2026-06-25T12:00:00.000Z"),
+          linqRecipientPhoneLookupKey: recipientLookupKey,
+          pendingLinqChatLookupKey: null,
+          pendingLinqLastInboundAt: null,
+          pendingLinqRecipientPhoneLookupKey: null,
+        }),
+      },
+    };
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      directRecipientPhoneNumber: "+15550199999",
+      fromPhoneNumber: "+15550100001",
+      idempotencyKey: "delivery-key-chat-b",
+      intentId: "intent-chat-b",
+      memberId: "member-1",
+      now: new Date("2026-06-25T12:05:00.000Z"),
+      prisma: prisma as never,
+      target: "chat-b",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedLinqDelivery.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          linqChatLookupKey: createHostedLinqChatLookupKey("chat-b"),
+          status: "skipped",
+          targetKind: "thread",
         }),
       }),
     );

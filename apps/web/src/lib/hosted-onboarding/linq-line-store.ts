@@ -5,6 +5,9 @@ import {
   createHostedPhoneLookupKey,
   readHostedPhoneHint,
 } from "./contact-privacy";
+import {
+  createHostedLinqProviderEventLookupKey,
+} from "./linq-observability-identifiers";
 import { normalizePhoneNumber } from "./phone";
 
 type HostedLinqLineClient = PrismaClient | Prisma.TransactionClient;
@@ -187,7 +190,7 @@ async function projectMessageDelivered(
       healthStatus: "healthy",
       lastDeliveredAt: event.providerCreatedAt,
       lastReceiptAt: event.providerCreatedAt,
-      lastReceiptEventId: event.eventId,
+      lastReceiptEventId: createHostedLinqProviderEventLookupKey(event.eventId),
     },
   });
   return updated.count === 1;
@@ -214,7 +217,7 @@ async function projectMessageFailed(
       lastFailureCode: event.failureCode,
       lastFailureReason: event.failureReason,
       lastReceiptAt: event.providerCreatedAt,
-      lastReceiptEventId: event.eventId,
+      lastReceiptEventId: createHostedLinqProviderEventLookupKey(event.eventId),
     },
   });
   return updated.count === 1;
@@ -232,7 +235,7 @@ async function projectPhoneNumberStatusUpdated(
     data: {
       ...(egressPolicy ? { egressPolicy } : {}),
       healthStatus,
-      lastStatusEventId: event.eventId,
+      lastStatusEventId: createHostedLinqProviderEventLookupKey(event.eventId),
       providerReason: event.providerReason,
       providerStatus: event.providerStatus,
       providerUpdatedAt: event.providerCreatedAt,

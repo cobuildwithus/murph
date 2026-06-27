@@ -8,6 +8,10 @@ import {
   recordHostedLinqDeliveryAttemptTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
+import {
+  createHostedLinqDeliveryIdempotencyLookupKey,
+  createHostedLinqProviderEventLookupKey,
+} from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 
 describe("hosted Linq observability stores", () => {
@@ -43,7 +47,7 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          eventId: "evt_failed_123",
+          eventId: createHostedLinqProviderEventLookupKey("evt_failed_123"),
           eventType: "message.failed",
           failureCode: "30007",
           failureReason: "[redacted]",
@@ -60,7 +64,7 @@ describe("hosted Linq observability stores", () => {
           healthStatus: "warning",
           lastFailureCode: "30007",
           lastFailureReason: "[redacted]",
-          lastReceiptEventId: "evt_failed_123",
+          lastReceiptEventId: createHostedLinqProviderEventLookupKey("evt_failed_123"),
         }),
       }),
     );
@@ -87,7 +91,7 @@ describe("hosted Linq observability stores", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           deliveryId: "hld_attempt_123",
-          eventId: "evt_failed_123",
+          eventId: createHostedLinqProviderEventLookupKey("evt_failed_123"),
           kind: "message_failed",
           status: "pending",
         }),
@@ -322,7 +326,7 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          eventId: "evt_status_rotated_key",
+          eventId: createHostedLinqProviderEventLookupKey("evt_status_rotated_key"),
           phoneNumberLookupKey: "hbidx:phone:v1-line-key",
         }),
       }),
@@ -360,7 +364,7 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          eventId: "evt_status_123",
+          eventId: createHostedLinqProviderEventLookupKey("evt_status_123"),
           providerCreatedAt: new Date("2026-03-26T12:00:00.000Z"),
           providerStatus: "CRITICAL",
         }),
@@ -371,7 +375,7 @@ describe("hosted Linq observability stores", () => {
         data: expect.objectContaining({
           egressPolicy: "disabled",
           healthStatus: "unhealthy",
-          lastStatusEventId: "evt_status_123",
+          lastStatusEventId: createHostedLinqProviderEventLookupKey("evt_status_123"),
           providerStatus: "CRITICAL",
           providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
         }),
@@ -408,7 +412,7 @@ describe("hosted Linq observability stores", () => {
       | undefined;
     expect(updateInput?.data).toMatchObject({
       healthStatus: "healthy",
-      lastStatusEventId: "evt_status_123",
+      lastStatusEventId: createHostedLinqProviderEventLookupKey("evt_status_123"),
       providerStatus: "ACTIVE",
     });
     expect(updateInput?.data).not.toHaveProperty("egressPolicy");
@@ -435,7 +439,7 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          eventId: "evt_status_flagged",
+          eventId: createHostedLinqProviderEventLookupKey("evt_status_flagged"),
           providerStatus: "FLAGGED",
         }),
       }),
@@ -529,6 +533,9 @@ describe("hosted Linq observability stores", () => {
 
   it("records attempts and later preserves provider ids as lookup keys on acceptance", async () => {
     const fixture = createObservabilityPrismaFixture();
+    const deliveryIdempotencyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
+      "linq-message:event-123",
+    );
 
     await expect(recordHostedLinqDeliveryAttemptTx({
       idempotencyKey: "linq-message:event-123",
@@ -545,11 +552,12 @@ describe("hosted Linq observability stores", () => {
       expect.objectContaining({
         create: expect.objectContaining({
           id: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
-          idempotencyKey: "linq-message:event-123",
+          idempotencyKey: deliveryIdempotencyLookupKey,
+          sourceRef: expect.stringMatching(/^hbid:linq\.delivery-source-ref:/u),
           status: "attempted",
         }),
         where: {
-          idempotencyKey: "linq-message:event-123",
+          idempotencyKey: deliveryIdempotencyLookupKey,
         },
       }),
     );
@@ -577,7 +585,7 @@ describe("hosted Linq observability stores", () => {
           status: "accepted",
         }),
         where: expect.objectContaining({
-          idempotencyKey: "linq-message:event-123",
+          idempotencyKey: deliveryIdempotencyLookupKey,
           deliveredAt: null,
           lastReceiptAt: null,
           skippedAt: null,
@@ -592,6 +600,9 @@ describe("hosted Linq observability stores", () => {
 
   it("lets a retry acceptance replace a pre-provider send failure", async () => {
     const fixture = createObservabilityPrismaFixture();
+    const deliveryIdempotencyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
+      "linq-message:event-123",
+    );
 
     await markHostedLinqDeliveryAcceptedTx({
       idempotencyKey: "linq-message:event-123",
@@ -611,7 +622,7 @@ describe("hosted Linq observability stores", () => {
         }),
         where: expect.objectContaining({
           deliveredAt: null,
-          idempotencyKey: "linq-message:event-123",
+          idempotencyKey: deliveryIdempotencyLookupKey,
           lastReceiptAt: null,
           skippedAt: null,
           OR: expect.arrayContaining([
@@ -756,12 +767,12 @@ describe("hosted Linq observability stores", () => {
           failedAt: new Date("2026-03-26T12:00:05.000Z"),
           failureCode: "30007",
           failureReason: "[redacted]",
-          lastProviderEventId: "evt_failed_123",
+          lastProviderEventId: createHostedLinqProviderEventLookupKey("evt_failed_123"),
           lastReceiptAt: new Date("2026-03-26T12:00:05.000Z"),
           status: "failed",
         }),
         where: expect.objectContaining({
-          idempotencyKey: "linq-message:event-123",
+          idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey("linq-message:event-123"),
           OR: expect.arrayContaining([
             {
               lastReceiptAt: {
@@ -800,6 +811,7 @@ describe("hosted Linq observability stores", () => {
       }),
     );
     const update = fixture.hostedLinqDeliveryUpdateMany.mock.calls[0]?.[0];
+    expect(JSON.stringify(update)).not.toContain("linq-message:event-123");
     expect(JSON.stringify(update)).not.toContain("provider_msg_123");
     expect(JSON.stringify(update)).not.toContain("+15551234567");
     expect(JSON.stringify(update)).not.toContain("private member text");

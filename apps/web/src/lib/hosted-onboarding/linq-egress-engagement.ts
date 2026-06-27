@@ -225,6 +225,10 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
         prisma: input.prisma,
       })
     : null;
+  const fallbackChatId = input.targetKind === "participant" ? null : input.target;
+  const fallbackRecipientPhone = input.targetKind === "participant"
+    ? input.directRecipientPhoneNumber ?? input.target
+    : null;
   const decision = route
     ? decideHostedLinqRecentInbound({
       lastInboundAt: route.lastInboundAt,
@@ -232,12 +236,10 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     })
     : decideHostedLinqRecentInbound({
       lastInboundAt: await readHostedMemberLinqRouteLastInboundAt({
-        chatId: input.target,
+        chatId: fallbackChatId,
         memberId: input.memberId,
         prisma: input.prisma,
-        recipientPhone: input.targetKind === "participant"
-          ? null
-          : input.directRecipientPhoneNumber,
+        recipientPhone: fallbackRecipientPhone,
       }),
       now,
     });

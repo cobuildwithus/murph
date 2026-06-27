@@ -10,6 +10,11 @@ import {
   upsertHostedLinqLineForPhoneTx,
 } from "./linq-line-store";
 import {
+  createHostedLinqDeliveryIdempotencyLookupKey,
+  createHostedLinqDeliverySourceRefLookupKey,
+  createHostedLinqProviderEventLookupKey,
+} from "./linq-observability-identifiers";
+import {
   sanitizeHostedOnboardingPersistedErrorCode,
   sanitizeHostedOnboardingPersistedErrorMessage,
 } from "./http";
@@ -40,7 +45,9 @@ export async function recordHostedLinqDeliveryAttemptTx(input: {
   template?: string | null;
 }): Promise<{ id: string }> {
   const attemptedAt = input.attemptedAt ?? new Date();
-  const idempotencyKey = normalizeNullable(input.idempotencyKey);
+  const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
+    normalizeNullable(input.idempotencyKey),
+  );
   const phoneNumber = normalizePhoneNumber(input.phoneNumber);
   const phoneNumberLookupKey = await ensureHostedLinqDeliveryLineTx({
     observedAt: attemptedAt,
@@ -53,7 +60,7 @@ export async function recordHostedLinqDeliveryAttemptTx(input: {
     phoneNumberHint: phoneNumber ? readHostedPhoneHint(phoneNumber) : null,
     phoneNumberLookupKey,
     source: input.source,
-    sourceRef: normalizeNullable(input.sourceRef),
+    sourceRef: createHostedLinqDeliverySourceRefLookupKey(normalizeNullable(input.sourceRef)),
     status: "attempted",
     targetKind: normalizeNullable(input.targetKind),
     template: normalizeNullable(input.template),
@@ -98,13 +105,17 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
   messageId?: string | null;
   prisma: HostedLinqDeliveryClient;
 }): Promise<void> {
+  const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey);
+  if (!idempotencyKey) {
+    return;
+  }
   const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
   const messageLookupKeyCandidates = createHostedLinqMessageLookupKeyReadCandidates(input.messageId);
   await runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
     const updated = await prisma.hostedLinqDelivery.updateMany({
       where: {
         deliveredAt: null,
-        idempotencyKey: input.idempotencyKey,
+        idempotencyKey,
         lastReceiptAt: null,
         skippedAt: null,
         OR: [
@@ -138,7 +149,7 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
     }
 
     await applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx({
-      idempotencyKey: input.idempotencyKey,
+      idempotencyKey,
       messageLookupKeyCandidates,
       messageLookupKey,
       prisma,
@@ -153,11 +164,15 @@ export async function markHostedLinqDeliverySendFailedTx(input: {
   idempotencyKey: string;
   prisma: HostedLinqDeliveryClient;
 }): Promise<void> {
+  const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey);
+  if (!idempotencyKey) {
+    return;
+  }
   await input.prisma.hostedLinqDelivery.updateMany({
     where: {
       acceptedAt: null,
       deliveredAt: null,
-      idempotencyKey: input.idempotencyKey,
+      idempotencyKey,
       lastReceiptAt: null,
       messageLookupKey: null,
     },
@@ -187,7 +202,9 @@ export async function markHostedLinqDeliverySkippedTx(input: {
   template?: string | null;
 }): Promise<{ id: string }> {
   const skippedAt = input.skippedAt ?? new Date();
-  const idempotencyKey = normalizeNullable(input.idempotencyKey);
+  const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
+    normalizeNullable(input.idempotencyKey),
+  );
   const phoneNumber = normalizePhoneNumber(input.phoneNumber);
   const phoneNumberLookupKey = await ensureHostedLinqDeliveryLineTx({
     observedAt: skippedAt,
@@ -205,7 +222,7 @@ export async function markHostedLinqDeliverySkippedTx(input: {
     skipReason: input.reason.slice(0, 160),
     skippedAt,
     source: input.source,
-    sourceRef: normalizeNullable(input.sourceRef),
+    sourceRef: createHostedLinqDeliverySourceRefLookupKey(normalizeNullable(input.sourceRef)),
     status: "skipped",
     targetKind: normalizeNullable(input.targetKind),
     template: normalizeNullable(input.template),
@@ -315,7 +332,7 @@ function buildReceiptUpdate(event: ParsedHostedLinqProviderEvent): Prisma.Hosted
 
   return buildReceiptUpdateFromData({
     deliveryStatus: event.deliveryStatus,
-    eventId: event.eventId,
+    eventId: createHostedLinqProviderEventLookupKey(event.eventId),
     failureCode: event.failureCode,
     failureReason: event.failureReason,
     providerCreatedAt: event.providerCreatedAt,
@@ -327,7 +344,7 @@ function buildReceiptUpdateFromData(
   receipt: HostedLinqDeliveryReceiptData,
 ): Prisma.HostedLinqDeliveryUpdateInput {
   const base = {
-    lastProviderEventId: receipt.eventId,
+    lastProviderEventId: createHostedLinqProviderEventLookupKey(receipt.eventId),
     lastReceiptAt: receipt.providerCreatedAt,
     service: receipt.service,
   } satisfies Prisma.HostedLinqDeliveryUpdateInput;

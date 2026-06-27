@@ -56,6 +56,9 @@ import {
   releaseHostedLinqQuotaReplyNoticeClaim,
 } from "@/src/lib/hosted-onboarding/linq-daily-state";
 import {
+  createHostedLinqDeliveryIdempotencyLookupKey,
+} from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
+import {
   createHostedWebhookLinqMessageSideEffect,
   drainHostedLinqSideEffectsDirect,
 } from "@/src/lib/hosted-onboarding/webhook-transport";
@@ -233,7 +236,7 @@ describe("hosted Linq webhook transport", () => {
           }),
           where: expect.objectContaining({
             deliveredAt: null,
-            idempotencyKey: effect.effectId,
+            idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(effect.effectId),
             lastReceiptAt: null,
             skippedAt: null,
           }),

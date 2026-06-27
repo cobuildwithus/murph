@@ -5,6 +5,9 @@ import {
   ensureHostedLinqLineForProviderEventTx,
   projectHostedLinqLineForProviderEventTx,
 } from "./linq-line-store";
+import {
+  createHostedLinqProviderEventLookupKey,
+} from "./linq-observability-identifiers";
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { sha256Hex } from "../primitives";
@@ -20,6 +23,7 @@ export async function ingestHostedLinqProviderEventTx(input: {
   duplicate: boolean;
 }> {
   const receivedAt = input.receivedAt ?? new Date();
+  const eventLookupKey = createHostedLinqProviderEventLookupKey(input.event.eventId);
   const lineLookupKey = await ensureHostedLinqLineForProviderEventTx({
     event: input.event,
     prisma: input.prisma,
@@ -29,7 +33,7 @@ export async function ingestHostedLinqProviderEventTx(input: {
       apiVersion: input.event.apiVersion,
       deliveryStatus: input.event.deliveryStatus,
       direction: input.event.direction,
-      eventId: input.event.eventId,
+      eventId: eventLookupKey,
       eventType: input.event.eventType,
       extractionJson: input.event.extractionJson,
       extractionVersion: 1,
@@ -93,6 +97,7 @@ export async function ingestHostedLinqProviderEventTx(input: {
   const alertIds = await claimHostedLinqAlertsForProviderEventTx({
     deliveryId: deliveryReceipt.deliveryId,
     event: input.event,
+    eventLookupKey,
     lineLookupKey,
     prisma: input.prisma,
   });
@@ -123,6 +128,7 @@ function isStaleStatusProjection(
 async function claimHostedLinqAlertsForProviderEventTx(input: {
   deliveryId: string | null;
   event: ParsedHostedLinqProviderEvent;
+  eventLookupKey: string;
   lineLookupKey: string | null;
   prisma: HostedLinqProviderEventClient;
 }): Promise<string[]> {
@@ -131,13 +137,13 @@ async function claimHostedLinqAlertsForProviderEventTx(input: {
     return [];
   }
 
-  const id = buildHostedLinqAlertId(kind, input.event.eventId);
+  const id = buildHostedLinqAlertId(kind, input.eventLookupKey);
   const created = await input.prisma.hostedLinqAlert.createMany({
     data: {
       claimedAt: new Date(),
       deliveryId: input.deliveryId,
       detailsJson: buildHostedLinqAlertDetailsJson(input.event),
-      eventId: input.event.eventId,
+      eventId: input.eventLookupKey,
       id,
       kind,
       phoneNumberHint: input.event.phoneNumberHint,

@@ -133,6 +133,9 @@ vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
 });
 
 import { buildHostedInviteReply } from "@/src/lib/hosted-onboarding/linq";
+import {
+  createHostedLinqProviderEventLookupKey,
+} from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 
 describe("hosted onboarding Linq webhook hard-cut flows", () => {
@@ -240,7 +243,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(prisma.hostedLinqProviderEvent.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          eventId: "evt_123",
+          eventId: createHostedLinqProviderEventLookupKey("evt_123"),
           eventType: "message.delivered",
         }),
         skipDuplicates: true,
@@ -283,7 +286,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(prisma.hostedLinqAlert.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          eventId: "evt_failed_123",
+          eventId: createHostedLinqProviderEventLookupKey("evt_failed_123"),
           kind: "message_failed",
           status: "pending",
         }),
@@ -332,7 +335,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(prisma.hostedLinqAlert.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          eventId: "evt_status_123",
+          eventId: createHostedLinqProviderEventLookupKey("evt_status_123"),
           kind: "phone_number_status_updated",
           status: "pending",
         }),
