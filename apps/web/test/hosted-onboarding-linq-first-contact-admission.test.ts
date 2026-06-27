@@ -31,13 +31,13 @@ import {
   claimHostedLinqFirstContactAdmissionBudget,
   readHostedLinqFirstContactAdmissionMode,
   recordHostedLinqFirstContactAdmissionDecision,
+  tryHostedLinqFirstContactAdmissionDeterministicDecision,
   type HostedLinqFirstContactAdmissionRequest,
 } from "@/src/lib/hosted-onboarding/linq-first-contact-admission";
 
 const BASE_REQUEST: HostedLinqFirstContactAdmissionRequest = {
   eventId: "evt_123",
   participantContactKind: "phone",
-  participantContactLookupKey: "blind:v1:test-contact",
   partTypes: ["text"],
   service: "imessage",
   text: "hi",
@@ -67,6 +67,28 @@ describe("Linq first-contact admission", () => {
     mocks.environment.linqFirstContactAdmissionMode = "off";
 
     expect(readHostedLinqFirstContactAdmissionMode()).toBe("off");
+  });
+
+  it("flags textless first-contact requests as deterministically blockable so callers can skip the budget claim", () => {
+    expect(
+      tryHostedLinqFirstContactAdmissionDeterministicDecision({
+        ...BASE_REQUEST,
+        text: null,
+      }),
+    ).toMatchObject({
+      category: "unsupported_content",
+      kind: "block",
+      source: "deterministic",
+    });
+  });
+
+  it("returns null from the deterministic check when text is present so the model classifier still runs", () => {
+    expect(
+      tryHostedLinqFirstContactAdmissionDeterministicDecision({
+        ...BASE_REQUEST,
+        text: "Murph can you help me with allergies?",
+      }),
+    ).toBeNull();
   });
 
   it("deterministically blocks textless first contacts without calling OpenAI", async () => {

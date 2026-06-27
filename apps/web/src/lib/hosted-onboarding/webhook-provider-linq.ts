@@ -974,7 +974,6 @@ function buildHostedLinqFirstContactAdmissionRequest(input: {
   return {
     eventId: input.event.event_id,
     participantContactKind: input.participantContact.kind,
-    participantContactLookupKey: input.participantContact.lookupKey,
     partTypes: buildHostedLinqFirstContactAdmissionPartTypes(input.context.messageEvent.data.message.parts),
     service: normalizeHostedLinqFirstContactAdmissionService(input.context.messageEvent.data.service),
     text: buildHostedLinqFirstContactAdmissionText(input.context.messageEvent.data.message.parts),

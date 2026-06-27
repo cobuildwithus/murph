@@ -48,7 +48,6 @@ export type HostedLinqFirstContactAdmissionDecision = {
 export type HostedLinqFirstContactAdmissionRequest = {
   eventId: string;
   participantContactKind: "email" | "phone";
-  participantContactLookupKey: string;
   partTypes: readonly string[];
   service: "imessage" | "rcs" | "sms" | "unknown";
   text: string | null;
@@ -138,16 +137,29 @@ export function readHostedLinqFirstContactAdmissionMode(): HostedLinqFirstContac
   return getHostedOnboardingEnvironment().linqFirstContactAdmissionMode;
 }
 
-export async function classifyHostedLinqFirstContactAdmission(input: {
-  request: HostedLinqFirstContactAdmissionRequest;
-  signal?: AbortSignal;
-}): Promise<HostedLinqFirstContactAdmissionDecision> {
-  if (!input.request.text) {
+// Returns a decision when the request can be resolved without an OpenAI
+// classifier call. Callers should run this before claiming the per-contact
+// admission budget so deterministic blocks never consume an attempt slot.
+export function tryHostedLinqFirstContactAdmissionDeterministicDecision(
+  request: HostedLinqFirstContactAdmissionRequest,
+): HostedLinqFirstContactAdmissionDecision | null {
+  if (!request.text) {
     return buildHostedLinqFirstContactAdmissionBlock({
       category: "unsupported_content",
       confidence: 1,
       source: "deterministic",
     });
+  }
+  return null;
+}
+
+export async function classifyHostedLinqFirstContactAdmission(input: {
+  request: HostedLinqFirstContactAdmissionRequest;
+  signal?: AbortSignal;
+}): Promise<HostedLinqFirstContactAdmissionDecision> {
+  const deterministicDecision = tryHostedLinqFirstContactAdmissionDeterministicDecision(input.request);
+  if (deterministicDecision) {
+    return deterministicDecision;
   }
 
   const environment = getHostedOnboardingEnvironment();
