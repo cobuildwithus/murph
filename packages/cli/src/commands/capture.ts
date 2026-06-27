@@ -37,7 +37,7 @@ export const captureCommandDescriptions = {
   importJson:
     'Import one or more dated media captures from a structured JSON payload file or stdin.',
   addHint:
-    'Use --media for one capture with one or more files. Use capture import-json --input @captures.json for batches.',
+    "Use --media for one capture with one or more files. For multiple distinct observations, body sites, or timepoints, run one capture add per observation grouped through vault-cli batch --format json --command '[...]' so each call stays argv-only and Incur-discoverable.",
   show: 'Show one capture by canonical event id or stable label.',
   list: 'List capture events with optional date, label, body-site, collection, and tag filters.',
   manifest: 'Show the immutable raw import manifest for one capture event id or stable label.',

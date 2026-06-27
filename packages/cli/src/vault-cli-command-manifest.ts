@@ -724,7 +724,7 @@ export const vaultCliCommandDescriptors = [
         path: ['capture', 'import-json'],
         description: captureCommandDescriptions.importJson,
         hint:
-          'JSON escape hatch for batch capture metadata, media/raw refs, labels, body sites, tags, and related ids.',
+          "Operator-only structured batch importer; no capture payload-schema is exposed, so agents must use repeated capture add grouped through vault-cli batch --format json --command '[...]' for multi-observation saves.",
       },
       {
         path: ['capture', 'show'],

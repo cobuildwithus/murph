@@ -8,7 +8,14 @@ import { test } from 'vitest'
 
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 
-import { registerCaptureCommands } from '../src/commands/capture.js'
+import {
+  captureCommandDescriptions,
+  registerCaptureCommands,
+} from '../src/commands/capture.js'
+import {
+  vaultCliCommandDescriptors,
+  type VaultCliCommandDescriptor,
+} from '../src/vault-cli-command-manifest.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
@@ -163,6 +170,35 @@ test('capture add schema exposes typed single-capture fields without raw input f
   ]) {
     assert.equal(field in schema.options.properties, true, field)
   }
+})
+
+test('capture add and import-json contract hints steer agents to vault-cli batch instead of capture import-json', () => {
+  assert.match(
+    captureCommandDescriptions.addHint,
+    /vault-cli batch --format json --command '\[\.\.\.\]'/u,
+  )
+  assert.equal(
+    captureCommandDescriptions.addHint.includes('capture import-json'),
+    false,
+  )
+
+  const descriptors = vaultCliCommandDescriptors as readonly VaultCliCommandDescriptor[]
+  const captureDescriptor = descriptors.find(
+    (descriptor) => descriptor.id === 'capture',
+  )
+  assert.ok(captureDescriptor, 'capture command descriptor present')
+  const importJsonLeaf = captureDescriptor.leafCommands?.find(
+    (leaf) => leaf.path.join(' ') === 'capture import-json',
+  )
+  assert.ok(importJsonLeaf, 'capture import-json leaf present')
+  assert.match(
+    importJsonLeaf.hint ?? '',
+    /Operator-only structured batch importer/u,
+  )
+  assert.match(
+    importJsonLeaf.hint ?? '',
+    /vault-cli batch --format json --command '\[\.\.\.\]'/u,
+  )
 })
 
 test('capture import-json schema exposes the batch payload escape hatch', async () => {
