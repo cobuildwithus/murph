@@ -1,6 +1,11 @@
 import type { HostedLinqFirstContactAdmissionMode } from "./env";
 import { hostedOnboardingError } from "./errors";
 import {
+  createHostedLinqParticipantContactLookupKey,
+  createHostedLinqParticipantContactLookupKeyReadCandidates,
+  type HostedLinqParticipantContact,
+} from "./linq-participant-contact";
+import {
   sanitizeHostedOnboardingStructuredLogDetails,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
@@ -9,6 +14,7 @@ import { getHostedOnboardingEnvironment } from "./runtime";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_TIMEOUT_MS = 10_000;
 const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MIN_ALLOW_CONFIDENCE = 0.6;
+export const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS = 4;
 
 const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_CATEGORIES = [
   "benign_greeting",
@@ -74,6 +80,53 @@ type HostedLinqFirstContactAdmissionDecisionStore = {
   };
 };
 
+type HostedLinqFirstContactAdmissionBudgetRecord = {
+  eventId: string;
+  participantContactKind: string;
+  participantContactLookupKey: string;
+};
+
+type HostedLinqFirstContactAdmissionBudgetStore = {
+  $executeRaw(
+    template: TemplateStringsArray,
+    ...values: readonly unknown[]
+  ): Promise<number>;
+  hostedLinqFirstContactAdmissionBudget: {
+    count(input: {
+      where: {
+        participantContactLookupKey: {
+          in: string[];
+        };
+      };
+    }): Promise<number>;
+    create(input: {
+      data: {
+        eventId: string;
+        participantContactKind: HostedLinqFirstContactAdmissionRequest["participantContactKind"];
+        participantContactLookupKey: string;
+      };
+    }): Promise<HostedLinqFirstContactAdmissionBudgetRecord>;
+    findFirst(input: {
+      where: {
+        eventId: string;
+        participantContactLookupKey: {
+          in: string[];
+        };
+      };
+    }): Promise<HostedLinqFirstContactAdmissionBudgetRecord | null>;
+  };
+};
+
+export type HostedLinqFirstContactAdmissionBudgetClaim =
+  | {
+      attemptCount: number;
+      kind: "claimed";
+    }
+  | {
+      attemptCount: number;
+      kind: "exhausted";
+    };
+
 type HostedLinqFirstContactAdmissionModelResult = {
   category: HostedLinqFirstContactAdmissionCategory;
   confidence: number;
@@ -84,16 +137,29 @@ export function readHostedLinqFirstContactAdmissionMode(): HostedLinqFirstContac
   return getHostedOnboardingEnvironment().linqFirstContactAdmissionMode;
 }
 
-export async function classifyHostedLinqFirstContactAdmission(input: {
-  request: HostedLinqFirstContactAdmissionRequest;
-  signal?: AbortSignal;
-}): Promise<HostedLinqFirstContactAdmissionDecision> {
-  if (!input.request.text) {
+// Returns a decision when the request can be resolved without an OpenAI
+// classifier call. Callers should run this before claiming the per-contact
+// admission budget so deterministic blocks never consume an attempt slot.
+export function tryHostedLinqFirstContactAdmissionDeterministicDecision(
+  request: HostedLinqFirstContactAdmissionRequest,
+): HostedLinqFirstContactAdmissionDecision | null {
+  if (!request.text) {
     return buildHostedLinqFirstContactAdmissionBlock({
       category: "unsupported_content",
       confidence: 1,
       source: "deterministic",
     });
+  }
+  return null;
+}
+
+export async function classifyHostedLinqFirstContactAdmission(input: {
+  request: HostedLinqFirstContactAdmissionRequest;
+  signal?: AbortSignal;
+}): Promise<HostedLinqFirstContactAdmissionDecision> {
+  const deterministicDecision = tryHostedLinqFirstContactAdmissionDeterministicDecision(input.request);
+  if (deterministicDecision) {
+    return deterministicDecision;
   }
 
   const environment = getHostedOnboardingEnvironment();
@@ -134,6 +200,22 @@ export async function classifyHostedLinqFirstContactAdmission(input: {
 
   if (!response.ok) {
     const providerError = await readHostedLinqFirstContactAdmissionProviderError(response);
+    if (isHostedLinqFirstContactAdmissionQuotaExhausted({
+      providerError,
+      status: response.status,
+    })) {
+      const decision = buildHostedLinqFirstContactAdmissionAllow({
+        category: "benign_greeting",
+        confidence: 1,
+        source: "deterministic",
+      });
+      logHostedLinqFirstContactAdmissionDecision(input.request, {
+        ...decision,
+        model: environment.linqFirstContactAdmissionModel,
+      });
+      return decision;
+    }
+
     throw buildHostedLinqFirstContactAdmissionUnavailableError({
       cause: providerError.message
         ? new Error(`OpenAI Responses API error: ${providerError.message}`)
@@ -234,6 +316,96 @@ export async function recordHostedLinqFirstContactAdmissionDecision(input: {
   }
 }
 
+export async function claimHostedLinqFirstContactAdmissionBudget(input: {
+  eventId: string;
+  participantContact: HostedLinqParticipantContact;
+  tx: HostedLinqFirstContactAdmissionBudgetStore;
+}): Promise<HostedLinqFirstContactAdmissionBudgetClaim> {
+  // Read every key version that still resolves to this contact so the budget
+  // and replay guard survive contact-privacy-key rotation. Lock and insert use
+  // the version-independent and current values respectively, matching the
+  // discipline in hosted-member-routing-linq for participant contacts.
+  const lookupKeyCandidates = createHostedLinqParticipantContactLookupKeyReadCandidates({
+    kind: input.participantContact.kind,
+    value: input.participantContact.value,
+  });
+  if (lookupKeyCandidates.length === 0) {
+    throw new TypeError(
+      "Hosted Linq first-contact admission budget requires at least one readable lookup key.",
+    );
+  }
+
+  const currentLookupKey = createHostedLinqParticipantContactLookupKey({
+    kind: input.participantContact.kind,
+    value: input.participantContact.value,
+  });
+  if (!currentLookupKey) {
+    throw new TypeError(
+      "Hosted Linq first-contact admission budget requires a current contact lookup key.",
+    );
+  }
+
+  // Per-contact advisory lock serializes concurrent distinct-event claims so
+  // the cap check and insert observe a consistent attempt count. The lock
+  // value is the version-independent `${kind}:${value}` so concurrent claims
+  // contend even across a key-version boundary. Released on transaction
+  // commit. Mirrors acquireHostedLinqRoutingWriteLockTx.
+  await input.tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtext(${"hosted-linq-first-contact-admission-budget"}),
+      hashtext(${`${input.participantContact.kind}:${input.participantContact.value}`})
+    )
+  `;
+
+  const alreadyCounted = await input.tx.hostedLinqFirstContactAdmissionBudget.findFirst({
+    where: {
+      eventId: input.eventId,
+      participantContactLookupKey: {
+        in: lookupKeyCandidates,
+      },
+    },
+  });
+  if (alreadyCounted) {
+    return {
+      attemptCount: await input.tx.hostedLinqFirstContactAdmissionBudget.count({
+        where: {
+          participantContactLookupKey: {
+            in: lookupKeyCandidates,
+          },
+        },
+      }),
+      kind: "claimed",
+    };
+  }
+
+  const existingCount = await input.tx.hostedLinqFirstContactAdmissionBudget.count({
+    where: {
+      participantContactLookupKey: {
+        in: lookupKeyCandidates,
+      },
+    },
+  });
+  if (existingCount >= HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS) {
+    return {
+      attemptCount: existingCount,
+      kind: "exhausted",
+    };
+  }
+
+  await input.tx.hostedLinqFirstContactAdmissionBudget.create({
+    data: {
+      eventId: input.eventId,
+      participantContactKind: input.participantContact.kind,
+      participantContactLookupKey: currentLookupKey,
+    },
+  });
+
+  return {
+    attemptCount: existingCount + 1,
+    kind: "claimed",
+  };
+}
+
 function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
   model: string;
   request: HostedLinqFirstContactAdmissionRequest;
@@ -242,10 +414,11 @@ function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
     input: [
       {
         content: [
-          "Classify the first inbound iMessage, SMS, or RCS message from an unknown sender to Murph, a personal health assistant.",
-          "Return allow only when the message plausibly comes from a human intentionally trying to contact Murph, start using Murph, ask about Murph, or send a benign short greeting like hi, hey, or hello.",
-          "Return block for messages addressed to another person, personal logistics, wrong-number bait, marketing, sales, recruiting, SEO, lead-generation outreach, promotional campaigns, referral or coupon blasts, opt-out boilerplate, media-only messages, unsupported content, or anything ambiguous.",
-          "When uncertain, block. Do not reward messages for being conversational if they are not plausibly for Murph.",
+          "Goal: decide whether this first inbound iMessage, SMS, or RCS message from an unknown sender should be admitted so Murph, a personal health assistant, can reply.",
+          "Allow real human messages that are plausibly for Murph: short greetings, start/use/join intent, questions about Murph, and health/wellness/life questions intended for Murph.",
+          "If the text mentions Murph at all, return allow unless it is clearly spam, promotional, media-only/unsupported, or addressed to someone else in a way that makes it unrelated.",
+          "Block only obvious marketing, sales, recruiting, SEO, lead-generation, promotional or coupon blasts, wrong-person personal logistics, media-only/unsupported content, or messages with no plausible relationship to Murph.",
+          "When the message does not mention Murph and the intended recipient or purpose is ambiguous, block.",
         ].join("\n"),
         role: "system",
       },
@@ -301,12 +474,11 @@ function normalizeHostedLinqFirstContactAdmissionModelDecision(
     && HOSTED_LINQ_FIRST_CONTACT_ADMISSION_ALLOW_CATEGORIES.has(result.category)
     && result.confidence >= HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MIN_ALLOW_CONFIDENCE
   ) {
-    return {
+    return buildHostedLinqFirstContactAdmissionAllow({
       category: result.category,
       confidence: result.confidence,
-      kind: "allow",
       source: "model",
-    };
+    });
   }
 
   return buildHostedLinqFirstContactAdmissionBlock({
@@ -316,6 +488,19 @@ function normalizeHostedLinqFirstContactAdmissionModelDecision(
     confidence: result.confidence,
     source: "model",
   });
+}
+
+function buildHostedLinqFirstContactAdmissionAllow(input: {
+  category: HostedLinqFirstContactAdmissionCategory;
+  confidence: number;
+  source: HostedLinqFirstContactAdmissionDecision["source"];
+}): HostedLinqFirstContactAdmissionDecision {
+  return {
+    category: input.category,
+    confidence: clampHostedLinqFirstContactAdmissionConfidence(input.confidence),
+    kind: "allow",
+    source: input.source,
+  };
 }
 
 function buildHostedLinqFirstContactAdmissionBlock(input: {
@@ -582,6 +767,35 @@ async function readHostedLinqFirstContactAdmissionProviderError(
 function readBoundedProviderErrorString(value: unknown): string | undefined {
   const text = readString(value);
   return text ? text.slice(0, 240) : undefined;
+}
+
+function isHostedLinqFirstContactAdmissionQuotaExhausted(input: {
+  providerError: {
+    code?: string;
+    message?: string;
+    type?: string;
+  };
+  status: number;
+}): boolean {
+  if (input.status !== 429) {
+    return false;
+  }
+
+  const code = input.providerError.code?.toLowerCase();
+  const type = input.providerError.type?.toLowerCase();
+  const message = input.providerError.message?.toLowerCase() ?? "";
+  return code === "insufficient_quota"
+    || code === "billing_hard_limit_reached"
+    || type === "insufficient_quota"
+    || type === "billing_hard_limit_reached"
+    || (
+      message.includes("exceeded your current quota")
+      && message.includes("billing")
+    )
+    || message.includes("insufficient quota")
+    || message.includes("billing hard limit")
+    || message.includes("out of credits")
+    || message.includes("credit balance");
 }
 
 function isPrismaUniqueConstraintError(error: unknown): boolean {

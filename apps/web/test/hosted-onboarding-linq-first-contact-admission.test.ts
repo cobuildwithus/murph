@@ -6,16 +6,32 @@ const mocks = vi.hoisted(() => ({
     linqFirstContactAdmissionModel: "gpt-5.4-nano",
     linqFirstContactAdmissionOpenAiApiKey: "test-openai-key" as string | null,
   },
+  participantContact: {
+    readCandidates: ["blind:v1:test-contact"] as string[],
+    currentLookupKey: "blind:v1:test-contact" as string | null,
+  },
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => mocks.environment,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/linq-participant-contact", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/src/lib/hosted-onboarding/linq-participant-contact")>();
+  return {
+    ...actual,
+    createHostedLinqParticipantContactLookupKey: () => mocks.participantContact.currentLookupKey,
+    createHostedLinqParticipantContactLookupKeyReadCandidates: () =>
+      mocks.participantContact.readCandidates,
+  };
+});
+
 import {
   classifyHostedLinqFirstContactAdmission,
+  claimHostedLinqFirstContactAdmissionBudget,
   readHostedLinqFirstContactAdmissionMode,
   recordHostedLinqFirstContactAdmissionDecision,
+  tryHostedLinqFirstContactAdmissionDeterministicDecision,
   type HostedLinqFirstContactAdmissionRequest,
 } from "@/src/lib/hosted-onboarding/linq-first-contact-admission";
 
@@ -27,18 +43,52 @@ const BASE_REQUEST: HostedLinqFirstContactAdmissionRequest = {
   text: "hi",
 };
 
+const BASE_PARTICIPANT_CONTACT = {
+  kind: "phone" as const,
+  lookupKey: "blind:v1:test-contact",
+  value: "+15551234567",
+};
+
+function resetParticipantContactMocks() {
+  mocks.participantContact.readCandidates = ["blind:v1:test-contact"];
+  mocks.participantContact.currentLookupKey = "blind:v1:test-contact";
+}
+
 describe("Linq first-contact admission", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mocks.environment.linqFirstContactAdmissionMode = "enforce";
     mocks.environment.linqFirstContactAdmissionModel = "gpt-5.4-nano";
     mocks.environment.linqFirstContactAdmissionOpenAiApiKey = "test-openai-key";
+    resetParticipantContactMocks();
   });
 
   it("reads the configured admission mode", () => {
     mocks.environment.linqFirstContactAdmissionMode = "off";
 
     expect(readHostedLinqFirstContactAdmissionMode()).toBe("off");
+  });
+
+  it("flags textless first-contact requests as deterministically blockable so callers can skip the budget claim", () => {
+    expect(
+      tryHostedLinqFirstContactAdmissionDeterministicDecision({
+        ...BASE_REQUEST,
+        text: null,
+      }),
+    ).toMatchObject({
+      category: "unsupported_content",
+      kind: "block",
+      source: "deterministic",
+    });
+  });
+
+  it("returns null from the deterministic check when text is present so the model classifier still runs", () => {
+    expect(
+      tryHostedLinqFirstContactAdmissionDeterministicDecision({
+        ...BASE_REQUEST,
+        text: "Murph can you help me with allergies?",
+      }),
+    ).toBeNull();
   });
 
   it("deterministically blocks textless first contacts without calling OpenAI", async () => {
@@ -117,6 +167,10 @@ describe("Linq first-contact admission", () => {
         },
       },
     });
+    const prompt = JSON.parse(fetchMock.mock.calls[0][1].body).input[0].content;
+    expect(prompt).toContain("Goal: decide whether");
+    expect(prompt).toContain("If the text mentions Murph at all, return allow");
+    expect(prompt).toContain("Block only obvious marketing");
   });
 
   it("blocks low-confidence or non-allow categories from structured responses", async () => {
@@ -313,6 +367,244 @@ describe("Linq first-contact admission", () => {
       httpStatus: 503,
       retryable: true,
     });
+  });
+
+  it("admits first contacts when OpenAI reports exhausted credits", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      error: {
+        code: "insufficient_quota",
+        message: "You exceeded your current quota, please check your plan and billing details.",
+        type: "insufficient_quota",
+      },
+    }), {
+      headers: {
+        "x-request-id": "req_credits",
+      },
+      status: 429,
+    })));
+
+    await expect(classifyHostedLinqFirstContactAdmission({
+      request: BASE_REQUEST,
+    })).resolves.toMatchObject({
+      category: "benign_greeting",
+      confidence: 1,
+      kind: "allow",
+      source: "deterministic",
+    });
+  });
+
+  it("does not spend another first-contact admission budget attempt for the same event replay", async () => {
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValueOnce(3),
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValueOnce({
+          eventId: BASE_REQUEST.eventId,
+          participantContactKind: BASE_PARTICIPANT_CONTACT.kind,
+          participantContactLookupKey: BASE_PARTICIPANT_CONTACT.lookupKey,
+        }),
+      },
+    };
+
+    await expect(claimHostedLinqFirstContactAdmissionBudget({
+      eventId: BASE_REQUEST.eventId,
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    })).resolves.toEqual({
+      attemptCount: 3,
+      kind: "claimed",
+    });
+    expect(tx.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not spend another budget attempt when a previously counted event is replayed after a different event has been counted", async () => {
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValueOnce(2),
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValueOnce({
+          eventId: BASE_REQUEST.eventId,
+          participantContactKind: BASE_PARTICIPANT_CONTACT.kind,
+          participantContactLookupKey: BASE_PARTICIPANT_CONTACT.lookupKey,
+        }),
+      },
+    };
+
+    await expect(claimHostedLinqFirstContactAdmissionBudget({
+      eventId: BASE_REQUEST.eventId,
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    })).resolves.toEqual({
+      attemptCount: 2,
+      kind: "claimed",
+    });
+    expect(tx.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
+  });
+
+  it("reports the contact budget as exhausted without spending another attempt once the cap has been reached", async () => {
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValueOnce(4),
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValueOnce(null),
+      },
+    };
+
+    await expect(claimHostedLinqFirstContactAdmissionBudget({
+      eventId: BASE_REQUEST.eventId,
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    })).resolves.toEqual({
+      attemptCount: 4,
+      kind: "exhausted",
+    });
+    expect(tx.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
+  });
+
+  it("counts a fresh first-contact event as a single new attempt", async () => {
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValueOnce(1),
+        create: vi.fn().mockResolvedValueOnce({
+          eventId: BASE_REQUEST.eventId,
+          participantContactKind: BASE_PARTICIPANT_CONTACT.kind,
+          participantContactLookupKey: BASE_PARTICIPANT_CONTACT.lookupKey,
+        }),
+        findFirst: vi.fn().mockResolvedValueOnce(null),
+      },
+    };
+
+    await expect(claimHostedLinqFirstContactAdmissionBudget({
+      eventId: BASE_REQUEST.eventId,
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    })).resolves.toEqual({
+      attemptCount: 2,
+      kind: "claimed",
+    });
+    expect(tx.hostedLinqFirstContactAdmissionBudget.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("finds an earlier key-version row after contact privacy rotation so a replay does not spend another attempt", async () => {
+    mocks.participantContact.readCandidates = ["blind:v2:test-contact", "blind:v1:test-contact"];
+    mocks.participantContact.currentLookupKey = "blind:v2:test-contact";
+
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValueOnce(2),
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValueOnce({
+          eventId: BASE_REQUEST.eventId,
+          participantContactKind: BASE_PARTICIPANT_CONTACT.kind,
+          participantContactLookupKey: "blind:v1:test-contact",
+        }),
+      },
+    };
+
+    await expect(claimHostedLinqFirstContactAdmissionBudget({
+      eventId: BASE_REQUEST.eventId,
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    })).resolves.toEqual({
+      attemptCount: 2,
+      kind: "claimed",
+    });
+    expect(tx.hostedLinqFirstContactAdmissionBudget.findFirst).toHaveBeenCalledWith({
+      where: {
+        eventId: BASE_REQUEST.eventId,
+        participantContactLookupKey: {
+          in: ["blind:v2:test-contact", "blind:v1:test-contact"],
+        },
+      },
+    });
+    expect(tx.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
+  });
+
+  it("inserts the new attempt under the current contact key version when older versions are still readable", async () => {
+    mocks.participantContact.readCandidates = ["blind:v2:test-contact", "blind:v1:test-contact"];
+    mocks.participantContact.currentLookupKey = "blind:v2:test-contact";
+
+    const tx = {
+      $executeRaw: vi.fn().mockResolvedValue(0),
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValueOnce(2),
+        create: vi.fn().mockResolvedValueOnce({
+          eventId: BASE_REQUEST.eventId,
+          participantContactKind: BASE_PARTICIPANT_CONTACT.kind,
+          participantContactLookupKey: "blind:v2:test-contact",
+        }),
+        findFirst: vi.fn().mockResolvedValueOnce(null),
+      },
+    };
+
+    await expect(claimHostedLinqFirstContactAdmissionBudget({
+      eventId: BASE_REQUEST.eventId,
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    })).resolves.toEqual({
+      attemptCount: 3,
+      kind: "claimed",
+    });
+    expect(tx.hostedLinqFirstContactAdmissionBudget.create).toHaveBeenCalledWith({
+      data: {
+        eventId: BASE_REQUEST.eventId,
+        participantContactKind: BASE_PARTICIPANT_CONTACT.kind,
+        participantContactLookupKey: "blind:v2:test-contact",
+      },
+    });
+  });
+
+  it("runs the per-contact advisory lock under a version-independent lock value before any cap read or budget write", async () => {
+    mocks.participantContact.readCandidates = ["blind:v2:test-contact", "blind:v1:test-contact"];
+    mocks.participantContact.currentLookupKey = "blind:v2:test-contact";
+
+    const callOrder: string[] = [];
+    let lockSqlSegments: readonly string[] = [];
+    let lockValues: readonly unknown[] = [];
+    const tx = {
+      $executeRaw: vi.fn(async (template: TemplateStringsArray, ...values: readonly unknown[]) => {
+        callOrder.push("$executeRaw");
+        lockSqlSegments = [...template];
+        lockValues = values;
+        return 0;
+      }),
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn(async () => {
+          callOrder.push("count");
+          return 0;
+        }),
+        create: vi.fn(async () => {
+          callOrder.push("create");
+          return {
+            eventId: BASE_REQUEST.eventId,
+            participantContactKind: BASE_PARTICIPANT_CONTACT.kind,
+            participantContactLookupKey: "blind:v2:test-contact",
+          };
+        }),
+        findFirst: vi.fn(async () => {
+          callOrder.push("findFirst");
+          return null;
+        }),
+      },
+    };
+
+    await claimHostedLinqFirstContactAdmissionBudget({
+      eventId: BASE_REQUEST.eventId,
+      participantContact: BASE_PARTICIPANT_CONTACT,
+      tx,
+    });
+
+    expect(callOrder[0]).toBe("$executeRaw");
+    expect(lockSqlSegments.join("")).toContain("pg_advisory_xact_lock");
+    expect(lockValues).toContain(`${BASE_PARTICIPANT_CONTACT.kind}:${BASE_PARTICIPANT_CONTACT.value}`);
+    // The version-independent value must not embed any key-versioned lookup key.
+    expect(lockValues.some((value) => typeof value === "string" && value.includes("blind:v"))).toBe(false);
   });
 
   it("returns the stored decision when a concurrent insert already won the event", async () => {
