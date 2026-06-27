@@ -54,6 +54,8 @@ vi.mock("@murphai/assistant-engine", () => ({
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_SCHEMA:
     "murph.assistant-context-diagnostics.v1",
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_TYPE: "assistant.context.diagnostics",
+  HOSTED_ASSISTANT_TURN_TIMING_SCHEMA: "murph.assistant-turn-timing.v1",
+  HOSTED_ASSISTANT_TURN_TIMING_TYPE: "assistant.turn.timing",
   readAssistantAutomationState: mocks.readAssistantAutomationState,
   runAssistantAutomationPass: mocks.runAssistantAutomationPass,
 }));

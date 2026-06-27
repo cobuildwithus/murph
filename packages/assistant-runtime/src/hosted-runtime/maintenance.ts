@@ -73,6 +73,7 @@ import {
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
 import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
+import { emitHostedAssistantTurnTimingTraceLog } from "./turn-timing-diagnostics.ts";
 import {
   closeHostedRuntimeDeviceSyncService,
   createHostedRuntimeDeviceSyncService,
@@ -435,6 +436,13 @@ export async function runHostedAssistantAutomation(
         });
         if (contextEntry) {
           redactedLogEntries.push(contextEntry);
+        }
+        const turnTimingEntry = emitHostedAssistantTurnTimingTraceLog({
+          event,
+          wake,
+        });
+        if (turnTimingEntry) {
+          redactedLogEntries.push(turnTimingEntry);
         }
         const providerEntry = emitHostedAssistantProviderTraceLog({
           details: {

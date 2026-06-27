@@ -2,10 +2,12 @@ import {
   buildHostedExecutionSafeErrorDiagnostics,
   buildHostedExecutionRuntimeTimerWake,
   deriveHostedExecutionErrorCode,
+  emitHostedExecutionStructuredLog,
   sanitizeHostedExecutionStructuredLogDetails,
   sanitizeHostedExecutionStructuredLogText,
   type HostedExecutionRedactedLogEntry,
   type HostedExecutionStructuredLogDetails,
+  type HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
   type HostedWorkspaceCheckpointReason,
@@ -14,6 +16,8 @@ import {
   type HostedRuntimeRedactedScalar,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
+  HOSTED_ASSISTANT_TURN_TIMING_TYPE,
   applyMurphManagedAutomations,
   getAssistantCronStatus,
   readAssistantOutboxIntent,
@@ -21,6 +25,7 @@ import {
   refreshAssistantContextSnapshotBestEffort,
   scheduleDeviceActivityTriggeredAutomations,
   type AssistantExecutionContext,
+  type HostedAssistantTurnTimingStage,
 } from "@murphai/assistant-engine";
 import type {
   AutomationRoute,
@@ -171,6 +176,7 @@ export type HostedWorkspaceRuntimeAssistantPhase = (
 export async function runHostedWorkspaceAssistantPhase(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
+  const assistantPhaseStartedAt = Date.now();
   const channelAbortController = new AbortController();
   const releaseChannelAbortRelay = relayHostedAssistantPhaseAbortSignal(
     input.signal ?? null,
@@ -307,6 +313,7 @@ export async function runHostedWorkspaceAssistantPhase(
     const freshAssistantInputIds =
       input.initialMailboxImport.importResult.assistantInputIds ?? [];
     const runAutomationLane = async () => {
+      const automationLaneStartedAt = Date.now();
       const assistantRuntimeState = await prepareHostedAssistantAutomationForWake(
         input.restored.vaultRoot,
         wake,
@@ -316,7 +323,7 @@ export async function runHostedWorkspaceAssistantPhase(
           operatorHomeRoot: input.restored.operatorHomeRoot,
         },
       );
-      return await runHostedAssistantAutomationLane({
+      const assistantMetrics = await runHostedAssistantAutomationLane({
         assistantRuntimeState,
         executionContext,
         freshAssistantInputIds,
@@ -335,6 +342,15 @@ export async function runHostedWorkspaceAssistantPhase(
         vaultRoot: input.restored.vaultRoot,
         wake,
       });
+      emitHostedWorkspaceAssistantTurnTimingTrace({
+        currentTurnDeliveryIntentCount:
+          assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds?.length ?? 0,
+        elapsedMs: elapsedSince(assistantPhaseStartedAt),
+        stage: "automation-pass-finished",
+        stepElapsedMs: elapsedSince(automationLaneStartedAt),
+        wake,
+      });
+      return assistantMetrics;
     };
     let assistantMetrics = await runAutomationLane();
     let currentTurnDeliveryIntentIds =
@@ -408,6 +424,14 @@ export async function runHostedWorkspaceAssistantPhase(
       terminalLinqCleanup,
     });
     if (foregroundAssistantPass) {
+      emitHostedWorkspaceAssistantTurnTimingTrace({
+        currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
+        elapsedMs: elapsedSince(assistantPhaseStartedAt),
+        foregroundAssistantPass,
+        stage: "foreground-delivery-phase-started",
+        wake,
+      });
+      const foregroundAssistantPhaseStartedAt = Date.now();
       const foregroundAssistantResult = await runForegroundAssistantReplyPhase({
         assistantMetrics,
         currentTurnDeliveryIntentIds,
@@ -416,6 +440,14 @@ export async function runHostedWorkspaceAssistantPhase(
         skippedDeviceSyncWake: deviceSyncFollowUpWake,
         systemMailboxWake,
         systemMailboxWakeAt,
+        wake,
+      });
+      emitHostedWorkspaceAssistantTurnTimingTrace({
+        currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
+        elapsedMs: elapsedSince(assistantPhaseStartedAt),
+        foregroundAssistantPass,
+        stage: "foreground-delivery-phase-finished",
+        stepElapsedMs: elapsedSince(foregroundAssistantPhaseStartedAt),
         wake,
       });
       return mergeContinuingSystemMailboxResult(
@@ -3665,6 +3697,39 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
   });
 }
 
+function emitHostedWorkspaceAssistantTurnTimingTrace(input: {
+  currentTurnDeliveryIntentCount?: number | null;
+  elapsedMs: number;
+  foregroundAssistantPass?: boolean | null;
+  stage: HostedAssistantTurnTimingStage;
+  stepElapsedMs?: number | null;
+  wake: HostedRuntimeEvent;
+}): void {
+  const details: HostedExecutionStructuredLogDetails = {
+    schema: HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
+    type: HOSTED_ASSISTANT_TURN_TIMING_TYPE,
+    currentTurnDeliveryIntentCount: input.currentTurnDeliveryIntentCount ?? null,
+    foregroundAssistantPass: input.foregroundAssistantPass ?? null,
+    turnTimingElapsedMs: input.elapsedMs,
+    turnTimingStage: input.stage,
+    ...(input.stepElapsedMs === undefined
+      ? {}
+      : { turnTimingStepElapsedMs: input.stepElapsedMs }),
+  };
+
+  try {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      details: sanitizeHostedExecutionStructuredLogDetails(details),
+      message: "Hosted assistant turn timing milestone captured.",
+      phase: "wake.running",
+      wake: input.wake,
+    });
+  } catch {
+    // Diagnostic emission must not block the assistant phase.
+  }
+}
+
 async function writeHostedAssistantPassRuntimeLog(input: {
   assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantAutomationLane>>;
   deliveryEffectCount: number;
@@ -3816,7 +3881,8 @@ function isPreferredHostedAssistantAutomationDetailKey(key: string): boolean {
     || key.startsWith("codexInvalidOutput")
     || key.startsWith("codexResumeFailure")
     || key.startsWith("failure")
-    || key.startsWith("routePlanning");
+    || key.startsWith("routePlanning")
+    || key.startsWith("turnTiming");
 }
 
 function maybeCopyHostedAssistantAutomationDetailRedactedEntry(
@@ -4732,4 +4798,8 @@ function buildHostedWorkspaceAssistantPhaseRedactedStatus(input: {
     hostedSystemMailboxPrepared: input.systemMailboxPrepared,
     hostedSystemMailboxRetryableFailed: input.systemMailboxRetryableFailed,
   };
+}
+
+function elapsedSince(startedAt: number): number {
+  return Math.max(0, Date.now() - startedAt);
 }
