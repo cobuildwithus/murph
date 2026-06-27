@@ -122,6 +122,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   event: HostedLinqWebhookEvent;
   firstContactAdmitted?: boolean;
   firstContactEventProcessingOwnerToken?: string | null;
+  firstContactEventReclaimedStale?: boolean;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
 }): Promise<HostedOnboardingLinqDirectPlan> {
@@ -201,6 +202,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
         existingMember: explicitThreadRoute.container,
         existingMemberMatch: "none",
         firstContactAdmitted: input.firstContactAdmitted === true,
+        firstContactEventProcessingOwnerToken,
+        firstContactEventReclaimedStale: input.firstContactEventReclaimedStale === true,
         memberId: explicitThreadRoute.containerMemberId,
         prisma: input.prisma,
         requireFirstContactAdmission: input.requireFirstContactAdmission === true,
@@ -336,6 +339,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
     existingMember,
     existingMemberMatch,
     firstContactAdmitted,
+    firstContactEventProcessingOwnerToken,
+    firstContactEventReclaimedStale: input.firstContactEventReclaimedStale === true,
     memberId: existingMember?.id ?? null,
     prisma: input.prisma,
     requireFirstContactAdmission: input.requireFirstContactAdmission === true,
@@ -822,6 +827,8 @@ async function planHostedLinqStaleFirstContactBeforeActiveRouting(input: {
   existingMember: Parameters<typeof hasHostedMemberActiveAccess>[0] | null;
   existingMemberMatch: HostedLinqExistingMemberMatch;
   firstContactAdmitted: boolean;
+  firstContactEventProcessingOwnerToken: string | null;
+  firstContactEventReclaimedStale: boolean;
   memberId: string | null;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission: boolean;
@@ -860,6 +867,14 @@ async function planHostedLinqStaleFirstContactBeforeActiveRouting(input: {
   }
 
   if (input.requireFirstContactAdmission && !input.firstContactAdmitted) {
+    return null;
+  }
+
+  const canConsumeStaleFirstContact = input.firstContactEventReclaimedStale || (
+    !input.firstContactEventProcessingOwnerToken
+    && !isHostedLinqFirstContactEventProcessingFresh(input.existingFirstContactReceipt)
+  );
+  if (!canConsumeStaleFirstContact) {
     return null;
   }
 

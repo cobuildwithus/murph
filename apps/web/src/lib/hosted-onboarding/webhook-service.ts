@@ -383,6 +383,7 @@ async function planHostedOnboardingLinqWebhookWithFirstContactAdmission(input: {
   return await resolveHostedOnboardingLinqWebhookClassifiedAdmission({
     classification,
     event: input.event,
+    firstContactEventReclaimedStale: initialPlan.firstContactEventReclaimedStale,
     firstContactEventProcessingOwnerToken: initialPlan.firstContactEventProcessingOwnerToken,
     prisma: input.prisma,
   });
@@ -395,6 +396,7 @@ async function planHostedOnboardingLinqWebhookForCurrentAdmissionState(input: {
   | HostedOnboardingLinqAdmissionPlanResult
   | {
       firstContactEventProcessingOwnerToken: string;
+      firstContactEventReclaimedStale: boolean;
       request: HostedOnboardingLinqFirstContactAdmissionRequest;
     }
 > {
@@ -417,22 +419,26 @@ async function planHostedOnboardingLinqWebhookForCurrentAdmissionState(input: {
         };
       }
 
-      const existingProcessingOwnerToken = await claimExistingHostedLinqFirstContactEventProcessingOwnerToken({
+      const existingProcessingClaimResult = await claimExistingHostedLinqFirstContactEventProcessingOwnerToken({
         eventId: input.event.event_id,
         transaction,
       });
-      if (existingProcessingOwnerToken === "consumed") {
+      if (existingProcessingClaimResult?.kind === "consumed") {
         return {
           firstContactAdmissionClassified: false,
           firstContactAdmissionUnavailable: false,
           plan: buildDuplicateHostedLinqFirstContactEventPlan(),
         };
       }
+      const existingProcessingClaim = existingProcessingClaimResult?.kind === "processing"
+        ? existingProcessingClaimResult
+        : null;
 
       const plan = await planHostedOnboardingLinqWebhook({
         event: input.event,
         firstContactAdmitted: recordedAdmission?.kind === "allow",
-        firstContactEventProcessingOwnerToken: existingProcessingOwnerToken ?? undefined,
+        firstContactEventProcessingOwnerToken: existingProcessingClaim?.processingOwnerToken,
+        firstContactEventReclaimedStale: existingProcessingClaim?.reclaimedStale,
         requireFirstContactAdmission: true,
         prisma: transaction,
       });
@@ -440,18 +446,19 @@ async function planHostedOnboardingLinqWebhookForCurrentAdmissionState(input: {
         return {
           firstContactAdmissionClassified: false,
           firstContactAdmissionUnavailable: false,
-          plan: existingProcessingOwnerToken
+          plan: existingProcessingClaim
             ? attachHostedLinqFirstContactEventProcessingOwnerToken({
               plan,
-              processingOwnerToken: existingProcessingOwnerToken,
+              processingOwnerToken: existingProcessingClaim.processingOwnerToken,
             })
             : plan,
         };
       }
 
-      if (existingProcessingOwnerToken) {
+      if (existingProcessingClaim) {
         return {
-          firstContactEventProcessingOwnerToken: existingProcessingOwnerToken,
+          firstContactEventProcessingOwnerToken: existingProcessingClaim.processingOwnerToken,
+          firstContactEventReclaimedStale: existingProcessingClaim.reclaimedStale,
           request: plan.firstContactAdmissionRequest,
         };
       }
@@ -479,6 +486,7 @@ async function planHostedOnboardingLinqWebhookForCurrentAdmissionState(input: {
 
       return {
         firstContactEventProcessingOwnerToken: receipt.processingOwnerToken,
+        firstContactEventReclaimedStale: false,
         request: plan.firstContactAdmissionRequest,
       };
     },
@@ -496,6 +504,7 @@ async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
         kind: "unavailable";
       };
   event: Parameters<typeof planHostedOnboardingLinqWebhook>[0]["event"];
+  firstContactEventReclaimedStale: boolean;
   firstContactEventProcessingOwnerToken: string;
   prisma: PrismaClient;
 }): Promise<HostedOnboardingLinqAdmissionPlanResult> {
@@ -577,6 +586,7 @@ async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
         event: input.event,
         firstContactAdmitted: recordedAdmission?.kind === "allow",
         firstContactEventProcessingOwnerToken: input.firstContactEventProcessingOwnerToken,
+        firstContactEventReclaimedStale: input.firstContactEventReclaimedStale,
         requireFirstContactAdmission: true,
         prisma: transaction,
       });
@@ -614,6 +624,7 @@ async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
           event: input.event,
           firstContactAdmitted: true,
           firstContactEventProcessingOwnerToken: input.firstContactEventProcessingOwnerToken,
+          firstContactEventReclaimedStale: input.firstContactEventReclaimedStale,
           requireFirstContactAdmission: true,
           prisma: transaction,
         });
@@ -632,6 +643,7 @@ async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
         event: input.event,
         firstContactAdmitted: true,
         firstContactEventProcessingOwnerToken: input.firstContactEventProcessingOwnerToken,
+        firstContactEventReclaimedStale: input.firstContactEventReclaimedStale,
         requireFirstContactAdmission: true,
         prisma: transaction,
       });
@@ -693,7 +705,17 @@ function attachHostedLinqFirstContactEventProcessingOwnerToken(input: {
 async function claimExistingHostedLinqFirstContactEventProcessingOwnerToken(input: {
   eventId: string;
   transaction: Prisma.TransactionClient;
-}): Promise<"consumed" | string | null> {
+}): Promise<
+  | {
+      kind: "consumed";
+    }
+  | {
+      kind: "processing";
+      processingOwnerToken: string;
+      reclaimedStale: boolean;
+    }
+  | null
+> {
   const existingReceipt = await readHostedLinqFirstContactEventReceipt({
     eventId: input.eventId,
     prisma: input.transaction,
@@ -701,13 +723,16 @@ async function claimExistingHostedLinqFirstContactEventProcessingOwnerToken(inpu
   if (existingReceipt?.status !== "processing") {
     return null;
   }
+  const existingReceiptFresh = isHostedLinqFirstContactEventProcessingFresh(existingReceipt);
 
   const receipt = await recordHostedLinqFirstContactEventProcessing({
     eventId: input.eventId,
     prisma: input.transaction,
   });
   if (receipt.status === "consumed") {
-    return "consumed";
+    return {
+      kind: "consumed",
+    };
   }
   if (!receipt.processingOwnerToken) {
     throw buildHostedLinqFirstContactEventProcessingError({
@@ -715,7 +740,11 @@ async function claimExistingHostedLinqFirstContactEventProcessingOwnerToken(inpu
     });
   }
 
-  return receipt.processingOwnerToken;
+  return {
+    kind: "processing",
+    processingOwnerToken: receipt.processingOwnerToken,
+    reclaimedStale: !existingReceiptFresh,
+  };
 }
 
 async function consumeResolvedHostedLinqFirstContactEventReceipt(input: {

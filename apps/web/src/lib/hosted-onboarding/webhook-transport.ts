@@ -487,25 +487,14 @@ async function buildHostedInviteSideEffectMessage(input: {
   payload: HostedLinqInviteMessagePayload;
   prisma: HostedLinqTransportPersistenceClient;
 }): Promise<string> {
-  const inviteLookup =
-    "findUnique" in input.prisma.hostedInvite && typeof input.prisma.hostedInvite.findUnique === "function"
-      ? input.prisma.hostedInvite.findUnique({
-          where: {
-            id: input.payload.inviteId,
-          },
-          select: {
-            inviteCode: true,
-          },
-        })
-      : input.prisma.hostedInvite.findFirst({
-          where: {
-            id: input.payload.inviteId,
-          },
-          select: {
-            inviteCode: true,
-          },
-        });
-  const invite = await inviteLookup;
+  const invite = await input.prisma.hostedInvite.findUnique({
+    where: {
+      id: input.payload.inviteId,
+    },
+    select: {
+      inviteCode: true,
+    },
+  });
 
   if (!invite) {
     throw hostedOnboardingError({
