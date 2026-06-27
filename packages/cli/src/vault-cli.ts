@@ -51,8 +51,8 @@ export function createVaultCliWithOptions(
     services,
     inboxServices,
   })
-  installVaultCliSchemaIndex(cli)
   installVaultCliLlmsNormalizer(cli, commandName)
+  installVaultCliSchemaIndex(cli)
   installVaultCliVaultContext(
     cli,
     input.vaultContext ?? createVaultCliVaultContext(),

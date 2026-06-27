@@ -445,7 +445,6 @@ test('explicit JSON fallback commands remain separate from the canonical typed s
   const commandNames = new Set(commands.map((command) => command.name))
 
   for (const [typedName, jsonName, typedHint] of [
-    ['capture add', 'capture import-json', 'media'],
     ['samples add', 'samples import-json', 'stream'],
     ['event note add', 'event import-json', 'note'],
     ['meal add', 'meal import-json', 'ingredient'],
@@ -532,6 +531,14 @@ test('legacy hard-cut command aliases stay out of the agent command manifest', a
   }
 })
 
+test('capture import-json is hidden from the agent-visible CLI manifest because it has no sibling payload-schema', async () => {
+  const commands = await loadFullLlmCommands()
+  const commandNames = new Set(commands.map((command) => command.name))
+
+  assert.equal(commandNames.has('capture import-json'), false)
+  assert.equal(commandNames.has('capture add'), true)
+})
+
 test('agent-visible input-file command surfaces stay explicitly reviewed', async () => {
   const commands = await loadFullLlmCommands()
   const reviewedInputCommands = [
@@ -544,7 +551,6 @@ test('agent-visible input-file command surfaces stay explicitly reviewed', async
     'assertion import-json',
     'automation import-json',
     'blood-test import-json',
-    'capture import-json',
     'clinical-note import-json',
     'condition import-json',
     'diagnostic-test import-json',

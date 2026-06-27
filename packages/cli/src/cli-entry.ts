@@ -334,8 +334,8 @@ async function servePlannedVaultCliInvocation(input: {
       cli,
       root: input.plan.root,
     })
-    installVaultCliSchemaIndex(cli)
     installVaultCliLlmsNormalizer(cli, input.programName)
+    installVaultCliSchemaIndex(cli)
     installVaultCliVaultContext(cli, input.vaultContext)
     await cli.serve(input.argv, input.serveOptions)
     return

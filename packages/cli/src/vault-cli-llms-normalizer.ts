@@ -31,12 +31,17 @@ interface LlmsJsonManifestRequest {
   kind: 'json-manifest'
 }
 
+interface RootLlmsMarkdownNormalizationRequest {
+  kind: 'root-markdown'
+}
+
 interface ScopedLlmsMarkdownNormalizationRequest extends ScopedLlmsMarkdownRequest {
   kind: 'scoped-markdown'
 }
 
 type LlmsNormalizationRequest =
   | LlmsJsonManifestRequest
+  | RootLlmsMarkdownNormalizationRequest
   | ScopedLlmsMarkdownNormalizationRequest
 
 export function installVaultCliLlmsNormalizer(
@@ -53,10 +58,18 @@ export function installVaultCliLlmsNormalizer(
     }
 
     const result = await captureServeOutput(serve, argv, options)
-    const output =
-      request.kind === 'json-manifest'
-        ? await normalizeLlmsJsonManifestOutput(result.output)
-        : normalizeScopedLlmsMarkdownOutput(result.output, commandName, request.commandPath)
+    let output: string
+    if (request.kind === 'json-manifest') {
+      output = await normalizeLlmsJsonManifestOutput(result.output)
+    } else if (request.kind === 'root-markdown') {
+      output = normalizeRootLlmsMarkdownOutput(result.output, commandName)
+    } else {
+      output = normalizeScopedLlmsMarkdownOutput(
+        result.output,
+        commandName,
+        request.commandPath,
+      )
+    }
     writeStdout(options, output)
 
     if (result.exitCode !== null) {
@@ -132,6 +145,9 @@ function parseLlmsNormalizationRequest(
     if (explicitFormat === 'json') {
       return { kind: 'json-manifest' }
     }
+    if (explicitFormat === null || explicitFormat === 'md') {
+      return { kind: 'root-markdown' }
+    }
     return null
   }
 
@@ -173,6 +189,13 @@ async function captureServeOutput(
   }
 }
 
+function normalizeRootLlmsMarkdownOutput(
+  output: string,
+  commandName: string,
+): string {
+  return stripHiddenCommandsFromLlmsMarkdownOutput(output, commandName)
+}
+
 function normalizeScopedLlmsMarkdownOutput(
   output: string,
   commandName: string,
@@ -195,7 +218,37 @@ function normalizeScopedLlmsMarkdownOutput(
     )
   }
 
-  return normalized
+  return stripHiddenCommandsFromLlmsMarkdownOutput(normalized, commandName)
+}
+
+function stripHiddenCommandsFromLlmsMarkdownOutput(
+  output: string,
+  commandName: string,
+): string {
+  if (vaultCliLlmsHiddenCommandNames.size === 0) {
+    return output
+  }
+
+  const lines = output.split('\n')
+  const filtered: string[] = []
+  for (const line of lines) {
+    if (lineMentionsHiddenCommand(line, commandName)) {
+      continue
+    }
+    filtered.push(line)
+  }
+
+  return filtered.join('\n')
+}
+
+function lineMentionsHiddenCommand(line: string, commandName: string): boolean {
+  for (const hiddenName of vaultCliLlmsHiddenCommandNames) {
+    const reference = `\`${commandName} ${hiddenName}`
+    if (line.includes(reference)) {
+      return true
+    }
+  }
+  return false
 }
 
 // Commands that stay registered for explicit operator/script invocation but
