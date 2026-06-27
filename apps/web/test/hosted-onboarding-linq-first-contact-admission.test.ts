@@ -188,6 +188,25 @@ describe("Linq first-contact admission", () => {
     });
   });
 
+  it("allows when the model returns decision=allow regardless of low confidence", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      output_text: JSON.stringify({
+        confidence: 0,
+        decision: "allow",
+      }),
+      status: "completed",
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(classifyHostedLinqFirstContactAdmission({
+      request: BASE_REQUEST,
+    })).resolves.toMatchObject({
+      confidence: 0,
+      kind: "allow",
+      source: "model",
+    });
+  });
+
   it("throws a retryable 503 when classifier confidence is outside the schema bounds", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       output_text: JSON.stringify({
@@ -624,6 +643,67 @@ describe("Linq first-contact admission", () => {
       confidence: 0.99,
       kind: "block",
       source: "model",
+    });
+  });
+
+  it("stores bounded rejected-message text only for block decisions", async () => {
+    const blockPrisma = {
+      hostedLinqFirstContactAdmissionDecision: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+        findUnique: vi.fn(),
+      },
+    };
+
+    await expect(recordHostedLinqFirstContactAdmissionDecision({
+      decision: {
+        confidence: 0.94,
+        kind: "block",
+        source: "model",
+      },
+      eventId: BASE_REQUEST.eventId,
+      prisma: blockPrisma,
+      rejectedMessageText: `${"x".repeat(2_100)}   `,
+    })).resolves.toMatchObject({
+      confidence: 0.94,
+      kind: "block",
+      source: "model",
+    });
+
+    expect(blockPrisma.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledWith({
+      data: {
+        confidence: 0.94,
+        decision: "block",
+        eventId: BASE_REQUEST.eventId,
+        rejectedMessageText: "x".repeat(2_000),
+        source: "model",
+      },
+    });
+
+    const allowPrisma = {
+      hostedLinqFirstContactAdmissionDecision: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+        findUnique: vi.fn(),
+      },
+    };
+
+    await recordHostedLinqFirstContactAdmissionDecision({
+      decision: {
+        confidence: 0.9,
+        kind: "allow",
+        source: "model",
+      },
+      eventId: "evt_allowed_with_text",
+      prisma: allowPrisma,
+      rejectedMessageText: "blocked text should not persist",
+    });
+
+    expect(allowPrisma.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledWith({
+      data: {
+        confidence: 0.9,
+        decision: "allow",
+        eventId: "evt_allowed_with_text",
+        source: "model",
+      },
     });
   });
 });

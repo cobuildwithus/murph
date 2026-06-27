@@ -1,7 +1,7 @@
 import type { ResponseCreateParamsNonStreaming } from "openai/resources/responses/responses";
 
 import type { HostedLinqFirstContactAdmissionMode } from "./env";
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
   createHostedLinqParticipantContactLookupKey,
   createHostedLinqParticipantContactLookupKeyReadCandidates,
@@ -15,6 +15,7 @@ import { getHostedOnboardingEnvironment } from "./runtime";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_TIMEOUT_MS = 10_000;
+const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_REJECTED_MESSAGE_MAX_CHARS = 2_000;
 export const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS = 4;
 
 export type HostedLinqFirstContactAdmissionDecision = {
@@ -35,6 +36,7 @@ type HostedLinqFirstContactAdmissionDecisionRecord = {
   confidence: number;
   decision: string;
   eventId: string;
+  rejectedMessageText?: string | null;
   source: string;
 };
 
@@ -45,6 +47,7 @@ type HostedLinqFirstContactAdmissionDecisionStore = {
         confidence: number;
         decision: HostedLinqFirstContactAdmissionDecision["kind"];
         eventId: string;
+        rejectedMessageText?: string | null;
         source: HostedLinqFirstContactAdmissionDecision["source"];
       };
     }): Promise<HostedLinqFirstContactAdmissionDecisionRecord>;
@@ -125,6 +128,19 @@ export function tryHostedLinqFirstContactAdmissionDeterministicDecision(
     });
   }
   return null;
+}
+
+export function buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision():
+  HostedLinqFirstContactAdmissionDecision {
+  return buildHostedLinqFirstContactAdmissionAllow({
+    confidence: 1,
+    source: "deterministic",
+  });
+}
+
+export function isHostedLinqFirstContactAdmissionClassifierUnavailableError(error: unknown): boolean {
+  return isHostedOnboardingError(error)
+    && error.code === "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE";
 }
 
 export async function classifyHostedLinqFirstContactAdmission(input: {
@@ -261,13 +277,19 @@ export async function recordHostedLinqFirstContactAdmissionDecision(input: {
   decision: HostedLinqFirstContactAdmissionDecision;
   eventId: string;
   prisma: HostedLinqFirstContactAdmissionDecisionStore;
+  rejectedMessageText?: string | null;
 }): Promise<HostedLinqFirstContactAdmissionDecision> {
   try {
+    const rejectedMessageText = buildHostedLinqFirstContactAdmissionRejectedMessageText({
+      decision: input.decision,
+      text: input.rejectedMessageText,
+    });
     const created = await input.prisma.hostedLinqFirstContactAdmissionDecision.create({
       data: {
         confidence: input.decision.confidence,
         decision: input.decision.kind,
         eventId: input.eventId,
+        ...(rejectedMessageText ? { rejectedMessageText } : {}),
         source: input.decision.source,
       },
     });
@@ -286,6 +308,19 @@ export async function recordHostedLinqFirstContactAdmissionDecision(input: {
     }
     throw error;
   }
+}
+
+function buildHostedLinqFirstContactAdmissionRejectedMessageText(input: {
+  decision: HostedLinqFirstContactAdmissionDecision;
+  text?: string | null;
+}): string | null {
+  if (input.decision.kind !== "block" || typeof input.text !== "string") {
+    return null;
+  }
+  const text = input.text
+    .slice(0, HOSTED_LINQ_FIRST_CONTACT_ADMISSION_REJECTED_MESSAGE_MAX_CHARS)
+    .trim();
+  return text.length > 0 ? text : null;
 }
 
 // Cheap read-only check of whether the per-contact classifier budget is
