@@ -195,40 +195,15 @@ export async function planHostedOnboardingLinqWebhook(input: {
       threadId: summary.chatId,
     });
     if (explicitThreadRoute) {
-      const staleFirstContactPlan = await planHostedLinqStaleFirstContactBeforeActiveRouting({
-        context,
-        event: input.event,
-        existingFirstContactReceipt,
-        existingMember: explicitThreadRoute.container,
-        existingMemberMatch: "none",
-        firstContactAdmitted: input.firstContactAdmitted === true,
-        firstContactEventProcessingOwnerToken,
-        firstContactEventReclaimedStale: input.firstContactEventReclaimedStale === true,
-        memberId: explicitThreadRoute.containerMemberId,
-        prisma: input.prisma,
-        requireFirstContactAdmission: input.requireFirstContactAdmission === true,
-      });
-      if (staleFirstContactPlan) {
-        return staleFirstContactPlan;
-      }
-
-      if (
-        existingFirstContactReceipt?.status === "processing"
-        && input.requireFirstContactAdmission === true
-        && input.firstContactAdmitted !== true
-      ) {
-        return planHostedLinqFirstContactAdmissionRequired({
-          context,
-          event: input.event,
-          existingMember: explicitThreadRoute.container,
-          existingMemberMatch: "none",
-        });
-      }
-
       return planHostedLinqExplicitThreadRouteWebhook({
         context,
         event: input.event,
+        existingFirstContactReceipt,
+        firstContactAdmitted: input.firstContactAdmitted === true,
+        firstContactEventProcessingOwnerToken,
+        firstContactEventReclaimedStale: input.firstContactEventReclaimedStale === true,
         prisma: input.prisma,
+        requireFirstContactAdmission: input.requireFirstContactAdmission === true,
         route: explicitThreadRoute,
       });
     }
@@ -332,23 +307,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
     participantContactKind: participantContact.kind,
   });
   const firstContactAdmitted = input.firstContactAdmitted === true;
-  const staleFirstContactPlan = await planHostedLinqStaleFirstContactBeforeActiveRouting({
-    context,
-    event: input.event,
-    existingFirstContactReceipt,
-    existingMember,
-    existingMemberMatch,
-    firstContactAdmitted,
-    firstContactEventProcessingOwnerToken,
-    firstContactEventReclaimedStale: input.firstContactEventReclaimedStale === true,
-    memberId: existingMember?.id ?? null,
-    prisma: input.prisma,
-    requireFirstContactAdmission: input.requireFirstContactAdmission === true,
-  });
-  if (staleFirstContactPlan) {
-    return staleFirstContactPlan;
-  }
-
   if (summary.isFromMe) {
     if (existingMember) {
       await incrementHostedLinqOutboundDailyState({
@@ -379,19 +337,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
         routeStage: "ignored-suspended-member",
       }),
     );
-  }
-
-  if (
-    existingFirstContactReceipt?.status === "processing"
-    && input.requireFirstContactAdmission === true
-    && !firstContactAdmitted
-  ) {
-    return planHostedLinqFirstContactAdmissionRequired({
-      context,
-      event: input.event,
-      existingMember,
-      existingMemberMatch,
-    });
   }
 
   if (existingMember && hasHostedMemberActiveAccess(existingMember)) {
@@ -484,6 +429,36 @@ export async function planHostedOnboardingLinqWebhook(input: {
           routeStage: "active-member-duplicate",
         }),
       );
+    }
+
+    const staleFirstContactPlan = await planHostedLinqStaleFirstContactBeforeActiveRouting({
+      context,
+      event: input.event,
+      existingFirstContactReceipt,
+      existingMember,
+      existingMemberMatch,
+      firstContactAdmitted,
+      firstContactEventProcessingOwnerToken,
+      firstContactEventReclaimedStale: input.firstContactEventReclaimedStale === true,
+      memberId: existingMember.id,
+      prisma: input.prisma,
+      requireFirstContactAdmission: input.requireFirstContactAdmission === true,
+    });
+    if (staleFirstContactPlan) {
+      return staleFirstContactPlan;
+    }
+
+    if (
+      existingFirstContactReceipt?.status === "processing"
+      && input.requireFirstContactAdmission === true
+      && !firstContactAdmitted
+    ) {
+      return planHostedLinqFirstContactAdmissionRequired({
+        context,
+        event: input.event,
+        existingMember,
+        existingMemberMatch,
+      });
     }
 
     const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
@@ -583,6 +558,19 @@ export async function planHostedOnboardingLinqWebhook(input: {
         routeStage: "active-member-appended",
       }),
     );
+  }
+
+  if (
+    existingFirstContactReceipt?.status === "processing"
+    && input.requireFirstContactAdmission === true
+    && !firstContactAdmitted
+  ) {
+    return planHostedLinqFirstContactAdmissionRequired({
+      context,
+      event: input.event,
+      existingMember,
+      existingMemberMatch,
+    });
   }
 
   if (!isHostedLinqDeliverableFirstContact({
@@ -995,7 +983,12 @@ async function readHostedLinqCurrentEventDeliveredSignupInvite(input: {
 async function planHostedLinqExplicitThreadRouteWebhook(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
+  existingFirstContactReceipt: Awaited<ReturnType<typeof readHostedLinqFirstContactEventReceipt>>;
+  firstContactAdmitted: boolean;
+  firstContactEventProcessingOwnerToken: string | null;
+  firstContactEventReclaimedStale: boolean;
   prisma: Prisma.TransactionClient;
+  requireFirstContactAdmission: boolean;
   route: HostedThreadRouteSnapshot;
 }): Promise<HostedOnboardingLinqDirectPlan> {
   const {
@@ -1110,6 +1103,36 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
         routeStage: "thread-route-duplicate",
       }),
     );
+  }
+
+  const staleFirstContactPlan = await planHostedLinqStaleFirstContactBeforeActiveRouting({
+    context: input.context,
+    event: input.event,
+    existingFirstContactReceipt: input.existingFirstContactReceipt,
+    existingMember: input.route.container,
+    existingMemberMatch: "none",
+    firstContactAdmitted: input.firstContactAdmitted,
+    firstContactEventProcessingOwnerToken: input.firstContactEventProcessingOwnerToken,
+    firstContactEventReclaimedStale: input.firstContactEventReclaimedStale,
+    memberId: input.route.containerMemberId,
+    prisma: input.prisma,
+    requireFirstContactAdmission: input.requireFirstContactAdmission,
+  });
+  if (staleFirstContactPlan) {
+    return staleFirstContactPlan;
+  }
+
+  if (
+    input.existingFirstContactReceipt?.status === "processing"
+    && input.requireFirstContactAdmission
+    && !input.firstContactAdmitted
+  ) {
+    return planHostedLinqFirstContactAdmissionRequired({
+      context: input.context,
+      event: input.event,
+      existingMember: input.route.container,
+      existingMemberMatch: "none",
+    });
   }
 
   const dailyState = await incrementHostedLinqInboundDailyState({

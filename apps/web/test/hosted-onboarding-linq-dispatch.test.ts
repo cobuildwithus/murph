@@ -127,7 +127,7 @@ const mocks = vi.hoisted(() => {
       step,
     })),
     readHostedLinqDailyState: vi.fn<() => Promise<HostedLinqDailyState | null>>(async () => null),
-    readHostedMailboxItemByDedupeKey: vi.fn(async () => null),
+    readHostedMailboxItemByDedupeKey: vi.fn(async (): Promise<{ id: string } | null> => null),
     readHostedMailboxItemOwnerById: vi.fn(async (input: { mailboxItemId: string }) => ({
       id: input.mailboxItemId,
       userId: "member_123",
@@ -1669,6 +1669,109 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
+  it("recovers an explicit thread-route mailbox duplicate before consuming a stale first-contact receipt", async () => {
+    mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
+    const eventId = "evt_thread_route_duplicate_before_stale";
+    const routeAccountLookupKey = createHostedPhoneLookupKey("+15550000000");
+    if (!routeAccountLookupKey) {
+      throw new Error("Expected test account lookup key.");
+    }
+    const routeLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey: routeAccountLookupKey,
+      channel: "linq",
+      threadId: "chat_123",
+    });
+    if (!routeLookupKey) {
+      throw new Error("Expected test route lookup key.");
+    }
+    const firstContactReceipt = createHostedLinqFirstContactEventReceiptFixture();
+    const staleReceipt = await firstContactReceipt.create({
+      data: {
+        eventId,
+        processingOwnerToken: "owner_stale_thread_route_duplicate",
+        status: "processing",
+      },
+    }) as HostedLinqReceiptRecord;
+    staleReceipt.updatedAt = new Date("2026-03-26T11:54:00.000Z");
+    const threadRoute = {
+      channel: "linq",
+      container: {
+        member: {
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-03-26T00:00:00.000Z"),
+          id: "member_thread_container_duplicate",
+          suspendedAt: null,
+          updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+        },
+        owner: {
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-03-26T00:00:00.000Z"),
+          id: "member_owner_duplicate",
+          suspendedAt: null,
+          updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+        },
+      },
+      containerMemberId: "member_thread_container_duplicate",
+      threadLookupKey: routeLookupKey,
+    };
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+      id: `mailbox_${eventId}`,
+    });
+    const prismaMocks = {
+      hostedLinqFirstContactAdmissionDecision: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedLinqFirstContactEventReceipt: firstContactReceipt,
+      hostedThreadRoute: {
+        findMany: vi.fn().mockResolvedValue([threadRoute]),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId,
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      duplicate: true,
+      ignored: true,
+      ok: true,
+      reason: "duplicate-webhook-event",
+    });
+
+    expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_thread_container_duplicate",
+      mailboxItemId: `mailbox_${eventId}`,
+    });
+    expectHostedLinqReadReceiptSent();
+    expect(await firstContactReceipt.findUnique({
+      where: {
+        eventId,
+      },
+    })).toMatchObject({
+      eventId,
+      status: "consumed",
+    });
   });
 
   it("requires admission before explicit thread-route wake for unclassified stale first-contact receipts", async () => {
@@ -5685,6 +5788,146 @@ https://join.example.test/join/code_first_text`);
       eventId,
       status: "consumed",
     });
+  });
+
+  it("retries an active-member wake after a first-contact append succeeds but signaling fails", async () => {
+    mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("temporal unavailable"));
+    const eventId = "evt_active_duplicate_after_signal_failure";
+    let member: HostedMemberRecord = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "member_active_duplicate_after_signal_failure",
+      phoneLookupKey: "+15551234567",
+      suspendedAt: null,
+    };
+    mocks.classifyHostedLinqFirstContactAdmission.mockImplementationOnce(async () => {
+      member = {
+        ...member,
+        billingStatus: HostedBillingStatus.active,
+      };
+      return {
+        category: "join_intent",
+        confidence: 0.95,
+        kind: "allow",
+        source: "model",
+      };
+    });
+    let existingMailboxAvailable = false;
+    mocks.readHostedMailboxItemByDedupeKey.mockImplementation(async () =>
+      existingMailboxAvailable
+        ? {
+            id: `mailbox_${eventId}`,
+          }
+        : null);
+
+    const admissionDecisions = new Map<string, Record<string, unknown>>();
+    const firstContactReceipt = createHostedLinqFirstContactEventReceiptFixture();
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn(),
+        findUnique: vi.fn(),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          admissionDecisions.set(String(data.eventId), data);
+          return data;
+        }),
+        findUnique: vi.fn(async ({ where }: { where: { eventId: string } }) =>
+          admissionDecisions.get(where.eventId) ?? null),
+      },
+      hostedLinqFirstContactEventReceipt: firstContactReceipt,
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn(async () => member),
+        update: vi.fn(),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+    const rawBody = buildHostedLinqWebhookBody({
+      eventId,
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).rejects.toThrow("temporal unavailable");
+
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(await firstContactReceipt.findUnique({
+      where: {
+        eventId,
+      },
+    })).toMatchObject({
+      eventId,
+      status: "processing",
+    });
+    existingMailboxAvailable = true;
+
+    const retainedReceipt = await firstContactReceipt.findUnique({
+      where: {
+        eventId,
+      },
+    }) as HostedLinqReceiptRecord | null;
+    if (!retainedReceipt) {
+      throw new Error("Expected failed handoff to retain the first-contact receipt.");
+    }
+    retainedReceipt.updatedAt = new Date("2026-03-26T11:54:00.000Z");
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      duplicate: true,
+      ignored: true,
+      ok: true,
+      reason: "duplicate-webhook-event",
+    });
+
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(2);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenNthCalledWith(2, {
+      expectedUserId: "member_active_duplicate_after_signal_failure",
+      mailboxItemId: `mailbox_${eventId}`,
+    });
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(await firstContactReceipt.findUnique({
+      where: {
+        eventId,
+      },
+    })).toMatchObject({
+      eventId,
+      status: "consumed",
+    });
+    mocks.readHostedMailboxItemByDedupeKey.mockImplementation(async () => null);
   });
 
   it("does not fail open when an earlier delivery has recorded a classifier block", async () => {
