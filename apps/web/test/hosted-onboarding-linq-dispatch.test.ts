@@ -1671,6 +1671,116 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
+  it("requires admission before explicit thread-route wake for unclassified stale first-contact receipts", async () => {
+    mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
+    mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValueOnce({
+      category: "wrong_number_or_personal_logistics",
+      confidence: 0.96,
+      kind: "block",
+      source: "model",
+    });
+    const eventId = "evt_stale_first_contact_thread_route_unclassified";
+    const routeAccountLookupKey = createHostedPhoneLookupKey("+15550000000");
+    if (!routeAccountLookupKey) {
+      throw new Error("Expected test account lookup key.");
+    }
+    const routeLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey: routeAccountLookupKey,
+      channel: "linq",
+      threadId: "chat_123",
+    });
+    if (!routeLookupKey) {
+      throw new Error("Expected test route lookup key.");
+    }
+    const firstContactReceipt = createHostedLinqFirstContactEventReceiptFixture();
+    const staleReceipt = await firstContactReceipt.create({
+      data: {
+        eventId,
+        processingOwnerToken: "owner_stale_thread_route_unclassified",
+        status: "processing",
+      },
+    }) as HostedLinqReceiptRecord;
+    staleReceipt.updatedAt = new Date("2026-03-26T11:54:00.000Z");
+    const prismaMocks = {
+      hostedLinqFirstContactAdmissionDecision: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedLinqFirstContactEventReceipt: firstContactReceipt,
+      hostedThreadRoute: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            channel: "linq",
+            container: {
+              member: {
+                billingStatus: HostedBillingStatus.active,
+                createdAt: new Date("2026-03-26T00:00:00.000Z"),
+                id: "member_thread_container_unclassified",
+                suspendedAt: null,
+                updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+              },
+              owner: {
+                billingStatus: HostedBillingStatus.active,
+                createdAt: new Date("2026-03-26T00:00:00.000Z"),
+                id: "member_owner_unclassified",
+                suspendedAt: null,
+                updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+              },
+            },
+            containerMemberId: "member_thread_container_unclassified",
+            threadLookupKey: routeLookupKey,
+          },
+        ]),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId,
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "blocked-first-contact-admission",
+    });
+
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          decision: "block",
+          eventId,
+        }),
+      }),
+    );
+    expect(await firstContactReceipt.findUnique({
+      where: {
+        eventId,
+      },
+    })).toMatchObject({
+      eventId,
+      status: "consumed",
+    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
   it("fails the Linq webhook before read receipt when Temporal signaling fails", async () => {
     mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("Temporal unavailable"));
     const prisma = asPrismaTransactionClient({

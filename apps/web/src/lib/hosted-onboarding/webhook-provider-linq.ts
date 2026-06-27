@@ -209,6 +209,19 @@ export async function planHostedOnboardingLinqWebhook(input: {
         return staleFirstContactPlan;
       }
 
+      if (
+        existingFirstContactReceipt?.status === "processing"
+        && input.requireFirstContactAdmission === true
+        && input.firstContactAdmitted !== true
+      ) {
+        return planHostedLinqFirstContactAdmissionRequired({
+          context,
+          event: input.event,
+          existingMember: explicitThreadRoute.container,
+          existingMemberMatch: "none",
+        });
+      }
+
       return planHostedLinqExplicitThreadRouteWebhook({
         context,
         event: input.event,
@@ -368,20 +381,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
     && input.requireFirstContactAdmission === true
     && !firstContactAdmitted
   ) {
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildFirstContactAdmissionRequiredPlan({
-        request: buildHostedLinqFirstContactAdmissionRequest({
-          context,
-          event: input.event,
-        }),
-      }),
-      buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
-        existingMemberMatch,
-        reason: "first-contact-admission-required",
-        routeStage: "first-contact-admission-required",
-      }),
-    );
+    return planHostedLinqFirstContactAdmissionRequired({
+      context,
+      event: input.event,
+      existingMember,
+      existingMemberMatch,
+    });
   }
 
   if (existingMember && hasHostedMemberActiveAccess(existingMember)) {
@@ -638,20 +643,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
       }
     }
 
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildFirstContactAdmissionRequiredPlan({
-        request: buildHostedLinqFirstContactAdmissionRequest({
-          context,
-          event: input.event,
-        }),
-      }),
-      buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        existingMemberActive: hasHostedMemberActiveAccess(existingMember),
-        existingMemberMatch,
-        reason: "first-contact-admission-required",
-        routeStage: "first-contact-admission-required",
-      }),
-    );
+    return planHostedLinqFirstContactAdmissionRequired({
+      context,
+      event: input.event,
+      existingMember,
+      existingMemberMatch,
+    });
   }
 
   if (
@@ -659,20 +656,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
     && input.requireFirstContactAdmission === true
     && !firstContactAdmitted
   ) {
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildFirstContactAdmissionRequiredPlan({
-        request: buildHostedLinqFirstContactAdmissionRequest({
-          context,
-          event: input.event,
-        }),
-      }),
-      buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
-        existingMemberMatch,
-        reason: "first-contact-admission-required",
-        routeStage: "first-contact-admission-required",
-      }),
-    );
+    return planHostedLinqFirstContactAdmissionRequired({
+      context,
+      event: input.event,
+      existingMember,
+      existingMemberMatch,
+    });
   }
 
   const member = existingMember
@@ -1339,6 +1328,28 @@ function buildFirstContactAdmissionRequiredPlan(input: {
     }),
     firstContactAdmissionRequest: input.request,
   };
+}
+
+function planHostedLinqFirstContactAdmissionRequired(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  event: HostedLinqWebhookEvent;
+  existingMember: Parameters<typeof hasHostedMemberActiveAccess>[0] | null;
+  existingMemberMatch: HostedLinqExistingMemberMatch;
+}): HostedOnboardingLinqDirectPlan {
+  return logHostedLinqWebhookPlannerDecisionAndReturn(
+    buildFirstContactAdmissionRequiredPlan({
+      request: buildHostedLinqFirstContactAdmissionRequest({
+        context: input.context,
+        event: input.event,
+      }),
+    }),
+    buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+      existingMemberActive: input.existingMember ? hasHostedMemberActiveAccess(input.existingMember) : false,
+      existingMemberMatch: input.existingMemberMatch,
+      reason: "first-contact-admission-required",
+      routeStage: "first-contact-admission-required",
+    }),
+  );
 }
 
 function buildLinqDuplicateWebhookEventPlan(): HostedOnboardingLinqDirectPlan {
