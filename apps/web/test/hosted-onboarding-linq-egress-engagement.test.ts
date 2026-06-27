@@ -5,6 +5,7 @@ import {
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  assertHostedLinqRouteAuthorityMatchesTarget,
   assertHostedLinqRecentInboundEngagementForRuntime,
   decideHostedLinqRecentInbound,
   recordHostedMemberLinqInboundEngagementTx,
@@ -331,6 +332,61 @@ describe("hosted Linq egress engagement", () => {
     });
 
     expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
+  });
+
+  it("requires Linq route authority to match the provider chat and payload member", () => {
+    expect(assertHostedLinqRouteAuthorityMatchesTarget({
+      chatId: "chat-a",
+      memberId: "member-1",
+      routeAuthority: {
+        accountLookupKey: "hbidx:phone:v1:account",
+        channel: "linq",
+        containerMemberId: "member-1",
+        threadId: "chat-a",
+      },
+    })).toMatchObject({
+      channel: "linq",
+      containerMemberId: "member-1",
+      threadId: "chat-a",
+    });
+
+    let threadMismatch: unknown = null;
+    try {
+      assertHostedLinqRouteAuthorityMatchesTarget({
+        chatId: "chat-b",
+        memberId: "member-1",
+        routeAuthority: {
+          accountLookupKey: "hbidx:phone:v1:account",
+          channel: "linq",
+          containerMemberId: "member-1",
+          threadId: "chat-a",
+        },
+      });
+    } catch (error) {
+      threadMismatch = error;
+    }
+    expect(threadMismatch).toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+    });
+
+    let memberMismatch: unknown = null;
+    try {
+      assertHostedLinqRouteAuthorityMatchesTarget({
+        chatId: "chat-a",
+        memberId: "member-2",
+        routeAuthority: {
+          accountLookupKey: "hbidx:phone:v1:account",
+          channel: "linq",
+          containerMemberId: "member-1",
+          threadId: "chat-a",
+        },
+      });
+    } catch (error) {
+      memberMismatch = error;
+    }
+    expect(memberMismatch).toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+    });
   });
 
   it("does not authorize a chat send from a different chat's recipient-phone freshness", async () => {

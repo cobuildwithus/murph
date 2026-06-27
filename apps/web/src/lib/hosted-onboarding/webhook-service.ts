@@ -57,6 +57,9 @@ import {
 import {
   assertHostedThreadRouteEgressAuthority,
 } from "../hosted-routing/thread-route-store";
+import {
+  assertHostedLinqRouteAuthorityMatchesTarget,
+} from "./linq-egress-engagement";
 
 export {
   handleHostedStripeWebhook,
@@ -342,7 +345,10 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
   try {
     if (input.plan.linqReadReceiptRouteAuthority) {
       await assertHostedThreadRouteEgressAuthority({
-        authority: input.plan.linqReadReceiptRouteAuthority,
+        authority: assertHostedLinqRouteAuthorityMatchesTarget({
+          chatId,
+          routeAuthority: input.plan.linqReadReceiptRouteAuthority,
+        }),
         prisma: input.prisma,
       });
     }

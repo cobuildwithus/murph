@@ -631,6 +631,60 @@ describe("hosted Linq webhook transport", () => {
     });
   });
 
+  it("rejects current-inbound routed replies when authority names a different Linq chat", async () => {
+    const accountLookupKey = createHostedPhoneLookupKey("+15550000000");
+    if (!accountLookupKey) {
+      throw new Error("Expected test account lookup key.");
+    }
+    const prisma = {
+      hostedLinqDelivery: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        upsert: vi.fn().mockResolvedValue({ id: "hld_route_mismatch" }),
+      },
+      hostedLinqProviderEvent: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      hostedThreadRoute: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-group-b",
+      memberId: "member-thread-container-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      routeAuthority: {
+        accountLookupKey,
+        channel: "linq",
+        containerMemberId: "member-thread-container-1",
+        threadId: "chat-group-a",
+      },
+      sourceEventId: "event-route-mismatch-daily-quota",
+      template: "daily_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        currentInboundReply: {
+          chatId: "chat-group-b",
+          messageId: "message-1",
+        },
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+    });
+
+    expect(prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(releaseHostedLinqQuotaReplyNoticeClaim).toHaveBeenCalledWith({
+      memberId: "member-thread-container-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+  });
+
   it("logs claimed AI usage quota source event suffixes separately from period-scoped effect ids", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(Object.assign(

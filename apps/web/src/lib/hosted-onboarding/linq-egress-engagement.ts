@@ -169,14 +169,21 @@ export async function readHostedLinqSideEffectRecentInboundDecision(input: {
   now?: Date;
   payload: HostedLinqMessagePayload;
   prisma: HostedLinqEngagementClient;
+  route?: { lastInboundAt: Date | null } | null;
 }): Promise<HostedLinqRecentInboundDecision> {
   const now = input.now ?? new Date();
+  const memberId = await resolveHostedLinqSideEffectMemberId(input);
   const routeAuthority = "routeAuthority" in input.payload
     ? input.payload.routeAuthority ?? null
     : null;
   if (routeAuthority) {
-    const route = await assertHostedThreadRouteEgressAuthority({
-      authority: routeAuthority,
+    const validatedRouteAuthority = assertHostedLinqRouteAuthorityMatchesTarget({
+      chatId: input.payload.chatId,
+      memberId,
+      routeAuthority,
+    });
+    const route = input.route ?? await assertHostedThreadRouteEgressAuthority({
+      authority: validatedRouteAuthority,
       prisma: input.prisma,
     });
     return decideHostedLinqRecentInbound({
@@ -185,7 +192,6 @@ export async function readHostedLinqSideEffectRecentInboundDecision(input: {
     });
   }
 
-  const memberId = await resolveHostedLinqSideEffectMemberId(input);
   if (!memberId) {
     return decideHostedLinqRecentInbound({ lastInboundAt: null, now });
   }
@@ -198,6 +204,35 @@ export async function readHostedLinqSideEffectRecentInboundDecision(input: {
     }),
     now,
   });
+}
+
+export function assertHostedLinqRouteAuthorityMatchesTarget(input: {
+  chatId: string | null | undefined;
+  memberId?: string | null;
+  routeAuthority: HostedExecutionExternalThreadRouteAuthority;
+}): HostedExecutionLinqExternalThreadRouteAuthority {
+  const authority = input.routeAuthority;
+  const chatId = normalizeNullable(input.chatId);
+  const memberId = normalizeNullable(input.memberId);
+
+  if (
+    authority.channel !== "linq"
+    || !chatId
+    || authority.threadId !== chatId
+    || (memberId !== null && authority.containerMemberId !== memberId)
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+      message: "Linq egress route authority does not match the requested thread.",
+      retryable: false,
+    });
+  }
+
+  return {
+    ...authority,
+    channel: "linq",
+  };
 }
 
 export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {

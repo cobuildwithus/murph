@@ -17,6 +17,7 @@ import {
   recordHostedLinqDeliveryAttemptTx,
 } from "./linq-delivery-store";
 import {
+  assertHostedLinqRouteAuthorityMatchesTarget,
   buildHostedLinqRecentInboundSkipReason,
   readHostedLinqSideEffectRecentInboundDecision,
 } from "./linq-egress-engagement";
@@ -37,6 +38,7 @@ import {
 } from "./linq";
 import {
   assertHostedThreadRouteEgressAuthority,
+  type HostedThreadRouteSnapshot,
   type HostedLinqThreadRouteEgressAuthority,
 } from "../hosted-routing/thread-route-store";
 import {
@@ -297,7 +299,7 @@ async function sendHostedLinqSideEffect(
   });
 
   try {
-    await assertHostedLinqSideEffectRouteAuthority(effect, options.prisma);
+    const route = await assertHostedLinqSideEffectRouteAuthority(effect, options.prisma);
     const currentInboundReply = isHostedLinqCurrentInboundSideEffect(
       effect,
       options.currentInboundReply,
@@ -306,6 +308,7 @@ async function sendHostedLinqSideEffect(
       const engagementDecision = await readHostedLinqSideEffectRecentInboundDecision({
         payload: effect.payload,
         prisma: options.prisma,
+        route,
       });
       if (!engagementDecision.allowed) {
         await deliveryAttemptTask;
@@ -364,16 +367,20 @@ async function sendHostedLinqSideEffect(
 async function assertHostedLinqSideEffectRouteAuthority(
   effect: HostedLinqMessageSideEffect,
   prisma: HostedLinqTransportPersistenceClient,
-): Promise<void> {
+): Promise<HostedThreadRouteSnapshot | null> {
   const routeAuthority = "routeAuthority" in effect.payload
     ? effect.payload.routeAuthority ?? null
     : null;
   if (!routeAuthority) {
-    return;
+    return null;
   }
 
-  await assertHostedThreadRouteEgressAuthority({
-    authority: routeAuthority,
+  return await assertHostedThreadRouteEgressAuthority({
+    authority: assertHostedLinqRouteAuthorityMatchesTarget({
+      chatId: effect.payload.chatId,
+      memberId: "memberId" in effect.payload ? effect.payload.memberId : null,
+      routeAuthority,
+    }),
     prisma,
   });
 }
