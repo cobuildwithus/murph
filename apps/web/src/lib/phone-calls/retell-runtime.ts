@@ -1,6 +1,15 @@
 import type {
   HostedPhoneCallBrief,
 } from "@murphai/hosted-execution/phone-calls";
+import {
+  APIConnectionError,
+  APIError,
+  Retell,
+} from "retell-sdk";
+import type { ClientOptions } from "retell-sdk";
+import type {
+  CallCreatePhoneCallParams,
+} from "retell-sdk/resources/call";
 
 import type {
   HostedPhoneCallRuntimeRecord,
@@ -9,72 +18,72 @@ import type {
 } from "./types";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
-const RETELL_CREATE_PHONE_CALL_URL = "https://api.retellai.com/v2/create-phone-call";
-const RETELL_STOP_CALL_URL_BASE = "https://api.retellai.com/v2/stop-call";
+const RETELL_API_BASE_URL = "https://api.retellai.com";
 const RETELL_START_TIMEOUT_MS = 15_000;
 const RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING = "basic_attributes_only";
 
 export function createRetellPhoneCallRuntime(input: {
   fetchImpl?: typeof fetch;
 } = {}): PhoneCallRuntime {
-  return new RetellPhoneCallRuntime(input.fetchImpl ?? fetch);
+  return new RetellPhoneCallRuntime(input.fetchImpl);
 }
 
 class RetellPhoneCallRuntime implements PhoneCallRuntime {
-  constructor(private readonly fetchImpl: typeof fetch) {}
+  constructor(private readonly fetchImpl: typeof fetch | undefined) {}
 
   async start(call: HostedPhoneCallRuntimeRecord): Promise<PhoneCallRuntimeStartResult> {
-    const response = await this.fetchImpl(RETELL_CREATE_PHONE_CALL_URL, {
-      body: JSON.stringify(buildRetellCreatePhoneCallRequest(call)),
-      headers: {
-        authorization: `Bearer ${requireEnv("RETELL_API_KEY")}`,
-        "content-type": "application/json",
-      },
-      method: "POST",
-      redirect: "error",
-      signal: AbortSignal.timeout(RETELL_START_TIMEOUT_MS),
-    });
+    const params = buildRetellCreatePhoneCallRequest(call);
+    const client = this.buildClient();
+    const response = await client.call.createPhoneCall(params);
 
-    if (!response.ok) {
-      throw new Error(`Retell create phone call failed with HTTP ${response.status}.`);
-    }
-
-    const payload = await response.json();
-    const providerCallId = readProviderCallId(payload);
+    const providerCallId = readRetellProviderCallId(response.call_id);
     if (!providerCallId) {
       throw new TypeError("Retell create phone call returned no call_id.");
     }
-    const storageSetting = readRetellDataStorageSetting(payload);
+    const storageSetting = readRetellDataStorageSetting(response.data_storage_setting);
     if (storageSetting !== RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING) {
       throw buildRetellStorageModeMismatchError({
         storageSetting,
-        stopFailure: await this.stopCallBestEffort(providerCallId),
+        stopFailure: await this.stopCallBestEffort(client, providerCallId),
       });
     }
 
     return { providerCallId };
   }
 
+  private buildClient(): Retell {
+    const options: ClientOptions = {
+      apiKey: requireEnv("RETELL_API_KEY"),
+      baseURL: RETELL_API_BASE_URL,
+      fetchOptions: { redirect: "error" },
+      maxRetries: 0,
+      timeout: RETELL_START_TIMEOUT_MS,
+    };
+    if (this.fetchImpl) {
+      options.fetch = this.fetchImpl as ClientOptions["fetch"];
+    }
+    return new Retell(options);
+  }
+
   private async stopCallBestEffort(
+    client: Retell,
     providerCallId: string,
   ): Promise<RetellStopCallFailure | null> {
     try {
-      const response = await this.fetchImpl(readRetellStopCallUrl(providerCallId), {
-        headers: {
-          authorization: `Bearer ${requireEnv("RETELL_API_KEY")}`,
-        },
-        method: "POST",
-        redirect: "error",
-        signal: AbortSignal.timeout(RETELL_START_TIMEOUT_MS),
-      });
-      if (!response.ok) {
+      await client.call.stop(providerCallId);
+      return null;
+    } catch (error) {
+      if (error instanceof APIConnectionError) {
         return {
-          statusCode: response.status,
+          type: "retell_storage_mismatch_stop_fetch_failed",
+        };
+      }
+      if (error instanceof APIError && typeof error.status === "number") {
+        return {
+          statusCode: error.status,
           type: "retell_storage_mismatch_stop_http_failed",
         };
       }
-      return null;
-    } catch {
       return {
         type: "retell_storage_mismatch_stop_fetch_failed",
       };
@@ -115,7 +124,7 @@ function buildRetellStorageModeMismatchError(input: {
   });
 }
 
-function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): Record<string, unknown> {
+function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): CallCreatePhoneCallParams {
   assertRetellAgentDataStorageSetting();
 
   return {
@@ -123,12 +132,10 @@ function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): 
     to_number: call.brief.to.phoneNumber,
     override_agent_id: requireEnv("RETELL_AGENT_ID"),
     override_agent_version: process.env.RETELL_AGENT_VERSION?.trim() || "prod",
-    agent_override: {
-      metadata: {
-        murph_phone_call_id: call.id,
-      },
-      retell_llm_dynamic_variables: buildRetellDynamicVariables(call),
+    metadata: {
+      murph_phone_call_id: call.id,
     },
+    retell_llm_dynamic_variables: buildRetellDynamicVariables(call),
   };
 }
 
@@ -158,10 +165,6 @@ function renderOpeningLine(brief: HostedPhoneCallBrief): string {
   return `Hi, this is Murph, an AI assistant calling on the user's behalf. I'm calling ${target} to ${brief.goal}`;
 }
 
-function readRetellStopCallUrl(providerCallId: string): string {
-  return `${RETELL_STOP_CALL_URL_BASE}/${encodeURIComponent(providerCallId)}`;
-}
-
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -170,22 +173,20 @@ function requireEnv(name: string): string {
   return value;
 }
 
-function readProviderCallId(value: unknown): string | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+function readRetellProviderCallId(value: unknown): string | null {
+  if (typeof value !== "string") {
     return null;
   }
-  const callId = (value as Record<string, unknown>).call_id;
-  return typeof callId === "string" && callId.trim() ? callId.trim() : null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function readRetellDataStorageSetting(value: unknown): string | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (typeof value !== "string") {
     return null;
   }
-  const setting = (value as Record<string, unknown>).data_storage_setting;
-  return typeof setting === "string" && setting.trim()
-    ? setting.trim().toLowerCase()
-    : null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed.toLowerCase() : null;
 }
 
 function formatRetellStorageSetting(value: string | null): string {
