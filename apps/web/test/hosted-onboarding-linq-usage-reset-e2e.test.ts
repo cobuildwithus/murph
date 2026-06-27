@@ -516,10 +516,7 @@ describe("hosted Linq usage reset e2e", () => {
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_evt_after_reset",
     });
-    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
-      chatId: CHAT_ID,
-      signal: undefined,
-    });
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
   it("suppresses the usage-limit reply when the exhausted period notice was already claimed", async () => {

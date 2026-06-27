@@ -342,16 +342,26 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
     return;
   }
 
+  const routeAuthority = input.plan.linqReadReceiptRouteAuthority ?? null;
+  if (!routeAuthority) {
+    finishHostedOnboardingTiming(readReceiptTiming, "skipped-missing-route-authority", {
+      responseReason,
+      signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
+      wakeHandoffReason,
+      wakeHandoffStarted,
+      wakeHandoffSignalAccepted,
+    });
+    return;
+  }
+
   try {
-    if (input.plan.linqReadReceiptRouteAuthority) {
-      await assertHostedThreadRouteEgressAuthority({
-        authority: assertHostedLinqRouteAuthorityMatchesTarget({
-          chatId,
-          routeAuthority: input.plan.linqReadReceiptRouteAuthority,
-        }),
-        prisma: input.prisma,
-      });
-    }
+    await assertHostedThreadRouteEgressAuthority({
+      authority: assertHostedLinqRouteAuthorityMatchesTarget({
+        chatId,
+        routeAuthority,
+      }),
+      prisma: input.prisma,
+    });
 
     const result = await sendHostedLinqReadReceipt({
       chatId,
