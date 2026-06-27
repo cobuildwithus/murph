@@ -61,7 +61,7 @@ beforeEach(() => {
   mocks.startTelegramTypingIndicator.mockResolvedValue(undefined);
 });
 
-test("hosted Linq read and typing share the same forwarded plus user env", async () => {
+test("hosted Linq read uses the forwarded plus user env without exposing typing", async () => {
   const forwardedEnv = {
     LINQ_API_BASE_URL: "https://api.linq.example",
     LINQ_API_TOKEN: "platform-linq-token",
@@ -89,9 +89,7 @@ test("hosted Linq read and typing share the same forwarded plus user env", async
     userEnv,
   });
 
-  await typing.startLinqTyping?.({
-    target: "chat_123",
-  });
+  assert.equal(typing.startLinqTyping, undefined);
   await markHostedConversationReadBestEffort({
     forwardedEnv,
     providerFetch: vi.fn<typeof fetch>(),
@@ -111,7 +109,7 @@ test("hosted Linq read and typing share the same forwarded plus user env", async
     }),
   });
 
-  assert.deepEqual(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.env, linqEnv);
+  expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
   assert.deepEqual(mocks.markLinqChatRead.mock.calls[0]?.[1]?.env, linqEnv);
 });
 
@@ -198,9 +196,7 @@ test("hosted channel activity uses provider fetch instead of effects-port provid
     userEnv: {},
   });
 
-  await typing.startLinqTyping?.({
-    target: "linq_chat_123",
-  });
+  assert.equal(typing.startLinqTyping, undefined);
   await typing.startTelegramTyping?.({
     target: "telegram_chat_123",
   });
@@ -224,23 +220,19 @@ test("hosted channel activity uses provider fetch instead of effects-port provid
     }),
   });
 
-  assert.equal(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.fetchImplementation, providerFetch);
+  expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
   assert.equal(mocks.startTelegramTypingIndicator.mock.calls[0]?.[1]?.fetchImplementation, providerFetch);
   assert.equal(mocks.markLinqChatRead.mock.calls[0]?.[1]?.fetchImplementation, providerFetch);
 });
 
-test("hosted channel activity does not use ambient fetch when provider fetch is missing", async () => {
+test("hosted channel activity omits Linq typing when provider fetch is missing", async () => {
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv: {},
     platformEnv: {},
     userEnv: {},
   });
 
-  await expect(typing.startLinqTyping?.({
-    target: "linq_chat_123",
-  })).rejects.toMatchObject({
-    code: "HOSTED_PROVIDER_FETCH_UNAVAILABLE",
-  });
+  assert.equal(typing.startLinqTyping, undefined);
   await markHostedConversationReadBestEffort({
     forwardedEnv: {},
     userEnv: {},

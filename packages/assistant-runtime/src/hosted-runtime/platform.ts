@@ -1,5 +1,5 @@
 import type {
-  HostedExecutionExternalThreadRouteAuthority,
+  HostedExecutionLinqExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
 import type {
   HostedActionApprovalConsumeRequest,
@@ -189,7 +189,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   fromPhoneNumber?: string | null;
   idempotencyKey?: string | null;
   intentId?: string | null;
-  routeAuthority?: HostedExecutionExternalThreadRouteAuthority | null;
+  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
@@ -238,7 +238,7 @@ type HostedRuntimeEffectsPortBase = {
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
   ): Promise<HostedAssistantDeliveryRecord | null>;
   assertLinqThreadRouteAuthority?(
-    authority: HostedExecutionExternalThreadRouteAuthority,
+    authority: HostedExecutionLinqExternalThreadRouteAuthority,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
   assertLinqRecentInboundEngagement?(

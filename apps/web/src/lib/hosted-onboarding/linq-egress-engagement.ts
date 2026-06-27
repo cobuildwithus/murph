@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import type {
   HostedExecutionExternalThreadRouteAuthority,
+  HostedExecutionLinqExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
 
 import {
@@ -212,7 +213,13 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   targetKind?: string | null;
 }): Promise<void> {
   const now = input.now ?? new Date();
-  if (input.routeAuthority && input.routeAuthority.containerMemberId !== input.memberId) {
+  const routeAuthority = normalizeHostedLinqRouteAuthorityForEgress({
+    memberId: input.memberId,
+    routeAuthority: input.routeAuthority ?? null,
+    target: input.target,
+    targetKind: input.targetKind,
+  });
+  if (routeAuthority && routeAuthority.containerMemberId !== input.memberId) {
     throw hostedOnboardingError({
       code: "HOSTED_LINQ_EGRESS_BOUND_USER_MISMATCH",
       httpStatus: 403,
@@ -221,9 +228,9 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     });
   }
 
-  const route = input.routeAuthority
+  const route = routeAuthority
     ? await assertHostedThreadRouteEgressAuthority({
-        authority: input.routeAuthority,
+        authority: routeAuthority,
         prisma: input.prisma,
       })
     : null;
@@ -273,6 +280,58 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     message: `Linq/iMessage delivery requires a recipient reply within the last ${HOSTED_LINQ_RECENT_INBOUND_WINDOW_DAYS} days.`,
     retryable: false,
   });
+}
+
+function normalizeHostedLinqRouteAuthorityForEgress(input: {
+  memberId: string;
+  routeAuthority: HostedExecutionExternalThreadRouteAuthority | null;
+  target: string | null;
+  targetKind?: string | null;
+}): HostedExecutionLinqExternalThreadRouteAuthority | null {
+  const authority = input.routeAuthority;
+  if (!authority) {
+    return null;
+  }
+  const targetKind = normalizeNullable(input.targetKind);
+  const target = normalizeNullable(input.target);
+  if (authority.channel !== "linq") {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+      message: "Linq egress route authority must be for a Linq thread.",
+      retryable: false,
+    });
+  }
+  const linqAuthority: HostedExecutionLinqExternalThreadRouteAuthority = {
+    ...authority,
+    channel: "linq",
+  };
+  if (linqAuthority.containerMemberId !== input.memberId) {
+    return linqAuthority;
+  }
+  if (targetKind !== "thread" && targetKind !== "explicit") {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+      message: "Linq egress route authority can only authorize thread delivery.",
+      retryable: false,
+    });
+  }
+  if (!target || target !== linqAuthority.threadId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+      message: "Linq egress route authority does not match the requested thread.",
+      retryable: false,
+    });
+  }
+
+  return linqAuthority;
+}
+
+function normalizeNullable(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
 }
 
 export function buildHostedLinqRecentInboundSkipReason(lastInboundAt: Date | null): string {

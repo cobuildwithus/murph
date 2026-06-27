@@ -2,7 +2,6 @@ import type {
   AssistantChannelTypingDependencies,
 } from "@murphai/assistant-engine";
 import {
-  startLinqTypingIndicator,
   startTelegramTypingIndicator,
 } from "@murphai/assistant-engine/assistant-channel-adapters";
 import type {
@@ -106,17 +105,6 @@ export function createHostedAssistantChannelTypingDependencies(input: {
   userEnv: Readonly<Record<string, string>>;
 }): AssistantChannelTypingDependencies {
   return {
-    startLinqTyping: async (request) => {
-      const dependencies = requireHostedProviderFetchDependencies({
-        env: buildHostedLinqChannelEnv({
-          forwardedEnv: input.forwardedEnv,
-          userEnv: input.userEnv,
-        }) as NodeJS.ProcessEnv,
-        fetchImplementation: input.providerFetch,
-        signal: input.signal,
-      }, "Hosted Linq typing indicator");
-      return startLinqTypingIndicator(request, dependencies);
-    },
     startTelegramTyping: async (request) => {
       const dependencies = requireHostedProviderFetchDependencies({
         env: buildHostedTelegramChannelEnv({

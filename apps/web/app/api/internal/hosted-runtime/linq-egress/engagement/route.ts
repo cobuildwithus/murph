@@ -1,3 +1,6 @@
+import type {
+  HostedExecutionLinqExternalThreadRouteAuthority,
+} from "@murphai/hosted-execution";
 import {
   parseHostedExecutionExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution/parsers";
@@ -8,6 +11,9 @@ import {
 import {
   assertHostedLinqRecentInboundEngagementForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
+import {
+  hostedOnboardingError,
+} from "@/src/lib/hosted-onboarding/errors";
 import {
   jsonOk,
   withJsonError,
@@ -22,12 +28,7 @@ export const POST = withJsonError(async (request: Request) => {
     maxBodyBytes: HOSTED_LINQ_EGRESS_ENGAGEMENT_BODY_LIMIT_BYTES,
   });
   const body = await readOptionalJsonObject(request);
-  const routeAuthority = body.routeAuthority
-    ? parseHostedExecutionExternalThreadRouteAuthority(
-        body.routeAuthority,
-        "Hosted Linq egress engagement request route authority",
-      )
-    : null;
+  const routeAuthority = parseHostedLinqEgressRouteAuthority(body.routeAuthority);
 
   await assertHostedLinqRecentInboundEngagementForRuntime({
     directRecipientPhoneNumber: readOptionalBodyString(body.directRecipientPhoneNumber),
@@ -49,4 +50,29 @@ export const POST = withJsonError(async (request: Request) => {
 function readOptionalBodyString(value: unknown): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized.length > 0 ? normalized : null;
+}
+
+function parseHostedLinqEgressRouteAuthority(
+  value: unknown,
+): HostedExecutionLinqExternalThreadRouteAuthority | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const authority = parseHostedExecutionExternalThreadRouteAuthority(
+    value,
+    "Hosted Linq egress engagement request route authority",
+  );
+  if (authority.channel !== "linq") {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+      message: "Linq egress route authority must be for a Linq thread.",
+      retryable: false,
+    });
+  }
+
+  return {
+    ...authority,
+    channel: "linq",
+  };
 }

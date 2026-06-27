@@ -1,5 +1,5 @@
 import type {
-  HostedExecutionExternalThreadRouteAuthority,
+  HostedExecutionLinqExternalThreadRouteAuthority,
   HostedExecutionStructuredLogDetails,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
@@ -2160,7 +2160,7 @@ function normalizeHostedLinqDeliveryText(value: string | null | undefined): stri
 function requireHostedAssistantLinqRouteAuthorityAssert(
   effectsPort: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null,
 ): (
-  authority: HostedExecutionExternalThreadRouteAuthority,
+  authority: HostedExecutionLinqExternalThreadRouteAuthority,
   context?: { signal?: AbortSignal | null },
 ) => Promise<void> {
   const assertAuthority = effectsPort?.assertLinqThreadRouteAuthority;

@@ -277,6 +277,62 @@ describe("hosted Linq egress engagement", () => {
     );
   });
 
+  it("rejects non-Linq route authority before using it as freshness proof", async () => {
+    const prisma = {
+      hostedLinqDelivery: {
+        create: vi.fn(),
+        findUnique: vi.fn(),
+      },
+    };
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      memberId: "member-1",
+      now: new Date("2026-06-25T12:05:00.000Z"),
+      prisma: prisma as never,
+      routeAuthority: {
+        accountLookupKey: "hbidx:email:v1:account",
+        channel: "email",
+        containerMemberId: "member-1",
+        threadId: "email-thread-1",
+      },
+      target: "chat-b",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects Linq route authority for a different requested thread", async () => {
+    const prisma = {
+      hostedLinqDelivery: {
+        create: vi.fn(),
+        findUnique: vi.fn(),
+      },
+    };
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      memberId: "member-1",
+      now: new Date("2026-06-25T12:05:00.000Z"),
+      prisma: prisma as never,
+      routeAuthority: {
+        accountLookupKey: "hbidx:phone:v1:account",
+        channel: "linq",
+        containerMemberId: "member-1",
+        threadId: "chat-a",
+      },
+      target: "chat-b",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
+  });
+
   it("does not authorize a chat send from a different chat's recipient-phone freshness", async () => {
     const activeChatLookupKey = createHostedLinqChatLookupKey("chat-a");
     const recipientLookupKey = createHostedPhoneLookupKey("+15550199999");
