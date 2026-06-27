@@ -183,11 +183,12 @@ describe("hosted Linq webhook transport", () => {
     });
     const prisma = {
       hostedLinqDelivery: {
+        create: vi.fn(() => attemptPromise),
+        findUnique: vi.fn().mockResolvedValue(null),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        upsert: vi.fn(() => attemptPromise),
       },
       hostedLinqProviderEvent: {
-        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
       },
     };
     const effect = createHostedWebhookLinqMessageSideEffect({
@@ -209,7 +210,7 @@ describe("hosted Linq webhook transport", () => {
     });
 
     await vi.waitFor(() => {
-      expect(prisma.hostedLinqDelivery.upsert).toHaveBeenCalled();
+      expect(prisma.hostedLinqDelivery.create).toHaveBeenCalled();
     });
     await vi.waitFor(() => {
       expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(

@@ -78,24 +78,80 @@ export async function recordHostedLinqDeliveryAttemptTx(input: {
   }
 
   const id = buildHostedLinqDeliveryId(idempotencyKey);
-  const row = await input.prisma.hostedLinqDelivery.upsert({
+  const createData = {
+    ...data,
+    id,
+    idempotencyKey,
+  };
+  const updateData = {
+    ...data,
+    failedAt: null,
+    failureCode: null,
+    failureReason: null,
+    skippedAt: null,
+    skipReason: null,
+    status: "attempted",
+  };
+
+  const existing = await input.prisma.hostedLinqDelivery.findUnique({
     where: { idempotencyKey },
-    create: {
-      ...data,
-      id,
-      idempotencyKey,
-    },
-    update: {
-      attemptedAt,
-      linqChatLookupKey: data.linqChatLookupKey,
-      phoneNumberHint: data.phoneNumberHint,
-      phoneNumberLookupKey: data.phoneNumberLookupKey,
-      targetKind: data.targetKind,
-      template: data.template,
-    },
+    select: hostedLinqDeliveryLifecycleSelect,
+  });
+  if (existing) {
+    return updateHostedLinqDeliveryAttemptIfPreProvider({
+      data: updateData,
+      delivery: existing,
+      prisma: input.prisma,
+    });
+  }
+
+  try {
+    return await input.prisma.hostedLinqDelivery.create({
+      data: createData,
+      select: { id: true },
+    });
+  } catch (error) {
+    if (!isPrismaUniqueConstraintError(error)) {
+      throw error;
+    }
+    const concurrent = await input.prisma.hostedLinqDelivery.findUnique({
+      where: { idempotencyKey },
+      select: hostedLinqDeliveryLifecycleSelect,
+    });
+    if (!concurrent) {
+      throw error;
+    }
+    return updateHostedLinqDeliveryAttemptIfPreProvider({
+      data: updateData,
+      delivery: concurrent,
+      prisma: input.prisma,
+    });
+  }
+}
+
+async function updateHostedLinqDeliveryAttemptIfPreProvider(input: {
+  data: Prisma.HostedLinqDeliveryUpdateInput;
+  delivery: {
+    acceptedAt: Date | null;
+    deliveredAt: Date | null;
+    failedAt: Date | null;
+    id: string;
+    lastReceiptAt: Date | null;
+    messageLookupKey: string | null;
+    skippedAt: Date | null;
+    status: string;
+  };
+  prisma: HostedLinqDeliveryClient;
+}): Promise<{ id: string }> {
+  if (isHostedLinqDeliveryProviderCorrelated(input.delivery)) {
+    return { id: input.delivery.id };
+  }
+
+  return input.prisma.hostedLinqDelivery.update({
+    where: { id: input.delivery.id },
+    data: input.data,
     select: { id: true },
   });
-  return row;
 }
 
 export async function markHostedLinqDeliveryAcceptedTx(input: {
@@ -502,6 +558,23 @@ function isHostedLinqDeliveryLifecycleFinal(input: {
       || input.messageLookupKey
       || input.skippedAt
       || input.status !== "attempted",
+  );
+}
+
+function isHostedLinqDeliveryProviderCorrelated(input: {
+  acceptedAt: Date | null;
+  deliveredAt: Date | null;
+  lastReceiptAt: Date | null;
+  messageLookupKey: string | null;
+  status: string;
+}): boolean {
+  return Boolean(
+    input.acceptedAt
+      || input.deliveredAt
+      || input.lastReceiptAt
+      || input.messageLookupKey
+      || input.status === "accepted"
+      || input.status === "delivered",
   );
 }
 
