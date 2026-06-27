@@ -16,6 +16,7 @@ import {
   vaultCliCommandDescriptors,
   type VaultCliCommandDescriptor,
 } from '../src/vault-cli-command-manifest.js'
+import { vaultCliLlmsHiddenCommandNames } from '../src/vault-cli-llms-normalizer.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
@@ -170,6 +171,10 @@ test('capture add schema exposes typed single-capture fields without raw input f
   ]) {
     assert.equal(field in schema.options.properties, true, field)
   }
+})
+
+test('capture import-json is excluded from the vault-cli --llms manifest because it lacks a sibling capture payload-schema', () => {
+  assert.equal(vaultCliLlmsHiddenCommandNames.has('capture import-json'), true)
 })
 
 test('capture add hint steers agents to vault-cli batch instead of capture import-json and fits the assistant contract hint budget', () => {

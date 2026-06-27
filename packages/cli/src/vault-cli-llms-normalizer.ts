@@ -198,6 +198,16 @@ function normalizeScopedLlmsMarkdownOutput(
   return normalized
 }
 
+// Commands that stay registered for explicit operator/script invocation but
+// must not appear in any agent-visible CLI manifest. Use this when a leaf
+// command accepts a complex `--input @file|-` payload without a paired
+// Incur-discoverable shape path (`docs/contracts/00-invariants.md` § Agent-Visible
+// CLI Payloads). Adding a sibling `payload-schema` command is the way back into
+// the agent-visible surface.
+export const vaultCliLlmsHiddenCommandNames: ReadonlySet<string> = new Set([
+  'capture import-json',
+])
+
 async function normalizeLlmsJsonManifestOutput(output: string): Promise<string> {
   let parsed: unknown
   try {
@@ -212,27 +222,40 @@ async function normalizeLlmsJsonManifestOutput(output: string): Promise<string> 
 
   const hintsByCommandName = await collectVaultCliDescriptorHintsByCommandName()
   let changed = false
-  const commands = parsed.commands.map((command) => {
+  const commands: unknown[] = []
+  for (const command of parsed.commands) {
+    if (
+      isRecord(command) &&
+      typeof command.name === 'string' &&
+      vaultCliLlmsHiddenCommandNames.has(command.name)
+    ) {
+      changed = true
+      continue
+    }
+
     if (!isRecord(command) || typeof command.name !== 'string') {
-      return command
+      commands.push(command)
+      continue
     }
 
     const existingHint = command.hint
     if (typeof existingHint === 'string' && existingHint.trim().length > 0) {
-      return command
+      commands.push(command)
+      continue
     }
 
     const hint = hintsByCommandName.get(command.name)
     if (!hint) {
-      return command
+      commands.push(command)
+      continue
     }
 
     changed = true
-    return {
+    commands.push({
       ...command,
       hint,
-    }
-  })
+    })
+  }
 
   if (!changed) {
     return output
