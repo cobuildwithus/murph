@@ -260,14 +260,14 @@ export async function issueHostedInviteTx(input: {
     },
   });
 
-  if (existingInvite) {
+  if (existingInvite && !(input.linqFirstContactEventId && existingInvite.sentAt)) {
     return input.prisma.hostedInvite.update({
       where: {
         id: existingInvite.id,
       },
       data: {
         channel: input.channel,
-        ...(input.linqFirstContactEventId
+        ...(input.linqFirstContactEventId && !existingInvite.sentAt
           ? {
               linqFirstContactEventId: input.linqFirstContactEventId,
             }
