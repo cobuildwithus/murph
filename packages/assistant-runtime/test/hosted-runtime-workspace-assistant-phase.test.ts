@@ -602,28 +602,135 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
-  it("installs a direct hosted usage recorder from the runtime platform", async () => {
-    const recordedUsageIds: string[] = [];
+  it("defers hosted usage records until after a progressed assistant checkpoint", async () => {
+    const events: string[] = [];
     const usageRecordPort: RuntimeUsageRecordPort = {
       async recordUsage(record) {
-        recordedUsageIds.push(record.usageId);
+        events.push(`record:${record.usageId}`);
         return {
           recorded: true,
           usageId: record.usageId,
         };
       },
     };
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+      );
+      events.push("assistant");
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: true,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
 
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({ runtimeUsageRecordPort: usageRecordPort }));
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeUsageRecordPort: usageRecordPort,
+    }));
 
     const hydratedContext = mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0];
     expect(hydratedContext?.hosted?.usageRecorder).toEqual({
       recordUsage: expect.any(Function),
     });
+    expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    expect(events).toEqual(["assistant"]);
 
-    await hydratedContext?.hosted?.usageRecorder?.recordUsage(createAssistantUsageRecord());
+    events.push("checkpoint");
+    await result.afterCheckpoint?.();
 
-    expect(recordedUsageIds).toEqual(["turn_direct_usage.attempt-1"]);
+    expect(events).toEqual([
+      "assistant",
+      "checkpoint",
+      "record:turn_direct_usage.attempt-1",
+    ]);
+  });
+
+  it("flushes deferred usage after existing post-checkpoint work", async () => {
+    const events: string[] = [];
+    const usageRecordPort: RuntimeUsageRecordPort = {
+      async recordUsage(record) {
+        events.push(`record:${record.usageId}`);
+        return {
+          recorded: true,
+          usageId: record.usageId,
+        };
+      },
+    };
+    const defaultRoute = {
+      channel: "linq",
+      deliverySource: null,
+      deliveryTarget: "chat_synthetic_seed_route",
+      identityId: "identity_synthetic_seed_route",
+      participantId: "participant_synthetic_seed_route",
+      threadId: "thread_synthetic_seed_route",
+    };
+    mocks.readAssistantInputEvent.mockResolvedValueOnce({
+      conversation: {
+        accountId: defaultRoute.identityId,
+        actorId: defaultRoute.participantId,
+        actorIsSelf: false,
+        source: defaultRoute.channel,
+        threadId: defaultRoute.threadId,
+        threadIsDirect: true,
+      },
+      replyTarget: {
+        channel: defaultRoute.channel,
+        messageId: "message_synthetic_seed_route",
+        threadId: defaultRoute.deliveryTarget,
+      },
+    });
+    mocks.applyMurphManagedAutomations.mockImplementationOnce(async () => {
+      events.push("managed-automation");
+      return {
+        created: 1,
+        skipped: 0,
+        updated: 0,
+      };
+    });
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 0,
+      enabledJobs: 1,
+      nextRunAt: "2026-04-30T17:00:00.000Z",
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+      );
+      events.push("assistant");
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: true,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+      runtimeUsageRecordPort: usageRecordPort,
+    }));
+
+    const hydratedContext = mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0];
+    expect(hydratedContext?.hosted?.usageRecorder).toEqual({
+      recordUsage: expect.any(Function),
+    });
+    expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    expect(events).toEqual(["assistant"]);
+
+    events.push("checkpoint");
+    await result.afterCheckpoint?.();
+
+    expect(events).toEqual([
+      "assistant",
+      "checkpoint",
+      "managed-automation",
+      "record:turn_direct_usage.attempt-1",
+    ]);
   });
 
   it("keeps device-sync options out of the assistant lane when active input is fresh", async () => {

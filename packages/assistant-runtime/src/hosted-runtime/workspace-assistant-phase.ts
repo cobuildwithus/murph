@@ -13,6 +13,7 @@ import {
   type HostedRuntimeRedactedObject,
   type HostedRuntimeRedactedScalar,
 } from "@murphai/hosted-execution/runtime-control";
+import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import {
   applyMurphManagedAutomations,
   getAssistantCronStatus,
@@ -187,6 +188,50 @@ export async function runHostedWorkspaceAssistantPhase(
     deviceConnectProviders,
     input,
   });
+  const usageRecordPort = input.runtime.platform.usageRecordPort ?? null;
+  const deferredUsageRecords: AssistantUsageRecord[] = [];
+  let usageFlushDeferredToAfterCheckpoint = false;
+  const recordDeferredUsage = (record: AssistantUsageRecord): Promise<void> => {
+    deferredUsageRecords.push(record);
+    return Promise.resolve();
+  };
+  const flushDeferredUsageRecords = async (): Promise<void> => {
+    if (!usageRecordPort || deferredUsageRecords.length === 0) {
+      return;
+    }
+
+    const records = deferredUsageRecords.splice(0);
+    for (const record of records) {
+      try {
+        await usageRecordPort.recordUsage(record);
+      } catch (error) {
+        warnHostedAssistantUsageRecordingFailure(error);
+      }
+    }
+  };
+  const deferUsageFlushUntilAfterCheckpoint = (
+    result: HostedWorkspaceRunnerAssistantPhaseResult,
+  ): HostedWorkspaceRunnerAssistantPhaseResult => {
+    if (
+      deferredUsageRecords.length === 0
+      || result.progressed !== true
+    ) {
+      return result;
+    }
+
+    const afterCheckpoint = result.afterCheckpoint ?? null;
+    usageFlushDeferredToAfterCheckpoint = true;
+    return {
+      ...result,
+      afterCheckpoint: async () => {
+        try {
+          return afterCheckpoint ? await afterCheckpoint() : null;
+        } finally {
+          await flushDeferredUsageRecords();
+        }
+      },
+    };
+  };
   if (shouldWriteHostedDeviceConnectContextLog({ deviceConnectProviders, input })) {
     void writeHostedDeviceConnectRuntimeLog({
       deviceConnectProviders,
@@ -234,12 +279,10 @@ export async function runHostedWorkspaceAssistantPhase(
         memberId: input.request.userId,
         providerFetch: input.runtime.platform.providerFetch ?? null,
         publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
-        ...(input.runtime.platform.usageRecordPort
+        ...(usageRecordPort
           ? {
               usageRecorder: {
-                recordUsage: async (record) => {
-                  await input.runtime.platform.usageRecordPort?.recordUsage(record);
-                },
+                recordUsage: recordDeferredUsage,
               },
             }
           : {}),
@@ -418,12 +461,13 @@ export async function runHostedWorkspaceAssistantPhase(
         systemMailboxWakeAt,
         wake,
       });
-      return mergeContinuingSystemMailboxResult(
+      const result = mergeContinuingSystemMailboxResult(
         withFreshHostedManagedAutomationsAfterCheckpoint({
           input,
           result: foregroundAssistantResult,
         }),
       );
+      return deferUsageFlushUntilAfterCheckpoint(result);
     }
     const assistantCronWakeAfterPass =
       shouldResolveHostedAssistantCronWakeAfterAssistantPass({
@@ -522,16 +566,16 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(postDelivery.redactedStatus ?? {}),
       };
       if (!phaseProgressed) {
-        return mergeContinuingSystemMailboxResult({
+        return deferUsageFlushUntilAfterCheckpoint(mergeContinuingSystemMailboxResult({
           ...(nextWakeAt ? { nextWakeAt } : {}),
           ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
             ? { nextWakeReason: postDelivery.nextWakeReason }
             : {}),
           progressed: false,
           redactedStatus,
-        });
+        }));
       }
-      return mergeContinuingSystemMailboxResult({
+      return deferUsageFlushUntilAfterCheckpoint(mergeContinuingSystemMailboxResult({
         checkpointReason: postDelivery.checkpointReason,
         nextWakeAt,
         ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
@@ -539,7 +583,7 @@ export async function runHostedWorkspaceAssistantPhase(
           : {}),
         progressed: true,
         redactedStatus,
-      });
+      }));
     }
 
     const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
@@ -592,17 +636,17 @@ export async function runHostedWorkspaceAssistantPhase(
       systemMailboxRetryableFailed: 0,
     });
     if (!phaseProgressed) {
-      return mergeContinuingSystemMailboxResult({
+      return deferUsageFlushUntilAfterCheckpoint(mergeContinuingSystemMailboxResult({
         ...(nextWakeAt ? { nextWakeAt } : {}),
         ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
           ? { nextWakeReason: nextWake.reason }
         : {}),
         progressed: false,
         redactedStatus,
-      });
+      }));
     }
 
-    return mergeContinuingSystemMailboxResult({
+    const result = mergeContinuingSystemMailboxResult({
       ...(hasPostCommitProviderCleanup
         ? {
             afterCheckpoint: async () => {
@@ -663,10 +707,20 @@ export async function runHostedWorkspaceAssistantPhase(
       progressed: true,
       redactedStatus,
     });
+    return deferUsageFlushUntilAfterCheckpoint(result);
   } finally {
+    if (!usageFlushDeferredToAfterCheckpoint) {
+      await flushDeferredUsageRecords();
+    }
     releaseChannelAbortRelay();
     channelAbortController.abort();
   }
+}
+
+function warnHostedAssistantUsageRecordingFailure(error: unknown): void {
+  console.warn("Assistant usage recording failed; continuing without retry.", {
+    errorName: error instanceof Error ? error.name : typeof error,
+  });
 }
 
 function hasFreshHostedConversationInput(
