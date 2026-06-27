@@ -8,8 +8,13 @@ import type {
 } from '../assistant/execution-context.js'
 
 export const MAX_GENERATE_IMAGE_REFERENCE_COUNT = 4
-export const MAX_GENERATE_IMAGE_REFERENCE_BYTES = 20 * 1024 * 1024
-export const MAX_GENERATE_IMAGE_REFERENCE_TOTAL_BYTES = 64 * 1024 * 1024
+// Sized so the maximum 4-image total stays well below the hosted runner Worker
+// proxy budget. createHostedRunnerUpstreamRequest currently buffers the request
+// body through ArrayBuffer + a new Request copy, so a single hosted call could
+// hold the multipart body twice in memory. Keep the per-file and total caps
+// small enough that 2x the total fits comfortably inside one Worker request.
+export const MAX_GENERATE_IMAGE_REFERENCE_BYTES = 4 * 1024 * 1024
+export const MAX_GENERATE_IMAGE_REFERENCE_TOTAL_BYTES = 16 * 1024 * 1024
 
 export type GenerateImageReferenceMediaType =
   | 'image/jpeg'

@@ -993,6 +993,85 @@ describe("hostedRunnerIntercept", () => {
     expect(forwardedRequest.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
   });
 
+  it("rewrites sentinel credentials and forwards multipart bodies to OpenAI image edits", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const form = new FormData();
+    form.set("model", "gpt-image-2");
+    form.set("prompt", "Use image 1 as the subject reference.");
+    form.append(
+      "image[]",
+      new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: "image/png" }),
+      "reference-image-1.png",
+    );
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/images/edits", {
+        body: form,
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "member_123--v-version_1" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+    });
+    const forwarded = findFetchCall(fetchMock, "api.openai.com")?.[0];
+    expect(forwarded).toBeInstanceOf(Request);
+    const forwardedRequest = forwarded as Request;
+    expect(forwardedRequest.url).toBe("https://api.openai.com/v1/images/edits");
+    expect(forwardedRequest.method).toBe("POST");
+    expect(forwardedRequest.headers.get("authorization")).toBe("Bearer openai-worker-secret");
+    expect(forwardedRequest.headers.has("x-hosted-runtime-attempt-id")).toBe(false);
+    expect(forwardedRequest.headers.has("x-hosted-runtime-lease-generation")).toBe(false);
+    expect(forwardedRequest.headers.has("x-hosted-runtime-workspace-version")).toBe(false);
+    expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    expect(forwardedRequest.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(false);
+    expect(forwardedRequest.headers.get("content-type")).toMatch(/^multipart\/form-data;\s*boundary=/u);
+    const forwardedBytes = new Uint8Array(await forwardedRequest.arrayBuffer());
+    const forwardedBody = new TextDecoder().decode(forwardedBytes);
+    expect(forwardedBody).toContain('name="prompt"');
+    expect(forwardedBody).toContain("Use image 1 as the subject reference.");
+    expect(forwardedBody).toContain('name="image[]"');
+    expect(forwardedBody).toContain('filename="reference-image-1.png"');
+  });
+
+  it("rejects OpenAI image edits without a hosted sentinel credential", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/images/edits", {
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: "Bearer user-supplied-token",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeWriteFence: vi.fn(async () => true),
+      }),
+      { containerId: "member_123--v-version_1" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(findFetchCall(fetchMock, "api.openai.com")).toBeUndefined();
+  });
+
   it("injects ElevenLabs speech credentials and records successful TTS usage", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (target) => {
       if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {

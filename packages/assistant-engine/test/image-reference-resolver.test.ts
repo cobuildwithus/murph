@@ -5,6 +5,8 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
+  MAX_GENERATE_IMAGE_REFERENCE_BYTES,
+  MAX_GENERATE_IMAGE_REFERENCE_TOTAL_BYTES,
   normalizeGenerateImageReferenceRef,
   resolveGenerateImageReferences,
   sniffGenerateImageReferenceMediaType,
@@ -156,6 +158,24 @@ describe('image-reference-resolver', () => {
       } finally {
         await rm(outsideRoot, { force: true, recursive: true })
       }
+    })
+  })
+
+  it('rejects files larger than the per-file budget proven safe for the hosted Worker proxy', async () => {
+    expect(MAX_GENERATE_IMAGE_REFERENCE_BYTES).toBe(4 * 1024 * 1024)
+    expect(MAX_GENERATE_IMAGE_REFERENCE_TOTAL_BYTES).toBe(16 * 1024 * 1024)
+
+    await withTempVault(async (vaultRoot) => {
+      const oversize = new Uint8Array(MAX_GENERATE_IMAGE_REFERENCE_BYTES + 1)
+      oversize.set(PNG_BYTES, 0)
+      await writeVaultFile(vaultRoot, 'raw/inbox/huge.png', oversize)
+
+      await expect(
+        resolveGenerateImageReferences({
+          refs: ['raw/inbox/huge.png'],
+          vaultRoot,
+        }),
+      ).rejects.toMatchObject({ code: 'ASSISTANT_IMAGE_REFERENCE_SIZE_UNSUPPORTED' })
     })
   })
 
