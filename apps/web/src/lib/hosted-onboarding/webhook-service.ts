@@ -768,7 +768,6 @@ function logHostedLinqFirstContactAdmissionFailOpen(input: {
   const safeErrorLogDetails: Record<string, unknown> = {
     ...(errorLogDetails ?? {}),
   };
-  delete safeErrorLogDetails.errorCauseMessage;
 
   console.warn(
     "Hosted Linq first-contact admission classifier unavailable; admitting first contact.",

@@ -3538,6 +3538,7 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         admissionDisposition: "fail_open",
         errorCode: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
+        errorCauseMessage: "Unexpected token R in JSON at position 0: [redacted]",
         errorCauseType: "SyntaxError",
         errorMessage: "Linq first-contact admission classifier is unavailable.",
         eventIdSuffix: "_retry",
@@ -3547,7 +3548,6 @@ https://join.example.test/join/code_first_text`);
       }),
     );
     const warnPayload = warnSpy.mock.calls[0]?.[1];
-    expect(warnPayload).not.toHaveProperty("errorCauseMessage");
     expect(JSON.stringify(warnPayload)).not.toContain(rawProviderBodyMarker);
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();

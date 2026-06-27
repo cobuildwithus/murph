@@ -575,5 +575,7 @@ describe("json route helper factory", () => {
       .toBe("Cookie: <redacted-secret>");
     expect(httpModule.sanitizeJsonLogString("{\"authorization\":\"Bearer auth-fixture-token\",\"status\":401}"))
       .toBe("{\"authorization\":<redacted-secret>,\"status\":401}");
+    expect(httpModule.sanitizeJsonLogString("Unexpected token R in JSON at position 0: RAW_PROVIDER_BODY"))
+      .toBe("Unexpected token R in JSON at position 0: [redacted]");
   });
 });

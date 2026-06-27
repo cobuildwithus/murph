@@ -583,6 +583,7 @@ export function sanitizeJsonLogString(
     .replace(/\b(Basic|Bearer)\s+[A-Z0-9._~+/=-]+\b/giu, "$1 <redacted-secret>")
     .replace(/\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9]+\b/giu, "<redacted-secret>")
     .replace(/\bwhsec_[A-Z0-9]+\b/giu, "<redacted-secret>")
+    .replace(/\b(Unexpected token .+? in JSON at position \d+:\s*).+/giu, "$1[redacted]")
     .replace(/\bfile:\/\/\S+/giu, "<redacted-path>")
     .replace(/\bhttps?:\/\/\S+/giu, "<redacted-url>")
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, "<redacted-email>")
