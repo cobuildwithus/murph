@@ -1,38 +1,42 @@
+import { createHash } from "node:crypto";
+
 import {
-  createHostedOpaqueIdentifier,
   normalizeHostedOpaqueInput,
 } from "./contact-privacy";
 
-const HOSTED_LINQ_OPAQUE_IDENTIFIER_VERSION_PATTERN = "v[0-9]+";
+const HOSTED_LINQ_OBSERVABILITY_IDENTIFIER_VERSION = "s1";
 
 export function createHostedLinqProviderEventLookupKey(eventId: string): string {
-  return requireHostedOpaqueIdentifier("linq.provider-event", eventId);
+  return requireHostedStableObservabilityIdentifier("linq.provider-event", eventId);
 }
 
 export function createHostedLinqDeliveryIdempotencyLookupKey(
   idempotencyKey: string | null | undefined,
 ): string | null {
-  return createNullableHostedOpaqueIdentifier("linq.delivery-idempotency", idempotencyKey);
+  return createNullableHostedStableObservabilityIdentifier(
+    "linq.delivery-idempotency",
+    idempotencyKey,
+  );
 }
 
 export function createHostedLinqDeliverySourceRefLookupKey(
   sourceRef: string | null | undefined,
 ): string | null {
-  return createNullableHostedOpaqueIdentifier("linq.delivery-source-ref", sourceRef);
+  return createNullableHostedStableObservabilityIdentifier("linq.delivery-source-ref", sourceRef);
 }
 
-function requireHostedOpaqueIdentifier(kind: string, value: string): string {
+function requireHostedStableObservabilityIdentifier(kind: string, value: string): string {
   const normalized = normalizeHostedOpaqueInput(value);
-  const lookupKey = normalized && isHostedLinqOpaqueIdentifierForKind(kind, normalized)
+  const lookupKey = normalized && isHostedLinqStableObservabilityIdentifierForKind(kind, normalized)
     ? normalized
-    : createHostedOpaqueIdentifier(kind, normalized ? `raw:${normalized}` : null);
+    : createHostedStableObservabilityIdentifier(kind, normalized);
   if (!lookupKey) {
     throw new TypeError(`Hosted Linq observability ${kind} lookup key requires a value.`);
   }
   return lookupKey;
 }
 
-function createNullableHostedOpaqueIdentifier(
+function createNullableHostedStableObservabilityIdentifier(
   kind: string,
   value: string | null | undefined,
 ): string | null {
@@ -41,12 +45,29 @@ function createNullableHostedOpaqueIdentifier(
     return null;
   }
 
-  return requireHostedOpaqueIdentifier(kind, normalized);
+  return requireHostedStableObservabilityIdentifier(kind, normalized);
 }
 
-function isHostedLinqOpaqueIdentifierForKind(kind: string, value: string): boolean {
+function createHostedStableObservabilityIdentifier(
+  kind: string,
+  value: string | null,
+): string | null {
+  if (!value) {
+    return null;
+  }
+  const digest = createHash("sha256")
+    .update("murph.hosted-linq-observability")
+    .update("\0")
+    .update(kind)
+    .update("\0")
+    .update(value)
+    .digest("hex");
+  return `hbid:${kind}:${HOSTED_LINQ_OBSERVABILITY_IDENTIFIER_VERSION}:${digest}`;
+}
+
+function isHostedLinqStableObservabilityIdentifierForKind(kind: string, value: string): boolean {
   return new RegExp(
-    `^hbid:${escapeRegExp(kind)}:${HOSTED_LINQ_OPAQUE_IDENTIFIER_VERSION_PATTERN}:[0-9a-f]+$`,
+    `^hbid:${escapeRegExp(kind)}:${HOSTED_LINQ_OBSERVABILITY_IDENTIFIER_VERSION}:[0-9a-f]{64}$`,
     "u",
   ).test(value);
 }

@@ -10,11 +10,57 @@ import {
 import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
+  createHostedLinqDeliverySourceRefLookupKey,
   createHostedLinqProviderEventLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 
+const OBSERVABILITY_TEST_KEYRING_ENTRIES = {
+  v1: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+  v2: "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
+};
+
 describe("hosted Linq observability stores", () => {
+  it("keeps non-contact observability ids stable when the contact-privacy keyring rotates", () => {
+    const restoreV1 = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: OBSERVABILITY_TEST_KEYRING_ENTRIES,
+    });
+    let providerEventId = "";
+    let deliveryIdempotencyKey: string | null = null;
+    let deliverySourceRef: string | null = null;
+    try {
+      providerEventId = createHostedLinqProviderEventLookupKey("evt_failed_123");
+      deliveryIdempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
+        "linq-message:event-123",
+      );
+      deliverySourceRef = createHostedLinqDeliverySourceRefLookupKey("source:event-123");
+    } finally {
+      restoreV1();
+    }
+
+    const restoreV2 = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: OBSERVABILITY_TEST_KEYRING_ENTRIES,
+    });
+    try {
+      expect(createHostedLinqProviderEventLookupKey("evt_failed_123")).toBe(providerEventId);
+      expect(createHostedLinqDeliveryIdempotencyLookupKey("linq-message:event-123"))
+        .toBe(deliveryIdempotencyKey);
+      expect(createHostedLinqDeliverySourceRefLookupKey("source:event-123"))
+        .toBe(deliverySourceRef);
+      expect(createHostedLinqProviderEventLookupKey(providerEventId)).toBe(providerEventId);
+    } finally {
+      restoreV2();
+    }
+
+    expect(providerEventId).toMatch(/^hbid:linq\.provider-event:s1:[a-f0-9]{64}$/u);
+    expect(deliveryIdempotencyKey)
+      .toMatch(/^hbid:linq\.delivery-idempotency:s1:[a-f0-9]{64}$/u);
+    expect(deliverySourceRef)
+      .toMatch(/^hbid:linq\.delivery-source-ref:s1:[a-f0-9]{64}$/u);
+  });
+
   it("records failed provider events, updates projections, and claims one event-scoped alert", async () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryFindFirst.mockResolvedValue({
@@ -954,4 +1000,29 @@ function buildMessageReceivedEvent(input: {
     trace_id: "trace_1234567890",
     webhook_version: "2026-02-03",
   } as HostedLinqWebhookEvent;
+}
+
+function configureHostedContactPrivacyKeyringForTest(input: {
+  currentVersion: string;
+  entries: Record<string, string>;
+}): () => void {
+  const previousKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+  const previousCurrent = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+  process.env.HOSTED_CONTACT_PRIVACY_KEYS = Object.entries(input.entries)
+    .map(([version, key]) => `${version}:${key}`)
+    .join(",");
+  process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = input.currentVersion;
+
+  return () => {
+    if (previousKeys === undefined) {
+      delete process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+    } else {
+      process.env.HOSTED_CONTACT_PRIVACY_KEYS = previousKeys;
+    }
+    if (previousCurrent === undefined) {
+      delete process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+    } else {
+      process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = previousCurrent;
+    }
+  };
 }
