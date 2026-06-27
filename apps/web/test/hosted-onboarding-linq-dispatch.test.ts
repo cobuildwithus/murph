@@ -3434,8 +3434,16 @@ https://join.example.test/join/code_first_text`);
   it("admits unknown Linq first contacts when the classifier is unavailable", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     const rawProviderBodyMarker = "RAW_PROVIDER_BODY_SHOULD_NOT_LOG";
+    const invalidJsonCause = await new Response(`${rawProviderBodyMarker} user@example.com`, {
+      headers: {
+        "content-type": "application/json",
+      },
+    }).json().catch((error: unknown) => error);
+    if (!(invalidJsonCause instanceof SyntaxError)) {
+      throw new Error("Expected invalid JSON response to throw a SyntaxError.");
+    }
     mocks.classifyHostedLinqFirstContactAdmission.mockRejectedValueOnce(hostedOnboardingError({
-      cause: new SyntaxError(`Unexpected token R in JSON at position 0: ${rawProviderBodyMarker}`),
+      cause: invalidJsonCause,
       code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
       details: {
         operationName: "hosted_linq_first_contact_admission",
@@ -3538,7 +3546,7 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         admissionDisposition: "fail_open",
         errorCode: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
-        errorCauseMessage: "Unexpected token R in JSON at position 0: [redacted]",
+        errorCauseMessage: "Unexpected token 'R', [redacted JSON body excerpt] is not valid JSON",
         errorCauseType: "SyntaxError",
         errorMessage: "Linq first-contact admission classifier is unavailable.",
         eventIdSuffix: "_retry",

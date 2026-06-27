@@ -577,5 +577,7 @@ describe("json route helper factory", () => {
       .toBe("{\"authorization\":<redacted-secret>,\"status\":401}");
     expect(httpModule.sanitizeJsonLogString("Unexpected token R in JSON at position 0: RAW_PROVIDER_BODY"))
       .toBe("Unexpected token R in JSON at position 0: [redacted]");
+    expect(httpModule.sanitizeJsonLogString("Unexpected token 'R', \"RAW_PROVID\"... is not valid JSON"))
+      .toBe("Unexpected token 'R', [redacted JSON body excerpt] is not valid JSON");
   });
 });
