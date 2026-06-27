@@ -33,12 +33,12 @@ const HOSTED_LINQ_FUTURE_INBOUND_SKEW_MS = 5 * 60 * 1000;
 export type HostedLinqRecentInboundDecision =
   | {
       allowed: true;
-      lastInboundAt: Date;
+      lastInboundAt: Date | null;
     }
   | {
       allowed: false;
-      lastInboundAt: Date | null;
-      reason: "missing_recent_inbound";
+      lastInboundAt: Date;
+      reason: "stale_inbound";
     };
 
 export function decideHostedLinqRecentInbound(input: {
@@ -48,30 +48,15 @@ export function decideHostedLinqRecentInbound(input: {
   const now = input.now ?? new Date();
   const lastInboundAt = input.lastInboundAt;
   if (!lastInboundAt) {
-    return {
-      allowed: false,
-      lastInboundAt: null,
-      reason: "missing_recent_inbound",
-    };
+    return { allowed: true, lastInboundAt: null };
   }
   if (lastInboundAt.getTime() > now.getTime() + HOSTED_LINQ_FUTURE_INBOUND_SKEW_MS) {
-    return {
-      allowed: false,
-      lastInboundAt,
-      reason: "missing_recent_inbound",
-    };
+    return { allowed: false, lastInboundAt, reason: "stale_inbound" };
   }
-
-  return lastInboundAt.getTime() >= now.getTime() - HOSTED_LINQ_RECENT_INBOUND_WINDOW_MS
-    ? {
-        allowed: true,
-        lastInboundAt,
-      }
-    : {
-        allowed: false,
-        lastInboundAt,
-        reason: "missing_recent_inbound",
-      };
+  if (lastInboundAt.getTime() >= now.getTime() - HOSTED_LINQ_RECENT_INBOUND_WINDOW_MS) {
+    return { allowed: true, lastInboundAt };
+  }
+  return { allowed: false, lastInboundAt, reason: "stale_inbound" };
 }
 
 export async function recordHostedMemberLinqInboundEngagementTx(input: {
