@@ -847,14 +847,13 @@ model HostedLinqFirstContactAdmissionDecision {
 }
 
 model HostedLinqFirstContactAdmissionBudget {
-  participantContactLookupKey String   @id @map("participant_contact_lookup_key")
+  participantContactLookupKey String   @map("participant_contact_lookup_key")
+  eventId                     String   @map("event_id")
   participantContactKind      String   @map("participant_contact_kind")
-  attemptCount                Int      @default(0) @map("attempt_count")
-  lastEventId                 String   @map("last_event_id")
   createdAt                   DateTime @default(now()) @map("created_at")
-  updatedAt                   DateTime @updatedAt @map("updated_at")
 
-  @@index([updatedAt])
+  @@id([participantContactLookupKey, eventId])
+  @@index([createdAt])
   @@map("hosted_linq_first_contact_admission_budget")
 }
 

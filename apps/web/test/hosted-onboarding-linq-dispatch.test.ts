@@ -361,8 +361,9 @@ type HostedLinqFirstContactAdmissionDecisionFixture = {
 };
 
 type HostedLinqFirstContactAdmissionBudgetFixture = {
+  count?: MockedFunction;
+  create?: MockedFunction;
   findUnique?: MockedFunction;
-  upsert?: MockedFunction;
 };
 
 type HostedMemberFixture = {
@@ -2583,12 +2584,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         updateMany: vi.fn(),
       },
       hostedLinqFirstContactAdmissionBudget: {
-        findUnique: vi.fn().mockResolvedValue({
-          attemptCount: 4,
-          participantContactKind: "phone",
-          participantContactLookupKey: "blind:v1:existing-contact",
-        }),
-        upsert: vi.fn(),
+        count: vi.fn().mockResolvedValue(4),
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(),
@@ -2627,10 +2625,18 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.findUnique).toHaveBeenCalledWith({
       where: {
+        participantContactLookupKey_eventId: {
+          eventId: "evt_first_contact_budget_exhausted",
+          participantContactLookupKey: expect.any(String),
+        },
+      },
+    });
+    expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.count).toHaveBeenCalledWith({
+      where: {
         participantContactLookupKey: expect.any(String),
       },
     });
-    expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.upsert).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
     expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
     expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
@@ -2944,13 +2950,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         updateMany: vi.fn(),
       },
       hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValue(4),
+        create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue({
-          attemptCount: 4,
-          lastEventId: eventId,
+          eventId,
           participantContactKind: "phone",
           participantContactLookupKey: "blind:v1:retry-contact",
         }),
-        upsert: vi.fn(),
       },
       hostedMember: {
         create: vi.fn(),
@@ -2973,7 +2979,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       retryable: true,
     });
 
-    expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.upsert).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
     expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
@@ -5259,12 +5265,17 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
     });
   }
 
-  if (!hostedLinqFirstContactAdmissionBudget?.findUnique || !hostedLinqFirstContactAdmissionBudget?.upsert) {
+  if (
+    !hostedLinqFirstContactAdmissionBudget?.findUnique
+    || !hostedLinqFirstContactAdmissionBudget?.create
+    || !hostedLinqFirstContactAdmissionBudget?.count
+  ) {
     Object.defineProperty(prisma, "hostedLinqFirstContactAdmissionBudget", {
       configurable: true,
       value: {
+        count: vi.fn().mockResolvedValue(0),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
         findUnique: vi.fn().mockResolvedValue(null),
-        upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
       },
     });
   }

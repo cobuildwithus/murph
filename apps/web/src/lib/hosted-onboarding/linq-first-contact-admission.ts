@@ -77,37 +77,33 @@ type HostedLinqFirstContactAdmissionDecisionStore = {
 };
 
 type HostedLinqFirstContactAdmissionBudgetRecord = {
-  attemptCount: number;
-  lastEventId: string;
+  eventId: string;
   participantContactKind: string;
   participantContactLookupKey: string;
 };
 
 type HostedLinqFirstContactAdmissionBudgetStore = {
   hostedLinqFirstContactAdmissionBudget: {
-    findUnique(input: {
+    count(input: {
       where: {
         participantContactLookupKey: string;
       };
-    }): Promise<HostedLinqFirstContactAdmissionBudgetRecord | null>;
-    upsert(input: {
-      create: {
-        attemptCount: number;
-        lastEventId: string;
+    }): Promise<number>;
+    create(input: {
+      data: {
+        eventId: string;
         participantContactKind: HostedLinqFirstContactAdmissionRequest["participantContactKind"];
-        participantContactLookupKey: string;
-      };
-      update: {
-        attemptCount: {
-          increment: number;
-        };
-        lastEventId: string;
-        participantContactKind: HostedLinqFirstContactAdmissionRequest["participantContactKind"];
-      };
-      where: {
         participantContactLookupKey: string;
       };
     }): Promise<HostedLinqFirstContactAdmissionBudgetRecord>;
+    findUnique(input: {
+      where: {
+        participantContactLookupKey_eventId: {
+          eventId: string;
+          participantContactLookupKey: string;
+        };
+      };
+    }): Promise<HostedLinqFirstContactAdmissionBudgetRecord | null>;
   };
 };
 
@@ -303,54 +299,59 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
   participantContactLookupKey: string;
   prisma: HostedLinqFirstContactAdmissionBudgetStore;
 }): Promise<HostedLinqFirstContactAdmissionBudgetClaim> {
-  const existing = await input.prisma.hostedLinqFirstContactAdmissionBudget.findUnique({
+  const alreadyCounted = await input.prisma.hostedLinqFirstContactAdmissionBudget.findUnique({
     where: {
-      participantContactLookupKey: input.participantContactLookupKey,
+      participantContactLookupKey_eventId: {
+        eventId: input.eventId,
+        participantContactLookupKey: input.participantContactLookupKey,
+      },
     },
   });
-
-  if (existing?.lastEventId === input.eventId) {
+  if (alreadyCounted) {
     return {
-      attemptCount: existing.attemptCount,
+      attemptCount: await input.prisma.hostedLinqFirstContactAdmissionBudget.count({
+        where: {
+          participantContactLookupKey: input.participantContactLookupKey,
+        },
+      }),
       kind: "claimed",
     };
   }
 
-  if (existing && existing.attemptCount >= HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS) {
-    return {
-      attemptCount: existing.attemptCount,
-      kind: "exhausted",
-    };
-  }
-
-  const claimed = await input.prisma.hostedLinqFirstContactAdmissionBudget.upsert({
-    create: {
-      attemptCount: 1,
-      lastEventId: input.eventId,
-      participantContactKind: input.participantContactKind,
-      participantContactLookupKey: input.participantContactLookupKey,
-    },
-    update: {
-      attemptCount: {
-        increment: 1,
-      },
-      lastEventId: input.eventId,
-      participantContactKind: input.participantContactKind,
-    },
+  const existingCount = await input.prisma.hostedLinqFirstContactAdmissionBudget.count({
     where: {
       participantContactLookupKey: input.participantContactLookupKey,
     },
   });
+  if (existingCount >= HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS) {
+    return {
+      attemptCount: existingCount,
+      kind: "exhausted",
+    };
+  }
 
-  return claimed.attemptCount > HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS
-    ? {
-        attemptCount: claimed.attemptCount,
-        kind: "exhausted",
-      }
-    : {
-        attemptCount: claimed.attemptCount,
-        kind: "claimed",
-      };
+  try {
+    await input.prisma.hostedLinqFirstContactAdmissionBudget.create({
+      data: {
+        eventId: input.eventId,
+        participantContactKind: input.participantContactKind,
+        participantContactLookupKey: input.participantContactLookupKey,
+      },
+    });
+  } catch (error) {
+    if (!isPrismaUniqueConstraintError(error)) {
+      throw error;
+    }
+  }
+
+  return {
+    attemptCount: await input.prisma.hostedLinqFirstContactAdmissionBudget.count({
+      where: {
+        participantContactLookupKey: input.participantContactLookupKey,
+      },
+    }),
+    kind: "claimed",
+  };
 }
 
 function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
