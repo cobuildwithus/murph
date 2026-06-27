@@ -433,16 +433,27 @@ async function planHostedOnboardingLinqWebhookForCurrentAdmissionState(input: {
       const existingProcessingClaim = existingProcessingClaimResult?.kind === "processing"
         ? existingProcessingClaimResult
         : null;
+      const plannerProcessingOwnerToken = existingProcessingClaim?.freshExisting
+        ? undefined
+        : existingProcessingClaim?.processingOwnerToken;
 
       const plan = await planHostedOnboardingLinqWebhook({
         event: input.event,
         firstContactAdmitted: recordedAdmission?.kind === "allow",
-        firstContactEventProcessingOwnerToken: existingProcessingClaim?.processingOwnerToken,
+        firstContactEventProcessingOwnerToken: plannerProcessingOwnerToken,
         firstContactEventReclaimedStale: existingProcessingClaim?.reclaimedStale,
         requireFirstContactAdmission: true,
         prisma: transaction,
       });
       if (!plan.firstContactAdmissionRequest) {
+        if (
+          existingProcessingClaim?.freshExisting
+          && !isHostedLinqSameEventMailboxDuplicateRecoveryPlan(plan)
+        ) {
+          throw buildHostedLinqFirstContactEventProcessingError({
+            eventId: input.event.event_id,
+          });
+        }
         return {
           firstContactAdmissionClassified: false,
           firstContactAdmissionUnavailable: false,
@@ -456,6 +467,11 @@ async function planHostedOnboardingLinqWebhookForCurrentAdmissionState(input: {
       }
 
       if (existingProcessingClaim) {
+        if (existingProcessingClaim.freshExisting) {
+          throw buildHostedLinqFirstContactEventProcessingError({
+            eventId: input.event.event_id,
+          });
+        }
         return {
           firstContactEventProcessingOwnerToken: existingProcessingClaim.processingOwnerToken,
           firstContactEventReclaimedStale: existingProcessingClaim.reclaimedStale,
@@ -702,6 +718,12 @@ function attachHostedLinqFirstContactEventProcessingOwnerToken(input: {
   };
 }
 
+function isHostedLinqSameEventMailboxDuplicateRecoveryPlan(
+  plan: HostedOnboardingLinqWebhookPlan,
+): boolean {
+  return plan.response.reason === "duplicate-webhook-event" && Boolean(plan.wakeMailboxItemId);
+}
+
 async function claimExistingHostedLinqFirstContactEventProcessingOwnerToken(input: {
   eventId: string;
   transaction: Prisma.TransactionClient;
@@ -710,6 +732,7 @@ async function claimExistingHostedLinqFirstContactEventProcessingOwnerToken(inpu
       kind: "consumed";
     }
   | {
+      freshExisting: boolean;
       kind: "processing";
       processingOwnerToken: string;
       reclaimedStale: boolean;
@@ -724,6 +747,19 @@ async function claimExistingHostedLinqFirstContactEventProcessingOwnerToken(inpu
     return null;
   }
   const existingReceiptFresh = isHostedLinqFirstContactEventProcessingFresh(existingReceipt);
+  if (existingReceiptFresh) {
+    if (!existingReceipt.processingOwnerToken) {
+      throw buildHostedLinqFirstContactEventProcessingError({
+        eventId: input.eventId,
+      });
+    }
+    return {
+      freshExisting: true,
+      kind: "processing",
+      processingOwnerToken: existingReceipt.processingOwnerToken,
+      reclaimedStale: false,
+    };
+  }
 
   const receipt = await recordHostedLinqFirstContactEventProcessing({
     eventId: input.eventId,
@@ -741,9 +777,10 @@ async function claimExistingHostedLinqFirstContactEventProcessingOwnerToken(inpu
   }
 
   return {
+    freshExisting: false,
     kind: "processing",
     processingOwnerToken: receipt.processingOwnerToken,
-    reclaimedStale: !existingReceiptFresh,
+    reclaimedStale: true,
   };
 }
 
