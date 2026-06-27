@@ -40,6 +40,9 @@ import {
   isHostedOnboardingError,
 } from "./errors";
 import {
+  describeHostedOnboardingErrorForLog,
+} from "./http";
+import {
   assertHostedLinqFirstContactEventProcessingOwner,
   buildHostedLinqFirstContactEventProcessingError,
   classifyHostedLinqFirstContactAdmission,
@@ -638,6 +641,8 @@ function logHostedLinqFirstContactAdmissionFailOpen(input: {
   error: unknown;
   eventId: string;
 }): void {
+  const errorLogDetails = describeHostedOnboardingErrorForLog(input.error);
+
   console.warn(
     "Hosted Linq first-contact admission classifier unavailable; admitting first contact.",
     {
@@ -647,6 +652,7 @@ function logHostedLinqFirstContactAdmissionFailOpen(input: {
         ...(isHostedOnboardingError(input.error) ? input.error.details ?? {} : {}),
         retryable: isHostedOnboardingError(input.error) ? input.error.retryable : null,
       }),
+      ...(errorLogDetails ?? {}),
       eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
     },
   );

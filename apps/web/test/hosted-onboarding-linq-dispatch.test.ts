@@ -2919,7 +2919,7 @@ https://join.example.test/join/code_first_text`);
   it("admits unknown Linq first contacts when the classifier is unavailable", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     mocks.classifyHostedLinqFirstContactAdmission.mockRejectedValueOnce(hostedOnboardingError({
-      cause: new Error("RAW_PROVIDER_RESPONSE_SENTINEL"),
+      cause: new Error("fetch failed"),
       code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
       details: {
         operationName: "hosted_linq_first_contact_admission",
@@ -3022,13 +3022,15 @@ https://join.example.test/join/code_first_text`);
       expect.objectContaining({
         admissionDisposition: "fail_open",
         errorCode: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
+        errorCauseMessage: "fetch failed",
+        errorCauseType: "Error",
+        errorMessage: "Linq first-contact admission classifier is unavailable.",
         eventIdSuffix: "_retry",
         operationName: "hosted_linq_first_contact_admission",
         retryable: true,
         type: "transport",
       }),
     );
-    expect(JSON.stringify(warnSpy.mock.calls[0]?.[1])).not.toContain("RAW_PROVIDER_RESPONSE_SENTINEL");
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
