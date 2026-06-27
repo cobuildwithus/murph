@@ -431,40 +431,6 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders detailed 
   assert.doesNotMatch(contract, /`model`/u)
 })
 
-test('buildAssistantCliSurfaceContract hides capture import-json from the agent contract so the agent-visible payload invariant cannot be reached', async () => {
-  const {
-    buildAssistantCliSurfaceContract,
-  } = await import('../src/assistant/cli-surface-bootstrap.ts')
-
-  const contract = buildAssistantCliSurfaceContract({
-    commands: [
-      {
-        description:
-          'Record one or more dated media captures as canonical events with immutable raw/captures/** attachments.',
-        hint:
-          "Use --media for one capture with one or more files. For multiple distinct captures, run capture add per observation grouped through vault-cli batch --command '[...]'.",
-        name: 'capture add',
-      },
-      {
-        description:
-          'Import one or more dated media captures from a structured JSON payload file or stdin.',
-        hint:
-          '--input accepts @file.json or - for stdin. The payload retains the full structured capture import surface, including batch capture metadata, media refs, raw refs, labels, body sites, collections, tags, and related ids.',
-        name: 'capture import-json',
-      },
-    ],
-  })
-
-  assert.ok(contract)
-  assert.match(contract, /`capture add`/u)
-  assert.match(
-    contract,
-    /run capture add per observation grouped through vault-cli batch --command '\[\.\.\.\]'/u,
-  )
-  assert.doesNotMatch(contract, /`capture import-json`/u)
-  assert.doesNotMatch(contract, /batch capture metadata, media refs, raw refs/u)
-})
-
 test('buildAssistantCliProcessEnv keeps manifest subprocess env credential-free', async () => {
   const {
     buildAssistantCliProcessEnv,

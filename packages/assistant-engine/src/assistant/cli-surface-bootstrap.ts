@@ -76,7 +76,6 @@ const assistantCliSurfaceBootstrapIgnoredCommandNames = new Set([
   'assistant session show',
   'assistant status',
   'assistant stop',
-  'capture import-json',
   'chat',
   'doctor',
   'model',
