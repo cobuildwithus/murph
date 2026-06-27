@@ -1,6 +1,11 @@
 import type { HostedLinqFirstContactAdmissionMode } from "./env";
 import { hostedOnboardingError } from "./errors";
 import {
+  createHostedLinqParticipantContactLookupKey,
+  createHostedLinqParticipantContactLookupKeyReadCandidates,
+  type HostedLinqParticipantContact,
+} from "./linq-participant-contact";
+import {
   sanitizeHostedOnboardingStructuredLogDetails,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
@@ -90,7 +95,9 @@ type HostedLinqFirstContactAdmissionBudgetStore = {
   hostedLinqFirstContactAdmissionBudget: {
     count(input: {
       where: {
-        participantContactLookupKey: string;
+        participantContactLookupKey: {
+          in: string[];
+        };
       };
     }): Promise<number>;
     create(input: {
@@ -100,11 +107,11 @@ type HostedLinqFirstContactAdmissionBudgetStore = {
         participantContactLookupKey: string;
       };
     }): Promise<HostedLinqFirstContactAdmissionBudgetRecord>;
-    findUnique(input: {
+    findFirst(input: {
       where: {
-        participantContactLookupKey_eventId: {
-          eventId: string;
-          participantContactLookupKey: string;
+        eventId: string;
+        participantContactLookupKey: {
+          in: string[];
         };
       };
     }): Promise<HostedLinqFirstContactAdmissionBudgetRecord | null>;
@@ -299,25 +306,50 @@ export async function recordHostedLinqFirstContactAdmissionDecision(input: {
 
 export async function claimHostedLinqFirstContactAdmissionBudget(input: {
   eventId: string;
-  participantContactKind: HostedLinqFirstContactAdmissionRequest["participantContactKind"];
-  participantContactLookupKey: string;
+  participantContact: HostedLinqParticipantContact;
   tx: HostedLinqFirstContactAdmissionBudgetStore;
 }): Promise<HostedLinqFirstContactAdmissionBudgetClaim> {
+  // Read every key version that still resolves to this contact so the budget
+  // and replay guard survive contact-privacy-key rotation. Lock and insert use
+  // the version-independent and current values respectively, matching the
+  // discipline in hosted-member-routing-linq for participant contacts.
+  const lookupKeyCandidates = createHostedLinqParticipantContactLookupKeyReadCandidates({
+    kind: input.participantContact.kind,
+    value: input.participantContact.value,
+  });
+  if (lookupKeyCandidates.length === 0) {
+    throw new TypeError(
+      "Hosted Linq first-contact admission budget requires at least one readable lookup key.",
+    );
+  }
+
+  const currentLookupKey = createHostedLinqParticipantContactLookupKey({
+    kind: input.participantContact.kind,
+    value: input.participantContact.value,
+  });
+  if (!currentLookupKey) {
+    throw new TypeError(
+      "Hosted Linq first-contact admission budget requires a current contact lookup key.",
+    );
+  }
+
   // Per-contact advisory lock serializes concurrent distinct-event claims so
-  // the cap check and insert observe a consistent attempt count. Released on
-  // transaction commit. Mirrors acquireHostedLinqRoutingWriteLockTx.
+  // the cap check and insert observe a consistent attempt count. The lock
+  // value is the version-independent `${kind}:${value}` so concurrent claims
+  // contend even across a key-version boundary. Released on transaction
+  // commit. Mirrors acquireHostedLinqRoutingWriteLockTx.
   await input.tx.$executeRaw`
     SELECT pg_advisory_xact_lock(
       hashtext(${"hosted-linq-first-contact-admission-budget"}),
-      hashtext(${input.participantContactLookupKey})
+      hashtext(${`${input.participantContact.kind}:${input.participantContact.value}`})
     )
   `;
 
-  const alreadyCounted = await input.tx.hostedLinqFirstContactAdmissionBudget.findUnique({
+  const alreadyCounted = await input.tx.hostedLinqFirstContactAdmissionBudget.findFirst({
     where: {
-      participantContactLookupKey_eventId: {
-        eventId: input.eventId,
-        participantContactLookupKey: input.participantContactLookupKey,
+      eventId: input.eventId,
+      participantContactLookupKey: {
+        in: lookupKeyCandidates,
       },
     },
   });
@@ -325,7 +357,9 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
     return {
       attemptCount: await input.tx.hostedLinqFirstContactAdmissionBudget.count({
         where: {
-          participantContactLookupKey: input.participantContactLookupKey,
+          participantContactLookupKey: {
+            in: lookupKeyCandidates,
+          },
         },
       }),
       kind: "claimed",
@@ -334,7 +368,9 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
 
   const existingCount = await input.tx.hostedLinqFirstContactAdmissionBudget.count({
     where: {
-      participantContactLookupKey: input.participantContactLookupKey,
+      participantContactLookupKey: {
+        in: lookupKeyCandidates,
+      },
     },
   });
   if (existingCount >= HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS) {
@@ -347,8 +383,8 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
   await input.tx.hostedLinqFirstContactAdmissionBudget.create({
     data: {
       eventId: input.eventId,
-      participantContactKind: input.participantContactKind,
-      participantContactLookupKey: input.participantContactLookupKey,
+      participantContactKind: input.participantContact.kind,
+      participantContactLookupKey: currentLookupKey,
     },
   });
 

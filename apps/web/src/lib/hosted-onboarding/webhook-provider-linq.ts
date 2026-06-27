@@ -514,6 +514,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   ) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildFirstContactAdmissionRequiredPlan({
+        participantContact,
         request: buildHostedLinqFirstContactAdmissionRequest({
           context,
           event: input.event,
@@ -948,6 +949,7 @@ async function planHostedLinqInboundAdmissionDenied(input: {
 }
 
 function buildFirstContactAdmissionRequiredPlan(input: {
+  participantContact: HostedLinqParticipantContact;
   request: HostedLinqFirstContactAdmissionRequest;
 }): HostedOnboardingLinqDirectPlan {
   return {
@@ -959,6 +961,7 @@ function buildFirstContactAdmissionRequiredPlan(input: {
         reason: "first-contact-admission-required",
       },
     }),
+    firstContactAdmissionParticipantContact: input.participantContact,
     firstContactAdmissionRequest: input.request,
   };
 }

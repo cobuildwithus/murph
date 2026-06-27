@@ -363,7 +363,7 @@ type HostedLinqFirstContactAdmissionDecisionFixture = {
 type HostedLinqFirstContactAdmissionBudgetFixture = {
   count?: MockedFunction;
   create?: MockedFunction;
-  findUnique?: MockedFunction;
+  findFirst?: MockedFunction;
 };
 
 type HostedMemberFixture = {
@@ -2586,7 +2586,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedLinqFirstContactAdmissionBudget: {
         count: vi.fn().mockResolvedValue(4),
         create: vi.fn(),
-        findUnique: vi.fn().mockResolvedValue(null),
+        findFirst: vi.fn().mockResolvedValue(null),
       },
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn(),
@@ -2623,17 +2623,19 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "first-contact-admission-budget-exhausted",
     });
-    expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.findUnique).toHaveBeenCalledWith({
+    expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.findFirst).toHaveBeenCalledWith({
       where: {
-        participantContactLookupKey_eventId: {
-          eventId: "evt_first_contact_budget_exhausted",
-          participantContactLookupKey: expect.any(String),
+        eventId: "evt_first_contact_budget_exhausted",
+        participantContactLookupKey: {
+          in: expect.arrayContaining([expect.any(String)]),
         },
       },
     });
     expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.count).toHaveBeenCalledWith({
       where: {
-        participantContactLookupKey: expect.any(String),
+        participantContactLookupKey: {
+          in: expect.arrayContaining([expect.any(String)]),
+        },
       },
     });
     expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
@@ -2952,7 +2954,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedLinqFirstContactAdmissionBudget: {
         count: vi.fn().mockResolvedValue(4),
         create: vi.fn(),
-        findUnique: vi.fn().mockResolvedValue({
+        findFirst: vi.fn().mockResolvedValue({
           eventId,
           participantContactKind: "phone",
           participantContactLookupKey: "blind:v1:retry-contact",
@@ -5266,7 +5268,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   }
 
   if (
-    !hostedLinqFirstContactAdmissionBudget?.findUnique
+    !hostedLinqFirstContactAdmissionBudget?.findFirst
     || !hostedLinqFirstContactAdmissionBudget?.create
     || !hostedLinqFirstContactAdmissionBudget?.count
   ) {
@@ -5275,7 +5277,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
       value: {
         count: vi.fn().mockResolvedValue(0),
         create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
-        findUnique: vi.fn().mockResolvedValue(null),
+        findFirst: vi.fn().mockResolvedValue(null),
       },
     });
   }

@@ -153,15 +153,18 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       }
 
       if (plan.firstContactAdmissionRequest) {
-        const firstContactAdmissionRequest = plan.firstContactAdmissionRequest;
+        const firstContactAdmissionParticipantContact = plan.firstContactAdmissionParticipantContact;
+        if (!firstContactAdmissionParticipantContact) {
+          throw new Error(
+            "Hosted Linq first-contact admission plan missing participant contact for budget claim.",
+          );
+        }
         const admissionBudget = await runHostedOnboardingWebhookTransaction(
           prisma,
           (transaction) =>
             claimHostedLinqFirstContactAdmissionBudget({
               eventId: event.event_id,
-              participantContactKind: firstContactAdmissionRequest.participantContactKind,
-              participantContactLookupKey:
-                firstContactAdmissionRequest.participantContactLookupKey,
+              participantContact: firstContactAdmissionParticipantContact,
               tx: transaction,
             }),
         );
