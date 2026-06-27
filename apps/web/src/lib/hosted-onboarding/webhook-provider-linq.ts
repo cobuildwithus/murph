@@ -300,6 +300,28 @@ export async function planHostedOnboardingLinqWebhook(input: {
     existingPendingLinqContactLookupPresent: Boolean(existingPendingLinqContactLookup),
     participantContactKind: participantContact.kind,
   });
+  let firstContactAdmitted = input.firstContactAdmitted === true;
+  if (
+    !firstContactAdmitted
+    && input.requireFirstContactAdmission === true
+    && existingMember
+  ) {
+    const existingDailyState = await readHostedLinqDailyState({
+      memberId: existingMember.id,
+      occurredAt,
+      prisma: input.prisma,
+    });
+    if (
+      existingDailyState?.onboardingLinkSentAt
+      && await hasHostedLinqDeliveredSignupProof({
+        claimSentAt: existingDailyState.onboardingLinkSentAt,
+        memberId: existingMember.id,
+        prisma: input.prisma,
+      })
+    ) {
+      firstContactAdmitted = true;
+    }
+  }
 
   if (summary.isFromMe) {
     if (existingMember) {
@@ -336,7 +358,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   if (
     existingFirstContactReceipt?.status === "processing"
     && input.requireFirstContactAdmission === true
-    && input.firstContactAdmitted !== true
+    && !firstContactAdmitted
   ) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildFirstContactAdmissionRequiredPlan({
@@ -586,7 +608,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   if (
     existingMember
     && input.requireFirstContactAdmission === true
-    && input.firstContactAdmitted !== true
+    && !firstContactAdmitted
   ) {
     const existingDailyState = await readHostedLinqDailyState({
       memberId: existingMember.id,
@@ -627,7 +649,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   if (
     existingMember === null
     && input.requireFirstContactAdmission === true
-    && input.firstContactAdmitted !== true
+    && !firstContactAdmitted
   ) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildFirstContactAdmissionRequiredPlan({
@@ -764,18 +786,10 @@ async function planHostedLinqSignupLinkAlreadySentIfDelivered(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedOnboardingLinqDirectPlan | null> {
-  const deliveredInvite = await input.prisma.hostedInvite.findFirst({
-    orderBy: {
-      sentAt: "desc",
-    },
-    where: {
-      channel: "linq",
-      memberId: input.memberId,
-      sentAt: {
-        gte: input.claimSentAt,
-        not: null,
-      },
-    },
+  const deliveredInvite = await readHostedLinqDeliveredSignupInvite({
+    claimSentAt: input.claimSentAt,
+    memberId: input.memberId,
+    prisma: input.prisma,
   });
   if (!deliveredInvite?.sentAt) {
     if (isHostedLinqOnboardingLinkNoticeClaimFresh(input.claimSentAt)) {
@@ -811,6 +825,35 @@ async function planHostedLinqSignupLinkAlreadySentIfDelivered(input: {
       routeStage: "first-contact-signup-already-sent",
     }),
   );
+}
+
+async function hasHostedLinqDeliveredSignupProof(input: {
+  claimSentAt: Date;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const deliveredInvite = await readHostedLinqDeliveredSignupInvite(input);
+  return Boolean(deliveredInvite?.sentAt);
+}
+
+async function readHostedLinqDeliveredSignupInvite(input: {
+  claimSentAt: Date;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<{ sentAt: Date | null } | null> {
+  return await input.prisma.hostedInvite.findFirst({
+    orderBy: {
+      sentAt: "desc",
+    },
+    where: {
+      channel: "linq",
+      memberId: input.memberId,
+      sentAt: {
+        gte: input.claimSentAt,
+        not: null,
+      },
+    },
+  });
 }
 
 async function planHostedLinqExplicitThreadRouteWebhook(input: {

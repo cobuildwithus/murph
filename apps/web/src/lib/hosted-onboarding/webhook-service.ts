@@ -417,13 +417,11 @@ async function planHostedOnboardingLinqWebhookForCurrentAdmissionState(input: {
         };
       }
 
-      const recordedAllowOwnerToken = recordedAdmission?.kind === "allow"
-        ? await claimExistingHostedLinqFirstContactEventProcessingOwnerToken({
-          eventId: input.event.event_id,
-          transaction,
-        })
-        : null;
-      if (recordedAllowOwnerToken === "consumed") {
+      const existingProcessingOwnerToken = await claimExistingHostedLinqFirstContactEventProcessingOwnerToken({
+        eventId: input.event.event_id,
+        transaction,
+      });
+      if (existingProcessingOwnerToken === "consumed") {
         return {
           firstContactAdmissionClassified: false,
           firstContactAdmissionUnavailable: false,
@@ -434,7 +432,7 @@ async function planHostedOnboardingLinqWebhookForCurrentAdmissionState(input: {
       const plan = await planHostedOnboardingLinqWebhook({
         event: input.event,
         firstContactAdmitted: recordedAdmission?.kind === "allow",
-        firstContactEventProcessingOwnerToken: recordedAllowOwnerToken ?? undefined,
+        firstContactEventProcessingOwnerToken: existingProcessingOwnerToken ?? undefined,
         requireFirstContactAdmission: true,
         prisma: transaction,
       });
@@ -442,12 +440,19 @@ async function planHostedOnboardingLinqWebhookForCurrentAdmissionState(input: {
         return {
           firstContactAdmissionClassified: false,
           firstContactAdmissionUnavailable: false,
-          plan: recordedAllowOwnerToken
+          plan: existingProcessingOwnerToken
             ? attachHostedLinqFirstContactEventProcessingOwnerToken({
               plan,
-              processingOwnerToken: recordedAllowOwnerToken,
+              processingOwnerToken: existingProcessingOwnerToken,
             })
             : plan,
+        };
+      }
+
+      if (existingProcessingOwnerToken) {
+        return {
+          firstContactEventProcessingOwnerToken: existingProcessingOwnerToken,
+          request: plan.firstContactAdmissionRequest,
         };
       }
 
@@ -760,6 +765,10 @@ function logHostedLinqFirstContactAdmissionFailOpen(input: {
   eventId: string;
 }): void {
   const errorLogDetails = describeHostedOnboardingErrorForLog(input.error);
+  const safeErrorLogDetails: Record<string, unknown> = {
+    ...(errorLogDetails ?? {}),
+  };
+  delete safeErrorLogDetails.errorCauseMessage;
 
   console.warn(
     "Hosted Linq first-contact admission classifier unavailable; admitting first contact.",
@@ -770,7 +779,7 @@ function logHostedLinqFirstContactAdmissionFailOpen(input: {
         ...(isHostedOnboardingError(input.error) ? input.error.details ?? {} : {}),
         retryable: isHostedOnboardingError(input.error) ? input.error.retryable : null,
       }),
-      ...(errorLogDetails ?? {}),
+      ...safeErrorLogDetails,
       eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
     },
   );
