@@ -76,7 +76,6 @@ describe("Linq first-contact admission", () => {
         text: null,
       }),
     ).toMatchObject({
-      category: "unsupported_content",
       kind: "block",
       source: "deterministic",
     });
@@ -101,7 +100,6 @@ describe("Linq first-contact admission", () => {
         text: null,
       },
     })).resolves.toMatchObject({
-      category: "unsupported_content",
       kind: "block",
       source: "deterministic",
     });
@@ -130,7 +128,6 @@ describe("Linq first-contact admission", () => {
           content: [
             {
               text: JSON.stringify({
-                category: "join_intent",
                 confidence: 0.91,
                 decision: "allow",
               }),
@@ -147,7 +144,6 @@ describe("Linq first-contact admission", () => {
     await expect(classifyHostedLinqFirstContactAdmission({
       request: BASE_REQUEST,
     })).resolves.toMatchObject({
-      category: "join_intent",
       confidence: 0.91,
       kind: "allow",
       source: "model",
@@ -169,16 +165,15 @@ describe("Linq first-contact admission", () => {
     });
     const prompt = JSON.parse(fetchMock.mock.calls[0][1].body).input[0].content;
     expect(prompt).toContain("Goal: decide whether");
-    expect(prompt).toContain("If the text mentions Murph at all, return allow");
-    expect(prompt).toContain("Block only obvious marketing");
+    expect(prompt).toContain("Default to allow");
+    expect(prompt).toContain("Only block if the message is clearly automated marketing");
   });
 
-  it("blocks low-confidence or non-allow categories from structured responses", async () => {
+  it("blocks when the model returns decision=block regardless of confidence", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       output_text: JSON.stringify({
-        category: "benign_greeting",
         confidence: 0.4,
-        decision: "allow",
+        decision: "block",
       }),
       status: "completed",
     }), { status: 200 }));
@@ -187,7 +182,6 @@ describe("Linq first-contact admission", () => {
     await expect(classifyHostedLinqFirstContactAdmission({
       request: BASE_REQUEST,
     })).resolves.toMatchObject({
-      category: "uncertain",
       confidence: 0.4,
       kind: "block",
       source: "model",
@@ -197,7 +191,6 @@ describe("Linq first-contact admission", () => {
   it("throws a retryable 503 when classifier confidence is outside the schema bounds", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       output_text: JSON.stringify({
-        category: "join_intent",
         confidence: 7,
         decision: "allow",
       }),
@@ -234,7 +227,6 @@ describe("Linq first-contact admission", () => {
     await expect(classifyHostedLinqFirstContactAdmission({
       request: BASE_REQUEST,
     })).resolves.toMatchObject({
-      category: "unsupported_content",
       confidence: 1,
       kind: "block",
       source: "model",
@@ -253,7 +245,6 @@ describe("Linq first-contact admission", () => {
     await expect(classifyHostedLinqFirstContactAdmission({
       request: BASE_REQUEST,
     })).resolves.toMatchObject({
-      category: "unsupported_content",
       confidence: 1,
       kind: "block",
       source: "model",
@@ -270,7 +261,6 @@ describe("Linq first-contact admission", () => {
           content: [
             {
               text: JSON.stringify({
-                category: "join_intent",
                 confidence: 0.9,
                 decision: "allow",
               }),
@@ -386,7 +376,6 @@ describe("Linq first-contact admission", () => {
     await expect(classifyHostedLinqFirstContactAdmission({
       request: BASE_REQUEST,
     })).resolves.toMatchObject({
-      category: "benign_greeting",
       confidence: 1,
       kind: "allow",
       source: "deterministic",
@@ -615,7 +604,6 @@ describe("Linq first-contact admission", () => {
       hostedLinqFirstContactAdmissionDecision: {
         create: vi.fn().mockRejectedValueOnce(uniqueConflict),
         findUnique: vi.fn().mockResolvedValueOnce({
-          category: "wrong_number_or_personal_logistics",
           confidence: 0.99,
           decision: "block",
           eventId: BASE_REQUEST.eventId,
@@ -626,7 +614,6 @@ describe("Linq first-contact admission", () => {
 
     await expect(recordHostedLinqFirstContactAdmissionDecision({
       decision: {
-        category: "join_intent",
         confidence: 0.9,
         kind: "allow",
         source: "model",
@@ -634,7 +621,6 @@ describe("Linq first-contact admission", () => {
       eventId: BASE_REQUEST.eventId,
       prisma,
     })).resolves.toMatchObject({
-      category: "wrong_number_or_personal_logistics",
       confidence: 0.99,
       kind: "block",
       source: "model",

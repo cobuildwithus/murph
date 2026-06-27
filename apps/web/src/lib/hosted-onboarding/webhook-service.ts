@@ -192,6 +192,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           // authoritative claim still runs after a successful classification
           // under its advisory lock + composite-PK idempotency.
           const budgetAlreadyExhausted = await isHostedLinqFirstContactAdmissionBudgetExhausted({
+            eventId: event.event_id,
             participantContact: firstContactAdmissionParticipantContact,
             prisma,
           });

@@ -15,33 +15,9 @@ import { getHostedOnboardingEnvironment } from "./runtime";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_TIMEOUT_MS = 10_000;
-const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MIN_ALLOW_CONFIDENCE = 0.6;
 export const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS = 4;
 
-const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_CATEGORIES = [
-  "benign_greeting",
-  "join_intent",
-  "murph_question",
-  "not_murph_intent",
-  "marketing_outreach",
-  "promotional_campaign",
-  "wrong_number_or_personal_logistics",
-  "unsupported_content",
-  "uncertain",
-] as const;
-
-type HostedLinqFirstContactAdmissionCategory =
-  typeof HOSTED_LINQ_FIRST_CONTACT_ADMISSION_CATEGORIES[number];
-
-const HOSTED_LINQ_FIRST_CONTACT_ADMISSION_ALLOW_CATEGORIES =
-  new Set<HostedLinqFirstContactAdmissionCategory>([
-    "benign_greeting",
-    "join_intent",
-    "murph_question",
-  ]);
-
 export type HostedLinqFirstContactAdmissionDecision = {
-  category: HostedLinqFirstContactAdmissionCategory;
   confidence: number;
   kind: "allow" | "block";
   source: "deterministic" | "model";
@@ -56,7 +32,6 @@ export type HostedLinqFirstContactAdmissionRequest = {
 };
 
 type HostedLinqFirstContactAdmissionDecisionRecord = {
-  category: string;
   confidence: number;
   decision: string;
   eventId: string;
@@ -67,7 +42,6 @@ type HostedLinqFirstContactAdmissionDecisionStore = {
   hostedLinqFirstContactAdmissionDecision: {
     create(input: {
       data: {
-        category: HostedLinqFirstContactAdmissionCategory;
         confidence: number;
         decision: HostedLinqFirstContactAdmissionDecision["kind"];
         eventId: string;
@@ -130,7 +104,6 @@ export type HostedLinqFirstContactAdmissionBudgetClaim =
     };
 
 type HostedLinqFirstContactAdmissionModelResult = {
-  category: HostedLinqFirstContactAdmissionCategory;
   confidence: number;
   decision: "allow" | "block";
 };
@@ -147,7 +120,6 @@ export function tryHostedLinqFirstContactAdmissionDeterministicDecision(
 ): HostedLinqFirstContactAdmissionDecision | null {
   if (!request.text) {
     return buildHostedLinqFirstContactAdmissionBlock({
-      category: "unsupported_content",
       confidence: 1,
       source: "deterministic",
     });
@@ -207,7 +179,6 @@ export async function classifyHostedLinqFirstContactAdmission(input: {
       status: response.status,
     })) {
       const decision = buildHostedLinqFirstContactAdmissionAllow({
-        category: "benign_greeting",
         confidence: 1,
         source: "deterministic",
       });
@@ -294,7 +265,6 @@ export async function recordHostedLinqFirstContactAdmissionDecision(input: {
   try {
     const created = await input.prisma.hostedLinqFirstContactAdmissionDecision.create({
       data: {
-        category: input.decision.category,
         confidence: input.decision.confidence,
         decision: input.decision.kind,
         eventId: input.eventId,
@@ -321,10 +291,16 @@ export async function recordHostedLinqFirstContactAdmissionDecision(input: {
 // Cheap read-only check of whether the per-contact classifier budget is
 // already exhausted across distinct events. Webhook-service uses this as a
 // pre-flight gate so it can skip the OpenAI call for permanently-blocked
-// contacts. Unlike `claimHostedLinqFirstContactAdmissionBudget` this does not
-// take the advisory lock or try to insert a row, so it must not be used to
-// authorize a slot — only to short-circuit when no slot is available.
+// contacts. Same-event retries are NOT exhausted even when the contact's
+// total count is at the cap: an event-id that already holds a slot is still
+// eligible to re-run the classifier (e.g. after a transport failure), and
+// the eventual `claimHostedLinqFirstContactAdmissionBudget` call recognises
+// the existing row and reports the claim idempotently. Unlike that claim,
+// this read does not take the advisory lock or try to insert a row, so it
+// must not be used to authorize a slot — only to short-circuit when no slot
+// is available.
 export async function isHostedLinqFirstContactAdmissionBudgetExhausted(input: {
+  eventId: string;
   participantContact: HostedLinqParticipantContact;
   prisma: Pick<HostedLinqFirstContactAdmissionBudgetStore, "hostedLinqFirstContactAdmissionBudget">;
 }): Promise<boolean> {
@@ -333,6 +309,17 @@ export async function isHostedLinqFirstContactAdmissionBudgetExhausted(input: {
     value: input.participantContact.value,
   });
   if (lookupKeyCandidates.length === 0) {
+    return false;
+  }
+  const alreadyCounted = await input.prisma.hostedLinqFirstContactAdmissionBudget.findFirst({
+    where: {
+      eventId: input.eventId,
+      participantContactLookupKey: {
+        in: lookupKeyCandidates,
+      },
+    },
+  });
+  if (alreadyCounted) {
     return false;
   }
   const existingCount = await input.prisma.hostedLinqFirstContactAdmissionBudget.count({
@@ -444,10 +431,10 @@ function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
       {
         content: [
           "Goal: decide whether this first inbound iMessage, SMS, or RCS message from an unknown sender should be admitted so Murph, a personal health assistant, can reply.",
-          "Allow real human messages that are plausibly for Murph: short greetings, start/use/join intent, questions about Murph, and health/wellness/life questions intended for Murph.",
-          "If the text mentions Murph at all, return allow unless it is clearly spam, promotional, media-only/unsupported, or addressed to someone else in a way that makes it unrelated.",
-          "Block only obvious marketing, sales, recruiting, SEO, lead-generation, promotional or coupon blasts, wrong-person personal logistics, media-only/unsupported content, or messages with no plausible relationship to Murph.",
-          "When the message does not mention Murph and the intended recipient or purpose is ambiguous, block.",
+          "Default to allow. Murph would rather reply to a stranger than turn one away.",
+          "Allow anything that reads like a real person reaching out — including bare greetings like \"hi\", \"hey\", \"yo\", \"sup\", emoji-only, single-word pings, any health/wellness/life question, any message that mentions Murph, and any genuine question or intent to use the product.",
+          "Only block if the message is clearly automated marketing, sales, recruiting, SEO outreach, lead generation, promotional or coupon blasts, mass-template solicitations, or other obvious commercial spam aimed at an inbox rather than a person.",
+          "When uncertain whether a message is a real human greeting or commercial spam, return allow.",
         ].join("\n"),
         role: "system",
       },
@@ -471,10 +458,6 @@ function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
         schema: {
           additionalProperties: false,
           properties: {
-            category: {
-              enum: HOSTED_LINQ_FIRST_CONTACT_ADMISSION_CATEGORIES,
-              type: "string",
-            },
             confidence: {
               maximum: 1,
               minimum: 0,
@@ -485,7 +468,7 @@ function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
               type: "string",
             },
           },
-          required: ["decision", "category", "confidence"],
+          required: ["decision", "confidence"],
           type: "object",
         },
         strict: true,
@@ -498,34 +481,22 @@ function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
 function normalizeHostedLinqFirstContactAdmissionModelDecision(
   result: HostedLinqFirstContactAdmissionModelResult,
 ): HostedLinqFirstContactAdmissionDecision {
-  if (
-    result.decision === "allow"
-    && HOSTED_LINQ_FIRST_CONTACT_ADMISSION_ALLOW_CATEGORIES.has(result.category)
-    && result.confidence >= HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MIN_ALLOW_CONFIDENCE
-  ) {
-    return buildHostedLinqFirstContactAdmissionAllow({
-      category: result.category,
+  return result.decision === "allow"
+    ? buildHostedLinqFirstContactAdmissionAllow({
+      confidence: result.confidence,
+      source: "model",
+    })
+    : buildHostedLinqFirstContactAdmissionBlock({
       confidence: result.confidence,
       source: "model",
     });
-  }
-
-  return buildHostedLinqFirstContactAdmissionBlock({
-    category: HOSTED_LINQ_FIRST_CONTACT_ADMISSION_ALLOW_CATEGORIES.has(result.category)
-      ? "uncertain"
-      : result.category,
-    confidence: result.confidence,
-    source: "model",
-  });
 }
 
 function buildHostedLinqFirstContactAdmissionAllow(input: {
-  category: HostedLinqFirstContactAdmissionCategory;
   confidence: number;
   source: HostedLinqFirstContactAdmissionDecision["source"];
 }): HostedLinqFirstContactAdmissionDecision {
   return {
-    category: input.category,
     confidence: clampHostedLinqFirstContactAdmissionConfidence(input.confidence),
     kind: "allow",
     source: input.source,
@@ -533,12 +504,10 @@ function buildHostedLinqFirstContactAdmissionAllow(input: {
 }
 
 function buildHostedLinqFirstContactAdmissionBlock(input: {
-  category: HostedLinqFirstContactAdmissionCategory;
   confidence: number;
   source: HostedLinqFirstContactAdmissionDecision["source"];
 }): HostedLinqFirstContactAdmissionDecision {
   return {
-    category: input.category,
     confidence: clampHostedLinqFirstContactAdmissionConfidence(input.confidence),
     kind: "block",
     source: input.source,
@@ -565,14 +534,12 @@ function parseHostedLinqFirstContactAdmissionModelResult(
   }
 
   const decision = readString(record.decision);
-  const category = readString(record.category);
   const confidence = typeof record.confidence === "number" && Number.isFinite(record.confidence)
     ? record.confidence
     : null;
 
   if (
     (decision !== "allow" && decision !== "block")
-    || !isHostedLinqFirstContactAdmissionCategory(category)
     || confidence === null
     || confidence < 0
     || confidence > 1
@@ -581,7 +548,6 @@ function parseHostedLinqFirstContactAdmissionModelResult(
   }
 
   return {
-    category,
     confidence,
     decision,
   };
@@ -594,10 +560,8 @@ function parseHostedLinqFirstContactAdmissionDecisionRecord(
     return null;
   }
 
-  const category = readString(record.category);
   if (
     (record.decision !== "allow" && record.decision !== "block")
-    || !isHostedLinqFirstContactAdmissionCategory(category)
     || !Number.isFinite(record.confidence)
     || record.confidence < 0
     || record.confidence > 1
@@ -607,7 +571,6 @@ function parseHostedLinqFirstContactAdmissionDecisionRecord(
   }
 
   return {
-    category,
     confidence: record.confidence,
     kind: record.decision,
     source: record.source,
@@ -641,7 +604,6 @@ function readHostedLinqFirstContactAdmissionTerminalBlock(
     && readString(incompleteDetails?.reason) === "content_filter"
   ) {
     return buildHostedLinqFirstContactAdmissionBlock({
-      category: "unsupported_content",
       confidence: 1,
       source: "model",
     });
@@ -649,7 +611,6 @@ function readHostedLinqFirstContactAdmissionTerminalBlock(
 
   return responseHasHostedLinqFirstContactAdmissionRefusal(record)
     ? buildHostedLinqFirstContactAdmissionBlock({
-      category: "unsupported_content",
       confidence: 1,
       source: "model",
     })
@@ -730,21 +691,12 @@ function logHostedLinqFirstContactAdmissionDecision(
   console.info(
     "Hosted Linq first-contact admission decision.",
     sanitizeHostedOnboardingStructuredLogDetails({
-      category: decision.category,
       confidence: decision.confidence,
       decision: decision.kind,
       eventIdSuffix: toHostedOnboardingLogIdSuffix(request.eventId),
       model: decision.model,
       source: decision.source,
     }),
-  );
-}
-
-function isHostedLinqFirstContactAdmissionCategory(
-  value: string | null,
-): value is HostedLinqFirstContactAdmissionCategory {
-  return HOSTED_LINQ_FIRST_CONTACT_ADMISSION_CATEGORIES.includes(
-    value as HostedLinqFirstContactAdmissionCategory,
   );
 }
 
