@@ -514,9 +514,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
   ) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildFirstContactAdmissionRequiredPlan({
+        participantContact,
         request: buildHostedLinqFirstContactAdmissionRequest({
           context,
           event: input.event,
+          participantContact,
         }),
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
@@ -947,6 +949,7 @@ async function planHostedLinqInboundAdmissionDenied(input: {
 }
 
 function buildFirstContactAdmissionRequiredPlan(input: {
+  participantContact: HostedLinqParticipantContact;
   request: HostedLinqFirstContactAdmissionRequest;
 }): HostedOnboardingLinqDirectPlan {
   return {
@@ -958,6 +961,7 @@ function buildFirstContactAdmissionRequiredPlan(input: {
         reason: "first-contact-admission-required",
       },
     }),
+    firstContactAdmissionParticipantContact: input.participantContact,
     firstContactAdmissionRequest: input.request,
   };
 }
@@ -965,10 +969,11 @@ function buildFirstContactAdmissionRequiredPlan(input: {
 function buildHostedLinqFirstContactAdmissionRequest(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
+  participantContact: HostedLinqParticipantContact;
 }): HostedLinqFirstContactAdmissionRequest {
   return {
     eventId: input.event.event_id,
-    participantContactKind: input.context.participantContact?.kind ?? "phone",
+    participantContactKind: input.participantContact.kind,
     partTypes: buildHostedLinqFirstContactAdmissionPartTypes(input.context.messageEvent.data.message.parts),
     service: normalizeHostedLinqFirstContactAdmissionService(input.context.messageEvent.data.service),
     text: buildHostedLinqFirstContactAdmissionText(input.context.messageEvent.data.message.parts),

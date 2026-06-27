@@ -146,9 +146,11 @@ message metadata/text, reduces provider service metadata to a fixed enum,
 persists only the event-id keyed terminal allow/block decision, stores no
 classifier payload or response body, and fails closed without sending a reply
 when enforcement is enabled and intent is not classified as allowed. OpenAI
-refusal and content-filter outcomes are terminal unsupported content blocks,
-while malformed, non-completed, or otherwise classifier-unavailable states return
-typed retryable errors before side effects. Active members, explicit thread routes, own messages,
+refusal and content-filter outcomes are terminal unsupported content blocks.
+OpenAI account quota or credits exhaustion is a fail-open allow because that is
+Murph's provider-account problem, not a sender-quality signal, while malformed,
+non-completed, or otherwise classifier-unavailable states return typed
+retryable errors before side effects. Active members, explicit thread routes, own messages,
 group chats, local guard rejects, deterministic URL/STOP-style spam, and other
 non-invite paths bypass the classifier.
 
