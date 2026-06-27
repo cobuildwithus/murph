@@ -646,6 +646,18 @@ export async function planHostedOnboardingLinqWebhook(input: {
         return currentEventAlreadySentPlan;
       }
 
+      if (
+        input.settleCurrentEventDeliveredSignupProof === true
+        && existingFirstContactReceipt?.status === "processing"
+      ) {
+        return planHostedLinqFirstContactAdmissionRequired({
+          context,
+          event: input.event,
+          existingMember,
+          existingMemberMatch,
+        });
+      }
+
       const alreadySentPlan = await planHostedLinqSignupLinkAlreadySentIfDelivered({
         claimSentAt: existingDailyState.onboardingLinkSentAt,
         context,

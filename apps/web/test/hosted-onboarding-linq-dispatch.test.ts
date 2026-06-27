@@ -3943,10 +3943,13 @@ https://join.example.test/join/code_first_text`);
       hostedInvite: {
         create: vi.fn(),
         findFirst: vi.fn(async ({ where }: { where?: Record<string, unknown> }) => {
-          if (
-            where?.sentAt
-            && where.linqFirstContactEventId === deliveredInvite.linqFirstContactEventId
-          ) {
+          if (where?.sentAt) {
+            if (
+              where.linqFirstContactEventId
+              && where.linqFirstContactEventId !== deliveredInvite.linqFirstContactEventId
+            ) {
+              return null;
+            }
             return deliveredInvite;
           }
           return null;
@@ -3963,7 +3966,7 @@ https://join.example.test/join/code_first_text`);
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue({
-          billingStatus: HostedBillingStatus.active,
+          billingStatus: HostedBillingStatus.not_started,
           id: memberId,
           phoneLookupKey: "+15551234567",
           suspendedAt: null,
