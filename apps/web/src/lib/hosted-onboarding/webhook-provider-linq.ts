@@ -351,7 +351,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
     });
 
     if (existingMailboxItem) {
-      const duplicatePlan = attachHostedLinqFirstContactEventProcessingOwnerTokenFromReceipt({
+      const duplicatePlan = await attachHostedLinqFirstContactEventProcessingOwnerTokenFromReceipt({
+        eventId: input.event.event_id,
         existingFirstContactReceipt,
         plan: buildActiveMemberDirectPlan({
           desiredSideEffects: [],
@@ -364,6 +365,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           wakeMailboxItemId: existingMailboxItem.id,
           wakeUserId: existingMember.id,
         }),
+        prisma: input.prisma,
       });
       return logHostedLinqWebhookPlannerDecisionAndReturn(
         duplicatePlan,
@@ -809,20 +811,44 @@ async function planHostedLinqSignupLinkAlreadySentIfDelivered(input: {
   });
 }
 
-function attachHostedLinqFirstContactEventProcessingOwnerTokenFromReceipt(input: {
+async function attachHostedLinqFirstContactEventProcessingOwnerTokenFromReceipt(input: {
+  eventId: string;
   existingFirstContactReceipt: Awaited<ReturnType<typeof readHostedLinqFirstContactEventReceipt>>;
   plan: HostedOnboardingLinqDirectPlan;
-}): HostedOnboardingLinqDirectPlan {
-  if (
-    input.existingFirstContactReceipt?.status !== "processing"
-    || !input.existingFirstContactReceipt.processingOwnerToken
-  ) {
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedOnboardingLinqDirectPlan> {
+  if (input.existingFirstContactReceipt?.status !== "processing") {
     return input.plan;
+  }
+
+  if (isHostedLinqFirstContactEventProcessingFresh(input.existingFirstContactReceipt)) {
+    if (!input.existingFirstContactReceipt.processingOwnerToken) {
+      throw buildHostedLinqFirstContactEventProcessingError({
+        eventId: input.eventId,
+      });
+    }
+    return {
+      ...input.plan,
+      firstContactEventProcessingOwnerToken: input.existingFirstContactReceipt.processingOwnerToken,
+    };
+  }
+
+  const receipt = await recordHostedLinqFirstContactEventProcessing({
+    eventId: input.eventId,
+    prisma: input.prisma,
+  });
+  if (receipt.status === "consumed") {
+    return input.plan;
+  }
+  if (!receipt.processingOwnerToken) {
+    throw buildHostedLinqFirstContactEventProcessingError({
+      eventId: input.eventId,
+    });
   }
 
   return {
     ...input.plan,
-    firstContactEventProcessingOwnerToken: input.existingFirstContactReceipt.processingOwnerToken,
+    firstContactEventProcessingOwnerToken: receipt.processingOwnerToken,
   };
 }
 
@@ -1117,7 +1143,8 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   });
 
   if (existingMailboxItem) {
-    const duplicatePlan = attachHostedLinqFirstContactEventProcessingOwnerTokenFromReceipt({
+    const duplicatePlan = await attachHostedLinqFirstContactEventProcessingOwnerTokenFromReceipt({
+      eventId: input.event.event_id,
       existingFirstContactReceipt: input.existingFirstContactReceipt,
       plan: buildActiveMemberDirectPlan({
         desiredSideEffects: [],
@@ -1132,6 +1159,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
         wakeUserId: input.route.containerMemberId,
         linqReadReceiptRouteAuthority: routeAuthority,
       }),
+      prisma: input.prisma,
     });
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       duplicatePlan,
