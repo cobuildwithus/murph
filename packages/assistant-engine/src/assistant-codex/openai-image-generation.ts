@@ -1,5 +1,7 @@
 import { Buffer } from 'node:buffer'
 
+import type { ImageGenerateParamsNonStreaming } from 'openai/resources/images'
+
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export const OPENAI_IMAGE_GENERATION_MODEL = 'gpt-image-2'
@@ -48,13 +50,7 @@ export async function generateOpenAiImage(input: {
   size: OpenAiImageSize
 }): Promise<OpenAiImageGenerationResult> {
   const response = await input.fetchImpl(`${OPENAI_IMAGES_BASE_URL}/images/generations`, {
-    body: JSON.stringify({
-      model: OPENAI_IMAGE_GENERATION_MODEL,
-      output_format: input.outputFormat,
-      prompt: input.prompt,
-      quality: input.quality,
-      size: input.size,
-    }),
+    body: JSON.stringify(buildOpenAiImageGenerationRequest(input)),
     headers: {
       authorization: `Bearer ${input.apiKey}`,
       'content-type': 'application/json',
@@ -88,6 +84,21 @@ export async function generateOpenAiImage(input: {
   return parseOpenAiImageGenerationPayload(payload, providerRequestId)
 }
 
+function buildOpenAiImageGenerationRequest(input: {
+  outputFormat: OpenAiImageOutputFormat
+  prompt: string
+  quality: OpenAiImageQuality
+  size: OpenAiImageSize
+}): ImageGenerateParamsNonStreaming {
+  return {
+    model: OPENAI_IMAGE_GENERATION_MODEL,
+    output_format: input.outputFormat,
+    prompt: input.prompt,
+    quality: input.quality,
+    size: input.size,
+  }
+}
+
 async function readOpenAiJsonResponse(response: Response): Promise<unknown> {
   try {
     return await response.json()
@@ -103,6 +114,19 @@ async function readOpenAiJsonResponse(response: Response): Promise<unknown> {
   }
 }
 
+// Custom-boundary parse of the OpenAI Images API payload (canonical SDK shape:
+// `ImagesResponse` from `openai/resources/images`). We use raw fetch instead of
+// the openai SDK client to keep auth/timeout/retry on our owners; the runtime
+// only consumes `data[0].b64_json` and an optional `usage` breakdown
+// (`input_tokens`, `output_tokens`, `total_tokens`, and nested
+// `input_tokens_details.{cached_tokens,image_tokens,text_tokens}` /
+// `output_tokens_details.{image_tokens,reasoning_tokens,text_tokens}`). The
+// defensive walks below are the executable shape contract for those exact
+// fields: `asRecord` narrows non-object payloads, `data[0].b64_json` is type-
+// checked, `decodeStrictBase64` round-trips the bytes, and
+// `normalizeOpenAiImageUsage` discards any field that is not a non-negative
+// integer or expected sub-record. Provider error paths (non-2xx) throw a
+// `VaultCliError` upstream before this parser runs.
 function parseOpenAiImageGenerationPayload(
   payload: unknown,
   providerRequestId: string | null,
