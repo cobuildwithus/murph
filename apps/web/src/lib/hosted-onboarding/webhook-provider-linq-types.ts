@@ -13,4 +13,7 @@ export type HostedOnboardingLinqWebhookResponse = {
 
 export type HostedOnboardingLinqDirectPlan =
   HostedWebhookPlan<HostedOnboardingLinqWebhookResponse, HostedLinqMessageSideEffect>
-  & { firstContactAdmissionRequest?: HostedLinqFirstContactAdmissionRequest };
+  & {
+    firstContactAdmissionRequest?: HostedLinqFirstContactAdmissionRequest;
+    firstContactEventProcessingOwnerToken?: string;
+  };

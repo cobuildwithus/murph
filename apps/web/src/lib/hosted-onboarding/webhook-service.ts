@@ -205,6 +205,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       source: "linq",
       userId: plan.wakeUserId,
     });
+    await consumeResolvedHostedLinqFirstContactEventReceipt({
+      eventId: event.event_id,
+      plan,
+      prisma,
+    });
     const sendReadReceipt = () => maybeSendHostedLinqIngressReadReceipt({
       plan,
       prisma,
@@ -528,7 +533,10 @@ async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
         return {
           firstContactAdmissionClassified: input.classification.kind === "classified",
           firstContactAdmissionUnavailable: false,
-          plan,
+          plan: attachHostedLinqFirstContactEventProcessingOwnerToken({
+            plan,
+            processingOwnerToken: input.firstContactEventProcessingOwnerToken,
+          }),
         };
       }
 
@@ -562,7 +570,10 @@ async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
         return {
           firstContactAdmissionClassified: true,
           firstContactAdmissionUnavailable: false,
-          plan,
+          plan: attachHostedLinqFirstContactEventProcessingOwnerToken({
+            plan,
+            processingOwnerToken: input.firstContactEventProcessingOwnerToken,
+          }),
         };
       }
 
@@ -581,7 +592,10 @@ async function resolveHostedOnboardingLinqWebhookClassifiedAdmission(input: {
       return {
         firstContactAdmissionClassified: false,
         firstContactAdmissionUnavailable: true,
-        plan,
+        plan: attachHostedLinqFirstContactEventProcessingOwnerToken({
+          plan,
+          processingOwnerToken: input.firstContactEventProcessingOwnerToken,
+        }),
       };
     },
   );
@@ -613,6 +627,36 @@ function assertHostedLinqFirstContactAdmissionResolved(
   if (plan.firstContactAdmissionRequest) {
     throw new Error("Hosted Linq first-contact admission remained unresolved after classification.");
   }
+}
+
+function attachHostedLinqFirstContactEventProcessingOwnerToken(input: {
+  plan: HostedOnboardingLinqWebhookPlan;
+  processingOwnerToken: string;
+}): HostedOnboardingLinqWebhookPlan {
+  return {
+    ...input.plan,
+    firstContactEventProcessingOwnerToken: input.processingOwnerToken,
+  };
+}
+
+async function consumeResolvedHostedLinqFirstContactEventReceipt(input: {
+  eventId: string;
+  plan: HostedOnboardingLinqWebhookPlan;
+  prisma: PrismaClient;
+}): Promise<void> {
+  const processingOwnerToken = input.plan.firstContactEventProcessingOwnerToken;
+  if (!processingOwnerToken) {
+    return;
+  }
+  if (input.plan.desiredSideEffects.some((effect) => effect.payload.template === "invite_signup")) {
+    return;
+  }
+
+  await recordHostedLinqFirstContactEventConsumed({
+    eventId: input.eventId,
+    prisma: input.prisma,
+    processingOwnerToken,
+  });
 }
 
 async function acquireHostedLinqFirstContactAdmissionEventLockTx(input: {
