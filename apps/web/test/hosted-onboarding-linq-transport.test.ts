@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   readHostedMemberHomeLinqRoute: vi.fn(),
-  readHostedMemberRoutingState: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -46,7 +45,6 @@ import {
   releaseHostedAiUsageLimitNotice,
 } from "@/src/lib/hosted-execution/usage-allowance";
 import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
-import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import {
   buildHostedLinqConversationHomeRedirectReply,
   sendHostedLinqChatMessage,
@@ -72,8 +70,7 @@ describe("hosted Linq webhook transport", () => {
     vi.clearAllMocks();
   });
 
-  it("uses the stored redirect phone fallback when current routing is unavailable", async () => {
-    vi.mocked(readHostedMemberRoutingState).mockResolvedValue(null);
+  it("sends the planner-chosen home phone with a chat+home-line stable effect id", async () => {
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       homeRecipientPhone: "+15555550100",
@@ -91,6 +88,7 @@ describe("hosted Linq webhook transport", () => {
       }),
     ).resolves.toBeUndefined();
 
+    expect(effect.effectId).toMatch(/^linq-home-redirect:[0-9a-f]{32}$/);
     expect(buildHostedLinqConversationHomeRedirectReply).toHaveBeenCalledWith(expect.objectContaining({
       homeRecipientPhone: "+15555550100",
     }));
@@ -102,6 +100,77 @@ describe("hosted Linq webhook transport", () => {
         replyToMessageId: "message-1",
       }),
     );
+  });
+
+  it("yields a stable effect id for repeat wrong-chat inbounds and a fresh id when the home line changes", () => {
+    const baseInput = {
+      chatId: "chat-1",
+      homeRecipientPhone: "+15555550100",
+      memberId: "member-1",
+      template: "conversation_home_redirect" as const,
+    };
+
+    const firstRedirect = createHostedWebhookLinqMessageSideEffect({
+      ...baseInput,
+      replyToMessageId: "message-1",
+      sourceEventId: "event-1",
+    });
+    const secondRedirectSameHome = createHostedWebhookLinqMessageSideEffect({
+      ...baseInput,
+      replyToMessageId: "message-2",
+      sourceEventId: "event-2",
+    });
+    const redirectAfterHomeLineChange = createHostedWebhookLinqMessageSideEffect({
+      ...baseInput,
+      homeRecipientPhone: "+15555550200",
+      replyToMessageId: "message-3",
+      sourceEventId: "event-3",
+    });
+
+    expect(firstRedirect.effectId).toMatch(/^linq-home-redirect:[0-9a-f]{32}$/);
+    expect(secondRedirectSameHome.effectId).toBe(firstRedirect.effectId);
+    expect(redirectAfterHomeLineChange.effectId).not.toBe(firstRedirect.effectId);
+    expect(redirectAfterHomeLineChange.effectId).toMatch(/^linq-home-redirect:[0-9a-f]{32}$/);
+  });
+
+  it("keeps the redirect effect id stable when the contact-privacy keyring rotates", () => {
+    const restoreV1 = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: HOME_REDIRECT_TEST_KEYRING_ENTRIES,
+    });
+    let firstRedirect;
+    try {
+      firstRedirect = createHostedWebhookLinqMessageSideEffect({
+        chatId: "chat-1",
+        homeRecipientPhone: "+15555550100",
+        memberId: "member-1",
+        replyToMessageId: "message-1",
+        sourceEventId: "event-1",
+        template: "conversation_home_redirect",
+      });
+    } finally {
+      restoreV1();
+    }
+
+    const restoreV2 = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: HOME_REDIRECT_TEST_KEYRING_ENTRIES,
+    });
+    let secondRedirect;
+    try {
+      secondRedirect = createHostedWebhookLinqMessageSideEffect({
+        chatId: "chat-1",
+        homeRecipientPhone: "+15555550100",
+        memberId: "member-1",
+        replyToMessageId: "message-2",
+        sourceEventId: "event-2",
+        template: "conversation_home_redirect",
+      });
+    } finally {
+      restoreV2();
+    }
+
+    expect(secondRedirect.effectId).toBe(firstRedirect.effectId);
   });
 
   it("does not block current inbound replies on delivery-attempt recording", async () => {
@@ -171,40 +240,6 @@ describe("hosted Linq webhook transport", () => {
         }),
       );
     });
-  });
-
-  it("prefers the latest routing phone over the stored redirect fallback", async () => {
-    vi.mocked(readHostedMemberRoutingState).mockResolvedValue({
-      linqChatId: "home-chat-1",
-      linqRecipientPhone: "+15555550200",
-      memberId: "member-1",
-      pendingLinqChatId: null,
-      pendingLinqParticipantContact: null,
-      pendingLinqRecipientPhone: null,
-      telegramThreadId: null,
-      telegramUserId: null,
-      telegramUserLookupKey: null,
-    });
-    const effect = createHostedWebhookLinqMessageSideEffect({
-      chatId: "chat-1",
-      homeRecipientPhone: "+15555550100",
-      memberId: "member-1",
-      replyToMessageId: "message-1",
-      sourceEventId: "event-1",
-      template: "conversation_home_redirect",
-    });
-
-    await expect(
-      drainHostedLinqSideEffectsDirect({
-        currentInboundReply,
-        prisma: {} as never,
-        sideEffects: [effect],
-      }),
-    ).resolves.toBeUndefined();
-
-    expect(buildHostedLinqConversationHomeRedirectReply).toHaveBeenCalledWith(expect.objectContaining({
-      homeRecipientPhone: "+15555550200",
-    }));
   });
 
   it("delivers legacy invite_signin side effects as invite signup replies", async () => {
@@ -706,3 +741,45 @@ describe("hosted Linq webhook transport", () => {
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
   });
 });
+
+const HOME_REDIRECT_TEST_KEYRING_ENTRIES = {
+  v1: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+  v2: "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
+} as const;
+
+function configureHostedContactPrivacyKeyringForTest(input: {
+  currentVersion: string;
+  entries: Record<string, string>;
+}): () => void {
+  const previousKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+  const previousCurrentVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+
+  process.env.HOSTED_CONTACT_PRIVACY_KEYS = Object.entries(input.entries)
+    .map(([version, key]) => `${version}:${key}`)
+    .join(",");
+  process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = input.currentVersion;
+  clearHostedOnboardingEnvCache();
+
+  return () => {
+    restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousKeys);
+    restoreEnvValue("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", previousCurrentVersion);
+    clearHostedOnboardingEnvCache();
+  };
+}
+
+function clearHostedOnboardingEnvCache(): void {
+  delete (
+    globalThis as typeof globalThis & {
+      __murphHostedOnboardingEnv?: unknown;
+    }
+  ).__murphHostedOnboardingEnv;
+}
+
+function restoreEnvValue(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
+}
