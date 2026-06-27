@@ -2626,22 +2626,13 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("creates a fresh invite instead of rebinding an in-flight first-contact invite", async () => {
+  it("reuses an in-flight first-contact invite without rebinding its event proof", async () => {
     mocks.readHostedLinqDailyState.mockResolvedValueOnce(null);
     const inFlightInvite = {
       channel: "linq",
       id: "invite_in_flight_event_a",
       inviteCode: "code_in_flight_event_a",
       linqFirstContactEventId: "evt_in_flight_event_a",
-      memberId: "member_in_flight_rebind",
-      sentAt: null as Date | null,
-      status: "pending",
-    };
-    const eventBInvite = {
-      channel: "linq",
-      id: "invite_in_flight_event_b",
-      inviteCode: "code_in_flight_event_b",
-      linqFirstContactEventId: "evt_in_flight_event_b",
       memberId: "member_in_flight_rebind",
       sentAt: null as Date | null,
       status: "pending",
@@ -2660,20 +2651,17 @@ https://join.example.test/join/code_first_text`);
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedInvite: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
-          ...eventBInvite,
-          linqFirstContactEventId: data.linqFirstContactEventId,
-        })),
+        create: vi.fn(),
         findFirst: vi.fn(async ({ where }: { where?: Record<string, unknown> }) =>
           where?.linqFirstContactEventId === "evt_in_flight_event_b" ? null : inFlightInvite
         ),
-        findUnique: vi.fn().mockResolvedValue(eventBInvite),
+        findUnique: vi.fn().mockResolvedValue(inFlightInvite),
         update: vi.fn(async ({ data, where }: { data: Record<string, unknown>; where: Record<string, unknown> }) => {
-          if (where.id === eventBInvite.id && data.sentAt instanceof Date) {
-            eventBInvite.sentAt = data.sentAt;
+          if (where.id === inFlightInvite.id && data.sentAt instanceof Date) {
+            inFlightInvite.sentAt = data.sentAt;
           }
           return {
-            ...eventBInvite,
+            ...inFlightInvite,
             ...data,
           };
         }),
@@ -2700,17 +2688,12 @@ https://join.example.test/join/code_first_text`);
       signature: null,
       timestamp: null,
     })).resolves.toMatchObject({
-      inviteCode: "code_in_flight_event_b",
+      inviteCode: "code_in_flight_event_a",
       ok: true,
       reason: "sent-signup-link",
     });
 
-    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        linqFirstContactEventId: "evt_in_flight_event_b",
-        memberId: "member_in_flight_rebind",
-      }),
-    });
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.update).not.toHaveBeenCalledWith({
       where: {
         id: inFlightInvite.id,
@@ -2718,6 +2701,14 @@ https://join.example.test/join/code_first_text`);
       data: expect.objectContaining({
         linqFirstContactEventId: "evt_in_flight_event_b",
       }),
+    });
+    expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith({
+      where: {
+        id: inFlightInvite.id,
+      },
+      data: {
+        channel: "linq",
+      },
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
   });

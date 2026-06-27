@@ -277,10 +277,19 @@ export async function issueHostedInviteTx(input: {
   });
 
   const existingInviteEventId = existingInvite?.linqFirstContactEventId ?? null;
+  const existingInviteIsReusablePendingLinqAttempt = Boolean(
+    input.channel === "linq"
+    && existingInvite?.channel === "linq"
+    && requestedInviteEventId
+    && existingInviteEventId
+    && existingInviteEventId !== requestedInviteEventId
+    && !existingInvite.sentAt,
+  );
   const existingInviteOwnedByAnotherEvent = Boolean(
     requestedInviteEventId
     && existingInviteEventId
-    && existingInviteEventId !== requestedInviteEventId,
+    && existingInviteEventId !== requestedInviteEventId
+    && !existingInviteIsReusablePendingLinqAttempt
   );
   const existingSentInviteCannotBeClaimed = Boolean(
     requestedInviteEventId
@@ -295,7 +304,8 @@ export async function issueHostedInviteTx(input: {
   const existingInviteDeliveryProofCannotBeRetagged = Boolean(
     existingInvite
     && (existingInvite.sentAt || existingInviteEventId)
-    && !existingInviteMatchesRequestedProof,
+    && !existingInviteMatchesRequestedProof
+    && !existingInviteIsReusablePendingLinqAttempt
   );
 
   if (
