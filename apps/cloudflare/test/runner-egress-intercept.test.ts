@@ -1049,6 +1049,34 @@ describe("hostedRunnerIntercept", () => {
     expect(forwardedBody).toContain('filename="reference-image-1.png"');
   });
 
+  it("rejects oversized multipart bodies to OpenAI image edits with 413 before upstream", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const oversizeBytes = new Uint8Array(20 * 1024 * 1024 + 1);
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.openai.com/v1/images/edits", {
+        body: oversizeBytes,
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          "content-length": String(oversizeBytes.byteLength),
+          "content-type": "multipart/form-data; boundary=test-boundary",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "member_123--v-version_1" },
+    );
+
+    expect(response.status).toBe(413);
+    expect(findFetchCall(fetchMock, "api.openai.com")).toBeUndefined();
+  });
+
   it("rejects OpenAI image edits without a hosted sentinel credential", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);
