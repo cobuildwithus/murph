@@ -333,6 +333,27 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
+  if (
+    existingFirstContactReceipt?.status === "processing"
+    && input.requireFirstContactAdmission === true
+    && input.firstContactAdmitted !== true
+  ) {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildFirstContactAdmissionRequiredPlan({
+        request: buildHostedLinqFirstContactAdmissionRequest({
+          context,
+          event: input.event,
+        }),
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
+        existingMemberMatch,
+        reason: "first-contact-admission-required",
+        routeStage: "first-contact-admission-required",
+      }),
+    );
+  }
+
   if (existingMember && hasHostedMemberActiveAccess(existingMember)) {
     const homeRoute = await readHostedMemberHomeLinqRoute({
       memberId: existingMember.id,
