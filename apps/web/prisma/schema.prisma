@@ -797,6 +797,7 @@ model HostedInvite {
   member                  HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId, createdAt])
+  @@index([memberId, channel, sentAt], map: "hosted_invite_member_channel_sent_at_idx")
   @@index([linqFirstContactEventId])
   @@index([expiresAt])
   @@map("hosted_invite")
