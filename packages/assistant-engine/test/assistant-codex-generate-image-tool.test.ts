@@ -689,7 +689,7 @@ describe('murph.generate_image dynamic tool execution', () => {
       0x57, 0x45, 0x42, 0x50,
       0x56, 0x50, 0x38, 0x4c,
     ])
-    const fetchImpl = vi.fn(async () =>
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
       jsonResponse({
         data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
         usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
