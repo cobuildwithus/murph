@@ -30,8 +30,9 @@ describe('assistant durable visual media guidance', () => {
       'vault-cli capture add --media <readable-file-path> --collection <stable-series-slug> --format json'
     )
     expect(prompt).toContain(
-      'vault-cli capture import-json --input @<payload.json> --format json'
+      "grouped through the documented `vault-cli batch --format json --command '[...]'` pattern"
     )
+    expect(prompt).toContain('argv-only and Incur-discoverable')
     expect(prompt).toContain(
       'canonical capture records with immutable `raw/captures/**` media and manifests'
     )
@@ -48,5 +49,6 @@ describe('assistant durable visual media guidance', () => {
     expect(prompt).not.toContain(
       'Save available attachment paths with `vault-cli capture add --media <path>'
     )
+    expect(prompt).not.toContain('capture import-json')
   })
 })
