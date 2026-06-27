@@ -345,14 +345,18 @@ async function servePlannedVaultCliInvocation(input: {
   const { vaultCliLlmsHiddenCommandNames } = await import(
     './vault-cli-llms-normalizer.js'
   )
+  const mcp = isMcpServerInvocation(input.argv)
+  const skillsSync = !mcp && isSkillsSyncInvocation(input.argv)
   const cli = createVaultCliWithOptions({
     commandName: input.programName,
-    ...(isMcpServerInvocation(input.argv)
+    ...(mcp
       ? {
           excludeCommandDescriptorIds: new Set(['batch']),
           excludeAgentLeafPaths: vaultCliLlmsHiddenCommandNames,
         }
-      : {}),
+      : skillsSync
+        ? { excludeAgentLeafPaths: vaultCliLlmsHiddenCommandNames }
+        : {}),
     vaultContext: input.vaultContext,
   })
   await cli.serve(input.argv, input.serveOptions)
@@ -369,6 +373,25 @@ function isMcpServerInvocation(argv: readonly string[]): boolean {
     }
   }
 
+  return false
+}
+
+// Incur's built-in `skills add`/`skills list` walks the registered command
+// tree to generate per-command agent skill files. Treat that as an agent
+// discovery surface so the same hide list that filters --llms / --help / MCP
+// also keeps generated skills from advertising commands without a paired
+// Incur-discoverable payload-schema. The `skill` alias (incur exposes both)
+// routes through the same path.
+function isSkillsSyncInvocation(argv: readonly string[]): boolean {
+  for (const token of argv) {
+    if (token === '--') {
+      return false
+    }
+    if (token === '--' || token.startsWith('-')) {
+      continue
+    }
+    return token === 'skills' || token === 'skill'
+  }
   return false
 }
 

@@ -177,6 +177,24 @@ test('capture import-json is excluded from the vault-cli --llms manifest because
   assert.equal(vaultCliLlmsHiddenCommandNames.has('capture import-json'), true)
 })
 
+test('createVaultCliWithOptions honors excludeAgentLeafPaths so MCP and skills-sync invocations never register capture import-json', async () => {
+  const { Cli } = await import('incur')
+  const { createVaultCliWithOptions } = await import('../src/vault-cli.js')
+
+  const cli = createVaultCliWithOptions({
+    excludeAgentLeafPaths: vaultCliLlmsHiddenCommandNames,
+  })
+
+  const rootCommands = Cli.toCommands.get(cli)
+  assert.ok(rootCommands, 'root commands registered')
+  const captureEntry = rootCommands.get('capture') as
+    | { commands?: Map<string, unknown> }
+    | undefined
+  assert.ok(captureEntry?.commands, 'capture group registered')
+  assert.equal(captureEntry.commands.has('import-json'), false)
+  assert.equal(captureEntry.commands.has('add'), true)
+})
+
 test('vault-cli capture --help filters the import-json leaf line through the LLM normalizer wrapper', async () => {
   const { createVaultCli } = await import('../src/vault-cli.js')
   const cli = createVaultCli()
