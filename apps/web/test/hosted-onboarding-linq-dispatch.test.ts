@@ -2071,11 +2071,18 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("does not retry signup delivery from a stale daily claim without delivered invite evidence", async () => {
+  it("retries signup delivery with the same invite after a stale daily claim without delivered invite evidence", async () => {
     mocks.readHostedLinqDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
       onboardingLinkSentAt: new Date("2026-03-26T12:00:01.000Z"),
     }));
-    const invite = {
+    const invite: {
+      channel: string;
+      id: string;
+      inviteCode: string;
+      memberId: string;
+      sentAt: Date | null;
+      status: string;
+    } = {
       channel: "linq",
       id: "invite_stale_claim",
       inviteCode: "code_stale_claim",
@@ -2098,11 +2105,14 @@ https://join.example.test/join/code_first_text`);
       },
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
-        findFirst: vi.fn().mockResolvedValue(null),
+        findFirst: vi.fn(async ({ where }: { where: { sentAt?: unknown } }) =>
+          where.sentAt ? null : invite),
         findUnique: vi.fn().mockResolvedValue(invite),
-        update: vi.fn().mockResolvedValue({
-          id: "invite_stale_claim",
-          sentAt: new Date("2026-03-26T12:00:02.000Z"),
+        update: vi.fn(async ({ data }: { data: { sentAt?: Date } }) => {
+          if (data.sentAt) {
+            invite.sentAt = data.sentAt;
+          }
+          return invite;
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
@@ -2125,11 +2135,18 @@ https://join.example.test/join/code_first_text`);
       }),
       signature: null,
       timestamp: null,
-    })).rejects.toMatchObject({
-      code: "LINQ_FIRST_CONTACT_EVENT_PROCESSING",
-      retryable: true,
+    })).resolves.toMatchObject({
+      inviteCode: "code_stale_claim",
+      ok: true,
+      reason: "sent-signup-link",
     });
 
+    expect(mocks.releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalledWith({
+      memberId: "member_stale_claim",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+      sentAt: new Date("2026-03-26T12:00:01.000Z"),
+    });
     expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledWith({
       orderBy: {
         sentAt: "desc",
@@ -2143,10 +2160,35 @@ https://join.example.test/join/code_first_text`);
         },
       },
     });
-    expect(mocks.releaseHostedLinqOnboardingLinkNoticeClaim).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledWith({
+      orderBy: {
+        createdAt: "desc",
+      },
+      where: {
+        expiresAt: {
+          gt: expect.any(Date),
+        },
+        memberId: "member_stale_claim",
+      },
+    });
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedInvite.update).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith({
+      where: {
+        id: "invite_stale_claim",
+      },
+      data: {
+        channel: "linq",
+      },
+    });
+    expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith({
+      where: {
+        id: "invite_stale_claim",
+      },
+      data: {
+        sentAt: expect.any(Date),
+      },
+    });
   });
 
   it("does not clear an in-flight daily onboarding claim before invite delivery proof exists", async () => {

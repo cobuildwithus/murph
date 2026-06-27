@@ -33,7 +33,9 @@ import {
   HOSTED_LINQ_DAILY_TEXT_LIMIT,
   incrementHostedLinqInboundDailyState,
   incrementHostedLinqOutboundDailyState,
+  isHostedLinqOnboardingLinkNoticeClaimFresh,
   readHostedLinqDailyState,
+  releaseHostedLinqOnboardingLinkNoticeClaim,
 } from "./linq-daily-state";
 import {
   type HostedLinqMessageReceivedEvent,
@@ -714,9 +716,19 @@ async function planHostedLinqSignupLinkAlreadySentIfDelivered(input: {
     },
   });
   if (!deliveredInvite?.sentAt) {
-    throw buildHostedLinqFirstContactEventProcessingError({
-      eventId: input.event.event_id,
+    if (isHostedLinqOnboardingLinkNoticeClaimFresh(input.claimSentAt)) {
+      throw buildHostedLinqFirstContactEventProcessingError({
+        eventId: input.event.event_id,
+      });
+    }
+
+    await releaseHostedLinqOnboardingLinkNoticeClaim({
+      memberId: input.memberId,
+      occurredAt: input.context.occurredAt,
+      prisma: input.prisma,
+      sentAt: input.claimSentAt,
     });
+    return null;
   }
 
   await recordHostedLinqFirstContactEventConsumed({
