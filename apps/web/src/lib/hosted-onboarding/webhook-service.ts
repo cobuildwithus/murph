@@ -327,6 +327,18 @@ function buildBlockedHostedLinqFirstContactAdmissionPlan(): HostedOnboardingLinq
   };
 }
 
+function buildDuplicateHostedLinqFirstContactEventPlan(): HostedOnboardingLinqWebhookPlan {
+  return {
+    desiredSideEffects: [],
+    response: {
+      duplicate: true,
+      ignored: true,
+      ok: true,
+      reason: "duplicate-webhook-event",
+    },
+  };
+}
+
 async function planHostedOnboardingLinqWebhookWithFirstContactAdmission(input: {
   event: Parameters<typeof planHostedOnboardingLinqWebhook>[0]["event"];
   prisma: PrismaClient;
@@ -393,15 +405,49 @@ async function planHostedOnboardingLinqWebhookForCurrentAdmissionState(input: {
         eventId: input.event.event_id,
         transaction,
       });
-      const plan = await planHostedOnboardingLinqWebhookForRecordedAdmission({
+      const recordedAdmission = await readRecordedHostedLinqFirstContactAdmissionDecision({
+        eventId: input.event.event_id,
+        prisma: transaction,
+      });
+      if (recordedAdmission?.kind === "block") {
+        return {
+          firstContactAdmissionClassified: false,
+          firstContactAdmissionUnavailable: false,
+          plan: buildBlockedHostedLinqFirstContactAdmissionPlan(),
+        };
+      }
+
+      const recordedAllowOwnerToken = recordedAdmission?.kind === "allow"
+        ? await claimExistingHostedLinqFirstContactEventProcessingOwnerToken({
+          eventId: input.event.event_id,
+          transaction,
+        })
+        : null;
+      if (recordedAllowOwnerToken === "consumed") {
+        return {
+          firstContactAdmissionClassified: false,
+          firstContactAdmissionUnavailable: false,
+          plan: buildDuplicateHostedLinqFirstContactEventPlan(),
+        };
+      }
+
+      const plan = await planHostedOnboardingLinqWebhook({
         event: input.event,
-        transaction,
+        firstContactAdmitted: recordedAdmission?.kind === "allow",
+        firstContactEventProcessingOwnerToken: recordedAllowOwnerToken ?? undefined,
+        requireFirstContactAdmission: true,
+        prisma: transaction,
       });
       if (!plan.firstContactAdmissionRequest) {
         return {
           firstContactAdmissionClassified: false,
           firstContactAdmissionUnavailable: false,
-          plan,
+          plan: recordedAllowOwnerToken
+            ? attachHostedLinqFirstContactEventProcessingOwnerToken({
+              plan,
+              processingOwnerToken: recordedAllowOwnerToken,
+            })
+            : plan,
         };
       }
 
@@ -637,6 +683,34 @@ function attachHostedLinqFirstContactEventProcessingOwnerToken(input: {
     ...input.plan,
     firstContactEventProcessingOwnerToken: input.processingOwnerToken,
   };
+}
+
+async function claimExistingHostedLinqFirstContactEventProcessingOwnerToken(input: {
+  eventId: string;
+  transaction: Prisma.TransactionClient;
+}): Promise<"consumed" | string | null> {
+  const existingReceipt = await readHostedLinqFirstContactEventReceipt({
+    eventId: input.eventId,
+    prisma: input.transaction,
+  });
+  if (existingReceipt?.status !== "processing") {
+    return null;
+  }
+
+  const receipt = await recordHostedLinqFirstContactEventProcessing({
+    eventId: input.eventId,
+    prisma: input.transaction,
+  });
+  if (receipt.status === "consumed") {
+    return "consumed";
+  }
+  if (!receipt.processingOwnerToken) {
+    throw buildHostedLinqFirstContactEventProcessingError({
+      eventId: input.eventId,
+    });
+  }
+
+  return receipt.processingOwnerToken;
 }
 
 async function consumeResolvedHostedLinqFirstContactEventReceipt(input: {
