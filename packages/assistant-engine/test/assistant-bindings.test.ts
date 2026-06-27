@@ -142,7 +142,10 @@ describe('assistant bindings', () => {
     ).toMatchObject({
       actorId: 'participant-2',
       conversationKey: 'channel:linq|actor:participant-2',
-      delivery: null,
+      delivery: {
+        kind: 'participant',
+        target: '+15550100001',
+      },
     })
 
     expect(
@@ -356,7 +359,8 @@ describe('assistant bindings', () => {
       'identity: hid_linq_identity',
       'actor: hid_linq_actor',
       'thread is direct: true',
-      'iMessage route note: call this channel iMessage in user-facing text; use internal channel "linq" only for route fields.',
+      'delivery: participant route available',
+      'iMessage route note: when the user asks to text or remind them here, use this conversation route with internal channel "linq"; call it iMessage in user-facing text.',
     ])
 
     const unknownDirectnessBinding = createAssistantBinding({

@@ -161,8 +161,8 @@ test('current audience delivery fields prefer route-matched input binding hint b
   expect(fields).toMatchObject({
     actorId: 'linq-participant',
     bindingDelivery: {
-      kind: 'thread',
-      target: 'linq-thread',
+      kind: 'participant',
+      target: 'linq-participant',
     },
     channel: 'linq',
     threadId: 'linq-thread',
@@ -333,7 +333,10 @@ test('current audience delivery fields prefer actor id over legacy participant i
 
   expect(fields).toMatchObject({
     actorId: 'linq-actor-current',
-    bindingDelivery: null,
+    bindingDelivery: {
+      kind: 'participant',
+      target: 'linq-actor-current',
+    },
     channel: 'linq',
   })
 })

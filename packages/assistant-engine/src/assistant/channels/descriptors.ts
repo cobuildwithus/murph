@@ -390,10 +390,6 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     return !hasVoiceMemoMedia(media)
   },
   inferBindingDelivery(input) {
-    if (input.deliveryKind === 'participant') {
-      return null
-    }
-
     return inferBindingDeliveryForChannel({
       channel: 'linq',
       conversation: input.conversation,
@@ -414,13 +410,6 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     })) ?? null
   },
   async sendMessage({ actorId, candidate, deliverySource, dependencies, idempotencyKey, media, message, replyToMessageId }) {
-    if (candidate.kind === 'participant') {
-      throw new VaultCliError(
-        'ASSISTANT_LINQ_PARTICIPANT_DELIVERY_UNSUPPORTED',
-        'iMessage delivery requires an existing Linq chat id or explicit chat target before assistant delivery.',
-      )
-    }
-
     if (hasVoiceMemoMedia(media)) {
       return await sendLinqVoiceMemoDelivery({
         actorId,

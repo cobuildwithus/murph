@@ -1846,42 +1846,6 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
-  it('rejects materialized Linq participant delivery before provider dispatch', async () => {
-    const sendLinq = vi.fn().mockResolvedValue({
-      providerMessageId: 'created-message',
-    })
-
-    const materialized = await ASSISTANT_CHANNEL_ADAPTERS.linq.send(
-      {
-        actorId: ' +15550001 ',
-        bindingDelivery: createAssistantBindingDelivery('participant', ' +15550001 '),
-        deliverySource: {
-          kind: 'linq',
-          fromPhoneNumber: '+15550000',
-        },
-        explicitTarget: null,
-        idempotencyKey: ' idem-created ',
-        identityId: null,
-        message: 'welcome',
-        replyToMessageId: null,
-      },
-      {
-        sendLinq,
-      },
-    ).then(
-      () => null,
-      (error: unknown) => error,
-    )
-
-    expect(materialized).toMatchObject({
-      code: 'ASSISTANT_LINQ_PARTICIPANT_DELIVERY_UNSUPPORTED',
-    })
-    expect(sendLinq).not.toHaveBeenCalled()
-    expect(materialized).toMatchObject({
-      message: expect.not.stringContaining('Materialized Linq'),
-    })
-  })
-
   it('falls back to the original stale-chat error when Linq sender probing or recovery fails', async () => {
     vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
     const missingChatError = new VaultCliError(

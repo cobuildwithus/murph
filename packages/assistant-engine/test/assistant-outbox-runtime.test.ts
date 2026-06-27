@@ -2156,47 +2156,6 @@ describe('assistant outbox runtime', () => {
     await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([])
   })
 
-  it('fails Linq participant-only outbox sends before provider dispatch', async () => {
-    const { vaultRoot } = await createAssistantVault(
-      'assistant-outbox-linq-participant-unsupported-',
-    )
-    await useActualOutboundDeliveryImplementation()
-
-    const queued = await createAssistantOutboxIntent({
-      actorId: '+15550001',
-      bindingDelivery: {
-        kind: 'participant',
-        target: '+15550001',
-      },
-      channel: 'linq',
-      deliverySource: TEST_LINQ_DELIVERY_SOURCE,
-      deliveryIdempotencyKey: 'idem-linq-participant-unsupported',
-      identityId: 'phone_lookup_1',
-      message: 'welcome',
-      sessionId: 'session-linq-participant-unsupported',
-      threadId: null,
-      threadIsDirect: true,
-      turnId: 'turn-linq-participant-unsupported',
-      vault: vaultRoot,
-    })
-    const sendLinq = vi.fn()
-
-    const dispatched = await dispatchAssistantOutboxIntent({
-      dependencies: {
-        sendLinq,
-      },
-      force: true,
-      intentId: queued.intentId,
-      vault: vaultRoot,
-    })
-
-    expect(sendLinq).not.toHaveBeenCalled()
-    expect(dispatched.intent.status).toBe('failed')
-    expect(dispatched.deliveryError).toMatchObject({
-      code: 'ASSISTANT_LINQ_PARTICIPANT_DELIVERY_UNSUPPORTED',
-    })
-  })
-
   it('clears prepared dispatches on definite failures and falls back to confirmation-pending retries when cleanup is ambiguous', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-failure-')
 

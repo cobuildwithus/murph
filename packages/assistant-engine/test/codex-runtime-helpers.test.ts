@@ -1836,7 +1836,7 @@ describe('Codex assistant registry helpers', () => {
     })
 
     expect(prompt).toContain('actor: hid_linq_actor')
-    expect(prompt).not.toContain('delivery: participant route available')
+    expect(prompt).toContain('delivery: participant route available')
     expect(prompt).not.toContain('+15550100001')
   })
 

@@ -56,7 +56,7 @@ describe('assistant channel adapter delivery inference', () => {
     })
   })
 
-  it('keeps linq thread-only even when participant delivery is requested', () => {
+  it('keeps linq thread-only by default and allows requested participant delivery', () => {
     expect(
       getAssistantChannelAdapter('linq')?.inferBindingDelivery({
         conversation: {
@@ -83,7 +83,10 @@ describe('assistant channel adapter delivery inference', () => {
         },
         deliveryKind: 'participant',
       }),
-    ).toBeNull()
+    ).toEqual({
+      kind: 'participant',
+      target: 'linq-user',
+    })
   })
 
   it('uses the same fallback policy when no channel adapter exists', () => {
