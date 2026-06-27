@@ -204,6 +204,7 @@ export async function executeCodexAssistantTurnAttempt(
       modelProvider: providerConfig.target.modelProvider,
       showThinkingTraces: input.showThinkingTraces ?? false,
     }),
+    authorizedReferenceImageRefs: input.authorizedReferenceImageRefs ?? null,
     env: codexProcessEnv,
     fetchImpl: input.providerFetch ?? undefined,
     hostedGeneratedImageUploader: input.generatedImageUploader ?? null,

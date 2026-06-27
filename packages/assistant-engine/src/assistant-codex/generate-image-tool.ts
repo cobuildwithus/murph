@@ -61,6 +61,7 @@ const MAX_GENERATED_IMAGE_BYTES = 10 * 1024 * 1024
 export async function executeGenerateImageTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateImageToolArgs
+  authorizedReferenceImageRefs?: ReadonlySet<string> | null
   codexHome?: string | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
@@ -101,6 +102,8 @@ export async function executeGenerateImageTool(input: {
   try {
     referenceImages = referenceImageRefs.length > 0
       ? await resolveGenerateImageReferences({
+          authorizedReferenceImageRefs:
+            input.authorizedReferenceImageRefs ?? null,
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
           refs: referenceImageRefs,
           vaultRoot: vaultRoot ?? '',

@@ -98,6 +98,7 @@ describe('executeGenerateImageTool reference images', () => {
           referenceImageRefs: ['raw/inbox/photo.png'],
           size: '1024x1024',
         },
+        authorizedReferenceImageRefs: new Set(['raw/inbox/photo.png']),
         codexHome,
         env: { OPENAI_API_KEY: 'test-key' },
         fetchImpl,

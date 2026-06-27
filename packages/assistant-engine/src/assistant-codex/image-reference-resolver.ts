@@ -32,6 +32,7 @@ export interface ResolvedGenerateImageReference {
 }
 
 export async function resolveGenerateImageReferences(input: {
+  authorizedReferenceImageRefs: ReadonlySet<string> | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   refs: readonly string[]
   vaultRoot: string
@@ -53,6 +54,26 @@ export async function resolveGenerateImageReferences(input: {
       'ASSISTANT_IMAGE_REFERENCE_COUNT_UNSUPPORTED',
       `Image generation supports at most ${MAX_GENERATE_IMAGE_REFERENCE_COUNT} reference images.`,
     )
+  }
+
+  // Per-turn authority: refs must be a subset of the image attachments the
+  // upstream pipeline accepted for this exact turn. Vault-state pre-existence
+  // (an old materialized inbox image) is not authority on its own. Fail closed
+  // when the caller did not compute an allowlist for this turn.
+  const authorizedRefs = input.authorizedReferenceImageRefs
+  if (!authorizedRefs) {
+    throw new VaultCliError(
+      'ASSISTANT_IMAGE_REFERENCE_AUTHORITY_UNAVAILABLE',
+      'Image references require per-turn attachment authority.',
+    )
+  }
+  for (const ref of refs) {
+    if (!authorizedRefs.has(ref)) {
+      throw new VaultCliError(
+        'ASSISTANT_IMAGE_REFERENCE_REF_UNAUTHORIZED',
+        'Image references must point at attachments accepted for this turn.',
+      )
+    }
   }
 
   const materialization = await input.materializeWorkspaceArtifacts?.(refs)

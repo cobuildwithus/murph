@@ -89,6 +89,11 @@ describe('image-reference-resolver', () => {
       await writeVaultFile(vaultRoot, 'raw/inbox/layout.webp', WEBP_BYTES)
 
       const references = await resolveGenerateImageReferences({
+        authorizedReferenceImageRefs: new Set([
+          'raw/inbox/front.png',
+          'raw/inbox/style.jpg',
+          'raw/inbox/layout.webp',
+        ]),
         refs: ['raw/inbox/front.png', 'raw/inbox/style.jpg', 'raw/inbox/layout.webp'],
         vaultRoot,
       })
@@ -116,6 +121,7 @@ describe('image-reference-resolver', () => {
       let materializedPaths: readonly string[] = []
 
       await resolveGenerateImageReferences({
+        authorizedReferenceImageRefs: new Set(['raw/inbox/photo.png']),
         materializeWorkspaceArtifacts: async (relativePaths) => {
           materializedPaths = [...relativePaths]
           return {
@@ -137,6 +143,7 @@ describe('image-reference-resolver', () => {
 
       await expect(
         resolveGenerateImageReferences({
+          authorizedReferenceImageRefs: new Set(['raw/inbox/not-image.png']),
           materializeWorkspaceArtifacts: async (relativePaths) => ({
             materializedArtifactPaths: new Set<string>(),
             missingArtifactPaths: new Set(relativePaths),
@@ -148,6 +155,7 @@ describe('image-reference-resolver', () => {
 
       await expect(
         resolveGenerateImageReferences({
+          authorizedReferenceImageRefs: new Set(['raw/inbox/not-image.png']),
           refs: ['raw/inbox/not-image.png'],
           vaultRoot,
         }),
@@ -164,6 +172,7 @@ describe('image-reference-resolver', () => {
 
         await expect(
           resolveGenerateImageReferences({
+            authorizedReferenceImageRefs: new Set(['raw/inbox/linked.png']),
             refs: ['raw/inbox/linked.png'],
             vaultRoot,
           }),
@@ -185,6 +194,7 @@ describe('image-reference-resolver', () => {
 
       await expect(
         resolveGenerateImageReferences({
+          authorizedReferenceImageRefs: new Set(['raw/inbox/huge.png']),
           refs: ['raw/inbox/huge.png'],
           vaultRoot,
         }),
@@ -195,6 +205,13 @@ describe('image-reference-resolver', () => {
   it('keeps the Murph product contract capped at four ordered references', async () => {
     await expect(
       resolveGenerateImageReferences({
+        authorizedReferenceImageRefs: new Set([
+          'raw/inbox/1.png',
+          'raw/inbox/2.png',
+          'raw/inbox/3.png',
+          'raw/inbox/4.png',
+          'raw/inbox/5.png',
+        ]),
         refs: [
           'raw/inbox/1.png',
           'raw/inbox/2.png',
@@ -205,5 +222,37 @@ describe('image-reference-resolver', () => {
         vaultRoot: '/',
       }),
     ).rejects.toMatchObject({ code: 'ASSISTANT_IMAGE_REFERENCE_COUNT_UNSUPPORTED' })
+  })
+
+  it('fails closed when no per-turn authority allowlist is provided', async () => {
+    await withTempVault(async (vaultRoot) => {
+      await writeVaultFile(vaultRoot, 'raw/inbox/photo.png', PNG_BYTES)
+
+      await expect(
+        resolveGenerateImageReferences({
+          authorizedReferenceImageRefs: null,
+          refs: ['raw/inbox/photo.png'],
+          vaultRoot,
+        }),
+      ).rejects.toMatchObject({
+        code: 'ASSISTANT_IMAGE_REFERENCE_AUTHORITY_UNAVAILABLE',
+      })
+    })
+  })
+
+  it('rejects refs that are not in the current-turn authority allowlist', async () => {
+    await withTempVault(async (vaultRoot) => {
+      await writeVaultFile(vaultRoot, 'raw/inbox/stale.png', PNG_BYTES)
+
+      await expect(
+        resolveGenerateImageReferences({
+          authorizedReferenceImageRefs: new Set(['raw/inbox/current.png']),
+          refs: ['raw/inbox/stale.png'],
+          vaultRoot,
+        }),
+      ).rejects.toMatchObject({
+        code: 'ASSISTANT_IMAGE_REFERENCE_REF_UNAUTHORIZED',
+      })
+    })
   })
 })

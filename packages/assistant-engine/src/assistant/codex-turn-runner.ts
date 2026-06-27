@@ -88,6 +88,9 @@ import type {
   AssistantCodexTurnExecutionProfile,
   AssistantCodexTurnThreadScopeProfile,
 } from './codex-turn/planning.js'
+import {
+  collectAuthorizedTurnAttachmentImageRefs,
+} from '../assistant-codex/turn-attachment-image-refs.js'
 
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
@@ -457,6 +460,11 @@ async function executeAssistantCodexAttempt(input: {
         developerInstructions: attemptPlan.routePlan.developerInstructions,
         dynamicTools: attemptPlan.routePlan.dynamicTools,
         env: attemptEnv,
+        authorizedReferenceImageRefs:
+          await collectAuthorizedTurnAttachmentImageRefs({
+            acceptedInputItems: executionPlan.acceptedInputItems ?? null,
+            vault: executionPlan.input.vault,
+          }),
         generatedImageUploader:
           executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,
         hostedToolContext: executionPlan.hostedToolContext ?? null,
