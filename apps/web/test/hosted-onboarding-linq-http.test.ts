@@ -384,4 +384,16 @@ describe("createHostedLinqWebhookSubscription", () => {
       }),
     );
   });
+
+  it("rejects webhook subscriptions with events outside the pinned Linq SDK contract", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createHostedLinqWebhookSubscription({
+      subscribedEvents: ["message.received", "unsupported.event"],
+      targetUrl: "https://www.withmurph.ai/api/hosted-onboarding/linq/webhook?version=2026-02-03",
+    })).rejects.toThrow("Linq subscribed event is not supported by the Linq SDK contract.");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

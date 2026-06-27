@@ -1,3 +1,5 @@
+import type { ResponseCreateParamsNonStreaming } from "openai/resources/responses/responses";
+
 import type { HostedLinqFirstContactAdmissionMode } from "./env";
 import { hostedOnboardingError } from "./errors";
 import {
@@ -409,7 +411,7 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
 function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
   model: string;
   request: HostedLinqFirstContactAdmissionRequest;
-}): Record<string, unknown> {
+}): ResponseCreateParamsNonStreaming {
   return {
     input: [
       {
@@ -585,6 +587,19 @@ function parseHostedLinqFirstContactAdmissionDecisionRecord(
   };
 }
 
+// Custom-boundary parse of the OpenAI Responses API payload (canonical SDK shape:
+// `Response` from `openai/resources/responses/responses`). We use raw fetch
+// instead of the openai SDK client to keep auth/timeout/retry on our owners; the
+// API output is a deep discriminated union of which we consume only a narrow set
+// of fields. The defensive walks in this file are the executable shape contract:
+// `status` must equal `"completed"` before we trust the structured output;
+// `incomplete_details.reason === "content_filter"` is a terminal block;
+// `output[].content[].type === "refusal"` (or any `output[].content[].refusal`
+// string) is a terminal block; the structured payload is read from `output_text`
+// first, then fallback `output[].content[].text`. Provider error paths (non-2xx)
+// throw `buildHostedLinqFirstContactAdmissionUnavailableError` upstream before
+// these parsers run, and unstructured/invalid JSON falls through to the
+// `"invalid_output"` retryable path.
 function readHostedLinqFirstContactAdmissionTerminalBlock(
   payload: unknown,
 ): HostedLinqFirstContactAdmissionDecision | null {

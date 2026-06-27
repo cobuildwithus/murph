@@ -43,6 +43,69 @@ const CAPTURE_TAG = 'capture'
 const MAX_CAPTURE_BATCH_SIZE = 100
 const CAPTURE_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
 
+// Owned wire-format contract for `vault-cli capture import-json --input @file`
+// payloads. This is the single source of truth for both runtime validation
+// (`loadStructuredCapturePayload` below) and the agent-discoverable
+// `vault-cli capture payload-schema --format json` sibling, so the emitted
+// contract cannot drift from what the importer actually accepts.
+const captureEntryPayloadSchema = z
+  .object({
+    media: z
+      .array(z.string().min(1))
+      .optional()
+      .describe(
+        'Local file paths to attach as durable capture bytes. Repeat across `media` and `mediaPaths` if helpful; the importer de-duplicates them.',
+      ),
+    mediaPaths: z
+      .array(z.string().min(1))
+      .optional()
+      .describe('Alias for `media`. Merged with `media` after de-duplication.'),
+    title: z.string().optional(),
+    note: z.string().optional(),
+    occurredAt: z.string().optional(),
+    source: eventSourceSchema.optional(),
+    label: z.string().optional(),
+    bodySite: z.string().optional(),
+    collection: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    relatedIds: z.array(z.string()).optional(),
+    externalRef: z.record(z.string(), z.unknown()).optional(),
+    links: z.unknown().optional(),
+    timeZone: z.string().optional(),
+  })
+  .strict()
+  .describe(
+    'Capture entry. Provide `media`/`mediaPaths` to attach durable bytes; the other fields are optional context.',
+  )
+
+export const captureImportPayloadSchema = captureEntryPayloadSchema
+  .extend({
+    captures: z
+      .array(
+        captureEntryPayloadSchema.refine(
+          (entry) =>
+            (entry.media?.length ?? 0) > 0 ||
+            (entry.mediaPaths?.length ?? 0) > 0,
+          {
+            message:
+              'Each captures[] entry must include media or mediaPaths; root-level defaults are not merged into batch entries.',
+          },
+        ),
+      )
+      .min(1, { message: 'captures must include at least one capture entry.' })
+      .max(MAX_CAPTURE_BATCH_SIZE, {
+        message: `Capture batches are limited to ${MAX_CAPTURE_BATCH_SIZE} entries.`,
+      })
+      .optional()
+      .describe(
+        'Optional batch: one capture entry per observation. Each entry must carry its own media; root-level fields apply only as non-media defaults.',
+      ),
+  })
+  .strict()
+  .describe(
+    'Structured capture import payload. Use root fields for one capture, or `captures` for a batch where root-level non-media fields are defaults.',
+  )
+
 export const captureLookupSchema = z
   .string()
   .trim()
@@ -346,52 +409,47 @@ function normalizeMediaPaths(input: CaptureEntryInput, fieldName: string): strin
   return mediaPaths
 }
 
-function normalizeCaptureEntry(value: unknown, fieldName: string): CaptureEntryInput {
-  const candidate = asJsonObject(value)
-  if (!candidate) {
-    throw new VaultCliError('invalid_payload', `${fieldName} must be an object.`)
-  }
-
-  if (Array.isArray(candidate.attachments) && candidate.attachments.length > 0) {
-    throw new VaultCliError(
-      'invalid_payload',
-      `${fieldName}.attachments is not supported. Use ${fieldName}.media to stage capture files.`,
-    )
-  }
-
+function normalizeCaptureEntry(
+  candidate: z.output<typeof captureEntryPayloadSchema>,
+  fieldName: string,
+): CaptureEntryInput {
   return compactObject({
     media: optionalStringArray(candidate.media, `${fieldName}.media`),
     mediaPaths: optionalStringArray(candidate.mediaPaths, `${fieldName}.mediaPaths`),
-    title: normalizeOptionalText(valueAsString(candidate.title)) ?? undefined,
-    note: normalizeOptionalText(valueAsString(candidate.note)) ?? undefined,
-    occurredAt: valueAsString(candidate.occurredAt),
-    source: normalizeSource(candidate.source, `${fieldName}.source`),
-    label: normalizeOptionalText(valueAsString(candidate.label)) ?? undefined,
-    bodySite: normalizeOptionalText(valueAsString(candidate.bodySite)) ?? undefined,
-    collection: normalizeOptionalText(valueAsString(candidate.collection)) ?? undefined,
+    title: normalizeOptionalText(candidate.title) ?? undefined,
+    note: normalizeOptionalText(candidate.note) ?? undefined,
+    occurredAt: candidate.occurredAt,
+    source: candidate.source,
+    label: normalizeOptionalText(candidate.label) ?? undefined,
+    bodySite: normalizeOptionalText(candidate.bodySite) ?? undefined,
+    collection: normalizeOptionalText(candidate.collection) ?? undefined,
     tags: optionalStringArray(candidate.tags, `${fieldName}.tags`),
     relatedIds: optionalStringArray(candidate.relatedIds, `${fieldName}.relatedIds`),
-    externalRef: asJsonObject(candidate.externalRef) ?? undefined,
+    externalRef: candidate.externalRef as JsonObject | undefined,
     links: candidate.links,
-    timeZone: valueAsString(candidate.timeZone),
+    timeZone: candidate.timeZone,
   })
 }
 
 async function loadStructuredCapturePayload(inputFile: string): Promise<StructuredCapturePayload> {
   const payload = await loadJsonInputObject(inputFile, 'capture payload')
-  const normalizedRoot = normalizeCaptureEntry(payload, 'capture payload')
-
-  if (payload.captures !== undefined && !Array.isArray(payload.captures)) {
-    throw new VaultCliError('invalid_payload', 'captures must be an array of capture entries.')
+  const parsed = captureImportPayloadSchema.safeParse(payload)
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0]
+    const pathPrefix = issue && issue.path.length > 0
+      ? `capture payload.${issue.path.join('.')}`
+      : 'capture payload'
+    throw new VaultCliError(
+      'invalid_payload',
+      issue ? `${pathPrefix}: ${issue.message}` : 'capture payload is invalid.',
+    )
   }
-
-  const captures = Array.isArray(payload.captures)
-    ? payload.captures.map((entry, index) => normalizeCaptureEntry(entry, `captures[${index}]`))
+  const normalizedRoot = normalizeCaptureEntry(parsed.data, 'capture payload')
+  const captures = parsed.data.captures
+    ? parsed.data.captures.map((entry, index) =>
+        normalizeCaptureEntry(entry, `captures[${index}]`),
+      )
     : undefined
-
-  if (captures && captures.length === 0) {
-    throw new VaultCliError('invalid_payload', 'captures must include at least one capture entry.')
-  }
 
   return {
     ...normalizedRoot,

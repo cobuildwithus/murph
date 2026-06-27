@@ -1,13 +1,52 @@
 import type {
-  LinqCreateChatResponse,
-  LinqCreateWebhookSubscriptionResponse,
-  LinqSendMessageResponse,
-} from "@murphai/messaging-ingress/linq-webhook";
+  ChatCreateParams,
+  ChatCreateResponse,
+  TextPart,
+  WebhookEventType,
+  WebhookSubscriptionCreateParams,
+  WebhookSubscriptionCreateResponse,
+} from "@linqapp/sdk/resources";
+import type {
+  MessageSendParams,
+  MessageSendResponse,
+} from "@linqapp/sdk/resources/chats";
 
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError } from "./errors";
 import { requireHostedOnboardingLinqConfig } from "./runtime";
 import { normalizeNullableString } from "./shared";
+
+const HOSTED_LINQ_WEBHOOK_EVENT_TYPES = [
+  "message.sent",
+  "message.received",
+  "message.read",
+  "message.delivered",
+  "message.failed",
+  "message.edited",
+  "reaction.added",
+  "reaction.removed",
+  "participant.added",
+  "participant.removed",
+  "chat.created",
+  "chat.group_name_updated",
+  "chat.group_icon_updated",
+  "chat.group_name_update_failed",
+  "chat.group_icon_update_failed",
+  "chat.typing_indicator.started",
+  "chat.typing_indicator.stopped",
+  "phone_number.status_updated",
+  "call.initiated",
+  "call.ringing",
+  "call.answered",
+  "call.ended",
+  "call.failed",
+  "call.declined",
+  "call.no_answer",
+  "location.sharing.started",
+  "location.sharing.stopped",
+] as const satisfies readonly WebhookEventType[];
+const HOSTED_LINQ_WEBHOOK_EVENT_TYPE_SET: ReadonlySet<string> =
+  new Set(HOSTED_LINQ_WEBHOOK_EVENT_TYPES);
 
 export type HostedLinqWebhookSubscription = {
   createdAt: string | null;
@@ -55,7 +94,7 @@ export async function sendHostedLinqChatMessage(input: {
     });
   }
 
-  const payload = await readHostedLinqOptionalJsonResponse<LinqSendMessageResponse>(response);
+  const payload = await readHostedLinqOptionalJsonResponse<MessageSendResponse>(response);
   return {
     chatId: normalizeNullableString(payload?.chat_id),
     messageId: normalizeNullableString(payload?.message?.id),
@@ -119,15 +158,17 @@ export async function createHostedLinqChat(input: {
   signal?: AbortSignal;
   to: string[];
 }): Promise<{ chatId: string | null; messageId: string | null }> {
+  const body: ChatCreateParams = {
+    from: normalizeRequiredString(input.from, "from"),
+    message: buildHostedLinqTextMessageBody({
+      idempotencyKey: input.idempotencyKey,
+      message: input.message,
+    }).message,
+    to: normalizeHostedLinqRecipients(input.to),
+  };
+
   const response = await fetchHostedLinqApiOrThrow({
-    body: JSON.stringify({
-      from: normalizeRequiredString(input.from, "from"),
-      message: buildHostedLinqTextMessageBody({
-        idempotencyKey: input.idempotencyKey,
-        message: input.message,
-      }).message,
-      to: normalizeHostedLinqRecipients(input.to),
-    }),
+    body: JSON.stringify(body),
     method: "POST",
     operation: "outbound chat creation",
     path: "chats",
@@ -143,7 +184,7 @@ export async function createHostedLinqChat(input: {
     });
   }
 
-  const payload = (await response.json()) as LinqCreateChatResponse;
+  const payload = (await response.json()) as ChatCreateResponse;
   return {
     chatId: normalizeNullableString(payload.chat?.id),
     messageId: normalizeNullableString(payload.chat?.message?.id),
@@ -156,16 +197,21 @@ export async function createHostedLinqWebhookSubscription(input: {
   subscribedEvents: readonly string[];
   targetUrl: string;
 }): Promise<HostedLinqWebhookSubscription> {
+  const phoneNumbers = input.phoneNumbers && input.phoneNumbers.length > 0
+    ? normalizeHostedLinqRecipients(input.phoneNumbers)
+    : null;
+  const body: WebhookSubscriptionCreateParams = {
+    ...(phoneNumbers
+      ? {
+          phone_numbers: phoneNumbers,
+        }
+      : {}),
+    subscribed_events: normalizeHostedLinqSubscribedEvents(input.subscribedEvents),
+    target_url: normalizeRequiredString(input.targetUrl, "target url"),
+  };
+
   const response = await fetchHostedLinqApiOrThrow({
-    body: JSON.stringify({
-      ...(input.phoneNumbers && input.phoneNumbers.length > 0
-        ? {
-            phone_numbers: normalizeHostedLinqRecipients(input.phoneNumbers),
-          }
-        : {}),
-      subscribed_events: normalizeHostedLinqSubscribedEvents(input.subscribedEvents),
-      target_url: normalizeRequiredString(input.targetUrl, "target url"),
-    }),
+    body: JSON.stringify(body),
     method: "POST",
     operation: "webhook subscription creation",
     path: "webhook-subscriptions",
@@ -181,7 +227,7 @@ export async function createHostedLinqWebhookSubscription(input: {
     });
   }
 
-  const payload = (await response.json()) as LinqCreateWebhookSubscriptionResponse;
+  const payload = (await response.json()) as WebhookSubscriptionCreateResponse;
   return {
     createdAt: normalizeNullableString(payload.created_at),
     id: normalizeNullableString(payload.id),
@@ -271,28 +317,18 @@ function buildHostedLinqTextMessageBody(input: {
   idempotencyKey?: string | null;
   message: string;
   replyToMessageId?: string | null;
-}): {
-  message: {
-    idempotency_key?: string;
-    parts: Array<{
-      type: "text";
-      value: string;
-    }>;
-    reply_to?: {
-      message_id: string;
-    };
-  };
-} {
+}): MessageSendParams {
   const idempotencyKey = normalizeNullableString(input.idempotencyKey);
   const replyToMessageId = normalizeNullableString(input.replyToMessageId);
+  const textPart: TextPart = {
+    type: "text",
+    value: normalizeRequiredString(input.message, "message"),
+  };
 
   return {
     message: {
       parts: [
-        {
-          type: "text",
-          value: normalizeRequiredString(input.message, "message"),
-        },
+        textPart,
       ],
       ...(idempotencyKey
         ? {
@@ -322,16 +358,27 @@ function normalizeHostedLinqRecipients(values: readonly string[]): string[] {
   return recipients;
 }
 
-function normalizeHostedLinqSubscribedEvents(values: readonly string[]): string[] {
+function normalizeHostedLinqSubscribedEvents(values: readonly string[]): WebhookEventType[] {
   const subscribedEvents = values
     .map((value) => normalizeRequiredString(value, "subscribed event"))
-    .filter((value, index, array) => array.indexOf(value) === index);
+    .filter((value, index, array) => array.indexOf(value) === index)
+    .map((value) => {
+      if (isHostedLinqWebhookEventType(value)) {
+        return value;
+      }
+
+      throw new TypeError("Linq subscribed event is not supported by the Linq SDK contract.");
+    });
 
   if (subscribedEvents.length === 0) {
     throw new TypeError("At least one Linq subscribed event is required.");
   }
 
   return subscribedEvents;
+}
+
+function isHostedLinqWebhookEventType(value: string): value is WebhookEventType {
+  return HOSTED_LINQ_WEBHOOK_EVENT_TYPE_SET.has(value);
 }
 
 function normalizeHostedLinqOptionalTextArray(values: readonly unknown[] | null | undefined): string[] {

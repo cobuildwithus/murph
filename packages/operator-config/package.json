@@ -184,6 +184,9 @@
     "@murphai/runtime-state": "workspace:*",
     "zod": "^4.4.3"
   },
+  "devDependencies": {
+    "@linqapp/sdk": "0.28.0"
+  },
   "engines": {
     "node": ">=24.14.1"
   }

@@ -4,9 +4,11 @@ import path from 'node:path'
 import {
   BLOOD_TEST_CATEGORY,
   BLOOD_TEST_SPECIMEN_TYPES,
+  type AllergyFrontmatter,
   type ContractSchema,
   allergyFrontmatterSchema,
   conditionFrontmatterSchema,
+  type ConditionFrontmatter,
   goalFrontmatterSchema,
   type GoalFrontmatter,
   regimenFrontmatterSchema,
@@ -34,8 +36,14 @@ import { resolveAssistantStatePaths } from './store/paths.js'
 
 export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA =
   'murph.assistant-context-snapshot'
-export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 1
+export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 2
 export const ASSISTANT_CONTEXT_SNAPSHOT_FILE_NAME = 'context-snapshot.json'
+
+const ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT = [
+  'Assistant context snapshot for navigation only:',
+  '- Active safety-critical health context is currently unavailable in the snapshot (recent canonical edit, pending rebuild, or incomplete source read).',
+  '- Before any safety-relevant guidance, enumerate the user\'s current active records with `vault-cli condition list --status active`, `vault-cli allergy list --status active`, `vault-cli regimen list --status active`, and `vault-cli goal list --status active`, then read individual records with the matching `vault-cli condition show <id>` / `vault-cli allergy show <id>` / `vault-cli regimen show <id>` / `vault-cli goal show <id>` as needed.',
+].join('\n')
 
 export const ASSISTANT_CONTEXT_SNAPSHOT_DIRTY_DOMAINS = [
   'experiments',
@@ -84,12 +92,20 @@ type AssistantContextSnapshotBuildResult = Pick<
   'includedDomains' | 'promptBlock' | 'sectionPresence'
 >
 
+type PromptLookupRecord = Readonly<{
+  slug: string
+  title: string
+}>
+
 const ASSISTANT_CONTEXT_SNAPSHOT_ALL_DOMAINS =
   ['experiments', 'blood_tests', 'health_context'] as const
 
 const BLOOD_TEST_SPECIMEN_TYPE_SET = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES)
+const MAX_ASSISTANT_CONTEXT_ACTIVE_SAFETY_RECORDS = 5
 const MAX_ASSISTANT_CONTEXT_ACTIVE_GOALS = 3
 const MAX_ASSISTANT_CONTEXT_ACTIVE_HABIT_REGIMENS = 3
+const MAX_ASSISTANT_CONTEXT_RELATED_RECORDS = 3
+const MAX_ASSISTANT_CONTEXT_SUPPLEMENT_INGREDIENTS = 3
 const MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES = 64 * 1024
 const MAX_ASSISTANT_CONTEXT_PROMPT_FIELD_LENGTH = 120
 const MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR = 200
@@ -111,7 +127,13 @@ export async function readAssistantContextSnapshotPrompt(input: {
     maxBytes: MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES,
     vaultRoot: input.vaultRoot,
   })
-  return normalizeNullableString(state?.lastCompleted?.promptBlock)
+  if (state?.pendingDirtyDomains.includes('health_context')) {
+    return ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT
+  }
+  if (state === null || state.lastCompleted === null) {
+    return ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT
+  }
+  return normalizeNullableString(state.lastCompleted.promptBlock)
 }
 
 export async function isAssistantContextSnapshotRefreshPending(input: {
@@ -345,16 +367,25 @@ async function buildAssistantContextSnapshotPrompt(input: {
   const coverage = await buildAssistantSnapshotCoverage(input)
   assertAssistantContextSnapshotCanContinue(input)
 
+  const safetyLines = coverage.safetyComplete
+    ? [
+        coverage.activeAllergiesLine,
+        coverage.activeConditionsLine,
+        coverage.activeMedicationRegimensLine,
+        coverage.activeSupplementRegimensLine,
+      ]
+    : [ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT]
   const lines = [
     'Assistant context snapshot for navigation only:',
     '- This is a compact, possibly stale snapshot. Treat it as orientation, not canonical evidence.',
     '- Before making factual claims about current values, dates, counts, progress, or outcomes, query the relevant vault surface.',
     coverage.bloodTestsLine,
     coverage.healthContextLine,
+    ...safetyLines,
     coverage.activeGoalsLine,
     coverage.regimensLine,
     coverage.activeHabitRegimensLine,
-    coverage.activePlanReadLine,
+    coverage.activeRecordReadLine,
   ].filter((line): line is string => Boolean(line))
 
   const promptBlock = [
@@ -384,11 +415,19 @@ async function buildAssistantSnapshotCoverage(input: {
   signal: AbortSignal | null
   vaultRoot: string
 }): Promise<{
+  activeAllergyCount: number
+  activeAllergiesLine: string | null
+  activeConditionCount: number
+  activeConditionsLine: string | null
   activeGoalCount: number
   activeGoalsLine: string | null
   activeHabitRegimenCount: number
   activeHabitRegimensLine: string | null
-  activePlanReadLine: string | null
+  activeMedicationRegimenCount: number
+  activeMedicationRegimensLine: string | null
+  activeRecordReadLine: string | null
+  activeSupplementRegimenCount: number
+  activeSupplementRegimensLine: string | null
   allergyCount: number
   bloodTestCount: number
   bloodTestsLine: string | null
@@ -397,28 +436,77 @@ async function buildAssistantSnapshotCoverage(input: {
   healthContextLine: string | null
   regimenCount: number
   regimensLine: string | null
+  safetyComplete: boolean
   supplementCount: number
 }> {
   const eventCoverage = await collectAssistantSnapshotEventLedgerCoverage(input)
-  const goals = await listAssistantSnapshotFrontmatterRecords(
+  const goalRead = await listAssistantSnapshotFrontmatterRecords(
     input,
     VAULT_LAYOUT.goalsDirectory,
     goalFrontmatterSchema,
   )
-  const conditions = await listAssistantSnapshotFrontmatterRecords(
+  const conditionRead = await listAssistantSnapshotFrontmatterRecords(
     input,
     VAULT_LAYOUT.conditionsDirectory,
     conditionFrontmatterSchema,
   )
-  const allergies = await listAssistantSnapshotFrontmatterRecords(
+  const allergyRead = await listAssistantSnapshotFrontmatterRecords(
     input,
     VAULT_LAYOUT.allergiesDirectory,
     allergyFrontmatterSchema,
   )
-  const regimens = await listAssistantSnapshotFrontmatterRecords(
+  const regimenRead = await listAssistantSnapshotFrontmatterRecords(
     input,
     VAULT_LAYOUT.regimensDirectory,
     regimenFrontmatterSchema,
+  )
+  const goals = goalRead.records
+  const conditions = conditionRead.records
+  const allergies = allergyRead.records
+  const regimens = regimenRead.records
+  const safetyComplete = conditionRead.complete
+    && allergyRead.complete
+    && regimenRead.complete
+  const activeRegimens = regimens.filter(isActiveRegimen)
+  const activeRegimensById = new Map<string, PromptLookupRecord>(
+    activeRegimens.map((regimen): [string, PromptLookupRecord] => [
+      regimen.regimenId,
+      regimen,
+    ]),
+  )
+  const activeConditions = conditions
+    .filter(isActiveCondition)
+    .sort(compareActiveConditions)
+  const activeConditionsById = new Map<string, PromptLookupRecord>(
+    activeConditions.map((condition): [string, PromptLookupRecord] => [
+      condition.conditionId,
+      condition,
+    ]),
+  )
+  const visibleActiveConditions = activeConditions.slice(
+    0,
+    MAX_ASSISTANT_CONTEXT_ACTIVE_SAFETY_RECORDS,
+  )
+  const activeAllergies = allergies
+    .filter(isActiveAllergy)
+    .sort(compareActiveAllergies)
+  const visibleActiveAllergies = activeAllergies.slice(
+    0,
+    MAX_ASSISTANT_CONTEXT_ACTIVE_SAFETY_RECORDS,
+  )
+  const activeMedicationRegimens = regimens
+    .filter(isActiveMedicationRegimen)
+    .sort(compareActiveSafetyRegimens)
+  const visibleActiveMedicationRegimens = activeMedicationRegimens.slice(
+    0,
+    MAX_ASSISTANT_CONTEXT_ACTIVE_SAFETY_RECORDS,
+  )
+  const activeSupplementRegimens = regimens
+    .filter(isActiveSupplementRegimen)
+    .sort(compareActiveSafetyRegimens)
+  const visibleActiveSupplementRegimens = activeSupplementRegimens.slice(
+    0,
+    MAX_ASSISTANT_CONTEXT_ACTIVE_SAFETY_RECORDS,
   )
   const activeGoals = goals
     .filter(isActiveGoal)
@@ -445,18 +533,64 @@ async function buildAssistantSnapshotCoverage(input: {
     summarizePositiveCount(supplementCount, 'supplement'),
   ].filter((part): part is string => Boolean(part))
 
+  const hasActivePromptContext = [
+    activeConditions.length,
+    activeAllergies.length,
+    activeMedicationRegimens.length,
+    activeSupplementRegimens.length,
+    activeGoals.length,
+    activeHabitRegimens.length,
+  ].some((count) => count > 0)
+
   return {
+    activeAllergyCount: activeAllergies.length,
+    activeAllergiesLine: renderActiveAllergiesLine({
+      allergies: visibleActiveAllergies,
+      conditionsById: activeConditionsById,
+      totalCount: activeAllergies.length,
+    }),
+    activeConditionCount: activeConditions.length,
+    activeConditionsLine: renderActiveConditionsLine({
+      conditions: visibleActiveConditions,
+      regimens: activeRegimens,
+      regimensById: activeRegimensById,
+      totalCount: activeConditions.length,
+    }),
     activeGoalCount: activeGoals.length,
     activeGoalsLine: renderActiveGoalsLine(
       visibleActiveGoals,
       activeGoals.length,
     ),
     activeHabitRegimenCount: activeHabitRegimens.length,
-    activeHabitRegimensLine:
-      renderActiveHabitRegimensLine(visibleActiveHabitRegimens, activeHabitRegimens.length),
-    activePlanReadLine: activeGoals.length > 0 || activeHabitRegimens.length > 0
-      ? '- For current goals, habits, routines, or ramps, read the relevant `vault-cli goal show` / `vault-cli regimen show` record before reconstructing baselines, ladders, targets, or fallback details.'
+    activeHabitRegimensLine: renderActiveHabitRegimensLine(
+      visibleActiveHabitRegimens,
+      activeHabitRegimens.length,
+    ),
+    activeMedicationRegimenCount: activeMedicationRegimens.length,
+    activeMedicationRegimensLine: renderActiveSafetyRegimensLine({
+      conditions: activeConditions,
+      conditionsById: activeConditionsById,
+      label: 'Active medication regimens',
+      omittedNoun: 'medication regimen',
+      regimens: visibleActiveMedicationRegimens,
+      totalCount: activeMedicationRegimens.length,
+    }),
+    activeRecordReadLine: hasActivePromptContext
+      ? [
+          '- For active conditions, allergies, medications, supplements, goals, habits, routines, or ramps,',
+          'read the relevant `vault-cli condition show` / `vault-cli allergy show` / `vault-cli regimen show` / `vault-cli goal show` record',
+          'before safety-relevant guidance or reconstructing baselines, ladders, targets, or fallback details.',
+        ].join(' ')
       : null,
+    activeSupplementRegimenCount: activeSupplementRegimens.length,
+    activeSupplementRegimensLine: renderActiveSafetyRegimensLine({
+      conditions: activeConditions,
+      conditionsById: activeConditionsById,
+      label: 'Active supplement regimens',
+      omittedNoun: 'supplement regimen',
+      regimens: visibleActiveSupplementRegimens,
+      totalCount: activeSupplementRegimens.length,
+    }),
     allergyCount: allergies.length,
     bloodTestCount: eventCoverage.bloodTestCount,
     bloodTestsLine: eventCoverage.bloodTestCount > 0
@@ -471,6 +605,7 @@ async function buildAssistantSnapshotCoverage(input: {
     regimensLine: regimenParts.length > 0
       ? `- Bank coverage includes ${joinWithAnd(regimenParts)}.`
       : null,
+    safetyComplete,
     supplementCount,
   }
 }
@@ -483,23 +618,28 @@ async function listAssistantSnapshotFrontmatterRecords<TRecord>(
   },
   relativeDirectory: string,
   schema: ContractSchema<TRecord>,
-): Promise<TRecord[]> {
+): Promise<{ complete: boolean; records: TRecord[] }> {
   assertAssistantContextSnapshotCanContinue(input)
   const { relativePaths } = await walkVaultFilesInterruptible(
     input.vaultRoot,
     relativeDirectory,
     {
       extension: '.md',
-      maxMatches: MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR,
+      maxMatches: MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR + 1,
       shouldContinue: () => {
         assertAssistantContextSnapshotCanContinue(input)
         return true
       },
     },
   )
+  const truncated = relativePaths.length > MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR
   const records: TRecord[] = []
+  let parseFailed = false
 
-  for (const relativePath of relativePaths) {
+  const visible = truncated
+    ? relativePaths.slice(0, MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR)
+    : relativePaths
+  for (const relativePath of visible) {
     assertAssistantContextSnapshotCanContinue(input)
     try {
       const resolved = resolveVaultPath(input.vaultRoot, relativePath)
@@ -510,16 +650,19 @@ async function listAssistantSnapshotFrontmatterRecords<TRecord>(
       const result = safeParseContract(schema, document.attributes)
       if (result.success) {
         records.push(result.data)
+      } else {
+        parseFailed = true
       }
     } catch (error) {
       if (isAssistantContextSnapshotPreemptionError(error)) {
         throw error
       }
+      parseFailed = true
       continue
     }
   }
 
-  return records
+  return { complete: !truncated && !parseFailed, records }
 }
 
 async function collectAssistantSnapshotEventLedgerCoverage(input: {
@@ -792,13 +935,64 @@ function parseNonNegativeInteger(value: unknown): number {
   return value
 }
 
+function isActiveAllergy(allergy: AllergyFrontmatter): boolean {
+  return normalizeToken(allergy.status) === 'active'
+}
+
+function isActiveCondition(condition: ConditionFrontmatter): boolean {
+  return normalizeToken(condition.clinicalStatus) === 'active'
+}
+
 function isActiveGoal(goal: GoalFrontmatter): boolean {
   return normalizeToken(goal.status) === 'active'
 }
 
-function isActiveHabitRegimen(regimen: RegimenFrontmatter): boolean {
+function isActiveRegimen(regimen: RegimenFrontmatter): boolean {
   return normalizeToken(regimen.status) === 'active'
-    && normalizeToken(regimen.kind) === 'habit'
+}
+
+function isActiveHabitRegimen(regimen: RegimenFrontmatter): boolean {
+  return isActiveRegimenKind(regimen, 'habit')
+}
+
+function isActiveMedicationRegimen(regimen: RegimenFrontmatter): boolean {
+  return isActiveRegimenKind(regimen, 'medication')
+}
+
+function isActiveSupplementRegimen(regimen: RegimenFrontmatter): boolean {
+  return isActiveRegimenKind(regimen, 'supplement')
+}
+
+function isActiveRegimenKind(
+  regimen: RegimenFrontmatter,
+  kind: RegimenFrontmatter['kind'],
+): boolean {
+  return isActiveRegimen(regimen) && normalizeToken(regimen.kind) === kind
+}
+
+function compareActiveAllergies(
+  left: AllergyFrontmatter,
+  right: AllergyFrontmatter,
+): number {
+  return (
+    allergyCriticalityRank(left.criticality) - allergyCriticalityRank(right.criticality)
+    || compareIsoDateDesc(left.recordedOn, right.recordedOn)
+    || left.title.localeCompare(right.title)
+    || left.allergyId.localeCompare(right.allergyId)
+  )
+}
+
+function compareActiveConditions(
+  left: ConditionFrontmatter,
+  right: ConditionFrontmatter,
+): number {
+  return (
+    conditionSeverityRank(left.severity) - conditionSeverityRank(right.severity)
+    || conditionVerificationRank(left.verificationStatus) - conditionVerificationRank(right.verificationStatus)
+    || compareIsoDateDesc(left.assertedOn, right.assertedOn)
+    || left.title.localeCompare(right.title)
+    || left.conditionId.localeCompare(right.conditionId)
+  )
 }
 
 function compareActiveGoals(
@@ -825,6 +1019,150 @@ function compareActiveHabitRegimens(
   )
 }
 
+function compareActiveSafetyRegimens(
+  left: RegimenFrontmatter,
+  right: RegimenFrontmatter,
+): number {
+  return (
+    compareIsoDateDesc(left.startedOn, right.startedOn)
+    || left.title.localeCompare(right.title)
+    || left.regimenId.localeCompare(right.regimenId)
+  )
+}
+
+function renderActiveAllergiesLine(input: {
+  allergies: readonly AllergyFrontmatter[]
+  conditionsById: ReadonlyMap<string, PromptLookupRecord>
+  totalCount: number
+}): string | null {
+  if (input.allergies.length === 0) {
+    return null
+  }
+
+  const allergySummaries = input.allergies
+    .map((allergy) => renderActiveAllergy(allergy, input.conditionsById))
+    .join('; ')
+
+  return `- Active allergies: ${allergySummaries}${renderOmittedCount(input.totalCount - input.allergies.length, 'allergy', 'allergies')}.`
+}
+
+function renderActiveAllergy(
+  allergy: AllergyFrontmatter,
+  conditionsById: ReadonlyMap<string, PromptLookupRecord>,
+): string {
+  const details = [
+    allergy.substance ? `substance ${renderPromptField(allergy.substance)}` : null,
+    allergy.criticality
+      ? `criticality ${renderPromptField(allergy.criticality)}`
+      : null,
+    allergy.reaction ? `reaction ${renderPromptField(allergy.reaction)}` : null,
+    allergy.recordedOn ? `recorded ${allergy.recordedOn}` : null,
+    renderRelatedLookups(
+      'related conditions',
+      collectAllergyRelatedConditionIds(allergy),
+      conditionsById,
+    ),
+    allergy.note ? `note ${renderPromptField(allergy.note)}` : null,
+  ].filter((part): part is string => Boolean(part))
+
+  return `${renderPromptLookup(allergy.title, allergy.slug, allergy.allergyId)}${renderDetailSuffix(details)}`
+}
+
+function renderActiveConditionsLine(input: {
+  conditions: readonly ConditionFrontmatter[]
+  regimens: readonly RegimenFrontmatter[]
+  regimensById: ReadonlyMap<string, PromptLookupRecord>
+  totalCount: number
+}): string | null {
+  if (input.conditions.length === 0) {
+    return null
+  }
+
+  const conditionSummaries = input.conditions
+    .map((condition) =>
+      renderActiveCondition(condition, input.regimensById, input.regimens),
+    )
+    .join('; ')
+
+  return `- Active conditions: ${conditionSummaries}${renderOmittedCount(input.totalCount - input.conditions.length, 'condition')}.`
+}
+
+function renderActiveCondition(
+  condition: ConditionFrontmatter,
+  regimensById: ReadonlyMap<string, PromptLookupRecord>,
+  regimens: readonly RegimenFrontmatter[],
+): string {
+  const details = [
+    condition.severity ? `severity ${renderPromptField(condition.severity)}` : null,
+    condition.verificationStatus
+      ? `verification ${renderPromptField(condition.verificationStatus)}`
+      : null,
+    condition.assertedOn ? `asserted ${condition.assertedOn}` : null,
+    condition.resolvedOn ? `resolved ${condition.resolvedOn}` : null,
+    renderStringList('body sites', condition.bodySites, MAX_ASSISTANT_CONTEXT_RELATED_RECORDS),
+    renderStringList('related goals', condition.relatedGoalIds, MAX_ASSISTANT_CONTEXT_RELATED_RECORDS),
+    renderRelatedLookups(
+      'related regimens',
+      collectConditionRelatedRegimenIds(condition, regimens),
+      regimensById,
+    ),
+    condition.note ? `note ${renderPromptField(condition.note)}` : null,
+  ].filter((part): part is string => Boolean(part))
+
+  return `${renderPromptLookup(condition.title, condition.slug, condition.conditionId)}${renderDetailSuffix(details)}`
+}
+
+function renderActiveSafetyRegimensLine(input: {
+  conditions: readonly ConditionFrontmatter[]
+  conditionsById: ReadonlyMap<string, PromptLookupRecord>
+  label: string
+  omittedNoun: string
+  regimens: readonly RegimenFrontmatter[]
+  totalCount: number
+}): string | null {
+  if (input.regimens.length === 0) {
+    return null
+  }
+
+  const regimenSummaries = input.regimens
+    .map((regimen) =>
+      renderActiveSafetyRegimen(regimen, input.conditionsById, input.conditions),
+    )
+    .join('; ')
+
+  return `- ${input.label}: ${regimenSummaries}${renderOmittedCount(input.totalCount - input.regimens.length, input.omittedNoun)}.`
+}
+
+function renderActiveSafetyRegimen(
+  regimen: RegimenFrontmatter,
+  conditionsById: ReadonlyMap<string, PromptLookupRecord>,
+  conditions: readonly ConditionFrontmatter[],
+): string {
+  const details = [
+    regimen.substance ? `substance ${renderPromptField(regimen.substance)}` : null,
+    renderRegimenDose(regimen),
+    regimen.schedule ? `schedule ${renderPromptField(regimen.schedule)}` : null,
+    regimen.startedOn ? `started ${regimen.startedOn}` : null,
+    regimen.brand ? `brand ${renderPromptField(regimen.brand)}` : null,
+    regimen.manufacturer
+      ? `manufacturer ${renderPromptField(regimen.manufacturer)}`
+      : null,
+    regimen.servingSize
+      ? `serving ${renderPromptField(regimen.servingSize)}`
+      : null,
+    renderSupplementIngredients(regimen),
+    renderRelatedLookups(
+      'related conditions',
+      collectRegimenRelatedConditionIds(regimen, conditions),
+      conditionsById,
+    ),
+    renderStringList('related goals', regimen.relatedGoalIds, MAX_ASSISTANT_CONTEXT_RELATED_RECORDS),
+    regimen.note ? `note ${renderPromptField(regimen.note)}` : null,
+  ].filter((part): part is string => Boolean(part))
+
+  return `${renderPromptLookup(regimen.title, regimen.slug, regimen.regimenId)}${renderDetailSuffix(details)}`
+}
+
 function renderActiveGoalsLine(
   goals: readonly GoalFrontmatter[],
   totalCount: number,
@@ -840,7 +1178,7 @@ function renderActiveGoal(goal: GoalFrontmatter): string {
   const details = [
     goal.horizon ? `horizon ${renderPromptField(goal.horizon)}` : null,
     renderGoalWindow(goal),
-    renderStringList('domains', goal.domains, 3),
+    renderStringList('domains', goal.domains, MAX_ASSISTANT_CONTEXT_RELATED_RECORDS),
   ].filter((part): part is string => Boolean(part))
 
   return `${renderPromptLookup(goal.title, goal.slug, goal.goalId)}${renderDetailSuffix(details)}`
@@ -874,7 +1212,11 @@ function renderActiveHabitRegimen(regimen: RegimenFrontmatter): string {
     regimen.schedule ? `schedule ${renderPromptField(regimen.schedule)}` : null,
     regimen.startedOn ? `started ${regimen.startedOn}` : null,
     regimen.note ? `note ${renderPromptField(regimen.note)}` : null,
-    renderStringList('related goals', regimen.relatedGoalIds, 3),
+    renderStringList(
+      'related goals',
+      regimen.relatedGoalIds,
+      MAX_ASSISTANT_CONTEXT_RELATED_RECORDS,
+    ),
   ].filter((part): part is string => Boolean(part))
 
   return `${renderPromptLookup(regimen.title, regimen.slug, regimen.regimenId)}${renderDetailSuffix(details)}`
@@ -904,8 +1246,192 @@ function renderStringList(
   return `${label} ${visible.join(', ')}${omitted}`
 }
 
-function renderOmittedCount(count: number, noun: string): string {
-  return count > 0 ? `; ${count} more active ${noun}${count === 1 ? '' : 's'} omitted` : ''
+function renderOmittedCount(
+  count: number,
+  singularNoun: string,
+  pluralNoun = `${singularNoun}s`,
+): string {
+  return count > 0
+    ? `; ${count} more active ${count === 1 ? singularNoun : pluralNoun} omitted`
+    : ''
+}
+
+function renderRegimenDose(regimen: RegimenFrontmatter): string | null {
+  if (regimen.dose === undefined && !regimen.unit) {
+    return null
+  }
+
+  const dose = [
+    regimen.dose === undefined ? null : String(regimen.dose),
+    regimen.unit ?? null,
+  ].filter((part): part is string => Boolean(part)).join(' ')
+  return dose ? `dose ${renderPromptField(dose)}` : null
+}
+
+function renderSupplementIngredients(regimen: RegimenFrontmatter): string | null {
+  if (!regimen.ingredients || regimen.ingredients.length === 0) {
+    return null
+  }
+
+  const visible = regimen.ingredients
+    .slice(0, MAX_ASSISTANT_CONTEXT_SUPPLEMENT_INGREDIENTS)
+    .map(renderSupplementIngredient)
+  const omitted = regimen.ingredients.length > visible.length
+    ? `, +${regimen.ingredients.length - visible.length}`
+    : ''
+
+  return `ingredients ${visible.join(', ')}${omitted}`
+}
+
+function renderSupplementIngredient(
+  ingredient: NonNullable<RegimenFrontmatter['ingredients']>[number],
+): string {
+  const amount = [
+    ingredient.amount === undefined ? null : String(ingredient.amount),
+    ingredient.unit ?? null,
+  ].filter((part): part is string => Boolean(part)).join(' ')
+  const parts = [
+    ingredient.label ?? ingredient.compound,
+    amount || null,
+    ingredient.active === false ? 'inactive' : null,
+  ].filter((part): part is string => Boolean(part))
+
+  return renderPromptField(parts.join(' '))
+}
+
+function renderRelatedLookups(
+  label: string,
+  ids: readonly string[],
+  recordsById: ReadonlyMap<string, PromptLookupRecord>,
+): string | null {
+  const presentIds = uniqueStrings(ids).filter((id) => recordsById.has(id))
+  if (presentIds.length === 0) {
+    return null
+  }
+
+  const visible = presentIds.slice(0, MAX_ASSISTANT_CONTEXT_RELATED_RECORDS)
+  const rendered = visible.map((id) => {
+    const record = recordsById.get(id)!
+    return renderPromptLookup(record.title, record.slug, id)
+  })
+  const omitted = presentIds.length > visible.length
+    ? `, +${presentIds.length - visible.length}`
+    : ''
+
+  return `${label} ${rendered.join(', ')}${omitted}`
+}
+
+function collectAllergyRelatedConditionIds(allergy: AllergyFrontmatter): string[] {
+  return uniqueStrings([
+    ...(allergy.relatedConditionIds ?? []),
+    ...(allergy.links ?? [])
+      .filter((link) => link.type === 'related_condition')
+      .map((link) => link.targetId),
+  ])
+}
+
+function collectConditionRelatedRegimenIds(
+  condition: ConditionFrontmatter,
+  regimens: readonly RegimenFrontmatter[],
+): string[] {
+  const availableRegimenIds = new Set(regimens.map((regimen) => regimen.regimenId))
+  return uniqueStrings([
+    ...(condition.relatedRegimenIds ?? []),
+    ...(condition.links ?? [])
+      .filter((link) => link.type === 'related_regimen')
+      .map((link) => link.targetId),
+    ...regimens
+      .filter((regimen) =>
+        regimenReferencesCondition(regimen, condition.conditionId),
+      )
+      .map((regimen) => regimen.regimenId),
+  ]).filter((regimenId) => availableRegimenIds.has(regimenId))
+}
+
+function collectRegimenRelatedConditionIds(
+  regimen: RegimenFrontmatter,
+  conditions: readonly ConditionFrontmatter[],
+): string[] {
+  return uniqueStrings([
+    ...(regimen.relatedConditionIds ?? []),
+    ...(regimen.links ?? [])
+      .filter((link) => link.type === 'addresses_condition')
+      .map((link) => link.targetId),
+    ...conditions
+      .filter((condition) => conditionReferencesRegimen(condition, regimen.regimenId))
+      .map((condition) => condition.conditionId),
+  ])
+}
+
+function conditionReferencesRegimen(
+  condition: ConditionFrontmatter,
+  regimenId: string,
+): boolean {
+  return (condition.relatedRegimenIds ?? []).includes(regimenId)
+    || (condition.links ?? []).some(
+      (link) => link.type === 'related_regimen' && link.targetId === regimenId,
+    )
+}
+
+function regimenReferencesCondition(
+  regimen: RegimenFrontmatter,
+  conditionId: string,
+): boolean {
+  return (regimen.relatedConditionIds ?? []).includes(conditionId)
+    || (regimen.links ?? []).some(
+      (link) =>
+        link.type === 'addresses_condition' && link.targetId === conditionId,
+    )
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values)]
+}
+
+function compareIsoDateDesc(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): number {
+  return (right ?? '').localeCompare(left ?? '')
+}
+
+function allergyCriticalityRank(value: AllergyFrontmatter['criticality']): number {
+  switch (normalizeToken(value)) {
+    case 'high':
+      return 0
+    case 'unable_to_assess':
+      return 1
+    case 'low':
+      return 2
+    default:
+      return 3
+  }
+}
+
+function conditionSeverityRank(value: ConditionFrontmatter['severity']): number {
+  switch (normalizeToken(value)) {
+    case 'severe':
+      return 0
+    case 'moderate':
+      return 1
+    case 'mild':
+      return 2
+    default:
+      return 3
+  }
+}
+
+function conditionVerificationRank(value: ConditionFrontmatter['verificationStatus']): number {
+  switch (normalizeToken(value)) {
+    case 'confirmed':
+      return 0
+    case 'provisional':
+      return 1
+    case 'unconfirmed':
+      return 2
+    default:
+      return 3
+  }
 }
 
 function renderPromptField(value: string): string {

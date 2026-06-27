@@ -26,7 +26,7 @@ attach_artifacts=1
 include_tests=0
 include_docs=0
 preset_dir="scripts/chatgpt-review-presets"
-package_script="scripts/package-audit-context.sh"
+package_script="scripts/package-audit-context-full.sh"
 # `current` skips connector selection. The PR loop requires the Eragon composer
 # to have no selected app connector before auto-send because review context must
 # come from the guarded ZIP and repomix attachments.
