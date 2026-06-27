@@ -10,6 +10,7 @@ import {
 const DAY_MS = 86_400_000;
 
 export const HOSTED_RUN_LOG_RETENTION_MS = 14 * DAY_MS;
+export const HOSTED_RUN_LOG_AUTOMATION_DETAIL_RETENTION_MS = 7 * DAY_MS;
 export const HOSTED_MAILBOX_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_WEB_SESSION_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE = 25;
@@ -201,11 +202,18 @@ async function deleteOldHostedRuntimeLogs(input: {
   prisma: PrismaClient;
 }): Promise<number> {
   const cutoff = new Date(input.now.getTime() - HOSTED_RUN_LOG_RETENTION_MS);
+  const automationDetailCutoff = new Date(
+    input.now.getTime() - HOSTED_RUN_LOG_AUTOMATION_DETAIL_RETENTION_MS,
+  );
   const result = await input.prisma.hostedRuntimeLog.deleteMany({
     where: {
-      at: {
-        lt: cutoff,
-      },
+      OR: [
+        { at: { lt: cutoff } },
+        {
+          eventCode: "assistant.automation_detail",
+          at: { lt: automationDetailCutoff },
+        },
+      ],
     },
   });
 

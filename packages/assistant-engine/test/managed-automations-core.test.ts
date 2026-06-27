@@ -86,6 +86,13 @@ describe('applyMurphManagedAutomations core integration', () => {
       status: 'active',
       title: 'Weekly health digest',
     })
+    expect(record?.instructions).toContain('A digest with no substance is worse than no message at all')
+    expect(record?.instructions).toContain('vault-cli device account list')
+    expect(record?.instructions).toContain('vault-cli wearables sources list')
+    expect(record?.instructions).toContain('Wearable connected but not delivering')
+    expect(record?.instructions).toContain('vault-cli device connect <provider>')
+    expect(record?.instructions).toContain('No substance and no live wearable')
+    expect(record?.instructions).toContain('Suppress the scheduled message')
 
     const insightRecord = await showAutomation({
       automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
