@@ -47,6 +47,7 @@ import {
   sendPreparedTelegramVoiceMemoMessage,
   sendTelegramMessage,
   sendWhatsAppMessage,
+  startLinqTypingIndicator,
   startTelegramTypingIndicator,
 } from './runtime.js'
 import type {
@@ -401,10 +402,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   targetRequiredMessage:
     'iMessage delivery requires an explicit chat id or a stored thread binding.',
   async startTypingIndicator({ candidate, dependencies }) {
-    const startTyping = dependencies.startLinqTyping
-    if (!startTyping) {
-      return null
-    }
+    const startTyping = dependencies.startLinqTyping ?? startLinqTypingIndicator
     return (await startTyping({
       target: candidate.target,
     })) ?? null
