@@ -773,6 +773,7 @@ test('capture descriptor exposes the add, show, list, and manifest leaves', () =
   assert.deepEqual([...descriptionsByPath.keys()], [
     'capture add',
     'capture import-json',
+    'capture payload-schema',
     'capture show',
     'capture list',
     'capture manifest',
@@ -782,6 +783,10 @@ test('capture descriptor exposes the add, show, list, and manifest leaves', () =
   assert.equal(
     descriptionsByPath.get('capture import-json')?.description,
     captureCommandDescriptions.importJson,
+  )
+  assert.equal(
+    descriptionsByPath.get('capture payload-schema')?.description,
+    captureCommandDescriptions.payloadSchema,
   )
   assert.equal(descriptionsByPath.get('capture show')?.description, captureCommandDescriptions.show)
   assert.equal(descriptionsByPath.get('capture list')?.description, captureCommandDescriptions.list)

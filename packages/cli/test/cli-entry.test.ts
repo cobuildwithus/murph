@@ -70,7 +70,6 @@ function mockCliActionModules(input: {
   vi.doMock("../src/vault-cli-llms-normalizer.js", () => ({
     installVaultCliLlmsNormalizer:
       input.installVaultCliLlmsNormalizer ?? vi.fn(),
-    vaultCliLlmsHiddenCommandNames: new Set<string>(),
   }));
   vi.doMock("../src/vault-cli-schema-index.js", () => ({
     installVaultCliSchemaIndex: vi.fn(),

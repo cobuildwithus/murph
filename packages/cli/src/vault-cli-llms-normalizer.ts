@@ -31,23 +31,12 @@ interface LlmsJsonManifestRequest {
   kind: 'json-manifest'
 }
 
-interface RootLlmsMarkdownNormalizationRequest {
-  kind: 'root-markdown'
-}
-
 interface ScopedLlmsMarkdownNormalizationRequest extends ScopedLlmsMarkdownRequest {
   kind: 'scoped-markdown'
 }
 
-interface ScopedHelpNormalizationRequest {
-  commandPath: string[]
-  kind: 'scoped-help'
-}
-
 type LlmsNormalizationRequest =
   | LlmsJsonManifestRequest
-  | RootLlmsMarkdownNormalizationRequest
-  | ScopedHelpNormalizationRequest
   | ScopedLlmsMarkdownNormalizationRequest
 
 export function installVaultCliLlmsNormalizer(
@@ -64,20 +53,10 @@ export function installVaultCliLlmsNormalizer(
     }
 
     const result = await captureServeOutput(serve, argv, options)
-    let output: string
-    if (request.kind === 'json-manifest') {
-      output = await normalizeLlmsJsonManifestOutput(result.output)
-    } else if (request.kind === 'root-markdown') {
-      output = normalizeRootLlmsMarkdownOutput(result.output, commandName)
-    } else if (request.kind === 'scoped-help') {
-      output = normalizeScopedHelpOutput(result.output, request.commandPath)
-    } else {
-      output = normalizeScopedLlmsMarkdownOutput(
-        result.output,
-        commandName,
-        request.commandPath,
-      )
-    }
+    const output =
+      request.kind === 'json-manifest'
+        ? await normalizeLlmsJsonManifestOutput(result.output)
+        : normalizeScopedLlmsMarkdownOutput(result.output, commandName, request.commandPath)
     writeStdout(options, output)
 
     if (result.exitCode !== null) {
@@ -90,7 +69,6 @@ function parseLlmsNormalizationRequest(
   argv: readonly string[],
 ): LlmsNormalizationRequest | null {
   let hasLlmsFlag = false
-  let hasHelpFlag = false
   let explicitFormat: string | null = null
   const commandPath: string[] = []
 
@@ -102,11 +80,6 @@ function parseLlmsNormalizationRequest(
 
     if (token === '--llms' || token === '--llms-full') {
       hasLlmsFlag = true
-      continue
-    }
-
-    if (token === '--help' || token === '-h') {
-      hasHelpFlag = true
       continue
     }
 
@@ -151,16 +124,6 @@ function parseLlmsNormalizationRequest(
     commandPath.push(token)
   }
 
-  if (hasHelpFlag && !hasLlmsFlag) {
-    if (
-      commandPath.length > 0 &&
-      scopedCommandHasHiddenChild(commandPath)
-    ) {
-      return { commandPath, kind: 'scoped-help' }
-    }
-    return null
-  }
-
   if (!hasLlmsFlag) {
     return null
   }
@@ -168,9 +131,6 @@ function parseLlmsNormalizationRequest(
   if (commandPath.length === 0) {
     if (explicitFormat === 'json') {
       return { kind: 'json-manifest' }
-    }
-    if (explicitFormat === null || explicitFormat === 'md') {
-      return { kind: 'root-markdown' }
     }
     return null
   }
@@ -213,52 +173,6 @@ async function captureServeOutput(
   }
 }
 
-function normalizeRootLlmsMarkdownOutput(
-  output: string,
-  commandName: string,
-): string {
-  return stripHiddenCommandsFromLlmsMarkdownOutput(output, commandName)
-}
-
-function scopedCommandHasHiddenChild(commandPath: readonly string[]): boolean {
-  if (vaultCliLlmsHiddenCommandNames.size === 0) {
-    return false
-  }
-
-  const prefix = `${commandPath.join(' ')} `
-  for (const hiddenName of vaultCliLlmsHiddenCommandNames) {
-    if (hiddenName.startsWith(prefix)) {
-      return true
-    }
-  }
-  return false
-}
-
-function normalizeScopedHelpOutput(
-  output: string,
-  commandPath: readonly string[],
-): string {
-  const prefix = `${commandPath.join(' ')} `
-  const childLeafNames: string[] = []
-  for (const hiddenName of vaultCliLlmsHiddenCommandNames) {
-    if (hiddenName.startsWith(prefix)) {
-      childLeafNames.push(hiddenName.slice(prefix.length))
-    }
-  }
-  if (childLeafNames.length === 0) {
-    return output
-  }
-
-  const leafLinePattern = new RegExp(
-    `^\\s+(${childLeafNames.map(escapeRegExp).join('|')})\\s`,
-    'u',
-  )
-
-  const lines = output.split('\n')
-  const filtered = lines.filter((line) => !leafLinePattern.test(line))
-  return filtered.join('\n')
-}
-
 function normalizeScopedLlmsMarkdownOutput(
   output: string,
   commandName: string,
@@ -281,48 +195,8 @@ function normalizeScopedLlmsMarkdownOutput(
     )
   }
 
-  return stripHiddenCommandsFromLlmsMarkdownOutput(normalized, commandName)
+  return normalized
 }
-
-function stripHiddenCommandsFromLlmsMarkdownOutput(
-  output: string,
-  commandName: string,
-): string {
-  if (vaultCliLlmsHiddenCommandNames.size === 0) {
-    return output
-  }
-
-  const lines = output.split('\n')
-  const filtered: string[] = []
-  for (const line of lines) {
-    if (lineMentionsHiddenCommand(line, commandName)) {
-      continue
-    }
-    filtered.push(line)
-  }
-
-  return filtered.join('\n')
-}
-
-function lineMentionsHiddenCommand(line: string, commandName: string): boolean {
-  for (const hiddenName of vaultCliLlmsHiddenCommandNames) {
-    const reference = `\`${commandName} ${hiddenName}`
-    if (line.includes(reference)) {
-      return true
-    }
-  }
-  return false
-}
-
-// Commands that stay registered for explicit operator/script invocation but
-// must not appear in any agent-visible CLI manifest. Use this when a leaf
-// command accepts a complex `--input @file|-` payload without a paired
-// Incur-discoverable shape path (`docs/contracts/00-invariants.md` § Agent-Visible
-// CLI Payloads). Adding a sibling `payload-schema` command is the way back into
-// the agent-visible surface.
-export const vaultCliLlmsHiddenCommandNames: ReadonlySet<string> = new Set([
-  'capture import-json',
-])
 
 async function normalizeLlmsJsonManifestOutput(output: string): Promise<string> {
   let parsed: unknown
@@ -338,40 +212,27 @@ async function normalizeLlmsJsonManifestOutput(output: string): Promise<string> 
 
   const hintsByCommandName = await collectVaultCliDescriptorHintsByCommandName()
   let changed = false
-  const commands: unknown[] = []
-  for (const command of parsed.commands) {
-    if (
-      isRecord(command) &&
-      typeof command.name === 'string' &&
-      vaultCliLlmsHiddenCommandNames.has(command.name)
-    ) {
-      changed = true
-      continue
-    }
-
+  const commands = parsed.commands.map((command) => {
     if (!isRecord(command) || typeof command.name !== 'string') {
-      commands.push(command)
-      continue
+      return command
     }
 
     const existingHint = command.hint
     if (typeof existingHint === 'string' && existingHint.trim().length > 0) {
-      commands.push(command)
-      continue
+      return command
     }
 
     const hint = hintsByCommandName.get(command.name)
     if (!hint) {
-      commands.push(command)
-      continue
+      return command
     }
 
     changed = true
-    commands.push({
+    return {
       ...command,
       hint,
-    })
-  }
+    }
+  })
 
   if (!changed) {
     return output

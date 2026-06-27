@@ -176,7 +176,7 @@ describe("canonical CLI JSON input split", () => {
 
   it("routes raw payloads through explicit import-json commands without dropping nested import surfaces", () => {
     expect(captureSource).toContain("capture.command('import-json'");
-    expect(captureSource).toContain("batch capture metadata, media refs, raw refs");
+    expect(captureSource).toContain("Run capture payload-schema --format json for the exact file-body contract");
     expect(captureSource).toContain("runCaptureAdd(options, normalizeInputFileOption(options.input))");
 
     expect(mealSource).toContain("name: 'import-json'");
@@ -239,6 +239,7 @@ describe("canonical CLI JSON input split", () => {
   it("keeps command discovery aligned with newly discoverable JSON escape hatches", () => {
     for (const pathLiteral of [
       "path: ['capture', 'import-json']",
+      "path: ['capture', 'payload-schema']",
       "path: ['encounter', 'scaffold']",
       "path: ['encounter', 'import-json']",
       "path: ['measurement', 'import-json']",

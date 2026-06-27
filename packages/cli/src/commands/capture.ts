@@ -30,6 +30,41 @@ import {
   registerFactoryCommand,
 } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
+import { registerPayloadSchemaCommand } from './payload-schema-command.js'
+
+const captureEntryPayloadSchema = z
+  .object({
+    media: z.array(z.string().min(1)).optional(),
+    mediaPaths: z.array(z.string().min(1)).optional(),
+    title: z.string().min(1).max(400).optional(),
+    note: z.string().min(1).max(4000).optional(),
+    occurredAt: z.string().min(1).optional(),
+    source: eventSourceSchema.optional(),
+    label: z.string().min(1).max(160).optional(),
+    bodySite: z.string().min(1).max(400).optional(),
+    collection: z.string().min(1).max(160).optional(),
+    tags: z.array(z.string().min(1)).optional(),
+    relatedIds: z.array(z.string().min(1).max(160)).optional(),
+    externalRef: z.record(z.string(), z.unknown()).optional(),
+    timeZone: timeZoneSchema.optional(),
+  })
+  .describe(
+    'Capture entry fields. Provide at least --media (file path) or media in the payload to attach durable bytes.',
+  )
+
+export const captureImportPayloadSchema = captureEntryPayloadSchema
+  .extend({
+    captures: z
+      .array(captureEntryPayloadSchema)
+      .min(1)
+      .optional()
+      .describe(
+        'Optional batch: one capture entry per observation. Root-level fields apply as defaults when set.',
+      ),
+  })
+  .describe(
+    'Structured capture import payload. Use root fields for one capture, or `captures` for a batch where root-level fields are defaults.',
+  )
 
 export const captureCommandDescriptions = {
   root: 'Dated media-capture commands for photos, videos, and other lightweight evidence with simple tags and context.',
@@ -37,9 +72,11 @@ export const captureCommandDescriptions = {
   importJson:
     'Import one or more dated media captures from a structured JSON payload file or stdin.',
   addHint:
-    "Use --media for one capture with one or more files. For multiple distinct captures, run capture add per observation grouped through vault-cli batch --command '[...]'.",
+    'Use --media for one capture with one or more files. Use capture import-json --input @captures.json for batches; run capture payload-schema --format json for the exact file-body contract.',
   importJsonHint:
-    '--input accepts @file.json or - for stdin. The payload retains the full structured capture import surface, including batch capture metadata, media refs, raw refs, labels, body sites, collections, tags, and related ids.',
+    '--input accepts @file.json or - for stdin. Run capture payload-schema --format json for the exact file-body contract.',
+  payloadSchema:
+    'Emit the exact JSON payload schema for capture import-json.',
   show: 'Show one capture by canonical event id or stable label.',
   list: 'List capture events with optional date, label, body-site, collection, and tag filters.',
   manifest: 'Show the immutable raw import manifest for one capture event id or stable label.',
@@ -60,13 +97,10 @@ function stringArrayOption(value: unknown): string[] | undefined {
 export function registerCaptureCommands(
   cli: Cli.Cli,
   _services: VaultServices,
-  options: { excludeLeafPaths?: ReadonlySet<string> } = {},
 ) {
   const capture = Cli.create('capture', {
     description: captureCommandDescriptions.root,
   })
-
-  const excludeLeafPaths = options.excludeLeafPaths ?? new Set<string>()
 
   const captureAddOptionShape = {
     media: z
@@ -184,31 +218,47 @@ export function registerCaptureCommands(
     },
   })
 
-  if (!excludeLeafPaths.has('capture import-json')) {
-    capture.command('import-json', {
-      description: captureCommandDescriptions.importJson,
-      args: z.object({}),
-      examples: [
-        {
-          description: 'Record a batch of separate captures from a structured JSON file.',
-          args: {},
-          options: {
-            vault: './vault',
-            input: '@captures.json',
-          },
+  capture.command('import-json', {
+    description: captureCommandDescriptions.importJson,
+    args: z.object({}),
+    examples: [
+      {
+        description: 'Record a batch of separate captures from a structured JSON file.',
+        args: {},
+        options: {
+          vault: './vault',
+          input: '@captures.json',
         },
-      ],
-      hint: captureCommandDescriptions.importJsonHint,
-      options: withBaseOptions({
-        input: inputFileOptionSchema.describe('Structured capture payload in @file.json form or - for stdin.'),
-        ...captureAddOptionShape,
-      }),
-      output: captureAddResultSchema,
-      async run({ options }) {
-        return runCaptureAdd(options, normalizeInputFileOption(options.input))
       },
-    })
-  }
+    ],
+    hint: captureCommandDescriptions.importJsonHint,
+    options: withBaseOptions({
+      input: inputFileOptionSchema.describe('Structured capture payload in @file.json form or - for stdin. Run capture payload-schema --format json for the exact file-body contract.'),
+      ...captureAddOptionShape,
+    }),
+    output: captureAddResultSchema,
+    async run({ options }) {
+      return runCaptureAdd(options, normalizeInputFileOption(options.input))
+    },
+  })
+
+  registerPayloadSchemaCommand(capture, {
+    command: 'capture import-json',
+    description: captureCommandDescriptions.payloadSchema,
+    schemaName: 'capture-import-payload',
+    schema: captureImportPayloadSchema,
+    examples: [
+      {
+        label: 'mole-left-forearm-1',
+        bodySite: 'Left forearm, dorsal side',
+        collection: 'skin-check-2026-04',
+        captures: [
+          { media: ['./left-forearm-1.jpg'], label: 'mole-left-forearm-1' },
+          { media: ['./right-forearm-1.jpg'], label: 'mole-right-forearm-1' },
+        ],
+      },
+    ],
+  })
 
   capture.command('show', {
     description: captureCommandDescriptions.show,

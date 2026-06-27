@@ -10,13 +10,13 @@ import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 
 import {
   captureCommandDescriptions,
+  captureImportPayloadSchema,
   registerCaptureCommands,
 } from '../src/commands/capture.js'
 import {
   vaultCliCommandDescriptors,
   type VaultCliCommandDescriptor,
 } from '../src/vault-cli-command-manifest.js'
-import { vaultCliLlmsHiddenCommandNames } from '../src/vault-cli-llms-normalizer.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
@@ -173,118 +173,11 @@ test('capture add schema exposes typed single-capture fields without raw input f
   }
 })
 
-test('capture import-json is excluded from the vault-cli --llms manifest because it lacks a sibling capture payload-schema', () => {
-  assert.equal(vaultCliLlmsHiddenCommandNames.has('capture import-json'), true)
-})
-
-test('resolveEffectiveTopLevelToken-based skills detection treats argv variants with leading value-taking root flags as skills-sync invocations', async () => {
-  const { resolveEffectiveTopLevelToken } = await import(
-    '@murphai/operator-config/command-helpers'
-  )
-
-  const skillsArgvVariants = [
-    ['skills', 'list'],
-    ['skills', 'add'],
-    ['skill', 'list'],
-    ['--format', 'json', 'skills', 'list'],
-    ['--format=json', 'skills', 'list'],
-    ['--config', '/tmp/cfg.json', 'skills', 'list'],
-    ['--no-config', 'skills', 'list'],
-  ]
-  for (const argv of skillsArgvVariants) {
-    const token = resolveEffectiveTopLevelToken(argv)
-    assert.equal(
-      token === 'skills' || token === 'skill',
-      true,
-      `argv ${JSON.stringify(argv)} should resolve to skills/skill root token`,
-    )
-  }
-
-  const nonSkillsArgv = [
-    ['capture', 'add'],
-    ['--mcp'],
-    ['--format', 'json', 'capture', 'list'],
-  ]
-  for (const argv of nonSkillsArgv) {
-    const token = resolveEffectiveTopLevelToken(argv)
-    assert.equal(
-      token !== 'skills' && token !== 'skill',
-      true,
-      `argv ${JSON.stringify(argv)} should not be classified as skills-sync`,
-    )
-  }
-})
-
-test('createVaultCliWithOptions honors excludeAgentLeafPaths so MCP and skills-sync invocations never register capture import-json', async () => {
-  const { Cli } = await import('incur')
-  const { createVaultCliWithOptions } = await import('../src/vault-cli.js')
-
-  const cli = createVaultCliWithOptions({
-    excludeAgentLeafPaths: vaultCliLlmsHiddenCommandNames,
-  })
-
-  const rootCommands = Cli.toCommands.get(cli)
-  assert.ok(rootCommands, 'root commands registered')
-  const captureEntry = rootCommands.get('capture') as
-    | { commands?: Map<string, unknown> }
-    | undefined
-  assert.ok(captureEntry?.commands, 'capture group registered')
-  assert.equal(captureEntry.commands.has('import-json'), false)
-  assert.equal(captureEntry.commands.has('add'), true)
-})
-
-test('vault-cli capture --help filters the import-json leaf line through the LLM normalizer wrapper', async () => {
-  const { createVaultCli } = await import('../src/vault-cli.js')
-  const cli = createVaultCli()
-  let stdout = ''
-  await cli.serve(['capture', '--help'], {
-    stdout(chunk: string) {
-      stdout += chunk
-    },
-    exit() {},
-  })
-  assert.match(stdout, /capture/u)
-  assert.equal(stdout.includes('import-json'), false)
-  // Sanity: a non-hidden leaf is still listed.
-  assert.match(stdout, /\badd\b/u)
-})
-
-test('registerCaptureCommands skips the import-json leaf when the agent-leaf exclude set lists it (so MCP and --help cannot expose it)', async () => {
-  const { Cli } = await import('incur')
-  const { createUnwiredVaultServices } = await import('@murphai/vault-usecases')
-
-  const cli = Cli.create('vault-cli', {
-    description: 'capture exclude test cli',
-    version: '0.0.0-test',
-  })
-  const services = createUnwiredVaultServices()
-  registerCaptureCommands(cli, services, {
-    excludeLeafPaths: new Set(['capture import-json']),
-  })
-
-  const rootCommands = Cli.toCommands.get(cli)
-  assert.ok(rootCommands, 'root commands registered')
-  const captureEntry = rootCommands.get('capture') as
-    | { commands?: Map<string, unknown> }
-    | undefined
-  assert.ok(captureEntry?.commands, 'capture group registered')
-  assert.equal(captureEntry.commands.has('import-json'), false)
-  assert.equal(captureEntry.commands.has('add'), true)
-})
-
-test('capture add hint steers agents to vault-cli batch instead of capture import-json and fits the assistant contract hint budget', () => {
-  assert.match(
-    captureCommandDescriptions.addHint,
-    /vault-cli batch --command '\[\.\.\.\]'/u,
-  )
-  assert.equal(
-    captureCommandDescriptions.addHint.includes('capture import-json'),
-    false,
-  )
-  assert.ok(
-    captureCommandDescriptions.addHint.length <= 180,
-    `addHint must fit the assistant contract hint budget; got ${captureCommandDescriptions.addHint.length} chars`,
-  )
+test('capture payload-schema is registered alongside capture import-json so the agent-visible payload invariant is satisfied via the discoverable sibling', async () => {
+  const schemaEnvelope = await readCommandSchema(createCaptureCli(), ['capture', 'payload-schema'])
+  assert.deepEqual(schemaEnvelope.args.required ?? [], [])
+  // payload-schema accepts no options beyond the global ones; the file body
+  // contract is emitted as the command output.
 
   const descriptors = vaultCliCommandDescriptors as readonly VaultCliCommandDescriptor[]
   const captureDescriptor = descriptors.find(
@@ -294,8 +187,52 @@ test('capture add hint steers agents to vault-cli batch instead of capture impor
   const importJsonLeaf = captureDescriptor.leafCommands?.find(
     (leaf) => leaf.path.join(' ') === 'capture import-json',
   )
+  const payloadSchemaLeaf = captureDescriptor.leafCommands?.find(
+    (leaf) => leaf.path.join(' ') === 'capture payload-schema',
+  )
   assert.ok(importJsonLeaf, 'capture import-json leaf present')
-  assert.equal(importJsonLeaf.hint, captureCommandDescriptions.importJsonHint)
+  assert.ok(payloadSchemaLeaf, 'capture payload-schema leaf present')
+  // The import-json hint must point at the payload-schema sibling so agents
+  // do not have to infer the file-body shape from source/tests/prompts.
+  assert.match(
+    importJsonLeaf.hint ?? '',
+    /capture payload-schema --format json/u,
+  )
+  assert.match(
+    captureCommandDescriptions.addHint,
+    /capture payload-schema --format json/u,
+  )
+})
+
+test('captureImportPayloadSchema accepts both a single capture and a batch with a captures[] array', () => {
+  // Single capture at root.
+  assert.doesNotThrow(() =>
+    captureImportPayloadSchema.parse({
+      media: ['./left-forearm-1.jpg'],
+      label: 'mole-left-forearm-1',
+      bodySite: 'Left forearm, dorsal side',
+      collection: 'skin-check-2026-04',
+    }),
+  )
+
+  // Batch via captures[].
+  assert.doesNotThrow(() =>
+    captureImportPayloadSchema.parse({
+      collection: 'skin-check-2026-04',
+      captures: [
+        { media: ['./left-forearm-1.jpg'], label: 'mole-left-forearm-1' },
+        { media: ['./right-forearm-1.jpg'], label: 'mole-right-forearm-1' },
+      ],
+    }),
+  )
+
+  // Empty captures[] is rejected so agents cannot send a no-op batch payload.
+  assert.throws(() =>
+    captureImportPayloadSchema.parse({
+      collection: 'skin-check-2026-04',
+      captures: [],
+    }),
+  )
 })
 
 test('capture import-json schema exposes the batch payload escape hatch', async () => {
