@@ -1204,7 +1204,9 @@ function currentHostedMailboxItemId(
 
 export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
-  authorizedReferenceImageRefs?: ReadonlyMap<string, { sha256: string }> | null
+  loadAuthorizedReferenceImageRefs?:
+    | (() => Promise<ReadonlyMap<string, { sha256: string }>>)
+    | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv
@@ -1402,11 +1404,13 @@ export async function executeMurphDynamicToolRequest(input: {
         return toolTextResult(false, 'image generation cannot be combined with a voice memo')
       }
 
+      const authorizedRefs = input.loadAuthorizedReferenceImageRefs
+        ? await input.loadAuthorizedReferenceImageRefs()
+        : null
       const result = await executeGenerateImageTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
-        authorizedReferenceImageRefs:
-          input.authorizedReferenceImageRefs ?? null,
+        authorizedReferenceImageRefs: authorizedRefs,
         codexHome: input.codexHome ?? null,
         env: input.env,
         fetchImpl: input.fetchImpl,
