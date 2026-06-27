@@ -193,10 +193,10 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
       },
       referenceImageRefs: {
         type: 'array',
-        maxItems: 4,
+        maxItems: 16,
         default: [],
         description:
-          'Optional ordered vault-relative JPG, PNG, or WebP image refs to use as visual references. Use only refs the user attached as part of the current turn (other vault paths are rejected as unauthorized). Describe in the prompt how image 1, image 2, etc. should be used.',
+          'Optional ordered vault-relative JPG, PNG, or WebP image refs to use as visual references (up to 16). Use only refs the user attached as part of the current turn (other vault paths are rejected as unauthorized). Describe in the prompt how image 1, image 2, etc. should be used.',
         items: {
           type: 'string',
           minLength: 1,
@@ -572,7 +572,7 @@ const generateImageArgumentsSchema = z
     quality: z.enum(['low', 'medium', 'high']).default('medium'),
     referenceImageRefs: z
       .array(z.string().trim().min(1).max(1024))
-      .max(4)
+      .max(16)
       .default([]),
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
   })

@@ -1054,7 +1054,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
     const validateRuntimeWriteFence = vi.fn(async () => true);
 
-    const oversizeBytes = new Uint8Array(20 * 1024 * 1024 + 1);
+    const oversizeBytes = new Uint8Array(36 * 1024 * 1024 + 1);
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/images/edits", {
         body: oversizeBytes,

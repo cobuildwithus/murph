@@ -57,19 +57,16 @@ describe('murph.generate_image dynamic tool schema', () => {
     })
   })
 
-  it('rejects more than four reference image refs', () => {
+  it('rejects more than sixteen reference image refs', () => {
     const request = readMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {
         arguments: {
           prompt: 'Too many refs.',
-          referenceImageRefs: [
-            'raw/inbox/1.png',
-            'raw/inbox/2.png',
-            'raw/inbox/3.png',
-            'raw/inbox/4.png',
-            'raw/inbox/5.png',
-          ],
+          referenceImageRefs: Array.from(
+            { length: 17 },
+            (_value, index) => `raw/inbox/${index + 1}.png`,
+          ),
         },
         namespace: 'murph',
         tool: 'generate_image',

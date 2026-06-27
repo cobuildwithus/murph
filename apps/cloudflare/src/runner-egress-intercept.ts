@@ -123,11 +123,11 @@ const HOSTED_TRANSCRIBE_MAX_BODY_BYTES = 16 * 1024 * 1024;
 const HOSTED_TRANSCRIBE_WORKERS_AI_MODEL = "@cf/openai/whisper-large-v3-turbo";
 const HOSTED_TRANSCRIBE_MAX_SEGMENTS = 10_000;
 // Worker-side ceiling for POST /v1/images/edits multipart uploads. Sized just
-// above the 16 MiB assistant-engine reference budget so a well-formed call
-// stays under the cap; the slack absorbs multipart boundaries, headers, and
-// per-part metadata without letting a rogue caller pin the Worker on an
-// unbounded body buffer at the egress boundary.
-const HOSTED_OPENAI_IMAGES_EDITS_MAX_BODY_BYTES = 20 * 1024 * 1024;
+// above the 32 MiB assistant-engine reference budget (16 images × 2 MiB) so a
+// well-formed call stays under the cap; the slack absorbs multipart boundaries,
+// headers, and per-part metadata without letting a rogue caller pin the Worker
+// on an unbounded body buffer at the egress boundary.
+const HOSTED_OPENAI_IMAGES_EDITS_MAX_BODY_BYTES = 36 * 1024 * 1024;
 export const HOSTED_DEPLOY_SMOKE_OPENAI_REQUEST_MAX_BODY_BYTES = 256 * 1024;
 
 export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {

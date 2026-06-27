@@ -171,8 +171,8 @@ describe('image-reference-resolver', () => {
   })
 
   it('rejects files larger than the per-file budget proven safe for the hosted Worker proxy', async () => {
-    expect(MAX_GENERATE_IMAGE_REFERENCE_BYTES).toBe(4 * 1024 * 1024)
-    expect(MAX_GENERATE_IMAGE_REFERENCE_TOTAL_BYTES).toBe(16 * 1024 * 1024)
+    expect(MAX_GENERATE_IMAGE_REFERENCE_BYTES).toBe(2 * 1024 * 1024)
+    expect(MAX_GENERATE_IMAGE_REFERENCE_TOTAL_BYTES).toBe(32 * 1024 * 1024)
 
     await withTempVault(async (vaultRoot) => {
       const oversize = new Uint8Array(MAX_GENERATE_IMAGE_REFERENCE_BYTES + 1)
@@ -189,23 +189,15 @@ describe('image-reference-resolver', () => {
     })
   })
 
-  it('keeps the Murph product contract capped at four ordered references', async () => {
+  it('keeps the Murph product contract capped at sixteen ordered references', async () => {
+    const seventeenRefs = Array.from(
+      { length: 17 },
+      (_value, index) => `raw/inbox/${index + 1}.png`,
+    )
     await expect(
       resolveGenerateImageReferences({
-        authorizedReferenceImageRefs: new Set([
-          'raw/inbox/1.png',
-          'raw/inbox/2.png',
-          'raw/inbox/3.png',
-          'raw/inbox/4.png',
-          'raw/inbox/5.png',
-        ]),
-        refs: [
-          'raw/inbox/1.png',
-          'raw/inbox/2.png',
-          'raw/inbox/3.png',
-          'raw/inbox/4.png',
-          'raw/inbox/5.png',
-        ],
+        authorizedReferenceImageRefs: new Set(seventeenRefs),
+        refs: seventeenRefs,
         vaultRoot: '/',
       }),
     ).rejects.toMatchObject({ code: 'ASSISTANT_IMAGE_REFERENCE_COUNT_UNSUPPORTED' })
