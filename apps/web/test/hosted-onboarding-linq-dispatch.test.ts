@@ -3881,6 +3881,16 @@ https://join.example.test/join/code_first_text`);
     })).toMatchObject({
       status: "consumed",
     });
+    expect(firstContactReceipt.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: "consumed",
+      }),
+      where: expect.objectContaining({
+        eventId,
+        processingOwnerToken: expect.any(String),
+        status: "processing",
+      }),
+    }));
   });
 
   it("does not use another event's delivered signup proof to admit a stale retry", async () => {

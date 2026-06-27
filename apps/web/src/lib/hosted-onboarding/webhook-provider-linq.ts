@@ -652,6 +652,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         event: input.event,
         existingMember,
         existingMemberMatch,
+        firstContactEventProcessingOwnerToken,
         memberId: existingMember.id,
         prisma: input.prisma,
       });
@@ -718,6 +719,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       event: input.event,
       existingMember,
       existingMemberMatch,
+      firstContactEventProcessingOwnerToken,
       memberId: member.id,
       prisma: input.prisma,
     });
@@ -743,6 +745,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       event: input.event,
       existingMember,
       existingMemberMatch,
+      firstContactEventProcessingOwnerToken,
       memberId: member.id,
       prisma: input.prisma,
     });
@@ -811,6 +814,7 @@ async function planHostedLinqSignupLinkAlreadySentIfDelivered(input: {
   event: HostedLinqWebhookEvent;
   existingMember: Parameters<typeof hasHostedMemberActiveAccess>[0] | null;
   existingMemberMatch: HostedLinqExistingMemberMatch;
+  firstContactEventProcessingOwnerToken?: string | null;
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedOnboardingLinqDirectPlan | null> {
@@ -841,6 +845,7 @@ async function planHostedLinqSignupLinkAlreadySentIfDelivered(input: {
     event: input.event,
     existingMember: input.existingMember,
     existingMemberMatch: input.existingMemberMatch,
+    firstContactEventProcessingOwnerToken: input.firstContactEventProcessingOwnerToken,
     prisma: input.prisma,
   });
 }
@@ -938,6 +943,7 @@ async function planHostedLinqStaleFirstContactBeforeActiveRouting(input: {
       event: input.event,
       existingMember: input.existingMember,
       existingMemberMatch: input.existingMemberMatch,
+      firstContactEventProcessingOwnerToken: input.firstContactEventProcessingOwnerToken,
       memberId: input.memberId,
       prisma: input.prisma,
     });
@@ -965,6 +971,7 @@ async function planHostedLinqStaleFirstContactBeforeActiveRouting(input: {
   await recordHostedLinqFirstContactEventConsumed({
     eventId: input.event.event_id,
     prisma: input.prisma,
+    processingOwnerToken: input.firstContactEventProcessingOwnerToken,
   });
   return logHostedLinqWebhookPlannerDecisionAndReturn(
     buildIgnoredLinqWebhookPlan("stale-first-contact"),
