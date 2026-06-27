@@ -240,38 +240,43 @@ export async function markHostedLinqDeliverySkippedTx(input: {
 
   const existing = await input.prisma.hostedLinqDelivery.findUnique({
     where: { idempotencyKey },
-    select: {
-      acceptedAt: true,
-      deliveredAt: true,
-      failedAt: true,
-      id: true,
-      lastReceiptAt: true,
-      messageLookupKey: true,
-      skippedAt: true,
-      status: true,
-    },
+    select: hostedLinqDeliveryLifecycleSelect,
   });
 
   if (existing) {
-    if (isHostedLinqDeliveryLifecycleFinal(existing)) {
-      return { id: existing.id };
-    }
-
-    return input.prisma.hostedLinqDelivery.update({
-      where: { id: existing.id },
+    return updateHostedLinqDeliverySkippedIfPreProvider({
       data,
-      select: { id: true },
+      delivery: existing,
+      prisma: input.prisma,
     });
   }
 
-  return input.prisma.hostedLinqDelivery.create({
-    data: {
-      ...data,
-      id: buildHostedLinqDeliveryId(idempotencyKey),
-      idempotencyKey,
-    },
-    select: { id: true },
-  });
+  try {
+    return await input.prisma.hostedLinqDelivery.create({
+      data: {
+        ...data,
+        id: buildHostedLinqDeliveryId(idempotencyKey),
+        idempotencyKey,
+      },
+      select: { id: true },
+    });
+  } catch (error) {
+    if (!isPrismaUniqueConstraintError(error)) {
+      throw error;
+    }
+    const concurrent = await input.prisma.hostedLinqDelivery.findUnique({
+      where: { idempotencyKey },
+      select: hostedLinqDeliveryLifecycleSelect,
+    });
+    if (!concurrent) {
+      throw error;
+    }
+    return updateHostedLinqDeliverySkippedIfPreProvider({
+      data,
+      delivery: concurrent,
+      prisma: input.prisma,
+    });
+  }
 }
 
 export async function applyHostedLinqDeliveryReceiptTx(input: {
@@ -497,6 +502,48 @@ function isHostedLinqDeliveryLifecycleFinal(input: {
       || input.messageLookupKey
       || input.skippedAt
       || input.status !== "attempted",
+  );
+}
+
+const hostedLinqDeliveryLifecycleSelect = {
+  acceptedAt: true,
+  deliveredAt: true,
+  failedAt: true,
+  id: true,
+  lastReceiptAt: true,
+  messageLookupKey: true,
+  skippedAt: true,
+  status: true,
+} satisfies Prisma.HostedLinqDeliverySelect;
+
+async function updateHostedLinqDeliverySkippedIfPreProvider(input: {
+  data: Prisma.HostedLinqDeliveryUpdateInput;
+  delivery: {
+    acceptedAt: Date | null;
+    deliveredAt: Date | null;
+    failedAt: Date | null;
+    id: string;
+    lastReceiptAt: Date | null;
+    messageLookupKey: string | null;
+    skippedAt: Date | null;
+    status: string;
+  };
+  prisma: HostedLinqDeliveryClient;
+}): Promise<{ id: string }> {
+  if (isHostedLinqDeliveryLifecycleFinal(input.delivery)) {
+    return { id: input.delivery.id };
+  }
+
+  return input.prisma.hostedLinqDelivery.update({
+    where: { id: input.delivery.id },
+    data: input.data,
+    select: { id: true },
+  });
+}
+
+function isPrismaUniqueConstraintError(error: unknown): boolean {
+  return Boolean(
+    error && typeof error === "object" && "code" in error && error.code === "P2002",
   );
 }
 

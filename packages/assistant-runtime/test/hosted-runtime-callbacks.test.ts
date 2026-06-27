@@ -4835,6 +4835,7 @@ describe("hosted runtime callbacks", () => {
     expect(assertAuthority).toHaveBeenCalledWith(routeAuthority, {
       signal: null,
     });
+    expect(assertAuthority).toHaveBeenCalledTimes(1);
     expect(assertAuthority.mock.invocationCallOrder[0] ?? 0)
       .toBeLessThan(mocks.sendLinqMessage.mock.invocationCallOrder[0] ?? 0);
     expect(outcomes).toEqual([

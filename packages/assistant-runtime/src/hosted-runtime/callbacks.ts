@@ -1854,11 +1854,6 @@ function createHostedAssistantLinqSendDependency(input: {
       fetchImplementation: input.providerFetch,
       ...(signal ? { signal } : {}),
     }, "Hosted assistant Linq delivery");
-    await assertHostedAssistantLinqRouteAuthorityForDelivery({
-      deliveryContext,
-      effectsPort: input.effectsPort ?? null,
-      signal: signal ?? null,
-    });
     const verifiedVaultFiles = await preloadApprovedHostedAssistantVaultFiles({
       actionApprovalPort: input.actionApprovalPort ?? null,
       expectedDedupeKey: input.expectedDedupeKey ?? null,

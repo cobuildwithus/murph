@@ -760,6 +760,42 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
+  it("treats concurrent skipped delivery creation as an idempotent success", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: null,
+        id: "hld_concurrent_skipped",
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        skippedAt: new Date("2026-06-25T12:00:00.000Z"),
+        status: "skipped",
+      });
+    fixture.hostedLinqDeliveryCreate.mockRejectedValueOnce({
+      code: "P2002",
+    });
+
+    await expect(markHostedLinqDeliverySkippedTx({
+      idempotencyKey: "linq-message:event-123",
+      linqChatId: "chat_123",
+      phoneNumber: "+15550000000",
+      prisma: fixture.prisma as never,
+      reason: "recent_reply_required",
+      source: "hosted_runtime_linq_egress_guard",
+      sourceRef: "intent-123",
+      targetKind: "thread",
+      template: "daily_quota",
+    })).resolves.toEqual({
+      id: "hld_concurrent_skipped",
+    });
+
+    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledTimes(2);
+    expect(fixture.hostedLinqDeliveryUpdate).not.toHaveBeenCalled();
+  });
+
   it("backfills an already-ingested terminal receipt when acceptance records the provider id", async () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqProviderEventFindMany.mockResolvedValueOnce([
