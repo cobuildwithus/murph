@@ -248,7 +248,23 @@ export async function issueHostedInviteTx(input: {
 
   await lockHostedMemberRow(input.prisma, input.memberId);
 
-  const existingInvite = await input.prisma.hostedInvite.findFirst({
+  const requestedInviteEventId = input.linqFirstContactEventId ?? null;
+  const sameEventInvite = requestedInviteEventId
+    ? await input.prisma.hostedInvite.findFirst({
+        where: {
+          memberId: input.memberId,
+          linqFirstContactEventId: requestedInviteEventId,
+          expiresAt: {
+            gt: now,
+          },
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      })
+    : null;
+
+  const existingInvite = sameEventInvite ?? await input.prisma.hostedInvite.findFirst({
     where: {
       memberId: input.memberId,
       expiresAt: {
@@ -261,7 +277,6 @@ export async function issueHostedInviteTx(input: {
   });
 
   const existingInviteEventId = existingInvite?.linqFirstContactEventId ?? null;
-  const requestedInviteEventId = input.linqFirstContactEventId ?? null;
   const existingInviteOwnedByAnotherEvent = Boolean(
     requestedInviteEventId
     && existingInviteEventId
