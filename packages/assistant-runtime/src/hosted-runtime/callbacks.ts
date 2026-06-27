@@ -158,7 +158,7 @@ export async function collectHostedAssistantDeliverySideEffects(
     const reconciliation = await reconcileHostedAssistantVaultFileApproval({
       actionApprovalPort: input.actionApprovalPort ?? null,
       intent,
-      missingApprovalPort: "skip",
+      missingApprovalPort: "block",
       now,
       vaultRoot: request.vaultRoot,
     });
