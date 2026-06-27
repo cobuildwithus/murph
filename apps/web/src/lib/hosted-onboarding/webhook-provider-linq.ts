@@ -700,16 +700,12 @@ async function planHostedLinqSignupLinkAlreadySentIfDelivered(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedOnboardingLinqDirectPlan | null> {
-  const now = new Date();
   const deliveredInvite = await input.prisma.hostedInvite.findFirst({
     orderBy: {
       sentAt: "desc",
     },
     where: {
       channel: "linq",
-      expiresAt: {
-        gt: now,
-      },
       memberId: input.memberId,
       sentAt: {
         gte: input.claimSentAt,

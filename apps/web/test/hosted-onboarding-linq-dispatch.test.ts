@@ -2136,9 +2136,6 @@ https://join.example.test/join/code_first_text`);
       },
       where: {
         channel: "linq",
-        expiresAt: {
-          gt: expect.any(Date),
-        },
         memberId: "member_stale_claim",
         sentAt: {
           gte: new Date("2026-03-26T12:00:01.000Z"),
@@ -2205,9 +2202,6 @@ https://join.example.test/join/code_first_text`);
       },
       where: {
         channel: "linq",
-        expiresAt: {
-          gt: expect.any(Date),
-        },
         memberId: "member_in_flight_claim",
         sentAt: {
           gte: claimSentAt,
@@ -5663,7 +5657,7 @@ https://join.example.test/join/code_first_text`);
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
-  it("suppresses repeat signup links after the first send that day", async () => {
+  it("suppresses repeat signup links after the first send that day even when the invite expired", async () => {
     mocks.readHostedLinqDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
       inboundCount: 1,
       onboardingLinkSentAt: new Date("2026-03-26T12:00:01.000Z"),
@@ -5684,7 +5678,7 @@ https://join.example.test/join/code_first_text`);
         create: vi.fn(),
         findFirst: vi.fn().mockResolvedValue({
           channel: "linq",
-          expiresAt: new Date("2026-03-27T12:00:00.000Z"),
+          expiresAt: new Date("2026-03-26T12:00:00.500Z"),
           id: "invite_repeat_signup",
           sentAt: new Date("2026-03-26T12:00:01.000Z"),
         }),
@@ -5722,9 +5716,6 @@ https://join.example.test/join/code_first_text`);
       },
       where: {
         channel: "linq",
-        expiresAt: {
-          gt: expect.any(Date),
-        },
         memberId: "member_123",
         sentAt: {
           gte: new Date("2026-03-26T12:00:01.000Z"),
