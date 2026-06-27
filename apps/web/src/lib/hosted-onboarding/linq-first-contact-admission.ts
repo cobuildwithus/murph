@@ -524,30 +524,6 @@ export function buildHostedLinqFirstContactEventProcessingError(input: {
   });
 }
 
-export async function deleteHostedLinqFirstContactEventReceipt(input: {
-  eventId: string;
-  prisma: HostedLinqFirstContactEventReceiptStore;
-  processingOwnerToken?: string | null;
-}): Promise<void> {
-  if (input.processingOwnerToken) {
-    await assertHostedLinqFirstContactEventProcessingOwner({
-      eventId: input.eventId,
-      prisma: input.prisma,
-      processingOwnerToken: input.processingOwnerToken,
-    });
-  }
-  await input.prisma.hostedLinqFirstContactEventReceipt.deleteMany({
-    where: {
-      eventId: input.eventId,
-      ...(input.processingOwnerToken
-        ? {
-            processingOwnerToken: input.processingOwnerToken,
-          }
-        : {}),
-    },
-  });
-}
-
 function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
   model: string;
   request: HostedLinqFirstContactAdmissionRequest;
