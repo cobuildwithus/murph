@@ -260,16 +260,29 @@ export async function issueHostedInviteTx(input: {
     },
   });
 
-  if (existingInvite && !(input.linqFirstContactEventId && existingInvite.sentAt)) {
+  const existingInviteEventId = existingInvite?.linqFirstContactEventId ?? null;
+  const requestedInviteEventId = input.linqFirstContactEventId ?? null;
+  const existingInviteOwnedByAnotherEvent = Boolean(
+    requestedInviteEventId
+    && existingInviteEventId
+    && existingInviteEventId !== requestedInviteEventId,
+  );
+  const existingSentInviteCannotBeClaimed = Boolean(
+    requestedInviteEventId
+    && existingInvite?.sentAt
+    && existingInviteEventId !== requestedInviteEventId,
+  );
+
+  if (existingInvite && !existingInviteOwnedByAnotherEvent && !existingSentInviteCannotBeClaimed) {
     return input.prisma.hostedInvite.update({
       where: {
         id: existingInvite.id,
       },
       data: {
         channel: input.channel,
-        ...(input.linqFirstContactEventId && !existingInvite.sentAt
+        ...(requestedInviteEventId && !existingInviteEventId && !existingInvite.sentAt
           ? {
-              linqFirstContactEventId: input.linqFirstContactEventId,
+              linqFirstContactEventId: requestedInviteEventId,
             }
           : {}),
       },

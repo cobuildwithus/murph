@@ -326,6 +326,22 @@ export async function planHostedOnboardingLinqWebhook(input: {
         return alreadySentPlan;
       }
     }
+
+    if (firstContactAdmitted && hasHostedMemberActiveAccess(existingMember)) {
+      await recordHostedLinqFirstContactEventConsumed({
+        eventId: input.event.event_id,
+        prisma: input.prisma,
+      });
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildIgnoredLinqWebhookPlan("stale-first-contact"),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
+          existingMemberActive: true,
+          existingMemberMatch,
+          reason: "stale-first-contact",
+          routeStage: "first-contact-stale-active-member",
+        }),
+      );
+    }
   }
 
   if (summary.isFromMe) {

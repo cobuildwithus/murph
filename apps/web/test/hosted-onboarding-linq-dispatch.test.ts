@@ -979,6 +979,7 @@ https://join.example.test/join/code_first_text`);
       signature: null,
       timestamp: null,
     })).resolves.toMatchObject({
+      ignored: false,
       ok: true,
       reason: "wake-appended-active-member",
     });
@@ -1055,6 +1056,7 @@ https://join.example.test/join/code_first_text`);
       signature: null,
       timestamp: null,
     })).resolves.toMatchObject({
+      ignored: false,
       ok: true,
       reason: "wake-appended-active-member",
     });
@@ -2301,6 +2303,100 @@ https://join.example.test/join/code_first_text`);
       },
       data: expect.objectContaining({
         linqFirstContactEventId: "evt_new_send_after_sent_invite",
+      }),
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("creates a fresh invite instead of rebinding an in-flight first-contact invite", async () => {
+    mocks.readHostedLinqDailyState.mockResolvedValueOnce(null);
+    const inFlightInvite = {
+      channel: "linq",
+      id: "invite_in_flight_event_a",
+      inviteCode: "code_in_flight_event_a",
+      linqFirstContactEventId: "evt_in_flight_event_a",
+      memberId: "member_in_flight_rebind",
+      sentAt: null as Date | null,
+      status: "pending",
+    };
+    const eventBInvite = {
+      channel: "linq",
+      id: "invite_in_flight_event_b",
+      inviteCode: "code_in_flight_event_b",
+      linqFirstContactEventId: "evt_in_flight_event_b",
+      memberId: "member_in_flight_rebind",
+      sentAt: null as Date | null,
+      status: "pending",
+    };
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+          ...eventBInvite,
+          linqFirstContactEventId: data.linqFirstContactEventId,
+        })),
+        findFirst: vi.fn().mockResolvedValue(inFlightInvite),
+        findUnique: vi.fn().mockResolvedValue(eventBInvite),
+        update: vi.fn(async ({ data, where }: { data: Record<string, unknown>; where: Record<string, unknown> }) => {
+          if (where.id === eventBInvite.id && data.sentAt instanceof Date) {
+            eventBInvite.sentAt = data.sentAt;
+          }
+          return {
+            ...eventBInvite,
+            ...data,
+          };
+        }),
+        updateMany: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_in_flight_rebind",
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_in_flight_event_b",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      inviteCode: "code_in_flight_event_b",
+      ok: true,
+      reason: "sent-signup-link",
+    });
+
+    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        linqFirstContactEventId: "evt_in_flight_event_b",
+        memberId: "member_in_flight_rebind",
+      }),
+    });
+    expect(prismaMocks.hostedInvite.update).not.toHaveBeenCalledWith({
+      where: {
+        id: inFlightInvite.id,
+      },
+      data: expect.objectContaining({
+        linqFirstContactEventId: "evt_in_flight_event_b",
       }),
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
@@ -4160,8 +4256,9 @@ https://join.example.test/join/code_first_text`);
       signature: null,
       timestamp: null,
     })).resolves.toMatchObject({
+      ignored: true,
       ok: true,
-      reason: "wake-appended-active-member",
+      reason: "stale-first-contact",
     });
 
     expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
@@ -4177,12 +4274,8 @@ https://join.example.test/join/code_first_text`);
         }),
       );
     }
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: memberId,
-      mailboxItemId: `mailbox_${eventId}`,
-    });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(await firstContactReceipt.findUnique({
       where: {
         eventId,
@@ -4205,8 +4298,8 @@ https://join.example.test/join/code_first_text`);
     });
 
     expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });
@@ -4285,14 +4378,15 @@ https://join.example.test/join/code_first_text`);
       signature: null,
       timestamp: null,
     })).resolves.toMatchObject({
+      ignored: true,
       ok: true,
-      reason: "wake-appended-active-member",
+      reason: "stale-first-contact",
     });
 
     expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
     expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(await firstContactReceipt.findUnique({
       where: {
         eventId,
@@ -4315,8 +4409,8 @@ https://join.example.test/join/code_first_text`);
     });
 
     expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
