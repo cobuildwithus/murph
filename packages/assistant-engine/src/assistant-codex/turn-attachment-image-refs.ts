@@ -7,18 +7,28 @@ const AUTHORIZED_REFERENCE_IMAGE_MEDIA_TYPES = new Set([
   'image/webp',
 ])
 
-// Returns the vault-relative raw paths of the supported image attachments that
-// were accepted as part of the current turn's input items. The generate_image
-// tool requires every referenceImageRef to live in this set so the model cannot
-// re-egress an older inbox image (or any other vault file) that survives in the
-// hosted workspace from a prior turn. Empty set means "no current-turn image
-// attachments authorized for reference," which the resolver treats as
-// fail-closed when the model requests any refs.
+export interface AuthorizedReferenceImageEvidence {
+  sha256: string
+}
+
+export type AuthorizedReferenceImageRefMap = ReadonlyMap<
+  string,
+  AuthorizedReferenceImageEvidence
+>
+
+// Returns the vault-relative raw paths (plus durable sha256 evidence) of the
+// supported image attachments that were accepted as part of the current turn's
+// input items. The generate_image tool requires every referenceImageRef to be
+// in this map AND for the bytes read off disk to hash to the recorded sha256,
+// so a same-turn workspace mutation cannot swap authorized bytes between the
+// allowlist check and the OpenAI image-edits egress. An attachment with no
+// stored sha256 in evidence does not provide durable authority and is omitted
+// from the map; the resolver fails closed when a requested ref isn't present.
 export async function collectAuthorizedTurnAttachmentImageRefs(input: {
   acceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[] | null | undefined
   vault: string | null | undefined
-}): Promise<Set<string>> {
-  const refs = new Set<string>()
+}): Promise<Map<string, AuthorizedReferenceImageEvidence>> {
+  const refs = new Map<string, AuthorizedReferenceImageEvidence>()
   const vault = input.vault?.trim()
   if (!vault) {
     return refs
@@ -47,7 +57,11 @@ export async function collectAuthorizedTurnAttachmentImageRefs(input: {
       if (!mime || !AUTHORIZED_REFERENCE_IMAGE_MEDIA_TYPES.has(mime)) {
         continue
       }
-      refs.add(rawPath)
+      const sha256 = attachment.raw?.sha256 ?? null
+      if (!sha256) {
+        continue
+      }
+      refs.set(rawPath, { sha256 })
     }
   }
   return refs

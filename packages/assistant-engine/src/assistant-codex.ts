@@ -432,7 +432,7 @@ export interface CodexAppServerTurnInput {
   }) => Promise<void> | void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
-  authorizedReferenceImageRefs?: ReadonlySet<string> | null
+  authorizedReferenceImageRefs?: ReadonlyMap<string, { sha256: string }> | null
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null

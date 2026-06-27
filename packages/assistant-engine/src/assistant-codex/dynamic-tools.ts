@@ -1204,7 +1204,7 @@ function currentHostedMailboxItemId(
 
 export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
-  authorizedReferenceImageRefs?: ReadonlySet<string> | null
+  authorizedReferenceImageRefs?: ReadonlyMap<string, { sha256: string }> | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv

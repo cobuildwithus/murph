@@ -33,7 +33,9 @@ export interface ResolvedGenerateImageReference {
 }
 
 export async function resolveGenerateImageReferences(input: {
-  authorizedReferenceImageRefs: ReadonlySet<string> | null
+  authorizedReferenceImageRefs:
+    | ReadonlyMap<string, { sha256: string }>
+    | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   refs: readonly string[]
   vaultRoot: string
@@ -58,9 +60,13 @@ export async function resolveGenerateImageReferences(input: {
   }
 
   // Per-turn authority: refs must be a subset of the image attachments the
-  // upstream pipeline accepted for this exact turn. Vault-state pre-existence
-  // (an old materialized inbox image) is not authority on its own. Fail closed
-  // when the caller did not compute an allowlist for this turn.
+  // upstream pipeline accepted for this exact turn, AND the bytes on disk must
+  // still hash to the sha256 the evidence recorded. Vault-state pre-existence
+  // (an old materialized inbox image) is not authority on its own; neither is
+  // a path that was authorized earlier in the turn but whose bytes were
+  // mutated before tool execution. Fail closed when the caller did not compute
+  // an allowlist for this turn, when a requested ref is not in the allowlist,
+  // or (later, after read) when the computed sha256 mismatches.
   const authorizedRefs = input.authorizedReferenceImageRefs
   if (!authorizedRefs) {
     throw new VaultCliError(
@@ -133,12 +139,21 @@ export async function resolveGenerateImageReferences(input: {
       )
     }
 
+    const bytesSha256 = sha256Hex(bytes)
+    const expectedSha256 = authorizedRefs.get(ref)?.sha256
+    if (!expectedSha256 || expectedSha256.toLowerCase() !== bytesSha256.toLowerCase()) {
+      throw new VaultCliError(
+        'ASSISTANT_IMAGE_REFERENCE_BYTES_UNAUTHORIZED',
+        'Image reference bytes do not match the attachment evidence accepted for this turn.',
+      )
+    }
+
     totalBytes += bytes.byteLength
     resolved.push({
       bytes,
       filename: buildNeutralReferenceFilename(index, mediaType),
       mediaType,
-      sha256: sha256Hex(bytes),
+      sha256: bytesSha256,
       sourceRef: ref,
       sourceRefSha256: sha256Hex(ref),
     })
