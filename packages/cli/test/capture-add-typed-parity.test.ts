@@ -172,14 +172,31 @@ test('capture add schema exposes typed single-capture fields without raw input f
   }
 })
 
-test('capture add and import-json contract hints steer agents to vault-cli batch instead of capture import-json', () => {
+test('capture add and import-json contract hints steer agents to vault-cli batch instead of capture import-json, and fit the assistant contract hint budget', () => {
   assert.match(
     captureCommandDescriptions.addHint,
-    /vault-cli batch --format json --command '\[\.\.\.\]'/u,
+    /vault-cli batch --command '\[\.\.\.\]'/u,
   )
   assert.equal(
     captureCommandDescriptions.addHint.includes('capture import-json'),
     false,
+  )
+  assert.ok(
+    captureCommandDescriptions.addHint.length <= 180,
+    `addHint must fit the assistant contract hint budget; got ${captureCommandDescriptions.addHint.length} chars`,
+  )
+
+  assert.match(
+    captureCommandDescriptions.importJsonHint,
+    /Operator-only; no capture payload-schema\./u,
+  )
+  assert.match(
+    captureCommandDescriptions.importJsonHint,
+    /vault-cli batch --command '\[\.\.\.\]'/u,
+  )
+  assert.ok(
+    captureCommandDescriptions.importJsonHint.length <= 180,
+    `importJsonHint must fit the assistant contract hint budget; got ${captureCommandDescriptions.importJsonHint.length} chars`,
   )
 
   const descriptors = vaultCliCommandDescriptors as readonly VaultCliCommandDescriptor[]
@@ -191,14 +208,7 @@ test('capture add and import-json contract hints steer agents to vault-cli batch
     (leaf) => leaf.path.join(' ') === 'capture import-json',
   )
   assert.ok(importJsonLeaf, 'capture import-json leaf present')
-  assert.match(
-    importJsonLeaf.hint ?? '',
-    /Operator-only structured batch importer/u,
-  )
-  assert.match(
-    importJsonLeaf.hint ?? '',
-    /vault-cli batch --format json --command '\[\.\.\.\]'/u,
-  )
+  assert.equal(importJsonLeaf.hint, captureCommandDescriptions.importJsonHint)
 })
 
 test('capture import-json schema exposes the batch payload escape hatch', async () => {

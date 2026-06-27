@@ -431,6 +431,48 @@ test('buildAssistantCliSurfaceContract normalizes commands and renders detailed 
   assert.doesNotMatch(contract, /`model`/u)
 })
 
+test('buildAssistantCliSurfaceContract steers agents away from capture import-json when the leaf hint marks it operator-only', async () => {
+  const {
+    buildAssistantCliSurfaceContract,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  const contract = buildAssistantCliSurfaceContract({
+    commands: [
+      {
+        description:
+          'Record one or more dated media captures as canonical events with immutable raw/captures/** attachments.',
+        hint:
+          "Use --media for one capture with one or more files. For multiple distinct captures, run capture add per observation grouped through vault-cli batch --command '[...]'.",
+        name: 'capture add',
+      },
+      {
+        description:
+          'Import one or more dated media captures from a structured JSON payload file or stdin.',
+        hint:
+          "Operator-only; no capture payload-schema. For agent batches, use repeated capture add through vault-cli batch --command '[...]'.",
+        name: 'capture import-json',
+      },
+    ],
+  })
+
+  assert.ok(contract)
+  assert.match(contract, /`capture add`/u)
+  assert.match(
+    contract,
+    /run capture add per observation grouped through vault-cli batch --command '\[\.\.\.\]'/u,
+  )
+  assert.match(contract, /`capture import-json`/u)
+  assert.match(
+    contract,
+    /Operator-only; no capture payload-schema\. For agent batches, use repeated capture add through vault-cli batch --command '\[\.\.\.\]'\./u,
+  )
+  assert.doesNotMatch(contract, /import-json --input @captures\.json for batches/u)
+  assert.doesNotMatch(
+    contract,
+    /batch capture metadata, media\/raw refs, labels, body sites/u,
+  )
+})
+
 test('buildAssistantCliProcessEnv keeps manifest subprocess env credential-free', async () => {
   const {
     buildAssistantCliProcessEnv,

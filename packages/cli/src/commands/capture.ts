@@ -37,7 +37,9 @@ export const captureCommandDescriptions = {
   importJson:
     'Import one or more dated media captures from a structured JSON payload file or stdin.',
   addHint:
-    "Use --media for one capture with one or more files. For multiple distinct observations, body sites, or timepoints, run one capture add per observation grouped through vault-cli batch --format json --command '[...]' so each call stays argv-only and Incur-discoverable.",
+    "Use --media for one capture with one or more files. For multiple distinct captures, run capture add per observation grouped through vault-cli batch --command '[...]'.",
+  importJsonHint:
+    "Operator-only; no capture payload-schema. For agent batches, use repeated capture add through vault-cli batch --command '[...]'.",
   show: 'Show one capture by canonical event id or stable label.',
   list: 'List capture events with optional date, label, body-site, collection, and tag filters.',
   manifest: 'Show the immutable raw import manifest for one capture event id or stable label.',
@@ -192,8 +194,7 @@ export function registerCaptureCommands(
         },
       },
     ],
-    hint:
-      '--input accepts @file.json or - for stdin. The payload retains the full structured capture import surface, including batch capture metadata, media refs, raw refs, labels, body sites, collections, tags, and related ids.',
+    hint: captureCommandDescriptions.importJsonHint,
     options: withBaseOptions({
       input: inputFileOptionSchema.describe('Structured capture payload in @file.json form or - for stdin.'),
       ...captureAddOptionShape,
