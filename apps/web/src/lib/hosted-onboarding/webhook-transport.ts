@@ -266,6 +266,7 @@ export async function drainHostedLinqSideEffectsDirect(input: {
       });
 
       if (result.status === "skipped") {
+        await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
         continue;
       }
     } catch (error) {
