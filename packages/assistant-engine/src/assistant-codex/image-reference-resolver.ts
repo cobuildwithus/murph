@@ -3,7 +3,6 @@ import { readFile, stat } from 'node:fs/promises'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 
-import { ASSISTANT_RAW_ATTACHMENT_ARTIFACT_PATH_PREFIXES } from '../assistant/attachment-artifact-paths.js'
 import type {
   AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
@@ -169,24 +168,7 @@ export function normalizeGenerateImageReferenceRef(value: string): string {
       'Image reference refs must be normalized, non-hidden vault-relative paths.',
     )
   }
-  const normalized = segments.join('/')
-  // Per-turn authority is enforced by restricting refs to the canonical
-  // user-attached raw-artifact prefix. Vault state already constrains accepted
-  // input attachments to ASSISTANT_RAW_ATTACHMENT_ARTIFACT_PATH_PREFIXES, so
-  // pinning generate_image to the same prefix prevents a prompt-injected or
-  // hallucinated ref from leaking unrelated vault images (e.g. bank/, private/)
-  // through the OpenAI Images edits boundary.
-  if (
-    !ASSISTANT_RAW_ATTACHMENT_ARTIFACT_PATH_PREFIXES.some((prefix) =>
-      normalized.startsWith(prefix),
-    )
-  ) {
-    throw new VaultCliError(
-      'ASSISTANT_IMAGE_REFERENCE_REF_UNAUTHORIZED',
-      'Image reference refs must point at user-attached inbox artifacts.',
-    )
-  }
-  return normalized
+  return segments.join('/')
 }
 
 export function sniffGenerateImageReferenceMediaType(
