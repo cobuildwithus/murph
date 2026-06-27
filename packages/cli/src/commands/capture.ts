@@ -17,6 +17,7 @@ import {
 import {
   addCaptureRecord,
   captureImportManifestResultSchema,
+  captureImportPayloadSchema,
   captureLookupSchema,
   listCaptureRecords,
   showCaptureManifest,
@@ -31,40 +32,6 @@ import {
 } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 import { registerPayloadSchemaCommand } from './payload-schema-command.js'
-
-const captureEntryPayloadSchema = z
-  .object({
-    media: z.array(z.string().min(1)).optional(),
-    mediaPaths: z.array(z.string().min(1)).optional(),
-    title: z.string().min(1).max(400).optional(),
-    note: z.string().min(1).max(4000).optional(),
-    occurredAt: z.string().min(1).optional(),
-    source: eventSourceSchema.optional(),
-    label: z.string().min(1).max(160).optional(),
-    bodySite: z.string().min(1).max(400).optional(),
-    collection: z.string().min(1).max(160).optional(),
-    tags: z.array(z.string().min(1)).optional(),
-    relatedIds: z.array(z.string().min(1).max(160)).optional(),
-    externalRef: z.record(z.string(), z.unknown()).optional(),
-    timeZone: timeZoneSchema.optional(),
-  })
-  .describe(
-    'Capture entry fields. Provide at least --media (file path) or media in the payload to attach durable bytes.',
-  )
-
-export const captureImportPayloadSchema = captureEntryPayloadSchema
-  .extend({
-    captures: z
-      .array(captureEntryPayloadSchema)
-      .min(1)
-      .optional()
-      .describe(
-        'Optional batch: one capture entry per observation. Root-level fields apply as defaults when set.',
-      ),
-  })
-  .describe(
-    'Structured capture import payload. Use root fields for one capture, or `captures` for a batch where root-level fields are defaults.',
-  )
 
 export const captureCommandDescriptions = {
   root: 'Dated media-capture commands for photos, videos, and other lightweight evidence with simple tags and context.',

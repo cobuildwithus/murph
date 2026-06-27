@@ -7,10 +7,10 @@ import { Cli } from 'incur'
 import { test } from 'vitest'
 
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import { captureImportPayloadSchema } from '@murphai/vault-usecases/captures'
 
 import {
   captureCommandDescriptions,
-  captureImportPayloadSchema,
   registerCaptureCommands,
 } from '../src/commands/capture.js'
 import {
@@ -204,7 +204,7 @@ test('capture payload-schema is registered alongside capture import-json so the 
   )
 })
 
-test('captureImportPayloadSchema accepts both a single capture and a batch with a captures[] array', () => {
+test('captureImportPayloadSchema is the exact wire-format contract the runtime importer accepts', () => {
   // Single capture at root.
   assert.doesNotThrow(() =>
     captureImportPayloadSchema.parse({
@@ -212,6 +212,7 @@ test('captureImportPayloadSchema accepts both a single capture and a batch with 
       label: 'mole-left-forearm-1',
       bodySite: 'Left forearm, dorsal side',
       collection: 'skin-check-2026-04',
+      links: [{ type: 'related_to', targetId: 'evt_abc' }],
     }),
   )
 
@@ -221,16 +222,47 @@ test('captureImportPayloadSchema accepts both a single capture and a batch with 
       collection: 'skin-check-2026-04',
       captures: [
         { media: ['./left-forearm-1.jpg'], label: 'mole-left-forearm-1' },
-        { media: ['./right-forearm-1.jpg'], label: 'mole-right-forearm-1' },
+        { mediaPaths: ['./right-forearm-1.jpg'], label: 'mole-right-forearm-1' },
       ],
     }),
   )
 
-  // Empty captures[] is rejected so agents cannot send a no-op batch payload.
+  // Empty captures[] is rejected.
   assert.throws(() =>
     captureImportPayloadSchema.parse({
       collection: 'skin-check-2026-04',
       captures: [],
+    }),
+  )
+
+  // Each captures[] entry must carry its own media (root defaults are stripped
+  // by the runtime). Schema mirrors that so the contract does not falsely
+  // claim entry-level media is optional.
+  assert.throws(() =>
+    captureImportPayloadSchema.parse({
+      media: ['./root-default.jpg'],
+      collection: 'skin-check-2026-04',
+      captures: [{ label: 'mole-left-forearm-1' }],
+    }),
+  )
+
+  // The runtime caps batches at 100; the schema enforces the same upper bound.
+  assert.throws(() =>
+    captureImportPayloadSchema.parse({
+      collection: 'skin-check-2026-04',
+      captures: Array.from({ length: 101 }, (_unused, index) => ({
+        media: [`./photo-${index + 1}.jpg`],
+        label: `mole-${index + 1}`,
+      })),
+    }),
+  )
+
+  // The runtime intentionally rejects `attachments`; the strict schema rejects
+  // it (and any other unknown wire-level field) so the contract cannot
+  // silently drift.
+  assert.throws(() =>
+    captureImportPayloadSchema.parse({
+      attachments: [{ kind: 'photo', path: './ignored.jpg' }],
     }),
   )
 })
