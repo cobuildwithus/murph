@@ -1160,6 +1160,7 @@ export async function sendAssistantMessageLocal(
               stage: 'turn-artifacts-finalized',
               stepElapsedMs: elapsedSince(turnArtifactsStartedAt),
             })
+            const replyDispatchStartedAt = Date.now()
             const {
               deliverySession,
               reactionDeliveryOutcomes,
@@ -1180,6 +1181,21 @@ export async function sendAssistantMessageLocal(
               reactionDeliveryOutcomes.length > 0
                 ? reactionDeliveryOutcomes[reactionDeliveryOutcomes.length - 1]!
                 : deliveryOutcome
+            emitTurnTiming({
+              deliveryAttempted: reactionDeliveryOutcomes.length > 0,
+              deliveryIntentPresent: 'intentId' in finalDeliveryOutcome
+                ? finalDeliveryOutcome.intentId !== null
+                : false,
+              deliveryOutcomeKind: finalDeliveryOutcome.kind,
+              elapsedMs: elapsedSince(turnTimingStartedAt),
+              finalReplySelected: false,
+              providerRequestOrdinal,
+              sinceProviderResultMs: providerResultReturnedAt === null
+                ? null
+                : elapsedSince(providerResultReturnedAt),
+              stage: 'reply-dispatched',
+              stepElapsedMs: elapsedSince(replyDispatchStartedAt),
+            })
             await finalizeDeliveredAssistantTurn({
               firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
               outcome: finalDeliveryOutcome,
@@ -1454,21 +1470,6 @@ export async function sendAssistantMessageLocal(
                 precedingDeliveryOutcomes,
                 session: deliverySession,
               })
-        emitTurnTiming({
-          deliveryAttempted: finalResponseText !== null,
-          deliveryIntentPresent: 'intentId' in deliveryOutcome
-            ? deliveryOutcome.intentId !== null
-            : false,
-          deliveryOutcomeKind: deliveryOutcome.kind,
-          elapsedMs: elapsedSince(turnTimingStartedAt),
-          finalReplySelected: finalResponseText !== null,
-          providerRequestOrdinal,
-          sinceProviderResultMs: providerResultReturnedAt === null
-            ? null
-            : elapsedSince(providerResultReturnedAt),
-          stage: 'reply-dispatched',
-          stepElapsedMs: elapsedSince(replyDispatchStartedAt),
-        })
         const reactionDeliveryResult = await deliverAssistantProviderReactions({
           currentInput,
           providerResult,
@@ -1503,6 +1504,22 @@ export async function sendAssistantMessageLocal(
           reactionDeliveryOutcomes.length > 0
             ? reactionDeliveryOutcomes[reactionDeliveryOutcomes.length - 1]!
             : deliveryOutcome
+        emitTurnTiming({
+          deliveryAttempted:
+            finalResponseText !== null || reactionDeliveryOutcomes.length > 0,
+          deliveryIntentPresent: 'intentId' in finalDeliveryOutcome
+            ? finalDeliveryOutcome.intentId !== null
+            : false,
+          deliveryOutcomeKind: finalDeliveryOutcome.kind,
+          elapsedMs: elapsedSince(turnTimingStartedAt),
+          finalReplySelected: finalResponseText !== null,
+          providerRequestOrdinal,
+          sinceProviderResultMs: providerResultReturnedAt === null
+            ? null
+            : elapsedSince(providerResultReturnedAt),
+          stage: 'reply-dispatched',
+          stepElapsedMs: elapsedSince(replyDispatchStartedAt),
+        })
         const finalResponseDisposition =
           finalResponseText === null && deliveryOutcome.kind === 'not-requested'
             ? 'none'

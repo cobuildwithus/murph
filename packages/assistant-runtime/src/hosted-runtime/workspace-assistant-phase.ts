@@ -310,6 +310,7 @@ export async function runHostedWorkspaceAssistantPhase(
 
     const freshAssistantInputIds =
       input.initialMailboxImport.importResult.assistantInputIds ?? [];
+    const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
     const runAutomationLane = async () => {
       const automationLaneStartedAt = Date.now();
       const assistantRuntimeState = await prepareHostedAssistantAutomationForWake(
@@ -321,25 +322,48 @@ export async function runHostedWorkspaceAssistantPhase(
           operatorHomeRoot: input.restored.operatorHomeRoot,
         },
       );
-      const assistantMetrics = await runHostedAssistantAutomationLane({
-        assistantRuntimeState,
-        executionContext,
-        freshAssistantInputIds,
-        requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
-        runtime: {
-          commitTimeoutMs: input.runtime.commitTimeoutMs,
-          forwardedEnv: input.runtime.forwardedEnv,
-          platform: input.platform,
-          platformEnv: input.runtime.platformEnv,
-          resolvedConfig: input.runtime.resolvedConfig,
-        },
-        operatorHomeRoot: input.restored.operatorHomeRoot,
-        runtimeAttemptId: input.request.attemptId,
-        runtimeEnv: input.runtimeEnv,
-        signal: input.signal ?? undefined,
-        vaultRoot: input.restored.vaultRoot,
-        wake,
-      });
+      const assistantMetrics = await (async () => {
+        try {
+          return await runHostedAssistantAutomationLane({
+            assistantRuntimeState,
+            executionContext,
+            freshAssistantInputIds,
+            requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
+            runtime: {
+              commitTimeoutMs: input.runtime.commitTimeoutMs,
+              forwardedEnv: input.runtime.forwardedEnv,
+              platform: input.platform,
+              platformEnv: input.runtime.platformEnv,
+              resolvedConfig: input.runtime.resolvedConfig,
+            },
+            operatorHomeRoot: input.restored.operatorHomeRoot,
+            runtimeAttemptId: input.request.attemptId,
+            runtimeEnv: input.runtimeEnv,
+            signal: input.signal ?? undefined,
+            vaultRoot: input.restored.vaultRoot,
+            wake,
+          });
+        } catch (error) {
+          const failureLogEntries =
+            readHostedAssistantAutomationFailureRedactedLogEntries(error);
+          const redactedLogEntries = [
+            ...assistantAutomationRedactedLogEntries,
+            ...failureLogEntries,
+          ];
+          if (redactedLogEntries.length > 0) {
+            await writeHostedAssistantAutomationDetailRuntimeLogs({
+              assistantMetrics: {
+                redactedLogEntries,
+              },
+              input,
+            });
+          }
+          throw error;
+        }
+      })();
+      assistantAutomationRedactedLogEntries.push(
+        ...(assistantMetrics.redactedLogEntries ?? []),
+      );
       writeHostedAssistantTurnTimingRuntimeLog({
         currentTurnDeliveryIntentCount:
           assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds?.length ?? 0,
@@ -348,7 +372,12 @@ export async function runHostedWorkspaceAssistantPhase(
         stage: "automation-pass-finished",
         stepElapsedMs: elapsedSince(automationLaneStartedAt),
       });
-      return assistantMetrics;
+      return {
+        ...assistantMetrics,
+        ...(assistantAutomationRedactedLogEntries.length === 0
+          ? {}
+          : { redactedLogEntries: [...assistantAutomationRedactedLogEntries] }),
+      };
     };
     let assistantMetrics = await runAutomationLane();
     let currentTurnDeliveryIntentIds =
@@ -430,6 +459,16 @@ export async function runHostedWorkspaceAssistantPhase(
         stage: "foreground-delivery-phase-started",
       });
       const foregroundAssistantPhaseStartedAt = Date.now();
+      const writeForegroundAssistantFinishedTiming = () => {
+        writeHostedAssistantTurnTimingRuntimeLog({
+          currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
+          elapsedMs: elapsedSince(assistantPhaseStartedAt),
+          foregroundAssistantPass,
+          input,
+          stage: "foreground-delivery-phase-finished",
+          stepElapsedMs: elapsedSince(foregroundAssistantPhaseStartedAt),
+        });
+      };
       const foregroundAssistantResult = await runForegroundAssistantReplyPhase({
         assistantMetrics,
         currentTurnDeliveryIntentIds,
@@ -440,18 +479,27 @@ export async function runHostedWorkspaceAssistantPhase(
         systemMailboxWakeAt,
         wake,
       });
-      writeHostedAssistantTurnTimingRuntimeLog({
-        currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
-        elapsedMs: elapsedSince(assistantPhaseStartedAt),
-        foregroundAssistantPass,
-        input,
-        stage: "foreground-delivery-phase-finished",
-        stepElapsedMs: elapsedSince(foregroundAssistantPhaseStartedAt),
-      });
+      const foregroundAfterCheckpoint = foregroundAssistantResult.afterCheckpoint;
+      const timedForegroundAssistantResult =
+        foregroundAfterCheckpoint
+          ? {
+              ...foregroundAssistantResult,
+              afterCheckpoint: async () => {
+                try {
+                  return await foregroundAfterCheckpoint();
+                } finally {
+                  writeForegroundAssistantFinishedTiming();
+                }
+              },
+            }
+          : foregroundAssistantResult;
+      if (!foregroundAssistantResult.afterCheckpoint) {
+        writeForegroundAssistantFinishedTiming();
+      }
       return mergeContinuingSystemMailboxResult(
         withFreshHostedManagedAutomationsAfterCheckpoint({
           input,
-          result: foregroundAssistantResult,
+          result: timedForegroundAssistantResult,
         }),
       );
     }
@@ -3824,6 +3872,37 @@ async function writeHostedAssistantAutomationDetailRuntimeLogs(input: {
       platform: input.input.platform,
     });
   }
+}
+
+function readHostedAssistantAutomationFailureRedactedLogEntries(
+  error: unknown,
+): HostedExecutionRedactedLogEntry[] {
+  if (!error || typeof error !== "object" || Array.isArray(error)) {
+    return [];
+  }
+
+  const value = (error as {
+    hostedAssistantAutomationRedactedLogEntries?: unknown;
+  }).hostedAssistantAutomationRedactedLogEntries;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isHostedExecutionRedactedLogEntry);
+}
+
+function isHostedExecutionRedactedLogEntry(
+  value: unknown,
+): value is HostedExecutionRedactedLogEntry {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof (value as { component?: unknown }).component === "string" &&
+    typeof (value as { level?: unknown }).level === "string" &&
+    typeof (value as { message?: unknown }).message === "string" &&
+    typeof (value as { phase?: unknown }).phase === "string"
+  );
 }
 
 function buildHostedAssistantAutomationDetailRedactedJson(

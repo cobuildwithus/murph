@@ -1109,7 +1109,20 @@ describe("runHostedAssistantAutomation", () => {
   });
 
   it("rethrows unexpected automation failures", async () => {
-    mocks.runAssistantAutomationPass.mockRejectedValueOnce(new Error("automation failed"));
+    const failure = new Error("automation failed");
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      input.onTraceEvent?.({
+        codexThreadId: null,
+        rawEvent: {
+          schema: "murph.assistant-turn-timing.v1",
+          type: "assistant.turn.timing",
+          turnTimingElapsedMs: 17,
+          turnTimingStage: "usage-recorded",
+        },
+        updates: [],
+      });
+      throw failure;
+    });
 
     await expect(
       runHostedAssistantAutomation(
@@ -1131,6 +1144,28 @@ describe("runHostedAssistantAutomation", () => {
       },
     ),
     ).rejects.toThrow("automation failed");
+
+    const attachedLogEntries =
+      (failure as {
+        hostedAssistantAutomationRedactedLogEntries?: unknown;
+      }).hostedAssistantAutomationRedactedLogEntries;
+    expect(Array.isArray(attachedLogEntries)).toBe(true);
+    expect(attachedLogEntries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        message: "Hosted assistant turn timing milestone captured.",
+        redacted: expect.objectContaining({
+          schema: "murph.assistant-turn-timing.v1",
+          turnTimingElapsedMs: 17,
+          turnTimingStage: "usage-recorded",
+        }),
+      }),
+      expect.objectContaining({
+        message: "Hosted assistant automation pass failed.",
+      }),
+    ]));
+    expect(Object.keys(failure)).not.toContain(
+      "hostedAssistantAutomationRedactedLogEntries",
+    );
   });
 });
 
