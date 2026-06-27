@@ -435,7 +435,6 @@ function buildHostedLinqFirstContactAdmissionOpenAiBody(input: {
         role: "user",
       },
     ],
-    max_output_tokens: 200,
     model: input.model,
     store: false,
     text: {
