@@ -198,6 +198,7 @@ interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   afterCheckpoint?: (() => Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void>) | null;
   browserVaultReplicaRefreshRequested?: true;
   deviceSyncMaintenanceRan?: true;
+  flushDeferredUsageAfterCheckpoint?: (() => Promise<void>) | null;
   // Failed foreground reply count for this pass. Present only when the pass
   // ran the foreground assistant reply phase; gates the durable conversation
   // consumed-watermark ack (only a clean pass with zero failed replies and no
@@ -541,6 +542,17 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   let assistantContextSnapshotDirty = false;
   let mailboxPostCheckpointEffectsFinished: Promise<void> | null = null;
   let projectedWakeRequiresCheckpoint = false;
+  let assistantPhaseCheckpointed = false;
+  let flushDeferredUsageAfterCheckpoint: (() => Promise<void>) | null = null;
+  let deferredUsageFlushed = false;
+  const flushAssistantPhaseDeferredUsage = async (): Promise<void> => {
+    if (!assistantPhaseCheckpointed || !flushDeferredUsageAfterCheckpoint || deferredUsageFlushed) {
+      return;
+    }
+
+    deferredUsageFlushed = true;
+    await flushDeferredUsageAfterCheckpoint();
+  };
   const hostedCanonicalWritePort = createHostedWorkspaceCanonicalWritePort({
     checkpointRequestBuilder: checkpointRequestSession,
     initialMailboxImport,
@@ -555,6 +567,11 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       hostedCanonicalWritePort,
       () => runAssistantPhase(assistantPhaseInput),
     );
+    flushDeferredUsageAfterCheckpoint =
+      assistantPhaseResult.flushDeferredUsageAfterCheckpoint ?? null;
+    if (flushDeferredUsageAfterCheckpoint && assistantPhaseResult.progressed !== true) {
+      throw new TypeError("Hosted workspace assistant phase deferred usage flush requires a progressed phase.");
+    }
     if (
       assistantContextSnapshotDirty
       || await isAssistantContextSnapshotRefreshPendingBestEffort(input.vaultRoot)
@@ -573,6 +590,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       platform: input.platform,
       runtimeLogContext: input.runtimeLogContext,
     });
+    assistantPhaseCheckpointed = true;
+    await flushAssistantPhaseDeferredUsage();
     if (assistantPhaseResult.afterCheckpoint && assistantPhaseResult.progressed !== true) {
       throw new TypeError("Hosted workspace assistant phase afterCheckpoint requires a progressed phase.");
     }
@@ -661,6 +680,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     });
   } catch (error) {
     await foregroundMailboxImportLoop.stop();
+    await flushAssistantPhaseDeferredUsage();
     scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
       input,

@@ -783,6 +783,50 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
   });
 
+  it("logs structured diagnostics when deferred usage recording fails", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const usageRecordPort: RuntimeUsageRecordPort = {
+      async recordUsage() {
+        throw Object.assign(new Error("usage ledger unavailable"), {
+          code: "usage_ledger_unavailable",
+        });
+      },
+    };
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+      );
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: true,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      runtimeUsageRecordPort: usageRecordPort,
+    }));
+
+    await result.afterCheckpoint?.();
+
+    const usageFailureLog = logRequests.flatMap((request) => request.entries)
+      .find((entry) => entry.errorCode === "assistant_usage_record_failed");
+    expect(usageFailureLog).toEqual(expect.objectContaining({
+      component: "runtime",
+      errorCode: "assistant_usage_record_failed",
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "error",
+      redactedJson: expect.objectContaining({
+        assistantUsageRecordFailed: true,
+        nestedErrorCode: expect.any(String),
+        safeErrorMessage: expect.any(String),
+      }),
+    }));
+  });
+
   it("keeps device-sync options out of the assistant lane when active input is fresh", async () => {
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,

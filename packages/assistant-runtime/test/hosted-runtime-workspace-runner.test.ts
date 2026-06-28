@@ -81,6 +81,7 @@ import {
 import {
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
+  resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
@@ -3523,6 +3524,124 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "1", lane: "conversation" },
         ],
       ]);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("flushes deferred assistant usage when late foreground pending-input wake fails", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_usage_flush_initial",
+        laneSeq: "1",
+      }),
+    ];
+    const events: string[] = [];
+    const importedSeqs: string[] = [];
+    const { mailboxPort } = createMailboxPort({ items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let flushSawAssistantCheckpointLog = false;
+
+    try {
+      await assert.rejects(
+        runHostedWorkspaceUntilIdleOrBudget({
+          checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+            attemptId: "attempt_synthetic_runner_usage_flush_pending_input_failure",
+            expectedWorkspaceVersion: "0",
+            leaseGeneration: "1",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            snapshotRef: null,
+          }),
+          expectedUserId: TEST_USER_ID,
+          async importItem(item) {
+            importedSeqs.push(item.item.laneSeq);
+            events.push(`import:${item.item.laneSeq}`);
+            if (item.item.laneSeq === "1") {
+              return { status: "imported" };
+            }
+
+            const staged = await upsertAssistantInputEvent({
+              event: createStoredAssistantInputEventForMailboxItem(
+                item.item,
+                "late pending input with corrupt index",
+              ),
+              vault: vaultRoot,
+            });
+            await enqueueHostedPendingAssistantInputId({
+              inputId: staged.inputId,
+              vaultRoot,
+            });
+            await writeFile(
+              resolveHostedPendingAssistantInputStatePath(vaultRoot),
+              "{",
+              "utf8",
+            );
+            return {
+              assistantInputId: staged.inputId,
+              status: "imported",
+            };
+          },
+          limitPerLane: 10,
+          platform: createPlatform({
+            logRequests,
+            mailboxPort,
+            workspacePort: createWorkspacePort({ checkpointRequests }),
+          }),
+          requestId: "request_synthetic_runner_usage_flush_pending_input_failure",
+          runtimeLogContext: {
+            attemptId: "attempt_synthetic_runner_usage_flush_pending_input_failure",
+            leaseGeneration: "1",
+            workspaceVersion: "0",
+          },
+          runtimeWakeSignal,
+          async runAssistantPhase(input) {
+            events.push("assistant");
+            items.push(createMailboxItem({
+              id: "mailbox_item_runner_usage_flush_late",
+              laneSeq: "2",
+              occurredAt: "2026-04-26T00:00:02.000Z",
+            }));
+            runtimeWakeSignal.notify();
+            await waitForCondition(() => importedSeqs.includes("2"));
+            await waitForCondition(() =>
+              input.shouldYieldBackgroundMaintenance?.() === true
+            );
+            return {
+              afterCheckpoint: async () => {
+                events.push("assistant:afterCheckpoint");
+                return null;
+              },
+              checkpointReason: "assistant_runtime_commit",
+              flushDeferredUsageAfterCheckpoint: async () => {
+                flushSawAssistantCheckpointLog = logRequests
+                  .flatMap((request) => request.entries)
+                  .some((entry) =>
+                    entry.eventCode === "checkpoint.runtime_residue_deferred"
+                    && entry.redactedJson?.checkpointPhase === "assistant"
+                  );
+                events.push("usage:flush");
+              },
+              progressed: true,
+            };
+          },
+          vaultRoot,
+          workspace: createWorkspaceState({ version: "0" }),
+          now: () => TEST_NOW,
+        }),
+      );
+
+      assert.deepEqual(importedSeqs, ["1", "2"]);
+      assert.deepEqual(checkpointRequests, []);
+      assert.equal(events.filter((event) => event === "usage:flush").length, 1);
+      assert.equal(events.includes("assistant:afterCheckpoint"), false);
+      assert.equal(flushSawAssistantCheckpointLog, true);
     } finally {
       await rm(vaultRoot, {
         force: true,

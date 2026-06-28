@@ -205,7 +205,10 @@ export async function runHostedWorkspaceAssistantPhase(
       try {
         await usageRecordPort.recordUsage(record);
       } catch (error) {
-        warnHostedAssistantUsageRecordingFailure(error);
+        await writeHostedAssistantUsageRecordingFailureRuntimeLog({
+          error,
+          input,
+        });
       }
     }
   };
@@ -230,6 +233,7 @@ export async function runHostedWorkspaceAssistantPhase(
           await flushDeferredUsageRecords();
         }
       },
+      flushDeferredUsageAfterCheckpoint: flushDeferredUsageRecords,
     };
   };
   if (shouldWriteHostedDeviceConnectContextLog({ deviceConnectProviders, input })) {
@@ -719,9 +723,38 @@ export async function runHostedWorkspaceAssistantPhase(
   }
 }
 
-function warnHostedAssistantUsageRecordingFailure(error: unknown): void {
+async function writeHostedAssistantUsageRecordingFailureRuntimeLog(input: {
+  error: unknown;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<void> {
+  const failure = buildHostedRuntimeFailureDiagnostics(
+    input.error,
+    "Hosted assistant usage recording failed.",
+  );
   console.warn("Assistant usage recording failed; continuing without retry.", {
-    errorName: error instanceof Error ? error.name : typeof error,
+    errorCode: "assistant_usage_record_failed",
+    nestedErrorCode: failure.errorCode,
+    safeErrorMessage: failure.redactedJson.safeErrorMessage,
+  });
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields({
+        attemptId: input.input.request.attemptId,
+        leaseGeneration: input.input.request.leaseGeneration,
+        workspaceVersion: input.input.request.workspaceVersion,
+      }),
+      component: "runtime",
+      errorCode: "assistant_usage_record_failed",
+      eventCode: "runner.error",
+      level: "warn",
+      phase: "error",
+      redactedJson: {
+        ...failure.redactedJson,
+        assistantUsageRecordFailed: true,
+        nestedErrorCode: failure.errorCode,
+      },
+    },
+    platform: input.input.runtime.platform,
   });
 }
 
