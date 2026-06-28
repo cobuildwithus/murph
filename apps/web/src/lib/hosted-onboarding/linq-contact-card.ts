@@ -1,16 +1,19 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
+import {
+  createHostedPhoneLookupKey,
+} from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import {
   syncHostedLinqConfiguredLinesTx,
 } from "./linq-line-store";
+import { normalizePhoneNumber } from "./phone";
 import {
   getHostedOnboardingEnvironment,
   requireHostedOnboardingLinqConfig,
 } from "./runtime";
 import { normalizeNullableString } from "./shared";
-import { normalizePhoneNumber } from "./phone";
 
 const HOSTED_LINQ_CONTACT_CARD_CRON_LINE_LIMIT = 50;
 const MURPH_CONTACT_CARD_FIRST_NAME = "Murph";
@@ -202,33 +205,47 @@ async function listHostedLinqConfiguredContactCardLines(input: {
   const phoneNumbers = uniqueNormalizedPhoneNumbers(
     environment.linqConversationPhoneNumbers,
   ).slice(0, maxLines);
+  const lineInputs = phoneNumbers
+    .map((phoneNumber) => ({
+      phoneNumber,
+      phoneNumberLookupKey: createHostedPhoneLookupKey(phoneNumber),
+    }))
+    .filter((line): line is {
+      phoneNumber: string;
+      phoneNumberLookupKey: string;
+    } => typeof line.phoneNumberLookupKey === "string" && line.phoneNumberLookupKey.length > 0);
 
-  if (phoneNumbers.length === 0) {
+  if (lineInputs.length === 0) {
     return [];
   }
 
   await syncHostedLinqConfiguredLinesTx({
     activeMemberLimit: environment.linqMaxActiveMembersPerConversationPhone,
     observedAt: input.observedAt,
-    phoneNumbers,
+    phoneNumbers: lineInputs.map((line) => line.phoneNumber),
     prisma: input.prisma,
   });
 
-  return input.prisma.hostedLinqLine.findMany({
+  const rows = await input.prisma.hostedLinqLine.findMany({
     where: {
-      phoneNumber: {
-        in: phoneNumbers,
+      phoneNumberLookupKey: {
+        in: lineInputs.map((line) => line.phoneNumberLookupKey),
       },
     },
-    orderBy: {
-      phoneNumber: "asc",
-    },
     select: {
-      phoneNumber: true,
+      phoneNumberLookupKey: true,
       providerStatus: true,
     },
     take: maxLines,
   });
+  const providerStatusByLookupKey = new Map(
+    rows.map((row) => [row.phoneNumberLookupKey, row.providerStatus]),
+  );
+
+  return lineInputs.map((line) => ({
+    phoneNumber: line.phoneNumber,
+    providerStatus: providerStatusByLookupKey.get(line.phoneNumberLookupKey) ?? null,
+  }));
 }
 
 async function reconcileHostedLinqContactCardForLine(input: {

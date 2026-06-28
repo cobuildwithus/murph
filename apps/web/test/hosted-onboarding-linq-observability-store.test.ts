@@ -417,10 +417,12 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqLineUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
-          phoneNumber: "+15550000000",
+          phoneNumberLookupKey: event.phoneNumberLookupKey,
         },
       }),
     );
+    expect(JSON.stringify(fixture.hostedLinqLineUpsert.mock.calls[0]?.[0]))
+      .not.toContain("+15550000000");
     expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({

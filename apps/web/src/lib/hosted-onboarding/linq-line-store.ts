@@ -31,7 +31,7 @@ export async function upsertHostedLinqLineForPhoneTx(input: {
 
   return input.prisma.hostedLinqLine.upsert({
     where: {
-      phoneNumber: normalizedPhoneNumber,
+      phoneNumberLookupKey: lookupKey,
     },
     create: {
       assignmentWeight: 100,
@@ -39,7 +39,6 @@ export async function upsertHostedLinqLineForPhoneTx(input: {
       configuredAt: input.source === "configured" ? input.observedAt : null,
       egressPolicy: "enabled",
       healthStatus: "unknown",
-      phoneNumber: normalizedPhoneNumber,
       phoneNumberHint: readHostedPhoneHint(normalizedPhoneNumber),
       phoneNumberLookupKey: lookupKey,
       providerSeenAt: input.source === "provider" ? input.observedAt : null,
@@ -49,7 +48,6 @@ export async function upsertHostedLinqLineForPhoneTx(input: {
       ...(input.activeMemberLimit === undefined ? {} : { activeMemberLimit: input.activeMemberLimit }),
       ...(input.source === "configured" ? { configuredAt: input.observedAt } : {}),
       ...(input.source === "provider" ? { providerSeenAt: input.observedAt } : {}),
-      phoneNumber: normalizedPhoneNumber,
       phoneNumberHint: readHostedPhoneHint(normalizedPhoneNumber),
       ...(input.source === "webhook" ? {} : { source: input.source }),
     },

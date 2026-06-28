@@ -2175,6 +2175,9 @@ function isHostedAssistantCurrentInboundLinqReply(input: {
   if (!input.allowCurrentInboundBypass || !input.deliveryContext) {
     return false;
   }
+  if (!input.deliveryContext.routeAuthority) {
+    return false;
+  }
   if (input.targetKind !== "thread" && input.targetKind !== "explicit") {
     return false;
   }

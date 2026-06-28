@@ -1,6 +1,5 @@
 CREATE TABLE "hosted_linq_line" (
   "phone_number_lookup_key" TEXT NOT NULL,
-  "phone_number" TEXT NOT NULL,
   "phone_number_hint" TEXT NOT NULL,
   "source" TEXT NOT NULL DEFAULT 'unknown',
   "configured_at" TIMESTAMP(3),
@@ -36,7 +35,6 @@ CREATE TABLE "hosted_linq_line" (
   CONSTRAINT "hosted_linq_line_pkey" PRIMARY KEY ("phone_number_lookup_key")
 );
 
-CREATE UNIQUE INDEX "hosted_linq_line_phone_number_key" ON "hosted_linq_line"("phone_number");
 CREATE INDEX "hosted_linq_line_health_status_egress_policy_idx" ON "hosted_linq_line"("health_status", "egress_policy");
 CREATE INDEX "hosted_linq_line_provider_status_idx" ON "hosted_linq_line"("provider_status");
 CREATE INDEX "hosted_linq_line_last_failed_at_idx" ON "hosted_linq_line"("last_failed_at");

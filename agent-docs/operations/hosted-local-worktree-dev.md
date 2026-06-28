@@ -150,6 +150,15 @@ For hosted runner/container proof, stop the main stack or wait for the
 Do not copy secret values into committed files, examples, shell history, or
 assistant messages.
 
+For browser auth, use the helper's printed `http://localhost:<web-port>` URL.
+The helper overwrites Murph's local hosted-onboarding mutation origins, but it
+cannot mutate Privy dashboard/app-client allowed origins. Privy checks the full
+browser origin, including the port, so live Privy signup on a worktree port
+requires a development app/client with no allowed-origin restriction or an
+app/client whose allowed origins include the exact `http://localhost:<web-port>`
+being tested. Do not use `127.0.0.1` for Privy browser testing unless that exact
+origin is also configured in Privy.
+
 Worktree-local startup should get authority from the same existing sources as
 the main checkout:
 

@@ -612,6 +612,10 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedLinqObservabilityMigrationSql).toContain('"payload_shape_json" JSONB');
     expect(hostedLinqObservabilityMigrationSql).toContain('"payload_sanitized_json" JSONB');
     expect(hostedLinqObservabilityMigrationSql).toContain('"provider_created_at" TIMESTAMP(3) NOT NULL');
+    expect(hostedLinqObservabilityMigrationSql).not.toContain('"phone_number" TEXT NOT NULL');
+    expect(hostedLinqObservabilityMigrationSql).not.toContain(
+      'hosted_linq_line_phone_number_key',
+    );
     expect(hostedLinqObservabilityMigrationSql).not.toContain("raw_payload");
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"linq_last_inbound_at" TIMESTAMP(3)');
     expect(hostedLinqEgressEngagementMigrationSql).toContain('"pending_linq_last_inbound_at" TIMESTAMP(3)');

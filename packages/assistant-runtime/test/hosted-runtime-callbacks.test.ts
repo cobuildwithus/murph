@@ -4856,6 +4856,7 @@ describe("hosted runtime callbacks", () => {
         status: 204,
       });
     });
+    const assertRecentInbound = vi.fn(async () => undefined);
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_materialized",
@@ -4896,11 +4897,24 @@ describe("hosted runtime callbacks", () => {
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake,
-      effectsPort: createHostedRuntimeEffectsPortStub(),
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
       providerFetch,
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directRecipientPhoneNumber: "+15550001",
+        routeAuthority: null,
+        target: "linq_chat_current",
+        targetKind: "thread",
+      }),
+      {
+        signal: null,
+      },
+    );
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
       fromPhoneNumber: "+15550002",
       idempotencyKey: "assistant-outbox:intent_hashed_target",
@@ -5638,6 +5652,7 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
+    const assertRecentInbound = vi.fn(async () => undefined);
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinqVoiceMemo({
         attachmentId: "attachment_voice_1",
@@ -5729,6 +5744,7 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
+    const assertRecentInbound = vi.fn(async () => undefined);
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinqVoiceMemo({
         attachmentId: "attachment_voice_1",
@@ -5752,11 +5768,24 @@ describe("hosted runtime callbacks", () => {
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake,
-      effectsPort: createHostedRuntimeEffectsPortStub(),
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directRecipientPhoneNumber: "+15550001",
+        routeAuthority: null,
+        target: "linq_chat_current",
+        targetKind: "thread",
+      }),
+      {
+        signal: null,
+      },
+    );
     expect(JSON.stringify(effect.payload)).not.toContain("+15550001");
     expect(mocks.sendLinqVoiceMemoMessage).toHaveBeenCalledWith({
       attachmentId: "attachment_voice_1",
@@ -5886,6 +5915,7 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_123",
       targetKind: "thread" as const,
     });
+    const assertRecentInbound = vi.fn(async () => undefined);
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
@@ -5912,11 +5942,24 @@ describe("hosted runtime callbacks", () => {
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake,
-      effectsPort: createHostedRuntimeEffectsPortStub(),
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directRecipientPhoneNumber: "+15550001",
+        routeAuthority: null,
+        target: "linq_chat_123",
+        targetKind: "thread",
+      }),
+      {
+        signal: null,
+      },
+    );
     expect(JSON.stringify(effect.payload)).not.toContain("+15550001");
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
       fromPhoneNumber: null,
@@ -5972,6 +6015,7 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
+    const assertRecentInbound = vi.fn(async () => undefined);
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
@@ -5998,11 +6042,24 @@ describe("hosted runtime callbacks", () => {
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake,
-      effectsPort: createHostedRuntimeEffectsPortStub(),
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directRecipientPhoneNumber: "+15550001",
+        routeAuthority: null,
+        target: "linq_chat_current",
+        targetKind: "thread",
+      }),
+      {
+        signal: null,
+      },
+    );
     expect(JSON.stringify(effect.payload)).not.toContain("+15550001");
     expect(JSON.stringify(effect.payload)).not.toContain("+15559990000");
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
@@ -6059,6 +6116,7 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
+    const assertRecentInbound = vi.fn(async () => undefined);
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
@@ -6085,11 +6143,25 @@ describe("hosted runtime callbacks", () => {
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake,
-      effectsPort: createHostedRuntimeEffectsPortStub(),
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: "+15550002",
+        routeAuthority: null,
+        target: "linq_chat_current",
+        targetKind: "thread",
+      }),
+      {
+        signal: null,
+      },
+    );
     expect(JSON.stringify(effect.payload)).not.toContain("+15550001");
     expect(JSON.stringify(effect.payload)).not.toContain("+15559990000");
     expect(mocks.sendLinqMessage).toHaveBeenCalledWith({
