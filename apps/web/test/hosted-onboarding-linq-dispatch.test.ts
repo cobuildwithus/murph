@@ -356,7 +356,7 @@ type HostedLinqDailyStateFixture = {
 };
 
 type HostedLinqFirstContactAdmissionDecisionFixture = {
-  create?: MockedFunction;
+  createMany?: MockedFunction;
   findUnique?: MockedFunction;
 };
 
@@ -2337,8 +2337,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         findFirst: vi.fn().mockResolvedValue(null),
       },
       hostedLinqFirstContactAdmissionDecision: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
-        findUnique: vi.fn().mockResolvedValue(null),
+        createMany: vi.fn(async () => ({ count: 1 })),
+        findUnique: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({
+            confidence: 1,
+            decision: "allow",
+            eventId: "evt_sms_first_contact",
+            source: "deterministic",
+          }),
       },
       hostedInvite: {
         create: vi.fn().mockResolvedValue(invite),
@@ -2387,13 +2394,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
     expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
-    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledWith({
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.createMany).toHaveBeenCalledWith({
       data: {
         confidence: 1,
         decision: "allow",
         eventId: "evt_sms_first_contact",
         source: "deterministic",
       },
+      skipDuplicates: true,
     });
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
@@ -2517,8 +2525,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         updateMany: vi.fn(),
       },
       hostedLinqFirstContactAdmissionDecision: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
-        findUnique: vi.fn().mockResolvedValue(null),
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue({
+            confidence: 0.94,
+            decision: "block",
+            eventId: "evt_wrong_person_first_contact",
+            source: "model",
+          }),
       },
       hostedMember: {
         create: vi.fn(),
@@ -2574,14 +2589,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledWith({
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.createMany).toHaveBeenCalledWith({
       data: {
         confidence: 0.94,
         decision: "block",
         eventId: "evt_wrong_person_first_contact",
-        rejectedMessageText: boundedRejectedMessageText,
         source: "model",
       },
+      skipDuplicates: true,
     });
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
@@ -2620,8 +2635,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         findFirst: vi.fn().mockResolvedValue(null),
       },
       hostedLinqFirstContactAdmissionDecision: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
-        findUnique: vi.fn().mockResolvedValue(null),
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue({
+            confidence: 1,
+            decision: "block",
+            eventId: "evt_media_only_first_contact",
+            source: "deterministic",
+          }),
       },
       hostedMember: {
         create: vi.fn(),
@@ -2658,13 +2680,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.findFirst).not.toHaveBeenCalled();
     expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.count).not.toHaveBeenCalled();
     expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).toHaveBeenCalledWith({
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.createMany).toHaveBeenCalledWith({
       data: {
         confidence: 1,
         decision: "block",
         eventId: "evt_media_only_first_contact",
         source: "deterministic",
       },
+      skipDuplicates: true,
     });
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
@@ -2705,7 +2728,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         findFirst: vi.fn().mockResolvedValue(null),
       },
       hostedLinqFirstContactAdmissionDecision: {
-        create: vi.fn(),
+        createMany: vi.fn(),
         findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedMember: {
@@ -2760,7 +2783,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
     expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.createMany).not.toHaveBeenCalled();
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
@@ -2795,9 +2818,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         updateMany: vi.fn(),
       },
       hostedLinqFirstContactAdmissionDecision: {
-        create: vi.fn(),
+        createMany: vi.fn(),
         findUnique: vi.fn().mockResolvedValue({
-              confidence: 0.94,
+          confidence: 0.94,
           decision: "block",
           eventId: "evt_recorded_wrong_person_first_contact",
           source: "model",
@@ -2834,7 +2857,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.createMany).not.toHaveBeenCalled();
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
@@ -2866,9 +2889,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         updateMany: vi.fn(),
       },
       hostedLinqFirstContactAdmissionDecision: {
-        create: vi.fn(),
+        createMany: vi.fn(),
         findUnique: vi.fn().mockResolvedValue({
-              confidence: 0.94,
+          confidence: 0.94,
           decision: "block",
           eventId: "evt_recorded_block_after_member_state",
           source: "model",
@@ -2903,7 +2926,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.createMany).not.toHaveBeenCalled();
     expect(prismaMocks.hostedMember.findUnique).not.toHaveBeenCalled();
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
@@ -2935,8 +2958,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqFirstContactAdmissionDecision: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
-        findUnique: vi.fn().mockResolvedValue(null),
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue({
+            confidence: 0.94,
+            decision: "block",
+            eventId: "evt_first_contact_untrusted_service",
+            source: "model",
+          }),
       },
       hostedMember: {
         create: vi.fn(),
@@ -2969,7 +2999,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
   });
 
-  it("throws retryable classifier failures before member or invite side effects", async () => {
+  it("fails open when the first-contact classifier is unavailable", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     mocks.classifyHostedLinqFirstContactAdmission.mockRejectedValueOnce(hostedOnboardingError({
       code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
@@ -2981,6 +3011,121 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       message: "Linq first-contact admission classifier is unavailable.",
       retryable: true,
     }));
+
+    const invite = {
+      channel: "linq",
+      id: "invite_classifier_fallback",
+      inviteCode: "code_classifier_fallback",
+      memberId: "member_classifier_fallback",
+      sentAt: null,
+      status: "pending",
+    };
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValue(0),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue({
+            confidence: 1,
+            decision: "allow",
+            eventId: "evt_classifier_transport_retry",
+            source: "deterministic",
+          }),
+      },
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          id: invite.id,
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
+        updateMany: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: invite.memberId,
+          phoneLookupKey: "+15551234567",
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_classifier_transport_retry",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      inviteCode: invite.inviteCode,
+      joinUrl: `https://join.example.test/join/${invite.inviteCode}`,
+      ok: true,
+      reason: "sent-signup-link",
+    });
+
+    expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.createMany).toHaveBeenCalledWith({
+      data: {
+        confidence: 1,
+        decision: "allow",
+        eventId: "evt_classifier_transport_retry",
+        source: "deterministic",
+      },
+      skipDuplicates: true,
+    });
+    expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
+      memberId: invite.memberId,
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
+      memberId: invite.memberId,
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: expect.stringContaining(`https://join.example.test/join/${invite.inviteCode}`),
+        replyToMessageId: "msg_123",
+      }),
+    );
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
+  it("does not fail open for plain errors that only mimic the classifier-unavailable code", async () => {
+    mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
+    mocks.classifyHostedLinqFirstContactAdmission.mockRejectedValueOnce({
+      code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
+      httpStatus: 503,
+      retryable: true,
+    });
 
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -2995,6 +3140,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValue(0),
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        createMany: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
       hostedInvite: {
         create: vi.fn(),
         findFirst: vi.fn(),
@@ -3013,7 +3167,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
-        eventId: "evt_classifier_transport_retry",
+        eventId: "evt_classifier_plain_object_error",
       }),
       signature: null,
       timestamp: null,
@@ -3023,6 +3177,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       retryable: true,
     });
 
+    expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.createMany).not.toHaveBeenCalled();
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
@@ -3034,7 +3190,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("keeps same-event classifier retries retryable instead of exhausting the contact budget", async () => {
+  it("fails open for same-event classifier retries without spending another budget attempt", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     mocks.classifyHostedLinqFirstContactAdmission.mockRejectedValueOnce(hostedOnboardingError({
       code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
@@ -3048,6 +3204,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }));
 
     const eventId = "evt_classifier_transport_retry_replay";
+    const invite = {
+      channel: "linq",
+      id: "invite_classifier_replay_fallback",
+      inviteCode: "code_classifier_replay_fallback",
+      memberId: "member_classifier_replay_fallback",
+      sentAt: null,
+      status: "pending",
+    };
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedWebhookReceipt: {
@@ -3062,10 +3226,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedInvite: {
-        create: vi.fn(),
-        findFirst: vi.fn(),
-        findUnique: vi.fn(),
-        update: vi.fn(),
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          id: invite.id,
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
         updateMany: vi.fn(),
       },
       hostedLinqFirstContactAdmissionBudget: {
@@ -3077,8 +3244,23 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           participantContactLookupKey: "blind:v1:retry-contact",
         }),
       },
+      hostedLinqFirstContactAdmissionDecision: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue({
+            confidence: 1,
+            decision: "allow",
+            eventId,
+            source: "deterministic",
+          }),
+      },
       hostedMember: {
-        create: vi.fn(),
+        create: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: invite.memberId,
+          phoneLookupKey: "+15551234567",
+        }),
         findUnique: vi.fn().mockResolvedValue(null),
         update: vi.fn(),
       },
@@ -3092,19 +3274,43 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
       signature: null,
       timestamp: null,
-    })).rejects.toMatchObject({
-      code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
-      httpStatus: 503,
-      retryable: true,
+    })).resolves.toMatchObject({
+      inviteCode: invite.inviteCode,
+      joinUrl: `https://join.example.test/join/${invite.inviteCode}`,
+      ok: true,
+      reason: "sent-signup-link",
     });
 
     expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.createMany).toHaveBeenCalledWith({
+      data: {
+        confidence: 1,
+        decision: "allow",
+        eventId,
+        source: "deterministic",
+      },
+      skipDuplicates: true,
+    });
     expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
-    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
-    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
+      memberId: invite.memberId,
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
+      memberId: invite.memberId,
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: expect.stringContaining(`https://join.example.test/join/${invite.inviteCode}`),
+        replyToMessageId: "msg_123",
+      }),
+    );
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
@@ -5373,12 +5579,20 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
     hostedLinqDailyState.updateMany = vi.fn().mockResolvedValue({ count: 1 });
   }
 
-  if (!hostedLinqFirstContactAdmissionDecision?.findUnique || !hostedLinqFirstContactAdmissionDecision?.create) {
+  if (!hostedLinqFirstContactAdmissionDecision?.findUnique || !hostedLinqFirstContactAdmissionDecision?.createMany) {
+    const decisionRecords = new Map<string, Record<string, unknown>>();
     Object.defineProperty(prisma, "hostedLinqFirstContactAdmissionDecision", {
       configurable: true,
       value: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
-        findUnique: vi.fn().mockResolvedValue(null),
+        createMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          if (typeof data.eventId === "string") {
+            decisionRecords.set(data.eventId, data);
+          }
+          return { count: 1 };
+        }),
+        findUnique: vi.fn(async ({ where }: { where: { eventId: string } }) =>
+          decisionRecords.get(where.eventId) ?? null,
+        ),
       },
     });
   }

@@ -6199,6 +6199,7 @@ test('sendAssistantMessageLocal delivers preserved reactions for accepted no-rep
   const failedProviderSession = createAssistantSession({
     sessionId: 'session-provider-failed-after-reaction-no-reply',
   })
+  const traceEvents: unknown[] = []
   const reactionOutcome: AssistantDeliveryOutcome = {
     error: null,
     intentId: 'intent-failed-terminal-reaction',
@@ -6242,6 +6243,15 @@ test('sendAssistantMessageLocal delivers preserved reactions for accepted no-rep
 
   const result = await sendAssistantMessageLocal({
     deliverResponse: true,
+    executionContext: {
+      hosted: {
+        memberId: 'member-123',
+        userEnvKeys: [],
+      },
+    },
+    onTraceEvent(event) {
+      traceEvents.push(event)
+    },
     prompt: 'React and finish',
     vault: '/vaults/test',
   })
@@ -6287,6 +6297,20 @@ test('sendAssistantMessageLocal delivers preserved reactions for accepted no-rep
     turnId: 'turn-1',
     vault: '/vaults/test',
   })
+  const replyTiming = traceEvents.find((event) =>
+    isTraceEventWithRawType(event, 'assistant.turn.timing') &&
+    (event as { rawEvent?: { turnTimingStage?: unknown } }).rawEvent
+      ?.turnTimingStage === 'reply-dispatched',
+  )
+  expect(replyTiming).toBeDefined()
+  expect((replyTiming as { rawEvent: Record<string, unknown> }).rawEvent)
+    .toEqual(expect.objectContaining({
+      deliveryAttempted: true,
+      deliveryIntentPresent: true,
+      deliveryOutcomeKind: 'queued',
+      finalReplySelected: false,
+      schema: 'murph.assistant-turn-timing.v1',
+    }))
 })
 
 test('sendAssistantMessageLocal recovers reaction no-reply before draining later acknowledged steers', async () => {
@@ -6839,6 +6863,94 @@ test('sendAssistantMessageLocal suppresses transcript and delivery for no-reply 
       session,
     },
   )
+})
+
+test('sendAssistantMessageLocal traces hosted reaction-only no-reply delivery outcomes', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-no-reply-final-reaction',
+  })
+  const traceEvents: unknown[] = []
+  const reactionOutcome: AssistantDeliveryOutcome = {
+    error: null,
+    intentId: 'intent-no-reply-reaction',
+    kind: 'queued',
+    media: [],
+    session,
+  }
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-no-reply-reaction',
+        finalAction: {
+          kind: 'none',
+        },
+        rawEvents: [],
+        reactions: [
+          {
+            deliveryContextOrdinal: 0,
+            reaction: 'heart',
+          },
+        ],
+        response: 'suppressed provider text',
+        route: {
+          routeId: 'route-no-reply-reaction',
+        },
+        session,
+      },
+    },
+    reactionOutcome,
+    session,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    executionContext: {
+      hosted: {
+        memberId: 'member-123',
+        userEnvKeys: [],
+      },
+    },
+    onTraceEvent(event) {
+      traceEvents.push(event)
+    },
+    prompt: 'react only',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(mocks.deliverAssistantReaction).toHaveBeenCalledWith(
+    expect.objectContaining({
+      deliveryContextOrdinal: 0,
+      reaction: 'heart',
+      turnId: 'turn-1',
+    }),
+  )
+  expect(result).toMatchObject({
+    delivery: null,
+    deliveryDeferred: true,
+    deliveryIntentId: 'intent-no-reply-reaction',
+    response: '',
+    responseDisposition: 'none',
+  })
+  const replyTiming = traceEvents.find((event) =>
+    isTraceEventWithRawType(event, 'assistant.turn.timing') &&
+    (event as { rawEvent?: { turnTimingStage?: unknown } }).rawEvent
+      ?.turnTimingStage === 'reply-dispatched',
+  )
+  expect(replyTiming).toBeDefined()
+  expect((replyTiming as { rawEvent: Record<string, unknown> }).rawEvent)
+    .toEqual(expect.objectContaining({
+      deliveryAttempted: true,
+      deliveryIntentPresent: true,
+      deliveryOutcomeKind: 'queued',
+      finalReplySelected: false,
+      schema: 'murph.assistant-turn-timing.v1',
+    }))
 })
 
 test('sendAssistantMessageLocal durably records accepted no-reply markers before visible finalization', async () => {
