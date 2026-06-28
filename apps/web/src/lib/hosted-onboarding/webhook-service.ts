@@ -36,8 +36,10 @@ import {
   drainHostedLinqSideEffectsDirect,
 } from "./webhook-transport";
 import {
+  buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision,
   claimHostedLinqFirstContactAdmissionBudget,
   classifyHostedLinqFirstContactAdmission,
+  isHostedLinqFirstContactAdmissionClassifierUnavailableError,
   isHostedLinqFirstContactAdmissionBudgetExhausted,
   readHostedLinqFirstContactAdmissionMode,
   readRecordedHostedLinqFirstContactAdmissionDecision,
@@ -154,8 +156,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         );
       }
 
-      const firstContactAdmissionRequest = plan.firstContactAdmissionRequest;
-      if (firstContactAdmissionRequest) {
+      if (plan.firstContactAdmissionRequest) {
+        const firstContactAdmissionRequest = plan.firstContactAdmissionRequest;
         // Resolve deterministic blocks (no OpenAI call) before claiming the
         // per-contact budget so unsupported/textless events cannot exhaust the
         // classifier-attempt cap.
@@ -167,7 +169,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             decision: deterministicDecision,
             eventId: event.event_id,
             prisma,
-            rejectedMessageText: firstContactAdmissionRequest.text,
           });
           plan = firstContactAdmission.kind === "block"
             ? buildBlockedHostedLinqFirstContactAdmissionPlan()
@@ -191,8 +192,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           // Pre-flight: skip the classifier call entirely for contacts whose
           // per-contact attempt cap is already burned. The cheap count-read
           // here is the read-only side of the same budget guard; the
-          // authoritative claim still runs after a successful classification
-          // under its advisory lock + composite-PK idempotency.
+          // authoritative claim still runs after classification or fallback
+          // admission under its advisory lock + composite-PK idempotency.
           const budgetAlreadyExhausted = await isHostedLinqFirstContactAdmissionBudgetExhausted({
             eventId: event.event_id,
             participantContact: firstContactAdmissionParticipantContact,
@@ -203,36 +204,56 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               "first-contact-admission-budget-exhausted",
             );
           } else {
-            // Classify before claiming the slot so transport/timeout/invalid-
-            // output failures do not consume budget. The post-classification
-            // claim still surfaces "exhausted" if a concurrent event filled the
-            // cap between the pre-flight read and the lock acquisition.
-            const classifiedAdmission = await classifyHostedLinqFirstContactAdmission({
-              request: firstContactAdmissionRequest,
-              signal: input.signal,
-            });
+            // Classifier-unavailable failures fail open, but explicit classifier
+            // blocks still block. Persist budget + decision together so retries
+            // cannot get stuck with a counted event and no reusable decision.
+            let classifiedAdmission: Awaited<ReturnType<typeof classifyHostedLinqFirstContactAdmission>>;
+            try {
+              classifiedAdmission = await classifyHostedLinqFirstContactAdmission({
+                request: firstContactAdmissionRequest,
+                signal: input.signal,
+              });
+            } catch (error) {
+              if (!isHostedLinqFirstContactAdmissionClassifierUnavailableError(error)) {
+                throw error;
+              }
+              classifiedAdmission = buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision();
+            }
             firstContactAdmissionClassified = true;
-            const admissionBudget = await runHostedOnboardingWebhookTransaction(
+            const persistedAdmission = await runHostedOnboardingWebhookTransaction(
               prisma,
-              (transaction) =>
-                claimHostedLinqFirstContactAdmissionBudget({
+              async (transaction) => {
+                const admissionBudget = await claimHostedLinqFirstContactAdmissionBudget({
                   eventId: event.event_id,
                   participantContact: firstContactAdmissionParticipantContact,
                   tx: transaction,
-                }),
+                });
+                if (admissionBudget.kind === "exhausted") {
+                  return {
+                    admissionBudget,
+                    firstContactAdmission: null,
+                  };
+                }
+                return {
+                  admissionBudget,
+                  firstContactAdmission: await recordHostedLinqFirstContactAdmissionDecision({
+                    decision: classifiedAdmission,
+                    eventId: event.event_id,
+                    prisma: transaction,
+                  }),
+                };
+              },
             );
 
-            if (admissionBudget.kind === "exhausted") {
+            if (persistedAdmission.admissionBudget.kind === "exhausted") {
               plan = buildBlockedHostedLinqFirstContactAdmissionPlan(
                 "first-contact-admission-budget-exhausted",
               );
             } else {
-              const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecision({
-                decision: classifiedAdmission,
-                eventId: event.event_id,
-                prisma,
-                rejectedMessageText: firstContactAdmissionRequest.text,
-              });
+              const firstContactAdmission = persistedAdmission.firstContactAdmission;
+              if (!firstContactAdmission) {
+                throw new Error("Hosted Linq first-contact admission was not persisted after a budget claim.");
+              }
               if (firstContactAdmission.kind === "block") {
                 plan = buildBlockedHostedLinqFirstContactAdmissionPlan();
               } else {
