@@ -1360,6 +1360,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         stage: "foreground.pass",
         status: "start",
       });
+      let completedPassResult: HostedWorkspaceRunnerResult | null = null;
+      const drainCompletedPassDeferredUsageFlush = async (): Promise<void> => {
+        if (completedPassResult === null) {
+          return;
+        }
+
+        await completedPassResult.deferredUsageFlushFinished;
+      };
       try {
         let currentDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
           initialMailboxImport: passInput.initialMailboxImport,
@@ -1372,8 +1380,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
             signal: runtimeAbortController.signal,
           },
-          async () =>
-            await raceHostedRuntimeCancellation(
+          async () => {
+            const runnerResult = await raceHostedRuntimeCancellation(
               runHostedWorkspaceUntilIdleOrBudget({
                 ...baseRunnerInput,
                 initialMailboxImport: passInput.initialMailboxImport,
@@ -1404,7 +1412,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 workspace: passInput.workspace,
               }),
               runtimeAbortController.signal,
-            ),
+            );
+            completedPassResult = runnerResult;
+            return runnerResult;
+          },
         );
         emitPhaseLog({
           details: {
@@ -1431,6 +1442,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         recordBrowserVaultReplicaRefreshIntent(passResult);
         return passResult;
       } catch (error) {
+        await drainCompletedPassDeferredUsageFlush();
         emitPhaseLog({
           details: {
             passForeground,

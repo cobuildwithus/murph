@@ -67,6 +67,12 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import {
+  HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
+  HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
+  HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_URL_ENV,
+} from "@murphai/hosted-execution/cli-runtime-bridge";
 import type {
   HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
@@ -151,6 +157,9 @@ import {
 import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "../src/hosted-runtime/checkpoint-bridge.ts";
+import {
+  stopHostedCliRuntimeBridge,
+} from "../src/hosted-runtime/cli-runtime-bridge.ts";
 import {
   ensureHostedInboxSidecarReady,
 } from "../src/hosted-runtime/context.ts";
@@ -4961,6 +4970,170 @@ describe("hosted workspace runtime entrypoint", () => {
       if (resultPromise) {
         await resultPromise.catch(() => undefined);
       }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("drains completed runner deferred usage before rethrowing CLI bridge drain failure", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-bridge-fail-"));
+    const events: string[] = [];
+    const usageRecordStarted = createDeferred<void>();
+    const releaseUsageRecord = createDeferred<void>();
+    const deviceSnapshotStarted = createDeferred<void>();
+    const releaseDeviceSnapshot = createDeferred<void>();
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+    let resultSettled = false;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const deviceSyncPort = createSnapshotDeviceSyncPort({
+        connectionId: "connection_synthetic_bridge_drain_failure",
+        nextReconcileAt: "2099-01-01T00:00:00.000Z",
+        onFetchSnapshot: async () => {
+          events.push("device.snapshot:start");
+          deviceSnapshotStarted.resolve();
+          await releaseDeviceSnapshot.promise;
+          events.push("device.snapshot:done");
+        },
+      });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_deferred_usage_bridge_drain_failure",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: `users/bundles/member-synthetic/deferred-usage-bridge-fail-${snapshotInput.reason}.bundle.json`,
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: {
+            ...createPlatform({
+              deviceSyncPort,
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: {
+                async read() {
+                  events.push("workspace.read");
+                  return {
+                    fetchedAt: TEST_NOW,
+                    workspace: createWorkspaceState({ version: "4" }),
+                  };
+                },
+                async checkpoint(request) {
+                  events.push(`workspace.checkpoint:${request.reason}`);
+                  return {
+                    checkpointed: true,
+                    workspace: createWorkspaceState({
+                      snapshotRef: request.snapshotRef,
+                      version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                    }),
+                  };
+                },
+              },
+            }),
+            usageRecordPort: {
+              async recordUsage(record: AssistantUsageRecord) {
+                events.push("usage.record:start");
+                usageRecordStarted.resolve();
+                await releaseUsageRecord.promise;
+                events.push("usage.record:done");
+                return {
+                  recorded: true,
+                  usageId: record.usageId,
+                };
+              },
+            },
+          },
+          async runAssistantPhase(phaseInput) {
+            events.push("assistant.phase");
+            const bridgeUrl = phaseInput.runtimeEnv[HOSTED_CLI_BRIDGE_URL_ENV];
+            const bridgeToken = phaseInput.runtimeEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV];
+            assert.ok(bridgeUrl);
+            assert.ok(bridgeToken);
+            const bridgeRequest = fetch(
+              new URL(HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH, bridgeUrl),
+              {
+                body: JSON.stringify({}),
+                headers: {
+                  authorization: `Bearer ${bridgeToken}`,
+                  "content-type": "application/json",
+                },
+                method: "POST",
+              },
+            );
+            void bridgeRequest.catch(() => undefined);
+            await withRealTimeout(
+              deviceSnapshotStarted.promise,
+              1_000,
+              () => "CLI bridge device snapshot request did not start.",
+            );
+            return {
+              afterCheckpoint: async () => {
+                events.push("reply.deliver");
+                return {
+                  checkpointReason: "outbox_receipt",
+                };
+              },
+              checkpointReason: "assistant_runtime_commit",
+              deferredUsageRecords: [
+                createAssistantUsageRecord({
+                  usageId: "turn_entrypoint_deferred_usage_bridge_failure.attempt-1",
+                }),
+              ],
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+      void resultPromise.finally(() => {
+        resultSettled = true;
+      }).catch(() => undefined);
+
+      await withRealTimeout(
+        usageRecordStarted.promise,
+        1_000,
+        () => "Deferred usage recording did not start before CLI bridge drain failure.",
+      );
+      await new Promise((resolve) =>
+        setTimeout(resolve, HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS + 50)
+      );
+      assert.equal(events.includes("usage.record:done"), false);
+      assert.equal(resultSettled, false);
+
+      releaseUsageRecord.resolve();
+      await expect(
+        withRealTimeout(
+          resultPromise,
+          2_000,
+          () => "Runtime did not reject after deferred usage recording finished.",
+        ),
+      ).rejects.toThrow("Hosted CLI bridge in-flight request drain timed out.");
+      assert.equal(events.includes("usage.record:done"), true);
+    } finally {
+      releaseUsageRecord.resolve();
+      releaseDeviceSnapshot.resolve();
+      if (resultPromise) {
+        await resultPromise.catch(() => undefined);
+      }
+      await stopHostedCliRuntimeBridge();
       await removeTempRoot(vaultRoot);
     }
   });
