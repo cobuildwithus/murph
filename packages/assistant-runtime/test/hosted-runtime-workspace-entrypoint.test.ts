@@ -4667,25 +4667,30 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const consumeRequests: HostedMailboxConsumeRequest[] = [];
+    const consumedSeqByLane = [
+      {
+        consumedSeq: "1",
+        lane: "conversation" as const,
+      },
+    ];
+    const restoredState = createEmptyHostedMailboxImportState();
+    restoredState.watermarks.conversation = "1";
+    const bundle = createMailboxImportStateBundle(restoredState);
     const usageRecordStarted = createDeferred<void>();
     const releaseUsageRecord = createDeferred<void>();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const cleanWakeAt = "2099-04-27T00:05:00.000Z";
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
     let resultSettled = false;
     let assistantPhaseCalls = 0;
 
     try {
-      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
-      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementationOnce(async () => {
-        events.push("browser.refresh");
-        return {
-          status: "skipped_no_port",
-        };
-      });
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const platform = createPlatform({
+        artifactBytesByHash: new Map([[bundle.hash, bundle.bytes]]),
         mailboxPort: createMailboxPort({
+          consumedSeqByLane,
+          consumeRequests,
           events,
           items: [],
         }),
@@ -4694,7 +4699,17 @@ describe("hosted workspace runtime entrypoint", () => {
             events.push("workspace.read");
             return {
               fetchedAt: TEST_NOW,
-              workspace: createWorkspaceState({ version: "4" }),
+              workspace: createWorkspaceState({
+                redactedStatus: {
+                  hostedMailboxConversationImportedSeq: "1",
+                },
+                snapshotRef: createBundleRef({
+                  hash: bundle.hash,
+                  key: "users/bundles/member-synthetic/deferred-usage-clean-wake-before.bundle.json",
+                  size: bundle.bytes.byteLength,
+                }),
+                version: "4",
+              }),
             };
           },
           async checkpoint(request) {
@@ -4743,7 +4758,13 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
-            return { status: "imported" };
+            return {
+              assistantInputId: await stageAssistantInputEventForMailboxItem({
+                item: item.item,
+                vaultRoot,
+              }),
+              status: "imported",
+            };
           },
           platform: {
             ...platform,
@@ -4766,8 +4787,7 @@ describe("hosted workspace runtime entrypoint", () => {
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls > 1) {
               return {
-                nextWakeAt: cleanWakeAt,
-                nextWakeReason: "mailbox.retry",
+                foregroundReplyFailed: 0,
                 progressed: false,
               };
             }
@@ -4813,6 +4833,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(resultSettled, false);
 
       releaseUsageRecord.resolve();
+      consumedSeqByLane[0]!.consumedSeq = "0";
       runtimeWakeSignal.notify();
       await waitUntil(() => {
         assert.equal(assistantPhaseCalls, 2);
@@ -4823,9 +4844,13 @@ describe("hosted workspace runtime entrypoint", () => {
         () => "Runtime did not settle after deferred usage recording finished.",
       );
 
-      assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, cleanWakeAt);
-      assert.equal(events.includes("browser.refresh"), true);
+      assert.equal(result.status, "idle");
+      assert.deepEqual(events.filter((event) => event === "mailbox.consume"), [
+        "mailbox.consume",
+      ]);
+      assert.deepEqual(consumeRequests.map((request) => request.lanes), [
+        [{ lane: "conversation", consumedSeq: "1" }],
+      ]);
       assert.deepEqual(events.filter((event) => event.startsWith("snapshot:")), [
         "snapshot:idle_shutdown",
       ]);
@@ -4838,7 +4863,6 @@ describe("hosted workspace runtime entrypoint", () => {
       if (resultPromise) {
         await resultPromise.catch(() => undefined);
       }
-      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       await removeTempRoot(vaultRoot);
     }
   });

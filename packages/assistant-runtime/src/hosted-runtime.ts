@@ -1736,13 +1736,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runtimeStateDirty ||= result.runtimeStateDirty;
         return result;
       };
-      const drainDeferredUsageFlushesAfterIdleCheckpoint = async (): Promise<boolean> => {
+      const drainDeferredUsageFlushesAfterIdleCheckpoint = async (): Promise<{
+        handledWake: boolean;
+        runtimeStateDirty: boolean;
+      }> => {
+        let handledWake = false;
         while (pendingDeferredUsageFlushCompletions.size > 0) {
           const waitResult = await waitForDeferredUsageFlushesAfterIdleCheckpoint();
           if (waitResult.kind === "finished") {
             continue;
           }
 
+          handledWake = true;
           const wakeResult = await runIdleWakeForegroundPass({
             latencySeed: createHostedRuntimeWakeLatencySeed(
               waitResult.notification,
@@ -1751,10 +1756,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             requestIdKind: "idle-wake",
           });
           if (wakeResult.runtimeStateDirty) {
-            return true;
+            return {
+              handledWake,
+              runtimeStateDirty: true,
+            };
           }
         }
-        return false;
+        return {
+          handledWake,
+          runtimeStateDirty: false,
+        };
       };
       while (runtimeStateDirty) {
         if (
@@ -1999,6 +2010,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           forceIdleCheckpointBeforeWake = true;
           continue;
         }
+        runtimeStateDirty = false;
         const checkpointWakeLatencySeed =
           consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null);
         if (checkpointWakeLatencySeed) {
@@ -2030,17 +2042,23 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           };
           runtimeStateDirty = result.runtimeStateDirty;
           if (!runtimeStateDirty) {
-            const deferredUsageDrainFoundDirtyWork =
+            const deferredUsageDrain =
               await drainDeferredUsageFlushesAfterIdleCheckpoint();
-            if (deferredUsageDrainFoundDirtyWork) {
+            if (
+              deferredUsageDrain.runtimeStateDirty
+              || deferredUsageDrain.handledWake
+            ) {
               continue;
             }
           }
           continue;
         }
-        const deferredUsageDrainFoundDirtyWork =
+        const deferredUsageDrain =
           await drainDeferredUsageFlushesAfterIdleCheckpoint();
-        if (deferredUsageDrainFoundDirtyWork) {
+        if (
+          deferredUsageDrain.runtimeStateDirty
+          || deferredUsageDrain.handledWake
+        ) {
           continue;
         }
         const browserVaultRefresh = await runBrowserVaultRefreshMaintenance({
