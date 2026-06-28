@@ -276,6 +276,7 @@ export interface HostedWorkspaceRunnerInput {
   initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
+  onDeferredUsageFlushStarted?: ((completion: Promise<void>) => void) | null;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
@@ -566,6 +567,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       input,
       records: deferredUsageRecords,
     });
+    input.onDeferredUsageFlushStarted?.(deferredUsageFlushFinished);
     return deferredUsageFlushFinished;
   };
   const awaitAssistantPhaseDeferredUsageFlush = async (): Promise<void> => {

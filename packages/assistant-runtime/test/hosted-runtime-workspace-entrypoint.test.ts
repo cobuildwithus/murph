@@ -146,7 +146,6 @@ vi.mock("../src/hosted-runtime/workspace-runner.ts", async (importOriginal) => {
 });
 
 import {
-  createAbortGuardedHostedRuntimePlatform,
   createCoalescingRuntimeWakeSignal,
   HostedRuntimeCheckpointInterruptedByWakeError,
   HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
@@ -2690,44 +2689,6 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("abort-guarded platform leaves deferred usage ledger writes unguarded", async () => {
-    const events: string[] = [];
-    const usageRequests: AssistantUsageRecord[] = [];
-    const abortReason = new Error("synthetic runtime abort before deferred usage ledger");
-    const platform: HostedRuntimePlatform = {
-      ...createPlatform({
-        events,
-        mailboxPort: null,
-        workspacePort: null,
-      }),
-      usageRecordPort: {
-        async recordUsage(record) {
-          events.push("usage.record");
-          usageRequests.push(record);
-          return {
-            recorded: true,
-            usageId: record.usageId,
-          };
-        },
-      },
-    };
-    const guardedPlatform = createAbortGuardedHostedRuntimePlatform(platform, () => {
-      throw abortReason;
-    });
-
-    await guardedPlatform.usageRecordPort?.recordUsage(
-      createAssistantUsageRecord({
-        usageId: "turn_entrypoint_abort_guarded_deferred_usage.attempt-1",
-      }),
-    );
-
-    assert.deepEqual(events, ["usage.record"]);
-    assert.deepEqual(
-      usageRequests.map((record) => record.usageId),
-      ["turn_entrypoint_abort_guarded_deferred_usage.attempt-1"],
-    );
-  });
-
   test("runtime abort blocks the foreground consume ack at the abort-guarded platform", async () => {
     // The guard half of the consume passthrough: the consumed-watermark ack is
     // a durable write, so once the runtime abort signal fires it must never
@@ -5042,6 +5003,147 @@ describe("hosted workspace runtime entrypoint", () => {
       releaseUsageRecord.resolve();
       await expect(resultPromise).rejects.toThrow("Synthetic idle checkpoint failure.");
       assert.equal(events.includes("usage.record:done"), true);
+    } finally {
+      releaseUsageRecord.resolve();
+      if (resultPromise) {
+        await resultPromise.catch(() => undefined);
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("drains started deferred usage when host abort wins before runner result returns", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-abort-"));
+    const events: string[] = [];
+    const usageRecordStarted = createDeferred<void>();
+    const releaseUsageRecord = createDeferred<void>();
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("synthetic host abort after deferred usage starts");
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+    let resultSettled = false;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_deferred_usage_host_abort",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: `users/bundles/member-synthetic/deferred-usage-abort-${snapshotInput.reason}.bundle.json`,
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: {
+            ...createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: {
+                async read() {
+                  events.push("workspace.read");
+                  return {
+                    fetchedAt: TEST_NOW,
+                    workspace: createWorkspaceState({ version: "4" }),
+                  };
+                },
+                async checkpoint(request) {
+                  events.push(`workspace.checkpoint:${request.reason}`);
+                  return {
+                    checkpointed: true,
+                    workspace: createWorkspaceState({
+                      snapshotRef: request.snapshotRef,
+                      version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                    }),
+                  };
+                },
+              },
+            }),
+            usageRecordPort: {
+              async recordUsage(record: AssistantUsageRecord) {
+                events.push("usage.record:start");
+                assert.equal(
+                  record.usageId,
+                  "turn_entrypoint_deferred_usage_host_abort.attempt-1",
+                );
+                usageRecordStarted.resolve();
+                hostAbortController.abort(hostAbortReason);
+                await releaseUsageRecord.promise;
+                events.push("usage.record:done");
+                return {
+                  recorded: true,
+                  usageId: record.usageId,
+                };
+              },
+            },
+          },
+          async runAssistantPhase() {
+            events.push("assistant.phase");
+            return {
+              afterCheckpoint: async () => {
+                events.push("reply.deliver");
+                return {
+                  checkpointReason: "outbox_receipt",
+                };
+              },
+              checkpointReason: "assistant_runtime_commit",
+              deferredUsageRecords: [
+                createAssistantUsageRecord({
+                  usageId: "turn_entrypoint_deferred_usage_host_abort.attempt-1",
+                }),
+              ],
+              progressed: true,
+            };
+          },
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+      void resultPromise.finally(() => {
+        resultSettled = true;
+      }).catch(() => undefined);
+
+      await withRealTimeout(
+        usageRecordStarted.promise,
+        1_000,
+        () => "Deferred usage recording did not start before host abort.",
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.equal(events.includes("usage.record:done"), false);
+      assert.equal(resultSettled, false);
+
+      releaseUsageRecord.resolve();
+      const outcome = await withRealTimeout(
+        resultPromise,
+        1_000,
+        () => "Runtime did not settle after deferred usage recording finished.",
+      ).then(
+        () => "resolved" as const,
+        (error: unknown) => error,
+      );
+
+      assert.equal(outcome, hostAbortReason);
+      assert.deepEqual(events.filter((event) => event.startsWith("usage.record:")), [
+        "usage.record:start",
+        "usage.record:done",
+      ]);
+      assert.equal(events.includes("reply.deliver"), true);
     } finally {
       releaseUsageRecord.resolve();
       if (resultPromise) {

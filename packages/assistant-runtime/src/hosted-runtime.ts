@@ -789,6 +789,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const phaseLogger = createHostedRuntimePhaseLogger();
   const emitPhaseLog = phaseLogger.emit;
   const pendingDeferredUsageFlushCompletions = new Set<Promise<void>>();
+  const trackPostCheckpointCompletion = (
+    pendingCompletions: Set<Promise<void>>,
+    completion: Promise<void> | null,
+  ): void => {
+    if (completion === null) {
+      return;
+    }
+
+    pendingCompletions.add(completion);
+    void completion.finally(() => {
+      pendingCompletions.delete(completion);
+    });
+  };
   const drainStartedDeferredUsageFlushesBestEffort = async (): Promise<void> => {
     if (pendingDeferredUsageFlushCompletions.size === 0) {
       return;
@@ -1009,6 +1022,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
+      onDeferredUsageFlushStarted: (completion) =>
+        trackPostCheckpointCompletion(pendingDeferredUsageFlushCompletions, completion),
       platform: runnerPlatform,
       requestId,
       runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -1540,19 +1555,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
       }
       return { requiresFollowUpCheckpoint };
-    };
-    const trackPostCheckpointCompletion = (
-      pendingCompletions: Set<Promise<void>>,
-      completion: Promise<void> | null,
-    ): void => {
-      if (completion === null) {
-        return;
-      }
-
-      pendingCompletions.add(completion);
-      void completion.finally(() => {
-        pendingCompletions.delete(completion);
-      });
     };
     const trackRunnerPostCheckpointCompletions = (passResult: HostedWorkspaceRunnerResult): void => {
       trackPostCheckpointCompletion(
@@ -3133,7 +3135,7 @@ function assertHostedWorkspaceRuntimeBudgetSupported(maxRuntimeMs: number | null
   throw new TypeError("Hosted workspace runtime job budget.maxRuntimeMs is not supported yet.");
 }
 
-export function createAbortGuardedHostedRuntimePlatform(
+function createAbortGuardedHostedRuntimePlatform(
   platform: HostedRuntimePlatform,
   assertLive: () => void,
 ): HostedRuntimePlatform {
