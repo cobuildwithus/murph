@@ -426,6 +426,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const linqFirstContactRejectedMessageMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260627230000_linq_first_contact_rejected_message_text/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -489,6 +496,7 @@ describe("hosted Prisma baseline migration", () => {
       "2026062600_computer_handoff_return_contact_kind",
       "20260626010000_linq_first_contact_admission_budget",
       "20260627210000_linq_first_contact_admission_drop_category",
+      "20260627230000_linq_first_contact_rejected_message_text",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -623,6 +631,21 @@ describe("hosted Prisma baseline migration", () => {
       "prompt",
     );
     expect(linqFirstContactAdmissionDropCategoryMigrationSql).not.toContain(
+      "response",
+    );
+    expect(linqFirstContactRejectedMessageMigrationSql).toContain(
+      'ADD COLUMN "rejected_message_text" TEXT',
+    );
+    expect(linqFirstContactRejectedMessageMigrationSql).toContain(
+      'char_length("rejected_message_text") <= 2000',
+    );
+    expect(linqFirstContactRejectedMessageMigrationSql).toContain(
+      '"decision" = \'block\'',
+    );
+    expect(linqFirstContactRejectedMessageMigrationSql).not.toContain(
+      "prompt",
+    );
+    expect(linqFirstContactRejectedMessageMigrationSql).not.toContain(
       "response",
     );
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
