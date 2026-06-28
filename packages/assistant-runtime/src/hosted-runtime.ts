@@ -792,8 +792,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
   const phaseLogger = createHostedRuntimePhaseLogger();
   const emitPhaseLog = phaseLogger.emit;
+  const pendingPostSafePointCompletions = new Set<Promise<void>>();
   const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
-  const pendingDeferredUsageCompletions = new Set<Promise<void>>();
   const trackCompletion = (
     pendingCompletions: Set<Promise<void>>,
     completion: Promise<void> | null,
@@ -807,18 +807,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       pendingCompletions.delete(completion);
     });
   };
+  const registerPostSafePointCompletion = (completion: Promise<void> | null): void => {
+    trackCompletion(pendingPostSafePointCompletions, completion);
+    trackHostedRuntimePostSafePointCompletion(completion);
+  };
   const trackMailboxPostCheckpointEffects = (completion: Promise<void> | null): void => {
     trackCompletion(pendingMailboxPostCheckpointEffectCompletions, completion);
+    registerPostSafePointCompletion(completion);
   };
-  const trackDeferredUsageCompletion = (completion: Promise<void> | null): void => {
-    trackCompletion(pendingDeferredUsageCompletions, completion);
-    trackHostedRuntimeDeferredUsageCompletion(completion);
-  };
-  const drainDeferredUsageCompletionsBestEffort = async (): Promise<void> => {
-    const pendingCompletions = [
-      ...pendingMailboxPostCheckpointEffectCompletions,
-      ...pendingDeferredUsageCompletions,
-    ];
+  const drainPostSafePointCompletionsBestEffort = async (): Promise<void> => {
+    const pendingCompletions = [...pendingPostSafePointCompletions];
     if (pendingCompletions.length > 0) {
       await Promise.allSettled(pendingCompletions);
     }
@@ -1034,7 +1032,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
-      onDeferredUsageCompletionRegistered: trackDeferredUsageCompletion,
+      registerPostSafePointCompletion,
       platform: runnerPlatform,
       requestId,
       runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -2174,7 +2172,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "fail",
     });
     if (!hostAbortObserved || error !== hostAbortReason) {
-      await drainDeferredUsageCompletionsBestEffort();
+      await drainPostSafePointCompletionsBestEffort();
     }
     throw error;
   } finally {
@@ -2490,7 +2488,7 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
 const DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const DEFAULT_HOSTED_FOREGROUND_MAILBOX_IMPORT_LIMIT = 10;
 const HOSTED_RUNTIME_MAX_TIMER_DELAY_MS = 2_147_483_647;
-const pendingHostedRuntimeDeferredUsageCompletions = new Set<Promise<void>>();
+const pendingHostedRuntimePostSafePointCompletions = new Set<Promise<void>>();
 
 type HostedRuntimeDirtyWaitResult =
   | { kind: "external_wake"; notification: RuntimeWakeNotification }
@@ -2520,22 +2518,22 @@ function consumePendingHostedRuntimeWakeUnlessShuttingDown(
   return consumePendingHostedRuntimeWake(runtimeWakeSignal);
 }
 
-function trackHostedRuntimeDeferredUsageCompletion(completion: Promise<void> | null): void {
+function trackHostedRuntimePostSafePointCompletion(completion: Promise<void> | null): void {
   if (completion === null) {
     return;
   }
 
-  pendingHostedRuntimeDeferredUsageCompletions.add(completion);
+  pendingHostedRuntimePostSafePointCompletions.add(completion);
   void completion.finally(() => {
-    pendingHostedRuntimeDeferredUsageCompletions.delete(completion);
+    pendingHostedRuntimePostSafePointCompletions.delete(completion);
   });
 }
 
-export async function drainHostedRuntimeDeferredUsageCompletionsBestEffort(input: {
+export async function drainHostedRuntimePostSafePointCompletionsBestEffort(input: {
   timeoutMs?: number | null;
 } = {}): Promise<void> {
   const pendingCompletions = [
-    ...pendingHostedRuntimeDeferredUsageCompletions,
+    ...pendingHostedRuntimePostSafePointCompletions,
   ];
   if (pendingCompletions.length === 0) {
     return;

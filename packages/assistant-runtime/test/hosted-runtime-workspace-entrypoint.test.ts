@@ -150,7 +150,7 @@ import {
   HostedRuntimeCheckpointInterruptedByWakeError,
   HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
   HostedWorkspaceRunnerUserMismatchError,
-  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
+  drainHostedRuntimePostSafePointCompletionsBestEffort,
   parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
@@ -5467,7 +5467,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(outcome, hostAbortReason);
       assert.equal(events.includes("usage.record:start"), false);
 
-      const drainPromise = drainHostedRuntimeDeferredUsageCompletionsBestEffort();
+      const drainPromise = drainHostedRuntimePostSafePointCompletionsBestEffort();
       let drainSettled = false;
       void drainPromise.finally(() => {
         drainSettled = true;
@@ -5493,7 +5493,7 @@ describe("hosted workspace runtime entrypoint", () => {
       await withRealTimeout(
         drainPromise,
         1_000,
-        () => "Shutdown deferred usage drain did not settle after usage finished.",
+        () => "Shutdown post-safe-point drain did not settle after usage finished.",
       );
       assert.equal(drainSettled, true);
     } finally {
