@@ -29,6 +29,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-participant-contact", async (importOri
 import {
   classifyHostedLinqFirstContactAdmission,
   claimHostedLinqFirstContactAdmissionBudget,
+  HOSTED_LINQ_FIRST_CONTACT_ADMISSION_REJECTED_MESSAGE_MAX_CHARS,
   readHostedLinqFirstContactAdmissionMode,
   recordHostedLinqFirstContactAdmissionDecision,
   tryHostedLinqFirstContactAdmissionDeterministicDecision,
@@ -594,6 +595,95 @@ describe("Linq first-contact admission", () => {
     expect(lockValues).toContain(`${BASE_PARTICIPANT_CONTACT.kind}:${BASE_PARTICIPANT_CONTACT.value}`);
     // The version-independent value must not embed any key-versioned lookup key.
     expect(lockValues.some((value) => typeof value === "string" && value.includes("blind:v"))).toBe(false);
+  });
+
+  it("stores bounded rejected-message text only for block decisions", async () => {
+    type AdmissionCreateData = {
+      confidence: number;
+      decision: "allow" | "block";
+      eventId: string;
+      rejectedMessageText?: string | null;
+      source: "deterministic" | "model";
+    };
+    const create = vi.fn(async ({ data }: { data: AdmissionCreateData }) => ({
+      confidence: data.confidence,
+      decision: data.decision,
+      eventId: data.eventId,
+      rejectedMessageText: data.rejectedMessageText ?? null,
+      source: data.source,
+    }));
+    const prisma = {
+      hostedLinqFirstContactAdmissionDecision: {
+        create,
+        findUnique: vi.fn(),
+      },
+    };
+    const rejectedMessageText = ` ${"x".repeat(
+      HOSTED_LINQ_FIRST_CONTACT_ADMISSION_REJECTED_MESSAGE_MAX_CHARS + 5,
+    )} `;
+
+    await recordHostedLinqFirstContactAdmissionDecision({
+      decision: {
+        confidence: 0.95,
+        kind: "block",
+        source: "model",
+      },
+      eventId: "evt_rejected_message",
+      prisma,
+      rejectedMessageText,
+    });
+
+    expect(create).toHaveBeenLastCalledWith({
+      data: {
+        confidence: 0.95,
+        decision: "block",
+        eventId: "evt_rejected_message",
+        rejectedMessageText: "x".repeat(
+          HOSTED_LINQ_FIRST_CONTACT_ADMISSION_REJECTED_MESSAGE_MAX_CHARS,
+        ),
+        source: "model",
+      },
+    });
+
+    await recordHostedLinqFirstContactAdmissionDecision({
+      decision: {
+        confidence: 0.99,
+        kind: "allow",
+        source: "model",
+      },
+      eventId: "evt_allowed_message",
+      prisma,
+      rejectedMessageText: "allowed text must not persist",
+    });
+
+    expect(create).toHaveBeenLastCalledWith({
+      data: {
+        confidence: 0.99,
+        decision: "allow",
+        eventId: "evt_allowed_message",
+        source: "model",
+      },
+    });
+
+    await recordHostedLinqFirstContactAdmissionDecision({
+      decision: {
+        confidence: 1,
+        kind: "block",
+        source: "deterministic",
+      },
+      eventId: "evt_textless_block",
+      prisma,
+      rejectedMessageText: " ",
+    });
+
+    expect(create).toHaveBeenLastCalledWith({
+      data: {
+        confidence: 1,
+        decision: "block",
+        eventId: "evt_textless_block",
+        source: "deterministic",
+      },
+    });
   });
 
   it("returns the stored decision when a concurrent insert already won the event", async () => {

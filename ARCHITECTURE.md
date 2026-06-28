@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-06-25
+Last verified: 2026-06-27
 
 ## Hosted Connected Apps
 
@@ -143,9 +143,11 @@ Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the signup-link path only. It runs after cheap deterministic ingress filters and
 before member/invite mutation, calls OpenAI through an env-only key with bounded
 message metadata/text, reduces provider service metadata to a fixed enum,
-persists only the event-id keyed terminal allow/block decision, stores no
-classifier payload or response body, and fails closed without sending a reply
-when enforcement is enabled and intent is not classified as allowed. OpenAI
+persists only the event-id keyed terminal allow/block decision plus
+confidence/source and bounded first-contact text for terminal block decisions,
+stores no classifier prompt, payload, raw response body, or model rationale,
+and fails closed without sending a reply when enforcement is enabled and intent
+is not classified as allowed. OpenAI
 refusal and content-filter outcomes are terminal unsupported content blocks.
 OpenAI account quota or credits exhaustion is a fail-open allow because that is
 Murph's provider-account problem, not a sender-quality signal, while malformed,
