@@ -61,7 +61,7 @@ beforeEach(() => {
   mocks.startTelegramTypingIndicator.mockResolvedValue(undefined);
 });
 
-test("hosted Linq read uses the hosted env while hosted Linq typing is disabled", async () => {
+test("hosted Linq typing and read use the hosted env for current inbound context", async () => {
   const forwardedEnv = {
     LINQ_API_BASE_URL: "https://api.linq.example",
     LINQ_API_TOKEN: "platform-linq-token",
@@ -82,6 +82,15 @@ test("hosted Linq read uses the hosted env while hosted Linq typing is disabled"
 
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv,
+    linqDeliveryContexts: [
+      {
+        directRecipientPhoneNumber: "+15551234567",
+        fromPhoneNumber: null,
+        replyToMessageId: "msg_123",
+        routeAuthority: null,
+        target: "chat_123",
+      },
+    ],
     platformEnv: {
       TELEGRAM_BOT_TOKEN: "telegram-token",
     },
@@ -111,7 +120,10 @@ test("hosted Linq read uses the hosted env while hosted Linq typing is disabled"
     }),
   });
 
-  expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
+  assert.deepEqual(mocks.startLinqTypingIndicator.mock.calls[0]?.[0], {
+    target: "chat_123",
+  });
+  assert.deepEqual(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.env, linqEnv);
   assert.deepEqual(mocks.markLinqChatRead.mock.calls[0]?.[1]?.env, linqEnv);
 });
 
@@ -193,6 +205,15 @@ test("hosted channel activity uses provider fetch instead of effects-port provid
   const providerFetch = vi.fn<typeof fetch>();
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv: {},
+    linqDeliveryContexts: [
+      {
+        directRecipientPhoneNumber: "+15551234567",
+        fromPhoneNumber: null,
+        replyToMessageId: "msg_123",
+        routeAuthority: null,
+        target: "linq_chat_123",
+      },
+    ],
     platformEnv: {},
     providerFetch,
     userEnv: {},
@@ -224,14 +245,49 @@ test("hosted channel activity uses provider fetch instead of effects-port provid
     }),
   });
 
-  expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
+  assert.equal(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.fetchImplementation, providerFetch);
   assert.equal(mocks.startTelegramTypingIndicator.mock.calls[0]?.[1]?.fetchImplementation, providerFetch);
   assert.equal(mocks.markLinqChatRead.mock.calls[0]?.[1]?.fetchImplementation, providerFetch);
+});
+
+test("hosted Linq typing no-ops when the target is not the current inbound context", async () => {
+  const typing = createHostedAssistantChannelTypingDependencies({
+    forwardedEnv: {
+      LINQ_API_TOKEN: "linq-token",
+    },
+    linqDeliveryContexts: [
+      {
+        directRecipientPhoneNumber: "+15551234567",
+        fromPhoneNumber: null,
+        replyToMessageId: "msg_123",
+        routeAuthority: null,
+        target: "current_linq_chat",
+      },
+    ],
+    platformEnv: {},
+    providerFetch: vi.fn<typeof fetch>(),
+    userEnv: {},
+  });
+
+  await expect(typing.startLinqTyping?.({
+    target: "different_linq_chat",
+  })).resolves.toBeUndefined();
+
+  expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
 });
 
 test("hosted channel activity does not use ambient fetch when provider fetch is missing", async () => {
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv: {},
+    linqDeliveryContexts: [
+      {
+        directRecipientPhoneNumber: "+15551234567",
+        fromPhoneNumber: null,
+        replyToMessageId: "msg_123",
+        routeAuthority: null,
+        target: "linq_chat_123",
+      },
+    ],
     platformEnv: {},
     userEnv: {},
   });

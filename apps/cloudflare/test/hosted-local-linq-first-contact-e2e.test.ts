@@ -235,16 +235,17 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     const typingRequestsAfterInbound = requestsAfterInbound.filter((request) =>
       request.method === "POST" && request.url === expectedTypingPath
     );
-    const typingStopRequestsAfterInbound = requestsAfterInbound.filter((request) =>
-      request.method === "DELETE" && request.url === expectedTypingPath
-    );
     expect(replySend.method).toBe("POST");
-    expect(typingRequestsAfterInbound).toHaveLength(0);
-    expect(typingStopRequestsAfterInbound).toHaveLength(0);
+    expect(typingRequestsAfterInbound.length).toBeGreaterThanOrEqual(1);
 
     const sendIndex = requestsAfterInbound.indexOf(replySend);
+    const typingIndices = typingRequestsAfterInbound.map((request) =>
+      requestsAfterInbound.indexOf(request)
+    );
 
     expect(sendIndex).toBeGreaterThanOrEqual(0);
+    expect(typingIndices[0]).toBeGreaterThanOrEqual(0);
+    expect(sendIndex).toBeGreaterThan(typingIndices[0]);
     expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
       HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT,
     );

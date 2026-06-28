@@ -2,6 +2,7 @@ import type {
   AssistantChannelTypingDependencies,
 } from "@murphai/assistant-engine";
 import {
+  startLinqTypingIndicator,
   startTelegramTypingIndicator,
 } from "@murphai/assistant-engine/assistant-channel-adapters";
 import type {
@@ -20,6 +21,10 @@ import {
 import {
   requireHostedProviderFetchDependencies,
 } from "./provider-fetch.ts";
+import {
+  resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest,
+  type HostedAssistantLinqDeliveryContext,
+} from "./linq-delivery-context.ts";
 
 const HOSTED_TELEGRAM_CHANNEL_ENV_KEYS = [
   "TELEGRAM_API_BASE_URL",
@@ -99,15 +104,36 @@ export function buildHostedWhatsAppChannelEnv(input: {
 
 export function createHostedAssistantChannelTypingDependencies(input: {
   forwardedEnv: Readonly<Record<string, string>>;
+  linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   platformEnv?: Readonly<Record<string, string>>;
   providerFetch?: typeof fetch | null;
   signal?: AbortSignal;
   userEnv: Readonly<Record<string, string>>;
 }): AssistantChannelTypingDependencies {
   return {
-    // Hosted Linq typing is provider-visible egress. Keep it disabled until it
-    // can share the same first-contact/recent-inbound proof as final sends.
-    startLinqTyping: async () => undefined,
+    startLinqTyping: async (request) => {
+      const deliveryContext = resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
+        contexts: input.linqDeliveryContexts ?? [],
+        replyToMessageId: null,
+        target: request.target,
+        targetKind: "thread",
+      });
+      if (!deliveryContext || !input.providerFetch) {
+        return undefined;
+      }
+
+      const dependencies = requireHostedProviderFetchDependencies({
+        env: buildHostedLinqChannelEnv({
+          forwardedEnv: input.forwardedEnv,
+          userEnv: input.userEnv,
+        }) as NodeJS.ProcessEnv,
+        fetchImplementation: input.providerFetch,
+        signal: input.signal,
+      }, "Hosted Linq typing indicator");
+      return startLinqTypingIndicator({
+        target: deliveryContext.target ?? request.target,
+      }, dependencies);
+    },
     startTelegramTyping: async (request) => {
       const dependencies = requireHostedProviderFetchDependencies({
         env: buildHostedTelegramChannelEnv({

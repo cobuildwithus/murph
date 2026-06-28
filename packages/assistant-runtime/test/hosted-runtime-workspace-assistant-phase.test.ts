@@ -5311,6 +5311,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         signal: expect.any(AbortSignal),
       }),
     );
+    expect(mocks.createHostedAssistantChannelTypingDependencies).toHaveBeenCalledWith(
+      expect.objectContaining({
+        linqDeliveryContexts: [linqDeliveryContext],
+        signal: expect.any(AbortSignal),
+      }),
+    );
   });
 
   it("passes foreground Linq delivery context into hosted outbox delivery", async () => {
