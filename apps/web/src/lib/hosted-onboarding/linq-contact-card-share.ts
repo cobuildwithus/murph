@@ -11,8 +11,8 @@ type HostedLinqContactCardSharePersistenceClient =
   {
     hostedLinqContactCardShare: {
       create(input: HostedLinqContactCardShareCreateInput): Promise<unknown>;
-      findFirst(input: HostedLinqContactCardShareFindFirstInput):
-        Promise<HostedLinqContactCardShareExisting | null>;
+      findMany(input: HostedLinqContactCardShareFindManyInput):
+        Promise<HostedLinqContactCardShareExisting[]>;
       updateMany(input: HostedLinqContactCardShareUpdateManyInput):
         Promise<{ count: number }>;
     };
@@ -39,7 +39,7 @@ type HostedLinqContactCardShareUpdateManyInput = {
   where: Record<string, unknown>;
 };
 
-type HostedLinqContactCardShareFindFirstInput = {
+type HostedLinqContactCardShareFindManyInput = {
   select: {
     lastContactCardShareAttemptedAt: true;
     linqChatLookupKey: true;
@@ -103,7 +103,7 @@ async function reserveHostedLinqContactCardShareAttemptAfterOutbound(input: {
   const attemptBefore = new Date(
     now.getTime() - HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS,
   );
-  const existing = await input.prisma.hostedLinqContactCardShare.findFirst({
+  const existingRows = await input.prisma.hostedLinqContactCardShare.findMany({
     where: {
       linqChatLookupKey: {
         in: [...chatLookup.readCandidates],
@@ -115,7 +115,7 @@ async function reserveHostedLinqContactCardShareAttemptAfterOutbound(input: {
     },
   });
 
-  if (!existing) {
+  if (existingRows.length === 0) {
     return await createHostedLinqContactCardShareAttemptReservation({
       chatLookupKey: chatLookup.writeKey,
       memberId: input.memberId,
@@ -124,19 +124,24 @@ async function reserveHostedLinqContactCardShareAttemptAfterOutbound(input: {
     });
   }
 
-  if (
-    existing.lastContactCardShareAttemptedAt
-    && existing.lastContactCardShareAttemptedAt > attemptBefore
-  ) {
+  const hasRecentAttempt = existingRows.some((row) =>
+    row.lastContactCardShareAttemptedAt
+    && row.lastContactCardShareAttemptedAt > attemptBefore,
+  );
+  if (hasRecentAttempt) {
     return {
       action: "skip",
       reason: "recent_attempt",
     };
   }
 
+  const existingKeys = existingRows.map((row) => row.linqChatLookupKey);
+  const hasWriteKey = existingKeys.includes(chatLookup.writeKey);
   const reserved = await input.prisma.hostedLinqContactCardShare.updateMany({
     where: {
-      linqChatLookupKey: existing.linqChatLookupKey,
+      linqChatLookupKey: {
+        in: existingKeys,
+      },
       OR: [
         { lastContactCardShareAttemptedAt: null },
         { lastContactCardShareAttemptedAt: { lte: attemptBefore } },
@@ -153,6 +158,15 @@ async function reserveHostedLinqContactCardShareAttemptAfterOutbound(input: {
       action: "skip",
       reason: "recent_attempt",
     };
+  }
+
+  if (!hasWriteKey) {
+    return await createHostedLinqContactCardShareAttemptReservation({
+      chatLookupKey: chatLookup.writeKey,
+      memberId: input.memberId,
+      now,
+      prisma: input.prisma,
+    });
   }
 
   return {

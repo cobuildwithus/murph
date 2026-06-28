@@ -9,6 +9,9 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
 }));
 
 import {
+  createHostedLinqChatLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
   maybeShareHostedLinqContactCardAfterOutbound,
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 
@@ -92,7 +95,7 @@ describe("hosted Linq contact-card sharing", () => {
       reason: "ineligible_chat",
     });
 
-    expect(prisma.model.findFirst).not.toHaveBeenCalled();
+    expect(prisma.model.findMany).not.toHaveBeenCalled();
     expect(prisma.model.create).not.toHaveBeenCalled();
     expect(prisma.model.updateMany).not.toHaveBeenCalled();
     expect(mocks.shareHostedLinqContactCard).not.toHaveBeenCalled();
@@ -195,6 +198,48 @@ describe("hosted Linq contact-card sharing", () => {
     expect(mocks.shareHostedLinqContactCard).toHaveBeenCalledTimes(2);
   });
 
+  it("checks every contact-privacy key version before allowing a rotated-key share", async () => {
+    const prisma = createContactCardSharePrismaStub();
+    const now = new Date("2026-06-27T12:00:00.000Z");
+
+    const oldLookupKey = mustCreateHostedLinqChatLookupKey("chat_123");
+    restoreKeyring?.();
+    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: { ...TEST_KEYRING_ENTRIES },
+    });
+    const currentLookupKey = mustCreateHostedLinqChatLookupKey("chat_123");
+
+    prisma.rows.push(
+      createContactCardShareRow({
+        lastContactCardShareAttemptedAt: new Date("2026-06-24T12:00:00.000Z"),
+        linqChatLookupKey: oldLookupKey,
+      }),
+      createContactCardShareRow({
+        lastContactCardShareAttemptedAt: new Date("2026-06-27T11:00:00.000Z"),
+        linqChatLookupKey: currentLookupKey,
+      }),
+    );
+
+    await expect(maybeShareHostedLinqContactCardAfterOutbound({
+      chatId: "chat_123",
+      eligibility: {
+        service: "iMessage",
+        threadIsDirect: true,
+      },
+      memberId: "member_123",
+      now,
+      prisma: prisma.client,
+    })).resolves.toEqual({
+      action: "skip",
+      reason: "recent_attempt",
+    });
+
+    expect(mocks.shareHostedLinqContactCard).not.toHaveBeenCalled();
+    expect(prisma.model.updateMany).not.toHaveBeenCalled();
+    expect(prisma.model.create).not.toHaveBeenCalled();
+  });
+
   it("shares best-effort and keeps provider failures throttled", async () => {
     const prisma = createContactCardSharePrismaStub();
     const now = new Date("2026-06-27T12:00:00.000Z");
@@ -264,7 +309,7 @@ type ContactCardShareRow = {
   updatedAt: Date;
 };
 
-type FindFirstArgs = {
+type FindManyArgs = {
   select?: Record<string, boolean>;
   where: {
     linqChatLookupKey: {
@@ -304,18 +349,16 @@ type DateComparison = {
 function createContactCardSharePrismaStub() {
   const rows: ContactCardShareRow[] = [];
   const model = {
-    findFirst: vi.fn(async (args: FindFirstArgs) => {
-      const row = rows.find((candidate) =>
-        args.where.linqChatLookupKey.in.includes(candidate.linqChatLookupKey),
-      );
-      if (!row) {
-        return null;
-      }
-      return {
-        lastContactCardShareAttemptedAt: row.lastContactCardShareAttemptedAt,
-        linqChatLookupKey: row.linqChatLookupKey,
-      };
-    }),
+    findMany: vi.fn(async (args: FindManyArgs) =>
+      rows
+        .filter((candidate) =>
+          args.where.linqChatLookupKey.in.includes(candidate.linqChatLookupKey)
+        )
+        .map((row) => ({
+          lastContactCardShareAttemptedAt: row.lastContactCardShareAttemptedAt,
+          linqChatLookupKey: row.linqChatLookupKey,
+        })),
+    ),
     create: vi.fn(async (args: CreateArgs) => {
       const row: ContactCardShareRow = {
         createdAt: args.data.lastContactCardShareAttemptedAt,
@@ -349,6 +392,30 @@ function createContactCardSharePrismaStub() {
     model,
     rows,
   };
+}
+
+function createContactCardShareRow(input: {
+  lastContactCardShareAttemptedAt: Date | null;
+  linqChatLookupKey: string;
+  memberId?: string;
+}): ContactCardShareRow {
+  const createdAt = input.lastContactCardShareAttemptedAt
+    ?? new Date("2026-06-27T12:00:00.000Z");
+  return {
+    createdAt,
+    lastContactCardShareAttemptedAt: input.lastContactCardShareAttemptedAt,
+    linqChatLookupKey: input.linqChatLookupKey,
+    memberId: input.memberId ?? "member_123",
+    updatedAt: createdAt,
+  };
+}
+
+function mustCreateHostedLinqChatLookupKey(chatId: string): string {
+  const lookupKey = createHostedLinqChatLookupKey(chatId);
+  if (!lookupKey) {
+    throw new Error("Expected hosted Linq chat lookup key.");
+  }
+  return lookupKey;
 }
 
 function rowMatchesUpdateWhere(
