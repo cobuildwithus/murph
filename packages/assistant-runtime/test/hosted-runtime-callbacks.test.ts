@@ -4461,6 +4461,83 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
+  it("requires recent inbound proof for signup welcome Linq sends into existing threads", async () => {
+    const effect = createEffect({
+      actorId: "ain_blinded_member_phone",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      idempotencyKey: "signup-welcome:member_123",
+      message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      transportIdempotent: false,
+    });
+    const assertRecentInbound = vi.fn(async () => undefined);
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: "+15550100099",
+        idempotencyKey: "signup-welcome:member_123",
+        message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+        replyToMessageId: null,
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          idempotencyKey: "signup-welcome:member_123",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directRecipientPhoneNumber: null,
+        engagementKind: "requires_recent_inbound",
+        fromPhoneNumber: "+15550100099",
+        idempotencyKey: "signup-welcome:member_123",
+        target: "linq_chat_123",
+        targetKind: "thread",
+      }),
+      {
+        signal: null,
+      },
+    );
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fromPhoneNumber: "+15550100099",
+        target: "linq_chat_123",
+        targetKind: "thread",
+      }),
+      expect.any(Object),
+    );
+  });
+
   it("does not reuse mismatched routed Linq authority for reactions", async () => {
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",

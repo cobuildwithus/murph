@@ -74,6 +74,7 @@ import type {
   HostedRuntimeActionApprovalPort,
   HostedRuntimeEffectsPort,
   HostedRuntimeLinqEngagementKind,
+  HostedRuntimeProviderTargetKind,
 } from "./platform.ts";
 import {
   buildHostedLinqChannelEnv,
@@ -2129,26 +2130,38 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
       { retryable: true },
     );
   }
+  const targetKind = normalizeHostedAssistantLinqTargetKind(input.targetKind);
   await assertRecentInbound({
     directRecipientPhoneNumber: input.directRecipientPhoneNumber,
-    engagementKind: readHostedAssistantLinqEngagementKind(input.idempotencyKey),
+    engagementKind: readHostedAssistantLinqEngagementKind({
+      idempotencyKey: input.idempotencyKey,
+      targetKind,
+    }),
     fromPhoneNumber: input.fromPhoneNumber,
     idempotencyKey: input.idempotencyKey,
     intentId: input.intentId,
     routeAuthority: input.deliveryContext?.routeAuthority ?? null,
     target: input.deliveryContext?.target ?? input.target,
-    targetKind: input.targetKind === "explicit" || input.targetKind === "participant" || input.targetKind === "thread"
-      ? input.targetKind
-      : null,
+    targetKind,
   }, {
     signal: input.signal,
   });
 }
 
-function readHostedAssistantLinqEngagementKind(
+function normalizeHostedAssistantLinqTargetKind(
+  targetKind: string | null,
+): HostedRuntimeProviderTargetKind | null {
+  return targetKind === "explicit" || targetKind === "participant" || targetKind === "thread"
+    ? targetKind
+    : null;
+}
+
+function readHostedAssistantLinqEngagementKind(input: {
   idempotencyKey: string | null,
-): HostedRuntimeLinqEngagementKind {
-  return isHostedSignupWelcomeDeliveryIdempotencyKey(idempotencyKey)
+  targetKind: HostedRuntimeProviderTargetKind | null,
+}): HostedRuntimeLinqEngagementKind {
+  return input.targetKind === "participant"
+    && isHostedSignupWelcomeDeliveryIdempotencyKey(input.idempotencyKey)
     ? "first_contact"
     : "requires_recent_inbound";
 }
