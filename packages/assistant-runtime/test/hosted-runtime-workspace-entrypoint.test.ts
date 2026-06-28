@@ -5144,7 +5144,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("drains started deferred usage when host abort wins before runner result returns", async () => {
+  test("does not drain started deferred usage when host abort wins before runner result returns", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-abort-"));
     const events: string[] = [];
     const usageRecordStarted = createDeferred<void>();
@@ -5256,21 +5256,23 @@ describe("hosted workspace runtime entrypoint", () => {
         1_000,
         () => "Deferred usage recording did not start before host abort.",
       );
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      assert.equal(events.includes("usage.record:done"), false);
-      assert.equal(resultSettled, false);
-
-      releaseUsageRecord.resolve();
       const outcome = await withRealTimeout(
         resultPromise,
         1_000,
-        () => "Runtime did not settle after deferred usage recording finished.",
+        () => "Runtime waited for deferred usage recording after host abort.",
       ).then(
         () => "resolved" as const,
         (error: unknown) => error,
       );
 
       assert.equal(outcome, hostAbortReason);
+      assert.equal(resultSettled, true);
+      assert.equal(events.includes("usage.record:done"), false);
+
+      releaseUsageRecord.resolve();
+      await waitUntil(() => {
+        assert.equal(events.includes("usage.record:done"), true);
+      });
       assert.deepEqual(events.filter((event) => event.startsWith("usage.record:")), [
         "usage.record:start",
         "usage.record:done",

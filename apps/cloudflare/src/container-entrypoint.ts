@@ -620,6 +620,20 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
+      if (containerShutdownController.signal.aborted) {
+        discardUnreadRequestBody(request);
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          level: "warn",
+          message: "Hosted container entrypoint rejected a runner request after shutdown started.",
+          phase: "failed",
+        });
+        writeJsonResponse(response, 503, {
+          error: "Hosted runner is shutting down.",
+        });
+        return;
+      }
+
       if (isCodexShellSmokeRequest) {
         if (activeHostedRunnerJobCount > 0) {
           discardUnreadRequestBody(request);

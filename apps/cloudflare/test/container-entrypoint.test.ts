@@ -422,6 +422,19 @@ describe("startHostedContainerEntrypoint", () => {
     await drainStarted.promise;
     expect(exit).not.toHaveBeenCalled();
 
+    const lateResponse = await sendHostedContainerJsonRequest({
+      body: JSON.stringify(buildWorkspaceJobBody()),
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+    expect(lateResponse).toMatchObject({
+      json: {
+        error: "Hosted runner is shutting down.",
+      },
+      status: 503,
+    });
+    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(1);
+
     releaseDrain.resolve();
     await vi.waitFor(() => {
       expect(exit).toHaveBeenCalledWith(0);

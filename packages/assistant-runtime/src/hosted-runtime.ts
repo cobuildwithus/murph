@@ -744,11 +744,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
   const runtimeAbortController = new AbortController();
   const hostAbortSignal = options.signal ?? null;
+  let hostAbortReason: unknown = null;
+  let hostAbortObserved = false;
   const abortFromHost = () => {
     if (!hostAbortSignal || runtimeAbortController.signal.aborted) {
       return;
     }
-    runtimeAbortController.abort(readHostedRuntimeAbortReason(hostAbortSignal));
+    hostAbortReason = readHostedRuntimeAbortReason(hostAbortSignal);
+    hostAbortObserved = true;
+    runtimeAbortController.abort(hostAbortReason);
   };
   if (hostAbortSignal?.aborted) {
     abortFromHost();
@@ -2145,7 +2149,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "runtime",
       status: "fail",
     });
-    await drainStartedPostSafePointCompletionsBestEffort();
+    if (!hostAbortObserved || error !== hostAbortReason) {
+      await drainStartedPostSafePointCompletionsBestEffort();
+    }
     throw error;
   } finally {
     hostAbortSignal?.removeEventListener("abort", abortFromHost);
