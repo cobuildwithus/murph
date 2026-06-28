@@ -14,6 +14,8 @@ import {
   type HostedRuntimeRedactedScalar,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
+  HOSTED_ASSISTANT_TURN_TIMING_TYPE,
   applyMurphManagedAutomations,
   getAssistantCronStatus,
   readAssistantOutboxIntent,
@@ -21,6 +23,7 @@ import {
   refreshAssistantContextSnapshotBestEffort,
   scheduleDeviceActivityTriggeredAutomations,
   type AssistantExecutionContext,
+  type HostedAssistantTurnTimingStage,
 } from "@murphai/assistant-engine";
 import type {
   AutomationRoute,
@@ -171,6 +174,7 @@ export type HostedWorkspaceRuntimeAssistantPhase = (
 export async function runHostedWorkspaceAssistantPhase(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
+  const assistantPhaseStartedAt = Date.now();
   const channelAbortController = new AbortController();
   const releaseChannelAbortRelay = relayHostedAssistantPhaseAbortSignal(
     input.signal ?? null,
@@ -306,7 +310,9 @@ export async function runHostedWorkspaceAssistantPhase(
 
     const freshAssistantInputIds =
       input.initialMailboxImport.importResult.assistantInputIds ?? [];
+    const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
     const runAutomationLane = async () => {
+      const automationLaneStartedAt = Date.now();
       const assistantRuntimeState = await prepareHostedAssistantAutomationForWake(
         input.restored.vaultRoot,
         wake,
@@ -316,25 +322,62 @@ export async function runHostedWorkspaceAssistantPhase(
           operatorHomeRoot: input.restored.operatorHomeRoot,
         },
       );
-      return await runHostedAssistantAutomationLane({
-        assistantRuntimeState,
-        executionContext,
-        freshAssistantInputIds,
-        requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
-        runtime: {
-          commitTimeoutMs: input.runtime.commitTimeoutMs,
-          forwardedEnv: input.runtime.forwardedEnv,
-          platform: input.platform,
-          platformEnv: input.runtime.platformEnv,
-          resolvedConfig: input.runtime.resolvedConfig,
-        },
-        operatorHomeRoot: input.restored.operatorHomeRoot,
-        runtimeAttemptId: input.request.attemptId,
-        runtimeEnv: input.runtimeEnv,
-        signal: input.signal ?? undefined,
-        vaultRoot: input.restored.vaultRoot,
-        wake,
+      const assistantMetrics = await (async () => {
+        try {
+          return await runHostedAssistantAutomationLane({
+            assistantRuntimeState,
+            executionContext,
+            freshAssistantInputIds,
+            requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
+            runtime: {
+              commitTimeoutMs: input.runtime.commitTimeoutMs,
+              forwardedEnv: input.runtime.forwardedEnv,
+              platform: input.platform,
+              platformEnv: input.runtime.platformEnv,
+              resolvedConfig: input.runtime.resolvedConfig,
+            },
+            operatorHomeRoot: input.restored.operatorHomeRoot,
+            runtimeAttemptId: input.request.attemptId,
+            runtimeEnv: input.runtimeEnv,
+            signal: input.signal ?? undefined,
+            vaultRoot: input.restored.vaultRoot,
+            wake,
+          });
+        } catch (error) {
+          const failureLogEntries =
+            readHostedAssistantAutomationFailureRedactedLogEntries(error);
+          const redactedLogEntries = [
+            ...assistantAutomationRedactedLogEntries,
+            ...failureLogEntries,
+          ];
+          if (redactedLogEntries.length > 0) {
+            await writeHostedAssistantAutomationDetailRuntimeLogs({
+              assistantMetrics: {
+                redactedLogEntries,
+              },
+              input,
+            });
+          }
+          throw error;
+        }
+      })();
+      assistantAutomationRedactedLogEntries.push(
+        ...(assistantMetrics.redactedLogEntries ?? []),
+      );
+      writeHostedAssistantTurnTimingRuntimeLog({
+        currentTurnDeliveryIntentCount:
+          assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds?.length ?? 0,
+        elapsedMs: elapsedSince(assistantPhaseStartedAt),
+        input,
+        stage: "automation-pass-finished",
+        stepElapsedMs: elapsedSince(automationLaneStartedAt),
       });
+      return {
+        ...assistantMetrics,
+        ...(assistantAutomationRedactedLogEntries.length === 0
+          ? {}
+          : { redactedLogEntries: [...assistantAutomationRedactedLogEntries] }),
+      };
     };
     let assistantMetrics = await runAutomationLane();
     let currentTurnDeliveryIntentIds =
@@ -408,6 +451,24 @@ export async function runHostedWorkspaceAssistantPhase(
       terminalLinqCleanup,
     });
     if (foregroundAssistantPass) {
+      writeHostedAssistantTurnTimingRuntimeLog({
+        currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
+        elapsedMs: elapsedSince(assistantPhaseStartedAt),
+        foregroundAssistantPass,
+        input,
+        stage: "foreground-delivery-phase-started",
+      });
+      const foregroundAssistantPhaseStartedAt = Date.now();
+      const writeForegroundAssistantFinishedTiming = () => {
+        writeHostedAssistantTurnTimingRuntimeLog({
+          currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
+          elapsedMs: elapsedSince(assistantPhaseStartedAt),
+          foregroundAssistantPass,
+          input,
+          stage: "foreground-delivery-phase-finished",
+          stepElapsedMs: elapsedSince(foregroundAssistantPhaseStartedAt),
+        });
+      };
       const foregroundAssistantResult = await runForegroundAssistantReplyPhase({
         assistantMetrics,
         currentTurnDeliveryIntentIds,
@@ -418,10 +479,27 @@ export async function runHostedWorkspaceAssistantPhase(
         systemMailboxWakeAt,
         wake,
       });
+      const foregroundAfterCheckpoint = foregroundAssistantResult.afterCheckpoint;
+      const timedForegroundAssistantResult =
+        foregroundAfterCheckpoint
+          ? {
+              ...foregroundAssistantResult,
+              afterCheckpoint: async () => {
+                try {
+                  return await foregroundAfterCheckpoint();
+                } finally {
+                  writeForegroundAssistantFinishedTiming();
+                }
+              },
+            }
+          : foregroundAssistantResult;
+      if (!foregroundAssistantResult.afterCheckpoint) {
+        writeForegroundAssistantFinishedTiming();
+      }
       return mergeContinuingSystemMailboxResult(
         withFreshHostedManagedAutomationsAfterCheckpoint({
           input,
-          result: foregroundAssistantResult,
+          result: timedForegroundAssistantResult,
         }),
       );
     }
@@ -3676,6 +3754,49 @@ async function writeHostedSystemMailboxRuntimeLog(input: {
   });
 }
 
+// Hot-path-safe: writeHostedRuntimeLogBestEffort queues info-level entries
+// and returns synchronously, so foreground delivery is never blocked on the
+// underlying log port write (invariant: "observability writes are never
+// user latency", docs/contracts/00-invariants.md § Hosted Foreground
+// Priority).
+function writeHostedAssistantTurnTimingRuntimeLog(input: {
+  currentTurnDeliveryIntentCount?: number | null;
+  elapsedMs: number;
+  foregroundAssistantPass?: boolean | null;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  stage: HostedAssistantTurnTimingStage;
+  stepElapsedMs?: number | null;
+}): void {
+  const redactedJson: HostedRuntimeRedactedJson = {
+    currentTurnDeliveryIntentCount: input.currentTurnDeliveryIntentCount ?? null,
+    detailLabel: "Hosted assistant turn timing milestone captured.",
+    foregroundAssistantPass: input.foregroundAssistantPass ?? null,
+    schema: HOSTED_ASSISTANT_TURN_TIMING_SCHEMA,
+    type: HOSTED_ASSISTANT_TURN_TIMING_TYPE,
+    turnTimingElapsedMs: input.elapsedMs,
+    turnTimingStage: input.stage,
+    ...(input.stepElapsedMs === undefined
+      ? {}
+      : { turnTimingStepElapsedMs: input.stepElapsedMs }),
+  };
+
+  void writeHostedRuntimeLogBestEffort({
+    entry: {
+      ...buildHostedRuntimeLogContextFields({
+        attemptId: input.input.request.attemptId,
+        leaseGeneration: input.input.request.leaseGeneration,
+        workspaceVersion: input.input.request.workspaceVersion,
+      }),
+      component: "assistant",
+      eventCode: "assistant.automation_detail",
+      level: "info",
+      phase: "invoke",
+      redactedJson,
+    },
+    platform: input.input.platform,
+  });
+}
+
 async function writeHostedAssistantPassRuntimeLog(input: {
   assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantAutomationLane>>;
   deliveryEffectCount: number;
@@ -3764,6 +3885,37 @@ async function writeHostedAssistantAutomationDetailRuntimeLogs(input: {
   }
 }
 
+function readHostedAssistantAutomationFailureRedactedLogEntries(
+  error: unknown,
+): HostedExecutionRedactedLogEntry[] {
+  if (!error || typeof error !== "object" || Array.isArray(error)) {
+    return [];
+  }
+
+  const value = (error as {
+    hostedAssistantAutomationRedactedLogEntries?: unknown;
+  }).hostedAssistantAutomationRedactedLogEntries;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isHostedExecutionRedactedLogEntry);
+}
+
+function isHostedExecutionRedactedLogEntry(
+  value: unknown,
+): value is HostedExecutionRedactedLogEntry {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof (value as { component?: unknown }).component === "string" &&
+    typeof (value as { level?: unknown }).level === "string" &&
+    typeof (value as { message?: unknown }).message === "string" &&
+    typeof (value as { phase?: unknown }).phase === "string"
+  );
+}
+
 function buildHostedAssistantAutomationDetailRedactedJson(
   redacted: Record<string, unknown> | null | undefined,
   detail: HostedRuntimeRedactedJson,
@@ -3827,7 +3979,8 @@ function isPreferredHostedAssistantAutomationDetailKey(key: string): boolean {
     || key.startsWith("codexInvalidOutput")
     || key.startsWith("codexResumeFailure")
     || key.startsWith("failure")
-    || key.startsWith("routePlanning");
+    || key.startsWith("routePlanning")
+    || key.startsWith("turnTiming");
 }
 
 function maybeCopyHostedAssistantAutomationDetailRedactedEntry(
@@ -4743,4 +4896,8 @@ function buildHostedWorkspaceAssistantPhaseRedactedStatus(input: {
     hostedSystemMailboxPrepared: input.systemMailboxPrepared,
     hostedSystemMailboxRetryableFailed: input.systemMailboxRetryableFailed,
   };
+}
+
+function elapsedSince(startedAt: number): number {
+  return Math.max(0, Date.now() - startedAt);
 }
