@@ -428,7 +428,11 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_RUNTIME_WAKE_PATH) {
-        if (containerShutdownController.signal.aborted) {
+        const rejectRuntimeWakeAfterShutdown = (): boolean => {
+          if (!containerShutdownController.signal.aborted) {
+            return false;
+          }
+
           discardUnreadRequestBody(request);
           emitHostedExecutionStructuredLog({
             component: "container",
@@ -440,6 +444,10 @@ export async function startHostedContainerEntrypoint(input: {
           writeJsonResponse(response, 503, {
             error: "Hosted runner is shutting down.",
           });
+          return true;
+        };
+
+        if (rejectRuntimeWakeAfterShutdown()) {
           return;
         }
 
@@ -456,6 +464,9 @@ export async function startHostedContainerEntrypoint(input: {
           });
           const classified = classifyRequestDecodeError(error);
           writeJsonResponse(response, classified.statusCode, classified.payload);
+          return;
+        }
+        if (rejectRuntimeWakeAfterShutdown()) {
           return;
         }
         const wake = activeRuntimeWake;
