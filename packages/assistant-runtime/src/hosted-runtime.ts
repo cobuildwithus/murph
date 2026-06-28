@@ -788,6 +788,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
   const phaseLogger = createHostedRuntimePhaseLogger();
   const emitPhaseLog = phaseLogger.emit;
+  const pendingDeferredUsageFlushCompletions = new Set<Promise<void>>();
+  const drainStartedDeferredUsageFlushesBestEffort = async (): Promise<void> => {
+    if (pendingDeferredUsageFlushCompletions.size === 0) {
+      return;
+    }
+
+    await Promise.allSettled([
+      ...pendingDeferredUsageFlushCompletions,
+    ]);
+  };
 
   try {
     const runtimePhaseStartedAt = new Date().toISOString();
@@ -1475,7 +1485,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     let runtimeStateDirty = false;
     const pendingDurableCheckpointEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
     const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
-    const pendingDeferredUsageFlushCompletions = new Set<Promise<void>>();
     let durableCheckpointWakeAt: string | null = null;
     let durableCheckpointWakeReason: string | null = null;
     let idleCheckpointStartByMs: number | null = null;
@@ -2166,6 +2175,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "runtime",
       status: "fail",
     });
+    await drainStartedDeferredUsageFlushesBestEffort();
     throw error;
   } finally {
     hostAbortSignal?.removeEventListener("abort", abortFromHost);
