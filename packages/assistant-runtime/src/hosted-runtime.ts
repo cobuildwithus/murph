@@ -1656,7 +1656,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         latencySeed?: HostedRuntimeWakeLatencySeed | null;
         projectedWakeKeyBeingServiced: string | null;
         requestIdKind: "checkpoint-interrupt" | "idle-wake";
-      }): Promise<void> => {
+      }): Promise<HostedWorkspaceRunnerResult> => {
         idleWakeOrdinal += 1;
         const passWorkspace = projectHostedWorkspaceWakeForForegroundPass({
           projection: accumulatedProjection,
@@ -1699,6 +1699,27 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             ? wakeInput.projectedWakeKeyBeingServiced
             : null;
         runtimeStateDirty ||= result.runtimeStateDirty;
+        return result;
+      };
+      const drainDeferredUsageFlushesAfterIdleCheckpoint = async (): Promise<boolean> => {
+        while (pendingDeferredUsageFlushCompletions.size > 0) {
+          const waitResult = await waitForDeferredUsageFlushesAfterIdleCheckpoint();
+          if (waitResult.kind === "finished") {
+            continue;
+          }
+
+          const wakeResult = await runIdleWakeForegroundPass({
+            latencySeed: createHostedRuntimeWakeLatencySeed(
+              waitResult.notification,
+            ),
+            projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
+            requestIdKind: "idle-wake",
+          });
+          if (wakeResult.runtimeStateDirty) {
+            return true;
+          }
+        }
+        return false;
       };
       while (runtimeStateDirty) {
         if (
@@ -1973,21 +1994,21 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             },
           };
           runtimeStateDirty = result.runtimeStateDirty;
+          if (!runtimeStateDirty) {
+            const deferredUsageDrainFoundDirtyWork =
+              await drainDeferredUsageFlushesAfterIdleCheckpoint();
+            if (deferredUsageDrainFoundDirtyWork) {
+              continue;
+            }
+          }
           continue;
         }
         const browserVaultRefresh = await runBrowserVaultRefreshMaintenance({
           workspace: checkpoint.workspace,
         });
-        const deferredUsageWaitResult =
-          await waitForDeferredUsageFlushesAfterIdleCheckpoint();
-        if (deferredUsageWaitResult.kind === "external_wake") {
-          await runIdleWakeForegroundPass({
-            latencySeed: createHostedRuntimeWakeLatencySeed(
-              deferredUsageWaitResult.notification,
-            ),
-            projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
-            requestIdKind: "idle-wake",
-          });
+        const deferredUsageDrainFoundDirtyWork =
+          await drainDeferredUsageFlushesAfterIdleCheckpoint();
+        if (deferredUsageDrainFoundDirtyWork) {
           continue;
         }
         const refreshRequestedImmediateWake =

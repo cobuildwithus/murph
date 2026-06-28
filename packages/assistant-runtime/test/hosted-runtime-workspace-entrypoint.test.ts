@@ -4660,8 +4660,10 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const usageRecordStarted = createDeferred<void>();
     const releaseUsageRecord = createDeferred<void>();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
     let resultSettled = false;
+    let assistantPhaseCalls = 0;
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -4670,11 +4672,33 @@ describe("hosted workspace runtime entrypoint", () => {
           events,
           items: [],
         }),
-        workspacePort: createWorkspacePort({
-          checkpointRequests,
-          events,
-          workspace: createWorkspaceState({ version: "4" }),
-        }),
+        workspacePort: {
+          async read() {
+            events.push("workspace.read");
+            return {
+              fetchedAt: TEST_NOW,
+              workspace: createWorkspaceState({ version: "4" }),
+            };
+          },
+          async checkpoint(request) {
+            events.push(`workspace.checkpoint:${request.reason}`);
+            checkpointRequests.push(request);
+            if (request.reason === "idle_shutdown") {
+              runtimeWakeSignal.notify();
+            }
+            return {
+              checkpointed: true,
+              workspace: createWorkspaceState({
+                inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                nextWakeAt: request.nextWakeAt ?? null,
+                nextWakeReason: request.nextWakeReason ?? null,
+                redactedStatus: request.redactedStatus ?? null,
+                snapshotRef: request.snapshotRef,
+                version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+              }),
+            };
+          },
+        },
       });
       resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -4722,8 +4746,16 @@ describe("hosted workspace runtime entrypoint", () => {
               },
             },
           },
+          runtimeWakeSignal,
           async runAssistantPhase() {
-            events.push("assistant.phase");
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls > 1) {
+              return {
+                progressed: false,
+              };
+            }
+
             return {
               afterCheckpoint: async () => {
                 events.push("reply.deliver");
@@ -4757,6 +4789,10 @@ describe("hosted workspace runtime entrypoint", () => {
           true,
         );
       });
+      await waitUntil(() => {
+        assert.equal(assistantPhaseCalls, 2);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
       assert.equal(events.includes("usage.record:done"), false);
       assert.equal(resultSettled, false);
 
