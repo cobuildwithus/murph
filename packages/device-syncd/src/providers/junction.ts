@@ -4596,7 +4596,8 @@ function isDocumentedJunctionHistoricalPullCompletedWebhookData(
   data: Record<string, unknown>,
   externalAccountId: string,
 ): boolean {
-  if ("is_final" in data || "isFinal" in data) {
+  const finalFlag = data.is_final ?? data.isFinal;
+  if (finalFlag === false) {
     return false;
   }
 
