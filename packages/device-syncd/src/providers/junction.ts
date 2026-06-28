@@ -4498,7 +4498,27 @@ function isJunctionProviderConnectionEvent(eventType: string): boolean {
 }
 
 function isJunctionDataEvent(eventType: string): boolean {
-  return eventType.startsWith("daily.data.");
+  return eventType.startsWith("daily.data.") || eventType.startsWith("historical.data.");
+}
+
+function isJunctionHistoricalDataEvent(eventType: string): boolean {
+  return eventType.startsWith("historical.data.");
+}
+
+function isJunctionHistoricalPullCompletedWebhookData(data: Record<string, unknown>): boolean {
+  const start =
+    toJunctionWebhookWindowBoundaryTimestampIfValid(data.start_date, "start")
+    ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data.startDate, "start");
+  const end =
+    toJunctionWebhookWindowBoundaryTimestampIfValid(data.end_date, "end")
+    ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data.endDate, "end");
+  const provider =
+    normalizeProviderSlug(data.provider)
+    ?? normalizeProviderSlug(data.source_provider)
+    ?? normalizeProviderSlug(data.sourceProvider);
+  const isFinal = data.is_final === true || data.isFinal === true;
+
+  return Boolean(start && end && provider && isFinal);
 }
 
 function buildJunctionWebhookDataJobJsons(input: {
@@ -4514,6 +4534,10 @@ function buildJunctionWebhookDataJobJsons(input: {
   }
 
   if (input.resource.category !== "summary" || !input.summaryResources.includes(input.resource.name)) {
+    return [];
+  }
+
+  if (isJunctionHistoricalDataEvent(input.eventType) && isJunctionHistoricalPullCompletedWebhookData(input.data)) {
     return [];
   }
 

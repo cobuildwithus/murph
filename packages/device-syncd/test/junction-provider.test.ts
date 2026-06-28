@@ -3780,6 +3780,191 @@ test("Junction signed wearable webhooks create direct import jobs for Oura sleep
   assert.deepEqual(providers.sort(), ["garmin", "oura"]);
 });
 
+test("Junction record-shaped historical Garmin sleep webhooks preserve inline summary payloads", async () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      summaryResources: ["sleep", "sleep_cycle"],
+      timeseriesResources: [],
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+
+  for (const testCase of [
+    {
+      eventType: "historical.data.sleep.created",
+      expectedResource: "sleep",
+      messageId: "msg_historical_garmin_sleep_1",
+      data: {
+        id: "garmin-sleep-1",
+        date: "2026-04-02",
+        resource: "sleep",
+        source: { provider: "garmin" },
+        start_time: "2026-04-02T03:30:00.000Z",
+        end_time: "2026-04-02T11:15:00.000Z",
+        total_sleep_minutes: 420,
+      },
+    },
+    {
+      eventType: "historical.data.hypnogram.created",
+      expectedResource: "sleep_cycle",
+      messageId: "msg_historical_garmin_hypnogram_1",
+      data: {
+        id: "garmin-hypnogram-1",
+        date: "2026-04-02",
+        resource: "hypnogram",
+        source: { provider: "garmin" },
+        stages: [
+          {
+            stage: "deep",
+            start_time: "2026-04-02T04:00:00.000Z",
+            end_time: "2026-04-02T04:25:00.000Z",
+          },
+        ],
+      },
+    },
+  ] as const) {
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: testCase.eventType,
+        user_id: "junction-user-1",
+        client_user_id: "murph_blinded",
+        data: testCase.data,
+      },
+      messageId: testCase.messageId,
+      timestamp: "1775174400",
+    });
+
+    const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-04-03T00:00:00.000Z",
+    });
+
+    assert.equal(parsed.eventType, testCase.eventType);
+    assert.equal(parsed.acceptanceMode, "durable_webhook_work");
+    assert.equal(parsed.resourceCategory, "summary");
+    assert.equal(parsed.jobs.length, 1);
+    const job = parsed.jobs[0];
+    assert.equal(job?.kind, "resource");
+    assert.equal(job?.payload?.resource, testCase.expectedResource);
+    assert.equal(job?.payload?.resourceCategory, "summary");
+    assert.equal(job?.payload?.sourceProviderSlug, "garmin");
+    assert.equal(typeof job?.payload?.webhookDataJson, "string");
+    assert.equal(String(job?.payload?.webhookDataJson).includes("junction-user-1"), false);
+    assert.equal(String(job?.payload?.webhookDataJson).includes("murph_blinded"), false);
+  }
+});
+
+test("Junction historical sleep completion webhooks fetch the bounded summary window", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(
+    async (input) => {
+      const url = readUrl(input);
+      requests.push(url);
+
+      if (url.includes("/v2/user/providers/junction-user-1")) {
+        return createJsonResponse({
+          providers: [
+            {
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: { sleep: true },
+            },
+          ],
+        });
+      }
+
+      if (url.includes("/v2/summary/sleep/junction-user-1")) {
+        return createJsonResponse({
+          data: [
+            {
+              date: "2026-04-02",
+              id: "garmin-sleep-fetched-1",
+              source: { provider: "garmin" },
+              total_sleep_minutes: 420,
+            },
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+    {
+      summaryResources: ["sleep"],
+      timeseriesResources: [],
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "historical.data.sleep.created",
+      user_id: "junction-user-1",
+      client_user_id: "murph_blinded",
+      data: {
+        user_id: "junction-user-1",
+        start_date: "2026-04-01",
+        end_date: "2026-04-02",
+        is_final: true,
+        provider: "garmin",
+      },
+    },
+    messageId: "msg_historical_garmin_sleep_completion_1",
+    timestamp: "1775260800",
+  });
+
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-04T00:00:00.000Z",
+  });
+
+  assert.equal(parsed.eventType, "historical.data.sleep.created");
+  assert.equal(parsed.acceptanceMode, "durable_webhook_work");
+  assert.equal(parsed.jobs.length, 1);
+  const job = parsed.jobs[0];
+  assert.equal(job?.kind, "resource");
+  assert.equal(job?.payload?.resource, "sleep");
+  assert.equal(job?.payload?.resourceCategory, "summary");
+  assert.equal(job?.payload?.sourceProviderSlug, "garmin");
+  assert.equal(job?.payload?.windowStart, "2026-04-01T00:00:00.000Z");
+  assert.equal(job?.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
+  assert.equal("webhookDataJson" in (job?.payload ?? {}), false);
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob(job?.kind ?? "resource", job?.payload ?? {}),
+  );
+
+  assert.equal(
+    requests.some((url) =>
+      url.includes("/v2/summary/sleep/junction-user-1")
+      && url.includes("provider=garmin")
+      && url.includes("start_date=2026-04-01")
+      && url.includes("end_date=2026-04-02")
+    ),
+    true,
+    `historical completion webhook should fetch the provider-scoped window; requests=${JSON.stringify(requests)}`,
+  );
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+  };
+  assert.equal(snapshot.summaries?.sleep?.[0]?.id, "garmin-sleep-fetched-1");
+  assert.equal(JSON.stringify(parsed.jobs).includes("junction-user-1"), false);
+  assert.equal(JSON.stringify(importedSnapshots).includes("murph_blinded"), false);
+});
+
 test("Junction rejects webhooks with only a client_user_id and no Junction user_id", async () => {
   const provider = createJunctionProvider(
     async (input) => {
