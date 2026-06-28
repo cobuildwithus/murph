@@ -441,9 +441,9 @@ export async function startHostedContainerEntrypoint(input: {
             phase: "failed",
           });
           response.setHeader("x-runtime-wake-accepted", "0");
-          writeJsonResponse(response, 503, {
-            error: "Hosted runner is shutting down.",
-          });
+          response.setHeader("x-runtime-wake-absent", "1");
+          response.statusCode = 204;
+          response.end();
           return true;
         };
 

@@ -499,15 +499,12 @@ describe("startHostedContainerEntrypoint", () => {
       },
       method: "POST",
     });
-    const lateWakeBody = await lateWake.json();
     releaseInvocation.resolve();
     const invocationResponse = await invocation;
 
-    expect(lateWake.status).toBe(503);
+    expect(lateWake.status).toBe(204);
     expect(lateWake.headers.get("x-runtime-wake-accepted")).toBe("0");
-    expect(lateWakeBody).toMatchObject({
-      error: "Hosted runner is shutting down.",
-    });
+    expect(lateWake.headers.get("x-runtime-wake-absent")).toBe("1");
     expect(runtimeWakeCount).toBe(0);
     expect(invocationResponse.status).toBe(200);
     await vi.waitFor(() => {
@@ -600,11 +597,10 @@ describe("startHostedContainerEntrypoint", () => {
     releaseInvocation.resolve();
     const invocationResponse = await invocation;
 
-    expect(lateWake.status).toBe(503);
+    expect(lateWake.status).toBe(204);
     expect(lateWake.headers["x-runtime-wake-accepted"]).toBe("0");
-    expect(lateWake.json).toMatchObject({
-      error: "Hosted runner is shutting down.",
-    });
+    expect(lateWake.headers["x-runtime-wake-absent"]).toBe("1");
+    expect(lateWake.json).toBeNull();
     expect(runtimeWakeCount).toBe(0);
     expect(invocationResponse.status).toBe(200);
     await vi.waitFor(() => {
