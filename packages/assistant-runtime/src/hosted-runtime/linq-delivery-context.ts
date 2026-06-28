@@ -48,12 +48,20 @@ export function resolveHostedAssistantLinqDeliveryContextForRequest(input: {
     return input.context;
   }
 
-  if (input.context.routeAuthority) {
+  const replyToMessageId = normalizeHostedLinqDeliveryContextText(input.replyToMessageId);
+  if (!replyToMessageId || replyToMessageId !== input.context.replyToMessageId) {
     return null;
   }
 
-  const replyToMessageId = normalizeHostedLinqDeliveryContextText(input.replyToMessageId);
-  return replyToMessageId && replyToMessageId === input.context.replyToMessageId
+  if (!input.context.routeAuthority) {
+    return input.context;
+  }
+
+  return (
+    input.context.target !== null
+    && input.context.routeAuthority.threadId === input.context.target
+    && looksLikeHostedAssistantRedactedLinqTarget(target)
+  )
     ? input.context
     : null;
 }
@@ -123,4 +131,18 @@ export function resolveHostedAssistantLinqReactionDeliveryContextFromCandidatesF
 function normalizeHostedLinqDeliveryContextText(value: string | null | undefined): string | null {
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized : null;
+}
+
+function looksLikeHostedAssistantRedactedLinqTarget(value: string | null): boolean {
+  if (!value) {
+    return false;
+  }
+  return (
+    /^h1_[a-f0-9]{24}$/iu.test(value)
+    || /(?:^|:)hid_[A-Za-z0-9_-]+/u.test(value)
+    || /(?:^|:)ain_[A-Za-z0-9_-]+/u.test(value)
+    || value.includes("hbid:")
+    || value.includes("hbidx:")
+    || value.startsWith("[redacted")
+  );
 }

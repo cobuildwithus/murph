@@ -237,6 +237,7 @@ export async function runHostedWorkspaceAssistantPhase(
           wake,
         }),
         channelTypingDependencies: createHostedAssistantChannelTypingDependencies({
+          effectsPort: input.runtime.platform.effectsPort,
           forwardedEnv: input.runtime.forwardedEnv,
           linqDeliveryContexts: initialLinqDeliveryContexts,
           platformEnv: input.runtime.platformEnv,

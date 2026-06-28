@@ -21,6 +21,9 @@ import {
 import {
   requireHostedProviderFetchDependencies,
 } from "./provider-fetch.ts";
+import type {
+  HostedRuntimeEffectsPort,
+} from "./platform.ts";
 import {
   resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest,
   type HostedAssistantLinqDeliveryContext,
@@ -103,6 +106,7 @@ export function buildHostedWhatsAppChannelEnv(input: {
 }
 
 export function createHostedAssistantChannelTypingDependencies(input: {
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null;
   forwardedEnv: Readonly<Record<string, string>>;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   platformEnv?: Readonly<Record<string, string>>;
@@ -119,6 +123,18 @@ export function createHostedAssistantChannelTypingDependencies(input: {
         targetKind: "thread",
       });
       if (!deliveryContext || !input.providerFetch) {
+        return undefined;
+      }
+      const routeAuthority = deliveryContext.routeAuthority;
+      const assertAuthority = input.effectsPort?.assertLinqThreadRouteAuthority;
+      if (!routeAuthority || !assertAuthority) {
+        return undefined;
+      }
+      try {
+        await assertAuthority(routeAuthority, {
+          signal: input.signal ?? null,
+        });
+      } catch {
         return undefined;
       }
 
