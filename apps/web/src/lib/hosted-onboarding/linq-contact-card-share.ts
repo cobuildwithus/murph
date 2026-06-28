@@ -68,7 +68,7 @@ type HostedLinqContactCardShareReserveDecision =
   | Extract<HostedLinqContactCardShareDecision, { action: "share" }>
   | Extract<HostedLinqContactCardShareDecision, { action: "skip" }>;
 
-export async function reserveHostedLinqContactCardShareAttemptAfterOutbound(input: {
+async function reserveHostedLinqContactCardShareAttemptAfterOutbound(input: {
   chatId: string;
   eligibility: HostedLinqContactCardShareEligibility;
   memberId: string;
@@ -157,7 +157,6 @@ export async function maybeShareHostedLinqContactCardAfterOutbound(input: {
   memberId: string;
   now?: Date;
   prisma: HostedLinqContactCardSharePersistenceClient;
-  shareContactCard?: (input: { chatId: string; signal?: AbortSignal }) => Promise<void>;
   signal?: AbortSignal;
 }): Promise<HostedLinqContactCardShareDecision> {
   let reservation: HostedLinqContactCardShareReserveDecision;
@@ -185,9 +184,8 @@ export async function maybeShareHostedLinqContactCardAfterOutbound(input: {
     return reservation;
   }
 
-  const share = input.shareContactCard ?? shareHostedLinqContactCard;
   try {
-    await share({
+    await shareHostedLinqContactCard({
       chatId: input.chatId,
       ...(input.signal ? { signal: input.signal } : {}),
     });

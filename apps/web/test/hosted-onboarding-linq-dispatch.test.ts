@@ -4131,14 +4131,22 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           suspendedAt: null,
         }),
       },
-      hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue(staleHomeRoute),
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-        upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
-          ...create,
-          ...update,
-        })),
-      },
+      hostedMemberRouting: (() => {
+        let route = staleHomeRoute;
+        return {
+          findUnique: vi.fn().mockImplementation(async () => route),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+          upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
+            route = {
+              ...route,
+              ...create,
+              ...update,
+              memberId: "member_123",
+            };
+            return route;
+          }),
+        };
+      })(),
     });
 
     const response = await handleHostedOnboardingLinqWebhook({
@@ -5356,14 +5364,32 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   }
 
   if (!hostedMemberRouting?.upsert) {
+    let hostedMemberRoutingRecord: Record<string, unknown> | null = null;
     Object.defineProperty(prisma, "hostedMemberRouting", {
       configurable: true,
       value: {
-        findFirst: vi.fn().mockResolvedValue(null),
-        findMany: vi.fn().mockResolvedValue([]),
-        findUnique: vi.fn().mockResolvedValue(null),
+        findFirst: vi.fn(async () => hostedMemberRoutingRecord),
+        findMany: vi.fn(async () => hostedMemberRoutingRecord ? [hostedMemberRoutingRecord] : []),
+        findUnique: vi.fn(async ({ where }: { where?: Record<string, unknown> } = {}) => {
+          if (!hostedMemberRoutingRecord) {
+            return null;
+          }
+          if (
+            typeof where?.memberId === "string"
+            && hostedMemberRoutingRecord.memberId !== where.memberId
+          ) {
+            return null;
+          }
+          return hostedMemberRoutingRecord;
+        }),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-        upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+        upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update?: Record<string, unknown> }) => {
+          hostedMemberRoutingRecord = {
+            ...create,
+            ...(update ?? {}),
+          };
+          return hostedMemberRoutingRecord;
+        }),
         createMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     });

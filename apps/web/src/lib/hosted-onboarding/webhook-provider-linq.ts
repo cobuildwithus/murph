@@ -426,6 +426,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         dailyQuotaReached: "active-member-daily-quota-reached",
         dailyQuotaReply: "active-member-daily-quota-reply",
       },
+      routeAuthority,
       usageGate,
     });
     if (admissionPlan) {

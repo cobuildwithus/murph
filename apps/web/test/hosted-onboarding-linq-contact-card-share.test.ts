@@ -1,8 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const mocks = vi.hoisted(() => ({
+  shareHostedLinqContactCard: vi.fn(async () => undefined),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
+  shareHostedLinqContactCard: mocks.shareHostedLinqContactCard,
+}));
+
 import {
   maybeShareHostedLinqContactCardAfterOutbound,
-  reserveHostedLinqContactCardShareAttemptAfterOutbound,
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 
 const TEST_KEYRING_ENTRIES = {
@@ -14,6 +21,8 @@ describe("hosted Linq contact-card sharing", () => {
   let restoreKeyring: (() => void) | null = null;
 
   beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.shareHostedLinqContactCard.mockResolvedValue(undefined);
     restoreKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
       entries: { ...TEST_KEYRING_ENTRIES },
@@ -29,7 +38,7 @@ describe("hosted Linq contact-card sharing", () => {
     const prisma = createContactCardSharePrismaStub();
     const now = new Date("2026-06-27T12:00:00.000Z");
 
-    const decision = await reserveHostedLinqContactCardShareAttemptAfterOutbound({
+    const decision = await maybeShareHostedLinqContactCardAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: "iMessage",
@@ -43,6 +52,9 @@ describe("hosted Linq contact-card sharing", () => {
     expect(decision).toEqual({
       action: "share",
     });
+    expect(mocks.shareHostedLinqContactCard).toHaveBeenCalledWith({
+      chatId: "chat_123",
+    });
     expect(prisma.rows).toHaveLength(1);
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       lastContactCardShareAttemptedAt: now,
@@ -55,7 +67,7 @@ describe("hosted Linq contact-card sharing", () => {
   it("skips ineligible chats before touching contact-card share state", async () => {
     const prisma = createContactCardSharePrismaStub();
 
-    await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
+    await expect(maybeShareHostedLinqContactCardAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: null,
@@ -67,7 +79,7 @@ describe("hosted Linq contact-card sharing", () => {
       action: "skip",
       reason: "ineligible_chat",
     });
-    await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
+    await expect(maybeShareHostedLinqContactCardAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: "iMessage",
@@ -83,13 +95,14 @@ describe("hosted Linq contact-card sharing", () => {
     expect(prisma.model.findFirst).not.toHaveBeenCalled();
     expect(prisma.model.create).not.toHaveBeenCalled();
     expect(prisma.model.updateMany).not.toHaveBeenCalled();
+    expect(mocks.shareHostedLinqContactCard).not.toHaveBeenCalled();
   });
 
   it("prevents duplicate attempts and keeps failed attempts throttled", async () => {
     const prisma = createContactCardSharePrismaStub();
     const now = new Date("2026-06-27T12:00:00.000Z");
 
-    await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
+    await expect(maybeShareHostedLinqContactCardAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: "iMessage",
@@ -102,7 +115,7 @@ describe("hosted Linq contact-card sharing", () => {
       action: "share",
     });
 
-    await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
+    await expect(maybeShareHostedLinqContactCardAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: "iMessage",
@@ -115,12 +128,13 @@ describe("hosted Linq contact-card sharing", () => {
       action: "skip",
       reason: "recent_attempt",
     });
+    expect(mocks.shareHostedLinqContactCard).toHaveBeenCalledTimes(1);
 
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       lastContactCardShareAttemptedAt: now,
     }));
 
-    await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
+    await expect(maybeShareHostedLinqContactCardAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: "iMessage",
@@ -132,13 +146,14 @@ describe("hosted Linq contact-card sharing", () => {
     })).resolves.toEqual({
       action: "share",
     });
+    expect(mocks.shareHostedLinqContactCard).toHaveBeenCalledTimes(2);
   });
 
   it("throttles share attempts for 48 hours after the reserved attempt", async () => {
     const prisma = createContactCardSharePrismaStub();
     const now = new Date("2026-06-27T12:00:00.000Z");
 
-    await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
+    await expect(maybeShareHostedLinqContactCardAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: "iMessage",
@@ -151,7 +166,7 @@ describe("hosted Linq contact-card sharing", () => {
       action: "share",
     });
 
-    await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
+    await expect(maybeShareHostedLinqContactCardAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: "iMessage",
@@ -164,7 +179,8 @@ describe("hosted Linq contact-card sharing", () => {
       action: "skip",
       reason: "recent_attempt",
     });
-    await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
+    expect(mocks.shareHostedLinqContactCard).toHaveBeenCalledTimes(1);
+    await expect(maybeShareHostedLinqContactCardAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: "iMessage",
@@ -176,11 +192,11 @@ describe("hosted Linq contact-card sharing", () => {
     })).resolves.toEqual({
       action: "share",
     });
+    expect(mocks.shareHostedLinqContactCard).toHaveBeenCalledTimes(2);
   });
 
   it("shares best-effort and keeps provider failures throttled", async () => {
     const prisma = createContactCardSharePrismaStub();
-    const shareContactCard = vi.fn(async () => undefined);
     const now = new Date("2026-06-27T12:00:00.000Z");
 
     await expect(maybeShareHostedLinqContactCardAfterOutbound({
@@ -192,19 +208,18 @@ describe("hosted Linq contact-card sharing", () => {
       memberId: "member_123",
       now,
       prisma: prisma.client,
-      shareContactCard,
     })).resolves.toEqual({
       action: "share",
     });
 
-    expect(shareContactCard).toHaveBeenCalledWith({
+    expect(mocks.shareHostedLinqContactCard).toHaveBeenCalledWith({
       chatId: "chat_123",
     });
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       lastContactCardShareAttemptedAt: now,
     }));
 
-    shareContactCard.mockRejectedValueOnce(new Error("provider rejected"));
+    mocks.shareHostedLinqContactCard.mockRejectedValueOnce(new Error("provider rejected"));
     await expect(maybeShareHostedLinqContactCardAfterOutbound({
       chatId: "chat_456",
       eligibility: {
@@ -214,7 +229,6 @@ describe("hosted Linq contact-card sharing", () => {
       memberId: "member_123",
       now,
       prisma: prisma.client,
-      shareContactCard,
     })).resolves.toEqual({
       action: "share",
     });
@@ -223,7 +237,7 @@ describe("hosted Linq contact-card sharing", () => {
       lastContactCardShareAttemptedAt: now,
     }));
 
-    shareContactCard.mockClear();
+    mocks.shareHostedLinqContactCard.mockClear();
     await expect(maybeShareHostedLinqContactCardAfterOutbound({
       chatId: "chat_456",
       eligibility: {
@@ -233,12 +247,11 @@ describe("hosted Linq contact-card sharing", () => {
       memberId: "member_123",
       now: new Date("2026-06-28T12:00:00.000Z"),
       prisma: prisma.client,
-      shareContactCard,
     })).resolves.toEqual({
       action: "skip",
       reason: "recent_attempt",
     });
-    expect(shareContactCard).not.toHaveBeenCalled();
+    expect(mocks.shareHostedLinqContactCard).not.toHaveBeenCalled();
   });
 
 });
