@@ -835,13 +835,13 @@ model HostedInvite {
 }
 
 model HostedLinqFirstContactAdmissionDecision {
-  eventId    String   @id @map("event_id")
-  decision   String
-  category   String?
-  confidence Float
-  source     String
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  eventId             String   @id @map("event_id")
+  decision            String
+  category            String?
+  confidence          Float
+  source              String
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
   @@map("hosted_linq_first_contact_admission_decision")
 }

@@ -615,6 +615,45 @@ describe("Linq first-contact admission", () => {
     expect(lockValues.some((value) => typeof value === "string" && value.includes("blind:v"))).toBe(false);
   });
 
+  it("records block decisions without storing rejected-message text", async () => {
+    const createMany = vi.fn().mockResolvedValueOnce({ count: 1 });
+    const prisma = {
+      hostedLinqFirstContactAdmissionDecision: {
+        createMany,
+        findUnique: vi.fn().mockResolvedValueOnce({
+          confidence: 0.95,
+          decision: "block",
+          eventId: "evt_rejected_message",
+          source: "model",
+        }),
+      },
+    };
+
+    await expect(recordHostedLinqFirstContactAdmissionDecision({
+      decision: {
+        confidence: 0.95,
+        kind: "block",
+        source: "model",
+      },
+      eventId: "evt_rejected_message",
+      prisma,
+    })).resolves.toMatchObject({
+      confidence: 0.95,
+      kind: "block",
+      source: "model",
+    });
+
+    expect(createMany).toHaveBeenCalledWith({
+      data: {
+        confidence: 0.95,
+        decision: "block",
+        eventId: "evt_rejected_message",
+        source: "model",
+      },
+      skipDuplicates: true,
+    });
+  });
+
   it("returns the stored decision when a concurrent insert already won the event", async () => {
     const prisma = {
       hostedLinqFirstContactAdmissionDecision: {

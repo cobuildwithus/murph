@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-06-25
+Last verified: 2026-06-28
 
 ## Hosted Connected Apps
 
