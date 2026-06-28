@@ -1565,8 +1565,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         };
         runtimeAbortController.signal.addEventListener("abort", abortWake, { once: true });
         let waitResult: HostedRuntimePostCheckpointCompletionWaitResult;
+        let wake: Promise<HostedRuntimePostCheckpointCompletionWaitResult> =
+          Promise.resolve({ kind: "finished" });
         try {
-          const wake = runtimeWakeSignal.wait(wakeAbortController.signal)
+          wake = runtimeWakeSignal.wait(wakeAbortController.signal)
             .then((notification) => ({
               kind: "external_wake" as const,
               notification,
@@ -1592,6 +1594,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
         if (waitResult.kind === "external_wake") {
           return waitResult;
+        }
+        const deliveredWakeResult = await wake;
+        if (deliveredWakeResult.kind === "external_wake") {
+          return deliveredWakeResult;
         }
         const pendingWake = runtimeWakeSignal.consumePending();
         if (pendingWake) {
