@@ -3537,11 +3537,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const events: string[] = [];
     const { mailboxPort } = createMailboxPort({ items: [] });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logRequests: HostedRuntimeLogRequest[] = [];
     let releaseUsageFlush!: () => void;
     const usageFlushGate = new Promise<void>((resolve) => {
       releaseUsageFlush = resolve;
     });
     let resultPromise: ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
+    let resultResolved = false;
+    let flushSawPostAssistantCheckpointLog = false;
 
     try {
       resultPromise = runHostedWorkspaceUntilIdleOrBudget({
@@ -3560,6 +3563,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         initialMailboxImport: createCheckpointedMailboxImportResult(),
         limitPerLane: 10,
         platform: createPlatform({
+          logRequests,
           mailboxPort,
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
@@ -3571,6 +3575,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         },
         async runAssistantPhase() {
           const flushDeferredUsageAfterCheckpoint = async () => {
+            flushSawPostAssistantCheckpointLog = logRequests
+              .flatMap((request) => request.entries)
+              .some((entry) =>
+                entry.eventCode === "checkpoint.runtime_residue_deferred"
+                && entry.redactedJson?.checkpointPhase === "post_assistant"
+              );
             events.push("usage:flush:start");
             await usageFlushGate;
             events.push("usage:flush:done");
@@ -3578,8 +3588,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           return {
             afterCheckpoint: async () => {
               events.push("reply:deliver");
-              await flushDeferredUsageAfterCheckpoint();
-              return null;
+              return {
+                checkpointReason: "outbox_receipt",
+              };
             },
             checkpointReason: "assistant_runtime_commit",
             flushDeferredUsageAfterCheckpoint,
@@ -3590,11 +3601,16 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         workspace: createWorkspaceState({ version: "0" }),
         now: () => TEST_NOW,
       });
+      void resultPromise.then(() => {
+        resultResolved = true;
+      });
 
       await waitUntil(() => {
-        assert.equal(events.includes("reply:deliver"), true);
+        assert.equal(events.includes("usage:flush:start"), true);
       });
       assert.deepEqual(events, ["reply:deliver", "usage:flush:start"]);
+      assert.equal(resultResolved, false);
+      assert.equal(flushSawPostAssistantCheckpointLog, true);
 
       releaseUsageFlush();
       const result = await withTestTimeout(resultPromise, 1_000);

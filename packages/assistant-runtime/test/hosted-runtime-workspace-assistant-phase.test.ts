@@ -634,11 +634,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(hydratedContext?.hosted?.usageRecorder).toEqual({
       recordUsage: expect.any(Function),
     });
-    expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    expect(result.flushDeferredUsageAfterCheckpoint).toEqual(expect.any(Function));
     expect(events).toEqual(["assistant"]);
 
     events.push("checkpoint");
-    await result.afterCheckpoint?.();
+    await result.flushDeferredUsageAfterCheckpoint?.();
 
     expect(events).toEqual([
       "assistant",
@@ -720,10 +720,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       recordUsage: expect.any(Function),
     });
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    expect(result.flushDeferredUsageAfterCheckpoint).toEqual(expect.any(Function));
     expect(events).toEqual(["assistant"]);
 
     events.push("checkpoint");
     await result.afterCheckpoint?.();
+
+    expect(events).toEqual([
+      "assistant",
+      "checkpoint",
+      "managed-automation",
+    ]);
+
+    await result.flushDeferredUsageAfterCheckpoint?.();
 
     expect(events).toEqual([
       "assistant",
@@ -771,10 +780,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result.checkpointReason).toBe("system_mailbox_receipt");
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    expect(result.flushDeferredUsageAfterCheckpoint).toEqual(expect.any(Function));
     expect(events).toEqual(["system-mailbox"]);
 
     events.push("checkpoint");
     await result.afterCheckpoint?.();
+
+    expect(events).toEqual([
+      "system-mailbox",
+      "checkpoint",
+    ]);
+
+    await result.flushDeferredUsageAfterCheckpoint?.();
 
     expect(events).toEqual([
       "system-mailbox",
@@ -809,7 +826,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runtimeUsageRecordPort: usageRecordPort,
     }));
 
-    await result.afterCheckpoint?.();
+    await result.flushDeferredUsageAfterCheckpoint?.();
 
     const usageFailureLog = logRequests.flatMap((request) => request.entries)
       .find((entry) => entry.errorCode === "assistant_usage_record_failed");

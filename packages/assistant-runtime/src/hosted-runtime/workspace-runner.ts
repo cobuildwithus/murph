@@ -651,6 +651,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           effects: afterDurableCheckpoint,
           postCheckpoint,
         });
+        await flushAssistantPhaseDeferredUsage();
       } catch (error) {
         if (
           error instanceof HostedMailboxImportCheckpointConflictError
@@ -664,6 +665,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           input,
         });
       }
+    } else {
+      await flushAssistantPhaseDeferredUsage();
     }
     await reconcilePendingAssistantInputWake({
       foregroundConversationWorkObserved,

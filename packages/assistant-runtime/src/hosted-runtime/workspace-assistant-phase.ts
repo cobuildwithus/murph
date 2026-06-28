@@ -222,17 +222,9 @@ export async function runHostedWorkspaceAssistantPhase(
       return result;
     }
 
-    const afterCheckpoint = result.afterCheckpoint ?? null;
     usageFlushDeferredToAfterCheckpoint = true;
     return {
       ...result,
-      afterCheckpoint: async () => {
-        try {
-          return afterCheckpoint ? await afterCheckpoint() : null;
-        } finally {
-          await flushDeferredUsageRecords();
-        }
-      },
       flushDeferredUsageAfterCheckpoint: flushDeferredUsageRecords,
     };
   };
