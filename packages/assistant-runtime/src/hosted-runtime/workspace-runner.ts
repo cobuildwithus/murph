@@ -7,6 +7,9 @@ import {
 import {
   buildHostedExecutionSafeErrorDiagnostics,
 } from "@murphai/hosted-execution";
+import type {
+  AssistantUsageRecord,
+} from "@murphai/hosted-execution/assistant-usage";
 import {
   withHostedCanonicalWritePort,
   type HostedCanonicalWritePort,
@@ -197,8 +200,8 @@ export interface HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier {
 interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   afterCheckpoint?: (() => Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void>) | null;
   browserVaultReplicaRefreshRequested?: true;
+  deferredUsageRecords?: readonly AssistantUsageRecord[] | null;
   deviceSyncMaintenanceRan?: true;
-  flushDeferredUsageAfterCheckpoint?: (() => Promise<void>) | null;
   // Failed foreground reply count for this pass. Present only when the pass
   // ran the foreground assistant reply phase; gates the durable conversation
   // consumed-watermark ack (only a clean pass with zero failed replies and no
@@ -311,6 +314,7 @@ export interface HostedWorkspaceRunnerResult {
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   latestMailboxImport: HostedMailboxImportCheckpointResult;
   latestWorkspace: HostedWorkspaceState | null;
+  deferredUsageFlushFinished: Promise<void> | null;
   mailboxPostCheckpointEffectsFinished: Promise<void> | null;
   mailboxRetryAt: string | null;
   projectedWakeRequiresCheckpoint: boolean;
@@ -508,6 +512,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       latestWorkspace: checkpointRequestSession.latestWorkspace()
         ?? initialMailboxImport.checkpoint?.workspace
         ?? input.workspace,
+      deferredUsageFlushFinished: null,
       mailboxPostCheckpointEffectsFinished: null,
       mailboxRetryAt: checkpointRequestSession.mailboxRetryAt(),
       projectedWakeRequiresCheckpoint: false,
@@ -544,26 +549,24 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   let projectedWakeRequiresCheckpoint = false;
   let assistantPhaseCheckpointed = false;
   let assistantPhaseAfterCheckpointReached = false;
-  let flushDeferredUsageAfterCheckpoint: (() => Promise<void>) | null = null;
+  let deferredUsageRecords: readonly AssistantUsageRecord[] = [];
+  let deferredUsageFlushFinished: Promise<void> | null = null;
   let deferredUsageFlushStarted = false;
   const startAssistantPhaseDeferredUsageFlush = (): Promise<void> | null => {
     if (
       !assistantPhaseCheckpointed
-      || !flushDeferredUsageAfterCheckpoint
+      || deferredUsageRecords.length === 0
       || deferredUsageFlushStarted
     ) {
       return null;
     }
 
     deferredUsageFlushStarted = true;
-    const flush = flushDeferredUsageAfterCheckpoint().catch((error: unknown) => {
-      warnAssistantBestEffortFailure({
-        error,
-        operation: "hosted assistant deferred usage flush",
-      });
+    deferredUsageFlushFinished = flushHostedAssistantUsageRecordsBestEffort({
+      input,
+      records: deferredUsageRecords,
     });
-    void flush;
-    return flush;
+    return deferredUsageFlushFinished;
   };
   const awaitAssistantPhaseDeferredUsageFlush = async (): Promise<void> => {
     await startAssistantPhaseDeferredUsageFlush();
@@ -582,10 +585,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       hostedCanonicalWritePort,
       () => runAssistantPhase(assistantPhaseInput),
     );
-    flushDeferredUsageAfterCheckpoint =
-      assistantPhaseResult.flushDeferredUsageAfterCheckpoint ?? null;
-    if (flushDeferredUsageAfterCheckpoint && assistantPhaseResult.progressed !== true) {
-      throw new TypeError("Hosted workspace assistant phase deferred usage flush requires a progressed phase.");
+    deferredUsageRecords = assistantPhaseResult.deferredUsageRecords ?? [];
+    if (deferredUsageRecords.length > 0 && assistantPhaseResult.progressed !== true) {
+      throw new TypeError("Hosted workspace assistant phase deferred usage records require a progressed phase.");
     }
     if (
       assistantContextSnapshotDirty
@@ -705,6 +707,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     await foregroundMailboxImportLoop.stop();
     if (!assistantPhaseAfterCheckpointReached) {
       await awaitAssistantPhaseDeferredUsageFlush();
+    } else {
+      await deferredUsageFlushFinished;
     }
     scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
@@ -725,6 +729,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     latestWorkspace: checkpointRequestSession.latestWorkspace()
       ?? initialMailboxImport.checkpoint?.workspace
       ?? input.workspace,
+    deferredUsageFlushFinished,
     mailboxPostCheckpointEffectsFinished,
     mailboxRetryAt: checkpointRequestSession.mailboxRetryAt(),
     projectedWakeRequiresCheckpoint,
@@ -1440,6 +1445,51 @@ async function writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog(cont
     now: context.input.now,
     platform: context.input.platform,
   });
+}
+
+async function flushHostedAssistantUsageRecordsBestEffort(input: {
+  input: HostedWorkspaceRunnerInput;
+  records: readonly AssistantUsageRecord[];
+}): Promise<void> {
+  const usageRecordPort = input.input.platform.usageRecordPort ?? null;
+  if (!usageRecordPort || input.records.length === 0) {
+    return;
+  }
+
+  for (const record of input.records) {
+    try {
+      await usageRecordPort.recordUsage(record);
+    } catch (error) {
+      const failure = buildHostedMailboxPostCheckpointEffectFailureLog(error);
+      const safeErrorMessage =
+        failure.summary ?? "Hosted assistant usage recording failed.";
+      console.warn("Assistant usage recording failed; continuing without retry.", {
+        errorCode: "assistant_usage_record_failed",
+        nestedErrorCode: failure.errorCode,
+        safeErrorMessage,
+      });
+      await writeHostedRuntimeLogBestEffort({
+        entry: {
+          ...buildHostedRuntimeLogContextFields(input.input.runtimeLogContext),
+          component: "runtime",
+          errorCode: "assistant_usage_record_failed",
+          eventCode: "runner.error",
+          level: "warn",
+          phase: "error",
+          redactedJson: {
+            assistantUsageRecordFailed: true,
+            failureCodeDetails: failure.codeDetail ? [failure.codeDetail] : [],
+            failureNames: failure.name ? [failure.name] : [],
+            failureSummaries: failure.summary ? [failure.summary] : [],
+            nestedErrorCode: failure.errorCode,
+            safeErrorMessage,
+          },
+        },
+        now: input.input.now,
+        platform: input.input.platform,
+      });
+    }
+  }
 }
 
 async function writeHostedForegroundMailboxImportFailureRuntimeLog(context: {

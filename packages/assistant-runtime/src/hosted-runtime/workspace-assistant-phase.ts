@@ -190,17 +190,17 @@ export async function runHostedWorkspaceAssistantPhase(
   });
   const usageRecordPort = input.runtime.platform.usageRecordPort ?? null;
   const deferredUsageRecords: AssistantUsageRecord[] = [];
-  let usageFlushDeferredToAfterCheckpoint = false;
   const recordDeferredUsage = (record: AssistantUsageRecord): Promise<void> => {
     deferredUsageRecords.push(record);
     return Promise.resolve();
   };
-  const flushDeferredUsageRecords = async (): Promise<void> => {
-    if (!usageRecordPort || deferredUsageRecords.length === 0) {
+  const flushDeferredUsageRecords = async (
+    records: readonly AssistantUsageRecord[],
+  ): Promise<void> => {
+    if (!usageRecordPort || records.length === 0) {
       return;
     }
 
-    const records = deferredUsageRecords.splice(0);
     for (const record of records) {
       try {
         await usageRecordPort.recordUsage(record);
@@ -222,10 +222,9 @@ export async function runHostedWorkspaceAssistantPhase(
       return result;
     }
 
-    usageFlushDeferredToAfterCheckpoint = true;
     return {
       ...result,
-      flushDeferredUsageAfterCheckpoint: flushDeferredUsageRecords,
+      deferredUsageRecords: deferredUsageRecords.splice(0),
     };
   };
   if (shouldWriteHostedDeviceConnectContextLog({ deviceConnectProviders, input })) {
@@ -707,9 +706,7 @@ export async function runHostedWorkspaceAssistantPhase(
     });
     return deferUsageFlushUntilAfterCheckpoint(result);
   } finally {
-    if (!usageFlushDeferredToAfterCheckpoint) {
-      await flushDeferredUsageRecords();
-    }
+    await flushDeferredUsageRecords(deferredUsageRecords.splice(0));
     releaseChannelAbortRelay();
     channelAbortController.abort();
   }

@@ -1519,15 +1519,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
       return { requiresFollowUpCheckpoint };
     };
-    const trackMailboxPostCheckpointEffects = (passResult: HostedWorkspaceRunnerResult): void => {
-      const effectsFinished = passResult.mailboxPostCheckpointEffectsFinished;
-      if (!effectsFinished) {
-        return;
+    const trackRunnerPostCheckpointCompletions = (passResult: HostedWorkspaceRunnerResult): void => {
+      const completions = [
+        passResult.mailboxPostCheckpointEffectsFinished,
+        passResult.deferredUsageFlushFinished,
+      ].filter((completion): completion is Promise<void> => completion !== null);
+      for (const completion of completions) {
+        pendingMailboxPostCheckpointEffectCompletions.add(completion);
+        void completion.finally(() => {
+          pendingMailboxPostCheckpointEffectCompletions.delete(completion);
+        });
       }
-      pendingMailboxPostCheckpointEffectCompletions.add(effectsFinished);
-      void effectsFinished.finally(() => {
-        pendingMailboxPostCheckpointEffectCompletions.delete(effectsFinished);
-      });
     };
     const waitForMailboxPostCheckpointEffectsBeforeIdleCheckpoint =
       async (): Promise<HostedRuntimeMailboxEffectsWaitResult> => {
@@ -1586,7 +1588,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         workspace: workspaceRead.workspace,
       });
       pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
-      trackMailboxPostCheckpointEffects(result);
+      trackRunnerPostCheckpointCompletions(result);
       const committedInboxMediaRetentionWakeDue = isHostedInboxMediaRetentionWakeDue({
         nowMs: Date.now(),
         workspace: workspaceRead.workspace,
@@ -1647,7 +1649,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           workspace: passWorkspace,
         });
         pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
-        trackMailboxPostCheckpointEffects(result);
+        trackRunnerPostCheckpointCompletions(result);
         if (result.runtimeStateDirty) {
           markIdleCheckpointTimerAfterDirtyWork();
         }
@@ -1929,7 +1931,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             workspace: checkpoint.workspace,
           });
           pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
-          trackMailboxPostCheckpointEffects(result);
+          trackRunnerPostCheckpointCompletions(result);
           idleCheckpointStartByMs = result.runtimeStateDirty
             ? Date.now() + idleCheckpointDelayMs
             : null;

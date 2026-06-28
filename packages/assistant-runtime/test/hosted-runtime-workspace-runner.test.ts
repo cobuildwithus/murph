@@ -50,6 +50,10 @@ import {
   parseHostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/parsers";
 import {
+  ASSISTANT_USAGE_SCHEMA,
+  type AssistantUsageRecord,
+} from "@murphai/hosted-execution/assistant-usage";
+import {
   applyCanonicalWriteBatch,
   initializeVault,
 } from "@murphai/core";
@@ -3545,6 +3549,24 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     let resultPromise: ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
     let resultResolved = false;
     let flushSawPostAssistantCheckpointLog = false;
+    const usageRecordPort: HostedRuntimeUsageRecordPort = {
+      async recordUsage(record) {
+        flushSawPostAssistantCheckpointLog = logRequests
+          .flatMap((request) => request.entries)
+          .some((entry) =>
+            entry.eventCode === "checkpoint.runtime_residue_deferred"
+            && entry.redactedJson?.checkpointPhase === "post_assistant"
+          );
+        events.push("usage:flush:start");
+        assert.equal(record.usageId, "turn_runner_usage.attempt-1");
+        await usageFlushGate;
+        events.push("usage:flush:done");
+        return {
+          recorded: true,
+          usageId: record.usageId,
+        };
+      },
+    };
 
     try {
       resultPromise = runHostedWorkspaceUntilIdleOrBudget({
@@ -3565,6 +3587,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         platform: createPlatform({
           logRequests,
           mailboxPort,
+          usageRecordPort,
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
         requestId: "request_synthetic_runner_usage_flush_delivery_order",
@@ -3574,17 +3597,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           workspaceVersion: "0",
         },
         async runAssistantPhase() {
-          const flushDeferredUsageAfterCheckpoint = async () => {
-            flushSawPostAssistantCheckpointLog = logRequests
-              .flatMap((request) => request.entries)
-              .some((entry) =>
-                entry.eventCode === "checkpoint.runtime_residue_deferred"
-                && entry.redactedJson?.checkpointPhase === "post_assistant"
-              );
-            events.push("usage:flush:start");
-            await usageFlushGate;
-            events.push("usage:flush:done");
-          };
           return {
             afterCheckpoint: async () => {
               events.push("reply:deliver");
@@ -3593,7 +3605,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               };
             },
             checkpointReason: "assistant_runtime_commit",
-            flushDeferredUsageAfterCheckpoint,
+            deferredUsageRecords: [createAssistantUsageRecord()],
             progressed: true,
           };
         },
@@ -3614,6 +3626,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       const result = await withTestTimeout(resultPromise, 1_000);
 
       assert.equal(result.assistantPhaseResult?.progressed, true);
+      assert.equal(result.deferredUsageFlushFinished instanceof Promise, true);
       assert.equal(resultResolved, true);
       assert.deepEqual(events, [
         "reply:deliver",
@@ -3621,9 +3634,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       ]);
 
       releaseUsageFlush();
-      await waitUntil(() => {
-        assert.equal(events.includes("usage:flush:done"), true);
-      });
+      await result.deferredUsageFlushFinished;
       assert.deepEqual(events, [
         "reply:deliver",
         "usage:flush:start",
@@ -3656,6 +3667,22 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     let flushSawAssistantCheckpointLog = false;
+    const usageRecordPort: HostedRuntimeUsageRecordPort = {
+      async recordUsage(record) {
+        flushSawAssistantCheckpointLog = logRequests
+          .flatMap((request) => request.entries)
+          .some((entry) =>
+            entry.eventCode === "checkpoint.runtime_residue_deferred"
+            && entry.redactedJson?.checkpointPhase === "assistant"
+          );
+        events.push("usage:flush");
+        assert.equal(record.usageId, "turn_runner_usage.attempt-1");
+        return {
+          recorded: true,
+          usageId: record.usageId,
+        };
+      },
+    };
 
     try {
       await assert.rejects(
@@ -3701,6 +3728,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           platform: createPlatform({
             logRequests,
             mailboxPort,
+            usageRecordPort,
             workspacePort: createWorkspacePort({ checkpointRequests }),
           }),
           requestId: "request_synthetic_runner_usage_flush_pending_input_failure",
@@ -3728,15 +3756,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 return null;
               },
               checkpointReason: "assistant_runtime_commit",
-              flushDeferredUsageAfterCheckpoint: async () => {
-                flushSawAssistantCheckpointLog = logRequests
-                  .flatMap((request) => request.entries)
-                  .some((entry) =>
-                    entry.eventCode === "checkpoint.runtime_residue_deferred"
-                    && entry.redactedJson?.checkpointPhase === "assistant"
-                  );
-                events.push("usage:flush");
-              },
+              deferredUsageRecords: [createAssistantUsageRecord()],
               progressed: true,
             };
           },
@@ -6037,6 +6057,50 @@ function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMa
     payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
     updatedAt: TEST_NOW,
     userId: TEST_USER_ID,
+    ...overrides,
+  };
+}
+
+function createAssistantUsageRecord(
+  overrides: Partial<AssistantUsageRecord> = {},
+): AssistantUsageRecord {
+  return {
+    apiKeyEnv: null,
+    attemptCount: 1,
+    baseUrl: null,
+    cacheWriteTokens: null,
+    cachedInputTokens: null,
+    credentialSource: "platform",
+    featureKey: null,
+    gatewayTags: [],
+    inputTokens: 10,
+    memberId: TEST_USER_ID,
+    occurredAt: TEST_NOW,
+    outputTokens: 5,
+    provider: "codex-cli",
+    providerName: "OpenAI",
+    providerRequestId: null,
+    providerRequestOutcome: "succeeded",
+    providerRequestOrdinal: 0,
+    rawUsageJson: null,
+    rawUsageJsonHash: null,
+    reasoningTokens: null,
+    reportingUserId: null,
+    requestedModel: "gpt-5.5",
+    routeId: "primary",
+    schema: ASSISTANT_USAGE_SCHEMA,
+    servedModel: "gpt-5.5",
+    sessionId: "asst_runner_usage",
+    stripeMeterSource: "murph",
+    surface: null,
+    tokenPricingBasis: "standard",
+    totalTokens: 15,
+    triggerKind: null,
+    turnId: "turn_runner_usage",
+    turnProfileJson: null,
+    usageExtractionSourcePath: null,
+    usageExtractionVersion: "codex-usage-v1",
+    usageId: "turn_runner_usage.attempt-1",
     ...overrides,
   };
 }
