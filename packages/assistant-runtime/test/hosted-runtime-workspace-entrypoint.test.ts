@@ -4778,7 +4778,7 @@ describe("hosted workspace runtime entrypoint", () => {
               },
             },
           },
-          async runAssistantPhase() {
+          async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls > 1) {
@@ -4790,6 +4790,9 @@ describe("hosted workspace runtime entrypoint", () => {
               };
             }
 
+            input.recordDeferredUsage?.(createAssistantUsageRecord({
+              usageId: "turn_entrypoint_deferred_usage.attempt-1",
+            }));
             return {
               afterCheckpoint: async () => {
                 events.push("reply.deliver");
@@ -4798,11 +4801,6 @@ describe("hosted workspace runtime entrypoint", () => {
                 };
               },
               checkpointReason: "assistant_runtime_commit",
-              deferredUsageRecords: [
-                createAssistantUsageRecord({
-                  usageId: "turn_entrypoint_deferred_usage.attempt-1",
-                }),
-              ],
               nextWakeAt: earlierWakeAt,
               nextWakeReason: "assistant",
               progressed: true,
@@ -4925,8 +4923,11 @@ describe("hosted workspace runtime entrypoint", () => {
               },
             },
           },
-          async runAssistantPhase() {
+          async runAssistantPhase(input) {
             events.push("first.assistant.phase");
+            input.recordDeferredUsage?.(createAssistantUsageRecord({
+              usageId: "turn_entrypoint_deferred_usage_previous.attempt-1",
+            }));
             return {
               afterCheckpoint: async () => {
                 events.push("first.reply.deliver");
@@ -4935,11 +4936,6 @@ describe("hosted workspace runtime entrypoint", () => {
                 };
               },
               checkpointReason: "assistant_runtime_commit",
-              deferredUsageRecords: [
-                createAssistantUsageRecord({
-                  usageId: "turn_entrypoint_deferred_usage_previous.attempt-1",
-                }),
-              ],
               progressed: true,
             };
           },
@@ -5092,8 +5088,11 @@ describe("hosted workspace runtime entrypoint", () => {
               },
             },
           },
-          async runAssistantPhase() {
+          async runAssistantPhase(input) {
             events.push("assistant.phase");
+            input.recordDeferredUsage?.(createAssistantUsageRecord({
+              usageId: "turn_entrypoint_deferred_usage_failure.attempt-1",
+            }));
             return {
               afterCheckpoint: async () => {
                 events.push("reply.deliver");
@@ -5102,11 +5101,6 @@ describe("hosted workspace runtime entrypoint", () => {
                 };
               },
               checkpointReason: "assistant_runtime_commit",
-              deferredUsageRecords: [
-                createAssistantUsageRecord({
-                  usageId: "turn_entrypoint_deferred_usage_failure.attempt-1",
-                }),
-              ],
               progressed: true,
             };
           },
@@ -5225,8 +5219,11 @@ describe("hosted workspace runtime entrypoint", () => {
               },
             },
           },
-          async runAssistantPhase() {
+          async runAssistantPhase(input) {
             events.push("assistant.phase");
+            input.recordDeferredUsage?.(createAssistantUsageRecord({
+              usageId: "turn_entrypoint_deferred_usage_host_abort.attempt-1",
+            }));
             return {
               afterCheckpoint: async () => {
                 events.push("reply.deliver");
@@ -5235,11 +5232,6 @@ describe("hosted workspace runtime entrypoint", () => {
                 };
               },
               checkpointReason: "assistant_runtime_commit",
-              deferredUsageRecords: [
-                createAssistantUsageRecord({
-                  usageId: "turn_entrypoint_deferred_usage_host_abort.attempt-1",
-                }),
-              ],
               progressed: true,
             };
           },
@@ -5278,6 +5270,109 @@ describe("hosted workspace runtime entrypoint", () => {
         "usage.record:done",
       ]);
       assert.equal(events.includes("reply.deliver"), true);
+    } finally {
+      releaseUsageRecord.resolve();
+      if (resultPromise) {
+        await resultPromise.catch(() => undefined);
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("starts captured deferred usage without blocking when host abort prevents the phase result", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-abort-before-result-"));
+    const events: string[] = [];
+    const usageRecordStarted = createDeferred<void>();
+    const usageRecordFinished = createDeferred<void>();
+    const releaseUsageRecord = createDeferred<void>();
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("synthetic host abort before assistant phase result");
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_deferred_usage_host_abort_before_result",
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Host abort before phase result should not checkpoint.");
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: {
+            ...createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests: [],
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            usageRecordPort: {
+              async recordUsage(record: AssistantUsageRecord) {
+                events.push("usage.record:start");
+                assert.equal(
+                  record.usageId,
+                  "turn_entrypoint_deferred_usage_abort_before_result.attempt-1",
+                );
+                usageRecordStarted.resolve();
+                await releaseUsageRecord.promise;
+                events.push("usage.record:done");
+                usageRecordFinished.resolve();
+                return {
+                  recorded: true,
+                  usageId: record.usageId,
+                };
+              },
+            },
+          },
+          async runAssistantPhase(input) {
+            events.push("assistant.phase");
+            input.recordDeferredUsage?.(createAssistantUsageRecord({
+              usageId: "turn_entrypoint_deferred_usage_abort_before_result.attempt-1",
+            }));
+            hostAbortController.abort(hostAbortReason);
+            throw hostAbortReason;
+          },
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        usageRecordStarted.promise,
+        1_000,
+        () => "Deferred usage recording did not start after host abort.",
+      );
+      const outcome = await withRealTimeout(
+        resultPromise,
+        1_000,
+        () => "Runtime waited for captured deferred usage after host abort.",
+      ).then(
+        () => "resolved" as const,
+        (error: unknown) => error,
+      );
+
+      assert.equal(outcome, hostAbortReason);
+      assert.equal(events.includes("usage.record:done"), false);
+
+      releaseUsageRecord.resolve();
+      await withRealTimeout(
+        usageRecordFinished.promise,
+        1_000,
+        () => "Deferred usage recording did not finish after release.",
+      );
     } finally {
       releaseUsageRecord.resolve();
       if (resultPromise) {
@@ -5397,6 +5492,9 @@ describe("hosted workspace runtime entrypoint", () => {
               1_000,
               () => "CLI bridge device snapshot request did not start.",
             );
+            phaseInput.recordDeferredUsage?.(createAssistantUsageRecord({
+              usageId: "turn_entrypoint_deferred_usage_bridge_failure.attempt-1",
+            }));
             return {
               afterCheckpoint: async () => {
                 events.push("reply.deliver");
@@ -5405,11 +5503,6 @@ describe("hosted workspace runtime entrypoint", () => {
                 };
               },
               checkpointReason: "assistant_runtime_commit",
-              deferredUsageRecords: [
-                createAssistantUsageRecord({
-                  usageId: "turn_entrypoint_deferred_usage_bridge_failure.attempt-1",
-                }),
-              ],
               progressed: true,
             };
           },

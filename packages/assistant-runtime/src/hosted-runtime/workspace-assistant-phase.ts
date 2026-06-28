@@ -188,41 +188,9 @@ export async function runHostedWorkspaceAssistantPhase(
     deviceConnectProviders,
     input,
   });
-  const usageRecordPort = input.runtime.platform.usageRecordPort ?? null;
-  const deferredUsageRecords: AssistantUsageRecord[] = [];
   const recordDeferredUsage = (record: AssistantUsageRecord): Promise<void> => {
-    deferredUsageRecords.push(record);
+    input.recordDeferredUsage?.(record);
     return Promise.resolve();
-  };
-  const flushDeferredUsageRecords = async (
-    records: readonly AssistantUsageRecord[],
-  ): Promise<void> => {
-    if (!usageRecordPort || records.length === 0) {
-      return;
-    }
-
-    for (const record of records) {
-      try {
-        await usageRecordPort.recordUsage(record);
-      } catch (error) {
-        await writeHostedAssistantUsageRecordingFailureRuntimeLog({
-          error,
-          input,
-        });
-      }
-    }
-  };
-  const deferUsageFlushUntilAfterCheckpoint = (
-    result: HostedWorkspaceRunnerAssistantPhaseResult,
-  ): HostedWorkspaceRunnerAssistantPhaseResult => {
-    if (deferredUsageRecords.length === 0) {
-      return result;
-    }
-
-    return {
-      ...result,
-      deferredUsageRecords: deferredUsageRecords.splice(0),
-    };
   };
   if (shouldWriteHostedDeviceConnectContextLog({ deviceConnectProviders, input })) {
     void writeHostedDeviceConnectRuntimeLog({
@@ -271,7 +239,7 @@ export async function runHostedWorkspaceAssistantPhase(
         memberId: input.request.userId,
         providerFetch: input.runtime.platform.providerFetch ?? null,
         publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
-        ...(usageRecordPort
+        ...(input.runtime.platform.usageRecordPort && input.recordDeferredUsage
           ? {
               usageRecorder: {
                 recordUsage: recordDeferredUsage,
@@ -317,11 +285,9 @@ export async function runHostedWorkspaceAssistantPhase(
       systemMailboxMaintenance.result
       && !shouldContinueAssistantLane
     ) {
-      return deferUsageFlushUntilAfterCheckpoint(
-        withHostedDeviceSyncMaintenanceRan(
-          systemMailboxMaintenance.result,
-          systemMailboxMaintenance.deviceSyncMaintenanceRan,
-        ),
+      return withHostedDeviceSyncMaintenanceRan(
+        systemMailboxMaintenance.result,
+        systemMailboxMaintenance.deviceSyncMaintenanceRan,
       );
     }
     let continuingSystemMailboxResult = shouldContinueAssistantLane
@@ -461,7 +427,7 @@ export async function runHostedWorkspaceAssistantPhase(
           result: foregroundAssistantResult,
         }),
       );
-      return deferUsageFlushUntilAfterCheckpoint(result);
+      return result;
     }
     const assistantCronWakeAfterPass =
       shouldResolveHostedAssistantCronWakeAfterAssistantPass({
@@ -560,16 +526,16 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(postDelivery.redactedStatus ?? {}),
       };
       if (!phaseProgressed) {
-        return deferUsageFlushUntilAfterCheckpoint(mergeContinuingSystemMailboxResult({
+        return mergeContinuingSystemMailboxResult({
           ...(nextWakeAt ? { nextWakeAt } : {}),
           ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
             ? { nextWakeReason: postDelivery.nextWakeReason }
             : {}),
           progressed: false,
           redactedStatus,
-        }));
+        });
       }
-      return deferUsageFlushUntilAfterCheckpoint(mergeContinuingSystemMailboxResult({
+      return mergeContinuingSystemMailboxResult({
         checkpointReason: postDelivery.checkpointReason,
         nextWakeAt,
         ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
@@ -577,7 +543,7 @@ export async function runHostedWorkspaceAssistantPhase(
           : {}),
         progressed: true,
         redactedStatus,
-      }));
+      });
     }
 
     const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
@@ -630,14 +596,14 @@ export async function runHostedWorkspaceAssistantPhase(
       systemMailboxRetryableFailed: 0,
     });
     if (!phaseProgressed) {
-      return deferUsageFlushUntilAfterCheckpoint(mergeContinuingSystemMailboxResult({
+      return mergeContinuingSystemMailboxResult({
         ...(nextWakeAt ? { nextWakeAt } : {}),
         ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
           ? { nextWakeReason: nextWake.reason }
         : {}),
         progressed: false,
         redactedStatus,
-      }));
+      });
     }
 
     const result = mergeContinuingSystemMailboxResult({
@@ -701,47 +667,11 @@ export async function runHostedWorkspaceAssistantPhase(
       progressed: true,
       redactedStatus,
     });
-    return deferUsageFlushUntilAfterCheckpoint(result);
+    return result;
   } finally {
-    await flushDeferredUsageRecords(deferredUsageRecords.splice(0));
     releaseChannelAbortRelay();
     channelAbortController.abort();
   }
-}
-
-async function writeHostedAssistantUsageRecordingFailureRuntimeLog(input: {
-  error: unknown;
-  input: HostedWorkspaceRuntimeAssistantPhaseInput;
-}): Promise<void> {
-  const failure = buildHostedRuntimeFailureDiagnostics(
-    input.error,
-    "Hosted assistant usage recording failed.",
-  );
-  console.warn("Assistant usage recording failed; continuing without retry.", {
-    errorCode: "assistant_usage_record_failed",
-    nestedErrorCode: failure.errorCode,
-    safeErrorMessage: failure.redactedJson.safeErrorMessage,
-  });
-  await writeHostedRuntimeLogBestEffort({
-    entry: {
-      ...buildHostedRuntimeLogContextFields({
-        attemptId: input.input.request.attemptId,
-        leaseGeneration: input.input.request.leaseGeneration,
-        workspaceVersion: input.input.request.workspaceVersion,
-      }),
-      component: "runtime",
-      errorCode: "assistant_usage_record_failed",
-      eventCode: "runner.error",
-      level: "warn",
-      phase: "error",
-      redactedJson: {
-        ...failure.redactedJson,
-        assistantUsageRecordFailed: true,
-        nestedErrorCode: failure.errorCode,
-      },
-    },
-    platform: input.input.runtime.platform,
-  });
 }
 
 function hasFreshHostedConversationInput(

@@ -604,6 +604,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("defers hosted usage records until after a progressed assistant checkpoint", async () => {
     const events: string[] = [];
+    const deferredUsageRecords: AssistantUsageRecord[] = [];
     const usageRecordPort: RuntimeUsageRecordPort = {
       async recordUsage(record) {
         events.push(`record:${record.usageId}`);
@@ -627,6 +628,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      recordDeferredUsage: (record) => {
+        deferredUsageRecords.push(record);
+      },
       runtimeUsageRecordPort: usageRecordPort,
     }));
 
@@ -634,7 +638,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(hydratedContext?.hosted?.usageRecorder).toEqual({
       recordUsage: expect.any(Function),
     });
-    expect(result.deferredUsageRecords).toEqual([
+    expect(deferredUsageRecords).toEqual([
       expect.objectContaining({
         usageId: "turn_direct_usage.attempt-1",
       }),
@@ -642,7 +646,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(events).toEqual(["assistant"]);
 
     events.push("checkpoint");
-    for (const record of result.deferredUsageRecords ?? []) {
+    for (const record of deferredUsageRecords) {
       await usageRecordPort.recordUsage(record);
     }
 
@@ -655,6 +659,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("flushes deferred usage after existing post-checkpoint work", async () => {
     const events: string[] = [];
+    const deferredUsageRecords: AssistantUsageRecord[] = [];
     const usageRecordPort: RuntimeUsageRecordPort = {
       async recordUsage(record) {
         events.push(`record:${record.usageId}`);
@@ -718,6 +723,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => "2026-04-27T00:00:00.000Z",
+      recordDeferredUsage: (record) => {
+        deferredUsageRecords.push(record);
+      },
       runtimeUsageRecordPort: usageRecordPort,
     }));
 
@@ -726,7 +734,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       recordUsage: expect.any(Function),
     });
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
-    expect(result.deferredUsageRecords).toEqual([
+    expect(deferredUsageRecords).toEqual([
       expect.objectContaining({
         usageId: "turn_direct_usage.attempt-1",
       }),
@@ -742,7 +750,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "managed-automation",
     ]);
 
-    for (const record of result.deferredUsageRecords ?? []) {
+    for (const record of deferredUsageRecords) {
       await usageRecordPort.recordUsage(record);
     }
 
@@ -756,6 +764,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("defers hosted usage records until after a system mailbox checkpoint", async () => {
     const events: string[] = [];
+    const deferredUsageRecords: AssistantUsageRecord[] = [];
     const usageRecordPort: RuntimeUsageRecordPort = {
       async recordUsage(record) {
         events.push(`record:${record.usageId}`);
@@ -786,13 +795,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      recordDeferredUsage: (record) => {
+        deferredUsageRecords.push(record);
+      },
       runtimeUsageRecordPort: usageRecordPort,
     }));
 
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result.checkpointReason).toBe("system_mailbox_receipt");
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
-    expect(result.deferredUsageRecords).toEqual([
+    expect(deferredUsageRecords).toEqual([
       expect.objectContaining({
         usageId: "turn_direct_usage.attempt-1",
       }),
@@ -807,7 +819,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "checkpoint",
     ]);
 
-    for (const record of result.deferredUsageRecords ?? []) {
+    for (const record of deferredUsageRecords) {
       await usageRecordPort.recordUsage(record);
     }
 
@@ -818,8 +830,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
   });
 
-  it("returns no-progress deferred usage records for runner-owned flushing", async () => {
+  it("collects no-progress deferred usage records for runner-owned flushing", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const deferredUsageRecords: AssistantUsageRecord[] = [];
     let usagePortCalled = false;
     const usageRecordPort: RuntimeUsageRecordPort = {
       async recordUsage() {
@@ -841,11 +854,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       logRequests,
+      recordDeferredUsage: (record) => {
+        deferredUsageRecords.push(record);
+      },
       runtimeUsageRecordPort: usageRecordPort,
     }));
 
     expect(result.progressed).toBe(false);
-    expect(result.deferredUsageRecords).toEqual([
+    expect(deferredUsageRecords).toEqual([
       expect.objectContaining({
         usageId: "turn_direct_usage.attempt-1",
       }),
@@ -7057,6 +7073,7 @@ function createPhaseInput(input: {
   logRequests?: HostedRuntimeLogRequest[];
   now?: () => string;
   prepareAutoReplyDelivery?: HostedWorkspaceRuntimeAssistantPhaseInput["prepareAutoReplyDelivery"];
+  recordDeferredUsage?: HostedWorkspaceRuntimeAssistantPhaseInput["recordDeferredUsage"];
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeForwardedEnv?: Record<string, string>;
@@ -7117,6 +7134,7 @@ function createPhaseInput(input: {
     },
     now: input.now,
     prepareAutoReplyDelivery: input.prepareAutoReplyDelivery,
+    recordDeferredUsage: input.recordDeferredUsage,
     platform: {
       artifactStore: {
         get: vi.fn(async () => null),

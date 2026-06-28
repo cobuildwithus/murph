@@ -182,6 +182,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   now?: () => string;
   platform: HostedRuntimePlatform;
   prepareAutoReplyDelivery?: (() => Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null>) | null;
+  recordDeferredUsage?: ((record: AssistantUsageRecord) => void) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   workspace: HostedWorkspaceState | null;
 }
@@ -200,7 +201,6 @@ export interface HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier {
 interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   afterCheckpoint?: (() => Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void>) | null;
   browserVaultReplicaRefreshRequested?: true;
-  deferredUsageRecords?: readonly AssistantUsageRecord[] | null;
   deviceSyncMaintenanceRan?: true;
   // Failed foreground reply count for this pass. Present only when the pass
   // ran the foreground assistant reply phase; gates the durable conversation
@@ -540,6 +540,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         foregroundMailboxImportLoop,
         input,
       }),
+    recordDeferredUsage(record: AssistantUsageRecord): void {
+      deferredUsageRecords.push(record);
+    },
     shouldYieldBackgroundMaintenance: () => foregroundConversationWorkObserved,
     workspace: input.workspace,
   };
@@ -548,12 +551,14 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   let projectedWakeRequiresCheckpoint = false;
   let assistantPhaseSafePointReached = false;
   let assistantPhaseAfterCheckpointReached = false;
-  let deferredUsageRecords: readonly AssistantUsageRecord[] = [];
+  let deferredUsageRecords: AssistantUsageRecord[] = [];
   let deferredUsageFlushFinished: Promise<void> | null = null;
   let deferredUsageFlushStarted = false;
-  const startAssistantPhaseDeferredUsageFlush = (): Promise<void> | null => {
+  const startAssistantPhaseDeferredUsageFlush = (inputOptions: {
+    beforeSafePoint?: boolean;
+  } = {}): Promise<void> | null => {
     if (
-      !assistantPhaseSafePointReached
+      (!assistantPhaseSafePointReached && inputOptions.beforeSafePoint !== true)
       || deferredUsageRecords.length === 0
       || deferredUsageFlushStarted
     ) {
@@ -563,7 +568,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     deferredUsageFlushStarted = true;
     deferredUsageFlushFinished = flushHostedAssistantUsageRecordsBestEffort({
       input,
-      records: deferredUsageRecords,
+      records: [...deferredUsageRecords],
     });
     input.onPostSafePointCompletionStarted?.(deferredUsageFlushFinished);
     return deferredUsageFlushFinished;
@@ -583,12 +588,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       return;
     }
 
-    deferredUsageFlushStarted = true;
-    deferredUsageFlushFinished = flushHostedAssistantUsageRecordsBestEffort({
-      input,
-      records: deferredUsageRecords,
-    });
-    await deferredUsageFlushFinished;
+    const completion = startAssistantPhaseDeferredUsageFlush({ beforeSafePoint: true });
+    if (input.signal?.aborted !== true) {
+      await completion;
+    }
   };
   const hostedCanonicalWritePort = createHostedWorkspaceCanonicalWritePort({
     checkpointRequestBuilder: checkpointRequestSession,
@@ -604,7 +607,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       hostedCanonicalWritePort,
       () => runAssistantPhase(assistantPhaseInput),
     );
-    deferredUsageRecords = assistantPhaseResult.deferredUsageRecords ?? [];
     if (
       assistantContextSnapshotDirty
       || await isAssistantContextSnapshotRefreshPendingBestEffort(input.vaultRoot)
@@ -1471,12 +1473,18 @@ async function flushHostedAssistantUsageRecordsBestEffort(input: {
     try {
       await usageRecordPort.recordUsage(record);
     } catch (error) {
-      const failure = buildHostedMailboxPostCheckpointEffectFailureLog(error);
+      const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
       const safeErrorMessage =
-        failure.summary ?? "Hosted assistant usage recording failed.";
+        typeof diagnostics?.errorMessage === "string"
+          ? diagnostics.errorMessage
+          : "Hosted assistant usage recording failed.";
+      const nestedErrorCode =
+        typeof diagnostics?.errorCode === "string"
+          ? diagnostics.errorCode
+          : "runtime_error";
       console.warn("Assistant usage recording failed; continuing without retry.", {
         errorCode: "assistant_usage_record_failed",
-        nestedErrorCode: failure.errorCode,
+        nestedErrorCode,
         safeErrorMessage,
       });
       await writeHostedRuntimeLogBestEffort({
@@ -1489,10 +1497,7 @@ async function flushHostedAssistantUsageRecordsBestEffort(input: {
           phase: "error",
           redactedJson: {
             assistantUsageRecordFailed: true,
-            failureCodeDetails: failure.codeDetail ? [failure.codeDetail] : [],
-            failureNames: failure.name ? [failure.name] : [],
-            failureSummaries: failure.summary ? [failure.summary] : [],
-            nestedErrorCode: failure.errorCode,
+            nestedErrorCode,
             safeErrorMessage,
           },
         },

@@ -3601,7 +3601,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           leaseGeneration: "1",
           workspaceVersion: "0",
         },
-        async runAssistantPhase() {
+        async runAssistantPhase(input) {
+          input.recordDeferredUsage?.(createAssistantUsageRecord());
           return {
             afterCheckpoint: async () => {
               events.push("reply:deliver");
@@ -3610,7 +3611,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               };
             },
             checkpointReason: "assistant_runtime_commit",
-            deferredUsageRecords: [createAssistantUsageRecord()],
             progressed: true,
           };
         },
@@ -3711,14 +3711,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           leaseGeneration: "1",
           workspaceVersion: "0",
         },
-        async runAssistantPhase() {
+        async runAssistantPhase(input) {
           events.push("assistant");
+          input.recordDeferredUsage?.(createAssistantUsageRecord({
+            usageId: "turn_runner_no_progress_usage.attempt-1",
+          }));
           return {
-            deferredUsageRecords: [
-              createAssistantUsageRecord({
-                usageId: "turn_runner_no_progress_usage.attempt-1",
-              }),
-            ],
             progressed: false,
           };
         },
@@ -3847,6 +3845,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           runtimeWakeSignal,
           async runAssistantPhase(input) {
             events.push("assistant");
+            input.recordDeferredUsage?.(createAssistantUsageRecord());
             items.push(createMailboxItem({
               id: "mailbox_item_runner_usage_flush_late",
               laneSeq: "2",
@@ -3863,7 +3862,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
                 return null;
               },
               checkpointReason: "assistant_runtime_commit",
-              deferredUsageRecords: [createAssistantUsageRecord()],
               progressed: true,
             };
           },
