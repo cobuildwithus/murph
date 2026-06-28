@@ -4661,6 +4661,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const usageRecordStarted = createDeferred<void>();
     const releaseUsageRecord = createDeferred<void>();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const cleanWakeAt = "2099-04-27T00:05:00.000Z";
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
     let resultSettled = false;
     let assistantPhaseCalls = 0;
@@ -4752,6 +4753,8 @@ describe("hosted workspace runtime entrypoint", () => {
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls > 1) {
               return {
+                nextWakeAt: cleanWakeAt,
+                nextWakeReason: "mailbox.retry",
                 progressed: false,
               };
             }
@@ -4803,7 +4806,8 @@ describe("hosted workspace runtime entrypoint", () => {
         () => "Runtime did not settle after deferred usage recording finished.",
       );
 
-      assert.equal(result.status, "idle");
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, cleanWakeAt);
       assert.deepEqual(events.filter((event) => event.startsWith("snapshot:")), [
         "snapshot:idle_shutdown",
       ]);

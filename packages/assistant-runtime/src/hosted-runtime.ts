@@ -2019,6 +2019,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             reason: checkpoint.workspace.nextWakeReason ?? null,
           },
           {
+            at: accumulatedProjection.nextWakeAt,
+            reason: accumulatedProjection.nextWakeReason,
+          },
+          {
             at: checkpoint.workspace.inboxMediaRetentionWakeAt ?? null,
             reason: checkpoint.workspace.inboxMediaRetentionWakeAt
               ? "inbox_media_retention"
@@ -2030,6 +2034,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           },
         ]);
         const checkpointReturnWakePresent = Object.hasOwn(checkpoint.workspace, "nextWakeAt")
+          || accumulatedProjection.nextWakeAt !== null
           || checkpoint.workspace.inboxMediaRetentionWakeAt !== null
           || durableCheckpointWakeAt !== null;
         const checkpointDurableWakeReason = readSelectedDurableCheckpointWakeReason({
