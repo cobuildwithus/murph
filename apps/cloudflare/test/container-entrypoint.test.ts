@@ -30,7 +30,7 @@ type SpawnMock = (
 ) => MockSpawnedProcess;
 
 const mocks = vi.hoisted(() => ({
-  drainHostedRuntimePostSafePointCompletionsBestEffort: vi.fn(async () => undefined),
+  drainHostedRuntimeDeferredUsageCompletionsBestEffort: vi.fn(async () => undefined),
   emitHostedExecutionStructuredLog: vi.fn(),
   runHostedWorkspaceInvocation: vi.fn(),
   snapshotExpectedCodexRootProcess: vi.fn(),
@@ -78,8 +78,8 @@ vi.mock("@murphai/assistant-runtime/hosted-invocation", async () => {
   );
   return {
     ...actual,
-    drainHostedRuntimePostSafePointCompletionsBestEffort:
-      mocks.drainHostedRuntimePostSafePointCompletionsBestEffort,
+    drainHostedRuntimeDeferredUsageCompletionsBestEffort:
+      mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort,
     stopHostedCliRuntimeBridge: mocks.stopHostedCliRuntimeBridge,
   };
 });
@@ -106,7 +106,7 @@ const TEST_SNAPSHOT_PATH_HASH_SECRET = "a".repeat(64);
 beforeEach(() => {
   vi.unstubAllGlobals();
   globalThis.fetch = nativeFetch;
-  mocks.drainHostedRuntimePostSafePointCompletionsBestEffort.mockResolvedValue(undefined);
+  mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort.mockResolvedValue(undefined);
   mocks.runHostedWorkspaceInvocation.mockResolvedValue(buildWorkspaceRunnerResult());
   mocks.snapshotExpectedCodexRootProcess.mockResolvedValue(null);
   mocks.spawn.mockReset();
@@ -390,10 +390,10 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("drains post-safe-point runtime completions before clean shutdown exit", async () => {
+  it("drains deferred usage completions before clean shutdown exit", async () => {
     const drainStarted = createDeferred();
     const releaseDrain = createDeferred();
-    mocks.drainHostedRuntimePostSafePointCompletionsBestEffort.mockImplementationOnce(
+    mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort.mockImplementationOnce(
       async () => {
         drainStarted.resolve();
         await releaseDrain.promise;

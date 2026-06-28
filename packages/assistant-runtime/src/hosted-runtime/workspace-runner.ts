@@ -276,7 +276,7 @@ export interface HostedWorkspaceRunnerInput {
   initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
-  onPostSafePointCompletionStarted?: ((completion: Promise<void>) => void) | null;
+  onDeferredUsageCompletionRegistered?: ((completion: Promise<void>) => void) | null;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
@@ -520,6 +520,31 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   }
 
   const runAssistantPhase = input.runAssistantPhase;
+  let deferredUsageCompletionSettled = false;
+  let resolveDeferredUsageCompletion: () => void = () => undefined;
+  const deferredUsageCompletion = new Promise<void>((resolve) => {
+    resolveDeferredUsageCompletion = resolve;
+  });
+  const resolveDeferredUsageCompletionOnce = (): void => {
+    if (deferredUsageCompletionSettled) {
+      return;
+    }
+
+    deferredUsageCompletionSettled = true;
+    resolveDeferredUsageCompletion();
+  };
+  const resolveDeferredUsageCompletionAfter = (completion: Promise<void> | null): void => {
+    if (completion === null) {
+      resolveDeferredUsageCompletionOnce();
+      return;
+    }
+
+    void completion.then(
+      resolveDeferredUsageCompletionOnce,
+      resolveDeferredUsageCompletionOnce,
+    );
+  };
+  input.onDeferredUsageCompletionRegistered?.(deferredUsageCompletion);
   let foregroundConversationWorkObserved = false;
   const foregroundMailboxImportLoop =
     startHostedForegroundConversationMailboxImportLoop({
@@ -570,7 +595,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       input,
       records: [...deferredUsageRecords],
     });
-    input.onPostSafePointCompletionStarted?.(deferredUsageFlushFinished);
+    resolveDeferredUsageCompletionAfter(deferredUsageFlushFinished);
     return deferredUsageFlushFinished;
   };
   const flushAssistantPhaseDeferredUsageBeforeThrow = async (): Promise<void> => {
@@ -732,6 +757,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     throw error;
   } finally {
     await foregroundMailboxImportLoop.stop();
+    if (!deferredUsageFlushStarted) {
+      resolveDeferredUsageCompletionOnce();
+    }
   }
 
   return {

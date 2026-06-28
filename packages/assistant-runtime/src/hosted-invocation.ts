@@ -9,7 +9,7 @@ import {
   type HostedAssistantWorkspaceRuntimeJobResult,
   type RuntimeWakeSignal,
 } from "./hosted-runtime.ts";
-export { drainHostedRuntimePostSafePointCompletionsBestEffort } from "./hosted-runtime.ts";
+export { drainHostedRuntimeDeferredUsageCompletionsBestEffort } from "./hosted-runtime.ts";
 export {
   consumeHostedCliRuntimeBridgeOffInvocationViolation,
   stopHostedCliRuntimeBridge,
