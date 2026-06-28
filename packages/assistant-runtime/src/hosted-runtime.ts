@@ -3133,7 +3133,7 @@ function assertHostedWorkspaceRuntimeBudgetSupported(maxRuntimeMs: number | null
   throw new TypeError("Hosted workspace runtime job budget.maxRuntimeMs is not supported yet.");
 }
 
-function createAbortGuardedHostedRuntimePlatform(
+export function createAbortGuardedHostedRuntimePlatform(
   platform: HostedRuntimePlatform,
   assertLive: () => void,
 ): HostedRuntimePlatform {
@@ -3286,13 +3286,9 @@ function createAbortGuardedHostedRuntimePlatform(
           },
         }
       : {}),
-    ...(platform.usageRecordPort
-      ? {
-          usageRecordPort: {
-            recordUsage: (usage) => guard(() => platform.usageRecordPort!.recordUsage(usage)),
-          },
-        }
-      : {}),
+    // usageRecordPort is inherited unguarded from platform. Deferred records
+    // are captured before abort and must still reach the idempotent web ledger
+    // after user-visible post-checkpoint work has happened.
     ...(platform.vaultSharePort
       ? {
           vaultSharePort: {

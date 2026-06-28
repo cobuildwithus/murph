@@ -146,6 +146,7 @@ vi.mock("../src/hosted-runtime/workspace-runner.ts", async (importOriginal) => {
 });
 
 import {
+  createAbortGuardedHostedRuntimePlatform,
   createCoalescingRuntimeWakeSignal,
   HostedRuntimeCheckpointInterruptedByWakeError,
   HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
@@ -2687,6 +2688,44 @@ describe("hosted workspace runtime entrypoint", () => {
     } finally {
       await removeTempRoot(vaultRoot);
     }
+  });
+
+  test("abort-guarded platform leaves deferred usage ledger writes unguarded", async () => {
+    const events: string[] = [];
+    const usageRequests: AssistantUsageRecord[] = [];
+    const abortReason = new Error("synthetic runtime abort before deferred usage ledger");
+    const platform: HostedRuntimePlatform = {
+      ...createPlatform({
+        events,
+        mailboxPort: null,
+        workspacePort: null,
+      }),
+      usageRecordPort: {
+        async recordUsage(record) {
+          events.push("usage.record");
+          usageRequests.push(record);
+          return {
+            recorded: true,
+            usageId: record.usageId,
+          };
+        },
+      },
+    };
+    const guardedPlatform = createAbortGuardedHostedRuntimePlatform(platform, () => {
+      throw abortReason;
+    });
+
+    await guardedPlatform.usageRecordPort?.recordUsage(
+      createAssistantUsageRecord({
+        usageId: "turn_entrypoint_abort_guarded_deferred_usage.attempt-1",
+      }),
+    );
+
+    assert.deepEqual(events, ["usage.record"]);
+    assert.deepEqual(
+      usageRequests.map((record) => record.usageId),
+      ["turn_entrypoint_abort_guarded_deferred_usage.attempt-1"],
+    );
   });
 
   test("runtime abort blocks the foreground consume ack at the abort-guarded platform", async () => {
