@@ -4684,9 +4684,6 @@ describe("hosted workspace runtime entrypoint", () => {
           async checkpoint(request) {
             events.push(`workspace.checkpoint:${request.reason}`);
             checkpointRequests.push(request);
-            if (request.reason === "idle_shutdown") {
-              runtimeWakeSignal.notify();
-            }
             return {
               checkpointed: true,
               workspace: createWorkspaceState({
@@ -4792,14 +4789,17 @@ describe("hosted workspace runtime entrypoint", () => {
           true,
         );
       });
-      await waitUntil(() => {
-        assert.equal(assistantPhaseCalls, 2);
-      });
+      assert.equal(assistantPhaseCalls, 1);
       await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.equal(assistantPhaseCalls, 1);
       assert.equal(events.includes("usage.record:done"), false);
       assert.equal(resultSettled, false);
 
       releaseUsageRecord.resolve();
+      runtimeWakeSignal.notify();
+      await waitUntil(() => {
+        assert.equal(assistantPhaseCalls, 2);
+      });
       const result = await withRealTimeout(
         resultPromise,
         1_000,
