@@ -231,6 +231,64 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
   });
 
+  it("claims a failed-message alert when the delivery advances but the line receipt projection is stale", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
+      id: "hld_attempt_older_than_line",
+    });
+    fixture.hostedLinqLineUpdateMany.mockResolvedValueOnce({ count: 0 });
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      createdAt: "2026-03-26T12:01:00.000Z",
+      data: {
+        error: {
+          code: "30007",
+          message: "carrier filtered +15551234567 provider_msg_123 private text",
+        },
+        message_id: "msg_failed_older_than_line",
+        phone_number: "+15550000000",
+        service: "sms",
+      },
+      eventId: "evt_failed_delivery_stale_line",
+      eventType: "message.failed",
+    }));
+
+    await expect(ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual({
+      alertIds: [expect.stringMatching(/^hla_message_failed_[a-f0-9]{32}$/u)],
+      duplicate: false,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "failed",
+        }),
+        where: expect.objectContaining({
+          id: "hld_attempt_older_than_line",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          phoneNumberLookupKey: event.phoneNumberLookupKey,
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqAlertCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          deliveryId: "hld_attempt_older_than_line",
+          eventId: createHostedLinqProviderEventLookupKey("evt_failed_delivery_stale_line"),
+          kind: "message_failed",
+        }),
+        skipDuplicates: true,
+      }),
+    );
+  });
+
   it("counts outbound message.received echoes against line pacing", async () => {
     const fixture = createObservabilityPrismaFixture();
     const event = requireParsedProviderEvent(buildMessageReceivedEvent({

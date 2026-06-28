@@ -83,9 +83,10 @@ export async function ingestHostedLinqProviderEventTx(input: {
     lineLookupKey,
     lineProjectionAdvanced,
   });
+  const staleUnownedLineReceipt = staleLineReceipt && deliveryReceipt.deliveryId === null;
   if (
     staleDeliveryReceipt
-    || staleLineReceipt
+    || staleUnownedLineReceipt
     || isStaleStatusProjection(input.event, lineProjectionAdvanced)
   ) {
     return {
