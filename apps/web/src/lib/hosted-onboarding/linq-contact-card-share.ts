@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import { Prisma } from "@prisma/client";
 
 import { createHostedLinqChatLookupKey, createHostedLinqChatLookupKeyReadCandidates } from "./contact-privacy";
@@ -24,16 +22,12 @@ type HostedLinqContactCardSharePersistenceClient =
   };
 
 type HostedLinqContactCardShareExisting = {
-  contactCardShareClaimedAt: Date | null;
   lastContactCardShareAttemptedAt: Date | null;
-  lastContactCardShareSucceededAt: Date | null;
   linqChatLookupKey: string;
 };
 
 type HostedLinqContactCardShareCreateInput = {
   data: {
-    contactCardShareClaimedAt: Date;
-    contactCardShareClaimId: string;
     lastContactCardShareAttemptedAt: Date;
     linqChatLookupKey: string;
     memberId: string;
@@ -42,8 +36,6 @@ type HostedLinqContactCardShareCreateInput = {
 
 type HostedLinqContactCardShareUpdateManyInput = {
   data: {
-    contactCardShareClaimedAt?: Date | null;
-    contactCardShareClaimId?: string | null;
     lastContactCardShareAttemptedAt?: Date | null;
     lastContactCardShareSucceededAt?: Date | null;
     memberId?: string;
@@ -53,9 +45,7 @@ type HostedLinqContactCardShareUpdateManyInput = {
 
 type HostedLinqContactCardShareFindFirstInput = {
   select: {
-    contactCardShareClaimedAt: true;
     lastContactCardShareAttemptedAt: true;
-    lastContactCardShareSucceededAt: true;
     linqChatLookupKey: true;
   };
   where: {
@@ -66,7 +56,6 @@ type HostedLinqContactCardShareFindFirstInput = {
 };
 
 const HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS = 48 * 60 * 60 * 1000;
-const HOSTED_LINQ_CONTACT_CARD_SHARE_CLAIM_TTL_MS = 10 * 60 * 1000;
 
 export type HostedLinqContactCardShareEligibility = {
   service: string | null;
@@ -76,20 +65,17 @@ export type HostedLinqContactCardShareEligibility = {
 export type HostedLinqContactCardShareDecision =
   HostedRuntimeLinqContactCardShareDecision;
 
-type HostedLinqContactCardShareClaimDecision =
-  | {
-      action: "share";
-      claimId: string;
-    }
+type HostedLinqContactCardShareReserveDecision =
+  | Extract<HostedLinqContactCardShareDecision, { action: "share" }>
   | Extract<HostedLinqContactCardShareDecision, { action: "skip" }>;
 
-export async function claimHostedLinqContactCardShareAfterOutbound(input: {
+export async function reserveHostedLinqContactCardShareAttemptAfterOutbound(input: {
   chatId: string;
   eligibility: HostedLinqContactCardShareEligibility;
   memberId: string;
   now?: Date;
   prisma: HostedLinqContactCardSharePersistenceClient;
-}): Promise<HostedLinqContactCardShareClaimDecision> {
+}): Promise<HostedLinqContactCardShareReserveDecision> {
   const now = input.now ?? new Date();
   const chatLookup = resolveHostedLinqContactCardShareLookup(input.chatId);
   if (!chatLookup) {
@@ -109,9 +95,6 @@ export async function claimHostedLinqContactCardShareAfterOutbound(input: {
   const attemptBefore = new Date(
     now.getTime() - HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS,
   );
-  const claimBefore = new Date(
-    now.getTime() - HOSTED_LINQ_CONTACT_CARD_SHARE_CLAIM_TTL_MS,
-  );
   const existing = await input.prisma.hostedLinqContactCardShare.findFirst({
     where: {
       linqChatLookupKey: {
@@ -119,15 +102,13 @@ export async function claimHostedLinqContactCardShareAfterOutbound(input: {
       },
     },
     select: {
-      contactCardShareClaimedAt: true,
       lastContactCardShareAttemptedAt: true,
-      lastContactCardShareSucceededAt: true,
       linqChatLookupKey: true,
     },
   });
 
   if (!existing) {
-    return await createHostedLinqContactCardShareClaim({
+    return await createHostedLinqContactCardShareAttemptReservation({
       chatLookupKey: chatLookup.writeKey,
       memberId: input.memberId,
       now,
@@ -135,15 +116,6 @@ export async function claimHostedLinqContactCardShareAfterOutbound(input: {
     });
   }
 
-  if (
-    existing.contactCardShareClaimedAt
-    && existing.contactCardShareClaimedAt > claimBefore
-  ) {
-    return {
-      action: "skip",
-      reason: "claim_active",
-    };
-  }
   if (
     existing.lastContactCardShareAttemptedAt
     && existing.lastContactCardShareAttemptedAt > attemptBefore
@@ -154,89 +126,53 @@ export async function claimHostedLinqContactCardShareAfterOutbound(input: {
     };
   }
 
-  const claimId = randomUUID();
-  const claimed = await input.prisma.hostedLinqContactCardShare.updateMany({
+  const reserved = await input.prisma.hostedLinqContactCardShare.updateMany({
     where: {
       linqChatLookupKey: existing.linqChatLookupKey,
-      AND: [
-        {
-          OR: [
-            { lastContactCardShareAttemptedAt: null },
-            { lastContactCardShareAttemptedAt: { lte: attemptBefore } },
-          ],
-        },
-        {
-          OR: [
-            { contactCardShareClaimedAt: null },
-            { contactCardShareClaimedAt: { lte: claimBefore } },
-          ],
-        },
+      OR: [
+        { lastContactCardShareAttemptedAt: null },
+        { lastContactCardShareAttemptedAt: { lte: attemptBefore } },
       ],
     },
     data: {
-      contactCardShareClaimedAt: now,
-      contactCardShareClaimId: claimId,
       lastContactCardShareAttemptedAt: now,
       memberId: input.memberId,
     },
   });
 
-  if (claimed.count !== 1) {
+  if (reserved.count !== 1) {
     return {
       action: "skip",
-      reason: "claim_active",
+      reason: "recent_attempt",
     };
   }
 
   return {
     action: "share",
-    claimId,
   };
 }
 
-export async function recordHostedLinqContactCardShareResult(input: {
+export async function recordHostedLinqContactCardShareSuccess(input: {
   chatId: string;
-  claimId: string;
   memberId?: string | null;
   now?: Date;
   prisma: HostedLinqContactCardSharePersistenceClient;
-  status: "failed" | "succeeded";
 }): Promise<{ ok: true }> {
   const chatLookup = resolveHostedLinqContactCardShareLookup(input.chatId);
   if (!chatLookup) {
     return { ok: true };
   }
 
-  if (input.status === "succeeded") {
-    const now = input.now ?? new Date();
-    await input.prisma.hostedLinqContactCardShare.updateMany({
-      where: {
-        contactCardShareClaimId: input.claimId,
-        ...(input.memberId ? { memberId: input.memberId } : {}),
-        linqChatLookupKey: {
-          in: [...chatLookup.readCandidates],
-        },
-      },
-      data: {
-        contactCardShareClaimedAt: null,
-        contactCardShareClaimId: null,
-        lastContactCardShareSucceededAt: now,
-      },
-    });
-    return { ok: true };
-  }
-
+  const now = input.now ?? new Date();
   await input.prisma.hostedLinqContactCardShare.updateMany({
     where: {
-      contactCardShareClaimId: input.claimId,
       ...(input.memberId ? { memberId: input.memberId } : {}),
       linqChatLookupKey: {
         in: [...chatLookup.readCandidates],
       },
     },
     data: {
-      contactCardShareClaimedAt: null,
-      contactCardShareClaimId: null,
+      lastContactCardShareSucceededAt: now,
     },
   });
   return { ok: true };
@@ -251,9 +187,9 @@ export async function maybeShareHostedLinqContactCardAfterOutbound(input: {
   shareContactCard?: (input: { chatId: string; signal?: AbortSignal }) => Promise<void>;
   signal?: AbortSignal;
 }): Promise<HostedLinqContactCardShareDecision> {
-  let claim: HostedLinqContactCardShareClaimDecision;
+  let reservation: HostedLinqContactCardShareReserveDecision;
   try {
-    claim = await claimHostedLinqContactCardShareAfterOutbound({
+    reservation = await reserveHostedLinqContactCardShareAttemptAfterOutbound({
       chatId: input.chatId,
       eligibility: input.eligibility,
       memberId: input.memberId,
@@ -264,7 +200,7 @@ export async function maybeShareHostedLinqContactCardAfterOutbound(input: {
     logHostedLinqContactCardShareFailure({
       chatId: input.chatId,
       error,
-      phase: "claim",
+      phase: "reserve",
     });
     return {
       action: "skip",
@@ -272,8 +208,8 @@ export async function maybeShareHostedLinqContactCardAfterOutbound(input: {
     };
   }
 
-  if (claim.action !== "share") {
-    return claim;
+  if (reservation.action !== "share") {
+    return reservation;
   }
 
   const share = input.shareContactCard ?? shareHostedLinqContactCard;
@@ -288,25 +224,17 @@ export async function maybeShareHostedLinqContactCardAfterOutbound(input: {
       error,
       phase: "provider",
     });
-    await releaseHostedLinqContactCardShareClaimBestEffort({
-      chatId: input.chatId,
-      claimId: claim.claimId,
-      memberId: input.memberId,
-      prisma: input.prisma,
-    });
     return {
       action: "share",
     };
   }
 
   try {
-    await recordHostedLinqContactCardShareResult({
+    await recordHostedLinqContactCardShareSuccess({
       chatId: input.chatId,
-      claimId: claim.claimId,
       memberId: input.memberId,
       now: input.now,
       prisma: input.prisma,
-      status: "succeeded",
     });
   } catch (error) {
     logHostedLinqContactCardShareFailure({
@@ -342,18 +270,15 @@ function isHostedLinqContactCardShareEligible(
     && eligibility.threadIsDirect === true;
 }
 
-async function createHostedLinqContactCardShareClaim(input: {
+async function createHostedLinqContactCardShareAttemptReservation(input: {
   chatLookupKey: string;
   memberId: string;
   now: Date;
   prisma: HostedLinqContactCardSharePersistenceClient;
-}): Promise<HostedLinqContactCardShareClaimDecision> {
-  const claimId = randomUUID();
+}): Promise<HostedLinqContactCardShareReserveDecision> {
   try {
     await input.prisma.hostedLinqContactCardShare.create({
       data: {
-        contactCardShareClaimedAt: input.now,
-        contactCardShareClaimId: claimId,
         lastContactCardShareAttemptedAt: input.now,
         linqChatLookupKey: input.chatLookupKey,
         memberId: input.memberId,
@@ -363,7 +288,7 @@ async function createHostedLinqContactCardShareClaim(input: {
     if (isPrismaUniqueViolation(error)) {
       return {
         action: "skip",
-        reason: "claim_active",
+        reason: "recent_attempt",
       };
     }
     throw error;
@@ -371,31 +296,7 @@ async function createHostedLinqContactCardShareClaim(input: {
 
   return {
     action: "share",
-    claimId,
   };
-}
-
-async function releaseHostedLinqContactCardShareClaimBestEffort(input: {
-  chatId: string;
-  claimId: string;
-  memberId?: string | null;
-  prisma: HostedLinqContactCardSharePersistenceClient;
-}): Promise<void> {
-  try {
-    await recordHostedLinqContactCardShareResult({
-      chatId: input.chatId,
-      claimId: input.claimId,
-      memberId: input.memberId ?? null,
-      prisma: input.prisma,
-      status: "failed",
-    });
-  } catch (error) {
-    logHostedLinqContactCardShareFailure({
-      chatId: input.chatId,
-      error,
-      phase: "release_claim",
-    });
-  }
 }
 
 function logHostedLinqContactCardShareFailure(input: {

@@ -5575,6 +5575,12 @@ describe("hosted runtime callbacks", () => {
   });
 
   it("shares the Linq contact card after an eligible delivered iMessage intent", async () => {
+    const routeAuthority = {
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq" as const,
+      containerMemberId: "member_123",
+      threadId: "linq_chat_current",
+    };
     const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq_contact_card",
       linqMessage: {
@@ -5593,14 +5599,15 @@ describe("hosted runtime callbacks", () => {
       },
       occurredAt: "2026-04-08T00:00:00.000Z",
       phoneLookupKey: "+15559990000",
+      routeAuthority,
       userId: "member_123",
     });
     const effect = createEffect({
       actorId: "ain_hashed_actor",
       bindingDeliveryKind: "thread",
-      bindingDeliveryTarget: "ain_hashed_thread",
+      bindingDeliveryTarget: "linq_chat_current",
       channel: "linq",
-      explicitTarget: "ain_hashed_thread",
+      explicitTarget: "linq_chat_current",
       transportIdempotent: true,
     });
     const maybeShareLinqContactCardAfterOutbound = vi.fn(async () => ({
@@ -5610,9 +5617,9 @@ describe("hosted runtime callbacks", () => {
     const providerFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
-      providerThreadId: "linq_chat_materialized",
-      target: "linq_chat_materialized",
-      targetKind: "participant" as const,
+      providerThreadId: "linq_chat_current",
+      target: "linq_chat_current",
+      targetKind: "thread" as const,
     });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies, dispatchHooks }) => {
       const delivery = await dependencies.sendLinq({
@@ -5621,7 +5628,7 @@ describe("hosted runtime callbacks", () => {
         idempotencyKey: "assistant-outbox:intent_hashed_target",
         message: "hello from hosted",
         replyToMessageId: "linq_message_current",
-        target: "ain_hashed_thread",
+        target: "linq_chat_current",
         targetKind: "thread",
       });
       const deliveryRecord = createDelivery({
@@ -5645,6 +5652,7 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqThreadRouteAuthority: vi.fn(async () => undefined),
         maybeShareLinqContactCardAfterOutbound,
       }),
       providerFetch,
@@ -5652,7 +5660,8 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(maybeShareLinqContactCardAfterOutbound).toHaveBeenCalledWith({
-      chatId: "linq_chat_materialized",
+      authority: routeAuthority,
+      chatId: "linq_chat_current",
       service: "iMessage",
       threadIsDirect: true,
     }, {
@@ -5667,6 +5676,12 @@ describe("hosted runtime callbacks", () => {
   });
 
   it("logs Linq contact-card callback failures without failing the sent outcome", async () => {
+    const routeAuthority = {
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq" as const,
+      containerMemberId: "member_123",
+      threadId: "linq_chat_current",
+    };
     const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq_contact_card_failed",
       linqMessage: {
@@ -5685,6 +5700,7 @@ describe("hosted runtime callbacks", () => {
       },
       occurredAt: "2026-04-08T00:00:00.000Z",
       phoneLookupKey: "+15559990000",
+      routeAuthority,
       userId: "member_123",
     });
     const effect = createEffect({
@@ -5735,6 +5751,7 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqThreadRouteAuthority: vi.fn(async () => undefined),
         maybeShareLinqContactCardAfterOutbound,
       }),
       providerFetch: vi.fn<typeof fetch>(),
@@ -5742,6 +5759,7 @@ describe("hosted runtime callbacks", () => {
     });
 
     expect(maybeShareLinqContactCardAfterOutbound).toHaveBeenCalledWith({
+      authority: routeAuthority,
       chatId: "linq_chat_current",
       service: "iMessage",
       threadIsDirect: true,

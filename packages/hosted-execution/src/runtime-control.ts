@@ -16,6 +16,7 @@ import type {
 import type {
   HostedBrowserVaultReplicaCursorRef,
   HostedBrowserVaultReplicaRef,
+  HostedExecutionLinqExternalThreadRouteAuthority,
 } from "./contracts.ts";
 import {
   HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
@@ -714,7 +715,6 @@ export const HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_SKIP_REASONS = [
   "ineligible_chat",
   "missing_chat_id",
   "recent_attempt",
-  "claim_active",
   "state_unavailable",
 ] as const;
 
@@ -722,6 +722,7 @@ export type HostedRuntimeLinqContactCardShareSkipReason =
   (typeof HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_SKIP_REASONS)[number];
 
 export interface HostedRuntimeLinqContactCardShareAfterOutboundRequest {
+  authority: HostedExecutionLinqExternalThreadRouteAuthority;
   chatId: string;
   service: string | null;
   threadIsDirect: boolean | null;

@@ -6,6 +6,9 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
+  hostedOnboardingError,
+} from "@/src/lib/hosted-onboarding/errors";
+import {
   maybeShareHostedLinqContactCardAfterOutbound,
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 import {
@@ -16,6 +19,9 @@ import {
   sanitizeHostedOnboardingStructuredLogDetails,
   toHostedOnboardingLogIdSuffix,
 } from "@/src/lib/hosted-onboarding/logging";
+import {
+  assertHostedThreadRouteEgressAuthority,
+} from "@/src/lib/hosted-routing/thread-route-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -29,6 +35,29 @@ export const POST = withJsonError(async (request: Request) => {
     await readOptionalJsonObject(request),
   );
 
+  if (body.authority.containerMemberId !== userId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_CONTACT_CARD_SHARE_BOUND_USER_MISMATCH",
+      httpStatus: 403,
+      message: "Hosted Linq contact-card share authority does not match the runtime user.",
+      retryable: false,
+    });
+  }
+  if (body.authority.threadId !== body.chatId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_CONTACT_CARD_SHARE_THREAD_MISMATCH",
+      httpStatus: 403,
+      message: "Hosted Linq contact-card share authority does not match the requested chat.",
+      retryable: false,
+    });
+  }
+
+  const prisma = getPrisma();
+  await assertHostedThreadRouteEgressAuthority({
+    authority: body.authority,
+    prisma,
+  });
+
   try {
     const decision = await maybeShareHostedLinqContactCardAfterOutbound({
       chatId: body.chatId,
@@ -37,7 +66,7 @@ export const POST = withJsonError(async (request: Request) => {
         threadIsDirect: body.threadIsDirect,
       },
       memberId: userId,
-      prisma: getPrisma(),
+      prisma,
     });
     return jsonOk({
       ok: true,

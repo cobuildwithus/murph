@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  claimHostedLinqContactCardShareAfterOutbound,
   maybeShareHostedLinqContactCardAfterOutbound,
-  recordHostedLinqContactCardShareResult,
+  recordHostedLinqContactCardShareSuccess,
+  reserveHostedLinqContactCardShareAttemptAfterOutbound,
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 
 const TEST_KEYRING_ENTRIES = {
@@ -26,11 +26,11 @@ describe("hosted Linq contact-card sharing", () => {
     restoreKeyring = null;
   });
 
-  it("claims eligible direct iMessage chats without storing the raw chat id", async () => {
+  it("reserves eligible direct iMessage chats without storing the raw chat id", async () => {
     const prisma = createContactCardSharePrismaStub();
     const now = new Date("2026-06-27T12:00:00.000Z");
 
-    const decision = await claimHostedLinqContactCardShareAfterOutbound({
+    const decision = await reserveHostedLinqContactCardShareAttemptAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: "iMessage",
@@ -41,10 +41,11 @@ describe("hosted Linq contact-card sharing", () => {
       prisma: prisma.client,
     });
 
-    expect(decision.action).toBe("share");
+    expect(decision).toEqual({
+      action: "share",
+    });
     expect(prisma.rows).toHaveLength(1);
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
-      contactCardShareClaimedAt: now,
       lastContactCardShareAttemptedAt: now,
       lastContactCardShareSucceededAt: null,
       memberId: "member_123",
@@ -56,7 +57,7 @@ describe("hosted Linq contact-card sharing", () => {
   it("skips ineligible chats before touching contact-card share state", async () => {
     const prisma = createContactCardSharePrismaStub();
 
-    await expect(claimHostedLinqContactCardShareAfterOutbound({
+    await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: null,
@@ -68,7 +69,7 @@ describe("hosted Linq contact-card sharing", () => {
       action: "skip",
       reason: "ineligible_chat",
     });
-    await expect(claimHostedLinqContactCardShareAfterOutbound({
+    await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: "iMessage",
@@ -86,11 +87,11 @@ describe("hosted Linq contact-card sharing", () => {
     expect(prisma.model.updateMany).not.toHaveBeenCalled();
   });
 
-  it("prevents duplicate active claims and keeps failed attempts throttled", async () => {
+  it("prevents duplicate attempts and keeps failed attempts throttled", async () => {
     const prisma = createContactCardSharePrismaStub();
     const now = new Date("2026-06-27T12:00:00.000Z");
 
-    const first = await claimHostedLinqContactCardShareAfterOutbound({
+    await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: "iMessage",
@@ -99,12 +100,11 @@ describe("hosted Linq contact-card sharing", () => {
       memberId: "member_123",
       now,
       prisma: prisma.client,
+    })).resolves.toEqual({
+      action: "share",
     });
-    if (first.action !== "share") {
-      throw new Error("Expected initial claim to share.");
-    }
 
-    await expect(claimHostedLinqContactCardShareAfterOutbound({
+    await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: "iMessage",
@@ -115,38 +115,15 @@ describe("hosted Linq contact-card sharing", () => {
       prisma: prisma.client,
     })).resolves.toEqual({
       action: "skip",
-      reason: "claim_active",
-    });
-
-    await recordHostedLinqContactCardShareResult({
-      chatId: "chat_123",
-      claimId: first.claimId,
-      memberId: "member_123",
-      prisma: prisma.client,
-      status: "failed",
-    });
-
-    await expect(claimHostedLinqContactCardShareAfterOutbound({
-      chatId: "chat_123",
-      eligibility: {
-        service: "iMessage",
-        threadIsDirect: true,
-      },
-      memberId: "member_123",
-      now: new Date("2026-06-27T12:06:00.000Z"),
-      prisma: prisma.client,
-    })).resolves.toEqual({
-      action: "skip",
       reason: "recent_attempt",
     });
 
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
-      contactCardShareClaimedAt: null,
       lastContactCardShareAttemptedAt: now,
       lastContactCardShareSucceededAt: null,
     }));
 
-    await expect(claimHostedLinqContactCardShareAfterOutbound({
+    await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: "iMessage",
@@ -155,16 +132,16 @@ describe("hosted Linq contact-card sharing", () => {
       memberId: "member_123",
       now: new Date("2026-06-29T12:00:00.000Z"),
       prisma: prisma.client,
-    })).resolves.toMatchObject({
+    })).resolves.toEqual({
       action: "share",
     });
   });
 
-  it("throttles share attempts for 48 hours", async () => {
+  it("throttles share attempts for 48 hours after success", async () => {
     const prisma = createContactCardSharePrismaStub();
     const now = new Date("2026-06-27T12:00:00.000Z");
 
-    const first = await claimHostedLinqContactCardShareAfterOutbound({
+    await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: "iMessage",
@@ -173,21 +150,18 @@ describe("hosted Linq contact-card sharing", () => {
       memberId: "member_123",
       now,
       prisma: prisma.client,
+    })).resolves.toEqual({
+      action: "share",
     });
-    if (first.action !== "share") {
-      throw new Error("Expected initial claim to share.");
-    }
 
-    await recordHostedLinqContactCardShareResult({
+    await recordHostedLinqContactCardShareSuccess({
       chatId: "chat_123",
-      claimId: first.claimId,
       memberId: "member_123",
       now,
       prisma: prisma.client,
-      status: "succeeded",
     });
 
-    await expect(claimHostedLinqContactCardShareAfterOutbound({
+    await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: "iMessage",
@@ -200,7 +174,7 @@ describe("hosted Linq contact-card sharing", () => {
       action: "skip",
       reason: "recent_attempt",
     });
-    await expect(claimHostedLinqContactCardShareAfterOutbound({
+    await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
       chatId: "chat_123",
       eligibility: {
         service: "iMessage",
@@ -209,45 +183,12 @@ describe("hosted Linq contact-card sharing", () => {
       memberId: "member_123",
       now: new Date("2026-06-29T12:00:00.000Z"),
       prisma: prisma.client,
-    })).resolves.toMatchObject({
+    })).resolves.toEqual({
       action: "share",
     });
   });
 
-  it("does not retry at the exact claim TTL boundary before the attempt throttle expires", async () => {
-    const prisma = createContactCardSharePrismaStub();
-    const now = new Date("2026-06-27T12:00:00.000Z");
-
-    const first = await claimHostedLinqContactCardShareAfterOutbound({
-      chatId: "chat_123",
-      eligibility: {
-        service: "iMessage",
-        threadIsDirect: true,
-      },
-      memberId: "member_123",
-      now,
-      prisma: prisma.client,
-    });
-    if (first.action !== "share") {
-      throw new Error("Expected initial claim to share.");
-    }
-
-    await expect(claimHostedLinqContactCardShareAfterOutbound({
-      chatId: "chat_123",
-      eligibility: {
-        service: "iMessage",
-        threadIsDirect: true,
-      },
-      memberId: "member_123",
-      now: new Date("2026-06-27T12:10:00.000Z"),
-      prisma: prisma.client,
-    })).resolves.toEqual({
-      action: "skip",
-      reason: "recent_attempt",
-    });
-  });
-
-  it("records best-effort share success and releases provider failures", async () => {
+  it("records best-effort share success and keeps provider failures throttled", async () => {
     const prisma = createContactCardSharePrismaStub();
     const shareContactCard = vi.fn(async () => undefined);
     const now = new Date("2026-06-27T12:00:00.000Z");
@@ -262,7 +203,7 @@ describe("hosted Linq contact-card sharing", () => {
       now,
       prisma: prisma.client,
       shareContactCard,
-    })).resolves.toMatchObject({
+    })).resolves.toEqual({
       action: "share",
     });
 
@@ -270,8 +211,6 @@ describe("hosted Linq contact-card sharing", () => {
       chatId: "chat_123",
     });
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
-      contactCardShareClaimId: null,
-      contactCardShareClaimedAt: null,
       lastContactCardShareAttemptedAt: now,
       lastContactCardShareSucceededAt: now,
     }));
@@ -287,14 +226,12 @@ describe("hosted Linq contact-card sharing", () => {
       now,
       prisma: prisma.client,
       shareContactCard,
-    })).resolves.toMatchObject({
+    })).resolves.toEqual({
       action: "share",
     });
 
     const failedRow = prisma.rows.find((row) => row.lastContactCardShareSucceededAt === null);
     expect(failedRow).toEqual(expect.objectContaining({
-      contactCardShareClaimId: null,
-      contactCardShareClaimedAt: null,
       lastContactCardShareAttemptedAt: now,
       lastContactCardShareSucceededAt: null,
     }));
@@ -357,8 +294,6 @@ describe("hosted Linq contact-card sharing", () => {
 });
 
 type ContactCardShareRow = {
-  contactCardShareClaimedAt: Date | null;
-  contactCardShareClaimId: string | null;
   createdAt: Date;
   lastContactCardShareAttemptedAt: Date | null;
   lastContactCardShareSucceededAt: Date | null;
@@ -378,8 +313,6 @@ type FindFirstArgs = {
 
 type CreateArgs = {
   data: {
-    contactCardShareClaimedAt: Date;
-    contactCardShareClaimId: string;
     lastContactCardShareAttemptedAt: Date;
     linqChatLookupKey: string;
     memberId: string;
@@ -389,24 +322,17 @@ type CreateArgs = {
 type UpdateManyArgs = {
   data: Partial<Pick<
     ContactCardShareRow,
-    | "contactCardShareClaimedAt"
-    | "contactCardShareClaimId"
     | "lastContactCardShareAttemptedAt"
     | "lastContactCardShareSucceededAt"
     | "memberId"
   >>;
   where: {
-    AND?: readonly ContactCardShareWhereClause[];
-    contactCardShareClaimId?: string;
     linqChatLookupKey?: string | {
       in: readonly string[];
     };
     memberId?: string;
+    OR?: readonly Record<string, DateComparison | null>[];
   };
-};
-
-type ContactCardShareWhereClause = {
-  OR?: readonly Record<string, DateComparison | null>[];
 };
 
 type DateComparison = {
@@ -425,22 +351,18 @@ function createContactCardSharePrismaStub() {
         return null;
       }
       return {
-        contactCardShareClaimedAt: row.contactCardShareClaimedAt,
         lastContactCardShareAttemptedAt: row.lastContactCardShareAttemptedAt,
-        lastContactCardShareSucceededAt: row.lastContactCardShareSucceededAt,
         linqChatLookupKey: row.linqChatLookupKey,
       };
     }),
     create: vi.fn(async (args: CreateArgs) => {
       const row: ContactCardShareRow = {
-        contactCardShareClaimedAt: args.data.contactCardShareClaimedAt,
-        contactCardShareClaimId: args.data.contactCardShareClaimId,
-        createdAt: args.data.contactCardShareClaimedAt,
+        createdAt: args.data.lastContactCardShareAttemptedAt,
         lastContactCardShareAttemptedAt: args.data.lastContactCardShareAttemptedAt,
         lastContactCardShareSucceededAt: null,
         linqChatLookupKey: args.data.linqChatLookupKey,
         memberId: args.data.memberId,
-        updatedAt: args.data.contactCardShareClaimedAt,
+        updatedAt: args.data.lastContactCardShareAttemptedAt,
       };
       rows.push(row);
       return row;
@@ -473,12 +395,6 @@ function rowMatchesUpdateWhere(
   row: ContactCardShareRow,
   where: UpdateManyArgs["where"],
 ): boolean {
-  if (
-    typeof where.contactCardShareClaimId === "string"
-    && row.contactCardShareClaimId !== where.contactCardShareClaimId
-  ) {
-    return false;
-  }
   if (typeof where.memberId === "string" && row.memberId !== where.memberId) {
     return false;
   }
@@ -489,8 +405,8 @@ function rowMatchesUpdateWhere(
     return false;
   }
 
-  return (where.AND ?? []).every((clause) =>
-    (clause.OR ?? []).some((condition) => rowMatchesCondition(row, condition)),
+  return (where.OR ?? [null]).some((condition) =>
+    condition === null || rowMatchesCondition(row, condition),
   );
 }
 
@@ -533,8 +449,6 @@ function readRowDate(
   key: string,
 ): Date | null | undefined {
   switch (key) {
-    case "contactCardShareClaimedAt":
-      return row.contactCardShareClaimedAt;
     case "lastContactCardShareAttemptedAt":
       return row.lastContactCardShareAttemptedAt;
     case "lastContactCardShareSucceededAt":

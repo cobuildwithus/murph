@@ -102,6 +102,9 @@ import {
   type HostedWorkspaceInvocationStatus,
   type HostedWorkspaceState,
 } from "../runtime-control.ts";
+import type {
+  HostedExecutionLinqExternalThreadRouteAuthority,
+} from "../contracts.ts";
 import {
   rejectLegacyAliases,
   requireArray,
@@ -618,11 +621,15 @@ export function parseHostedRuntimeLinqContactCardShareAfterOutboundRequest(
   const record = requireObject(value, "Hosted runtime Linq contact-card share after-outbound request");
   assertAllowedObjectKeys(
     record,
-    new Set(["chatId", "service", "threadIsDirect"]),
+    new Set(["authority", "chatId", "service", "threadIsDirect"]),
     "Hosted runtime Linq contact-card share after-outbound request",
   );
 
   return {
+    authority: parseHostedRuntimeLinqExternalThreadRouteAuthority(
+      record.authority,
+      "Hosted runtime Linq contact-card share after-outbound request authority",
+    ),
     chatId: requireString(
       record.chatId,
       "Hosted runtime Linq contact-card share after-outbound request chatId",
@@ -873,6 +880,24 @@ function parseHostedRuntimeLinqContactCardShareSkipReason(
     );
   }
   return reason as HostedRuntimeLinqContactCardShareSkipReason;
+}
+
+function parseHostedRuntimeLinqExternalThreadRouteAuthority(
+  value: unknown,
+  label: string,
+): HostedExecutionLinqExternalThreadRouteAuthority {
+  const record = requireObject(value, label);
+  const channel = requireString(record.channel, `${label} channel`);
+  if (channel !== "linq") {
+    throw new TypeError(`${label} channel must be linq.`);
+  }
+
+  return {
+    accountLookupKey: requireString(record.accountLookupKey, `${label} accountLookupKey`),
+    channel,
+    containerMemberId: requireString(record.containerMemberId, `${label} containerMemberId`),
+    threadId: requireString(record.threadId, `${label} threadId`),
+  };
 }
 
 function parseHostedProductFeedbackKind(value: unknown): HostedProductFeedbackKind {

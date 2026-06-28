@@ -325,6 +325,12 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
+      authority: {
+        accountLookupKey: "hbidx:phone:v1:account",
+        channel: "linq",
+        containerMemberId: "member_123",
+        threadId: "linq_chat_123",
+      },
       chatId: "linq_chat_123",
       service: "iMessage",
       threadIsDirect: true,

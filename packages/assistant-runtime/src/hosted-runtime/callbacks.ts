@@ -1177,11 +1177,18 @@ async function maybeShareHostedLinqContactCardAfterDeliveredIntent(input: {
     ) {
       return;
     }
+    const routeAuthority = input.linqDeliveryContext.routeAuthority;
+    if (!routeAuthority) {
+      return;
+    }
 
     const chatId =
       normalizeHostedLinqContactCardChatId(input.delivery.providerThreadId)
       ?? normalizeHostedLinqContactCardChatId(input.delivery.target);
     if (!chatId) {
+      return;
+    }
+    if (routeAuthority.threadId !== chatId) {
       return;
     }
     chatIdForLog = chatId;
@@ -1193,6 +1200,7 @@ async function maybeShareHostedLinqContactCardAfterDeliveredIntent(input: {
     }
 
     await maybeShareContactCard({
+      authority: routeAuthority,
       chatId,
       service: input.linqDeliveryContext.service,
       threadIsDirect: input.linqDeliveryContext.threadIsDirect,
