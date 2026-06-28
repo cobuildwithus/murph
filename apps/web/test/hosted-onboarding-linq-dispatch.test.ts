@@ -7,6 +7,7 @@ import {
 } from "@/src/lib/hosted-execution/usage-allowance";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import {
+  createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -1538,6 +1539,70 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
   });
 
+  it("skips scheduled active-member Linq read receipts when home-route authority drifts", async () => {
+    const scheduledTasks: Array<() => Promise<void>> = [];
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+      },
+      hostedMemberRouting,
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_scheduled_read_receipt_route_drift",
+      }),
+      scheduleAfterResponse: (task) => {
+        scheduledTasks.push(task);
+      },
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(scheduledTasks).toHaveLength(2);
+    hostedMemberRouting.findUnique.mockResolvedValueOnce(null);
+
+    await scheduledTasks[1]?.();
+
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
+      }),
+      "failed",
+      expect.objectContaining({
+        errorName: "Error",
+        responseReason: "wake-appended-active-member",
+        wakeHandoffStarted: true,
+        wakeHandoffSignalAccepted: true,
+      }),
+    );
+  });
+
   it("revalidates routed Linq read receipts before provider delivery", async () => {
     const routeAccountLookupKey = createHostedPhoneLookupKey("+15550000000");
     if (!routeAccountLookupKey) {
@@ -1550,6 +1615,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     if (!routeLookupKey) {
       throw new Error("Expected test route lookup key.");
+    }
+    const routeIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "linq",
+      threadId: "chat_123",
+    });
+    if (!routeIdentityLookupKey) {
+      throw new Error("Expected test route identity lookup key.");
     }
     const prisma = asPrismaTransactionClient({
       hostedThreadRoute: {
@@ -1577,7 +1649,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
               threadLookupKey: routeLookupKey,
             },
           ])
-          .mockResolvedValueOnce([]),
+          .mockResolvedValue([]),
       },
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -1609,7 +1681,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       mailboxItemId: "mailbox_evt_routed_read_receipt_stale",
     });
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenCalledTimes(3);
     expect(prisma.hostedThreadRoute?.findMany).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -1626,6 +1698,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         where: expect.objectContaining({
           threadLookupKey: {
             in: expect.arrayContaining([routeLookupKey]),
+          },
+        }),
+      }),
+    );
+    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          threadIdentityLookupKey: {
+            in: expect.arrayContaining([routeIdentityLookupKey]),
           },
         }),
       }),
@@ -1758,6 +1840,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("opens a Prisma transaction when dispatching an active-member Linq message from a root client", async () => {
     const transactionReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
     const transactionHostedMemberFindUnique = vi.fn().mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
       id: "member_123",
@@ -1772,6 +1855,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedMember: {
         findUnique: transactionHostedMemberFindUnique,
       },
+      hostedMemberRouting,
     };
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
@@ -1794,6 +1878,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           phoneLookupKey: "+15551234567",
         }),
       },
+      hostedMemberRouting,
     }, transactionClient);
 
     const response = await handleHostedOnboardingLinqWebhook({
@@ -5364,34 +5449,9 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   }
 
   if (!hostedMemberRouting?.upsert) {
-    let hostedMemberRoutingRecord: Record<string, unknown> | null = null;
     Object.defineProperty(prisma, "hostedMemberRouting", {
       configurable: true,
-      value: {
-        findFirst: vi.fn(async () => hostedMemberRoutingRecord),
-        findMany: vi.fn(async () => hostedMemberRoutingRecord ? [hostedMemberRoutingRecord] : []),
-        findUnique: vi.fn(async ({ where }: { where?: Record<string, unknown> } = {}) => {
-          if (!hostedMemberRoutingRecord) {
-            return null;
-          }
-          if (
-            typeof where?.memberId === "string"
-            && hostedMemberRoutingRecord.memberId !== where.memberId
-          ) {
-            return null;
-          }
-          return hostedMemberRoutingRecord;
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-        upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update?: Record<string, unknown> }) => {
-          hostedMemberRoutingRecord = {
-            ...create,
-            ...(update ?? {}),
-          };
-          return hostedMemberRoutingRecord;
-        }),
-        createMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
+      value: createStatefulHostedMemberRoutingMock(),
     });
   } else if (!hostedMemberRouting.findFirst && hostedMemberRouting.findUnique) {
     hostedMemberRouting.findFirst = hostedMemberRouting.findUnique;
@@ -5467,6 +5527,38 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   }
 
   return prisma as T & HostedOnboardingLinqWebhookPrismaFixture;
+}
+
+function createStatefulHostedMemberRoutingMock(initialRecord: Record<string, unknown> | null = null) {
+  let hostedMemberRoutingRecord = initialRecord;
+  return {
+    findFirst: vi.fn(async () => hostedMemberRoutingRecord),
+    findMany: vi.fn(async () => hostedMemberRoutingRecord ? [hostedMemberRoutingRecord] : []),
+    findUnique: vi.fn(async ({ where }: { where?: Record<string, unknown> } = {}) => {
+      if (!hostedMemberRoutingRecord) {
+        return null;
+      }
+      if (
+        typeof where?.memberId === "string"
+        && hostedMemberRoutingRecord.memberId !== where.memberId
+      ) {
+        return null;
+      }
+      return hostedMemberRoutingRecord;
+    }),
+    updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    upsert: vi.fn(async ({ create, update }: {
+      create: Record<string, unknown>;
+      update?: Record<string, unknown>;
+    }) => {
+      hostedMemberRoutingRecord = {
+        ...create,
+        ...(update ?? {}),
+      };
+      return hostedMemberRoutingRecord;
+    }),
+    createMany: vi.fn().mockResolvedValue({ count: 1 }),
+  };
 }
 
 function withPrismaTransaction<

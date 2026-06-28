@@ -48,7 +48,7 @@ import {
   maybeHandoffHostedExecutionWebhookWake,
 } from "./webhook-service-wake";
 import {
-  assertHostedThreadRouteEgressAuthority,
+  assertHostedLinqRouteEgressAuthority,
 } from "../hosted-routing/thread-route-store";
 
 export {
@@ -358,12 +358,21 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
   }
 
   try {
-    if (input.plan.linqReadReceiptRouteAuthority) {
-      await assertHostedThreadRouteEgressAuthority({
-        authority: input.plan.linqReadReceiptRouteAuthority,
-        prisma: input.prisma,
+    if (!input.plan.linqReadReceiptRouteAuthority) {
+      finishHostedOnboardingTiming(readReceiptTiming, "skipped-missing-route-authority", {
+        responseReason,
+        signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
+        wakeHandoffReason,
+        wakeHandoffStarted,
+        wakeHandoffSignalAccepted,
       });
+      return;
     }
+
+    await assertHostedLinqRouteEgressAuthority({
+      authority: input.plan.linqReadReceiptRouteAuthority,
+      prisma: input.prisma,
+    });
 
     const result = await sendHostedLinqReadReceipt({
       chatId,

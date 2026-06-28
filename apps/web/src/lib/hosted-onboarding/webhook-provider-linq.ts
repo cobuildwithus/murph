@@ -350,6 +350,18 @@ export async function planHostedOnboardingLinqWebhook(input: {
       );
     }
 
+    const homeBindingRecipientPhone = resolveHostedLinqHomeBindingRecipientPhone({
+      homeChatId: homeRoute?.linqChatId ?? null,
+      homeRecipientPhone: homeRoute?.linqRecipientPhone ?? null,
+      incomingChatId: summary.chatId,
+      incomingRecipientPhone: recipientPhoneNumber,
+    });
+    const routeAuthority = buildHostedLinqHomeRouteEgressAuthority({
+      accountLookupKey: createHostedPhoneLookupKey(homeBindingRecipientPhone),
+      memberId: existingMember.id,
+      threadId: summary.chatId,
+    });
+
     const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
       dedupeKey: input.event.event_id,
       prisma: input.prisma,
@@ -368,6 +380,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           },
           wakeMailboxItemId: existingMailboxItem.id,
           wakeUserId: existingMember.id,
+          ...(routeAuthority ? { linqReadReceiptRouteAuthority: routeAuthority } : {}),
         }),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {
           duplicate: true,
@@ -380,18 +393,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
         }),
       );
     }
-
-    const homeBindingRecipientPhone = resolveHostedLinqHomeBindingRecipientPhone({
-      homeChatId: homeRoute?.linqChatId ?? null,
-      homeRecipientPhone: homeRoute?.linqRecipientPhone ?? null,
-      incomingChatId: summary.chatId,
-      incomingRecipientPhone: recipientPhoneNumber,
-    });
-    const routeAuthority = buildHostedLinqHomeRouteEgressAuthority({
-      accountLookupKey: createHostedPhoneLookupKey(homeBindingRecipientPhone),
-      memberId: existingMember.id,
-      threadId: summary.chatId,
-    });
 
     const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
       chatId: summary.chatId,
@@ -477,6 +478,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         wakeLinqChatId: summary.chatId,
         wakeMailboxItemId: mailboxAppend.item.id,
         wakeUserId: existingMember.id,
+        ...(routeAuthority ? { linqReadReceiptRouteAuthority: routeAuthority } : {}),
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
         dailyInboundCount: dailyState.inboundCount,
