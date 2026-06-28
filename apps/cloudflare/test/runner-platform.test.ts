@@ -3547,7 +3547,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
       if (url.pathname.endsWith(HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH)) {
         return new Response(JSON.stringify({
-          action: "share",
           ok: true,
         }), {
           headers: { "content-type": "application/json; charset=utf-8" },

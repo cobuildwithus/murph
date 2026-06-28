@@ -26,7 +26,6 @@ import {
   HOSTED_RUNTIME_LOG_LEVELS,
   HOSTED_RUNTIME_LOG_PHASES,
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
-  HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_SKIP_REASONS,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   sanitizeHostedProductFeedbackSummary,
@@ -83,8 +82,6 @@ import {
   type HostedRuntimeUsageRecordRequest,
   type HostedRuntimeUsageRecordResponse,
   type HostedRuntimeLinqContactCardShareAfterOutboundRequest,
-  type HostedRuntimeLinqContactCardShareAfterOutboundResponse,
-  type HostedRuntimeLinqContactCardShareSkipReason,
   type HostedRuntimeProductFeedbackRecordRequest,
   type HostedRuntimeProductFeedbackRecordResponse,
   type HostedCodexAuthUpdate,
@@ -647,49 +644,6 @@ export function parseHostedRuntimeLinqContactCardShareAfterOutboundRequest(
   };
 }
 
-export function parseHostedRuntimeLinqContactCardShareAfterOutboundResponse(
-  value: unknown,
-): HostedRuntimeLinqContactCardShareAfterOutboundResponse {
-  const record = requireObject(value, "Hosted runtime Linq contact-card share after-outbound response");
-  const action = requireString(
-    record.action,
-    "Hosted runtime Linq contact-card share after-outbound response action",
-  );
-
-  if (action === "share") {
-    assertAllowedObjectKeys(
-      record,
-      new Set(["action", "ok"]),
-      "Hosted runtime Linq contact-card share after-outbound response",
-    );
-    if (record.ok !== true) {
-      throw new TypeError("Hosted runtime Linq contact-card share after-outbound response ok must be true.");
-    }
-    return {
-      action,
-      ok: true,
-    };
-  }
-
-  if (action === "skip") {
-    assertAllowedObjectKeys(
-      record,
-      new Set(["action", "ok", "reason"]),
-      "Hosted runtime Linq contact-card share after-outbound response",
-    );
-    if (record.ok !== true) {
-      throw new TypeError("Hosted runtime Linq contact-card share after-outbound response ok must be true.");
-    }
-    return {
-      action,
-      ok: true,
-      reason: parseHostedRuntimeLinqContactCardShareSkipReason(record.reason),
-    };
-  }
-
-  throw new TypeError("Hosted runtime Linq contact-card share after-outbound response action is invalid.");
-}
-
 export function parseHostedRuntimeProductFeedbackRecordRequest(
   value: unknown,
 ): HostedRuntimeProductFeedbackRecordRequest {
@@ -863,23 +817,6 @@ function assertHostedCodexAuthVerificationUrl(value: string): void {
   if (url.hostname !== "auth.openai.com") {
     throw new TypeError("Hosted Codex auth verificationUrl must use the OpenAI auth host.");
   }
-}
-
-function parseHostedRuntimeLinqContactCardShareSkipReason(
-  value: unknown,
-): HostedRuntimeLinqContactCardShareSkipReason {
-  const reason = requireString(
-    value,
-    "Hosted runtime Linq contact-card share after-outbound response reason",
-  );
-  if (!HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_SKIP_REASONS.includes(
-    reason as HostedRuntimeLinqContactCardShareSkipReason,
-  )) {
-    throw new TypeError(
-      "Hosted runtime Linq contact-card share after-outbound response reason is invalid.",
-    );
-  }
-  return reason as HostedRuntimeLinqContactCardShareSkipReason;
 }
 
 function parseHostedRuntimeLinqExternalThreadRouteAuthority(

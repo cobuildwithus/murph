@@ -59,7 +59,7 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   try {
-    const decision = await maybeShareHostedLinqContactCardAfterOutbound({
+    await maybeShareHostedLinqContactCardAfterOutbound({
       chatId: body.chatId,
       eligibility: {
         service: body.service,
@@ -70,7 +70,6 @@ export const POST = withJsonError(async (request: Request) => {
     });
     return jsonOk({
       ok: true,
-      ...decision,
     });
   } catch (error) {
     console.warn(
@@ -85,9 +84,7 @@ export const POST = withJsonError(async (request: Request) => {
       }),
     );
     return jsonOk({
-      action: "skip",
       ok: true,
-      reason: "state_unavailable",
     });
   }
 });

@@ -310,11 +310,45 @@ async function assertHostedLinqSideEffectRouteAuthority(
     return false;
   }
 
+  assertHostedLinqSideEffectRouteAuthorityTarget(effect, routeAuthority);
   await assertHostedLinqRouteEgressAuthority({
     authority: routeAuthority,
     prisma,
   });
   return true;
+}
+
+function assertHostedLinqSideEffectRouteAuthorityTarget(
+  effect: HostedLinqMessageSideEffect,
+  routeAuthority: HostedLinqThreadRouteEgressAuthority,
+): void {
+  if (normalizeHostedLinqRouteAuthorityTarget(routeAuthority.threadId)
+    !== normalizeHostedLinqRouteAuthorityTarget(effect.payload.chatId)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_SIDE_EFFECT_ROUTE_THREAD_MISMATCH",
+      httpStatus: 403,
+      message: "Hosted Linq side-effect route authority does not match the requested chat.",
+      retryable: false,
+    });
+  }
+
+  const memberId = readHostedLinqSideEffectMemberId(effect.payload);
+  if (
+    memberId
+    && normalizeHostedLinqRouteAuthorityTarget(routeAuthority.containerMemberId)
+      !== normalizeHostedLinqRouteAuthorityTarget(memberId)
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_SIDE_EFFECT_ROUTE_MEMBER_MISMATCH",
+      httpStatus: 403,
+      message: "Hosted Linq side-effect route authority does not match the side-effect member.",
+      retryable: false,
+    });
+  }
+}
+
+function normalizeHostedLinqRouteAuthorityTarget(value: string): string {
+  return value.trim();
 }
 
 function buildHostedLinqSideEffectLogDetails(

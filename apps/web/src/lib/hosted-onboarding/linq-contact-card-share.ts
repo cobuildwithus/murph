@@ -6,9 +6,6 @@ import {
   sanitizeHostedOnboardingStructuredLogDetails,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
-import type {
-  HostedRuntimeLinqContactCardShareDecision,
-} from "@murphai/hosted-execution/runtime-control";
 
 type HostedLinqContactCardSharePersistenceClient =
   {
@@ -61,8 +58,20 @@ export type HostedLinqContactCardShareEligibility = {
   threadIsDirect: boolean | null;
 };
 
+type HostedLinqContactCardShareSkipReason =
+  | "ineligible_chat"
+  | "missing_chat_id"
+  | "recent_attempt"
+  | "state_unavailable";
+
 export type HostedLinqContactCardShareDecision =
-  HostedRuntimeLinqContactCardShareDecision;
+  | {
+      action: "share";
+    }
+  | {
+      action: "skip";
+      reason: HostedLinqContactCardShareSkipReason;
+    };
 
 type HostedLinqContactCardShareReserveDecision =
   | Extract<HostedLinqContactCardShareDecision, { action: "share" }>

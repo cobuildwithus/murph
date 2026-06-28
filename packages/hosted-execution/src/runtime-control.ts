@@ -711,36 +711,12 @@ export interface HostedRuntimeUsageRecordResponse {
   usageId: string;
 }
 
-export const HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_SKIP_REASONS = [
-  "ineligible_chat",
-  "missing_chat_id",
-  "recent_attempt",
-  "state_unavailable",
-] as const;
-
-export type HostedRuntimeLinqContactCardShareSkipReason =
-  (typeof HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_SKIP_REASONS)[number];
-
 export interface HostedRuntimeLinqContactCardShareAfterOutboundRequest {
   authority: HostedExecutionLinqExternalThreadRouteAuthority;
   chatId: string;
   service: string | null;
   threadIsDirect: boolean | null;
 }
-
-export type HostedRuntimeLinqContactCardShareDecision =
-  | {
-      action: "share";
-    }
-  | {
-      action: "skip";
-      reason: HostedRuntimeLinqContactCardShareSkipReason;
-    };
-
-export type HostedRuntimeLinqContactCardShareAfterOutboundResponse =
-  HostedRuntimeLinqContactCardShareDecision & {
-    ok: true;
-  };
 
 export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
   "feature_interest",

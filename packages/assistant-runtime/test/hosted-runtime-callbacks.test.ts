@@ -5714,8 +5714,8 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "linq_chat_current",
       transportIdempotent: true,
     });
-    let resolveShare: (value: { action: "share"; ok: true }) => void = () => {};
-    const sharePromise = new Promise<{ action: "share"; ok: true }>((resolve) => {
+    let resolveShare: () => void = () => {};
+    const sharePromise = new Promise<void>((resolve) => {
       resolveShare = resolve;
     });
     const maybeShareLinqContactCardAfterOutbound = vi.fn(() => sharePromise);
@@ -5774,10 +5774,7 @@ describe("hosted runtime callbacks", () => {
         deliveryStatus: "sent",
       }),
     ]);
-    resolveShare({
-      action: "share",
-      ok: true,
-    });
+    resolveShare();
     await Promise.resolve();
   });
 
@@ -5799,10 +5796,7 @@ describe("hosted runtime callbacks", () => {
       transportIdempotent: true,
     });
     const assertAuthority = vi.fn(async () => undefined);
-    const maybeShareLinqContactCardAfterOutbound = vi.fn(async () => ({
-      action: "share" as const,
-      ok: true as const,
-    }));
+    const maybeShareLinqContactCardAfterOutbound = vi.fn(async () => undefined);
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_retry_sent",
       providerThreadId: "linq_chat_current",
@@ -6071,10 +6065,7 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "linq_chat_current",
       transportIdempotent: true,
     });
-    const maybeShareLinqContactCardAfterOutbound = vi.fn(async () => ({
-      ok: true as const,
-      action: "share" as const,
-    }));
+    const maybeShareLinqContactCardAfterOutbound = vi.fn(async () => undefined);
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_current",

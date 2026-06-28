@@ -32,7 +32,6 @@ import type {
   HostedWorkspaceReadResponse,
   HostedBrowserVaultReplicaPublishResponse,
   HostedRuntimeLinqContactCardShareAfterOutboundRequest,
-  HostedRuntimeLinqContactCardShareAfterOutboundResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   AssistantUsageRecord,
@@ -236,7 +235,7 @@ type HostedRuntimeEffectsPortBase = {
   maybeShareLinqContactCardAfterOutbound?(
     request: HostedRuntimeLinqContactCardShareAfterOutboundRequest,
     context?: { signal?: AbortSignal | null },
-  ): Promise<HostedRuntimeLinqContactCardShareAfterOutboundResponse>;
+  ): Promise<void>;
   sendEmail(request: HostedEmailSendRequest): Promise<{ target: string } | void>;
   writeAssistantDeliveryRecord?(
     record: HostedAssistantDeliveryRecord,

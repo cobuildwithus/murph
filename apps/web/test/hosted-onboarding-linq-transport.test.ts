@@ -172,6 +172,78 @@ describe("hosted Linq webhook transport", () => {
     });
   });
 
+  it("rejects routed side effects when authority targets a different chat", async () => {
+    const route = buildAuthorizedLinqRouteFixture({
+      memberId: "member-1",
+      threadId: "chat-other",
+    });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      routeAuthority: route.authority,
+      service: "iMessage",
+      sourceEventId: "event-contact-card-wrong-chat",
+      threadIsDirect: true,
+      template: "daily_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: route.prisma as never,
+        sideEffects: [effect],
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_SIDE_EFFECT_ROUTE_THREAD_MISMATCH",
+    });
+
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(maybeShareHostedLinqContactCardAfterOutbound).not.toHaveBeenCalled();
+    expect(route.prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+    expect(releaseHostedLinqQuotaReplyNoticeClaim).toHaveBeenCalledWith({
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma: route.prisma,
+    });
+  });
+
+  it("rejects routed side effects when authority targets a different member", async () => {
+    const route = buildAuthorizedLinqRouteFixture({
+      memberId: "member-other",
+      threadId: "chat-1",
+    });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      routeAuthority: route.authority,
+      service: "iMessage",
+      sourceEventId: "event-contact-card-wrong-member",
+      threadIsDirect: true,
+      template: "daily_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: route.prisma as never,
+        sideEffects: [effect],
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_SIDE_EFFECT_ROUTE_MEMBER_MISMATCH",
+    });
+
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(maybeShareHostedLinqContactCardAfterOutbound).not.toHaveBeenCalled();
+    expect(route.prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+    expect(releaseHostedLinqQuotaReplyNoticeClaim).toHaveBeenCalledWith({
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma: route.prisma,
+    });
+  });
+
   it("does not let contact-card share failures release successful notice claims", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     vi.mocked(maybeShareHostedLinqContactCardAfterOutbound)

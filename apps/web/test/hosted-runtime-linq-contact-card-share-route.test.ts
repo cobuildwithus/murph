@@ -71,7 +71,6 @@ describe("hosted runtime Linq contact-card share callback route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      action: "share",
       ok: true,
     });
     expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith({

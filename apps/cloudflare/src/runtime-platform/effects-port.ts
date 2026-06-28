@@ -6,9 +6,6 @@ import {
   HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
 } from "@murphai/hosted-execution/routes";
-import {
-  parseHostedRuntimeLinqContactCardShareAfterOutboundResponse,
-} from "@murphai/hosted-execution/parsers";
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
 import { HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH } from "../runner-email-route.ts";
@@ -147,7 +144,7 @@ export function createCloudflareEffectsPort(input: {
           },
           async maybeShareLinqContactCardAfterOutbound(request, context) {
             const description = "Hosted Linq contact-card share after outbound";
-            const payload = await fetchHostedWebControlPlaneJson({
+            await fetchHostedWebControlPlaneJson({
               body: request,
               boundUserId: input.boundUserId,
               description,
@@ -165,7 +162,6 @@ export function createCloudflareEffectsPort(input: {
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
             });
-            return parseHostedRuntimeLinqContactCardShareAfterOutboundResponse(payload);
           },
         }
       : {}),

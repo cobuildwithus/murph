@@ -49,6 +49,7 @@ import {
 } from "./webhook-service-wake";
 import {
   assertHostedLinqRouteEgressAuthority,
+  type HostedLinqThreadRouteEgressAuthority,
 } from "../hosted-routing/thread-route-store";
 
 export {
@@ -372,6 +373,20 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
       return;
     }
 
+    if (!isHostedLinqRouteAuthorityForChat(
+      input.plan.linqReadReceiptRouteAuthority,
+      chatId,
+    )) {
+      finishHostedOnboardingTiming(readReceiptTiming, "skipped-route-authority-mismatch", {
+        responseReason,
+        signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
+        wakeHandoffReason,
+        wakeHandoffStarted,
+        wakeHandoffSignalAccepted,
+      });
+      return;
+    }
+
     await assertHostedLinqRouteEgressAuthority({
       authority: input.plan.linqReadReceiptRouteAuthority,
       prisma: input.prisma,
@@ -400,6 +415,13 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
       wakeHandoffSignalAccepted,
     });
   }
+}
+
+function isHostedLinqRouteAuthorityForChat(
+  authority: HostedLinqThreadRouteEgressAuthority,
+  chatId: string,
+): boolean {
+  return authority.threadId.trim() === chatId.trim();
 }
 
 function buildBlockedHostedLinqFirstContactAdmissionPlan(
