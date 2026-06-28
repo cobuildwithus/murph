@@ -62,6 +62,10 @@ The helper:
   Temporal port, Wrangler persist dir, MinIO data dir, generated
   crypto-state path, Linq webhook registration cache path, Linq tunnel config,
   `NEXT_DIST_DIR_MODE=smoke`, and `NEXT_DIST_DIR_SUFFIX=<slug>`
+- publishes the browser-facing hosted web origin as `localhost:<web-port>` by
+  default, overwrites inherited remote public web origins locally, and allows
+  both `localhost:<web-port>` and `127.0.0.1:<web-port>` for hosted-onboarding
+  browser mutations
 - preserves live Stripe support
 - disables live Linq tunnel startup and webhook registration by default; a
   worktree must opt in with a dedicated public URL or tunnel config
@@ -93,7 +97,13 @@ proof beside another active `pnpm dev`.
 ```bash
 MURPH_HOSTED_LOCAL_PROFILE=dev \
 MURPH_DEV_DATABASE_URL='postgresql://postgres@127.0.0.1:5432/murph_dev_<slug>' \
+MURPH_DEV_WEB_HOST=localhost \
 MURPH_DEV_WEB_PORT=3101 \
+DEVICE_SYNC_PUBLIC_BASE_URL='http://localhost:3101/api/device-sync' \
+HOSTED_ONBOARDING_PUBLIC_BASE_URL='http://localhost:3101' \
+HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS='http://localhost:3101,http://127.0.0.1:3101' \
+HOSTED_WEB_BASE_URL='http://localhost:3101' \
+MURPH_DEV_WORKER_HOST=127.0.0.1 \
 MURPH_DEV_WORKER_PORT=8801 \
 MURPH_DEV_TEMPORAL=managed \
 MURPH_DEV_TEMPORAL_PORT=7301 \
