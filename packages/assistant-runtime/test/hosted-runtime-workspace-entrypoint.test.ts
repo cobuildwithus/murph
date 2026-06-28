@@ -4667,22 +4667,14 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const consumeRequests: HostedMailboxConsumeRequest[] = [];
-    const consumedSeqByLane = [
-      {
-        consumedSeq: "1",
-        lane: "conversation" as const,
-      },
-    ];
     const restoredState = createEmptyHostedMailboxImportState();
     restoredState.watermarks.conversation = "1";
     const bundle = createMailboxImportStateBundle(restoredState);
     const usageRecordStarted = createDeferred<void>();
+    const usageRecordFinished = createDeferred<void>();
     const releaseUsageRecord = createDeferred<void>();
-    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const checkpointInboxMediaRetentionWakeAt = "2099-04-27T00:02:00.000Z";
     const earlierWakeAt = "2099-04-27T00:05:00.000Z";
-    const laterWakeAt = "2099-04-27T00:10:00.000Z";
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
     let resultSettled = false;
     let assistantPhaseCalls = 0;
@@ -4692,8 +4684,6 @@ describe("hosted workspace runtime entrypoint", () => {
       const platform = createPlatform({
         artifactBytesByHash: new Map([[bundle.hash, bundle.bytes]]),
         mailboxPort: createMailboxPort({
-          consumedSeqByLane,
-          consumeRequests,
           events,
           items: [],
         }),
@@ -4780,6 +4770,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 usageRecordStarted.resolve();
                 await releaseUsageRecord.promise;
                 events.push("usage.record:done");
+                usageRecordFinished.resolve();
                 return {
                   recorded: true,
                   usageId: record.usageId,
@@ -4787,14 +4778,13 @@ describe("hosted workspace runtime entrypoint", () => {
               },
             },
           },
-          runtimeWakeSignal,
           async runAssistantPhase() {
             assistantPhaseCalls += 1;
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls > 1) {
               return {
                 foregroundReplyFailed: 0,
-                nextWakeAt: laterWakeAt,
+                nextWakeAt: "2099-04-27T00:10:00.000Z",
                 nextWakeReason: "mailbox.retry",
                 progressed: false,
               };
@@ -4840,28 +4830,17 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(assistantPhaseCalls, 1);
       assert.equal(events.includes("usage.record:done"), false);
       assert.equal(events.includes("browser.refresh"), false);
-      assert.equal(resultSettled, false);
-
-      releaseUsageRecord.resolve();
-      consumedSeqByLane[0]!.consumedSeq = "0";
-      runtimeWakeSignal.notify();
-      await waitUntil(() => {
-        assert.equal(assistantPhaseCalls, 2);
-      });
       const result = await withRealTimeout(
         resultPromise,
         1_000,
-        () => "Runtime did not settle after deferred usage recording finished.",
+        () => "Runtime did not settle while deferred usage recording was pending.",
       );
+      assert.equal(resultSettled, true);
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(events.includes("usage.record:done"), false);
 
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, checkpointInboxMediaRetentionWakeAt);
-      assert.deepEqual(events.filter((event) => event === "mailbox.consume"), [
-        "mailbox.consume",
-      ]);
-      assert.deepEqual(consumeRequests.map((request) => request.lanes), [
-        [{ lane: "conversation", consumedSeq: "1" }],
-      ]);
       assert.deepEqual(events.filter((event) => event.startsWith("snapshot:")), [
         "snapshot:idle_shutdown",
       ]);
@@ -4872,6 +4851,13 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(checkpointRequests.map((request) => request.nextWakeAt), [
         earlierWakeAt,
       ]);
+
+      releaseUsageRecord.resolve();
+      await withRealTimeout(
+        usageRecordFinished.promise,
+        1_000,
+        () => "Deferred usage recording did not finish after release.",
+      );
     } finally {
       releaseUsageRecord.resolve();
       if (resultPromise) {

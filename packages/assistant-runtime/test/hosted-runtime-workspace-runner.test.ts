@@ -3546,6 +3546,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const usageFlushGate = new Promise<void>((resolve) => {
       releaseUsageFlush = resolve;
     });
+    let resolveUsageFlushDone!: () => void;
+    const usageFlushDone = new Promise<void>((resolve) => {
+      resolveUsageFlushDone = resolve;
+    });
     let resultPromise: ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
     let resultResolved = false;
     let flushSawPostAssistantCheckpointLog = false;
@@ -3561,6 +3565,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         assert.equal(record.usageId, "turn_runner_usage.attempt-1");
         await usageFlushGate;
         events.push("usage:flush:done");
+        resolveUsageFlushDone();
         return {
           recorded: true,
           usageId: record.usageId,
@@ -3626,7 +3631,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       const result = await withTestTimeout(resultPromise, 1_000);
 
       assert.equal(result.assistantPhaseResult?.progressed, true);
-      assert.equal(result.deferredUsageFlushFinished instanceof Promise, true);
       assert.equal(resultResolved, true);
       assert.deepEqual(events, [
         "reply:deliver",
@@ -3634,9 +3638,112 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       ]);
 
       releaseUsageFlush();
-      await result.deferredUsageFlushFinished;
+      await withTestTimeout(usageFlushDone, 1_000);
       assert.deepEqual(events, [
         "reply:deliver",
+        "usage:flush:start",
+        "usage:flush:done",
+      ]);
+    } finally {
+      releaseUsageFlush?.();
+      if (resultPromise) {
+        await resultPromise.catch(() => undefined);
+      }
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("does not block no-progress assistant phases on deferred usage flushing", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const events: string[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let releaseUsageFlush!: () => void;
+    const usageFlushGate = new Promise<void>((resolve) => {
+      releaseUsageFlush = resolve;
+    });
+    let resolveUsageFlushDone!: () => void;
+    const usageFlushDone = new Promise<void>((resolve) => {
+      resolveUsageFlushDone = resolve;
+    });
+    let resultPromise: ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
+    const usageRecordPort: HostedRuntimeUsageRecordPort = {
+      async recordUsage(record) {
+        events.push("usage:flush:start");
+        assert.equal(record.usageId, "turn_runner_no_progress_usage.attempt-1");
+        await usageFlushGate;
+        events.push("usage:flush:done");
+        resolveUsageFlushDone();
+        return {
+          recorded: true,
+          usageId: record.usageId,
+        };
+      },
+    };
+
+    try {
+      resultPromise = runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_no_progress_usage",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("No mailbox import expected.");
+        },
+        initialMailboxImport: createCheckpointedMailboxImportResult(),
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          usageRecordPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_no_progress_usage",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_no_progress_usage",
+          leaseGeneration: "1",
+          workspaceVersion: "0",
+        },
+        async runAssistantPhase() {
+          events.push("assistant");
+          return {
+            deferredUsageRecords: [
+              createAssistantUsageRecord({
+                usageId: "turn_runner_no_progress_usage.attempt-1",
+              }),
+            ],
+            progressed: false,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      await waitUntil(() => {
+        assert.equal(events.includes("usage:flush:start"), true);
+      });
+
+      const result = await withTestTimeout(resultPromise, 1_000);
+
+      assert.equal(result.assistantPhaseResult?.progressed, false);
+      assert.deepEqual(checkpointRequests, []);
+      assert.deepEqual(events, [
+        "assistant",
+        "usage:flush:start",
+      ]);
+
+      releaseUsageFlush();
+      await withTestTimeout(usageFlushDone, 1_000);
+      assert.deepEqual(events, [
+        "assistant",
         "usage:flush:start",
         "usage:flush:done",
       ]);

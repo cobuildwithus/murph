@@ -266,10 +266,6 @@ export type HostedWorkspaceRunnerMailboxImportItem = (
   context?: HostedWorkspaceRunnerMailboxImportContext,
 ) => Promise<HostedMailboxItemImportOutcome>;
 
-export type HostedWorkspaceRunnerPostCheckpointCompletionPhase =
-  | "beforeIdleCheckpoint"
-  | "afterIdleCheckpoint";
-
 export interface HostedWorkspaceRunnerInput {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   expectedUserId: string;
@@ -280,10 +276,7 @@ export interface HostedWorkspaceRunnerInput {
   initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
-  onPostCheckpointCompletionStarted?: ((input: {
-    completion: Promise<void>;
-    phase: HostedWorkspaceRunnerPostCheckpointCompletionPhase;
-  }) => void) | null;
+  onPostSafePointCompletionStarted?: ((completion: Promise<void>) => void) | null;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
@@ -322,7 +315,6 @@ export interface HostedWorkspaceRunnerResult {
   initialMailboxImport: HostedMailboxImportCheckpointResult;
   latestMailboxImport: HostedMailboxImportCheckpointResult;
   latestWorkspace: HostedWorkspaceState | null;
-  deferredUsageFlushFinished: Promise<void> | null;
   mailboxPostCheckpointEffectsFinished: Promise<void> | null;
   mailboxRetryAt: string | null;
   projectedWakeRequiresCheckpoint: boolean;
@@ -520,7 +512,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       latestWorkspace: checkpointRequestSession.latestWorkspace()
         ?? initialMailboxImport.checkpoint?.workspace
         ?? input.workspace,
-      deferredUsageFlushFinished: null,
       mailboxPostCheckpointEffectsFinished: null,
       mailboxRetryAt: checkpointRequestSession.mailboxRetryAt(),
       projectedWakeRequiresCheckpoint: false,
@@ -555,14 +546,14 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   let assistantContextSnapshotDirty = false;
   let mailboxPostCheckpointEffectsFinished: Promise<void> | null = null;
   let projectedWakeRequiresCheckpoint = false;
-  let assistantPhaseCheckpointed = false;
+  let assistantPhaseSafePointReached = false;
   let assistantPhaseAfterCheckpointReached = false;
   let deferredUsageRecords: readonly AssistantUsageRecord[] = [];
   let deferredUsageFlushFinished: Promise<void> | null = null;
   let deferredUsageFlushStarted = false;
   const startAssistantPhaseDeferredUsageFlush = (): Promise<void> | null => {
     if (
-      !assistantPhaseCheckpointed
+      !assistantPhaseSafePointReached
       || deferredUsageRecords.length === 0
       || deferredUsageFlushStarted
     ) {
@@ -574,14 +565,30 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       input,
       records: deferredUsageRecords,
     });
-    input.onPostCheckpointCompletionStarted?.({
-      completion: deferredUsageFlushFinished,
-      phase: "afterIdleCheckpoint",
-    });
+    input.onPostSafePointCompletionStarted?.(deferredUsageFlushFinished);
     return deferredUsageFlushFinished;
   };
-  const awaitAssistantPhaseDeferredUsageFlush = async (): Promise<void> => {
-    await startAssistantPhaseDeferredUsageFlush();
+  const flushAssistantPhaseDeferredUsageBeforeThrow = async (): Promise<void> => {
+    if (deferredUsageFlushStarted) {
+      await deferredUsageFlushFinished;
+      return;
+    }
+
+    if (assistantPhaseSafePointReached) {
+      await startAssistantPhaseDeferredUsageFlush();
+      return;
+    }
+
+    if (deferredUsageRecords.length === 0) {
+      return;
+    }
+
+    deferredUsageFlushStarted = true;
+    deferredUsageFlushFinished = flushHostedAssistantUsageRecordsBestEffort({
+      input,
+      records: deferredUsageRecords,
+    });
+    await deferredUsageFlushFinished;
   };
   const hostedCanonicalWritePort = createHostedWorkspaceCanonicalWritePort({
     checkpointRequestBuilder: checkpointRequestSession,
@@ -598,9 +605,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       () => runAssistantPhase(assistantPhaseInput),
     );
     deferredUsageRecords = assistantPhaseResult.deferredUsageRecords ?? [];
-    if (deferredUsageRecords.length > 0 && assistantPhaseResult.progressed !== true) {
-      throw new TypeError("Hosted workspace assistant phase deferred usage records require a progressed phase.");
-    }
     if (
       assistantContextSnapshotDirty
       || await isAssistantContextSnapshotRefreshPendingBestEffort(input.vaultRoot)
@@ -619,7 +623,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       platform: input.platform,
       runtimeLogContext: input.runtimeLogContext,
     });
-    assistantPhaseCheckpointed = true;
+    assistantPhaseSafePointReached = true;
     if (assistantPhaseResult.afterCheckpoint && assistantPhaseResult.progressed !== true) {
       throw new TypeError("Hosted workspace assistant phase afterCheckpoint requires a progressed phase.");
     }
@@ -646,7 +650,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       );
     } catch (error) {
       if (!assistantPhaseAfterCheckpointReached) {
-        await awaitAssistantPhaseDeferredUsageFlush();
+        await flushAssistantPhaseDeferredUsageBeforeThrow();
       }
       await writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog({
         error,
@@ -715,19 +719,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       input,
       phase: "import",
     });
-    if (mailboxPostCheckpointEffectsFinished) {
-      input.onPostCheckpointCompletionStarted?.({
-        completion: mailboxPostCheckpointEffectsFinished,
-        phase: "beforeIdleCheckpoint",
-      });
-    }
   } catch (error) {
     await foregroundMailboxImportLoop.stop();
-    if (!assistantPhaseAfterCheckpointReached) {
-      await awaitAssistantPhaseDeferredUsageFlush();
-    } else {
-      await deferredUsageFlushFinished;
-    }
+    await flushAssistantPhaseDeferredUsageBeforeThrow();
     scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
@@ -747,7 +741,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     latestWorkspace: checkpointRequestSession.latestWorkspace()
       ?? initialMailboxImport.checkpoint?.workspace
       ?? input.workspace,
-    deferredUsageFlushFinished,
     mailboxPostCheckpointEffectsFinished,
     mailboxRetryAt: checkpointRequestSession.mailboxRetryAt(),
     projectedWakeRequiresCheckpoint,

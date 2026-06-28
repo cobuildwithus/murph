@@ -215,10 +215,7 @@ export async function runHostedWorkspaceAssistantPhase(
   const deferUsageFlushUntilAfterCheckpoint = (
     result: HostedWorkspaceRunnerAssistantPhaseResult,
   ): HostedWorkspaceRunnerAssistantPhaseResult => {
-    if (
-      deferredUsageRecords.length === 0
-      || result.progressed !== true
-    ) {
+    if (deferredUsageRecords.length === 0) {
       return result;
     }
 

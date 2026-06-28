@@ -120,7 +120,6 @@ import {
   type HostedWorkspaceRunnerHandledDeviceSyncWake,
   type HostedWorkspaceRunnerMailboxImportContext,
   type HostedWorkspaceRunnerInput,
-  type HostedWorkspaceRunnerPostCheckpointCompletionPhase,
   type HostedWorkspaceRunnerResult,
 } from "./hosted-runtime/workspace-runner.ts";
 import {
@@ -789,31 +788,31 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
   const phaseLogger = createHostedRuntimePhaseLogger();
   const emitPhaseLog = phaseLogger.emit;
-  const pendingPostCheckpointCompletions: Record<
-    HostedWorkspaceRunnerPostCheckpointCompletionPhase,
-    Set<Promise<void>>
-  > = {
-    afterIdleCheckpoint: new Set(),
-    beforeIdleCheckpoint: new Set(),
-  };
-  const trackPostCheckpointCompletion = (
-    phase: HostedWorkspaceRunnerPostCheckpointCompletionPhase,
+  const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
+  const pendingPostSafePointCompletions = new Set<Promise<void>>();
+  const trackCompletion = (
+    pendingCompletions: Set<Promise<void>>,
     completion: Promise<void> | null,
   ): void => {
     if (completion === null) {
       return;
     }
 
-    const pendingCompletions = pendingPostCheckpointCompletions[phase];
     pendingCompletions.add(completion);
     void completion.finally(() => {
       pendingCompletions.delete(completion);
     });
   };
-  const drainStartedPostCheckpointCompletionsBestEffort = async (): Promise<void> => {
+  const trackMailboxPostCheckpointEffects = (completion: Promise<void> | null): void => {
+    trackCompletion(pendingMailboxPostCheckpointEffectCompletions, completion);
+  };
+  const trackPostSafePointCompletion = (completion: Promise<void> | null): void => {
+    trackCompletion(pendingPostSafePointCompletions, completion);
+  };
+  const drainStartedPostSafePointCompletionsBestEffort = async (): Promise<void> => {
     const pendingCompletions = [
-      ...pendingPostCheckpointCompletions.beforeIdleCheckpoint,
-      ...pendingPostCheckpointCompletions.afterIdleCheckpoint,
+      ...pendingMailboxPostCheckpointEffectCompletions,
+      ...pendingPostSafePointCompletions,
     ];
     if (pendingCompletions.length === 0) {
       return;
@@ -1032,8 +1031,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
-      onPostCheckpointCompletionStarted: ({ completion, phase }) =>
-        trackPostCheckpointCompletion(phase, completion),
+      onPostSafePointCompletionStarted: trackPostSafePointCompletion,
       platform: runnerPlatform,
       requestId,
       runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -1432,6 +1430,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             );
           },
         );
+        trackMailboxPostCheckpointEffects(passResult.mailboxPostCheckpointEffectsFinished);
         emitPhaseLog({
           details: {
             assistantProgressed: passResult.assistantPhaseResult?.progressed === true,
@@ -1554,10 +1553,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
       return { requiresFollowUpCheckpoint };
     };
-    const waitForPostCheckpointCompletions = async (
-      phase: HostedWorkspaceRunnerPostCheckpointCompletionPhase,
-    ): Promise<HostedRuntimePostCheckpointCompletionWaitResult> => {
-      const pendingCompletions = pendingPostCheckpointCompletions[phase];
+    const waitForMailboxPostCheckpointEffects = async (): Promise<
+      HostedRuntimeMailboxPostCheckpointEffectWaitResult
+    > => {
+      const pendingCompletions = pendingMailboxPostCheckpointEffectCompletions;
       while (pendingCompletions.size > 0) {
         const effectsFinished = Promise.all([
           ...pendingCompletions,
@@ -1576,8 +1575,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           wakeAbortController.abort(readHostedRuntimeAbortReason(runtimeAbortController.signal));
         };
         runtimeAbortController.signal.addEventListener("abort", abortWake, { once: true });
-        let waitResult: HostedRuntimePostCheckpointCompletionWaitResult;
-        let wake: Promise<HostedRuntimePostCheckpointCompletionWaitResult> =
+        let waitResult: HostedRuntimeMailboxPostCheckpointEffectWaitResult;
+        let wake: Promise<HostedRuntimeMailboxPostCheckpointEffectWaitResult> =
           Promise.resolve({ kind: "finished" });
         try {
           wake = runtimeWakeSignal.wait(wakeAbortController.signal)
@@ -1713,37 +1712,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runtimeStateDirty ||= result.runtimeStateDirty;
         return result;
       };
-      const drainPostCheckpointCompletionsAfterIdleCheckpoint = async (): Promise<{
-        handledWake: boolean;
-        runtimeStateDirty: boolean;
-      }> => {
-        let handledWake = false;
-        while (pendingPostCheckpointCompletions.afterIdleCheckpoint.size > 0) {
-          const waitResult = await waitForPostCheckpointCompletions("afterIdleCheckpoint");
-          if (waitResult.kind === "finished") {
-            continue;
-          }
-
-          handledWake = true;
-          const wakeResult = await runIdleWakeForegroundPass({
-            latencySeed: createHostedRuntimeWakeLatencySeed(
-              waitResult.notification,
-            ),
-            projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
-            requestIdKind: "idle-wake",
-          });
-          if (wakeResult.runtimeStateDirty) {
-            return {
-              handledWake,
-              runtimeStateDirty: true,
-            };
-          }
-        }
-        return {
-          handledWake,
-          runtimeStateDirty: false,
-        };
-      };
       while (runtimeStateDirty) {
         if (
           accumulatedProjection.status !== "budget_exhausted"
@@ -1818,7 +1786,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           status: "start",
         });
         const mailboxEffectsWaitResult =
-          await waitForPostCheckpointCompletions("beforeIdleCheckpoint");
+          await waitForMailboxPostCheckpointEffects();
         if (mailboxEffectsWaitResult.kind === "external_wake") {
           await runIdleWakeForegroundPass({
             latencySeed: createHostedRuntimeWakeLatencySeed(
@@ -2036,24 +2004,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             },
           );
           runtimeStateDirty = result.runtimeStateDirty;
-          if (!runtimeStateDirty) {
-            const postCheckpointCompletionDrain =
-              await drainPostCheckpointCompletionsAfterIdleCheckpoint();
-            if (
-              postCheckpointCompletionDrain.runtimeStateDirty
-              || postCheckpointCompletionDrain.handledWake
-            ) {
-              continue;
-            }
-          }
-          continue;
-        }
-        const postCheckpointCompletionDrain =
-          await drainPostCheckpointCompletionsAfterIdleCheckpoint();
-        if (
-          postCheckpointCompletionDrain.runtimeStateDirty
-          || postCheckpointCompletionDrain.handledWake
-        ) {
           continue;
         }
         const browserVaultRefresh = await runBrowserVaultRefreshMaintenance({
@@ -2196,7 +2146,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "runtime",
       status: "fail",
     });
-    await drainStartedPostCheckpointCompletionsBestEffort();
+    await drainStartedPostSafePointCompletionsBestEffort();
     throw error;
   } finally {
     hostAbortSignal?.removeEventListener("abort", abortFromHost);
@@ -2517,7 +2467,7 @@ type HostedRuntimeDirtyWaitResult =
   | { kind: "idle_checkpoint" }
   | { kind: "projected_runtime_wake" };
 
-type HostedRuntimePostCheckpointCompletionWaitResult =
+type HostedRuntimeMailboxPostCheckpointEffectWaitResult =
   | { kind: "external_wake"; notification: RuntimeWakeNotification }
   | { kind: "finished" };
 

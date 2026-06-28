@@ -818,13 +818,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
   });
 
-  it("logs structured diagnostics when deferred usage recording fails", async () => {
+  it("returns no-progress deferred usage records for runner-owned flushing", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
+    let usagePortCalled = false;
     const usageRecordPort: RuntimeUsageRecordPort = {
       async recordUsage() {
-        throw Object.assign(new Error("usage ledger unavailable"), {
-          code: "usage_ledger_unavailable",
-        });
+        usagePortCalled = true;
+        throw new Error("Phase should not flush deferred usage directly.");
       },
     };
     mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
@@ -844,20 +844,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runtimeUsageRecordPort: usageRecordPort,
     }));
 
+    expect(result.progressed).toBe(false);
+    expect(result.deferredUsageRecords).toEqual([
+      expect.objectContaining({
+        usageId: "turn_direct_usage.attempt-1",
+      }),
+    ]);
+    expect(usagePortCalled).toBe(false);
     const usageFailureLog = logRequests.flatMap((request) => request.entries)
       .find((entry) => entry.errorCode === "assistant_usage_record_failed");
-    expect(usageFailureLog).toEqual(expect.objectContaining({
-      component: "runtime",
-      errorCode: "assistant_usage_record_failed",
-      eventCode: "runner.error",
-      level: "warn",
-      phase: "error",
-      redactedJson: expect.objectContaining({
-        assistantUsageRecordFailed: true,
-        nestedErrorCode: expect.any(String),
-        safeErrorMessage: expect.any(String),
-      }),
-    }));
+    expect(usageFailureLog).toBeUndefined();
   });
 
   it("keeps device-sync options out of the assistant lane when active input is fresh", async () => {
