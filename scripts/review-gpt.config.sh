@@ -26,6 +26,8 @@ attach_artifacts=1
 include_tests=0
 include_docs=0
 preset_dir="scripts/chatgpt-review-presets"
+# PR review runs pass REVIEW_GPT_PR_URL so this package wrapper can add
+# review-gpt-pr-context/pr.diff and changed-files.txt to repo.snapshot.zip.
 package_script="scripts/package-audit-context-full.sh"
 # `current` skips connector selection. The PR loop requires the Eragon composer
 # to have no selected app connector before auto-send because review context must
@@ -112,7 +114,7 @@ review_gpt_register_dir_preset "legacy-removal" "legacy-removal.md" \
   "hard-cut" \
   "greenfield-hard-cut"
 review_gpt_register_dir_preset "pr-review" "pr-deep-review.md" \
-  "Deep PR review for bugs, edge cases, and minimal-complexity architecture via guarded ZIP and repomix attachments." \
+  "Deep PR review for bugs, edge cases, and minimal-complexity architecture via guarded ZIP PR diff plus repomix attachments." \
   "pr-deep-review" \
   "deep-pr-review" \
   "pr-bugs-and-architecture"
