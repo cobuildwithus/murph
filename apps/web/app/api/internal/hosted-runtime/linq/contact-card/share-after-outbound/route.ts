@@ -20,7 +20,7 @@ import {
   toHostedOnboardingLogIdSuffix,
 } from "@/src/lib/hosted-onboarding/logging";
 import {
-  assertHostedThreadRouteEgressAuthority,
+  assertHostedLinqRouteEgressAuthority,
 } from "@/src/lib/hosted-routing/thread-route-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
@@ -53,7 +53,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   const prisma = getPrisma();
-  await assertHostedThreadRouteEgressAuthority({
+  await assertHostedLinqRouteEgressAuthority({
     authority: body.authority,
     prisma,
   });

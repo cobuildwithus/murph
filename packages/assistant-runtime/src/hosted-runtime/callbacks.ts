@@ -1218,6 +1218,28 @@ async function maybeShareHostedLinqContactCardAfterDeliveredIntent(input: {
   }
 }
 
+function queueHostedLinqContactCardShareAfterDeliveredIntent(input: {
+  delivery: AssistantChannelDelivery | null | undefined;
+  effectsPort: HostedRuntimeEffectsPort;
+  linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;
+  signal: AbortSignal | null;
+  userId: string;
+  wake: HostedRuntimeEvent;
+}): void {
+  if (!input.delivery) {
+    return;
+  }
+
+  void maybeShareHostedLinqContactCardAfterDeliveredIntent({
+    delivery: input.delivery,
+    effectsPort: input.effectsPort,
+    linqDeliveryContext: input.linqDeliveryContext,
+    signal: input.signal,
+    userId: input.userId,
+    wake: input.wake,
+  });
+}
+
 function normalizeHostedLinqContactCardChatId(
   value: string | null | undefined,
 ): string | null {
@@ -1553,15 +1575,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             now: preflightNow,
             vaultRoot: vault,
           }),
-        persistDeliveredIntent: async ({ delivery }) =>
-          maybeShareHostedLinqContactCardAfterDeliveredIntent({
-            delivery,
-            effectsPort: input.effectsPort,
-            linqDeliveryContext,
-            signal: input.signal,
-            userId: input.userId,
-            wake: input.wake,
-          }),
       },
       dependencies: {
         sendEmail: async (request) => {
@@ -1764,6 +1777,16 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         wake: input.wake,
       });
     }
+    queueHostedLinqContactCardShareAfterDeliveredIntent({
+      delivery: dispatched.intent.status === "sent"
+        ? dispatched.intent.delivery
+        : null,
+      effectsPort: input.effectsPort,
+      linqDeliveryContext,
+      signal: input.signal,
+      userId: input.userId,
+      wake: input.wake,
+    });
     assertHostedDeliveryLiveness(input.signal);
     return await buildHostedAssistantDeliveryDispatchResult({
       assistantDeliveryEffect: input.assistantDeliveryEffect,

@@ -693,6 +693,70 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     },
   );
 
+  it("adds home Linq route authority to active-member direct iMessage wakes", async () => {
+    const accountLookupKey = createHostedPhoneLookupKey("+15550000000");
+    if (!accountLookupKey) {
+      throw new Error("Expected test account lookup key.");
+    }
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+        }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        chatIsGroup: false,
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          message: expect.objectContaining({
+            accountLookupKey,
+            routeAuthority: {
+              accountLookupKey,
+              channel: "linq",
+              containerMemberId: "member_123",
+              threadId: "chat_123",
+            },
+            linqMessage: expect.objectContaining({
+              service: "iMessage",
+              threadIsDirect: true,
+            }),
+          }),
+          userId: "member_123",
+        }),
+      }),
+    );
+  });
+
   it("marks Linq reaction eligibility from raw parts before mailbox text compaction", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {

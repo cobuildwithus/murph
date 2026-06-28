@@ -5610,10 +5610,11 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "linq_chat_current",
       transportIdempotent: true,
     });
-    const maybeShareLinqContactCardAfterOutbound = vi.fn(async () => ({
-      ok: true as const,
-      action: "share" as const,
-    }));
+    let resolveShare: (value: { action: "share"; ok: true }) => void = () => {};
+    const sharePromise = new Promise<{ action: "share"; ok: true }>((resolve) => {
+      resolveShare = resolve;
+    });
+    const maybeShareLinqContactCardAfterOutbound = vi.fn(() => sharePromise);
     const providerFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
@@ -5621,7 +5622,7 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
-    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies, dispatchHooks }) => {
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
         fromPhoneNumber: "+15550002",
@@ -5638,10 +5639,6 @@ describe("hosted runtime callbacks", () => {
         target: delivery.target,
         targetKind: delivery.targetKind,
       });
-      await dispatchHooks.persistDeliveredIntent?.({
-        delivery: deliveryRecord,
-      });
-
       return createDispatchResult({
         delivery: deliveryRecord,
         status: "sent",
@@ -5673,6 +5670,11 @@ describe("hosted runtime callbacks", () => {
         deliveryStatus: "sent",
       }),
     ]);
+    resolveShare({
+      action: "share",
+      ok: true,
+    });
+    await Promise.resolve();
   });
 
   it("logs Linq contact-card callback failures without failing the sent outcome", async () => {
@@ -5720,7 +5722,7 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
-    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies, dispatchHooks }) => {
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
         fromPhoneNumber: null,
@@ -5737,10 +5739,6 @@ describe("hosted runtime callbacks", () => {
         target: delivery.target,
         targetKind: delivery.targetKind,
       });
-      await dispatchHooks.persistDeliveredIntent?.({
-        delivery: deliveryRecord,
-      });
-
       return createDispatchResult({
         delivery: deliveryRecord,
         status: "sent",
@@ -5757,6 +5755,7 @@ describe("hosted runtime callbacks", () => {
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
+    await Promise.resolve();
 
     expect(maybeShareLinqContactCardAfterOutbound).toHaveBeenCalledWith({
       authority: routeAuthority,
@@ -5823,24 +5822,14 @@ describe("hosted runtime callbacks", () => {
       target: "linq_chat_current",
       targetKind: "thread" as const,
     });
-    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies, dispatchHooks }) => {
-      const delivery = await dependencies.sendLinq({
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendLinq({
         idempotencyKey: "assistant-outbox:intent_linq",
         message: "hello from hosted",
         replyToMessageId: "linq_message_current",
         target: "linq_chat_current",
         targetKind: "thread",
       });
-      await dispatchHooks.persistDeliveredIntent?.({
-        delivery: createDelivery({
-          channel: "linq",
-          providerMessageId: delivery.providerMessageId,
-          providerThreadId: delivery.providerThreadId,
-          target: delivery.target,
-          targetKind: delivery.targetKind,
-        }),
-      });
-
       return createDispatchResult({
         delivery: createDelivery({
           channel: "linq",

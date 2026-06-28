@@ -66,6 +66,7 @@ import {
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
 import {
+  createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
 import type {
@@ -380,17 +381,24 @@ export async function planHostedOnboardingLinqWebhook(input: {
       );
     }
 
+    const homeBindingRecipientPhone = resolveHostedLinqHomeBindingRecipientPhone({
+      homeChatId: homeRoute?.linqChatId ?? null,
+      homeRecipientPhone: homeRoute?.linqRecipientPhone ?? null,
+      incomingChatId: summary.chatId,
+      incomingRecipientPhone: recipientPhoneNumber,
+    });
+    const routeAuthority = buildHostedLinqHomeRouteEgressAuthority({
+      accountLookupKey: createHostedPhoneLookupKey(homeBindingRecipientPhone),
+      memberId: existingMember.id,
+      threadId: summary.chatId,
+    });
+
     const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
       chatId: summary.chatId,
       memberId: existingMember.id,
       occurredAt,
       prisma: input.prisma,
-      recipientPhone: resolveHostedLinqHomeBindingRecipientPhone({
-        homeChatId: homeRoute?.linqChatId ?? null,
-        homeRecipientPhone: homeRoute?.linqRecipientPhone ?? null,
-        incomingChatId: summary.chatId,
-        incomingRecipientPhone: recipientPhoneNumber,
-      }),
+      recipientPhone: homeBindingRecipientPhone,
     });
 
     // Read-first: the webhook only needs the gate decision for quota notices;
@@ -425,6 +433,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     }
 
     const mailboxWake = buildHostedLinqConversationWakeForMailbox({
+      ...(routeAuthority ? { accountLookupKey: routeAuthority.accountLookupKey } : {}),
       eventId: input.event.event_id,
       linqMessage: {
         chatId: summary.chatId,
@@ -447,6 +456,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       occurredAt,
       participantContact,
       rawParts: messageEvent.data.message.parts,
+      routeAuthority,
       userId: existingMember.id,
     });
 
@@ -1026,6 +1036,23 @@ function buildHostedLinqThreadRouteEgressAuthority(input: {
     accountLookupKey: input.route.accountLookupKey,
     channel: "linq",
     containerMemberId: input.route.containerMemberId,
+    threadId: input.threadId,
+  };
+}
+
+function buildHostedLinqHomeRouteEgressAuthority(input: {
+  accountLookupKey: string | null;
+  memberId: string;
+  threadId: string;
+}): HostedLinqThreadRouteEgressAuthority | null {
+  if (!input.accountLookupKey) {
+    return null;
+  }
+
+  return {
+    accountLookupKey: input.accountLookupKey,
+    channel: "linq",
+    containerMemberId: input.memberId,
     threadId: input.threadId,
   };
 }

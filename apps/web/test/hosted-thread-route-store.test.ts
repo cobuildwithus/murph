@@ -2,9 +2,13 @@ import type { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  assertHostedLinqRouteEgressAuthority,
   readHostedThreadRouteByExternalThread,
   readHostedThreadRouteByThreadIdentity,
 } from "../src/lib/hosted-routing/thread-route-store";
+import {
+  encryptHostedWebNullableString,
+} from "../src/lib/hosted-web/encryption";
 import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
@@ -17,13 +21,23 @@ if (!LINQ_ACCOUNT_LOOKUP_KEY) {
 }
 
 function createPrismaMock() {
+  const hostedMember = {
+    findUnique: vi.fn(),
+  };
+  const hostedMemberRouting = {
+    findUnique: vi.fn(),
+  };
   const hostedThreadRoute = {
     findMany: vi.fn(),
   };
 
   return {
+    hostedMember,
+    hostedMemberRouting,
     hostedThreadRoute,
   } as unknown as Prisma.TransactionClient & {
+    hostedMember: typeof hostedMember;
+    hostedMemberRouting: typeof hostedMemberRouting;
     hostedThreadRoute: typeof hostedThreadRoute;
   };
 }
@@ -273,6 +287,55 @@ describe("hosted thread route store", () => {
       containerMemberId: "member_container_123",
       owner,
     });
+  });
+
+  it("authorizes active member home Linq routes when no explicit route owns the chat", async () => {
+    const prisma = createPrismaMock();
+    prisma.hostedThreadRoute.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    prisma.hostedMember.findUnique.mockResolvedValueOnce({
+      billingStatus: "active",
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_home_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    });
+    prisma.hostedMemberRouting.findUnique.mockResolvedValueOnce({
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id",
+        memberId: "member_home_123",
+        value: "chat_home_123",
+      }),
+      linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-recipient-phone",
+        memberId: "member_home_123",
+        value: "+15550000000",
+      }),
+      memberId: "member_home_123",
+    });
+
+    await expect(assertHostedLinqRouteEgressAuthority({
+      authority: {
+        accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+        channel: "linq",
+        containerMemberId: "member_home_123",
+        threadId: "chat_home_123",
+      },
+      prisma,
+    })).resolves.toBeUndefined();
+
+    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "member_home_123" },
+      }),
+    );
+    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { memberId: "member_home_123" },
+      }),
+    );
   });
 
   it("fails closed when lookup candidates match multiple containers", async () => {

@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  assertHostedThreadRouteEgressAuthority: vi.fn(),
+  assertHostedLinqRouteEgressAuthority: vi.fn(),
   getPrisma: vi.fn(),
   maybeShareHostedLinqContactCardAfterOutbound: vi.fn(),
   prisma: {},
@@ -18,8 +18,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
-  assertHostedThreadRouteEgressAuthority:
-    mocks.assertHostedThreadRouteEgressAuthority,
+  assertHostedLinqRouteEgressAuthority:
+    mocks.assertHostedLinqRouteEgressAuthority,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -49,7 +49,7 @@ describe("hosted runtime Linq contact-card share callback route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValue(undefined);
+    mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue(undefined);
     mocks.getPrisma.mockReturnValue(mocks.prisma);
     mocks.maybeShareHostedLinqContactCardAfterOutbound.mockResolvedValue({
       action: "share",
@@ -74,7 +74,7 @@ describe("hosted runtime Linq contact-card share callback route", () => {
       action: "share",
       ok: true,
     });
-    expect(mocks.assertHostedThreadRouteEgressAuthority).toHaveBeenCalledWith({
+    expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith({
       authority: AUTHORITY,
       prisma: mocks.prisma,
     });
@@ -106,7 +106,7 @@ describe("hosted runtime Linq contact-card share callback route", () => {
         code: "HOSTED_LINQ_CONTACT_CARD_SHARE_BOUND_USER_MISMATCH",
       },
     });
-    expect(mocks.assertHostedThreadRouteEgressAuthority).not.toHaveBeenCalled();
+    expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
     expect(mocks.maybeShareHostedLinqContactCardAfterOutbound).not.toHaveBeenCalled();
   });
 
@@ -127,7 +127,7 @@ describe("hosted runtime Linq contact-card share callback route", () => {
         code: "HOSTED_LINQ_CONTACT_CARD_SHARE_THREAD_MISMATCH",
       },
     });
-    expect(mocks.assertHostedThreadRouteEgressAuthority).not.toHaveBeenCalled();
+    expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
     expect(mocks.maybeShareHostedLinqContactCardAfterOutbound).not.toHaveBeenCalled();
   });
 });

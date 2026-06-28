@@ -9,6 +9,7 @@ import type {
 import {
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedExternalThreadLookupKeyReadCandidates,
+  createHostedPhoneLookupKeyReadCandidates,
   isHostedExternalThreadChannel,
 } from "../hosted-onboarding/contact-privacy";
 import {
@@ -20,6 +21,12 @@ import {
 import type {
   HostedMemberCoreState,
 } from "../hosted-onboarding/hosted-member-store";
+import {
+  readHostedMemberCoreState,
+} from "../hosted-onboarding/hosted-member-store";
+import {
+  readHostedMemberHomeLinqRoute,
+} from "../hosted-onboarding/hosted-member-routing-store";
 import type {
   HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
@@ -261,6 +268,70 @@ export async function assertHostedThreadRouteEgressAuthority(input: {
   }
 
   throw hostedOnboardingError({
+    code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+    httpStatus: 403,
+    message: "External thread route egress is no longer authorized.",
+    retryable: false,
+  });
+}
+
+export async function assertHostedLinqRouteEgressAuthority(input: {
+  authority: HostedLinqThreadRouteEgressAuthority;
+  prisma: HostedOnboardingReadClient;
+}): Promise<void> {
+  const explicitRoute = await readHostedThreadRouteByExternalThread({
+    accountLookupKey: input.authority.accountLookupKey,
+    channel: "linq",
+    prisma: input.prisma,
+    threadId: input.authority.threadId,
+  });
+
+  if (explicitRoute) {
+    if (
+      explicitRoute.containerMemberId === input.authority.containerMemberId
+      && hasHostedMemberActiveAccess(explicitRoute.container)
+      && hasHostedMemberActiveAccess(explicitRoute.owner)
+    ) {
+      return;
+    }
+
+    throw buildHostedThreadRouteEgressUnauthorizedError();
+  }
+
+  const mismatchedExplicitRoute = await readHostedThreadRouteByThreadIdentity({
+    channel: "linq",
+    prisma: input.prisma,
+    threadId: input.authority.threadId,
+  });
+  if (mismatchedExplicitRoute) {
+    throw buildHostedThreadRouteEgressUnauthorizedError();
+  }
+
+  const [member, homeRoute] = await Promise.all([
+    readHostedMemberCoreState({
+      memberId: input.authority.containerMemberId,
+      prisma: input.prisma,
+    }),
+    readHostedMemberHomeLinqRoute({
+      memberId: input.authority.containerMemberId,
+      prisma: input.prisma,
+    }),
+  ]);
+  if (
+    member
+    && hasHostedMemberActiveAccess(member)
+    && homeRoute?.linqChatId === input.authority.threadId
+    && createHostedPhoneLookupKeyReadCandidates(homeRoute.linqRecipientPhone)
+      .includes(input.authority.accountLookupKey)
+  ) {
+    return;
+  }
+
+  throw buildHostedThreadRouteEgressUnauthorizedError();
+}
+
+function buildHostedThreadRouteEgressUnauthorizedError() {
+  return hostedOnboardingError({
     code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
     httpStatus: 403,
     message: "External thread route egress is no longer authorized.",
