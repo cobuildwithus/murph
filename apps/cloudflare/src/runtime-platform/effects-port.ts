@@ -146,11 +146,20 @@ export function createCloudflareEffectsPort(input: {
             });
           },
           async maybeShareLinqContactCardAfterOutbound(request, context) {
+            const description = "Hosted Linq contact-card share after outbound";
             const payload = await fetchHostedWebControlPlaneJson({
               body: request,
               boundUserId: input.boundUserId,
-              description: "Hosted Linq contact-card share after outbound",
+              description,
               fetchImpl: input.fetchImpl,
+              ...(webControlTransport.mode === "proxy"
+                ? {
+                    headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                      description,
+                      workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+                    }),
+                  }
+                : {}),
               path: HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
