@@ -1,5 +1,8 @@
 import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 
+import type { Junction } from "@junction-api/sdk";
+import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
+import type * as JunctionSerialization from "@junction-api/sdk/serialization";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 import {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
@@ -116,6 +119,24 @@ interface JunctionDirectResourceJobInput {
   windowEnd: string;
   windowStart: string;
 }
+
+type JunctionSdkHistoricalPullCompleted = Junction.HistoricalPullCompleted;
+type JunctionSdkHistoricalSleepCompletionWebhook = Junction.ClientFacingSleepHistoricalPullCompleted;
+type JunctionSdkHistoricalSleepCompletionWebhookWire =
+  JunctionSerialization.ClientFacingSleepHistoricalPullCompleted.Raw;
+
+const JUNCTION_WEBHOOK_ROOT_FIELDS = Object.freeze({
+  eventType: "event_type",
+  userId: "user_id",
+  clientUserId: "client_user_id",
+  data: "data",
+} satisfies Record<
+  keyof Pick<
+    JunctionSdkHistoricalSleepCompletionWebhook,
+    "eventType" | "userId" | "clientUserId" | "data"
+  >,
+  keyof JunctionSdkHistoricalSleepCompletionWebhookWire
+>);
 
 interface JunctionWindowFetchOptions {
   dateQueryFormat?: JunctionDateQueryFormat;
@@ -1350,7 +1371,7 @@ export function createJunctionDeviceSyncProvider(
       timestampToleranceMs: webhookTimestampToleranceMs,
     });
     const eventType = requireJunctionWebhookEventType(verified.payload);
-    const data = readPlainObject(verified.payload.data);
+    const data = readPlainObject(verified.payload[JUNCTION_WEBHOOK_ROOT_FIELDS.data]);
     const externalAccountSelection = requireJunctionWebhookUserIdSelection(verified.payload, data);
     const resource = inferJunctionWebhookResource(eventType, data);
     const sourceProviderSlug = extractJunctionWebhookSourceProviderSlug(data);
@@ -4505,20 +4526,30 @@ function isJunctionHistoricalDataEvent(eventType: string): boolean {
   return eventType.startsWith("historical.data.");
 }
 
-function isJunctionHistoricalPullCompletedWebhookData(data: Record<string, unknown>): boolean {
-  const start =
-    toJunctionWebhookWindowBoundaryTimestampIfValid(data.start_date, "start")
-    ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data.startDate, "start");
-  const end =
-    toJunctionWebhookWindowBoundaryTimestampIfValid(data.end_date, "end")
-    ?? toJunctionWebhookWindowBoundaryTimestampIfValid(data.endDate, "end");
-  const provider =
-    normalizeProviderSlug(data.provider)
-    ?? normalizeProviderSlug(data.source_provider)
-    ?? normalizeProviderSlug(data.sourceProvider);
-  const isFinal = data.is_final === true || data.isFinal === true;
+function isJunctionHistoricalPullCompletedWebhookData(
+  data: Record<string, unknown>,
+  externalAccountId: string,
+): boolean {
+  const completed = parseJunctionHistoricalPullCompletedWebhookData(data, externalAccountId);
+  return Boolean(completed && normalizeProviderSlug(completed.provider));
+}
 
-  return Boolean(start && end && provider && isFinal);
+function parseJunctionHistoricalPullCompletedWebhookData(
+  data: Record<string, unknown>,
+  externalAccountId: string,
+): JunctionSdkHistoricalPullCompleted | null {
+  const parsed = JunctionHistoricalPullCompletedSchema.parse(
+    {
+      ...data,
+      [JUNCTION_WEBHOOK_ROOT_FIELDS.userId]:
+        normalizeString(data[JUNCTION_WEBHOOK_ROOT_FIELDS.userId]) ?? externalAccountId,
+    },
+    {
+      unrecognizedObjectKeys: "passthrough",
+    },
+  );
+
+  return parsed.ok ? parsed.value : null;
 }
 
 function buildJunctionWebhookDataJobJsons(input: {
@@ -4537,7 +4568,10 @@ function buildJunctionWebhookDataJobJsons(input: {
     return [];
   }
 
-  if (isJunctionHistoricalDataEvent(input.eventType) && isJunctionHistoricalPullCompletedWebhookData(input.data)) {
+  if (
+    isJunctionHistoricalDataEvent(input.eventType)
+    && isJunctionHistoricalPullCompletedWebhookData(input.data, input.externalAccountId)
+  ) {
     return [];
   }
 
@@ -5123,7 +5157,9 @@ function parseWebhookJsonBody(rawBody: Buffer): Record<string, unknown> {
 }
 
 function requireJunctionWebhookEventType(payload: Record<string, unknown>): string {
-  const eventType = normalizeString(payload.event_type) ?? normalizeString(payload.eventType);
+  const eventType =
+    normalizeString(payload[JUNCTION_WEBHOOK_ROOT_FIELDS.eventType])
+    ?? normalizeString(payload.eventType);
   if (eventType) {
     return eventType;
   }
@@ -5209,7 +5245,7 @@ function collectJunctionWebhookIdentityCandidates(
 
     seenContainers.add(container);
 
-    for (const key of ["user_id", "userId"] as const) {
+    for (const key of [JUNCTION_WEBHOOK_ROOT_FIELDS.userId, "userId"] as const) {
       addJunctionWebhookIdentityCandidate(candidates, {
         kind: "external_account_id",
         path: `${path}.${key}`,
@@ -5217,7 +5253,7 @@ function collectJunctionWebhookIdentityCandidates(
       });
     }
 
-    for (const key of ["client_user_id", "clientUserId"] as const) {
+    for (const key of [JUNCTION_WEBHOOK_ROOT_FIELDS.clientUserId, "clientUserId"] as const) {
       addJunctionWebhookIdentityCandidate(candidates, {
         kind: "client_user_id",
         path: `${path}.${key}`,
