@@ -520,6 +520,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   }
 
   const runAssistantPhase = input.runAssistantPhase;
+  const deferredUsageRecords: AssistantUsageRecord[] = [];
+  let deferredUsageFlushFinished: Promise<void> | null = null;
   let deferredUsageCompletionSettled = false;
   let resolveDeferredUsageCompletion: () => void = () => undefined;
   const deferredUsageCompletion = new Promise<void>((resolve) => {
@@ -533,16 +535,25 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     deferredUsageCompletionSettled = true;
     resolveDeferredUsageCompletion();
   };
-  const resolveDeferredUsageCompletionAfter = (completion: Promise<void> | null): void => {
-    if (completion === null) {
-      resolveDeferredUsageCompletionOnce();
-      return;
+  const startDeferredUsageFlushOnce = (): Promise<void> | null => {
+    if (deferredUsageFlushFinished) {
+      return deferredUsageFlushFinished;
     }
 
-    void completion.then(
+    if (deferredUsageRecords.length === 0) {
+      resolveDeferredUsageCompletionOnce();
+      return null;
+    }
+
+    deferredUsageFlushFinished = flushHostedAssistantUsageRecordsBestEffort({
+      input,
+      records: [...deferredUsageRecords],
+    });
+    void deferredUsageFlushFinished.then(
       resolveDeferredUsageCompletionOnce,
       resolveDeferredUsageCompletionOnce,
     );
+    return deferredUsageFlushFinished;
   };
   input.onDeferredUsageCompletionRegistered?.(deferredUsageCompletion);
   let foregroundConversationWorkObserved = false;
@@ -574,50 +585,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   let assistantContextSnapshotDirty = false;
   let mailboxPostCheckpointEffectsFinished: Promise<void> | null = null;
   let projectedWakeRequiresCheckpoint = false;
-  let assistantPhaseSafePointReached = false;
-  let assistantPhaseAfterCheckpointReached = false;
-  let deferredUsageRecords: AssistantUsageRecord[] = [];
-  let deferredUsageFlushFinished: Promise<void> | null = null;
-  let deferredUsageFlushStarted = false;
-  const startAssistantPhaseDeferredUsageFlush = (inputOptions: {
-    beforeSafePoint?: boolean;
-  } = {}): Promise<void> | null => {
-    if (
-      (!assistantPhaseSafePointReached && inputOptions.beforeSafePoint !== true)
-      || deferredUsageRecords.length === 0
-      || deferredUsageFlushStarted
-    ) {
-      return null;
-    }
-
-    deferredUsageFlushStarted = true;
-    deferredUsageFlushFinished = flushHostedAssistantUsageRecordsBestEffort({
-      input,
-      records: [...deferredUsageRecords],
-    });
-    resolveDeferredUsageCompletionAfter(deferredUsageFlushFinished);
-    return deferredUsageFlushFinished;
-  };
-  const flushAssistantPhaseDeferredUsageBeforeThrow = async (): Promise<void> => {
-    if (deferredUsageFlushStarted) {
-      await deferredUsageFlushFinished;
-      return;
-    }
-
-    if (assistantPhaseSafePointReached) {
-      await startAssistantPhaseDeferredUsageFlush();
-      return;
-    }
-
-    if (deferredUsageRecords.length === 0) {
-      return;
-    }
-
-    const completion = startAssistantPhaseDeferredUsageFlush({ beforeSafePoint: true });
-    if (input.signal?.aborted !== true) {
-      await completion;
-    }
-  };
   const hostedCanonicalWritePort = createHostedWorkspaceCanonicalWritePort({
     checkpointRequestBuilder: checkpointRequestSession,
     initialMailboxImport,
@@ -627,6 +594,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     },
   });
   let assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
+  let runnerError: unknown = null;
   try {
     assistantPhaseResult = await withHostedCanonicalWritePort(
       hostedCanonicalWritePort,
@@ -650,7 +618,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       platform: input.platform,
       runtimeLogContext: input.runtimeLogContext,
     });
-    assistantPhaseSafePointReached = true;
     if (assistantPhaseResult.afterCheckpoint && assistantPhaseResult.progressed !== true) {
       throw new TypeError("Hosted workspace assistant phase afterCheckpoint requires a progressed phase.");
     }
@@ -670,15 +637,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     try {
       postCheckpoint = await withHostedCanonicalWritePort(
         hostedCanonicalWritePort,
-        async () => {
-          assistantPhaseAfterCheckpointReached = true;
-          return await assistantPhaseResult.afterCheckpoint?.();
-        },
+        async () => await assistantPhaseResult.afterCheckpoint?.(),
       );
     } catch (error) {
-      if (!assistantPhaseAfterCheckpointReached) {
-        await flushAssistantPhaseDeferredUsageBeforeThrow();
-      }
       await writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog({
         error,
         errorCode: "assistant_after_checkpoint_failed",
@@ -710,7 +671,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           effects: afterDurableCheckpoint,
           postCheckpoint,
         });
-        startAssistantPhaseDeferredUsageFlush();
       } catch (error) {
         if (
           error instanceof HostedMailboxImportCheckpointConflictError
@@ -724,8 +684,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           input,
         });
       }
-    } else {
-      startAssistantPhaseDeferredUsageFlush();
     }
     await reconcilePendingAssistantInputWake({
       foregroundConversationWorkObserved,
@@ -747,8 +705,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       phase: "import",
     });
   } catch (error) {
+    runnerError = error;
     await foregroundMailboxImportLoop.stop();
-    await flushAssistantPhaseDeferredUsageBeforeThrow();
     scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
@@ -756,9 +714,19 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     });
     throw error;
   } finally {
-    await foregroundMailboxImportLoop.stop();
-    if (!deferredUsageFlushStarted) {
-      resolveDeferredUsageCompletionOnce();
+    try {
+      await foregroundMailboxImportLoop.stop();
+    } catch (error) {
+      runnerError ??= error;
+      throw error;
+    } finally {
+      const deferredUsageFlush = startDeferredUsageFlushOnce();
+      if (
+        runnerError !== null
+        && !isHostedWorkspaceRunnerAbortError(runnerError, input.signal ?? null)
+      ) {
+        await deferredUsageFlush;
+      }
     }
   }
 
@@ -1569,6 +1537,29 @@ function readHostedForegroundRuntimeWakeAbortReason(signal: AbortSignal | null):
   return signal?.reason instanceof Error
     ? signal.reason
     : new DOMException("Foreground mailbox import loop was aborted.", "AbortError");
+}
+
+function isHostedWorkspaceRunnerAbortError(
+  error: unknown,
+  signal: AbortSignal | null,
+): boolean {
+  if (!signal?.aborted) {
+    return false;
+  }
+
+  if (signal.reason instanceof Error) {
+    return error === signal.reason;
+  }
+
+  return error === signal.reason
+    || (
+      error instanceof DOMException
+      && error.name === "AbortError"
+    )
+    || (
+      error instanceof Error
+      && error.name === "AbortError"
+    );
 }
 
 function shouldRecordHostedForegroundMailboxImportResult(
