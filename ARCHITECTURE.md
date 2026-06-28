@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-06-27
+Last verified: 2026-06-28
 
 ## Hosted Connected Apps
 
@@ -143,17 +143,23 @@ Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the signup-link path only. It runs after cheap deterministic ingress filters and
 before member/invite mutation, calls OpenAI through an env-only key with bounded
 message metadata/text, reduces provider service metadata to a fixed enum,
-persists only the event-id keyed terminal allow/block decision plus
-confidence/source and bounded first-contact text for terminal block decisions,
-stores no classifier prompt, payload, raw response body, or model rationale,
-and fails closed without sending a reply when enforcement is enabled and intent
-is not classified as allowed. OpenAI
-refusal and content-filter outcomes are terminal unsupported content blocks.
-OpenAI account quota or credits exhaustion is a fail-open allow because that is
-Murph's provider-account problem, not a sender-quality signal, while malformed,
-non-completed, or otherwise classifier-unavailable states return typed
-retryable errors before side effects. Active members, explicit thread routes, own messages,
-group chats, local guard rejects, deterministic URL/STOP-style spam, and other
+persists only the event-id keyed terminal allow/block decision, stores no
+classifier payload or response body, and fails closed without sending a reply
+when enforcement is enabled and the classifier explicitly blocks. OpenAI
+refusal and content-filter outcomes are terminal unsupported content blocks, and
+first-contact budget exhaustion also blocks before side effects.
+The legacy nullable rejected-message-text column is retained only as a
+deploy-skew compatibility column during the expand/contract rollout; new Prisma
+code ignores it and the migration scrubs existing values.
+Classifier-path budget claims and decision recording commit together, and the
+event-id decision write is duplicate-safe so webhook retries can observe the
+same terminal decision without replaying a failing unique-constraint path.
+Classifier-unavailable states, including missing keys, timeouts, ordinary
+non-2xx responses, malformed output, non-completed responses, max-output
+exhaustion, and OpenAI quota or credits exhaustion, intentionally fail open by
+recording a deterministic allow decision so a legitimate first contact is not
+permanently dropped. Active members, explicit thread routes, own messages, group
+chats, local guard rejects, deterministic URL/STOP-style spam, and other
 non-invite paths bypass the classifier.
 
 Hosted runner progress reconciliation treats a runtime-kind write fence as the active
