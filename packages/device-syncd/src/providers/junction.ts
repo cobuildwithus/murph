@@ -4530,8 +4530,16 @@ function isJunctionHistoricalPullCompletedWebhookData(
   data: Record<string, unknown>,
   externalAccountId: string,
 ): boolean {
+  if (hasJunctionHistoricalInlineRecordCarrierFields(data)) {
+    return false;
+  }
+
   const completed = parseJunctionHistoricalPullCompletedWebhookData(data, externalAccountId);
-  return Boolean(completed && normalizeProviderSlug(completed.provider));
+  if (completed && normalizeJunctionWebhookSourceProviderCandidate(completed.provider)) {
+    return true;
+  }
+
+  return isDocumentedJunctionHistoricalPullCompletedWebhookData(data, externalAccountId);
 }
 
 function parseJunctionHistoricalPullCompletedWebhookData(
@@ -4550,6 +4558,60 @@ function parseJunctionHistoricalPullCompletedWebhookData(
   );
 
   return parsed.ok ? parsed.value : null;
+}
+
+const JUNCTION_HISTORICAL_INLINE_RECORD_CARRIER_FIELDS = new Set([
+  "activities",
+  "bedtime_start",
+  "bedtime_stop",
+  "data",
+  "data_type",
+  "date",
+  "duration",
+  "end_time",
+  "groups",
+  "id",
+  "items",
+  "object_id",
+  "records",
+  "resource",
+  "resource_id",
+  "resource_type",
+  "samples",
+  "source",
+  "sourceProviderSlug",
+  "source_provider_slug",
+  "stages",
+  "start_time",
+  "timestamp",
+  "total",
+  "total_sleep_minutes",
+  "type",
+  "workout_id",
+  "workouts",
+]);
+
+function hasJunctionHistoricalInlineRecordCarrierFields(data: Record<string, unknown>): boolean {
+  return Object.keys(data).some((key) => JUNCTION_HISTORICAL_INLINE_RECORD_CARRIER_FIELDS.has(key));
+}
+
+function isDocumentedJunctionHistoricalPullCompletedWebhookData(
+  data: Record<string, unknown>,
+  externalAccountId: string,
+): boolean {
+  if ("is_final" in data || "isFinal" in data) {
+    return false;
+  }
+
+  const userId = normalizeString(data[JUNCTION_WEBHOOK_ROOT_FIELDS.userId]) ?? externalAccountId;
+  const provider = normalizeJunctionWebhookSourceProviderCandidate(data.provider);
+  const windowStart = toJunctionWebhookWindowBoundaryTimestampIfValid(data.start_date, "start");
+  const windowEnd = toJunctionWebhookWindowBoundaryTimestampIfValid(data.end_date, "end");
+  if (!userId || !provider || !windowStart || !windowEnd) {
+    return false;
+  }
+
+  return Date.parse(windowStart) < Date.parse(windowEnd);
 }
 
 function buildJunctionWebhookDataJobJsons(input: {
