@@ -16,6 +16,13 @@
 - A session proves who is present, not that a sensitive or lifecycle-specific action is authorized. Destructive actions, bulk exports, managed-auth completion, mailbox resume, checkout recovery, provider egress, and runtime wake/reuse must bind to the narrow action, user/member, route/target, attempt/lease/fence, freshness proof, or row lock that owns that action.
 - If durable authority is missing, stale, ambiguous, or mismatched, fail closed or fall back to the narrower safe flow. Do not "complete" by trusting ambient UI state, process memory, or provider success alone.
 
+## Product-Critical Flow Preservation
+
+- Do not fix safety, reliability, privacy, auth, or review findings by disabling, silently dropping, or degrading an existing user-critical flow unless the user explicitly asks for that product change.
+- User-critical flows include onboarding, signup and welcome delivery, replies to a current inbound message, billing and access transitions, authentication, device/data sync, and privacy or safety controls.
+- Any change that tightens a guard, permission check, egress policy, retry rule, route selection, or delivery decision must preserve an authorized success path for the existing UX, or replace it with an explicitly designed product path. Prove that path with a production-faithful test, E2E, or owner-level integration check.
+- If safety and UX appear to conflict, stop and surface the tradeoff. Do not ship a silent no-op, dropped message, blocked onboarding path, or unreachable recovery path as a safety fix.
+
 ## Stable Idempotency Identity
 
 - Durable product identity, dedupe identity, idempotency keys, and revision identity must be derived from stable product/provider facts, not machine-local rows, runtime-local ids, mutable provider versions, media URLs, callback timing, or session-specific storage.

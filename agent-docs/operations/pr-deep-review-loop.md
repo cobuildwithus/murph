@@ -1,6 +1,6 @@
 # PR Deep-Review Loop
 
-Last verified: 2026-06-26
+Last verified: 2026-06-28
 
 Required external deep-review loop that runs after the repo-required completion workflow, on PR-lane work.
 For PR-lane patch implementation, this loop is the audit gate: the worktree/PR-lane skip in `agent-docs/operations/completion-workflow.md` lets the parent agent default-skip the local required audit subagent passes and rely on this loop to cover that surface. For current-checkout (non-PR-lane) work it stays additive — it does not satisfy, replace, or reorder the local required completion audits in that document, and those passes still run there.
@@ -74,6 +74,14 @@ Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit c
    - **Rejected** — wrong, already handled, speculative, not worth the added
      complexity, or missing the required reproduction/proof. Note rejections
      briefly with the reason.
+
+   Review findings are adversarial signals, not implementation instructions.
+   Before accepting a finding, identify both the invariant it protects and any
+   product-critical flow it could break. Follow
+   `docs/contracts/00-invariants.md` § Product-Critical Flow Preservation:
+   reject or redesign fixes that remove a required onboarding, welcome,
+   current-reply, billing/access, auth, sync, privacy, or safety success path
+   without an explicitly designed and tested replacement.
 
    Before accepting any fix that introduces a new durable state owner, index,
    lifecycle enum, queue, transaction layer, or reconciliation loop, run the
