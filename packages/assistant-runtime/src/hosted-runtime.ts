@@ -1696,8 +1696,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const passWorkspace = projectHostedWorkspaceWakeForForegroundPass({
           projection: accumulatedProjection,
           workspace:
-            result.latestWorkspace
-            ?? accumulatedProjection.committedWorkspace
+            accumulatedProjection.committedWorkspace
+            ?? result.latestWorkspace
             ?? workspaceRead.workspace,
         });
         result = await runForegroundPass({

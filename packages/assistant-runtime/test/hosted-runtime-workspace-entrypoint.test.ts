@@ -4680,6 +4680,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const usageRecordStarted = createDeferred<void>();
     const releaseUsageRecord = createDeferred<void>();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const checkpointInboxMediaRetentionWakeAt = "2099-04-27T00:02:00.000Z";
     const earlierWakeAt = "2099-04-27T00:05:00.000Z";
     const laterWakeAt = "2099-04-27T00:10:00.000Z";
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
@@ -4720,7 +4721,10 @@ describe("hosted workspace runtime entrypoint", () => {
             return {
               checkpointed: true,
               workspace: createWorkspaceState({
-                inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                inboxMediaRetentionWakeAt:
+                  request.reason === "idle_shutdown"
+                    ? checkpointInboxMediaRetentionWakeAt
+                    : request.inboxMediaRetentionWakeAt ?? null,
                 nextWakeAt: request.nextWakeAt ?? null,
                 nextWakeReason: request.nextWakeReason ?? null,
                 redactedStatus: request.redactedStatus ?? null,
@@ -4851,7 +4855,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.equal(result.status, "scheduled");
-      assert.equal(result.nextWakeAt, earlierWakeAt);
+      assert.equal(result.nextWakeAt, checkpointInboxMediaRetentionWakeAt);
       assert.deepEqual(events.filter((event) => event === "mailbox.consume"), [
         "mailbox.consume",
       ]);
