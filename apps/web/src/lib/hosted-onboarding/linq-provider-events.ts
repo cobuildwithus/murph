@@ -84,6 +84,8 @@ const GENERIC_PARTICIPANT_PHONE_PATHS = [
   ["recipient_handle", "handle"],
 ] as const;
 
+const HOSTED_LINQ_PROVIDER_TIMESTAMP_TIMEZONE_PATTERN = /(?:[zZ]|[+-]\d\d(?::?\d\d)?)$/u;
+
 export function parseHostedLinqProviderEvent(input: {
   event: HostedLinqWebhookEvent;
   rawBody?: string | null;
@@ -339,7 +341,7 @@ function buildParsedProviderEvent(input: {
     payloadHash: buildPayloadHash(input.rawBody, input.event),
     payloadSanitizedJson: toPrismaJson({
       api_version: normalizeNullableString(input.event.api_version),
-      created_at: input.event.created_at,
+      created_at: providerCreatedAt.toISOString(),
       data_shape: payloadShapeJson,
       event_id_suffix: toHostedOnboardingLogIdSuffix(input.event.event_id),
       event_type: input.event.event_type,
@@ -379,11 +381,15 @@ function parseProviderCreatedAt(value: string): Date {
 }
 
 function parseProviderDate(value: string | null): Date | null {
-  if (!value) {
+  const normalized = normalizeNullableString(value);
+  if (!normalized) {
+    return null;
+  }
+  if (!HOSTED_LINQ_PROVIDER_TIMESTAMP_TIMEZONE_PATTERN.test(normalized)) {
     return null;
   }
 
-  const parsed = new Date(value);
+  const parsed = new Date(normalized);
   if (Number.isNaN(parsed.getTime())) {
     return null;
   }
@@ -496,7 +502,7 @@ function buildPayloadHash(rawBody: string | null | undefined, event: HostedLinqW
 
 function buildHostedJsonShape(value: unknown, depth = 0): unknown {
   if (depth > 3) {
-    return "[max-depth]";
+    return { kind: "max_depth" };
   }
   if (Array.isArray(value)) {
     return {
@@ -509,14 +515,15 @@ function buildHostedJsonShape(value: unknown, depth = 0): unknown {
     return { kind: value === null ? "null" : typeof value };
   }
 
-  const entries = Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .slice(0, 40)
-    .map(([key, entry]) => [key, buildHostedJsonShape(entry, depth + 1)] as const);
+  const entries = Object.values(value as Record<string, unknown>);
 
   return {
     kind: "object",
-    keys: Object.fromEntries(entries),
+    keyCount: entries.length,
+    sampleValues: entries
+      .slice(0, 40)
+      .map((entry) => buildHostedJsonShape(entry, depth + 1)),
+    truncated: entries.length > 40,
   };
 }
 

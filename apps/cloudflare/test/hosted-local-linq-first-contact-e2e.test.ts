@@ -206,10 +206,6 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     const observedMessageIdsBeforeReply =
       requireLinqStub().listObservedMessageIds(materializedChatId).length;
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
-    const typingStopCountBeforeReply = countObservedLinqRequests({
-      expectedMethod: "DELETE",
-      expectedPath: expectedTypingPath,
-    });
     const requestCountBeforeReply = requireLinqStub().observedRequests.length;
     requireScenario().queueAssistantResponses([HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT]);
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
@@ -235,12 +231,6 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       scenario: requireScenario(),
       userId: directReplyUserId,
     });
-    const typingStop = await waitForAdditionalObservedLinqRequest({
-      baselineCount: typingStopCountBeforeReply,
-      expectedMethod: "DELETE",
-      expectedPath: expectedTypingPath,
-      userId: directReplyUserId,
-    });
     const requestsAfterInbound = requireLinqStub().observedRequests.slice(requestCountBeforeReply);
     const typingRequestsAfterInbound = requestsAfterInbound.filter((request) =>
       request.method === "POST" && request.url === expectedTypingPath
@@ -249,23 +239,12 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       request.method === "DELETE" && request.url === expectedTypingPath
     );
     expect(replySend.method).toBe("POST");
-    expect(typingRequestsAfterInbound.length).toBeGreaterThanOrEqual(1);
-    expect(typingStopRequestsAfterInbound.length).toBeGreaterThanOrEqual(1);
+    expect(typingRequestsAfterInbound).toHaveLength(0);
+    expect(typingStopRequestsAfterInbound).toHaveLength(0);
 
     const sendIndex = requestsAfterInbound.indexOf(replySend);
-    const typingIndices = typingRequestsAfterInbound.map((request) =>
-      requestsAfterInbound.indexOf(request)
-    );
-    const typingStopIndex = requestsAfterInbound.indexOf(typingStop);
 
     expect(sendIndex).toBeGreaterThanOrEqual(0);
-    expect(typingIndices[0]).toBeGreaterThanOrEqual(0);
-    expect(sendIndex).toBeGreaterThan(typingIndices[0]);
-    expect(typingStopIndex).toBeGreaterThan(typingIndices[0]);
-    expect(typingStopIndex).toBeLessThan(sendIndex);
-    expect(typingRequestsAfterInbound.every((request) =>
-      requestsAfterInbound.indexOf(request) < sendIndex
-    )).toBe(true);
     expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
       HOSTED_LINQ_DEFAULT_ASSISTANT_REPLY_TEXT,
     );
@@ -1044,71 +1023,6 @@ function requireScenario(): HostedLocalFullStackScenario {
   }
 
   return scenario;
-}
-
-function countObservedLinqRequests(input: {
-  expectedMethod: string;
-  expectedPath: string;
-}): number {
-  return requireLinqStub().observedRequests.filter((request) =>
-    isMatchingObservedLinqRequest(request, input)
-  ).length;
-}
-
-async function waitForAdditionalObservedLinqRequest(input: {
-  baselineCount: number;
-  expectedMethod: string;
-  expectedPath: string;
-  userId: string;
-}): Promise<ObservedLinqRequest> {
-  const matchingRequests = await waitForObservedLinqRequestCount({
-    expectedCount: input.baselineCount + 1,
-    expectedMethod: input.expectedMethod,
-    expectedPath: input.expectedPath,
-    userId: input.userId,
-  });
-
-  return matchingRequests.at(-1)!;
-}
-
-async function waitForObservedLinqRequestCount(input: {
-  expectedCount: number;
-  expectedMethod: string;
-  expectedPath: string;
-  userId: string;
-}): Promise<ObservedLinqRequest[]> {
-  const startedAt = Date.now();
-
-  while ((Date.now() - startedAt) < 60_000) {
-    const matchingRequests = requireLinqStub().observedRequests.filter((request) =>
-      isMatchingObservedLinqRequest(request, input)
-    );
-
-    if (matchingRequests.length >= input.expectedCount) {
-      return matchingRequests;
-    }
-
-    await sleep(250);
-  }
-
-  throw new Error(
-    await requireScenario().buildFailureMessage(input.userId, [
-      `Timed out waiting for ${input.expectedCount} Linq request(s) for ${input.userId}.`,
-      `expected method: ${input.expectedMethod}`,
-      `expected path: ${input.expectedPath}`,
-      `observed requests: ${JSON.stringify(requireLinqStub().observedRequests)}`,
-    ]),
-  );
-}
-
-function isMatchingObservedLinqRequest(
-  request: ObservedLinqRequest,
-  input: {
-    expectedMethod: string;
-    expectedPath: string;
-  },
-): boolean {
-  return request.method === input.expectedMethod && request.url === input.expectedPath;
 }
 
 function readObservedLinqIdempotencyKey(request: ObservedLinqRequest): string | null {

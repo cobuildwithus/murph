@@ -116,6 +116,48 @@ describe("parseHostedLinqProviderEvent", () => {
     expect(JSON.stringify(failed?.payloadShapeJson)).not.toContain("raw chat text");
   });
 
+  it("stores provider payload shape without raw dynamic webhook keys", () => {
+    const parsed = parseHostedLinqProviderEvent({
+      event: buildGenericEvent({
+        data: {
+          failures_by_message: {
+            provider_msg_123: {
+              "+15551234567": {
+                note: "private nested provider text",
+              },
+            },
+          },
+          message_id: "msg_failed_123",
+          phone_number: "+15550000000",
+          service: "sms",
+        },
+        eventType: "message.failed",
+      }),
+    });
+
+    expect(parsed?.payloadShapeJson).toMatchObject({
+      kind: "object",
+      keyCount: expect.any(Number),
+      sampleValues: expect.any(Array),
+    });
+    expect(parsed?.payloadSanitizedJson).toMatchObject({
+      created_at: "2026-03-26T12:00:00.000Z",
+      data_shape: expect.objectContaining({
+        kind: "object",
+        keyCount: expect.any(Number),
+      }),
+    });
+
+    const persistedShape = JSON.stringify(parsed?.payloadShapeJson);
+    const persistedSanitizedPayload = JSON.stringify(parsed?.payloadSanitizedJson);
+    expect(persistedShape).not.toContain("provider_msg_123");
+    expect(persistedShape).not.toContain("+15551234567");
+    expect(persistedShape).not.toContain("private nested provider text");
+    expect(persistedSanitizedPayload).not.toContain("provider_msg_123");
+    expect(persistedSanitizedPayload).not.toContain("+15551234567");
+    expect(persistedSanitizedPayload).not.toContain("private nested provider text");
+  });
+
   it("redacts free-form provider status reasons before persistence", () => {
     const parsed = parseHostedLinqProviderEvent({
       event: buildGenericEvent({
@@ -196,6 +238,28 @@ describe("parseHostedLinqProviderEvent", () => {
     });
 
     expect(parsed?.providerCreatedAt).toEqual(new Date(0));
+  });
+
+  it("rejects timezone-less generic provider timestamps", () => {
+    const parsed = parseHostedLinqProviderEvent({
+      event: buildGenericEvent({
+        createdAt: "2026-03-26T11:59:59.000Z",
+        data: {
+          changed_at: "2026-03-26T12:00:00",
+          new_reputation: "CRITICAL",
+          phone_number: "+15550000000",
+        },
+        eventType: "phone_number.status_updated",
+      }),
+    });
+
+    expect(parsed).toMatchObject({
+      eventType: "phone_number.status_updated",
+      providerCreatedAt: new Date("2026-03-26T11:59:59.000Z"),
+      payloadSanitizedJson: expect.objectContaining({
+        created_at: "2026-03-26T11:59:59.000Z",
+      }),
+    });
   });
 
   it("does not store participant phone lookup keys in the line FK column", () => {
