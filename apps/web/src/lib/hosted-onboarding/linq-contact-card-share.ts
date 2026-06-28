@@ -135,13 +135,21 @@ async function reserveHostedLinqContactCardShareAttemptAfterOutbound(input: {
     };
   }
 
-  const existingKeys = existingRows.map((row) => row.linqChatLookupKey);
-  const hasWriteKey = existingKeys.includes(chatLookup.writeKey);
+  const currentReservation = existingRows.find((row) =>
+    row.linqChatLookupKey === chatLookup.writeKey
+  );
+  if (!currentReservation) {
+    return await createHostedLinqContactCardShareAttemptReservation({
+      chatLookupKey: chatLookup.writeKey,
+      memberId: input.memberId,
+      now,
+      prisma: input.prisma,
+    });
+  }
+
   const reserved = await input.prisma.hostedLinqContactCardShare.updateMany({
     where: {
-      linqChatLookupKey: {
-        in: existingKeys,
-      },
+      linqChatLookupKey: chatLookup.writeKey,
       OR: [
         { lastContactCardShareAttemptedAt: null },
         { lastContactCardShareAttemptedAt: { lte: attemptBefore } },
@@ -158,15 +166,6 @@ async function reserveHostedLinqContactCardShareAttemptAfterOutbound(input: {
       action: "skip",
       reason: "recent_attempt",
     };
-  }
-
-  if (!hasWriteKey) {
-    return await createHostedLinqContactCardShareAttemptReservation({
-      chatLookupKey: chatLookup.writeKey,
-      memberId: input.memberId,
-      now,
-      prisma: input.prisma,
-    });
   }
 
   return {

@@ -240,6 +240,60 @@ describe("hosted Linq contact-card sharing", () => {
     expect(prisma.model.create).not.toHaveBeenCalled();
   });
 
+  it("reserves only the current contact-privacy key when rotated-key rows are stale", async () => {
+    const prisma = createContactCardSharePrismaStub();
+    const now = new Date("2026-06-27T12:00:00.000Z");
+    const oldAttemptedAt = new Date("2026-06-24T12:00:00.000Z");
+    const currentAttemptedAt = new Date("2026-06-24T13:00:00.000Z");
+
+    const oldLookupKey = mustCreateHostedLinqChatLookupKey("chat_123");
+    restoreKeyring?.();
+    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: { ...TEST_KEYRING_ENTRIES },
+    });
+    const currentLookupKey = mustCreateHostedLinqChatLookupKey("chat_123");
+
+    prisma.rows.push(
+      createContactCardShareRow({
+        lastContactCardShareAttemptedAt: oldAttemptedAt,
+        linqChatLookupKey: oldLookupKey,
+      }),
+      createContactCardShareRow({
+        lastContactCardShareAttemptedAt: currentAttemptedAt,
+        linqChatLookupKey: currentLookupKey,
+      }),
+    );
+
+    await expect(maybeShareHostedLinqContactCardAfterOutbound({
+      chatId: "chat_123",
+      eligibility: {
+        service: "iMessage",
+        threadIsDirect: true,
+      },
+      memberId: "member_456",
+      now,
+      prisma: prisma.client,
+    })).resolves.toEqual({
+      action: "share",
+    });
+
+    expect(mocks.shareHostedLinqContactCard).toHaveBeenCalledTimes(1);
+    expect(prisma.model.create).not.toHaveBeenCalled();
+    expect(prisma.rows).toEqual([
+      expect.objectContaining({
+        lastContactCardShareAttemptedAt: oldAttemptedAt,
+        linqChatLookupKey: oldLookupKey,
+        memberId: "member_123",
+      }),
+      expect.objectContaining({
+        lastContactCardShareAttemptedAt: now,
+        linqChatLookupKey: currentLookupKey,
+        memberId: "member_456",
+      }),
+    ]);
+  });
+
   it("shares best-effort and keeps provider failures throttled", async () => {
     const prisma = createContactCardSharePrismaStub();
     const now = new Date("2026-06-27T12:00:00.000Z");
