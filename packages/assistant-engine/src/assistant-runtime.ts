@@ -24,6 +24,7 @@ export type {
 export * from './assistant/conversation-policy.js'
 export * from './assistant/conversation-ref.js'
 export * from './assistant/hosted-context-diagnostics.js'
+export * from './assistant/hosted-turn-timing.js'
 export * from './assistant/quarantine.js'
 export * from './assistant/redaction.js'
 export {

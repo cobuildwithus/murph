@@ -11,6 +11,7 @@ import {
 } from '../input-source.js'
 import { compareAssistantInputCursors } from '../input-store.js'
 import { sameAssistantAutoReplyState } from '../automation-state.js'
+import { emitHostedAssistantTurnTimingTrace } from '../hosted-turn-timing.js'
 import { collectAssistantAutoReplyGroup } from './grouping.js'
 import {
   assistantAutomationInputSummaryFromCandidate,
@@ -65,6 +66,7 @@ export async function scanAssistantAutomationOnce(input: {
   vault: string
   vaultServices?: VaultServices
 }): Promise<AssistantAutomationScanResult> {
+  const scanStartedAt = Date.now()
   const routing = createEmptyInboxScanResult()
   const replies = createEmptyAutoReplyScanResult()
   const currentTurnDeliveryIntentIds: string[] = []
@@ -75,8 +77,8 @@ export async function scanAssistantAutomationOnce(input: {
   const replyChannels = applyCanonicalWrites
     ? scanState.autoReply.map((entry) => entry.channel)
     : []
-  const persistScanState = async () => {
-    await persistAssistantAutomationScanState({
+  const persistScanState = async (): Promise<boolean> => {
+    return await persistAssistantAutomationScanState({
       onStateProgress: input.onStateProgress,
       persistedState,
       scanState,
@@ -196,7 +198,17 @@ export async function scanAssistantAutomationOnce(input: {
       })
     }
 
-    await persistScanState()
+    const scanStatePersistStartedAt = Date.now()
+    const scanStateChanged = await persistScanState()
+    emitHostedAssistantTurnTimingTrace({
+      currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
+      elapsedMs: elapsedSince(scanStartedAt),
+      executionContext: input.executionContext ?? null,
+      onTraceEvent: input.onTraceEvent ?? null,
+      scanStateChanged,
+      stage: 'scan-state-persisted',
+      stepElapsedMs: elapsedSince(scanStatePersistStartedAt),
+    })
 
     if (stopReplyScan) {
       break
@@ -337,6 +349,10 @@ function assistantInputSummaryFromInputCandidate(
   return assistantAutomationInputSummaryFromCandidate(input)
 }
 
+function elapsedSince(startedAt: number): number {
+  return Math.max(0, Date.now() - startedAt)
+}
+
 async function persistAssistantAutomationScanState(input: {
   onStateProgress?: (
     state: AssistantAutomationScanStateProgress,
@@ -344,14 +360,15 @@ async function persistAssistantAutomationScanState(input: {
   persistedState: AssistantAutomationScanStateProgress
   scanState: AssistantAutomationScanStateProgress
   updatePersistedState: (state: AssistantAutomationScanStateProgress) => void
-}): Promise<void> {
+}): Promise<boolean> {
   if (assistantAutomationScanStateEqual(input.persistedState, input.scanState)) {
-    return
+    return false
   }
 
   const next = cloneAutomationScanState(input.scanState)
   await input.onStateProgress?.(next)
   input.updatePersistedState(next)
+  return true
 }
 
 function cloneAutomationScanState(

@@ -106,6 +106,16 @@ import {
   type HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
 
+function withoutAssistantTurnTimingLogs(
+  logRequests: HostedRuntimeLogRequest[],
+): HostedRuntimeLogRequest[] {
+  return logRequests.filter(
+    (request) =>
+      request.entries[0]?.redactedJson?.schema
+        !== "murph.assistant-turn-timing.v1",
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([]);
@@ -243,8 +253,9 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
     });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
-    expect(logRequests[0]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests[0]?.entries[0]).toEqual(expect.objectContaining({
       component: "assistant",
       eventCode: "assistant.automation_detail",
       redactedJson: expect.objectContaining({
@@ -290,12 +301,12 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
         schema: "murph.assistant-codex-resume-failure-diagnostics.v1",
       }),
     }));
-    expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(
+    expect(filteredLogRequests[0]?.entries[0]?.redactedJson).not.toEqual(
       expect.objectContaining({
         codexResumeFailureErrorPreview: expect.anything(),
       }),
     );
-    expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(
+    expect(filteredLogRequests[0]?.entries[0]?.redactedJson).not.toEqual(
       expect.objectContaining({
         genericResumeOverflow0Count: expect.anything(),
       }),
@@ -336,8 +347,9 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
     });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
-    expect(logRequests[0]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests[0]?.entries[0]).toEqual(expect.objectContaining({
       component: "assistant",
       eventCode: "assistant.automation_detail",
       redactedJson: expect.objectContaining({
@@ -350,7 +362,7 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
         routePlanningSlowestStageElapsedMs: 66_000,
       }),
     }));
-    expect(logRequests[0]?.entries[0]?.redactedJson).not.toEqual(
+    expect(filteredLogRequests[0]?.entries[0]?.redactedJson).not.toEqual(
       expect.objectContaining({
         routePlanningFreshThreadFallbackPromptElapsedMs: expect.anything(),
         routePlanningPrimarySystemPromptElapsedMs: expect.anything(),
@@ -429,8 +441,9 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
     });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
-    expect(logRequests[0]?.entries[0]).toEqual(expect.objectContaining({
+    expect(filteredLogRequests[0]?.entries[0]).toEqual(expect.objectContaining({
       component: "assistant",
       eventCode: "assistant.automation_detail",
       redactedJson: expect.objectContaining({
