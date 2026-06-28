@@ -96,6 +96,7 @@ import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
 } from "../src/deploy-smoke-live-model.js";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
+import { HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE } from "../src/runner-container-error-codes.js";
 import * as hostedInvocation from "../src/hosted-workspace-invocation.js";
 
 const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
@@ -429,6 +430,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
     expect(lateResponse).toMatchObject({
       json: {
+        code: HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
         error: "Hosted runner is shutting down.",
       },
       status: 503,

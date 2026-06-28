@@ -38,6 +38,9 @@ import {
   buildHostedRunnerContainerCaEnv,
 } from "../src/runner-container-ca-env.ts";
 import {
+  HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+} from "../src/runner-container-error-codes.ts";
+import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
 } from "../src/deploy-smoke-live-model.ts";
 
@@ -865,6 +868,51 @@ describe("RunnerContainer", () => {
       String(url).endsWith("/internal/workspace-invocation")
     );
     expect(executeCalls).toHaveLength(1);
+  });
+
+  it("ensureProcessing treats runner shutdown rejection as replacement-required", async () => {
+    const { container, containerFetch, destroy } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+        return new Response(JSON.stringify({
+          code: HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+          error: "Hosted runner is shutting down.",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 503,
+        });
+      }),
+    });
+
+    await expect(container.ensureProcessing({
+      invoke: {
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_shutdown_replacement_required"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      },
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "start-required",
+      reason: "no-active-child",
+    });
+
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(executeCalls).toHaveLength(1);
+    expect(destroy).toHaveBeenCalledTimes(1);
   });
 
   it("ensureReadyForProcessing starts and health-checks without invoking workspace work", async () => {
@@ -5338,6 +5386,62 @@ describe("RunnerContainer", () => {
       timeoutMs: 45_000,
       userId: "member_123",
     });
+  });
+
+  it("retries a prepared invocation once when the warm runner is shutting down", async () => {
+    let workspaceInvocationCount = 0;
+    const { container, containerFetch, destroy, startAndWaitForPorts } =
+      createContainerDouble({
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            return new Response(JSON.stringify(createRunnerHealthResult()), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            });
+          }
+
+          workspaceInvocationCount += 1;
+          if (workspaceInvocationCount === 1) {
+            return new Response(JSON.stringify({
+              code: HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+              error: "Hosted runner is shutting down.",
+            }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 503,
+            });
+          }
+
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }),
+      });
+    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => container);
+
+    await expect(invokeHostedExecutionContainerRunner({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_shutdown_retry"),
+      },
+      runnerContainerNamespace: { getByName },
+      timeoutMs: 45_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    expect(getByName).toHaveBeenCalledOnce();
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(executeCalls).toHaveLength(2);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
   });
 
   it("uses an explicit runner container name without changing the job user identity", async () => {

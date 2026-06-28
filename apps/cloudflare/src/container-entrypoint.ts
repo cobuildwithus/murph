@@ -59,6 +59,9 @@ import {
   HOSTED_RUNNER_CONTAINER_CA_ENV_KEYS,
 } from "./runner-container-ca-env.ts";
 import {
+  HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+} from "./runner-container-error-codes.ts";
+import {
   runHostedWorkspaceInvocation as runHostedWorkspaceInvocationDirect,
 } from "./hosted-workspace-invocation.ts";
 import {
@@ -655,6 +658,7 @@ export async function startHostedContainerEntrypoint(input: {
           phase: "failed",
         });
         writeJsonResponse(response, 503, {
+          code: HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
           error: "Hosted runner is shutting down.",
         });
         return;
