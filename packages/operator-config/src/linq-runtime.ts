@@ -165,7 +165,6 @@ type LinqOperation =
   | 'list_phone_numbers'
   | 'mark_read'
   | 'send_message'
-  | 'share_contact_card'
   | 'send_voice_memo'
   | 'set_message_reaction'
   | 'typing_start'
@@ -535,32 +534,6 @@ export async function sendLinqVoiceMemo(
     attachmentId,
     chatId,
     response,
-  })
-}
-
-export async function shareLinqContactCard(
-  input: {
-    chatId: string
-  },
-  dependencies: {
-    env?: NodeJS.ProcessEnv
-    fetchImplementation?: LinqFetch
-    signal?: AbortSignal
-  } = {},
-): Promise<void> {
-  const chatId = normalizeRequiredString(input.chatId, 'chat id')
-
-  await requestLinqNoContent({
-    allowRateLimitRetries: false,
-    details: {
-      operation: 'share_contact_card',
-      provider: 'linq',
-    },
-    env: dependencies.env ?? process.env,
-    fetchImplementation: dependencies.fetchImplementation,
-    method: 'POST',
-    path: `/chats/${encodeURIComponent(chatId)}/share_contact_card`,
-    signal: dependencies.signal,
   })
 }
 

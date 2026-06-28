@@ -713,7 +713,7 @@ export interface HostedRuntimeUsageRecordResponse {
 export const HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_SKIP_REASONS = [
   "ineligible_chat",
   "missing_chat_id",
-  "recent_success",
+  "recent_attempt",
   "claim_active",
   "state_unavailable",
 ] as const;
@@ -721,31 +721,25 @@ export const HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_SKIP_REASONS = [
 export type HostedRuntimeLinqContactCardShareSkipReason =
   (typeof HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_SKIP_REASONS)[number];
 
-export interface HostedRuntimeLinqContactCardShareClaimRequest {
+export interface HostedRuntimeLinqContactCardShareAfterOutboundRequest {
   chatId: string;
   service: string | null;
   threadIsDirect: boolean | null;
 }
 
-export type HostedRuntimeLinqContactCardShareClaimResponse =
+export type HostedRuntimeLinqContactCardShareDecision =
   | {
       action: "share";
-      claimId: string;
     }
   | {
       action: "skip";
       reason: HostedRuntimeLinqContactCardShareSkipReason;
     };
 
-export interface HostedRuntimeLinqContactCardShareResultRequest {
-  chatId: string;
-  claimId: string;
-  status: "failed" | "succeeded";
-}
-
-export interface HostedRuntimeLinqContactCardShareResultResponse {
-  ok: true;
-}
+export type HostedRuntimeLinqContactCardShareAfterOutboundResponse =
+  HostedRuntimeLinqContactCardShareDecision & {
+    ok: true;
+  };
 
 export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
   "feature_interest",

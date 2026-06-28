@@ -3106,7 +3106,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
+        chatIsGroup: false,
         eventId: "evt_active_member_no_first_contact_classifier",
+        service: "iMessage",
       }),
       signature: null,
       timestamp: null,
@@ -3116,6 +3118,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith(expect.objectContaining({
+      envelope: expect.objectContaining({
+        message: expect.objectContaining({
+          linqMessage: expect.objectContaining({
+            service: "iMessage",
+            threadIsDirect: true,
+          }),
+        }),
+      }),
+    }));
     expectHostedLinqReadReceiptSent();
   });
 
@@ -5490,6 +5502,7 @@ function readHostedMemberIdentityFromMockMember(
 }
 
 function buildHostedLinqWebhookBody(input: {
+  chatIsGroup?: boolean;
   createdAt?: string;
   data?: Record<string, unknown>;
   eventId?: string;
@@ -5504,6 +5517,7 @@ function buildHostedLinqWebhookBody(input: {
     data: {
       chat: {
         id: "chat_123",
+        ...(input.chatIsGroup === undefined ? {} : { is_group: input.chatIsGroup }),
         owner_handle: {
           handle: "+15550000000",
           id: "handle_owner_123",

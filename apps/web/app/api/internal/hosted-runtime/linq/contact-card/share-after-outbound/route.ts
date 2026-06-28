@@ -1,12 +1,12 @@
 import {
-  parseHostedRuntimeLinqContactCardShareResultRequest,
+  parseHostedRuntimeLinqContactCardShareAfterOutboundRequest,
 } from "@murphai/hosted-execution/parsers";
 
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
-  recordHostedLinqContactCardShareResult,
+  maybeShareHostedLinqContactCardAfterOutbound,
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 import {
   jsonOk,
@@ -19,38 +19,46 @@ import {
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 
-const HOSTED_LINQ_CONTACT_CARD_SHARE_RESULT_BODY_LIMIT_BYTES = 4 * 1024;
+const HOSTED_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_BODY_LIMIT_BYTES = 4 * 1024;
 
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
-    maxBodyBytes: HOSTED_LINQ_CONTACT_CARD_SHARE_RESULT_BODY_LIMIT_BYTES,
+    maxBodyBytes: HOSTED_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_BODY_LIMIT_BYTES,
   });
-  const body = parseHostedRuntimeLinqContactCardShareResultRequest(
+  const body = parseHostedRuntimeLinqContactCardShareAfterOutboundRequest(
     await readOptionalJsonObject(request),
   );
 
   try {
-    return jsonOk(await recordHostedLinqContactCardShareResult({
+    const decision = await maybeShareHostedLinqContactCardAfterOutbound({
       chatId: body.chatId,
-      claimId: body.claimId,
+      eligibility: {
+        service: body.service,
+        threadIsDirect: body.threadIsDirect,
+      },
       memberId: userId,
       prisma: getPrisma(),
-      status: body.status,
-    }));
+    });
+    return jsonOk({
+      ok: true,
+      ...decision,
+    });
   } catch (error) {
     console.warn(
-      "Hosted Linq contact-card share result failed.",
+      "Hosted Linq contact-card share callback failed.",
       sanitizeHostedOnboardingStructuredLogDetails({
         chatIdSuffix: toHostedOnboardingLogIdSuffix(body.chatId),
         errorMessage: error instanceof Error ? error.message : null,
         errorName: error instanceof Error ? error.name : null,
         operation: "share_contact_card",
-        phase: "record_result",
+        phase: "after_outbound",
         provider: "linq",
       }),
     );
     return jsonOk({
+      action: "skip",
       ok: true,
+      reason: "state_unavailable",
     });
   }
 });

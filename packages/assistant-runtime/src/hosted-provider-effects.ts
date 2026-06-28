@@ -13,7 +13,6 @@ import type {
 import {
   isLinqChatNotFoundSendMessageError,
   markLinqChatRead,
-  shareLinqContactCard,
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
 } from "@murphai/operator-config/linq-runtime";
@@ -282,23 +281,6 @@ export async function deleteHostedProviderLinqMessages(
     env: context.env,
     fetchImplementation: context.fetchImplementation,
     messageIds: request.messageIds,
-    signal: context.signal,
-  });
-}
-
-export async function shareHostedProviderLinqContactCard(
-  request: HostedRuntimeLinqMarkReadRequest,
-  dependencies: HostedProviderEffectDependencies,
-): Promise<void> {
-  const context = createHostedProviderEffectContext(
-    dependencies,
-    "Hosted Linq contact-card share",
-  );
-  await shareLinqContactCard({
-    chatId: request.chatId,
-  }, {
-    env: context.env,
-    fetchImplementation: context.fetchImplementation,
     signal: context.signal,
   });
 }

@@ -20,8 +20,7 @@ import {
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
-  HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_CLAIM_PATH,
-  HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_RESULT_PATH,
+  HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_MAILBOX_CONSUME_PATH,
   HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
@@ -65,8 +64,7 @@ export type HostedRunnerWebControlOperation =
   | "mailbox_payload_decode"
   | "mailbox_payload_fetch"
   | "phone_call_start"
-  | "linq_contact_card_share_claim"
-  | "linq_contact_card_share_result"
+  | "linq_contact_card_share_after_outbound"
   | "runtime_latency_trace"
   | "runtime_log_write"
   | "thread_route_egress_authority"
@@ -92,8 +90,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH, "device_sync_runtime_snapshot"],
   [HOSTED_RUNTIME_LOG_PATH, "runtime_log_write"],
   [HOSTED_RUNTIME_LATENCY_TRACE_PATH, "runtime_latency_trace"],
-  [HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_CLAIM_PATH, "linq_contact_card_share_claim"],
-  [HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_RESULT_PATH, "linq_contact_card_share_result"],
+  [HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH, "linq_contact_card_share_after_outbound"],
   [HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH, "browser_vault_replica_publish"],
   [HOSTED_RUNTIME_CODEX_AUTH_PATH, "codex_auth_update"],
   [HOSTED_RUNTIME_MAILBOX_CONSUME_PATH, "mailbox_consume"],

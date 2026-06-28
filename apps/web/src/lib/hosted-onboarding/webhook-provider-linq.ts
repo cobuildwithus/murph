@@ -435,6 +435,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           parts: messageEvent.data.message.parts,
           service: messageEvent.data.service ?? null,
         }),
+        threadIsDirect: isHostedLinqDirectChatAttested(messageEvent),
         ...(messageEvent.data.message.reply_to?.message_id === undefined
           ? {}
           : { replyToMessageId: messageEvent.data.message.reply_to.message_id }),

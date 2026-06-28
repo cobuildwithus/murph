@@ -5017,11 +5017,6 @@ describe("hostedRunnerIntercept", () => {
       path: "/chats/chat_1/read",
     },
     {
-      method: "POST",
-      name: "contact-card share",
-      path: "/chats/chat_1/share_contact_card",
-    },
-    {
       method: "DELETE",
       name: "typing stop",
       path: "/chats/chat_1/typing",
@@ -5153,6 +5148,10 @@ describe("hostedRunnerIntercept", () => {
     {
       method: "POST",
       path: "/chats/chat_1/contact_card",
+    },
+    {
+      method: "POST",
+      path: "/chats/chat_1/share_contact_card",
     },
     {
       method: "POST",

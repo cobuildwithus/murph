@@ -23,7 +23,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
 vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
   maybeShareHostedLinqContactCardAfterOutbound: vi.fn().mockResolvedValue({
     action: "skip",
-    reason: "recent_success",
+    reason: "recent_attempt",
   }),
 }));
 

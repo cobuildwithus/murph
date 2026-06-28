@@ -81,7 +81,6 @@ import {
   buildHostedWhatsAppChannelEnv,
 } from "./channel-activity.ts";
 import {
-  shareHostedProviderLinqContactCard,
   sendHostedProviderLinqMessage,
   sendHostedProviderLinqVoiceMemo,
   setHostedProviderLinqMessageReaction,
@@ -1160,12 +1159,11 @@ async function maybeShareHostedLinqContactCardAfterDeliveredIntent(input: {
   delivery: AssistantChannelDelivery;
   effectsPort: HostedRuntimeEffectsPort;
   linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;
-  linqEnv: NodeJS.ProcessEnv;
-  providerFetch: typeof fetch | null;
   signal: AbortSignal | null;
   userId: string;
   wake: HostedRuntimeEvent;
 }): Promise<void> {
+  let chatIdForLog: string | null = null;
   try {
     if (
       input.delivery.kind === "message-reaction"
@@ -1186,98 +1184,26 @@ async function maybeShareHostedLinqContactCardAfterDeliveredIntent(input: {
     if (!chatId) {
       return;
     }
+    chatIdForLog = chatId;
 
-    const claimContactCardShare = input.effectsPort.claimLinqContactCardShare;
-    const recordContactCardShareResult =
-      input.effectsPort.recordLinqContactCardShareResult;
-    if (!claimContactCardShare || !recordContactCardShareResult) {
+    const maybeShareContactCard =
+      input.effectsPort.maybeShareLinqContactCardAfterOutbound;
+    if (!maybeShareContactCard) {
       return;
     }
 
-    const claim = await claimContactCardShare({
+    await maybeShareContactCard({
       chatId,
       service: input.linqDeliveryContext.service,
       threadIsDirect: input.linqDeliveryContext.threadIsDirect,
     }, {
       signal: input.signal,
     });
-    if (claim.action !== "share") {
-      return;
-    }
-
-    try {
-      await shareHostedProviderLinqContactCard({
-        chatId,
-      }, {
-        env: input.linqEnv,
-        fetchImplementation: input.providerFetch,
-        ...(input.signal ? { signal: input.signal } : {}),
-      });
-    } catch (error) {
-      logHostedLinqContactCardShareRuntimeFailure({
-        chatId,
-        error,
-        phase: "provider",
-        userId: input.userId,
-        wake: input.wake,
-      });
-      await recordHostedLinqContactCardShareRuntimeResultBestEffort({
-        chatId,
-        claimId: claim.claimId,
-        effectsPort: input.effectsPort,
-        phase: "record_failure",
-        signal: input.signal,
-        status: "failed",
-        userId: input.userId,
-        wake: input.wake,
-      });
-      return;
-    }
-
-    await recordHostedLinqContactCardShareRuntimeResultBestEffort({
-      chatId,
-      claimId: claim.claimId,
-      effectsPort: input.effectsPort,
-      phase: "record_success",
-      signal: input.signal,
-      status: "succeeded",
-      userId: input.userId,
-      wake: input.wake,
-    });
   } catch (error) {
     logHostedLinqContactCardShareRuntimeFailure({
-      chatId: null,
+      chatId: chatIdForLog,
       error,
-      phase: "claim",
-      userId: input.userId,
-      wake: input.wake,
-    });
-  }
-}
-
-async function recordHostedLinqContactCardShareRuntimeResultBestEffort(input: {
-  chatId: string;
-  claimId: string;
-  effectsPort: Pick<HostedRuntimeEffectsPort, "recordLinqContactCardShareResult">;
-  phase: string;
-  signal: AbortSignal | null;
-  status: "failed" | "succeeded";
-  userId: string;
-  wake: HostedRuntimeEvent;
-}): Promise<void> {
-  try {
-    await input.effectsPort.recordLinqContactCardShareResult?.({
-      chatId: input.chatId,
-      claimId: input.claimId,
-      status: input.status,
-    }, {
-      signal: input.signal,
-    });
-  } catch (error) {
-    logHostedLinqContactCardShareRuntimeFailure({
-      chatId: input.chatId,
-      error,
-      phase: input.phase,
+      phase: "after_outbound",
       userId: input.userId,
       wake: input.wake,
     });
@@ -1624,8 +1550,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             delivery,
             effectsPort: input.effectsPort,
             linqDeliveryContext,
-            linqEnv: input.linqEnv,
-            providerFetch: input.providerFetch,
             signal: input.signal,
             userId: input.userId,
             wake: input.wake,

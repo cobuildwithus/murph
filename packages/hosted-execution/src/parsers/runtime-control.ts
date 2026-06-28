@@ -82,10 +82,8 @@ import {
   type HostedRuntimeSideInputUnavailableCode,
   type HostedRuntimeUsageRecordRequest,
   type HostedRuntimeUsageRecordResponse,
-  type HostedRuntimeLinqContactCardShareClaimRequest,
-  type HostedRuntimeLinqContactCardShareClaimResponse,
-  type HostedRuntimeLinqContactCardShareResultRequest,
-  type HostedRuntimeLinqContactCardShareResultResponse,
+  type HostedRuntimeLinqContactCardShareAfterOutboundRequest,
+  type HostedRuntimeLinqContactCardShareAfterOutboundResponse,
   type HostedRuntimeLinqContactCardShareSkipReason,
   type HostedRuntimeProductFeedbackRecordRequest,
   type HostedRuntimeProductFeedbackRecordResponse,
@@ -614,119 +612,75 @@ export function parseHostedRuntimeUsageRecordResponse(
   };
 }
 
-export function parseHostedRuntimeLinqContactCardShareClaimRequest(
+export function parseHostedRuntimeLinqContactCardShareAfterOutboundRequest(
   value: unknown,
-): HostedRuntimeLinqContactCardShareClaimRequest {
-  const record = requireObject(value, "Hosted runtime Linq contact-card share claim request");
+): HostedRuntimeLinqContactCardShareAfterOutboundRequest {
+  const record = requireObject(value, "Hosted runtime Linq contact-card share after-outbound request");
   assertAllowedObjectKeys(
     record,
     new Set(["chatId", "service", "threadIsDirect"]),
-    "Hosted runtime Linq contact-card share claim request",
+    "Hosted runtime Linq contact-card share after-outbound request",
   );
 
   return {
     chatId: requireString(
       record.chatId,
-      "Hosted runtime Linq contact-card share claim request chatId",
+      "Hosted runtime Linq contact-card share after-outbound request chatId",
     ),
     service: readNullableString(
       record.service,
-      "Hosted runtime Linq contact-card share claim request service",
+      "Hosted runtime Linq contact-card share after-outbound request service",
     ),
     threadIsDirect: record.threadIsDirect === null
       ? null
       : requireBoolean(
           record.threadIsDirect,
-          "Hosted runtime Linq contact-card share claim request threadIsDirect",
+          "Hosted runtime Linq contact-card share after-outbound request threadIsDirect",
         ),
   };
 }
 
-export function parseHostedRuntimeLinqContactCardShareClaimResponse(
+export function parseHostedRuntimeLinqContactCardShareAfterOutboundResponse(
   value: unknown,
-): HostedRuntimeLinqContactCardShareClaimResponse {
-  const record = requireObject(value, "Hosted runtime Linq contact-card share claim response");
+): HostedRuntimeLinqContactCardShareAfterOutboundResponse {
+  const record = requireObject(value, "Hosted runtime Linq contact-card share after-outbound response");
   const action = requireString(
     record.action,
-    "Hosted runtime Linq contact-card share claim response action",
+    "Hosted runtime Linq contact-card share after-outbound response action",
   );
 
   if (action === "share") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "claimId"]),
-      "Hosted runtime Linq contact-card share claim response",
+      new Set(["action", "ok"]),
+      "Hosted runtime Linq contact-card share after-outbound response",
     );
+    if (record.ok !== true) {
+      throw new TypeError("Hosted runtime Linq contact-card share after-outbound response ok must be true.");
+    }
     return {
       action,
-      claimId: requireString(
-        record.claimId,
-        "Hosted runtime Linq contact-card share claim response claimId",
-      ),
+      ok: true,
     };
   }
 
   if (action === "skip") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "reason"]),
-      "Hosted runtime Linq contact-card share claim response",
+      new Set(["action", "ok", "reason"]),
+      "Hosted runtime Linq contact-card share after-outbound response",
     );
+    if (record.ok !== true) {
+      throw new TypeError("Hosted runtime Linq contact-card share after-outbound response ok must be true.");
+    }
     return {
       action,
+      ok: true,
       reason: parseHostedRuntimeLinqContactCardShareSkipReason(record.reason),
     };
   }
 
-  throw new TypeError("Hosted runtime Linq contact-card share claim response action is invalid.");
-}
-
-export function parseHostedRuntimeLinqContactCardShareResultRequest(
-  value: unknown,
-): HostedRuntimeLinqContactCardShareResultRequest {
-  const record = requireObject(value, "Hosted runtime Linq contact-card share result request");
-  assertAllowedObjectKeys(
-    record,
-    new Set(["chatId", "claimId", "status"]),
-    "Hosted runtime Linq contact-card share result request",
-  );
-  const status = requireString(
-    record.status,
-    "Hosted runtime Linq contact-card share result request status",
-  );
-  if (status !== "failed" && status !== "succeeded") {
-    throw new TypeError("Hosted runtime Linq contact-card share result request status is invalid.");
-  }
-
-  return {
-    chatId: requireString(
-      record.chatId,
-      "Hosted runtime Linq contact-card share result request chatId",
-    ),
-    claimId: requireString(
-      record.claimId,
-      "Hosted runtime Linq contact-card share result request claimId",
-    ),
-    status,
-  };
-}
-
-export function parseHostedRuntimeLinqContactCardShareResultResponse(
-  value: unknown,
-): HostedRuntimeLinqContactCardShareResultResponse {
-  const record = requireObject(value, "Hosted runtime Linq contact-card share result response");
-  assertAllowedObjectKeys(
-    record,
-    new Set(["ok"]),
-    "Hosted runtime Linq contact-card share result response",
-  );
-  if (record.ok !== true) {
-    throw new TypeError("Hosted runtime Linq contact-card share result response ok must be true.");
-  }
-
-  return {
-    ok: true,
-  };
+  throw new TypeError("Hosted runtime Linq contact-card share after-outbound response action is invalid.");
 }
 
 export function parseHostedRuntimeProductFeedbackRecordRequest(
@@ -909,13 +863,13 @@ function parseHostedRuntimeLinqContactCardShareSkipReason(
 ): HostedRuntimeLinqContactCardShareSkipReason {
   const reason = requireString(
     value,
-    "Hosted runtime Linq contact-card share claim response reason",
+    "Hosted runtime Linq contact-card share after-outbound response reason",
   );
   if (!HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_SKIP_REASONS.includes(
     reason as HostedRuntimeLinqContactCardShareSkipReason,
   )) {
     throw new TypeError(
-      "Hosted runtime Linq contact-card share claim response reason is invalid.",
+      "Hosted runtime Linq contact-card share after-outbound response reason is invalid.",
     );
   }
   return reason as HostedRuntimeLinqContactCardShareSkipReason;

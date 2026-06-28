@@ -41,7 +41,6 @@ const mocks = vi.hoisted(() => ({
   readVerifiedAssistantVaultFileBytes: vi.fn(),
   resetAssistantOutboxPreparedDispatchById: vi.fn(),
   saveAssistantOutboxIntentIfUnchanged: vi.fn(),
-  shareLinqContactCard: vi.fn(),
   setLinqMessageReaction: vi.fn(),
   setTelegramMessageReaction: vi.fn(),
   sendLinqMessage: vi.fn(),
@@ -115,16 +114,6 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
 vi.mock("@murphai/operator-config/telegram-runtime", () => ({
   setTelegramMessageReaction: mocks.setTelegramMessageReaction,
 }));
-
-vi.mock("@murphai/operator-config/linq-runtime", async () => {
-  const actual = await vi.importActual<typeof import("@murphai/operator-config/linq-runtime")>(
-    "@murphai/operator-config/linq-runtime",
-  );
-  return {
-    ...actual,
-    shareLinqContactCard: mocks.shareLinqContactCard,
-  };
-});
 
 import {
   collectHostedAssistantDeliverySideEffects,
@@ -293,7 +282,6 @@ beforeEach(() => {
       status: "sent",
     }),
   );
-  mocks.shareLinqContactCard.mockResolvedValue(undefined);
   mocks.normalizeAssistantDeliveryError.mockImplementation((
     error: Error & {
       code?: string | null;
@@ -5615,11 +5603,10 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "ain_hashed_thread",
       transportIdempotent: true,
     });
-    const claimLinqContactCardShare = vi.fn(async () => ({
+    const maybeShareLinqContactCardAfterOutbound = vi.fn(async () => ({
+      ok: true as const,
       action: "share" as const,
-      claimId: "claim_123",
     }));
-    const recordLinqContactCardShareResult = vi.fn(async () => ({ ok: true as const }));
     const providerFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
@@ -5658,31 +5645,16 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
-        claimLinqContactCardShare,
-        recordLinqContactCardShareResult,
+        maybeShareLinqContactCardAfterOutbound,
       }),
       providerFetch,
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
-    expect(claimLinqContactCardShare).toHaveBeenCalledWith({
+    expect(maybeShareLinqContactCardAfterOutbound).toHaveBeenCalledWith({
       chatId: "linq_chat_materialized",
       service: "iMessage",
       threadIsDirect: true,
-    }, {
-      signal: null,
-    });
-    expect(mocks.shareLinqContactCard).toHaveBeenCalledWith({
-      chatId: "linq_chat_materialized",
-    }, {
-      env: {},
-      fetchImplementation: providerFetch,
-      signal: undefined,
-    });
-    expect(recordLinqContactCardShareResult).toHaveBeenCalledWith({
-      chatId: "linq_chat_materialized",
-      claimId: "claim_123",
-      status: "succeeded",
     }, {
       signal: null,
     });
@@ -5694,7 +5666,7 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("records Linq contact-card share failures without failing the sent outcome", async () => {
+  it("logs Linq contact-card callback failures without failing the sent outcome", async () => {
     const wake = buildHostedExecutionLinqConversationMessageWake({
       eventId: "evt_linq_contact_card_failed",
       linqMessage: {
@@ -5723,12 +5695,9 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "linq_chat_current",
       transportIdempotent: true,
     });
-    const claimLinqContactCardShare = vi.fn(async () => ({
-      action: "share" as const,
-      claimId: "claim_123",
-    }));
-    const recordLinqContactCardShareResult = vi.fn(async () => ({ ok: true as const }));
-    mocks.shareLinqContactCard.mockRejectedValueOnce(new Error("share failed"));
+    const maybeShareLinqContactCardAfterOutbound = vi.fn(async () => {
+      throw new Error("callback failed");
+    });
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_current",
@@ -5766,17 +5735,16 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
-        claimLinqContactCardShare,
-        recordLinqContactCardShareResult,
+        maybeShareLinqContactCardAfterOutbound,
       }),
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
-    expect(recordLinqContactCardShareResult).toHaveBeenCalledWith({
+    expect(maybeShareLinqContactCardAfterOutbound).toHaveBeenCalledWith({
       chatId: "linq_chat_current",
-      claimId: "claim_123",
-      status: "failed",
+      service: "iMessage",
+      threadIsDirect: true,
     }, {
       signal: null,
     });
@@ -5784,9 +5752,9 @@ describe("hosted runtime callbacks", () => {
       component: "assistant-delivery",
       details: expect.objectContaining({
         chatIdSuffix: "urrent",
-        errorMessage: "share failed",
+        errorMessage: "callback failed",
         operation: "share_contact_card",
-        phase: "provider",
+        phase: "after_outbound",
         provider: "linq",
       }),
       level: "warn",
@@ -5827,9 +5795,9 @@ describe("hosted runtime callbacks", () => {
       explicitTarget: "linq_chat_current",
       transportIdempotent: true,
     });
-    const claimLinqContactCardShare = vi.fn(async () => ({
+    const maybeShareLinqContactCardAfterOutbound = vi.fn(async () => ({
+      ok: true as const,
       action: "share" as const,
-      claimId: "claim_123",
     }));
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
@@ -5868,14 +5836,13 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
-        claimLinqContactCardShare,
+        maybeShareLinqContactCardAfterOutbound,
       }),
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
 
-    expect(claimLinqContactCardShare).not.toHaveBeenCalled();
-    expect(mocks.shareLinqContactCard).not.toHaveBeenCalled();
+    expect(maybeShareLinqContactCardAfterOutbound).not.toHaveBeenCalled();
   });
 
   it("routes hosted email thread deliveries through the shared effects port", async () => {

@@ -9,9 +9,7 @@ import {
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
 import type {
-  HostedRuntimeLinqContactCardShareClaimResponse,
-  HostedRuntimeLinqContactCardShareResultRequest,
-  HostedRuntimeLinqContactCardShareResultResponse,
+  HostedRuntimeLinqContactCardShareDecision,
 } from "@murphai/hosted-execution/runtime-control";
 
 type HostedLinqContactCardSharePersistenceClient =
@@ -27,6 +25,7 @@ type HostedLinqContactCardSharePersistenceClient =
 
 type HostedLinqContactCardShareExisting = {
   contactCardShareClaimedAt: Date | null;
+  lastContactCardShareAttemptedAt: Date | null;
   lastContactCardShareSucceededAt: Date | null;
   linqChatLookupKey: string;
 };
@@ -35,6 +34,7 @@ type HostedLinqContactCardShareCreateInput = {
   data: {
     contactCardShareClaimedAt: Date;
     contactCardShareClaimId: string;
+    lastContactCardShareAttemptedAt: Date;
     linqChatLookupKey: string;
     memberId: string;
   };
@@ -44,6 +44,7 @@ type HostedLinqContactCardShareUpdateManyInput = {
   data: {
     contactCardShareClaimedAt?: Date | null;
     contactCardShareClaimId?: string | null;
+    lastContactCardShareAttemptedAt?: Date | null;
     lastContactCardShareSucceededAt?: Date | null;
     memberId?: string;
   };
@@ -53,6 +54,7 @@ type HostedLinqContactCardShareUpdateManyInput = {
 type HostedLinqContactCardShareFindFirstInput = {
   select: {
     contactCardShareClaimedAt: true;
+    lastContactCardShareAttemptedAt: true;
     lastContactCardShareSucceededAt: true;
     linqChatLookupKey: true;
   };
@@ -71,8 +73,15 @@ export type HostedLinqContactCardShareEligibility = {
   threadIsDirect: boolean | null;
 };
 
-export type HostedLinqContactCardShareClaimDecision =
-  HostedRuntimeLinqContactCardShareClaimResponse;
+export type HostedLinqContactCardShareDecision =
+  HostedRuntimeLinqContactCardShareDecision;
+
+type HostedLinqContactCardShareClaimDecision =
+  | {
+      action: "share";
+      claimId: string;
+    }
+  | Extract<HostedLinqContactCardShareDecision, { action: "skip" }>;
 
 export async function claimHostedLinqContactCardShareAfterOutbound(input: {
   chatId: string;
@@ -97,7 +106,7 @@ export async function claimHostedLinqContactCardShareAfterOutbound(input: {
     };
   }
 
-  const successBefore = new Date(
+  const attemptBefore = new Date(
     now.getTime() - HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS,
   );
   const claimBefore = new Date(
@@ -111,6 +120,7 @@ export async function claimHostedLinqContactCardShareAfterOutbound(input: {
     },
     select: {
       contactCardShareClaimedAt: true,
+      lastContactCardShareAttemptedAt: true,
       lastContactCardShareSucceededAt: true,
       linqChatLookupKey: true,
     },
@@ -126,21 +136,21 @@ export async function claimHostedLinqContactCardShareAfterOutbound(input: {
   }
 
   if (
-    existing.lastContactCardShareSucceededAt
-    && existing.lastContactCardShareSucceededAt > successBefore
-  ) {
-    return {
-      action: "skip",
-      reason: "recent_success",
-    };
-  }
-  if (
     existing.contactCardShareClaimedAt
     && existing.contactCardShareClaimedAt > claimBefore
   ) {
     return {
       action: "skip",
       reason: "claim_active",
+    };
+  }
+  if (
+    existing.lastContactCardShareAttemptedAt
+    && existing.lastContactCardShareAttemptedAt > attemptBefore
+  ) {
+    return {
+      action: "skip",
+      reason: "recent_attempt",
     };
   }
 
@@ -151,8 +161,8 @@ export async function claimHostedLinqContactCardShareAfterOutbound(input: {
       AND: [
         {
           OR: [
-            { lastContactCardShareSucceededAt: null },
-            { lastContactCardShareSucceededAt: { lte: successBefore } },
+            { lastContactCardShareAttemptedAt: null },
+            { lastContactCardShareAttemptedAt: { lte: attemptBefore } },
           ],
         },
         {
@@ -166,6 +176,7 @@ export async function claimHostedLinqContactCardShareAfterOutbound(input: {
     data: {
       contactCardShareClaimedAt: now,
       contactCardShareClaimId: claimId,
+      lastContactCardShareAttemptedAt: now,
       memberId: input.memberId,
     },
   });
@@ -189,8 +200,8 @@ export async function recordHostedLinqContactCardShareResult(input: {
   memberId?: string | null;
   now?: Date;
   prisma: HostedLinqContactCardSharePersistenceClient;
-  status: HostedRuntimeLinqContactCardShareResultRequest["status"];
-}): Promise<HostedRuntimeLinqContactCardShareResultResponse> {
+  status: "failed" | "succeeded";
+}): Promise<{ ok: true }> {
   const chatLookup = resolveHostedLinqContactCardShareLookup(input.chatId);
   if (!chatLookup) {
     return { ok: true };
@@ -239,7 +250,7 @@ export async function maybeShareHostedLinqContactCardAfterOutbound(input: {
   prisma: HostedLinqContactCardSharePersistenceClient;
   shareContactCard?: (input: { chatId: string; signal?: AbortSignal }) => Promise<void>;
   signal?: AbortSignal;
-}): Promise<HostedLinqContactCardShareClaimDecision> {
+}): Promise<HostedLinqContactCardShareDecision> {
   let claim: HostedLinqContactCardShareClaimDecision;
   try {
     claim = await claimHostedLinqContactCardShareAfterOutbound({
@@ -283,7 +294,9 @@ export async function maybeShareHostedLinqContactCardAfterOutbound(input: {
       memberId: input.memberId,
       prisma: input.prisma,
     });
-    return claim;
+    return {
+      action: "share",
+    };
   }
 
   try {
@@ -303,7 +316,9 @@ export async function maybeShareHostedLinqContactCardAfterOutbound(input: {
     });
   }
 
-  return claim;
+  return {
+    action: "share",
+  };
 }
 
 function resolveHostedLinqContactCardShareLookup(
@@ -339,6 +354,7 @@ async function createHostedLinqContactCardShareClaim(input: {
       data: {
         contactCardShareClaimedAt: input.now,
         contactCardShareClaimId: claimId,
+        lastContactCardShareAttemptedAt: input.now,
         linqChatLookupKey: input.chatLookupKey,
         memberId: input.memberId,
       },

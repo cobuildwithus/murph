@@ -1095,6 +1095,7 @@ model HostedLinqDailyState {
 model HostedLinqContactCardShare {
   linqChatLookupKey                String       @id @map("linq_chat_lookup_key")
   memberId                         String       @map("member_id")
+  lastContactCardShareAttemptedAt  DateTime?    @map("last_contact_card_share_attempted_at")
   lastContactCardShareSucceededAt  DateTime?    @map("last_contact_card_share_succeeded_at")
   contactCardShareClaimedAt        DateTime?    @map("contact_card_share_claimed_at")
   contactCardShareClaimId          String?      @unique @map("contact_card_share_claim_id")
@@ -1103,6 +1104,7 @@ model HostedLinqContactCardShare {
   member                           HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId])
+  @@index([lastContactCardShareAttemptedAt])
   @@index([lastContactCardShareSucceededAt])
   @@index([contactCardShareClaimedAt])
   @@map("hosted_linq_contact_card_share")
