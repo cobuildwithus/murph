@@ -325,9 +325,11 @@ export async function runHostedWorkspaceAssistantPhase(
       systemMailboxMaintenance.result
       && !shouldContinueAssistantLane
     ) {
-      return withHostedDeviceSyncMaintenanceRan(
-        systemMailboxMaintenance.result,
-        systemMailboxMaintenance.deviceSyncMaintenanceRan,
+      return deferUsageFlushUntilAfterCheckpoint(
+        withHostedDeviceSyncMaintenanceRan(
+          systemMailboxMaintenance.result,
+          systemMailboxMaintenance.deviceSyncMaintenanceRan,
+        ),
       );
     }
     let continuingSystemMailboxResult = shouldContinueAssistantLane

@@ -733,6 +733,56 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
   });
 
+  it("defers hosted usage records until after a system mailbox checkpoint", async () => {
+    const events: string[] = [];
+    const usageRecordPort: RuntimeUsageRecordPort = {
+      async recordUsage(record) {
+        events.push(`record:${record.usageId}`);
+        return {
+          recorded: true,
+          usageId: record.usageId,
+        };
+      },
+    };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(
+      async ({ executionContext }) => {
+        await executionContext.hosted?.usageRecorder?.recordUsage(
+          createAssistantUsageRecord(),
+        );
+        events.push("system-mailbox");
+        return {
+          item: createSystemMailboxItem(),
+          itemId: "system_mailbox_item_processed",
+          metrics: {
+            bootstrapResult: null,
+            conversationMetrics: null,
+            mailboxLane: "assistant-notification",
+            redactedLogEntries: [],
+          },
+          status: "processed",
+        };
+      },
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeUsageRecordPort: usageRecordPort,
+    }));
+
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result.checkpointReason).toBe("system_mailbox_receipt");
+    expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    expect(events).toEqual(["system-mailbox"]);
+
+    events.push("checkpoint");
+    await result.afterCheckpoint?.();
+
+    expect(events).toEqual([
+      "system-mailbox",
+      "checkpoint",
+      "record:turn_direct_usage.attempt-1",
+    ]);
+  });
+
   it("keeps device-sync options out of the assistant lane when active input is fresh", async () => {
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
