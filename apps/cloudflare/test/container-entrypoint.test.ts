@@ -30,6 +30,7 @@ type SpawnMock = (
 ) => MockSpawnedProcess;
 
 const mocks = vi.hoisted(() => ({
+  drainHostedRuntimePostSafePointCompletionsBestEffort: vi.fn(async () => undefined),
   emitHostedExecutionStructuredLog: vi.fn(),
   runHostedWorkspaceInvocation: vi.fn(),
   snapshotExpectedCodexRootProcess: vi.fn(),
@@ -77,6 +78,8 @@ vi.mock("@murphai/assistant-runtime/hosted-invocation", async () => {
   );
   return {
     ...actual,
+    drainHostedRuntimePostSafePointCompletionsBestEffort:
+      mocks.drainHostedRuntimePostSafePointCompletionsBestEffort,
     stopHostedCliRuntimeBridge: mocks.stopHostedCliRuntimeBridge,
   };
 });
@@ -103,6 +106,7 @@ const TEST_SNAPSHOT_PATH_HASH_SECRET = "a".repeat(64);
 beforeEach(() => {
   vi.unstubAllGlobals();
   globalThis.fetch = nativeFetch;
+  mocks.drainHostedRuntimePostSafePointCompletionsBestEffort.mockResolvedValue(undefined);
   mocks.runHostedWorkspaceInvocation.mockResolvedValue(buildWorkspaceRunnerResult());
   mocks.snapshotExpectedCodexRootProcess.mockResolvedValue(null);
   mocks.spawn.mockReset();
@@ -384,6 +388,48 @@ describe("startHostedContainerEntrypoint", () => {
       poisoned: false,
       service: "cloudflare-hosted-runner-node",
     });
+  });
+
+  it("drains post-safe-point runtime completions before clean shutdown exit", async () => {
+    const drainStarted = createDeferred();
+    const releaseDrain = createDeferred();
+    mocks.drainHostedRuntimePostSafePointCompletionsBestEffort.mockImplementationOnce(
+      async () => {
+        drainStarted.resolve();
+        await releaseDrain.promise;
+      },
+    );
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await sendHostedContainerJsonRequest({
+      body: JSON.stringify(buildWorkspaceJobBody()),
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+    expect(response.status).toBe(200);
+
+    process.emit("SIGTERM", "SIGTERM");
+
+    await drainStarted.promise;
+    expect(exit).not.toHaveBeenCalled();
+
+    releaseDrain.resolve();
+    await vi.waitFor(() => {
+      expect(exit).toHaveBeenCalledWith(0);
+    });
+    const serverIndex = servers.indexOf(server);
+    if (serverIndex !== -1) {
+      servers.splice(serverIndex, 1);
+    }
   });
 
   it("uses the default hosted process-lifetime shutdown hooks when the server closes", async () => {

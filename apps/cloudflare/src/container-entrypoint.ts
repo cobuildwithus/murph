@@ -36,6 +36,7 @@ import {
 import {
   consumeHostedCliRuntimeBridgeOffInvocationViolation,
   drainHostedRuntimeLogWritesBestEffort,
+  drainHostedRuntimePostSafePointCompletionsBestEffort,
   stopHostedCliRuntimeBridge,
 } from "@murphai/assistant-runtime/hosted-invocation";
 import {
@@ -107,6 +108,7 @@ const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS = 160;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_CHUNK_BYTES = 1024 * 1024;
+const HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS = 5_000;
 const HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH =
   "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 const HOSTED_CONTAINER_CODEX_SMOKE_HOME_DIRECTORY = ".codex-deploy-smoke";
@@ -977,26 +979,35 @@ export async function startHostedContainerEntrypoint(input: {
     });
   });
 
+  let containerShutdownExitStarted = false;
   const maybeExitAfterContainerShutdownDrain = () => {
     if (
       !containerShutdownController.signal.aborted
       || activeHostedRunnerJobCount > 0
+      || containerShutdownExitStarted
     ) {
       return;
     }
-    emitHostedExecutionStructuredLog({
-      component: "container",
-      level: "warn",
-      message: "Hosted container entrypoint drained after shutdown signal; exiting cleanly.",
-      phase: "wake.running",
-    });
-    server.close(() => {
-      process.exit(0);
-    });
-    // Lingering keep-alive sockets must not hold the doomed container open.
-    setTimeout(() => {
-      process.exit(0);
-    }, 5_000).unref();
+    containerShutdownExitStarted = true;
+    void (async () => {
+      await drainHostedRuntimePostSafePointCompletionsBestEffort({
+        timeoutMs: HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        level: "warn",
+        message: "Hosted container entrypoint drained after shutdown signal; exiting cleanly.",
+        phase: "wake.running",
+      });
+      const cleanExitBackstop = setTimeout(() => {
+        process.exit(0);
+      }, 5_000);
+      cleanExitBackstop.unref();
+      server.close(() => {
+        clearTimeout(cleanExitBackstop);
+        process.exit(0);
+      });
+    })();
   };
   const handleContainerShutdownSignal = () => {
     if (containerShutdownController.signal.aborted) {
@@ -1145,6 +1156,9 @@ function installHostedContainerProcessFatalHandlers(): void {
       void Promise.allSettled([
         reportHostedContainerFatalBestEffort({ error, stage }),
         drainHostedRuntimeLogWritesBestEffort(),
+        drainHostedRuntimePostSafePointCompletionsBestEffort({
+          timeoutMs: HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS,
+        }),
       ]).then(() => {
         process.exitCode = 1;
         process.exit(1);

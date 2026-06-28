@@ -789,7 +789,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const phaseLogger = createHostedRuntimePhaseLogger();
   const emitPhaseLog = phaseLogger.emit;
   const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
-  const pendingPostSafePointCompletions = new Set<Promise<void>>();
   const trackCompletion = (
     pendingCompletions: Set<Promise<void>>,
     completion: Promise<void> | null,
@@ -806,19 +805,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const trackMailboxPostCheckpointEffects = (completion: Promise<void> | null): void => {
     trackCompletion(pendingMailboxPostCheckpointEffectCompletions, completion);
   };
-  const trackPostSafePointCompletion = (completion: Promise<void> | null): void => {
-    trackCompletion(pendingPostSafePointCompletions, completion);
-  };
   const drainStartedPostSafePointCompletionsBestEffort = async (): Promise<void> => {
     const pendingCompletions = [
       ...pendingMailboxPostCheckpointEffectCompletions,
-      ...pendingPostSafePointCompletions,
     ];
-    if (pendingCompletions.length === 0) {
-      return;
+    if (pendingCompletions.length > 0) {
+      await Promise.allSettled(pendingCompletions);
     }
 
-    await Promise.allSettled(pendingCompletions);
+    await drainHostedRuntimePostSafePointCompletionsBestEffort();
   };
 
   try {
@@ -1031,7 +1026,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
-      onPostSafePointCompletionStarted: trackPostSafePointCompletion,
+      onPostSafePointCompletionStarted: trackHostedRuntimePostSafePointCompletion,
       platform: runnerPlatform,
       requestId,
       runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -2461,6 +2456,7 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
 const DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const DEFAULT_HOSTED_FOREGROUND_MAILBOX_IMPORT_LIMIT = 10;
 const HOSTED_RUNTIME_MAX_TIMER_DELAY_MS = 2_147_483_647;
+const pendingHostedRuntimePostSafePointCompletions = new Set<Promise<void>>();
 
 type HostedRuntimeDirtyWaitResult =
   | { kind: "external_wake"; notification: RuntimeWakeNotification }
@@ -2477,6 +2473,49 @@ function consumePendingHostedRuntimeWake(
   return createHostedRuntimeWakeLatencySeed(
     runtimeWakeSignal?.consumePending() ?? null,
   );
+}
+
+function trackHostedRuntimePostSafePointCompletion(completion: Promise<void> | null): void {
+  if (completion === null) {
+    return;
+  }
+
+  pendingHostedRuntimePostSafePointCompletions.add(completion);
+  void completion.finally(() => {
+    pendingHostedRuntimePostSafePointCompletions.delete(completion);
+  });
+}
+
+export async function drainHostedRuntimePostSafePointCompletionsBestEffort(input: {
+  timeoutMs?: number | null;
+} = {}): Promise<void> {
+  const pendingCompletions = [
+    ...pendingHostedRuntimePostSafePointCompletions,
+  ];
+  if (pendingCompletions.length === 0) {
+    return;
+  }
+
+  const finished = Promise.allSettled(pendingCompletions).then(() => undefined);
+  const timeoutMs = input.timeoutMs ?? null;
+  if (timeoutMs === null) {
+    await finished;
+    return;
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    await Promise.race([
+      finished,
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, Math.max(0, timeoutMs));
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 interface HostedWorkspaceInvocationProjection {
