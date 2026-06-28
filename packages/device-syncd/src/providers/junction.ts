@@ -4530,13 +4530,13 @@ function isJunctionHistoricalPullCompletedWebhookData(
   data: Record<string, unknown>,
   externalAccountId: string,
 ): boolean {
-  if (hasJunctionHistoricalInlineRecordCarrierFields(data)) {
-    return false;
-  }
-
   const completed = parseJunctionHistoricalPullCompletedWebhookData(data, externalAccountId);
   if (completed && normalizeJunctionWebhookSourceProviderCandidate(completed.provider)) {
     return true;
+  }
+
+  if (hasJunctionHistoricalInlineRecordCarrierFields(data)) {
+    return false;
   }
 
   return isDocumentedJunctionHistoricalPullCompletedWebhookData(data, externalAccountId);
