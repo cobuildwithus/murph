@@ -4667,6 +4667,13 @@ describe("hosted workspace runtime entrypoint", () => {
     let assistantPhaseCalls = 0;
 
     try {
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementationOnce(async () => {
+        events.push("browser.refresh");
+        return {
+          status: "skipped_no_port",
+        };
+      });
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const platform = createPlatform({
         mailboxPort: createMailboxPort({
@@ -4793,6 +4800,7 @@ describe("hosted workspace runtime entrypoint", () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
       assert.equal(assistantPhaseCalls, 1);
       assert.equal(events.includes("usage.record:done"), false);
+      assert.equal(events.includes("browser.refresh"), false);
       assert.equal(resultSettled, false);
 
       releaseUsageRecord.resolve();
@@ -4808,6 +4816,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, cleanWakeAt);
+      assert.equal(events.includes("browser.refresh"), true);
       assert.deepEqual(events.filter((event) => event.startsWith("snapshot:")), [
         "snapshot:idle_shutdown",
       ]);
@@ -4820,6 +4829,7 @@ describe("hosted workspace runtime entrypoint", () => {
       if (resultPromise) {
         await resultPromise.catch(() => undefined);
       }
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       await removeTempRoot(vaultRoot);
     }
   });

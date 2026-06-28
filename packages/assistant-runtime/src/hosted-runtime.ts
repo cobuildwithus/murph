@@ -2017,14 +2017,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
           continue;
         }
-        const browserVaultRefresh = await runBrowserVaultRefreshMaintenance({
-          workspace: checkpoint.workspace,
-        });
         const deferredUsageDrainFoundDirtyWork =
           await drainDeferredUsageFlushesAfterIdleCheckpoint();
         if (deferredUsageDrainFoundDirtyWork) {
           continue;
         }
+        const browserVaultRefresh = await runBrowserVaultRefreshMaintenance({
+          workspace: checkpoint.workspace,
+        });
         const refreshRequestedImmediateWake =
           browserVaultRefresh.status === "deferred_runtime_wake";
         const checkpointReturnWake = selectEarliestHostedRuntimeWake([
