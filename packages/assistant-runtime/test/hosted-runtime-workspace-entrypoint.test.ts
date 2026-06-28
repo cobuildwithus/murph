@@ -63,6 +63,10 @@ import {
   type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  ASSISTANT_USAGE_SCHEMA,
+  type AssistantUsageRecord,
+} from "@murphai/hosted-execution/assistant-usage";
 import type {
   HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
@@ -4646,6 +4650,136 @@ describe("hosted workspace runtime entrypoint", () => {
         checkpointed: true,
         workspace: createWorkspaceState({ version: "5" }),
       });
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("deferred usage flushing does not block the delivered reply idle checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const usageRecordStarted = createDeferred<void>();
+    const releaseUsageRecord = createDeferred<void>();
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+    let resultSettled = false;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const platform = createPlatform({
+        mailboxPort: createMailboxPort({
+          events,
+          items: [],
+        }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace: createWorkspaceState({ version: "4" }),
+        }),
+      });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_deferred_usage_idle_checkpoint",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            const hashPrefix =
+              snapshotInput.reason === "assistant_runtime_commit"
+                ? "a"
+                : snapshotInput.reason === "outbox_receipt"
+                  ? "b"
+                  : "c";
+            return {
+              snapshotRef: createBundleRef({
+                hash: hashPrefix.repeat(64),
+                key: `users/bundles/member-synthetic/deferred-usage-${snapshotInput.reason}.bundle.json`,
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: {
+            ...platform,
+            usageRecordPort: {
+              async recordUsage(record: AssistantUsageRecord) {
+                events.push("usage.record:start");
+                usageRecordStarted.resolve();
+                await releaseUsageRecord.promise;
+                events.push("usage.record:done");
+                return {
+                  recorded: true,
+                  usageId: record.usageId,
+                };
+              },
+            },
+          },
+          async runAssistantPhase() {
+            events.push("assistant.phase");
+            return {
+              afterCheckpoint: async () => {
+                events.push("reply.deliver");
+                return {
+                  checkpointReason: "outbox_receipt",
+                };
+              },
+              checkpointReason: "assistant_runtime_commit",
+              deferredUsageRecords: [
+                createAssistantUsageRecord({
+                  usageId: "turn_entrypoint_deferred_usage.attempt-1",
+                }),
+              ],
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      ).finally(() => {
+        resultSettled = true;
+      });
+
+      await withRealTimeout(
+        usageRecordStarted.promise,
+        1_000,
+        () => "Deferred usage recording did not start.",
+      );
+      await waitUntil(() => {
+        assert.equal(
+          checkpointRequests.some((request) => request.reason === "idle_shutdown"),
+          true,
+        );
+      });
+      assert.equal(events.includes("usage.record:done"), false);
+      assert.equal(resultSettled, false);
+
+      releaseUsageRecord.resolve();
+      const result = await withRealTimeout(
+        resultPromise,
+        1_000,
+        () => "Runtime did not settle after deferred usage recording finished.",
+      );
+
+      assert.equal(result.status, "idle");
+      assert.deepEqual(events.filter((event) => event.startsWith("snapshot:")), [
+        "snapshot:idle_shutdown",
+      ]);
+      assert.equal(events.includes("reply.deliver"), true);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+    } finally {
+      releaseUsageRecord.resolve();
+      if (resultPromise) {
+        await resultPromise.catch(() => undefined);
+      }
       await removeTempRoot(vaultRoot);
     }
   });
@@ -11778,6 +11912,50 @@ function createWorkspaceState(overrides: Partial<HostedWorkspaceState> = {}): Ho
     updatedAt: TEST_NOW,
     userId: TEST_USER_ID,
     version: "0",
+    ...overrides,
+  };
+}
+
+function createAssistantUsageRecord(
+  overrides: Partial<AssistantUsageRecord> = {},
+): AssistantUsageRecord {
+  return {
+    apiKeyEnv: null,
+    attemptCount: 1,
+    baseUrl: null,
+    cacheWriteTokens: null,
+    cachedInputTokens: null,
+    credentialSource: "platform",
+    featureKey: null,
+    gatewayTags: [],
+    inputTokens: 10,
+    memberId: TEST_USER_ID,
+    occurredAt: TEST_NOW,
+    outputTokens: 5,
+    provider: "codex-cli",
+    providerName: "OpenAI",
+    providerRequestId: null,
+    providerRequestOutcome: "succeeded",
+    providerRequestOrdinal: 0,
+    rawUsageJson: null,
+    rawUsageJsonHash: null,
+    reasoningTokens: null,
+    reportingUserId: null,
+    requestedModel: "gpt-5.5",
+    routeId: "primary",
+    schema: ASSISTANT_USAGE_SCHEMA,
+    servedModel: "gpt-5.5",
+    sessionId: "asst_entrypoint_usage",
+    stripeMeterSource: "murph",
+    surface: null,
+    tokenPricingBasis: "standard",
+    totalTokens: 15,
+    triggerKind: null,
+    turnId: "turn_entrypoint_usage",
+    turnProfileJson: null,
+    usageExtractionSourcePath: null,
+    usageExtractionVersion: "codex-usage-v1",
+    usageId: "turn_entrypoint_usage.attempt-1",
     ...overrides,
   };
 }

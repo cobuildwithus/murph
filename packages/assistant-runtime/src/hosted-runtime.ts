@@ -1475,6 +1475,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     let runtimeStateDirty = false;
     const pendingDurableCheckpointEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
     const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
+    const pendingDeferredUsageFlushCompletions = new Set<Promise<void>>();
     let durableCheckpointWakeAt: string | null = null;
     let durableCheckpointWakeReason: string | null = null;
     let idleCheckpointStartByMs: number | null = null;
@@ -1519,23 +1520,35 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
       return { requiresFollowUpCheckpoint };
     };
-    const trackRunnerPostCheckpointCompletions = (passResult: HostedWorkspaceRunnerResult): void => {
-      const completions = [
-        passResult.mailboxPostCheckpointEffectsFinished,
-        passResult.deferredUsageFlushFinished,
-      ].filter((completion): completion is Promise<void> => completion !== null);
-      for (const completion of completions) {
-        pendingMailboxPostCheckpointEffectCompletions.add(completion);
-        void completion.finally(() => {
-          pendingMailboxPostCheckpointEffectCompletions.delete(completion);
-        });
+    const trackPostCheckpointCompletion = (
+      pendingCompletions: Set<Promise<void>>,
+      completion: Promise<void> | null,
+    ): void => {
+      if (completion === null) {
+        return;
       }
+
+      pendingCompletions.add(completion);
+      void completion.finally(() => {
+        pendingCompletions.delete(completion);
+      });
     };
-    const waitForMailboxPostCheckpointEffectsBeforeIdleCheckpoint =
-      async (): Promise<HostedRuntimeMailboxEffectsWaitResult> => {
-      while (pendingMailboxPostCheckpointEffectCompletions.size > 0) {
+    const trackRunnerPostCheckpointCompletions = (passResult: HostedWorkspaceRunnerResult): void => {
+      trackPostCheckpointCompletion(
+        pendingMailboxPostCheckpointEffectCompletions,
+        passResult.mailboxPostCheckpointEffectsFinished,
+      );
+      trackPostCheckpointCompletion(
+        pendingDeferredUsageFlushCompletions,
+        passResult.deferredUsageFlushFinished,
+      );
+    };
+    const waitForPostCheckpointCompletions = async (
+      pendingCompletions: Set<Promise<void>>,
+    ): Promise<HostedRuntimePostCheckpointCompletionWaitResult> => {
+      while (pendingCompletions.size > 0) {
         const effectsFinished = Promise.all([
-          ...pendingMailboxPostCheckpointEffectCompletions,
+          ...pendingCompletions,
         ]);
         const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
         if (!runtimeWakeSignal) {
@@ -1581,6 +1594,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
       }
       return { kind: "finished" };
+    };
+    const waitForMailboxPostCheckpointEffectsBeforeIdleCheckpoint =
+      async (): Promise<HostedRuntimePostCheckpointCompletionWaitResult> => {
+      return await waitForPostCheckpointCompletions(
+        pendingMailboxPostCheckpointEffectCompletions,
+      );
+    };
+    const waitForDeferredUsageFlushesAfterIdleCheckpoint =
+      async (): Promise<HostedRuntimePostCheckpointCompletionWaitResult> => {
+      return await waitForPostCheckpointCompletions(
+        pendingDeferredUsageFlushCompletions,
+      );
     };
       result = await runForegroundPass({
         initialMailboxImport,
@@ -1953,6 +1978,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const browserVaultRefresh = await runBrowserVaultRefreshMaintenance({
           workspace: checkpoint.workspace,
         });
+        const deferredUsageWaitResult =
+          await waitForDeferredUsageFlushesAfterIdleCheckpoint();
+        if (deferredUsageWaitResult.kind === "external_wake") {
+          await runIdleWakeForegroundPass({
+            latencySeed: createHostedRuntimeWakeLatencySeed(
+              deferredUsageWaitResult.notification,
+            ),
+            projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
+            requestIdKind: "idle-wake",
+          });
+          continue;
+        }
         const refreshRequestedImmediateWake =
           browserVaultRefresh.status === "deferred_runtime_wake";
         const checkpointReturnWake = selectEarliestHostedRuntimeWake([
@@ -2409,7 +2446,7 @@ type HostedRuntimeDirtyWaitResult =
   | { kind: "idle_checkpoint" }
   | { kind: "projected_runtime_wake" };
 
-type HostedRuntimeMailboxEffectsWaitResult =
+type HostedRuntimePostCheckpointCompletionWaitResult =
   | { kind: "external_wake"; notification: RuntimeWakeNotification }
   | { kind: "finished" };
 
