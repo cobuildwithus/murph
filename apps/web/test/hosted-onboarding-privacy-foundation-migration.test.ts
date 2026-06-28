@@ -632,6 +632,15 @@ describe("hosted Prisma baseline migration", () => {
     expect(linqFirstContactAdmissionDropCategoryMigrationSql).toContain(
       'DROP CONSTRAINT IF EXISTS "hosted_linq_first_contact_admission_decision_category_check"',
     );
+    expect(linqFirstContactAdmissionDropCategoryMigrationSql).toContain(
+      'ALTER COLUMN "category" DROP NOT NULL',
+    );
+    expect(linqFirstContactAdmissionDropCategoryMigrationSql).not.toContain(
+      "prompt",
+    );
+    expect(linqFirstContactAdmissionDropCategoryMigrationSql).not.toContain(
+      "response",
+    );
     expect(linqFirstContactRejectedMessageMigrationSql).toContain(
       'ADD COLUMN "rejected_message_text" TEXT',
     );
