@@ -83,14 +83,16 @@ Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit c
    current-reply, billing/access, auth, sync, privacy, or safety success path
    without an explicitly designed and tested replacement.
 
-   Before accepting any fix that introduces a new durable state owner, index,
-   lifecycle enum, queue, transaction layer, or reconciliation loop, run the
-   architecture pressure check explicitly: can the invariant be preserved by
-   deleting code, reordering existing durable writes, tightening an existing
-   owner boundary, or deriving from one existing source of truth? Reject or
-   defer the finding when the proposed cure is a broader state machine than the
-   confirmed bug justifies. ReviewGPT is strongest as an adversarial reviewer,
-   not as the final architecture owner.
+   Before accepting any fix that broadens architecture, run the architecture
+   pressure check explicitly: can the invariant be preserved by deleting code,
+   reordering existing durable writes, tightening an existing owner boundary,
+   deriving from one existing source of truth, or adding focused coverage around
+   the existing primitive? Reject, defer, or redesign the finding when the
+   proposed cure adds a new durable state owner, index, lifecycle enum, queue,
+   transaction layer, reconciliation loop, policy manager, or abstraction
+   without production-path proof that the simpler owner-boundary fix is
+   insufficient. ReviewGPT is strongest as an adversarial reviewer, not as the
+   final architecture owner.
 4. Fix only accepted findings after the reproduction/proof above is in place,
    run the verification required by
    `agent-docs/operations/verification-and-runtime.md` for the touched owners,
