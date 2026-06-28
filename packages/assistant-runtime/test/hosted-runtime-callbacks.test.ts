@@ -4991,6 +4991,7 @@ describe("hosted runtime callbacks", () => {
       transportIdempotent: true,
     });
     const assertAuthority = vi.fn(async () => undefined);
+    const assertRecentInbound = vi.fn(async () => undefined);
     mocks.sendLinqMessage.mockResolvedValueOnce({
       providerMessageId: "linq_message_sent",
       providerThreadId: "linq_chat_current",
@@ -5025,6 +5026,7 @@ describe("hosted runtime callbacks", () => {
       wake,
       effectsPort: createHostedRuntimeEffectsPortStub({
         assertLinqThreadRouteAuthority: assertAuthority,
+        assertLinqRecentInboundEngagement: assertRecentInbound,
       }),
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
@@ -5035,6 +5037,20 @@ describe("hosted runtime callbacks", () => {
     });
     expect(assertAuthority).toHaveBeenCalledTimes(1);
     expect(assertAuthority.mock.invocationCallOrder[0] ?? 0)
+      .toBeLessThan(mocks.sendLinqMessage.mock.invocationCallOrder[0] ?? 0);
+    expect(assertRecentInbound).toHaveBeenCalledWith({
+      directRecipientPhoneNumber: "+15550001",
+      engagementKind: "requires_recent_inbound",
+      fromPhoneNumber: null,
+      idempotencyKey: "assistant-outbox:intent_hashed_target",
+      intentId: "intent_123",
+      routeAuthority,
+      target: "linq_chat_current",
+      targetKind: "thread",
+    }, {
+      signal: null,
+    });
+    expect(assertRecentInbound.mock.invocationCallOrder[0] ?? 0)
       .toBeLessThan(mocks.sendLinqMessage.mock.invocationCallOrder[0] ?? 0);
     expect(outcomes).toEqual([
       expect.objectContaining({

@@ -1530,7 +1530,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         sendLinq: createHostedAssistantLinqSendDependency({
           actionApprovalPort: input.actionApprovalPort,
-          allowCurrentInboundEngagementBypass: input.assistantDeliveryEffect.deliveryPhase === "foreground_current_turn",
           assertLiveness: input.assertLiveness,
           effectsPort: input.effectsPort,
           expectedDedupeKey: input.assistantDeliveryEffect.fingerprint,
@@ -1545,7 +1544,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           vaultRoot: input.vaultRoot,
         }),
         sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
-          allowCurrentInboundEngagementBypass: input.assistantDeliveryEffect.deliveryPhase === "foreground_current_turn",
           assertLiveness: input.assertLiveness,
           effectsPort: input.effectsPort,
           linqEnv: input.linqEnv,
@@ -1570,7 +1568,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             signal: input.signal,
           });
           await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
-            allowCurrentInboundBypass: input.assistantDeliveryEffect.deliveryPhase === "foreground_current_turn",
             deliveryContext,
             directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
             effectsPort: input.effectsPort,
@@ -1835,7 +1832,6 @@ function resolveHostedAssistantLinqDeliveryContexts(input: {
 
 function createHostedAssistantLinqSendDependency(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
-  allowCurrentInboundEngagementBypass?: boolean;
   assertLiveness?: () => Promise<void>;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement" | "assertLinqThreadRouteAuthority"> | null;
   expectedDedupeKey?: string | null;
@@ -1869,7 +1865,6 @@ function createHostedAssistantLinqSendDependency(input: {
       signal: signal ?? null,
     });
     await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
-      allowCurrentInboundBypass: input.allowCurrentInboundEngagementBypass === true,
       deliveryContext,
       directRecipientPhoneNumber,
       effectsPort: input.effectsPort ?? null,
@@ -2045,7 +2040,6 @@ function buildHostedVaultFileMediaIdentity(input: {
 }
 
 function createHostedAssistantLinqVoiceMemoSendDependency(input: {
-  allowCurrentInboundEngagementBypass?: boolean;
   assertLiveness?: () => Promise<void>;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement" | "assertLinqThreadRouteAuthority"> | null;
   intentId?: string | null;
@@ -2076,7 +2070,6 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       signal: signal ?? null,
     });
     await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
-      allowCurrentInboundBypass: input.allowCurrentInboundEngagementBypass === true,
       deliveryContext,
       directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
       effectsPort: input.effectsPort ?? null,
@@ -2117,7 +2110,6 @@ async function assertHostedAssistantLinqRouteAuthorityForDelivery(input: {
 }
 
 async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
-  allowCurrentInboundBypass: boolean;
   deliveryContext: HostedAssistantLinqDeliveryContext | null;
   directRecipientPhoneNumber: string | null;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
@@ -2129,10 +2121,6 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   target: string;
   targetKind: string | null;
 }): Promise<void> {
-  if (isHostedAssistantCurrentInboundLinqReply(input)) {
-    return;
-  }
-
   const assertRecentInbound = input.effectsPort?.assertLinqRecentInboundEngagement;
   if (!assertRecentInbound) {
     throw new VaultCliError(
@@ -2163,37 +2151,6 @@ function readHostedAssistantLinqEngagementKind(
   return isHostedSignupWelcomeDeliveryIdempotencyKey(idempotencyKey)
     ? "first_contact"
     : "requires_recent_inbound";
-}
-
-function isHostedAssistantCurrentInboundLinqReply(input: {
-  allowCurrentInboundBypass: boolean;
-  deliveryContext: HostedAssistantLinqDeliveryContext | null;
-  replyToMessageId: string | null;
-  target: string;
-  targetKind: string | null;
-}): boolean {
-  if (!input.allowCurrentInboundBypass || !input.deliveryContext) {
-    return false;
-  }
-  if (!input.deliveryContext.routeAuthority) {
-    return false;
-  }
-  if (input.targetKind !== "thread" && input.targetKind !== "explicit") {
-    return false;
-  }
-  const target = normalizeHostedLinqDeliveryText(input.target);
-  const replyToMessageId = normalizeHostedLinqDeliveryText(input.replyToMessageId);
-  return (
-    target !== null
-    && target === input.deliveryContext.target
-    && replyToMessageId !== null
-    && replyToMessageId === input.deliveryContext.replyToMessageId
-  );
-}
-
-function normalizeHostedLinqDeliveryText(value: string | null | undefined): string | null {
-  const normalized = value?.trim() ?? "";
-  return normalized.length > 0 ? normalized : null;
 }
 
 function requireHostedAssistantLinqRouteAuthorityAssert(

@@ -5,18 +5,9 @@ import {
   startLinqTypingIndicator,
   startTelegramTypingIndicator,
 } from "@murphai/assistant-engine/assistant-channel-adapters";
-import type {
-  HostedExecutionConversationMessageWake,
-} from "@murphai/hosted-execution";
-import {
-  isHostedLinqConversationMessageWake,
-} from "@murphai/hosted-execution";
 import {
   HOSTED_ELEVENLABS_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
-import {
-  markLinqChatRead,
-} from "@murphai/operator-config/linq-runtime";
 
 import {
   requireHostedProviderFetchDependencies,
@@ -106,7 +97,7 @@ export function buildHostedWhatsAppChannelEnv(input: {
 }
 
 export function createHostedAssistantChannelTypingDependencies(input: {
-  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
   forwardedEnv: Readonly<Record<string, string>>;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   platformEnv?: Readonly<Record<string, string>>;
@@ -125,13 +116,21 @@ export function createHostedAssistantChannelTypingDependencies(input: {
       if (!deliveryContext || !input.providerFetch) {
         return undefined;
       }
-      const routeAuthority = deliveryContext.routeAuthority;
-      const assertAuthority = input.effectsPort?.assertLinqThreadRouteAuthority;
-      if (!routeAuthority || !assertAuthority) {
+      const assertRecentInbound = input.effectsPort?.assertLinqRecentInboundEngagement;
+      if (!assertRecentInbound) {
         return undefined;
       }
       try {
-        await assertAuthority(routeAuthority, {
+        await assertRecentInbound({
+          directRecipientPhoneNumber: deliveryContext.directRecipientPhoneNumber,
+          engagementKind: "requires_recent_inbound",
+          fromPhoneNumber: deliveryContext.fromPhoneNumber,
+          idempotencyKey: null,
+          intentId: null,
+          routeAuthority: deliveryContext.routeAuthority,
+          target: deliveryContext.target ?? request.target,
+          targetKind: "thread",
+        }, {
           signal: input.signal ?? null,
         });
       } catch {
@@ -162,42 +161,6 @@ export function createHostedAssistantChannelTypingDependencies(input: {
       return startTelegramTypingIndicator(request, dependencies);
     },
   };
-}
-
-export async function markHostedConversationReadBestEffort(input: {
-  forwardedEnv: Readonly<Record<string, string>>;
-  providerFetch?: typeof fetch | null;
-  userEnv: Readonly<Record<string, string>>;
-  wake: HostedExecutionConversationMessageWake;
-  signal?: AbortSignal;
-}): Promise<void> {
-  if (!isHostedLinqConversationMessageWake(input.wake)) {
-    return;
-  }
-
-  const linqMessage = input.wake.message.linqMessage;
-  if (linqMessage.isFromMe) {
-    return;
-  }
-
-  try {
-    const dependencies = requireHostedProviderFetchDependencies({
-      env: buildHostedLinqChannelEnv({
-        forwardedEnv: input.forwardedEnv,
-        userEnv: input.userEnv,
-      }) as NodeJS.ProcessEnv,
-      fetchImplementation: input.providerFetch,
-      signal: input.signal,
-    }, "Hosted Linq read receipt");
-    await markLinqChatRead(
-      {
-        chatId: linqMessage.chatId,
-      },
-      dependencies,
-    );
-  } catch {
-    // Best-effort provider-visible acknowledgement; local import remains authoritative.
-  }
 }
 
 function pickHostedChannelEnv(
