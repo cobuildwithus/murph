@@ -2052,13 +2052,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             result,
             workspace: checkpoint.workspace,
           });
-          accumulatedProjection = {
-            ...nextProjection,
-            redactedStatus: {
-              ...(checkpoint.workspace.redactedStatus ?? accumulatedProjection.redactedStatus),
-              ...nextProjection.redactedStatus,
+          accumulatedProjection = mergeHostedWorkspaceInvocationProjection(
+            accumulatedProjection,
+            nextProjection,
+            {
+              replaceWake: shouldReplaceHostedWorkspaceInvocationWake(result),
             },
-          };
+          );
           runtimeStateDirty = result.runtimeStateDirty;
           if (!runtimeStateDirty) {
             const deferredUsageDrain =
