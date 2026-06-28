@@ -381,6 +381,9 @@ export function formatHostedLocalWorktreeEnv(
     ],
     ["MURPH_DEV_WEB_HOST", config.env.MURPH_DEV_WEB_HOST],
     ["MURPH_DEV_WEB_PORT", config.env.MURPH_DEV_WEB_PORT],
+    ["DEVICE_SYNC_PUBLIC_BASE_URL", config.env.DEVICE_SYNC_PUBLIC_BASE_URL],
+    ["HOSTED_ONBOARDING_PUBLIC_BASE_URL", config.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL],
+    ["HOSTED_WEB_BASE_URL", config.env.HOSTED_WEB_BASE_URL],
     ["MURPH_DEV_WORKER_HOST", config.env.MURPH_DEV_WORKER_HOST],
     ["MURPH_DEV_WORKER_PORT", config.env.MURPH_DEV_WORKER_PORT],
     ["MURPH_DEV_TEMPORAL", config.env.MURPH_DEV_TEMPORAL],
@@ -584,6 +587,7 @@ function buildHostedLocalWorktreeEnv(input: {
   slug: string;
 }): NodeJS.ProcessEnv {
   const env = { ...input.baseEnv };
+  const webOrigin = `http://127.0.0.1:${input.ports.web}`;
   delete env.MURPH_DEV_TEMP_DIR;
 
   return {
@@ -591,6 +595,9 @@ function buildHostedLocalWorktreeEnv(input: {
     [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]: input.buildId,
     [HOSTED_LOCAL_WORKTREE_SCOPE_ENV]: input.slug,
     [USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV]: "0",
+    DEVICE_SYNC_PUBLIC_BASE_URL: `${webOrigin}/api/device-sync`,
+    HOSTED_ONBOARDING_PUBLIC_BASE_URL: webOrigin,
+    HOSTED_WEB_BASE_URL: webOrigin,
     MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "0",
     MURPH_HOSTED_LOCAL_PROFILE: HOSTED_LOCAL_WORKTREE_PROFILE,
     MURPH_DEV_CF_PERSIST_DIR: input.paths.wranglerPersistDir,

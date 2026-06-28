@@ -13,8 +13,9 @@ artifacts are the guarded source snapshot ZIP (`repo.snapshot.zip`) plus the
 repomix attachment (`repo.repomix.zip`, or the configured repomix artifact name)
 generated for the pushed PR head.
 
-- the full PR diff
-- touched files
+- the full PR diff at `docs/review-gpt-pr-context/pr.diff.patch`
+- touched files at `docs/review-gpt-pr-context/touched-files.txt`
+- PR metadata and commit history at `docs/review-gpt-pr-context/README.md` and `docs/review-gpt-pr-context/commit-history.txt`
 - enough surrounding callers, invariants, state owners, and tests to judge the change in context
 - the baseline invariants doc at `docs/contracts/00-invariants.md` (and any topic-specific contract files it links, e.g. `docs/contracts/06-hosted-workspace-file-count.md`) — read this before reporting so invariant checks are grounded in the current rules, not memory
 

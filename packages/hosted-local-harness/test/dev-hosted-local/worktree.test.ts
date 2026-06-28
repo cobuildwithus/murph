@@ -165,6 +165,9 @@ describe("hosted-local worktree config", () => {
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
         ".tmp/hosted-local-worktrees/feature-a/cloudflared-linq-webhook.yml",
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+      DEVICE_SYNC_PUBLIC_BASE_URL: "http://127.0.0.1:3101/api/device-sync",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://127.0.0.1:3101",
+      HOSTED_WEB_BASE_URL: "http://127.0.0.1:3101",
       MURPH_DEV_MINIO_PORT: "9101",
       MURPH_DEV_REUSE_EXISTING_WORKER: "0",
       MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
@@ -184,6 +187,9 @@ describe("hosted-local worktree config", () => {
     expect(rendered).toContain("export MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER='1'");
     expect(rendered).toContain("export MURPH_DEV_SKIP_STRIPE_LISTEN='1'");
     expect(rendered).toContain("export MURPH_DEV_WEB_PORT='3101'");
+    expect(rendered).toContain("export DEVICE_SYNC_PUBLIC_BASE_URL='http://127.0.0.1:3101/api/device-sync'");
+    expect(rendered).toContain("export HOSTED_ONBOARDING_PUBLIC_BASE_URL='http://127.0.0.1:3101'");
+    expect(rendered).toContain("export HOSTED_WEB_BASE_URL='http://127.0.0.1:3101'");
     expect(rendered).not.toContain("MURPH_DEV_TEMP_DIR");
     expect(rendered).not.toContain(config.databaseUrl);
   });
