@@ -3757,6 +3757,105 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("starts every deferred assistant usage write before awaiting slow records", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const events: string[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let releaseFirstUsageFlush: () => void = () => undefined;
+    const firstUsageFlushGate = new Promise<void>((resolve) => {
+      releaseFirstUsageFlush = resolve;
+    });
+    let resultPromise: ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
+    const usageRecordPort: HostedRuntimeUsageRecordPort = {
+      async recordUsage(record) {
+        events.push(`usage:${record.usageId}:start`);
+        if (record.usageId === "turn_runner_usage.first") {
+          await firstUsageFlushGate;
+        }
+        events.push(`usage:${record.usageId}:done`);
+        return {
+          recorded: true,
+          usageId: record.usageId,
+        };
+      },
+    };
+
+    try {
+      resultPromise = runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_parallel_usage_flush",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("No mailbox import expected.");
+        },
+        initialMailboxImport: createCheckpointedMailboxImportResult(),
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          usageRecordPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_parallel_usage_flush",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_parallel_usage_flush",
+          leaseGeneration: "1",
+          workspaceVersion: "0",
+        },
+        async runAssistantPhase(input) {
+          events.push("assistant");
+          input.recordDeferredUsage?.(createAssistantUsageRecord({
+            usageId: "turn_runner_usage.first",
+          }));
+          input.recordDeferredUsage?.(createAssistantUsageRecord({
+            usageId: "turn_runner_usage.second",
+          }));
+          return {
+            progressed: false,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      await waitUntil(() => {
+        assert.equal(events.includes("usage:turn_runner_usage.second:start"), true);
+      });
+      assert.deepEqual(events.slice(0, 3), [
+        "assistant",
+        "usage:turn_runner_usage.first:start",
+        "usage:turn_runner_usage.second:start",
+      ]);
+      assert.equal(events.includes("usage:turn_runner_usage.second:done"), true);
+      assert.equal(events.includes("usage:turn_runner_usage.first:done"), false);
+
+      const result = await withTestTimeout(resultPromise, 1_000);
+
+      assert.equal(result.assistantPhaseResult?.progressed, false);
+
+      releaseFirstUsageFlush();
+      await waitUntil(() => {
+        assert.equal(events.includes("usage:turn_runner_usage.first:done"), true);
+      });
+    } finally {
+      releaseFirstUsageFlush();
+      if (resultPromise) {
+        await resultPromise.catch(() => undefined);
+      }
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("flushes deferred assistant usage when late foreground pending-input wake fails", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [

@@ -1465,7 +1465,7 @@ async function flushHostedAssistantUsageRecordsBestEffort(input: {
     return;
   }
 
-  for (const record of input.records) {
+  const recordFlushes = input.records.map(async (record) => {
     try {
       await usageRecordPort.recordUsage(record);
     } catch (error) {
@@ -1501,7 +1501,8 @@ async function flushHostedAssistantUsageRecordsBestEffort(input: {
         platform: input.input.platform,
       });
     }
-  }
+  });
+  await Promise.allSettled(recordFlushes);
 }
 
 async function writeHostedForegroundMailboxImportFailureRuntimeLog(context: {
