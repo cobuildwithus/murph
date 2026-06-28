@@ -8,7 +8,9 @@ export interface HostedAssistantLinqDeliveryContext {
   fromPhoneNumber: string | null;
   replyToMessageId: string | null;
   routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority | null;
+  service: string | null;
   target: string | null;
+  threadIsDirect: boolean | null;
 }
 
 export function buildHostedAssistantLinqDeliveryContextFromWake(
@@ -26,7 +28,11 @@ export function buildHostedAssistantLinqDeliveryContextFromWake(
     fromPhoneNumber: null,
     replyToMessageId: normalizeHostedLinqDeliveryContextText(wake.message.linqMessage.messageId),
     routeAuthority: wake.message.routeAuthority ?? null,
+    service: normalizeHostedLinqDeliveryContextText(wake.message.linqMessage.service),
     target: normalizeHostedLinqDeliveryContextText(wake.message.linqMessage.chatId),
+    threadIsDirect: typeof wake.message.linqMessage.threadIsDirect === "boolean"
+      ? wake.message.linqMessage.threadIsDirect
+      : null,
   };
 }
 

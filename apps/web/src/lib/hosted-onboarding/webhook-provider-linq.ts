@@ -307,7 +307,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
           homeRecipientPhone: routeDecision.homeRecipientPhone,
           memberId: existingMember.id,
           messageId: summary.messageId,
+          service: messageEvent.data.service ?? null,
           sourceEventId: input.event.event_id,
+          threadIsDirect: isHostedLinqDirectChatAttested(messageEvent),
         }),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {
           existingMemberActive: true,
@@ -595,7 +597,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
       memberId: member.id,
       messageId: summary.messageId,
       occurredAt,
+      service: messageEvent.data.service ?? null,
       sourceEventId: input.event.event_id,
+      threadIsDirect: isHostedLinqDirectChatAttested(messageEvent),
     }),
     buildHostedLinqWebhookPlannerDetails(input.event, context, {
       chatDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
@@ -893,7 +897,9 @@ async function planHostedLinqInboundAdmissionDenied(input: {
         noticeCode: deniedUsageGate.userNotice.code,
         occurredAt: input.context.occurredAt,
         routeAuthority: input.routeAuthority ?? null,
+        service: input.context.messageEvent.data.service ?? null,
         sourceEventId: input.event.event_id,
+        threadIsDirect: isHostedLinqDirectChatAttested(input.context.messageEvent),
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
         ...input.logDetails,
@@ -930,7 +936,9 @@ async function planHostedLinqInboundAdmissionDenied(input: {
         messageId: input.context.summary.messageId,
         occurredAt: input.context.occurredAt,
         routeAuthority: input.routeAuthority ?? null,
+        service: input.context.messageEvent.data.service ?? null,
         sourceEventId: input.event.event_id,
+        threadIsDirect: isHostedLinqDirectChatAttested(input.context.messageEvent),
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
         ...input.logDetails,

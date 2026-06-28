@@ -70,6 +70,8 @@ import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
+  HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_CLAIM_PATH,
+  HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_RESULT_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
@@ -321,6 +323,24 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "hosted thread-route egress authority assertion",
     path: HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
+  },
+  {
+    body: {
+      chatId: "linq_chat_123",
+      service: "iMessage",
+      threadIsDirect: true,
+    },
+    name: "hosted Linq contact-card share claim",
+    path: HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_CLAIM_PATH,
+  },
+  {
+    body: {
+      chatId: "linq_chat_123",
+      claimId: "claim_123",
+      status: "succeeded",
+    },
+    name: "hosted Linq contact-card share result",
+    path: HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_RESULT_PATH,
   },
   {
     body: {

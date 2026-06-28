@@ -31,6 +31,10 @@ export const HOSTED_RUNTIME_ISSUE_RECORD_PATH =
   "/api/internal/hosted-execution/issues/record";
 export const HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH =
   "/api/internal/hosted-runtime/thread-route/egress-authority";
+export const HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_CLAIM_PATH =
+  "/api/internal/hosted-runtime/linq/contact-card/share-claim";
+export const HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_RESULT_PATH =
+  "/api/internal/hosted-runtime/linq/contact-card/share-result";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH =
   "/api/internal/device-sync/recovery-sweep";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID =

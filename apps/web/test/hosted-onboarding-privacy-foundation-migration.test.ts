@@ -43,6 +43,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "id String @id",
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
+    "linqContactCardShares HostedLinqContactCardShare[]",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
     "sensitiveActionChallenges HostedSensitiveActionChallenge[]",
     'signupNotificationEmailAttemptedAt DateTime? @map("signup_notification_email_attempted_at")',
@@ -481,6 +482,8 @@ describe("hosted Prisma baseline migration", () => {
       "20260626000000_linq_first_contact_admission_decision",
       "2026062600_computer_handoff_return_contact_kind",
       "20260626010000_linq_first_contact_admission_budget",
+      "20260627210000_linq_first_contact_admission_drop_category",
+      "20260627230000_hosted_linq_contact_card_share",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');

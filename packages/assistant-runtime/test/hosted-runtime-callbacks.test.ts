@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   readVerifiedAssistantVaultFileBytes: vi.fn(),
   resetAssistantOutboxPreparedDispatchById: vi.fn(),
   saveAssistantOutboxIntentIfUnchanged: vi.fn(),
+  shareLinqContactCard: vi.fn(),
   setLinqMessageReaction: vi.fn(),
   setTelegramMessageReaction: vi.fn(),
   sendLinqMessage: vi.fn(),
@@ -114,6 +115,16 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
 vi.mock("@murphai/operator-config/telegram-runtime", () => ({
   setTelegramMessageReaction: mocks.setTelegramMessageReaction,
 }));
+
+vi.mock("@murphai/operator-config/linq-runtime", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/operator-config/linq-runtime")>(
+    "@murphai/operator-config/linq-runtime",
+  );
+  return {
+    ...actual,
+    shareLinqContactCard: mocks.shareLinqContactCard,
+  };
+});
 
 import {
   collectHostedAssistantDeliverySideEffects,
@@ -282,6 +293,7 @@ beforeEach(() => {
       status: "sent",
     }),
   );
+  mocks.shareLinqContactCard.mockResolvedValue(undefined);
   mocks.normalizeAssistantDeliveryError.mockImplementation((
     error: Error & {
       code?: string | null;
@@ -5572,6 +5584,298 @@ describe("hosted runtime callbacks", () => {
         deliveryStatus: "sent",
       }),
     ]);
+  });
+
+  it("shares the Linq contact card after an eligible delivered iMessage intent", async () => {
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_contact_card",
+      linqMessage: {
+        chatId: "linq_chat_current",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_current",
+        parts: [
+          {
+            type: "text",
+            value: "hello on the current wake",
+          },
+        ],
+        service: "iMessage",
+        threadIsDirect: true,
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "+15559990000",
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      actorId: "ain_hashed_actor",
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "ain_hashed_thread",
+      channel: "linq",
+      explicitTarget: "ain_hashed_thread",
+      transportIdempotent: true,
+    });
+    const claimLinqContactCardShare = vi.fn(async () => ({
+      action: "share" as const,
+      claimId: "claim_123",
+    }));
+    const recordLinqContactCardShareResult = vi.fn(async () => ({ ok: true as const }));
+    const providerFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_materialized",
+      target: "linq_chat_materialized",
+      targetKind: "participant" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies, dispatchHooks }) => {
+      const delivery = await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: "+15550002",
+        idempotencyKey: "assistant-outbox:intent_hashed_target",
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_current",
+        target: "ain_hashed_thread",
+        targetKind: "thread",
+      });
+      const deliveryRecord = createDelivery({
+        channel: "linq",
+        providerMessageId: delivery.providerMessageId,
+        providerThreadId: delivery.providerThreadId,
+        target: delivery.target,
+        targetKind: delivery.targetKind,
+      });
+      await dispatchHooks.persistDeliveredIntent?.({
+        delivery: deliveryRecord,
+      });
+
+      return createDispatchResult({
+        delivery: deliveryRecord,
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        claimLinqContactCardShare,
+        recordLinqContactCardShareResult,
+      }),
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(claimLinqContactCardShare).toHaveBeenCalledWith({
+      chatId: "linq_chat_materialized",
+      service: "iMessage",
+      threadIsDirect: true,
+    }, {
+      signal: null,
+    });
+    expect(mocks.shareLinqContactCard).toHaveBeenCalledWith({
+      chatId: "linq_chat_materialized",
+    }, {
+      env: {},
+      fetchImplementation: providerFetch,
+      signal: undefined,
+    });
+    expect(recordLinqContactCardShareResult).toHaveBeenCalledWith({
+      chatId: "linq_chat_materialized",
+      claimId: "claim_123",
+      status: "succeeded",
+    }, {
+      signal: null,
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+      }),
+    ]);
+  });
+
+  it("records Linq contact-card share failures without failing the sent outcome", async () => {
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_contact_card_failed",
+      linqMessage: {
+        chatId: "linq_chat_current",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_current",
+        parts: [
+          {
+            type: "text",
+            value: "hello on the current wake",
+          },
+        ],
+        service: "iMessage",
+        threadIsDirect: true,
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "+15559990000",
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      actorId: "ain_hashed_actor",
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_current",
+      channel: "linq",
+      explicitTarget: "linq_chat_current",
+      transportIdempotent: true,
+    });
+    const claimLinqContactCardShare = vi.fn(async () => ({
+      action: "share" as const,
+      claimId: "claim_123",
+    }));
+    const recordLinqContactCardShareResult = vi.fn(async () => ({ ok: true as const }));
+    mocks.shareLinqContactCard.mockRejectedValueOnce(new Error("share failed"));
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_current",
+      target: "linq_chat_current",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies, dispatchHooks }) => {
+      const delivery = await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_linq",
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_current",
+        target: "linq_chat_current",
+        targetKind: "thread",
+      });
+      const deliveryRecord = createDelivery({
+        channel: "linq",
+        providerMessageId: delivery.providerMessageId,
+        providerThreadId: delivery.providerThreadId,
+        target: delivery.target,
+        targetKind: delivery.targetKind,
+      });
+      await dispatchHooks.persistDeliveredIntent?.({
+        delivery: deliveryRecord,
+      });
+
+      return createDispatchResult({
+        delivery: deliveryRecord,
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        claimLinqContactCardShare,
+        recordLinqContactCardShareResult,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(recordLinqContactCardShareResult).toHaveBeenCalledWith({
+      chatId: "linq_chat_current",
+      claimId: "claim_123",
+      status: "failed",
+    }, {
+      signal: null,
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+      component: "assistant-delivery",
+      details: expect.objectContaining({
+        chatIdSuffix: "urrent",
+        errorMessage: "share failed",
+        operation: "share_contact_card",
+        phase: "provider",
+        provider: "linq",
+      }),
+      level: "warn",
+    }));
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+      }),
+    ]);
+  });
+
+  it("skips contact-card sharing for non-iMessage Linq deliveries", async () => {
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_contact_card_sms",
+      linqMessage: {
+        chatId: "linq_chat_current",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_current",
+        parts: [
+          {
+            type: "text",
+            value: "hello on the current wake",
+          },
+        ],
+        service: "SMS",
+        threadIsDirect: true,
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "+15559990000",
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_current",
+      channel: "linq",
+      explicitTarget: "linq_chat_current",
+      transportIdempotent: true,
+    });
+    const claimLinqContactCardShare = vi.fn(async () => ({
+      action: "share" as const,
+      claimId: "claim_123",
+    }));
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_current",
+      target: "linq_chat_current",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies, dispatchHooks }) => {
+      const delivery = await dependencies.sendLinq({
+        idempotencyKey: "assistant-outbox:intent_linq",
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_current",
+        target: "linq_chat_current",
+        targetKind: "thread",
+      });
+      await dispatchHooks.persistDeliveredIntent?.({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerThreadId: "linq_chat_current",
+        }),
+        status: "sent",
+      });
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        claimLinqContactCardShare,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(claimLinqContactCardShare).not.toHaveBeenCalled();
+    expect(mocks.shareLinqContactCard).not.toHaveBeenCalled();
   });
 
   it("routes hosted email thread deliveries through the shared effects port", async () => {

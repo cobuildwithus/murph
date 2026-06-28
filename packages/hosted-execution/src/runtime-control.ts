@@ -710,6 +710,43 @@ export interface HostedRuntimeUsageRecordResponse {
   usageId: string;
 }
 
+export const HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_SKIP_REASONS = [
+  "ineligible_chat",
+  "missing_chat_id",
+  "recent_success",
+  "claim_active",
+  "state_unavailable",
+] as const;
+
+export type HostedRuntimeLinqContactCardShareSkipReason =
+  (typeof HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_SKIP_REASONS)[number];
+
+export interface HostedRuntimeLinqContactCardShareClaimRequest {
+  chatId: string;
+  service: string | null;
+  threadIsDirect: boolean | null;
+}
+
+export type HostedRuntimeLinqContactCardShareClaimResponse =
+  | {
+      action: "share";
+      claimId: string;
+    }
+  | {
+      action: "skip";
+      reason: HostedRuntimeLinqContactCardShareSkipReason;
+    };
+
+export interface HostedRuntimeLinqContactCardShareResultRequest {
+  chatId: string;
+  claimId: string;
+  status: "failed" | "succeeded";
+}
+
+export interface HostedRuntimeLinqContactCardShareResultResponse {
+  ok: true;
+}
+
 export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
   "feature_interest",
   "feature_request",

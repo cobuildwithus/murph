@@ -81,6 +81,7 @@ import {
   buildHostedWhatsAppChannelEnv,
 } from "./channel-activity.ts";
 import {
+  shareHostedProviderLinqContactCard,
   sendHostedProviderLinqMessage,
   sendHostedProviderLinqVoiceMemo,
   setHostedProviderLinqMessageReaction,
@@ -1155,6 +1156,196 @@ function createHostedAssistantEmailSendDependency(input: {
   };
 }
 
+async function maybeShareHostedLinqContactCardAfterDeliveredIntent(input: {
+  delivery: AssistantChannelDelivery;
+  effectsPort: HostedRuntimeEffectsPort;
+  linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;
+  linqEnv: NodeJS.ProcessEnv;
+  providerFetch: typeof fetch | null;
+  signal: AbortSignal | null;
+  userId: string;
+  wake: HostedRuntimeEvent;
+}): Promise<void> {
+  try {
+    if (
+      input.delivery.kind === "message-reaction"
+      || input.delivery.channel !== "linq"
+    ) {
+      return;
+    }
+    if (
+      input.linqDeliveryContext?.service?.trim().toLowerCase() !== "imessage"
+      || input.linqDeliveryContext.threadIsDirect !== true
+    ) {
+      return;
+    }
+
+    const chatId =
+      normalizeHostedLinqContactCardChatId(input.delivery.providerThreadId)
+      ?? normalizeHostedLinqContactCardChatId(input.delivery.target);
+    if (!chatId) {
+      return;
+    }
+
+    const claimContactCardShare = input.effectsPort.claimLinqContactCardShare;
+    const recordContactCardShareResult =
+      input.effectsPort.recordLinqContactCardShareResult;
+    if (!claimContactCardShare || !recordContactCardShareResult) {
+      return;
+    }
+
+    const claim = await claimContactCardShare({
+      chatId,
+      service: input.linqDeliveryContext.service,
+      threadIsDirect: input.linqDeliveryContext.threadIsDirect,
+    }, {
+      signal: input.signal,
+    });
+    if (claim.action !== "share") {
+      return;
+    }
+
+    try {
+      await shareHostedProviderLinqContactCard({
+        chatId,
+      }, {
+        env: input.linqEnv,
+        fetchImplementation: input.providerFetch,
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+    } catch (error) {
+      logHostedLinqContactCardShareRuntimeFailure({
+        chatId,
+        error,
+        phase: "provider",
+        userId: input.userId,
+        wake: input.wake,
+      });
+      await recordHostedLinqContactCardShareRuntimeResultBestEffort({
+        chatId,
+        claimId: claim.claimId,
+        effectsPort: input.effectsPort,
+        phase: "record_failure",
+        signal: input.signal,
+        status: "failed",
+        userId: input.userId,
+        wake: input.wake,
+      });
+      return;
+    }
+
+    await recordHostedLinqContactCardShareRuntimeResultBestEffort({
+      chatId,
+      claimId: claim.claimId,
+      effectsPort: input.effectsPort,
+      phase: "record_success",
+      signal: input.signal,
+      status: "succeeded",
+      userId: input.userId,
+      wake: input.wake,
+    });
+  } catch (error) {
+    logHostedLinqContactCardShareRuntimeFailure({
+      chatId: null,
+      error,
+      phase: "claim",
+      userId: input.userId,
+      wake: input.wake,
+    });
+  }
+}
+
+async function recordHostedLinqContactCardShareRuntimeResultBestEffort(input: {
+  chatId: string;
+  claimId: string;
+  effectsPort: Pick<HostedRuntimeEffectsPort, "recordLinqContactCardShareResult">;
+  phase: string;
+  signal: AbortSignal | null;
+  status: "failed" | "succeeded";
+  userId: string;
+  wake: HostedRuntimeEvent;
+}): Promise<void> {
+  try {
+    await input.effectsPort.recordLinqContactCardShareResult?.({
+      chatId: input.chatId,
+      claimId: input.claimId,
+      status: input.status,
+    }, {
+      signal: input.signal,
+    });
+  } catch (error) {
+    logHostedLinqContactCardShareRuntimeFailure({
+      chatId: input.chatId,
+      error,
+      phase: input.phase,
+      userId: input.userId,
+      wake: input.wake,
+    });
+  }
+}
+
+function normalizeHostedLinqContactCardChatId(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 && !normalized.startsWith("+") ? normalized : null;
+}
+
+function logHostedLinqContactCardShareRuntimeFailure(input: {
+  chatId: string | null;
+  error: unknown;
+  phase: string;
+  userId: string;
+  wake: HostedRuntimeEvent;
+}): void {
+  const errorRecord = input.error && typeof input.error === "object"
+    ? input.error as Record<string, unknown>
+    : null;
+  const details = errorRecord?.details && typeof errorRecord.details === "object"
+    ? errorRecord.details as Record<string, unknown>
+    : null;
+
+  emitHostedExecutionStructuredLog({
+    component: "assistant-delivery",
+    details: sanitizeHostedExecutionStructuredLogDetails({
+      chatIdSuffix: readHostedLinqContactCardLogIdSuffix(input.chatId),
+      errorCode: readHostedLinqContactCardErrorString(errorRecord, "code"),
+      errorMessage: input.error instanceof Error ? input.error.message : null,
+      errorName: input.error instanceof Error ? input.error.name : null,
+      operation: "share_contact_card",
+      phase: input.phase,
+      provider: "linq",
+      status: readHostedLinqContactCardErrorNumber(details, "status"),
+    }),
+    level: "warn",
+    message: "Hosted Linq contact-card share failed.",
+    phase: "outbox",
+    userId: input.userId,
+    wake: input.wake,
+  });
+}
+
+function readHostedLinqContactCardLogIdSuffix(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized ? normalized.slice(-6) : null;
+}
+
+function readHostedLinqContactCardErrorString(
+  record: Record<string, unknown> | null,
+  key: string,
+): string | null {
+  return record && typeof record[key] === "string" ? record[key] as string : null;
+}
+
+function readHostedLinqContactCardErrorNumber(
+  record: Record<string, unknown> | null,
+  key: string,
+): number | null {
+  return record && typeof record[key] === "number" ? record[key] as number : null;
+}
+
 export async function drainHostedPreparedAssistantDeliveries(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   allowPreparedSending?: boolean;
@@ -1416,6 +1607,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     if (disabledAutoReplyOutcome) {
       return disabledAutoReplyOutcome;
     }
+    const linqDeliveryContext = input.wake
+      ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
+      : null;
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
         preflightDispatchIntent: async ({ intent, now: preflightNow, vault }) =>
@@ -1424,6 +1618,17 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             intent,
             now: preflightNow,
             vaultRoot: vault,
+          }),
+        persistDeliveredIntent: async ({ delivery }) =>
+          maybeShareHostedLinqContactCardAfterDeliveredIntent({
+            delivery,
+            effectsPort: input.effectsPort,
+            linqDeliveryContext,
+            linqEnv: input.linqEnv,
+            providerFetch: input.providerFetch,
+            signal: input.signal,
+            userId: input.userId,
+            wake: input.wake,
           }),
       },
       dependencies: {
@@ -1514,9 +1719,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           expectedDedupeKey: input.assistantDeliveryEffect.fingerprint,
           intentId: input.assistantDeliveryEffect.effectId,
           linqEnv: input.linqEnv,
-          linqDeliveryContext: input.wake
-            ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
-            : null,
+          linqDeliveryContext,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
@@ -1528,9 +1731,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           assertLiveness: input.assertLiveness,
           effectsPort: input.effectsPort,
           linqEnv: input.linqEnv,
-          linqDeliveryContext: input.wake
-            ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
-            : null,
+          linqDeliveryContext,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },

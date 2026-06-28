@@ -25,6 +25,7 @@ import {
   probeLinqApi,
   sendLinqChatMessage,
   sendLinqVoiceMemo,
+  shareLinqContactCard,
   startLinqChatTypingIndicator,
   stopLinqChatTypingIndicator,
   uploadLinqAttachmentBytes,
@@ -863,6 +864,74 @@ test('markLinqChatRead posts a no-body read acknowledgement with Linq metadata',
       error.context?.path === '/chats/[chat]/read' &&
       error.context?.retryable === false &&
       error.context?.status === 503,
+  )
+})
+
+test('shareLinqContactCard posts a no-body contact-card share request with Linq metadata', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const seenRequests: Array<{
+    body?: string | Blob
+    headers?: Record<string, string>
+    method: string
+    url: string
+  }> = []
+
+  await shareLinqContactCard(
+    {
+      chatId: ' chat:123 ',
+    },
+    {
+      env,
+      fetchImplementation: async (url: string, init) => {
+        seenRequests.push({
+          body: init.body,
+          headers: init.headers,
+          method: init.method,
+          url,
+        })
+        return new Response(null, { status: 204 })
+      },
+    },
+  )
+
+  assert.deepEqual(seenRequests, [
+    {
+      body: undefined,
+      headers: {
+        authorization: `Bearer ${env.LINQ_API_TOKEN}`,
+      },
+      method: 'POST',
+      url: 'https://linq.example.test/custom/chats/chat%3A123/share_contact_card',
+    },
+  ])
+
+  await assert.rejects(
+    () =>
+      shareLinqContactCard(
+        {
+          chatId: 'chat-123',
+        },
+        {
+          env,
+          fetchImplementation: async () =>
+            createJsonResponse({ detail: 'no active card' }, {
+              status: 400,
+            }),
+        },
+      ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.operation === 'share_contact_card' &&
+      error.context?.provider === 'linq' &&
+      error.context?.failureStage === 'http' &&
+      error.context?.method === 'POST' &&
+      error.context?.path === '/chats/[chat]/share_contact_card' &&
+      error.context?.retryable === false &&
+      error.context?.status === 400,
   )
 })
 

@@ -12,6 +12,7 @@ import {
   createHostedLinqWebhookSubscription,
   sendHostedLinqChatMessage,
   sendHostedLinqReadReceipt,
+  shareHostedLinqContactCard,
   startHostedLinqTypingIndicator,
 } from "@/src/lib/hosted-onboarding/linq";
 
@@ -227,6 +228,57 @@ describe("sendHostedLinqReadReceipt", () => {
         signal: expect.any(AbortSignal),
       }),
     );
+  });
+});
+
+describe("shareHostedLinqContactCard", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("posts a no-body contact-card share request", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(shareHostedLinqContactCard({
+      chatId: "chat_123",
+    })).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("chats/chat_123/share_contact_card", "https://linq.example.test/api/partner/v3/"),
+      expect.objectContaining({
+        body: undefined,
+        method: "POST",
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it("treats Linq API contact-card share failures as non-retryable", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return createJsonResponse({}, 429);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(shareHostedLinqContactCard({
+      chatId: "chat_123",
+    })).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      httpStatus: 502,
+      message: "Linq contact-card share failed with HTTP 429.",
+      retryable: false,
+    });
   });
 });
 

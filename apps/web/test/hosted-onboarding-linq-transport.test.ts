@@ -20,6 +20,13 @@ vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
   sendHostedLinqChatMessage: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
+  maybeShareHostedLinqContactCardAfterOutbound: vi.fn().mockResolvedValue({
+    action: "skip",
+    reason: "recent_success",
+  }),
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   claimHostedLinqOnboardingLinkNotice: vi.fn().mockResolvedValue(true),
   claimHostedLinqQuotaReplyNotice: vi.fn().mockResolvedValue(true),
@@ -54,6 +61,9 @@ import {
   releaseHostedLinqOnboardingLinkNoticeClaim,
   releaseHostedLinqQuotaReplyNoticeClaim,
 } from "@/src/lib/hosted-onboarding/linq-daily-state";
+import {
+  maybeShareHostedLinqContactCardAfterOutbound,
+} from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 import {
   createHostedWebhookLinqMessageSideEffect,
   drainHostedLinqSideEffectsDirect,
@@ -93,6 +103,80 @@ describe("hosted Linq webhook transport", () => {
         replyToMessageId: "message-1",
       }),
     );
+  });
+
+  it("shares the contact card after an eligible successful outbound send", async () => {
+    vi.mocked(readHostedMemberRoutingState).mockResolvedValue(null);
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      homeRecipientPhone: "+15555550100",
+      memberId: "member-1",
+      replyToMessageId: "message-1",
+      service: "iMessage",
+      sourceEventId: "event-contact-card",
+      threadIsDirect: true,
+      template: "conversation_home_redirect",
+    });
+    const prisma = {};
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(maybeShareHostedLinqContactCardAfterOutbound).toHaveBeenCalledWith({
+      chatId: "chat-1",
+      eligibility: {
+        service: "iMessage",
+        threadIsDirect: true,
+      },
+      memberId: "member-1",
+      prisma,
+      signal: undefined,
+    });
+  });
+
+  it("does not let contact-card share failures release successful notice claims", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.mocked(maybeShareHostedLinqContactCardAfterOutbound)
+      .mockRejectedValueOnce(new Error("share failed"));
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      service: "iMessage",
+      sourceEventId: "event-contact-card-fail",
+      threadIsDirect: true,
+      template: "daily_quota",
+    });
+
+    try {
+      await expect(
+        drainHostedLinqSideEffectsDirect({
+          prisma: {} as never,
+          sideEffects: [effect],
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+      expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Hosted Linq contact-card side-effect share failed.",
+        expect.objectContaining({
+          chatIdSuffix: "chat-1",
+          errorMessage: "share failed",
+          operation: "share_contact_card",
+          provider: "linq",
+          template: "daily_quota",
+        }),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("prefers the latest routing phone over the stored redirect fallback", async () => {

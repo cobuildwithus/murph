@@ -149,7 +149,9 @@ describe("hosted mailbox conversation import adapter", () => {
       fromPhoneNumber: null,
       replyToMessageId: "msg_synthetic_projection_failure",
       routeAuthority: null,
+      service: null,
       target: "chat_synthetic",
+      threadIsDirect: null,
     });
 
     const listed = await listAssistantInputEvents({

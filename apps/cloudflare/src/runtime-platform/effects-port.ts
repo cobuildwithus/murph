@@ -3,8 +3,14 @@ import type {
   HostedExecutionExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_CLAIM_PATH,
+  HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_RESULT_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
 } from "@murphai/hosted-execution/routes";
+import {
+  parseHostedRuntimeLinqContactCardShareClaimResponse,
+  parseHostedRuntimeLinqContactCardShareResultResponse,
+} from "@murphai/hosted-execution/parsers";
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
 import { HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH } from "../runner-email-route.ts";
@@ -140,6 +146,32 @@ export function createCloudflareEffectsPort(input: {
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
             });
+          },
+          async claimLinqContactCardShare(request, context) {
+            const payload = await fetchHostedWebControlPlaneJson({
+              body: request,
+              boundUserId: input.boundUserId,
+              description: "Hosted Linq contact-card share claim",
+              fetchImpl: input.fetchImpl,
+              path: HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_CLAIM_PATH,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+            return parseHostedRuntimeLinqContactCardShareClaimResponse(payload);
+          },
+          async recordLinqContactCardShareResult(request, context) {
+            const payload = await fetchHostedWebControlPlaneJson({
+              body: request,
+              boundUserId: input.boundUserId,
+              description: "Hosted Linq contact-card share result",
+              fetchImpl: input.fetchImpl,
+              path: HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_RESULT_PATH,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+            return parseHostedRuntimeLinqContactCardShareResultResponse(payload);
           },
         }
       : {}),
