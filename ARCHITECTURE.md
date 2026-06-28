@@ -148,6 +148,9 @@ classifier payload or response body, and fails closed without sending a reply
 when enforcement is enabled and the classifier explicitly blocks. OpenAI
 refusal and content-filter outcomes are terminal unsupported content blocks, and
 first-contact budget exhaustion also blocks before side effects.
+The legacy nullable rejected-message-text column is retained only as a
+deploy-skew compatibility column during the expand/contract rollout; new Prisma
+code ignores it and the migration scrubs existing values.
 Classifier-path budget claims and decision recording commit together, and the
 event-id decision write is duplicate-safe so webhook retries can observe the
 same terminal decision without replaying a failing unique-constraint path.
