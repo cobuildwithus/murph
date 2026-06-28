@@ -48,13 +48,25 @@ describe("hosted Linq egress engagement", () => {
   });
 
   it("allows explicit signup welcome first contact for the bound runtime user", async () => {
+    const memberPhoneLookupKey = createHostedPhoneLookupKey("+15550100001");
+    const homeLineLookupKey = createHostedPhoneLookupKey("+15550100099");
+    if (!memberPhoneLookupKey || !homeLineLookupKey) {
+      throw new Error("Expected test phone lookup keys.");
+    }
     const prisma = {
       hostedLinqDelivery: {
         create: vi.fn(),
         findUnique: vi.fn(),
       },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue({
+          phoneLookupKey: memberPhoneLookupKey,
+        }),
+      },
       hostedMemberRouting: {
-        findUnique: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({
+          linqRecipientPhoneLookupKey: homeLineLookupKey,
+        }),
       },
       hostedThreadRoute: {
         findUnique: vi.fn(),
@@ -63,16 +75,89 @@ describe("hosted Linq egress engagement", () => {
 
     await expect(assertHostedLinqRecentInboundEngagementForRuntime({
       engagementKind: "first_contact",
+      fromPhoneNumber: "+15550100099",
       idempotencyKey: "signup-welcome:member-1",
       intentId: "intent-1",
       memberId: "member-1",
       prisma: prisma as never,
-      target: "chat-1",
-      targetKind: "thread",
+      target: "+15550100001",
+      targetKind: "participant",
     })).resolves.toBeUndefined();
 
-    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.findUnique).toHaveBeenCalledWith({
+      where: { memberId: "member-1" },
+      select: { phoneLookupKey: true },
+    });
+    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalledWith({
+      where: { memberId: "member-1" },
+      select: { linqRecipientPhoneLookupKey: true },
+    });
     expect(prisma.hostedThreadRoute.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects signup welcome first contact when the participant route does not match durable member routing", async () => {
+    const memberPhoneLookupKey = createHostedPhoneLookupKey("+15550100001");
+    const homeLineLookupKey = createHostedPhoneLookupKey("+15550100099");
+    if (!memberPhoneLookupKey || !homeLineLookupKey) {
+      throw new Error("Expected test phone lookup keys.");
+    }
+    const prisma = {
+      hostedLinqDelivery: {
+        create: vi.fn(),
+        findUnique: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue({
+          phoneLookupKey: memberPhoneLookupKey,
+        }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          linqRecipientPhoneLookupKey: homeLineLookupKey,
+        }),
+      },
+    };
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      engagementKind: "first_contact",
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey: "signup-welcome:member-1",
+      memberId: "member-1",
+      prisma: prisma as never,
+      target: "+15550100002",
+      targetKind: "participant",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_FIRST_CONTACT_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      engagementKind: "first_contact",
+      fromPhoneNumber: "+15550100100",
+      idempotencyKey: "signup-welcome:member-1",
+      memberId: "member-1",
+      prisma: prisma as never,
+      target: "+15550100001",
+      targetKind: "participant",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_FIRST_CONTACT_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      engagementKind: "first_contact",
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey: "signup-welcome:member-1",
+      memberId: "member-1",
+      prisma: prisma as never,
+      target: "chat-1",
+      targetKind: "thread",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_FIRST_CONTACT_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
     expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
   });
 

@@ -99,6 +99,7 @@ export function resolveHostedMemberAssistantNotificationRoute(input: {
   messaging: HostedMemberMessagingState;
 }): HostedMemberAssistantNotificationRoute {
   const memberPhoneNumber = normalizePhoneNumber(input.memberPhoneNumber);
+  const linqRecipientPhone = normalizePhoneNumber(input.linqRecipientPhone);
   const linqContactLookupKey =
     normalizeMessagingIdentity(input.linqContactLookupKey)
     ?? input.messaging.linqContactLookupKey
@@ -127,6 +128,34 @@ export function resolveHostedMemberAssistantNotificationRoute(input: {
         identifierBlind,
         input.linqChatId,
       ),
+      threadIsDirect: true,
+    };
+  }
+
+  if (linqRecipientPhone && memberPhoneNumber && input.messaging.phoneLookupKey) {
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: input.messaging.phoneLookupKey,
+      userId: input.memberId,
+    });
+    return {
+      actorId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        memberPhoneNumber,
+      ),
+      channel: "linq",
+      delivery: {
+        kind: "participant",
+        source: {
+          fromPhoneNumber: linqRecipientPhone,
+          kind: "linq",
+        },
+        target: memberPhoneNumber,
+      },
+      identityId: hashHostedAssistantConversationIdentifier(
+        identifierBlind,
+        input.messaging.phoneLookupKey,
+      ),
+      threadId: null,
       threadIsDirect: true,
     };
   }

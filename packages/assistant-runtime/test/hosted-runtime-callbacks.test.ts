@@ -4386,6 +4386,8 @@ describe("hosted runtime callbacks", () => {
 
   it("marks signup welcome Linq sends as first-contact engagement", async () => {
     const effect = createEffect({
+      actorId: "ain_blinded_member_phone",
+      bindingDeliveryTarget: "+15550100001",
       channel: "linq",
       idempotencyKey: "signup-welcome:member_123",
       message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
@@ -4401,11 +4403,11 @@ describe("hosted runtime callbacks", () => {
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinq({
         directRecipientPhoneNumber: null,
-        fromPhoneNumber: null,
+        fromPhoneNumber: "+15550100099",
         idempotencyKey: "signup-welcome:member_123",
         message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
         replyToMessageId: null,
-        target: "linq_chat_123",
+        target: "+15550100001",
         targetKind: "participant",
       });
 
@@ -4438,14 +4440,25 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledWith(
       expect.objectContaining({
+        directRecipientPhoneNumber: null,
         engagementKind: "first_contact",
+        fromPhoneNumber: "+15550100099",
         idempotencyKey: "signup-welcome:member_123",
+        target: "+15550100001",
+        targetKind: "participant",
       }),
       {
         signal: null,
       },
     );
-    expect(mocks.sendLinqMessage).toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fromPhoneNumber: "+15550100099",
+        target: "+15550100001",
+        targetKind: "participant",
+      }),
+      expect.any(Object),
+    );
   });
 
   it("does not reuse mismatched routed Linq authority for reactions", async () => {

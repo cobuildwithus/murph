@@ -22,6 +22,7 @@ import {
 import {
   hostedOnboardingError,
 } from "./errors";
+import { normalizePhoneNumber } from "./phone";
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
 type HostedLinqEgressEngagementKind = "first_contact" | "requires_recent_inbound";
@@ -254,9 +255,14 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     });
   }
   if ((input.engagementKind ?? "requires_recent_inbound") === "first_contact") {
-    assertHostedLinqFirstContactEgressAuthority({
+    await assertHostedLinqFirstContactEgressAuthority({
+      directRecipientPhoneNumber: input.directRecipientPhoneNumber,
+      fromPhoneNumber: input.fromPhoneNumber,
       idempotencyKey: input.idempotencyKey,
       memberId: input.memberId,
+      prisma: input.prisma,
+      target: input.target,
+      targetKind: input.targetKind,
     });
     return;
   }
@@ -315,14 +321,58 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   });
 }
 
-function assertHostedLinqFirstContactEgressAuthority(input: {
+async function assertHostedLinqFirstContactEgressAuthority(input: {
+  directRecipientPhoneNumber?: string | null;
+  fromPhoneNumber?: string | null;
   idempotencyKey?: string | null;
   memberId: string;
-}): void {
-  if (isHostedLinqSignupWelcomeFirstContact(input)) {
-    return;
+  prisma: HostedLinqEngagementClient;
+  target: string | null;
+  targetKind?: string | null;
+}): Promise<void> {
+  if (!isHostedLinqSignupWelcomeFirstContact(input)) {
+    throwHostedLinqFirstContactEgressAuthorityMismatch();
   }
 
+  const targetKind = normalizeNullable(input.targetKind);
+  const recipientPhone = normalizePhoneNumber(
+    targetKind === "participant"
+      ? input.target ?? input.directRecipientPhoneNumber ?? null
+      : null,
+  );
+  const fromPhoneNumber = normalizePhoneNumber(input.fromPhoneNumber);
+  if (targetKind !== "participant" || !recipientPhone || !fromPhoneNumber) {
+    throwHostedLinqFirstContactEgressAuthorityMismatch();
+  }
+
+  const recipientPhoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(recipientPhone);
+  const fromPhoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(fromPhoneNumber);
+  if (recipientPhoneLookupKeys.length === 0 || fromPhoneLookupKeys.length === 0) {
+    throwHostedLinqFirstContactEgressAuthorityMismatch();
+  }
+
+  const [identity, routing] = await Promise.all([
+    input.prisma.hostedMemberIdentity.findUnique({
+      where: { memberId: input.memberId },
+      select: { phoneLookupKey: true },
+    }),
+    input.prisma.hostedMemberRouting.findUnique({
+      where: { memberId: input.memberId },
+      select: { linqRecipientPhoneLookupKey: true },
+    }),
+  ]);
+
+  if (
+    !identity?.phoneLookupKey
+    || !recipientPhoneLookupKeys.includes(identity.phoneLookupKey)
+    || !routing?.linqRecipientPhoneLookupKey
+    || !fromPhoneLookupKeys.includes(routing.linqRecipientPhoneLookupKey)
+  ) {
+    throwHostedLinqFirstContactEgressAuthorityMismatch();
+  }
+}
+
+function throwHostedLinqFirstContactEgressAuthorityMismatch(): never {
   throw hostedOnboardingError({
     code: "HOSTED_LINQ_FIRST_CONTACT_AUTHORITY_MISMATCH",
     httpStatus: 403,
