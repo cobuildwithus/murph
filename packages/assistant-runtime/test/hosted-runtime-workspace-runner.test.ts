@@ -3532,6 +3532,91 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("does not block normal post-checkpoint delivery on deferred usage flushing", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const events: string[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let releaseUsageFlush!: () => void;
+    const usageFlushGate = new Promise<void>((resolve) => {
+      releaseUsageFlush = resolve;
+    });
+    let resultPromise: ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget> | null = null;
+
+    try {
+      resultPromise = runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_usage_flush_delivery_order",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("No mailbox import expected.");
+        },
+        initialMailboxImport: createCheckpointedMailboxImportResult(),
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_usage_flush_delivery_order",
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_runner_usage_flush_delivery_order",
+          leaseGeneration: "1",
+          workspaceVersion: "0",
+        },
+        async runAssistantPhase() {
+          const flushDeferredUsageAfterCheckpoint = async () => {
+            events.push("usage:flush:start");
+            await usageFlushGate;
+            events.push("usage:flush:done");
+          };
+          return {
+            afterCheckpoint: async () => {
+              events.push("reply:deliver");
+              await flushDeferredUsageAfterCheckpoint();
+              return null;
+            },
+            checkpointReason: "assistant_runtime_commit",
+            flushDeferredUsageAfterCheckpoint,
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      await waitUntil(() => {
+        assert.equal(events.includes("reply:deliver"), true);
+      });
+      assert.deepEqual(events, ["reply:deliver", "usage:flush:start"]);
+
+      releaseUsageFlush();
+      const result = await withTestTimeout(resultPromise, 1_000);
+
+      assert.equal(result.assistantPhaseResult?.progressed, true);
+      assert.deepEqual(events, [
+        "reply:deliver",
+        "usage:flush:start",
+        "usage:flush:done",
+      ]);
+    } finally {
+      releaseUsageFlush?.();
+      if (resultPromise) {
+        await resultPromise.catch(() => undefined);
+      }
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("flushes deferred assistant usage when late foreground pending-input wake fails", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [

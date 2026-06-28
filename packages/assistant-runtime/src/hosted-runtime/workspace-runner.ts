@@ -543,6 +543,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   let mailboxPostCheckpointEffectsFinished: Promise<void> | null = null;
   let projectedWakeRequiresCheckpoint = false;
   let assistantPhaseCheckpointed = false;
+  let assistantPhaseAfterCheckpointReached = false;
   let flushDeferredUsageAfterCheckpoint: (() => Promise<void>) | null = null;
   let deferredUsageFlushed = false;
   const flushAssistantPhaseDeferredUsage = async (): Promise<void> => {
@@ -591,7 +592,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       runtimeLogContext: input.runtimeLogContext,
     });
     assistantPhaseCheckpointed = true;
-    await flushAssistantPhaseDeferredUsage();
     if (assistantPhaseResult.afterCheckpoint && assistantPhaseResult.progressed !== true) {
       throw new TypeError("Hosted workspace assistant phase afterCheckpoint requires a progressed phase.");
     }
@@ -611,9 +611,15 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     try {
       postCheckpoint = await withHostedCanonicalWritePort(
         hostedCanonicalWritePort,
-        async () => await assistantPhaseResult.afterCheckpoint?.(),
+        async () => {
+          assistantPhaseAfterCheckpointReached = true;
+          return await assistantPhaseResult.afterCheckpoint?.();
+        },
       );
     } catch (error) {
+      if (!assistantPhaseAfterCheckpointReached) {
+        await flushAssistantPhaseDeferredUsage();
+      }
       await writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog({
         error,
         errorCode: "assistant_after_checkpoint_failed",
@@ -680,7 +686,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     });
   } catch (error) {
     await foregroundMailboxImportLoop.stop();
-    await flushAssistantPhaseDeferredUsage();
+    if (!assistantPhaseAfterCheckpointReached) {
+      await flushAssistantPhaseDeferredUsage();
+    }
     scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
