@@ -928,11 +928,16 @@ export async function startHostedContainerEntrypoint(input: {
       });
       if (error instanceof HostedRunnerShellIsolationError) {
         hostedContainerPoisoned = true;
-        await reportHostedContainerFatalBestEffort({
-          boundUserId: job ? readHostedExecutionRunnerJobUserId(job) : null,
-          error,
-          stage: "shell_isolation_poison",
-        });
+        await Promise.allSettled([
+          reportHostedContainerFatalBestEffort({
+            boundUserId: job ? readHostedExecutionRunnerJobUserId(job) : null,
+            error,
+            stage: "shell_isolation_poison",
+          }),
+          drainHostedRuntimeDeferredUsageCompletionsBestEffort({
+            timeoutMs: HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS,
+          }),
+        ]);
         runtime.exitScheduler();
       }
       const classified = classifyRunnerJobError(error);

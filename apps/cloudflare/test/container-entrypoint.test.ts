@@ -3181,6 +3181,79 @@ describe("startHostedContainerEntrypoint", () => {
       poisoned: true,
     });
   });
+
+  it("drains deferred usage before scheduling shell-isolation poison exit", async () => {
+    const childPid = process.pid + 2100;
+    let releaseDrain: () => void = () => undefined;
+    const drainReleased = new Promise<void>((resolve) => {
+      releaseDrain = resolve;
+    });
+
+    mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort.mockImplementationOnce(
+      async () => {
+        await drainReleased;
+      },
+    );
+
+    const kill = vi.fn();
+    const exit = vi.fn();
+    const readdir = vi.fn(async () => [
+      { isDirectory: () => true, name: String(process.pid) },
+      { isDirectory: () => true, name: String(childPid) },
+    ]);
+    const readFile = vi.fn(async (filePath: string) => {
+      if (String(filePath).endsWith(`/${childPid}/stat`)) {
+        return `${childPid} (child) S ${process.pid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(buildWorkspaceRunnerResult());
+
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        exitScheduler: exit,
+        processApi: { kill, readFile, readdir },
+        processIsolation: true,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const responsePromise = fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_descendant_cleanup_usage_drain",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort).toHaveBeenCalledTimes(1);
+    }, { timeout: 7_000 });
+    expect(exit).not.toHaveBeenCalled();
+
+    releaseDrain();
+    const response = await responsePromise;
+
+    expect(response.status).toBe(500);
+    expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: expect.any(Number) }),
+    );
+  });
 });
 
 describe("classifyRunnerJobError", () => {
