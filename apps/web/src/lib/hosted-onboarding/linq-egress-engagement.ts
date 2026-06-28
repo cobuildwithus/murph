@@ -274,9 +274,15 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
       })
     : null;
   const fallbackChatId = input.targetKind === "participant" ? null : input.target;
-  const fallbackRecipientPhone = input.targetKind === "participant"
-    ? input.directRecipientPhoneNumber ?? input.target
-    : null;
+  let fallbackRecipientPhone: string | null = null;
+  if (input.targetKind === "participant") {
+    await assertHostedLinqParticipantTargetMatchesMemberIdentity({
+      memberId: input.memberId,
+      participantPhone: input.target ?? input.directRecipientPhoneNumber ?? null,
+      prisma: input.prisma,
+    });
+    fallbackRecipientPhone = input.fromPhoneNumber ?? null;
+  }
   const decision = route
     ? decideHostedLinqRecentInbound({
       lastInboundAt: route.lastInboundAt,
@@ -317,6 +323,39 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
     },
     httpStatus: 403,
     message: `Linq/iMessage delivery requires a recipient reply within the last ${HOSTED_LINQ_RECENT_INBOUND_WINDOW_DAYS} days.`,
+    retryable: false,
+  });
+}
+
+async function assertHostedLinqParticipantTargetMatchesMemberIdentity(input: {
+  memberId: string;
+  participantPhone?: string | null;
+  prisma: HostedLinqEngagementClient;
+}): Promise<void> {
+  const participantPhone = normalizePhoneNumber(input.participantPhone);
+  const participantPhoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(participantPhone);
+  if (!participantPhone || participantPhoneLookupKeys.length === 0) {
+    throwHostedLinqParticipantEgressAuthorityMismatch();
+  }
+
+  const identity = await input.prisma.hostedMemberIdentity.findUnique({
+    where: { memberId: input.memberId },
+    select: { phoneLookupKey: true },
+  });
+
+  if (
+    !identity?.phoneLookupKey
+    || !participantPhoneLookupKeys.includes(identity.phoneLookupKey)
+  ) {
+    throwHostedLinqParticipantEgressAuthorityMismatch();
+  }
+}
+
+function throwHostedLinqParticipantEgressAuthorityMismatch(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
+    httpStatus: 403,
+    message: "Linq participant egress requires the participant target to match the runtime user.",
     retryable: false,
   });
 }
