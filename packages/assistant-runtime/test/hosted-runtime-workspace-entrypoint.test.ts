@@ -4680,6 +4680,8 @@ describe("hosted workspace runtime entrypoint", () => {
     const usageRecordStarted = createDeferred<void>();
     const releaseUsageRecord = createDeferred<void>();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const earlierWakeAt = "2099-04-27T00:05:00.000Z";
+    const laterWakeAt = "2099-04-27T00:10:00.000Z";
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
     let resultSettled = false;
     let assistantPhaseCalls = 0;
@@ -4788,6 +4790,8 @@ describe("hosted workspace runtime entrypoint", () => {
             if (assistantPhaseCalls > 1) {
               return {
                 foregroundReplyFailed: 0,
+                nextWakeAt: laterWakeAt,
+                nextWakeReason: "mailbox.retry",
                 progressed: false,
               };
             }
@@ -4805,6 +4809,8 @@ describe("hosted workspace runtime entrypoint", () => {
                   usageId: "turn_entrypoint_deferred_usage.attempt-1",
                 }),
               ],
+              nextWakeAt: earlierWakeAt,
+              nextWakeReason: "assistant",
               progressed: true,
             };
           },
@@ -4844,7 +4850,8 @@ describe("hosted workspace runtime entrypoint", () => {
         () => "Runtime did not settle after deferred usage recording finished.",
       );
 
-      assert.equal(result.status, "idle");
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, earlierWakeAt);
       assert.deepEqual(events.filter((event) => event === "mailbox.consume"), [
         "mailbox.consume",
       ]);
@@ -4857,6 +4864,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(events.includes("reply.deliver"), true);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "idle_shutdown",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.nextWakeAt), [
+        earlierWakeAt,
       ]);
     } finally {
       releaseUsageRecord.resolve();

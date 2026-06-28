@@ -2010,6 +2010,25 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           forceIdleCheckpointBeforeWake = true;
           continue;
         }
+        const checkpointProjectionWake = selectEarliestHostedRuntimeWake([
+          {
+            at: accumulatedProjection.nextWakeAt,
+            reason: accumulatedProjection.nextWakeReason,
+          },
+          {
+            at: checkpoint.workspace.nextWakeAt ?? null,
+            reason: checkpoint.workspace.nextWakeReason ?? null,
+          },
+        ]);
+        accumulatedProjection = {
+          ...accumulatedProjection,
+          committedWorkspace: checkpoint.workspace,
+          inboxMediaRetentionWakeAt: checkpoint.workspace.inboxMediaRetentionWakeAt ?? null,
+          nextWakeAt: checkpointProjectionWake.nextWakeAt,
+          nextWakeReason: checkpointProjectionWake.nextWakeReason,
+          projectedWakeRequiresCheckpoint: false,
+          redactedStatus: checkpoint.workspace.redactedStatus ?? accumulatedProjection.redactedStatus,
+        };
         runtimeStateDirty = false;
         const checkpointWakeLatencySeed =
           consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null);
@@ -2130,11 +2149,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     // Replay-only mailbox consume acks are already backed by the restored
     // durable checkpoint, so they still need to flush when no new state is dirty.
     await runDurableCheckpointEffectsBestEffort();
-    const projection = buildHostedWorkspaceInvocationProjection({
-      mailboxBudgetExhausted: mailboxBudgetExhausted(),
-      result,
-      workspace: workspaceRead.workspace,
-    });
+    const projection = accumulatedProjection;
     const shouldRunNoProgressBrowserVaultRefresh =
       browserVaultReplicaRefreshRequested;
     const noProgressBrowserVaultRefresh =
