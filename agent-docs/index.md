@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-06-27
+Last verified: 2026-06-28
 
 ## Purpose
 
@@ -12,7 +12,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |
 | `README.md` | Human-facing repo overview, install path, public package posture, local/hosted runtime tiers, and verification entrypoints. | Current repository state | High | 2026-05-02 |
-| `ARCHITECTURE.md` | Top-level module map, trust boundaries, persisted-state rules, hosted mailbox/checkpoint ownership, managed hosted Codex auth snapshot boundary, hosted provider egress credential boundary, hosted Linq first-contact decision storage, hosted computer-use ownership, hosted generated-image ownership, hosted Retell phone-call ownership, hosted Temporal hard-cut pointer, bounded device-sync mailbox handoff ownership, active-turn targeting lifecycle, control-flow contracts, and package-boundary rules. | Current runtime architecture | High | 2026-06-27 |
+| `ARCHITECTURE.md` | Top-level module map, trust boundaries, persisted-state rules, hosted mailbox/checkpoint ownership, managed hosted Codex auth snapshot boundary, hosted provider egress credential boundary, hosted computer-use ownership, hosted generated-image ownership, hosted Retell phone-call ownership, hosted Linq first-contact admission fail-open policy plus deploy-skew compatibility column, hosted Temporal hard-cut pointer, bounded device-sync mailbox handoff ownership, active-turn targeting lifecycle, control-flow contracts, and package-boundary rules. | Current runtime architecture | High | 2026-06-28 |
 | `PRODUCT.md` | Strategic design context: register, users, brand personality, anti-references, design principles. Loaded by the impeccable skill before any UI work. | Product/brand strategic context | High | 2026-04-24 |
 | `DESIGN.md` | Visual design system in Google Stitch DESIGN.md format: color, typography, elevation, components, do's/don'ts, YAML token frontmatter. Loaded by the impeccable skill before any UI work. | Visual design system | High | 2026-04-24 |
 | `docs/architecture.md` | Concise architecture summary, repo-shape overview, package-boundary hygiene notes, and hosted ownership baseline. | Current architectural baseline | High | 2026-05-13 |
@@ -33,7 +33,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/user-interviews.md` | User-interview kit: cardinal rules, prospective-user and existing-user scripts, question swaps, signal lists, Murph-specific probes, after-call synthesis template. Based on Gustaf Alströmer's YC talk + PG. | User research method | Medium | 2026-06-10 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
 | `agent-docs/RELIABILITY.md` | Reliability guardrails and failure-mode expectations. | Runtime reliability policy | High | 2026-06-09 |
-| `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules, including Cloudflare deploy Blacksmith secret access, Worker-owned hosted provider/generated-image credentials, hosted Linq first-contact classifier decision storage, runner-scoped OpenAI egress credentials, web-owned Retell phone-call credentials, hosted computer-use Kernel/browser secret handling, and Composio connected-app plus OpenWeather authority. | Security policy | High | 2026-06-27 |
+| `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules, including Cloudflare deploy Blacksmith secret access, Worker-owned hosted provider/generated-image credentials, runner-scoped OpenAI egress credentials, web-owned Retell phone-call credentials, hosted Linq first-contact admission fail-open plus deploy-skew-safe ignored raw-text compatibility column and duplicate-safe decision policy, hosted computer-use Kernel/browser secret handling, and Composio connected-app plus OpenWeather authority. | Security policy | High | 2026-06-28 |
 | `agent-docs/compliance/README.md` | Compliance reference-pack overview, launch minimums, and official source links for consumer health-data obligations. | Compliance docs index | High | 2026-04-29 |
 | `agent-docs/compliance/ftc-hbnr-incident-plan.md` | Internal incident playbook for suspected FTC HBNR breaches, unauthorized disclosures, vendor incidents, and tracking disclosures involving health data. | Health-data incident response | High | 2026-04-29 |
 | `agent-docs/compliance/ftc-hbnr-notice-templates.md` | Counsel-reviewed template starting points for consumer, FTC, media, vendor, and internal incident notices. | Health-data notice workflow | High | 2026-04-29 |
@@ -83,7 +83,7 @@ It intentionally lists live architecture, product, verification, and package-bou
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
 | `agent-docs/prompts/` | Reusable review and audit prompt templates for the completion workflow, including the prompt-primary `prompt-review` pass. | Workflow prompt library | Low | 2026-06-07 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke audit prompts for the major repo seams used in broad risk and simplification review sweeps. | Seam-audit prompt library | Low | 2026-04-23 |
-| `apps/web/README.md` | Hosted web control-plane overview, env/runtime contract, hosted AI usage allowance ownership, hosted computer-use run/handoff ownership, Temporal reconciliation-facts boundary, and app-source/testkit ownership split. | `apps/web/**` | Medium | 2026-06-17 |
+| `apps/web/README.md` | Hosted web control-plane overview, env/runtime contract, hosted AI usage allowance ownership, hosted computer-use run/handoff ownership, hosted Linq first-contact decision retention boundary, Temporal reconciliation-facts boundary, and app-source/testkit ownership split. | `apps/web/**` | Medium | 2026-06-28 |
 | `apps/cloudflare/README.md` | Hosted execution-plane overview and runtime contract, including Worker-owned provider egress allowlists, runner-scoped OpenAI egress credentials, and hosted generated-image upload config. | `apps/cloudflare/**` | Medium | 2026-06-25 |
 | `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, including Blacksmith deploy handoff validation, hosted generated-image upload config, and no signed usage-allowance start secret. | Hosted deploy flow | Medium | 2026-06-24 |
 | `packages/assistantd/README.md` | Local assistant daemon boundary and control-plane contract. | `packages/assistantd/**` | Medium | 2026-03-30 |

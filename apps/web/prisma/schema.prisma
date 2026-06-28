@@ -845,7 +845,7 @@ model HostedLinqFirstContactAdmissionDecision {
   category            String?
   confidence          Float
   source              String
-  rejectedMessageText String?  @map("rejected_message_text")
+  rejectedMessageText String?  @map("rejected_message_text") @ignore
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
