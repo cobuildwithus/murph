@@ -3609,13 +3609,21 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         assert.equal(events.includes("usage:flush:start"), true);
       });
       assert.deepEqual(events, ["reply:deliver", "usage:flush:start"]);
-      assert.equal(resultResolved, false);
       assert.equal(flushSawPostAssistantCheckpointLog, true);
 
-      releaseUsageFlush();
       const result = await withTestTimeout(resultPromise, 1_000);
 
       assert.equal(result.assistantPhaseResult?.progressed, true);
+      assert.equal(resultResolved, true);
+      assert.deepEqual(events, [
+        "reply:deliver",
+        "usage:flush:start",
+      ]);
+
+      releaseUsageFlush();
+      await waitUntil(() => {
+        assert.equal(events.includes("usage:flush:done"), true);
+      });
       assert.deepEqual(events, [
         "reply:deliver",
         "usage:flush:start",

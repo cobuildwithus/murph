@@ -545,14 +545,28 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   let assistantPhaseCheckpointed = false;
   let assistantPhaseAfterCheckpointReached = false;
   let flushDeferredUsageAfterCheckpoint: (() => Promise<void>) | null = null;
-  let deferredUsageFlushed = false;
-  const flushAssistantPhaseDeferredUsage = async (): Promise<void> => {
-    if (!assistantPhaseCheckpointed || !flushDeferredUsageAfterCheckpoint || deferredUsageFlushed) {
-      return;
+  let deferredUsageFlushStarted = false;
+  const startAssistantPhaseDeferredUsageFlush = (): Promise<void> | null => {
+    if (
+      !assistantPhaseCheckpointed
+      || !flushDeferredUsageAfterCheckpoint
+      || deferredUsageFlushStarted
+    ) {
+      return null;
     }
 
-    deferredUsageFlushed = true;
-    await flushDeferredUsageAfterCheckpoint();
+    deferredUsageFlushStarted = true;
+    const flush = flushDeferredUsageAfterCheckpoint().catch((error: unknown) => {
+      warnAssistantBestEffortFailure({
+        error,
+        operation: "hosted assistant deferred usage flush",
+      });
+    });
+    void flush;
+    return flush;
+  };
+  const awaitAssistantPhaseDeferredUsageFlush = async (): Promise<void> => {
+    await startAssistantPhaseDeferredUsageFlush();
   };
   const hostedCanonicalWritePort = createHostedWorkspaceCanonicalWritePort({
     checkpointRequestBuilder: checkpointRequestSession,
@@ -618,7 +632,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       );
     } catch (error) {
       if (!assistantPhaseAfterCheckpointReached) {
-        await flushAssistantPhaseDeferredUsage();
+        await awaitAssistantPhaseDeferredUsageFlush();
       }
       await writeHostedWorkspaceAssistantPostCheckpointFailureRuntimeLog({
         error,
@@ -651,7 +665,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           effects: afterDurableCheckpoint,
           postCheckpoint,
         });
-        await flushAssistantPhaseDeferredUsage();
+        startAssistantPhaseDeferredUsageFlush();
       } catch (error) {
         if (
           error instanceof HostedMailboxImportCheckpointConflictError
@@ -666,7 +680,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         });
       }
     } else {
-      await flushAssistantPhaseDeferredUsage();
+      startAssistantPhaseDeferredUsageFlush();
     }
     await reconcilePendingAssistantInputWake({
       foregroundConversationWorkObserved,
@@ -690,7 +704,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   } catch (error) {
     await foregroundMailboxImportLoop.stop();
     if (!assistantPhaseAfterCheckpointReached) {
-      await flushAssistantPhaseDeferredUsage();
+      await awaitAssistantPhaseDeferredUsageFlush();
     }
     scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
