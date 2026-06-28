@@ -445,6 +445,80 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
+  it("rejects runtime wakes after shutdown starts", async () => {
+    const invocationReady = createDeferred();
+    const releaseInvocation = createDeferred();
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    let runtimeWakeCount = 0;
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
+      async (_job, options) => {
+        options?.onRuntimeWakeReady?.(() => {
+          runtimeWakeCount += 1;
+          return true;
+        });
+        invocationReady.resolve();
+        await releaseInvocation.promise;
+        return buildWorkspaceRunnerResult();
+      },
+    );
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const invocation = fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_runtime_wake_shutdown",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    await invocationReady.promise;
+    process.emit("SIGTERM", "SIGTERM");
+
+    const lateWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      body: JSON.stringify({
+        attemptId: "attempt_evt_runtime_wake_shutdown",
+        leaseGeneration: "1",
+        userId: "u1",
+      }),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+    const lateWakeBody = await lateWake.json();
+    releaseInvocation.resolve();
+    const invocationResponse = await invocation;
+
+    expect(lateWake.status).toBe(503);
+    expect(lateWake.headers.get("x-runtime-wake-accepted")).toBe("0");
+    expect(lateWakeBody).toMatchObject({
+      error: "Hosted runner is shutting down.",
+    });
+    expect(runtimeWakeCount).toBe(0);
+    expect(invocationResponse.status).toBe(200);
+    await vi.waitFor(() => {
+      expect(exit).toHaveBeenCalledWith(0);
+    });
+    const serverIndex = servers.indexOf(server);
+    if (serverIndex !== -1) {
+      servers.splice(serverIndex, 1);
+    }
+  });
+
   it("uses the default hosted process-lifetime shutdown hooks when the server closes", async () => {
     const server = await startHostedContainerEntrypoint({ port: 0 });
     servers.push(server);

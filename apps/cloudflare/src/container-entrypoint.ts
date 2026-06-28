@@ -428,6 +428,21 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_RUNTIME_WAKE_PATH) {
+        if (containerShutdownController.signal.aborted) {
+          discardUnreadRequestBody(request);
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            level: "warn",
+            message: "Hosted container entrypoint rejected a runtime wake after shutdown started.",
+            phase: "failed",
+          });
+          response.setHeader("x-runtime-wake-accepted", "0");
+          writeJsonResponse(response, 503, {
+            error: "Hosted runner is shutting down.",
+          });
+          return;
+        }
+
         let wakeRequest: HostedContainerRuntimeWakeRequest | null;
         try {
           wakeRequest = await readHostedContainerRuntimeWakeRequest(request);

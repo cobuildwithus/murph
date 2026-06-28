@@ -1564,7 +1564,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const effectsFinished = Promise.all([
           ...pendingCompletions,
         ]);
-        const runtimeWakeSignal = options.runtimeWakeSignal ?? null;
+        const runtimeWakeSignal =
+          options.shutdownSignal?.aborted === true
+            ? null
+            : options.runtimeWakeSignal ?? null;
         if (!runtimeWakeSignal) {
           await raceHostedRuntimeCancellation(
             effectsFinished,
@@ -1577,7 +1580,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const abortWake = () => {
           wakeAbortController.abort(readHostedRuntimeAbortReason(runtimeAbortController.signal));
         };
+        const abortWakeAfterShutdown = () => {
+          wakeAbortController.abort(
+            options.shutdownSignal?.reason instanceof Error
+              ? options.shutdownSignal.reason
+              : new Error("Hosted runtime wake wait skipped after shutdown."),
+          );
+        };
         runtimeAbortController.signal.addEventListener("abort", abortWake, { once: true });
+        options.shutdownSignal?.addEventListener("abort", abortWakeAfterShutdown, { once: true });
         let waitResult: HostedRuntimeMailboxPostCheckpointEffectWaitResult;
         let wake: Promise<HostedRuntimeMailboxPostCheckpointEffectWaitResult> =
           Promise.resolve({ kind: "finished" });
@@ -1602,6 +1613,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           ]);
         } finally {
           runtimeAbortController.signal.removeEventListener("abort", abortWake);
+          options.shutdownSignal?.removeEventListener("abort", abortWakeAfterShutdown);
           if (!wakeAbortController.signal.aborted) {
             wakeAbortController.abort();
           }
@@ -1613,7 +1625,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (deliveredWakeResult.kind === "external_wake") {
           return deliveredWakeResult;
         }
-        const pendingWake = runtimeWakeSignal.consumePending();
+        const pendingWake =
+          options.shutdownSignal?.aborted === true
+            ? null
+            : runtimeWakeSignal.consumePending();
         if (pendingWake) {
           return {
             kind: "external_wake",
@@ -1801,7 +1816,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           continue;
         }
         const pendingWakeLatencySeed =
-          consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null);
+          consumePendingHostedRuntimeWakeUnlessShuttingDown(
+            options.runtimeWakeSignal ?? null,
+            options.shutdownSignal ?? null,
+          );
         if (pendingWakeLatencySeed) {
           await runIdleWakeForegroundPass({
             latencySeed: pendingWakeLatencySeed,
@@ -1868,7 +1886,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               : "done",
         });
         const idleMaintenanceWakeLatencySeed =
-          consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null);
+          consumePendingHostedRuntimeWakeUnlessShuttingDown(
+            options.runtimeWakeSignal ?? null,
+            options.shutdownSignal ?? null,
+          );
         if (idleMaintenanceWakeLatencySeed) {
           await runIdleWakeForegroundPass({
             latencySeed: idleMaintenanceWakeLatencySeed,
@@ -1979,7 +2000,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         };
         runtimeStateDirty = false;
         const checkpointWakeLatencySeed =
-          consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null);
+          consumePendingHostedRuntimeWakeUnlessShuttingDown(
+            options.runtimeWakeSignal ?? null,
+            options.shutdownSignal ?? null,
+          );
         if (checkpointWakeLatencySeed) {
           idleWakeOrdinal += 1;
           result = await runForegroundPass({
@@ -2483,6 +2507,17 @@ function consumePendingHostedRuntimeWake(
   return createHostedRuntimeWakeLatencySeed(
     runtimeWakeSignal?.consumePending() ?? null,
   );
+}
+
+function consumePendingHostedRuntimeWakeUnlessShuttingDown(
+  runtimeWakeSignal: RuntimeWakeSignal | null,
+  shutdownSignal: AbortSignal | null,
+): HostedRuntimeWakeLatencySeed | null {
+  if (shutdownSignal?.aborted === true) {
+    return null;
+  }
+
+  return consumePendingHostedRuntimeWake(runtimeWakeSignal);
 }
 
 function trackHostedRuntimeDeferredUsageCompletion(completion: Promise<void> | null): void {
