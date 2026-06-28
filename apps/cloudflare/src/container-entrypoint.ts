@@ -914,18 +914,18 @@ export async function startHostedContainerEntrypoint(input: {
       response.setHeader("content-type", "application/json; charset=utf-8");
       response.end(JSON.stringify(result));
     } catch (error) {
-      if (requestAbort.signal.aborted || response.destroyed) {
-        return;
-      }
+      const responseUnavailable = requestAbort.signal.aborted || response.destroyed;
 
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: buildHostedContainerRunnerJobErrorMetadata(error),
-        level: "error",
-        message: "Hosted container entrypoint failed a runner job.",
-        phase: "failed",
-        userId: null,
-      });
+      if (!responseUnavailable || error instanceof HostedRunnerShellIsolationError) {
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: buildHostedContainerRunnerJobErrorMetadata(error),
+          level: "error",
+          message: "Hosted container entrypoint failed a runner job.",
+          phase: "failed",
+          userId: null,
+        });
+      }
       if (error instanceof HostedRunnerShellIsolationError) {
         hostedContainerPoisoned = true;
         await Promise.allSettled([
@@ -939,6 +939,9 @@ export async function startHostedContainerEntrypoint(input: {
           }),
         ]);
         runtime.exitScheduler();
+      }
+      if (responseUnavailable) {
+        return;
       }
       const classified = classifyRunnerJobError(error);
       writeJsonResponse(response, classified.statusCode, classified.payload);

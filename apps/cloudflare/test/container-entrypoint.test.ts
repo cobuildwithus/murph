@@ -3254,6 +3254,95 @@ describe("startHostedContainerEntrypoint", () => {
       expect.objectContaining({ timeoutMs: expect.any(Number) }),
     );
   });
+
+  it("drains deferred usage on shell-isolation poison after caller disconnects", async () => {
+    const childPid = process.pid + 2200;
+    let runnerStarted = false;
+    let releaseInvocation: () => void = () => undefined;
+    const invocationStarted = new Promise<void>((resolve) => {
+      vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(async () => {
+        runnerStarted = true;
+        resolve();
+        await new Promise<void>((release) => {
+          releaseInvocation = release;
+        });
+        return buildWorkspaceRunnerResult();
+      });
+    });
+    let releaseDrain: () => void = () => undefined;
+    const drainReleased = new Promise<void>((resolve) => {
+      releaseDrain = resolve;
+    });
+
+    mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort.mockImplementationOnce(
+      async () => {
+        await drainReleased;
+      },
+    );
+
+    const kill = vi.fn();
+    const exit = vi.fn();
+    const readdir = vi.fn(async () => [
+      { isDirectory: () => true, name: String(process.pid) },
+      ...(runnerStarted ? [{ isDirectory: () => true, name: String(childPid) }] : []),
+    ]);
+    const readFile = vi.fn(async (filePath: string) => {
+      if (String(filePath).endsWith(`/${childPid}/stat`)) {
+        return `${childPid} (child) S ${process.pid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        exitScheduler: exit,
+        processApi: { kill, readFile, readdir },
+        processIsolation: true,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const request = httpRequest({
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      host: "127.0.0.1",
+      method: "POST",
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+    request.on("error", () => undefined);
+    request.write(JSON.stringify(buildJobBody({
+      wake: {
+        event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+        eventId: "evt_descendant_cleanup_usage_drain_disconnect",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+    })));
+    request.end();
+
+    await invocationStarted;
+    request.destroy();
+    releaseInvocation();
+
+    await vi.waitFor(() => {
+      expect(mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort).toHaveBeenCalledTimes(1);
+    }, { timeout: 7_000 });
+    expect(exit).not.toHaveBeenCalled();
+
+    releaseDrain();
+    await vi.waitFor(() => {
+      expect(exit).toHaveBeenCalledTimes(1);
+    });
+    expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
+  });
 });
 
 describe("classifyRunnerJobError", () => {
