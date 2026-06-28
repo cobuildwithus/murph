@@ -266,6 +266,10 @@ export type HostedWorkspaceRunnerMailboxImportItem = (
   context?: HostedWorkspaceRunnerMailboxImportContext,
 ) => Promise<HostedMailboxItemImportOutcome>;
 
+export type HostedWorkspaceRunnerPostCheckpointCompletionPhase =
+  | "beforeIdleCheckpoint"
+  | "afterIdleCheckpoint";
+
 export interface HostedWorkspaceRunnerInput {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestBuilder;
   expectedUserId: string;
@@ -276,7 +280,10 @@ export interface HostedWorkspaceRunnerInput {
   initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
-  onDeferredUsageFlushStarted?: ((completion: Promise<void>) => void) | null;
+  onPostCheckpointCompletionStarted?: ((input: {
+    completion: Promise<void>;
+    phase: HostedWorkspaceRunnerPostCheckpointCompletionPhase;
+  }) => void) | null;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
@@ -567,7 +574,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       input,
       records: deferredUsageRecords,
     });
-    input.onDeferredUsageFlushStarted?.(deferredUsageFlushFinished);
+    input.onPostCheckpointCompletionStarted?.({
+      completion: deferredUsageFlushFinished,
+      phase: "afterIdleCheckpoint",
+    });
     return deferredUsageFlushFinished;
   };
   const awaitAssistantPhaseDeferredUsageFlush = async (): Promise<void> => {
@@ -705,6 +715,12 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       input,
       phase: "import",
     });
+    if (mailboxPostCheckpointEffectsFinished) {
+      input.onPostCheckpointCompletionStarted?.({
+        completion: mailboxPostCheckpointEffectsFinished,
+        phase: "beforeIdleCheckpoint",
+      });
+    }
   } catch (error) {
     await foregroundMailboxImportLoop.stop();
     if (!assistantPhaseAfterCheckpointReached) {

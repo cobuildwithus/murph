@@ -120,6 +120,7 @@ import {
   type HostedWorkspaceRunnerHandledDeviceSyncWake,
   type HostedWorkspaceRunnerMailboxImportContext,
   type HostedWorkspaceRunnerInput,
+  type HostedWorkspaceRunnerPostCheckpointCompletionPhase,
   type HostedWorkspaceRunnerResult,
 } from "./hosted-runtime/workspace-runner.ts";
 import {
@@ -788,28 +789,37 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
   const phaseLogger = createHostedRuntimePhaseLogger();
   const emitPhaseLog = phaseLogger.emit;
-  const pendingDeferredUsageFlushCompletions = new Set<Promise<void>>();
+  const pendingPostCheckpointCompletions: Record<
+    HostedWorkspaceRunnerPostCheckpointCompletionPhase,
+    Set<Promise<void>>
+  > = {
+    afterIdleCheckpoint: new Set(),
+    beforeIdleCheckpoint: new Set(),
+  };
   const trackPostCheckpointCompletion = (
-    pendingCompletions: Set<Promise<void>>,
+    phase: HostedWorkspaceRunnerPostCheckpointCompletionPhase,
     completion: Promise<void> | null,
   ): void => {
     if (completion === null) {
       return;
     }
 
+    const pendingCompletions = pendingPostCheckpointCompletions[phase];
     pendingCompletions.add(completion);
     void completion.finally(() => {
       pendingCompletions.delete(completion);
     });
   };
-  const drainStartedDeferredUsageFlushesBestEffort = async (): Promise<void> => {
-    if (pendingDeferredUsageFlushCompletions.size === 0) {
+  const drainStartedPostCheckpointCompletionsBestEffort = async (): Promise<void> => {
+    const pendingCompletions = [
+      ...pendingPostCheckpointCompletions.beforeIdleCheckpoint,
+      ...pendingPostCheckpointCompletions.afterIdleCheckpoint,
+    ];
+    if (pendingCompletions.length === 0) {
       return;
     }
 
-    await Promise.allSettled([
-      ...pendingDeferredUsageFlushCompletions,
-    ]);
+    await Promise.allSettled(pendingCompletions);
   };
 
   try {
@@ -1022,8 +1032,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
-      onDeferredUsageFlushStarted: (completion) =>
-        trackPostCheckpointCompletion(pendingDeferredUsageFlushCompletions, completion),
+      onPostCheckpointCompletionStarted: ({ completion, phase }) =>
+        trackPostCheckpointCompletion(phase, completion),
       platform: runnerPlatform,
       requestId,
       runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -1375,14 +1385,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         stage: "foreground.pass",
         status: "start",
       });
-      let completedPassResult: HostedWorkspaceRunnerResult | null = null;
-      const drainCompletedPassDeferredUsageFlush = async (): Promise<void> => {
-        if (completedPassResult === null) {
-          return;
-        }
-
-        await completedPassResult.deferredUsageFlushFinished;
-      };
       try {
         let currentDeliveryRoute = await resolveHostedForegroundCurrentDeliveryRoute({
           initialMailboxImport: passInput.initialMailboxImport,
@@ -1396,7 +1398,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             signal: runtimeAbortController.signal,
           },
           async () => {
-            const runnerResult = await raceHostedRuntimeCancellation(
+            return await raceHostedRuntimeCancellation(
               runHostedWorkspaceUntilIdleOrBudget({
                 ...baseRunnerInput,
                 initialMailboxImport: passInput.initialMailboxImport,
@@ -1428,8 +1430,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               }),
               runtimeAbortController.signal,
             );
-            completedPassResult = runnerResult;
-            return runnerResult;
           },
         );
         emitPhaseLog({
@@ -1457,7 +1457,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         recordBrowserVaultReplicaRefreshIntent(passResult);
         return passResult;
       } catch (error) {
-        await drainCompletedPassDeferredUsageFlush();
         emitPhaseLog({
           details: {
             passForeground,
@@ -1511,7 +1510,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     let result: HostedWorkspaceRunnerResult;
     let runtimeStateDirty = false;
     const pendingDurableCheckpointEffects: HostedWorkspaceDurableCheckpointEffect[] = [];
-    const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
     let durableCheckpointWakeAt: string | null = null;
     let durableCheckpointWakeReason: string | null = null;
     let idleCheckpointStartByMs: number | null = null;
@@ -1556,19 +1554,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
       return { requiresFollowUpCheckpoint };
     };
-    const trackRunnerPostCheckpointCompletions = (passResult: HostedWorkspaceRunnerResult): void => {
-      trackPostCheckpointCompletion(
-        pendingMailboxPostCheckpointEffectCompletions,
-        passResult.mailboxPostCheckpointEffectsFinished,
-      );
-      trackPostCheckpointCompletion(
-        pendingDeferredUsageFlushCompletions,
-        passResult.deferredUsageFlushFinished,
-      );
-    };
     const waitForPostCheckpointCompletions = async (
-      pendingCompletions: Set<Promise<void>>,
+      phase: HostedWorkspaceRunnerPostCheckpointCompletionPhase,
     ): Promise<HostedRuntimePostCheckpointCompletionWaitResult> => {
+      const pendingCompletions = pendingPostCheckpointCompletions[phase];
       while (pendingCompletions.size > 0) {
         const effectsFinished = Promise.all([
           ...pendingCompletions,
@@ -1632,25 +1621,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
       return { kind: "finished" };
     };
-    const waitForMailboxPostCheckpointEffectsBeforeIdleCheckpoint =
-      async (): Promise<HostedRuntimePostCheckpointCompletionWaitResult> => {
-      return await waitForPostCheckpointCompletions(
-        pendingMailboxPostCheckpointEffectCompletions,
-      );
-    };
-    const waitForDeferredUsageFlushesAfterIdleCheckpoint =
-      async (): Promise<HostedRuntimePostCheckpointCompletionWaitResult> => {
-      return await waitForPostCheckpointCompletions(
-        pendingDeferredUsageFlushCompletions,
-      );
-    };
       result = await runForegroundPass({
         initialMailboxImport,
         requestId,
         workspace: workspaceRead.workspace,
       });
       pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
-      trackRunnerPostCheckpointCompletions(result);
       const committedInboxMediaRetentionWakeDue = isHostedInboxMediaRetentionWakeDue({
         nowMs: Date.now(),
         workspace: workspaceRead.workspace,
@@ -1711,7 +1687,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           workspace: passWorkspace,
         });
         pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
-        trackRunnerPostCheckpointCompletions(result);
         if (result.runtimeStateDirty) {
           markIdleCheckpointTimerAfterDirtyWork();
         }
@@ -1738,13 +1713,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runtimeStateDirty ||= result.runtimeStateDirty;
         return result;
       };
-      const drainDeferredUsageFlushesAfterIdleCheckpoint = async (): Promise<{
+      const drainPostCheckpointCompletionsAfterIdleCheckpoint = async (): Promise<{
         handledWake: boolean;
         runtimeStateDirty: boolean;
       }> => {
         let handledWake = false;
-        while (pendingDeferredUsageFlushCompletions.size > 0) {
-          const waitResult = await waitForDeferredUsageFlushesAfterIdleCheckpoint();
+        while (pendingPostCheckpointCompletions.afterIdleCheckpoint.size > 0) {
+          const waitResult = await waitForPostCheckpointCompletions("afterIdleCheckpoint");
           if (waitResult.kind === "finished") {
             continue;
           }
@@ -1843,7 +1818,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           status: "start",
         });
         const mailboxEffectsWaitResult =
-          await waitForMailboxPostCheckpointEffectsBeforeIdleCheckpoint();
+          await waitForPostCheckpointCompletions("beforeIdleCheckpoint");
         if (mailboxEffectsWaitResult.kind === "external_wake") {
           await runIdleWakeForegroundPass({
             latencySeed: createHostedRuntimeWakeLatencySeed(
@@ -2045,7 +2020,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             workspace: checkpoint.workspace,
           });
           pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
-          trackRunnerPostCheckpointCompletions(result);
           idleCheckpointStartByMs = result.runtimeStateDirty
             ? Date.now() + idleCheckpointDelayMs
             : null;
@@ -2063,22 +2037,22 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           );
           runtimeStateDirty = result.runtimeStateDirty;
           if (!runtimeStateDirty) {
-            const deferredUsageDrain =
-              await drainDeferredUsageFlushesAfterIdleCheckpoint();
+            const postCheckpointCompletionDrain =
+              await drainPostCheckpointCompletionsAfterIdleCheckpoint();
             if (
-              deferredUsageDrain.runtimeStateDirty
-              || deferredUsageDrain.handledWake
+              postCheckpointCompletionDrain.runtimeStateDirty
+              || postCheckpointCompletionDrain.handledWake
             ) {
               continue;
             }
           }
           continue;
         }
-        const deferredUsageDrain =
-          await drainDeferredUsageFlushesAfterIdleCheckpoint();
+        const postCheckpointCompletionDrain =
+          await drainPostCheckpointCompletionsAfterIdleCheckpoint();
         if (
-          deferredUsageDrain.runtimeStateDirty
-          || deferredUsageDrain.handledWake
+          postCheckpointCompletionDrain.runtimeStateDirty
+          || postCheckpointCompletionDrain.handledWake
         ) {
           continue;
         }
@@ -2222,7 +2196,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "runtime",
       status: "fail",
     });
-    await drainStartedDeferredUsageFlushesBestEffort();
+    await drainStartedPostCheckpointCompletionsBestEffort();
     throw error;
   } finally {
     hostAbortSignal?.removeEventListener("abort", abortFromHost);
