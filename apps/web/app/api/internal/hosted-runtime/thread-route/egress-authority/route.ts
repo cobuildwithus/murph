@@ -13,6 +13,7 @@ import {
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
 import {
+  assertHostedLinqRouteEgressAuthority,
   assertHostedThreadRouteEgressAuthority,
 } from "@/src/lib/hosted-routing/thread-route-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
@@ -39,10 +40,21 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  await assertHostedThreadRouteEgressAuthority({
-    authority,
-    prisma: getPrisma(),
-  });
+  const prisma = getPrisma();
+  if (authority.channel === "linq") {
+    await assertHostedLinqRouteEgressAuthority({
+      authority: {
+        ...authority,
+        channel: "linq",
+      },
+      prisma,
+    });
+  } else {
+    await assertHostedThreadRouteEgressAuthority({
+      authority,
+      prisma,
+    });
+  }
 
   return jsonOk({
     ok: true,

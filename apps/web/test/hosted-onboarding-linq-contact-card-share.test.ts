@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   maybeShareHostedLinqContactCardAfterOutbound,
-  recordHostedLinqContactCardShareSuccess,
   reserveHostedLinqContactCardShareAttemptAfterOutbound,
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 
@@ -47,7 +46,6 @@ describe("hosted Linq contact-card sharing", () => {
     expect(prisma.rows).toHaveLength(1);
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       lastContactCardShareAttemptedAt: now,
-      lastContactCardShareSucceededAt: null,
       memberId: "member_123",
     }));
     expect(prisma.rows[0]?.linqChatLookupKey).toMatch(/^hbidx:linq-chat:v1:/u);
@@ -120,7 +118,6 @@ describe("hosted Linq contact-card sharing", () => {
 
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       lastContactCardShareAttemptedAt: now,
-      lastContactCardShareSucceededAt: null,
     }));
 
     await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
@@ -137,7 +134,7 @@ describe("hosted Linq contact-card sharing", () => {
     });
   });
 
-  it("throttles share attempts for 48 hours after success", async () => {
+  it("throttles share attempts for 48 hours after the reserved attempt", async () => {
     const prisma = createContactCardSharePrismaStub();
     const now = new Date("2026-06-27T12:00:00.000Z");
 
@@ -152,13 +149,6 @@ describe("hosted Linq contact-card sharing", () => {
       prisma: prisma.client,
     })).resolves.toEqual({
       action: "share",
-    });
-
-    await recordHostedLinqContactCardShareSuccess({
-      chatId: "chat_123",
-      memberId: "member_123",
-      now,
-      prisma: prisma.client,
     });
 
     await expect(reserveHostedLinqContactCardShareAttemptAfterOutbound({
@@ -188,7 +178,7 @@ describe("hosted Linq contact-card sharing", () => {
     });
   });
 
-  it("records best-effort share success and keeps provider failures throttled", async () => {
+  it("shares best-effort and keeps provider failures throttled", async () => {
     const prisma = createContactCardSharePrismaStub();
     const shareContactCard = vi.fn(async () => undefined);
     const now = new Date("2026-06-27T12:00:00.000Z");
@@ -212,7 +202,6 @@ describe("hosted Linq contact-card sharing", () => {
     });
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       lastContactCardShareAttemptedAt: now,
-      lastContactCardShareSucceededAt: now,
     }));
 
     shareContactCard.mockRejectedValueOnce(new Error("provider rejected"));
@@ -230,10 +219,8 @@ describe("hosted Linq contact-card sharing", () => {
       action: "share",
     });
 
-    const failedRow = prisma.rows.find((row) => row.lastContactCardShareSucceededAt === null);
-    expect(failedRow).toEqual(expect.objectContaining({
+    expect(prisma.rows[1]).toEqual(expect.objectContaining({
       lastContactCardShareAttemptedAt: now,
-      lastContactCardShareSucceededAt: null,
     }));
 
     shareContactCard.mockClear();
@@ -254,49 +241,11 @@ describe("hosted Linq contact-card sharing", () => {
     expect(shareContactCard).not.toHaveBeenCalled();
   });
 
-  it("keeps an unknown provider success throttled when success recording fails", async () => {
-    const prisma = createContactCardSharePrismaStub();
-    const shareContactCard = vi.fn(async () => undefined);
-    const now = new Date("2026-06-27T12:00:00.000Z");
-    prisma.model.updateMany.mockRejectedValueOnce(new Error("record unavailable"));
-
-    await expect(maybeShareHostedLinqContactCardAfterOutbound({
-      chatId: "chat_unknown_success",
-      eligibility: {
-        service: "iMessage",
-        threadIsDirect: true,
-      },
-      memberId: "member_123",
-      now,
-      prisma: prisma.client,
-      shareContactCard,
-    })).resolves.toEqual({
-      action: "share",
-    });
-    expect(shareContactCard).toHaveBeenCalledTimes(1);
-
-    await expect(maybeShareHostedLinqContactCardAfterOutbound({
-      chatId: "chat_unknown_success",
-      eligibility: {
-        service: "iMessage",
-        threadIsDirect: true,
-      },
-      memberId: "member_123",
-      now: new Date("2026-06-27T12:10:00.000Z"),
-      prisma: prisma.client,
-      shareContactCard,
-    })).resolves.toEqual({
-      action: "skip",
-      reason: "recent_attempt",
-    });
-    expect(shareContactCard).toHaveBeenCalledTimes(1);
-  });
 });
 
 type ContactCardShareRow = {
   createdAt: Date;
   lastContactCardShareAttemptedAt: Date | null;
-  lastContactCardShareSucceededAt: Date | null;
   linqChatLookupKey: string;
   memberId: string;
   updatedAt: Date;
@@ -323,7 +272,6 @@ type UpdateManyArgs = {
   data: Partial<Pick<
     ContactCardShareRow,
     | "lastContactCardShareAttemptedAt"
-    | "lastContactCardShareSucceededAt"
     | "memberId"
   >>;
   where: {
@@ -359,7 +307,6 @@ function createContactCardSharePrismaStub() {
       const row: ContactCardShareRow = {
         createdAt: args.data.lastContactCardShareAttemptedAt,
         lastContactCardShareAttemptedAt: args.data.lastContactCardShareAttemptedAt,
-        lastContactCardShareSucceededAt: null,
         linqChatLookupKey: args.data.linqChatLookupKey,
         memberId: args.data.memberId,
         updatedAt: args.data.lastContactCardShareAttemptedAt,
@@ -451,8 +398,6 @@ function readRowDate(
   switch (key) {
     case "lastContactCardShareAttemptedAt":
       return row.lastContactCardShareAttemptedAt;
-    case "lastContactCardShareSucceededAt":
-      return row.lastContactCardShareSucceededAt;
     default:
       return undefined;
   }

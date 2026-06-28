@@ -37,7 +37,6 @@ type HostedLinqContactCardShareCreateInput = {
 type HostedLinqContactCardShareUpdateManyInput = {
   data: {
     lastContactCardShareAttemptedAt?: Date | null;
-    lastContactCardShareSucceededAt?: Date | null;
     memberId?: string;
   };
   where: Record<string, unknown>;
@@ -152,32 +151,6 @@ export async function reserveHostedLinqContactCardShareAttemptAfterOutbound(inpu
   };
 }
 
-export async function recordHostedLinqContactCardShareSuccess(input: {
-  chatId: string;
-  memberId?: string | null;
-  now?: Date;
-  prisma: HostedLinqContactCardSharePersistenceClient;
-}): Promise<{ ok: true }> {
-  const chatLookup = resolveHostedLinqContactCardShareLookup(input.chatId);
-  if (!chatLookup) {
-    return { ok: true };
-  }
-
-  const now = input.now ?? new Date();
-  await input.prisma.hostedLinqContactCardShare.updateMany({
-    where: {
-      ...(input.memberId ? { memberId: input.memberId } : {}),
-      linqChatLookupKey: {
-        in: [...chatLookup.readCandidates],
-      },
-    },
-    data: {
-      lastContactCardShareSucceededAt: now,
-    },
-  });
-  return { ok: true };
-}
-
 export async function maybeShareHostedLinqContactCardAfterOutbound(input: {
   chatId: string;
   eligibility: HostedLinqContactCardShareEligibility;
@@ -227,21 +200,6 @@ export async function maybeShareHostedLinqContactCardAfterOutbound(input: {
     return {
       action: "share",
     };
-  }
-
-  try {
-    await recordHostedLinqContactCardShareSuccess({
-      chatId: input.chatId,
-      memberId: input.memberId,
-      now: input.now,
-      prisma: input.prisma,
-    });
-  } catch (error) {
-    logHostedLinqContactCardShareFailure({
-      chatId: input.chatId,
-      error,
-      phase: "record_success",
-    });
   }
 
   return {

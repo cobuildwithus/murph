@@ -2,7 +2,6 @@ CREATE TABLE "hosted_linq_contact_card_share" (
   "linq_chat_lookup_key" TEXT NOT NULL,
   "member_id" TEXT NOT NULL,
   "last_contact_card_share_attempted_at" TIMESTAMP(3),
-  "last_contact_card_share_succeeded_at" TIMESTAMP(3),
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -20,6 +19,3 @@ CREATE INDEX "hosted_linq_contact_card_share_member_id_idx"
 
 CREATE INDEX "hosted_linq_contact_card_share_last_contact_card_share_attempted_at_idx"
   ON "hosted_linq_contact_card_share"("last_contact_card_share_attempted_at");
-
-CREATE INDEX "hosted_linq_contact_card_share_last_contact_card_share_succeeded_at_idx"
-  ON "hosted_linq_contact_card_share"("last_contact_card_share_succeeded_at");
