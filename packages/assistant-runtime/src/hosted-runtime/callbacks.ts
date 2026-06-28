@@ -1,5 +1,4 @@
 import type {
-  HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionLinqExternalThreadRouteAuthority,
   HostedExecutionStructuredLogDetails,
   HostedRuntimeEvent,
@@ -74,6 +73,7 @@ import type {
 import type {
   HostedRuntimeActionApprovalPort,
   HostedRuntimeEffectsPort,
+  HostedRuntimeLinqEngagementKind,
 } from "./platform.ts";
 import {
   buildHostedLinqChannelEnv,
@@ -88,8 +88,9 @@ import {
 } from "../hosted-provider-effects.ts";
 import {
   buildHostedAssistantLinqDeliveryContextFromWake,
-  resolveHostedAssistantLinqReactionDeliveryContextForRequest,
+  resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest,
   resolveHostedAssistantLinqDeliveryContextForRequest,
+  resolveHostedAssistantLinqReactionDeliveryContextFromCandidatesForRequest,
   type HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
 import {
@@ -506,11 +507,18 @@ async function abandonStaleSignupWelcomeBackgroundCandidatesAfterForegroundReply
 function isHostedSignupWelcomeDeliveryPayload(
   payload: HostedAssistantDeliveryPayload,
 ): boolean {
+  return isHostedSignupWelcomeDeliveryIdempotencyKey(payload.idempotencyKey);
+}
+
+function isHostedSignupWelcomeDeliveryIdempotencyKey(
+  idempotencyKey: string | null | undefined,
+): boolean {
   const prefix = "signup-welcome:";
-  if (!payload.idempotencyKey.startsWith(prefix)) {
+  const normalized = idempotencyKey?.trim() ?? "";
+  if (!normalized.startsWith(prefix)) {
     return false;
   }
-  const tokenTarget = payload.idempotencyKey.slice(prefix.length);
+  const tokenTarget = normalized.slice(prefix.length);
   return tokenTarget.length > 0 && !tokenTarget.includes(":");
 }
 
@@ -1101,9 +1109,10 @@ function buildHostedAssistantLinqDeliveryContextFromPreparedIntent(input: {
 }
 
 export function createHostedAssistantProgressDeliveryDependencies(input: {
-  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority" | "sendEmail"> | null;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement" | "assertLinqThreadRouteAuthority" | "sendEmail"> | null;
   forwardedEnv?: Readonly<Record<string, string>>;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
+  linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   platformEnv?: Readonly<Record<string, string>>;
   providerFetch?: typeof fetch | null;
   signal?: AbortSignal | null;
@@ -1118,8 +1127,11 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
     forwardedEnv: input.forwardedEnv ?? {},
     userEnv: input.userEnv ?? {},
   }) as NodeJS.ProcessEnv;
-  const linqDeliveryContext = input.linqDeliveryContext
-    ?? (input.wake ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake) : null);
+  const linqDeliveryContexts = resolveHostedAssistantLinqDeliveryContexts({
+    context: input.linqDeliveryContext ?? null,
+    contexts: input.linqDeliveryContexts ?? null,
+    wake: input.wake ?? null,
+  });
 
   return {
     ...(input.signal ? { signal: input.signal } : {}),
@@ -1136,14 +1148,14 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
     sendLinq: createHostedAssistantLinqSendDependency({
       effectsPort: input.effectsPort ?? null,
       linqEnv,
-      linqDeliveryContext,
+      linqDeliveryContexts,
       providerFetch: input.providerFetch ?? null,
       signal: input.signal ?? null,
     }),
     sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
       effectsPort: input.effectsPort ?? null,
       linqEnv,
-      linqDeliveryContext,
+      linqDeliveryContexts,
       providerFetch: input.providerFetch ?? null,
       signal: input.signal ?? null,
     }),
@@ -1227,7 +1239,7 @@ function createHostedAssistantEmailSendDependency(input: {
 async function maybeShareHostedLinqContactCardAfterDeliveredIntent(input: {
   delivery: AssistantChannelDelivery;
   effectsPort: HostedRuntimeEffectsPort;
-  linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
   signal: AbortSignal | null;
   userId: string;
   wake: HostedRuntimeEvent;
@@ -1240,24 +1252,17 @@ async function maybeShareHostedLinqContactCardAfterDeliveredIntent(input: {
     ) {
       return;
     }
-    if (
-      input.linqDeliveryContext?.service?.trim().toLowerCase() !== "imessage"
-      || input.linqDeliveryContext.threadIsDirect !== true
-    ) {
-      return;
-    }
-    const routeAuthority = input.linqDeliveryContext.routeAuthority;
-    if (!routeAuthority) {
-      return;
-    }
-
     const chatId =
       normalizeHostedLinqContactCardChatId(input.delivery.providerThreadId)
       ?? normalizeHostedLinqContactCardChatId(input.delivery.target);
     if (!chatId) {
       return;
     }
-    if (routeAuthority.threadId !== chatId) {
+    const deliveryContext = selectHostedLinqContactCardDeliveryContext({
+      chatId,
+      contexts: input.linqDeliveryContexts,
+    });
+    if (!deliveryContext) {
       return;
     }
     chatIdForLog = chatId;
@@ -1269,10 +1274,12 @@ async function maybeShareHostedLinqContactCardAfterDeliveredIntent(input: {
     }
 
     await maybeShareContactCard({
-      authority: routeAuthority,
       chatId,
-      service: input.linqDeliveryContext.service,
-      threadIsDirect: input.linqDeliveryContext.threadIsDirect,
+      service: deliveryContext.service,
+      threadIsDirect: deliveryContext.threadIsDirect,
+      ...(deliveryContext.routeAuthority
+        ? { authority: deliveryContext.routeAuthority }
+        : {}),
     }, {
       signal: input.signal,
     });
@@ -1290,7 +1297,7 @@ async function maybeShareHostedLinqContactCardAfterDeliveredIntent(input: {
 function queueHostedLinqContactCardShareAfterDeliveredIntent(input: {
   delivery: AssistantChannelDelivery | null | undefined;
   effectsPort: HostedRuntimeEffectsPort;
-  linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
   signal: AbortSignal | null;
   userId: string;
   wake: HostedRuntimeEvent;
@@ -1302,11 +1309,30 @@ function queueHostedLinqContactCardShareAfterDeliveredIntent(input: {
   void maybeShareHostedLinqContactCardAfterDeliveredIntent({
     delivery: input.delivery,
     effectsPort: input.effectsPort,
-    linqDeliveryContext: input.linqDeliveryContext,
+    linqDeliveryContexts: input.linqDeliveryContexts,
     signal: input.signal,
     userId: input.userId,
     wake: input.wake,
   });
+}
+
+function selectHostedLinqContactCardDeliveryContext(input: {
+  chatId: string;
+  contexts: readonly HostedAssistantLinqDeliveryContext[];
+}): HostedAssistantLinqDeliveryContext | null {
+  return input.contexts.find((context) => {
+    if (
+      context.service?.trim().toLowerCase() !== "imessage"
+      || context.threadIsDirect !== true
+    ) {
+      return false;
+    }
+    return (
+      normalizeHostedLinqContactCardChatId(context.target) === input.chatId
+      || normalizeHostedLinqContactCardChatId(context.routeAuthority?.threadId)
+        === input.chatId
+    );
+  }) ?? null;
 }
 
 function normalizeHostedLinqContactCardChatId(
@@ -1378,6 +1404,8 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
   assertLiveness?: () => Promise<void>;
   forwardedEnv?: Readonly<Record<string, string>>;
+  linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
+  linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   platformEnv?: Readonly<Record<string, string>>;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
@@ -1402,6 +1430,11 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     forwardedEnv: input.forwardedEnv ?? {},
     platformEnv: input.platformEnv,
   }) as NodeJS.ProcessEnv;
+  const linqDeliveryContexts = resolveHostedAssistantLinqDeliveryContexts({
+    context: input.linqDeliveryContext ?? null,
+    contexts: input.linqDeliveryContexts ?? null,
+    wake: input.wake,
+  });
   const outcomes: HostedAssistantDeliveryOutcome[] = [];
   const blockedForegroundDeliveryKeys = new Set<string>();
   const preparedDispatchByIntentId = new Map(
@@ -1456,6 +1489,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         assistantDeliveryEffect,
         signal: input.signal ?? null,
         linqEnv,
+        linqDeliveryContexts,
         preparedDispatch: ownsPreparedDispatch ? preparedDispatch : null,
         telegramEnv,
         telegramVoiceMemoEnv,
@@ -1589,6 +1623,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   signal: AbortSignal | null;
   linqEnv: NodeJS.ProcessEnv;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
   preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   telegramEnv: NodeJS.ProcessEnv;
   telegramVoiceMemoEnv: NodeJS.ProcessEnv;
@@ -1632,15 +1667,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     if (disabledAutoReplyOutcome) {
       return disabledAutoReplyOutcome;
     }
-    const linqDeliveryContext = input.preparedDispatch?.linqDeliveryContext
-      ?? (input.wake
-        ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
-        : null);
-    const routeAuthorityRequired = shouldRequireHostedAssistantLinqRouteAuthority({
-      effect: input.assistantDeliveryEffect,
-      linqDeliveryContext,
-      preparedDispatch: input.preparedDispatch,
-    });
+    const linqDeliveryContexts = input.preparedDispatch?.linqDeliveryContext
+      ? [input.preparedDispatch.linqDeliveryContext, ...input.linqDeliveryContexts]
+      : input.linqDeliveryContexts;
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
         preflightDispatchIntent: async ({ intent, now: preflightNow, vault }) =>
@@ -1734,45 +1763,57 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         sendLinq: createHostedAssistantLinqSendDependency({
           actionApprovalPort: input.actionApprovalPort,
+          allowCurrentInboundEngagementBypass: input.assistantDeliveryEffect.deliveryPhase === "foreground_current_turn",
           assertLiveness: input.assertLiveness,
           effectsPort: input.effectsPort,
           expectedDedupeKey: input.assistantDeliveryEffect.fingerprint,
           intentId: input.assistantDeliveryEffect.effectId,
           linqEnv: input.linqEnv,
-          linqDeliveryContext,
+          linqDeliveryContexts,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
           providerFetch: input.providerFetch,
-          routeAuthorityRequired,
           signal: input.signal,
           vaultRoot: input.vaultRoot,
         }),
         sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
+          allowCurrentInboundEngagementBypass: input.assistantDeliveryEffect.deliveryPhase === "foreground_current_turn",
           assertLiveness: input.assertLiveness,
           effectsPort: input.effectsPort,
           linqEnv: input.linqEnv,
-          linqDeliveryContext,
+          linqDeliveryContexts,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
+          intentId: input.assistantDeliveryEffect.effectId,
           providerFetch: input.providerFetch,
-          routeAuthorityRequired,
           signal: input.signal,
         }),
         setLinqMessageReaction: async (request) => {
           await assertHostedDeliveryLiveNow(input);
-          const routeScopedContext = linqDeliveryContext;
+          const deliveryContext = resolveHostedAssistantLinqReactionDeliveryContextFromCandidatesForRequest({
+            contexts: linqDeliveryContexts,
+            target: request.target,
+            targetMessageId: request.targetMessageId,
+          });
           await assertHostedAssistantLinqRouteAuthorityForDelivery({
-            deliveryContext: resolveHostedAssistantLinqReactionDeliveryContextForRequest({
-              context: routeScopedContext,
-              target: request.target,
-              targetMessageId: request.targetMessageId,
-            }),
+            deliveryContext,
             effectsPort: input.effectsPort,
-            routeAuthorityRequired,
-            routeScopedContext,
             signal: input.signal,
+          });
+          await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+            allowCurrentInboundBypass: input.assistantDeliveryEffect.deliveryPhase === "foreground_current_turn",
+            deliveryContext,
+            directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
+            effectsPort: input.effectsPort,
+            fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+            idempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey ?? null,
+            intentId: input.assistantDeliveryEffect.effectId,
+            replyToMessageId: request.targetMessageId,
+            signal: input.signal,
+            target: request.target,
+            targetKind: "thread",
           });
           let reactionProviderDispatchEntered = false;
           const result = await setHostedProviderLinqMessageReaction({
@@ -1858,7 +1899,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         ? dispatched.intent.delivery
         : null,
       effectsPort: input.effectsPort,
-      linqDeliveryContext,
+      linqDeliveryContexts,
       signal: input.signal,
       userId: input.userId,
       wake: input.wake,
@@ -2018,24 +2059,41 @@ function readProviderFetchRequestUrl(request: Parameters<typeof fetch>[0]): stri
   return String(request);
 }
 
+function resolveHostedAssistantLinqDeliveryContexts(input: {
+  context?: HostedAssistantLinqDeliveryContext | null;
+  contexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
+  wake?: HostedRuntimeEvent | null;
+}): readonly HostedAssistantLinqDeliveryContext[] {
+  if (input.contexts && input.contexts.length > 0) {
+    return input.contexts;
+  }
+  if (input.context) {
+    return [input.context];
+  }
+  const wakeContext = input.wake
+    ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
+    : null;
+  return wakeContext ? [wakeContext] : [];
+}
+
 function createHostedAssistantLinqSendDependency(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
+  allowCurrentInboundEngagementBypass?: boolean;
   assertLiveness?: () => Promise<void>;
-  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement" | "assertLinqThreadRouteAuthority"> | null;
   expectedDedupeKey?: string | null;
   intentId?: string | null;
-  linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
+  linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
-  routeAuthorityRequired?: boolean;
   signal: AbortSignal | null;
   vaultRoot?: string | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
   return async (request) => {
     await assertHostedDeliveryLiveNow(input);
-    const deliveryContext = resolveHostedAssistantLinqDeliveryContextForRequest({
-      context: input.linqDeliveryContext ?? null,
+    const deliveryContext = resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
+      contexts: input.linqDeliveryContexts ?? [],
       replyToMessageId: request.replyToMessageId ?? null,
       target: request.target,
       targetKind: request.targetKind ?? null,
@@ -2046,19 +2104,31 @@ function createHostedAssistantLinqSendDependency(input: {
     const fromPhoneNumber =
       normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
+    const providerTarget = deliveryContext?.target ?? request.target;
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
+    await assertHostedAssistantLinqRouteAuthorityForDelivery({
+      deliveryContext,
+      effectsPort: input.effectsPort ?? null,
+      signal: signal ?? null,
+    });
+    await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+      allowCurrentInboundBypass: input.allowCurrentInboundEngagementBypass === true,
+      deliveryContext,
+      directRecipientPhoneNumber,
+      effectsPort: input.effectsPort ?? null,
+      fromPhoneNumber,
+      idempotencyKey: request.idempotencyKey ?? null,
+      intentId: input.intentId ?? null,
+      replyToMessageId: request.replyToMessageId ?? null,
+      signal: signal ?? null,
+      target: request.target,
+      targetKind: request.targetKind ?? null,
+    });
     const dependencies = requireHostedProviderFetchDependencies({
       env: input.linqEnv,
       fetchImplementation: input.providerFetch,
       ...(signal ? { signal } : {}),
     }, "Hosted assistant Linq delivery");
-    await assertHostedAssistantLinqRouteAuthorityForDelivery({
-      deliveryContext,
-      effectsPort: input.effectsPort ?? null,
-      routeAuthorityRequired: input.routeAuthorityRequired === true,
-      routeScopedContext: input.linqDeliveryContext ?? null,
-      signal: signal ?? null,
-    });
     const verifiedVaultFiles = await preloadApprovedHostedAssistantVaultFiles({
       actionApprovalPort: input.actionApprovalPort ?? null,
       expectedDedupeKey: input.expectedDedupeKey ?? null,
@@ -2074,7 +2144,7 @@ function createHostedAssistantLinqSendDependency(input: {
       media: request.media ?? null,
       message: request.message,
       replyToMessageId: request.replyToMessageId ?? null,
-      target: request.target,
+      target: providerTarget,
       targetKind: request.targetKind ?? null,
     }, {
       ...dependencies,
@@ -2218,23 +2288,25 @@ function buildHostedVaultFileMediaIdentity(input: {
 }
 
 function createHostedAssistantLinqVoiceMemoSendDependency(input: {
+  allowCurrentInboundEngagementBypass?: boolean;
   assertLiveness?: () => Promise<void>;
-  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null;
-  linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement" | "assertLinqThreadRouteAuthority"> | null;
+  intentId?: string | null;
+  linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
-  routeAuthorityRequired?: boolean;
   signal: AbortSignal | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinqVoiceMemo"]> {
   return async (request) => {
     await assertHostedDeliveryLiveNow(input);
-    const deliveryContext = resolveHostedAssistantLinqDeliveryContextForRequest({
-      context: input.linqDeliveryContext ?? null,
+    const deliveryContext = resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
+      contexts: input.linqDeliveryContexts ?? [],
       replyToMessageId: request.replyToMessageId ?? null,
       target: request.target,
       targetKind: request.targetKind ?? null,
     });
+    const providerTarget = deliveryContext?.target ?? request.target;
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
     const dependencies = requireHostedProviderFetchDependencies({
       env: input.linqEnv,
@@ -2244,14 +2316,25 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
     await assertHostedAssistantLinqRouteAuthorityForDelivery({
       deliveryContext,
       effectsPort: input.effectsPort ?? null,
-      routeAuthorityRequired: input.routeAuthorityRequired === true,
-      routeScopedContext: input.linqDeliveryContext ?? null,
       signal: signal ?? null,
+    });
+    await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+      allowCurrentInboundBypass: input.allowCurrentInboundEngagementBypass === true,
+      deliveryContext,
+      directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
+      effectsPort: input.effectsPort ?? null,
+      fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+      idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
+      intentId: input.intentId ?? null,
+      replyToMessageId: deliveryContext?.replyToMessageId ?? null,
+      signal: signal ?? null,
+      target: providerTarget,
+      targetKind: "thread",
     });
     input.onProviderDispatchEntered?.();
     const result = await sendHostedProviderLinqVoiceMemo({
       attachmentId: request.attachmentId,
-      target: deliveryContext?.target ?? request.target,
+      target: providerTarget,
     }, dependencies);
     await assertHostedDeliveryLiveNow(input);
     return result;
@@ -2261,28 +2344,10 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
 async function assertHostedAssistantLinqRouteAuthorityForDelivery(input: {
   deliveryContext: HostedAssistantLinqDeliveryContext | null;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null;
-  routeAuthorityRequired?: boolean;
-  routeScopedContext?: HostedAssistantLinqDeliveryContext | null;
   signal: AbortSignal | null;
 }): Promise<void> {
   const routeAuthority = input.deliveryContext?.routeAuthority ?? null;
   if (!routeAuthority) {
-    if (input.routeScopedContext?.routeAuthority) {
-      throw new VaultCliError(
-        "ASSISTANT_LINQ_ROUTE_AUTHORITY_TARGET_MISMATCH",
-        "Hosted Linq route authority does not match the requested delivery target.",
-      );
-    }
-    if (input.routeAuthorityRequired === true) {
-      throw createAssistantDeliveryBlockedError(
-        "ASSISTANT_LINQ_ROUTE_AUTHORITY_REQUIRED",
-        "Hosted Linq route authority is required before retrying this route-scoped delivery.",
-        {
-          blockKind: "linq_route_authority_missing",
-          resume: "recipient_inbound",
-        },
-      );
-    }
     return;
   }
 
@@ -2294,45 +2359,87 @@ async function assertHostedAssistantLinqRouteAuthorityForDelivery(input: {
   });
 }
 
-function shouldRequireHostedAssistantLinqRouteAuthority(input: {
-  effect: HostedAssistantDeliveryEffect;
-  linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;
-  preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
-}): boolean {
-  if (input.linqDeliveryContext?.routeAuthority) {
-    return false;
+async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
+  allowCurrentInboundBypass: boolean;
+  deliveryContext: HostedAssistantLinqDeliveryContext | null;
+  directRecipientPhoneNumber: string | null;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
+  fromPhoneNumber: string | null;
+  idempotencyKey: string | null;
+  intentId: string | null;
+  replyToMessageId: string | null;
+  signal: AbortSignal | null;
+  target: string;
+  targetKind: string | null;
+}): Promise<void> {
+  if (isHostedAssistantCurrentInboundLinqReply(input)) {
+    return;
   }
-  if (!input.preparedDispatch) {
-    return false;
-  }
-  if (input.effect.deliveryPhase !== "background_retry") {
-    return false;
-  }
-  return isHostedAssistantLinqRouteScopedPayload(input.effect.payload);
-}
 
-function isHostedAssistantLinqRouteScopedPayload(
-  payload: HostedAssistantDeliveryPayload,
-): boolean {
-  return payload.channel === "linq"
-    && (
-      payload.bindingDeliveryKind === "thread"
-      || normalizeHostedLinqRouteScopedTarget(payload.threadId) !== null
-      || normalizeHostedLinqRouteScopedTarget(payload.explicitTarget) !== null
+  const assertRecentInbound = input.effectsPort?.assertLinqRecentInboundEngagement;
+  if (!assertRecentInbound) {
+    throw new VaultCliError(
+      "ASSISTANT_LINQ_ENGAGEMENT_ASSERT_UNAVAILABLE",
+      "Hosted Linq delivery requires recent-recipient-engagement assertion before provider dispatch.",
+      { retryable: true },
     );
+  }
+  await assertRecentInbound({
+    directRecipientPhoneNumber: input.directRecipientPhoneNumber,
+    engagementKind: readHostedAssistantLinqEngagementKind(input.idempotencyKey),
+    fromPhoneNumber: input.fromPhoneNumber,
+    idempotencyKey: input.idempotencyKey,
+    intentId: input.intentId,
+    routeAuthority: input.deliveryContext?.routeAuthority ?? null,
+    target: input.deliveryContext?.target ?? input.target,
+    targetKind: input.targetKind === "explicit" || input.targetKind === "participant" || input.targetKind === "thread"
+      ? input.targetKind
+      : null,
+  }, {
+    signal: input.signal,
+  });
 }
 
-function normalizeHostedLinqRouteScopedTarget(
-  value: string | null | undefined,
-): string | null {
+function readHostedAssistantLinqEngagementKind(
+  idempotencyKey: string | null,
+): HostedRuntimeLinqEngagementKind {
+  return isHostedSignupWelcomeDeliveryIdempotencyKey(idempotencyKey)
+    ? "first_contact"
+    : "requires_recent_inbound";
+}
+
+function isHostedAssistantCurrentInboundLinqReply(input: {
+  allowCurrentInboundBypass: boolean;
+  deliveryContext: HostedAssistantLinqDeliveryContext | null;
+  replyToMessageId: string | null;
+  target: string;
+  targetKind: string | null;
+}): boolean {
+  if (!input.allowCurrentInboundBypass || !input.deliveryContext) {
+    return false;
+  }
+  if (input.targetKind !== "thread" && input.targetKind !== "explicit") {
+    return false;
+  }
+  const target = normalizeHostedLinqDeliveryText(input.target);
+  const replyToMessageId = normalizeHostedLinqDeliveryText(input.replyToMessageId);
+  return (
+    target !== null
+    && target === input.deliveryContext.target
+    && replyToMessageId !== null
+    && replyToMessageId === input.deliveryContext.replyToMessageId
+  );
+}
+
+function normalizeHostedLinqDeliveryText(value: string | null | undefined): string | null {
   const normalized = value?.trim() ?? "";
-  return normalized.length > 0 && !normalized.startsWith("+") ? normalized : null;
+  return normalized.length > 0 ? normalized : null;
 }
 
 function requireHostedAssistantLinqRouteAuthorityAssert(
   effectsPort: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null,
 ): (
-  authority: HostedExecutionExternalThreadRouteAuthority,
+  authority: HostedExecutionLinqExternalThreadRouteAuthority,
   context?: { signal?: AbortSignal | null },
 ) => Promise<void> {
   const assertAuthority = effectsPort?.assertLinqThreadRouteAuthority;

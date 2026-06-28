@@ -273,7 +273,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
   })
 
-  it('creates over a Linq participant route with a Linq delivery source, preserving deliverySource', async () => {
+  it('skips Linq participant routes even when a Linq delivery source is present', async () => {
     const vaultRoot = await createVaultRoot()
     const linqParticipantRoute = {
       channel: 'linq',
@@ -292,25 +292,19 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
-      skipped: 0,
+      created: 0,
+      skipped: 4,
       updated: 0,
     })
 
     await expect(showAutomation({
       automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
       vaultRoot,
-    })).resolves.toMatchObject({
-      route: linqParticipantRoute,
-      status: 'active',
-    })
+    })).resolves.toBeNull()
     await expect(showAutomation({
       automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
       vaultRoot,
-    })).resolves.toMatchObject({
-      route: linqParticipantRoute,
-      status: 'active',
-    })
+    })).resolves.toBeNull()
   })
 
   it('skips creation for a Linq participant route without a Linq delivery source', async () => {

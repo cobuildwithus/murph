@@ -388,6 +388,10 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
   }
 
   await drainHostedLinqSideEffectsDirect({
+    currentInboundReply: {
+      chatId: wake.message.linqMessage.chatId,
+      messageId: wake.message.linqMessage.messageId,
+    },
     prisma: input.prisma,
     sideEffects: buildAiUsageQuotaReplyResponse({
       chatId: wake.message.linqMessage.chatId,
@@ -400,6 +404,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       messageId: wake.message.linqMessage.messageId,
       noticeCode: decision.userNotice.code,
       occurredAt: wake.occurredAt,
+      routeAuthority: wake.message.routeAuthority ?? null,
       sourceEventId: wake.eventId,
     }).desiredSideEffects,
   });

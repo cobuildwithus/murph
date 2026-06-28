@@ -345,6 +345,7 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
     return `sha256-${hex.padEnd(24, "0").slice(0, 24)}`;
   }),
   buildHostedLocalDevOverrides: vi.fn(() => ({
+    DEVICE_SYNC_PUBLIC_BASE_URL: "http://localhost:3000/api/device-sync",
     HOSTED_WEB_BASE_URL: "http://localhost:3000",
   })),
   buildHostedLocalStateEnvFileText: vi.fn(() => 'HOSTED_CRYPTO_ENV="local"'),
@@ -362,7 +363,12 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
         : { ai: { binding: "AI" } }),
     };
   }),
-  buildWranglerVarArgs: vi.fn(() => ["--var", "HOSTED_WEB_BASE_URL:http://localhost:3000"]),
+  buildWranglerVarArgs: vi.fn((source: Readonly<Record<string, string | undefined>>) => [
+    "--var",
+    `HOSTED_WEB_BASE_URL:${source.HOSTED_WEB_BASE_URL}`,
+    "--var",
+    `DEVICE_SYNC_PUBLIC_BASE_URL:${source.DEVICE_SYNC_PUBLIC_BASE_URL}`,
+  ]),
   includesWranglerLocalDevAiBinding: vi.fn(
     (source: Readonly<Record<string, string | undefined>>) =>
       !(source.NODE_ENV === "test" && source.MURPH_HOSTED_LOCAL_TEST_ROUTES === "1")
@@ -404,6 +410,7 @@ vi.mock("../../src/dev-hosted-local/environment.ts", () => ({
     HOSTED_ASSISTANT_PROVIDER:
       input.overrides?.HOSTED_ASSISTANT_PROVIDER ?? "openai",
     OPENAI_API_KEY: input.overrides?.OPENAI_API_KEY,
+    DEVICE_SYNC_PUBLIC_BASE_URL: "http://127.0.0.1:1/api/device-sync",
     HOSTED_EXECUTION_RUNNER_HOST_ALIAS:
       input.overrides?.HOSTED_EXECUTION_RUNNER_HOST_ALIAS
       ?? "127.0.0.1",
@@ -604,6 +611,8 @@ describe("hosted local dev stack", () => {
         "/tmp/murph-dev-env-test/cloudflare-worker.env",
         "--var",
         "HOSTED_WEB_BASE_URL:http://localhost:3000",
+        "--var",
+        "DEVICE_SYNC_PUBLIC_BASE_URL:http://localhost:3000/api/device-sync",
       ],
       expect.objectContaining({
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",

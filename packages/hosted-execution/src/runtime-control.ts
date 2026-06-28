@@ -712,7 +712,7 @@ export interface HostedRuntimeUsageRecordResponse {
 }
 
 export interface HostedRuntimeLinqContactCardShareAfterOutboundRequest {
-  authority: HostedExecutionLinqExternalThreadRouteAuthority;
+  authority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
   chatId: string;
   service: string | null;
   threadIsDirect: boolean | null;

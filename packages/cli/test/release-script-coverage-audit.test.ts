@@ -302,6 +302,9 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain('Do not use app connectors for this preset.')
     expect(prDeepReviewPrompt).toContain('if you cannot read the PR diff or the touched files from the required ZIP/repomix attachments')
     expect(prDeepReviewPrompt).toContain('do not review from memory, a connector, pasted context, or the PR description alone')
+    expect(prDeepReviewPrompt).not.toContain('app_connector="github"')
+    expect(prDeepReviewPrompt).not.toContain('GitHub connector context')
+    expect(prDeepReviewPrompt).not.toContain('connected repository, PR diff, or touched files')
     expect(prDeepReviewPrompt).toContain('start the final message with a single `Checked:` line')
     expect(prDeepReviewPrompt).toContain('`Checked: PR #123 @ abc1234`')
     const prDeepReviewLoop = readFileSync(

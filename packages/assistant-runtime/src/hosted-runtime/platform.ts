@@ -1,5 +1,5 @@
 import type {
-  HostedExecutionExternalThreadRouteAuthority,
+  HostedExecutionLinqExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
 import type {
   HostedActionApprovalConsumeRequest,
@@ -185,6 +185,21 @@ export interface HostedRuntimeLinqSendResponse {
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
 
+export type HostedRuntimeLinqEngagementKind =
+  | "first_contact"
+  | "requires_recent_inbound";
+
+export interface HostedRuntimeLinqRecentInboundEngagementRequest {
+  directRecipientPhoneNumber?: string | null;
+  engagementKind?: HostedRuntimeLinqEngagementKind | null;
+  fromPhoneNumber?: string | null;
+  idempotencyKey?: string | null;
+  intentId?: string | null;
+  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
+  target: string | null;
+  targetKind?: HostedRuntimeProviderTargetKind | null;
+}
+
 export interface HostedRuntimeWhatsAppSendRequest {
   message: string;
   replyToMessageId?: string | null;
@@ -212,6 +227,13 @@ export interface HostedRuntimeLinqDeleteMessagesRequest {
   messageIds: readonly string[];
 }
 
+type HostedRuntimeLinqContactCardShareAfterOutboundEffectsRequest = Omit<
+  HostedRuntimeLinqContactCardShareAfterOutboundRequest,
+  "authority"
+> & {
+  authority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
+};
+
 type HostedRuntimeEffectsPortBase = {
   deletePreparedAssistantDelivery?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
@@ -229,11 +251,15 @@ type HostedRuntimeEffectsPortBase = {
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
   ): Promise<HostedAssistantDeliveryRecord | null>;
   assertLinqThreadRouteAuthority?(
-    authority: HostedExecutionExternalThreadRouteAuthority,
+    authority: HostedExecutionLinqExternalThreadRouteAuthority,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<void>;
+  assertLinqRecentInboundEngagement?(
+    request: HostedRuntimeLinqRecentInboundEngagementRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
   maybeShareLinqContactCardAfterOutbound?(
-    request: HostedRuntimeLinqContactCardShareAfterOutboundRequest,
+    request: HostedRuntimeLinqContactCardShareAfterOutboundEffectsRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
   sendEmail(request: HostedEmailSendRequest): Promise<{ target: string } | void>;

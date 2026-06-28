@@ -21,6 +21,10 @@ import {
 import {
   requireHostedProviderFetchDependencies,
 } from "./provider-fetch.ts";
+import {
+  resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest,
+  type HostedAssistantLinqDeliveryContext,
+} from "./linq-delivery-context.ts";
 
 const HOSTED_TELEGRAM_CHANNEL_ENV_KEYS = [
   "TELEGRAM_API_BASE_URL",
@@ -100,6 +104,7 @@ export function buildHostedWhatsAppChannelEnv(input: {
 
 export function createHostedAssistantChannelTypingDependencies(input: {
   forwardedEnv: Readonly<Record<string, string>>;
+  linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   platformEnv?: Readonly<Record<string, string>>;
   providerFetch?: typeof fetch | null;
   signal?: AbortSignal;
@@ -107,6 +112,16 @@ export function createHostedAssistantChannelTypingDependencies(input: {
 }): AssistantChannelTypingDependencies {
   return {
     startLinqTyping: async (request) => {
+      const deliveryContext = resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
+        contexts: input.linqDeliveryContexts ?? [],
+        replyToMessageId: null,
+        target: request.target,
+        targetKind: "thread",
+      });
+      if (!deliveryContext || !input.providerFetch) {
+        return undefined;
+      }
+
       const dependencies = requireHostedProviderFetchDependencies({
         env: buildHostedLinqChannelEnv({
           forwardedEnv: input.forwardedEnv,
@@ -115,7 +130,9 @@ export function createHostedAssistantChannelTypingDependencies(input: {
         fetchImplementation: input.providerFetch,
         signal: input.signal,
       }, "Hosted Linq typing indicator");
-      return startLinqTypingIndicator(request, dependencies);
+      return startLinqTypingIndicator({
+        target: deliveryContext.target ?? request.target,
+      }, dependencies);
     },
     startTelegramTyping: async (request) => {
       const dependencies = requireHostedProviderFetchDependencies({

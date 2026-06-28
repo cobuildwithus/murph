@@ -64,6 +64,12 @@ describe('assistant outbox retry policy', () => {
 
   it('detects retryable delivery errors from context, direct flags, failure-class hints, and normalized fallback signals', () => {
     expect(isAssistantOutboxRetryableError({ context: { retryable: true } })).toBe(true)
+    expect(
+      isAssistantOutboxRetryableError({
+        context: { retryable: false },
+        message: 'retryable false: do not retry this request',
+      }),
+    ).toBe(false)
     expect(isAssistantOutboxRetryableError({ retryable: false })).toBe(false)
     expect(
       isAssistantOutboxRetryableError({

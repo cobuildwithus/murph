@@ -189,7 +189,10 @@ describe("sendHostedLinqChatMessage", () => {
     await expect(sendHostedLinqChatMessage({
       chatId: "chat_123",
       message: "hello",
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({
+      chatId: null,
+      messageId: null,
+    });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

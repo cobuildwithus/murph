@@ -704,7 +704,7 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('accepts Linq participant automations when a delivery source is available', async () => {
+  it('rejects Linq participant automations even when a delivery source is available', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-upsert-automation-linq-participant-',
     )
@@ -714,48 +714,37 @@ describe('assistant cron runtime orchestration', () => {
       },
     })
 
-    const job = await upsertAssistantCronAutomation({
-      firstOccurrencePolicy: 'after-current-local-day',
-      instructions: 'Check setup progress.',
-      now: new Date('2026-04-08T15:00:00.000Z'),
-      route: {
-        channel: 'linq',
-        deliverySource: {
-          fromPhoneNumber: '+15550001111',
-          kind: 'linq',
+    await expect(
+      upsertAssistantCronAutomation({
+        firstOccurrencePolicy: 'after-current-local-day',
+        instructions: 'Check setup progress.',
+        now: new Date('2026-04-08T15:00:00.000Z'),
+        route: {
+          channel: 'linq',
+          deliverySource: {
+            fromPhoneNumber: '+15550001111',
+            kind: 'linq',
+          },
+          deliveryTarget: null,
+          identityId: 'hid_linq_identity_participant',
+          participantId: '+15550002222',
+          threadId: null,
         },
-        deliveryTarget: null,
-        identityId: 'hid_linq_identity_participant',
-        participantId: '+15550002222',
-        threadId: null,
-      },
-      schedule: {
-        kind: 'dailyLocal',
-        localTime: '13:30',
-      },
-      slug: 'finish-onboarding-followup',
-      summary: 'Continue setup.',
-      tags: ['assistant', 'onboarding'],
-      title: 'Finish Murph onboarding follow-up',
-      vault: vaultRoot,
+        schedule: {
+          kind: 'dailyLocal',
+          localTime: '13:30',
+        },
+        slug: 'finish-onboarding-followup',
+        summary: 'Continue setup.',
+        tags: ['assistant', 'onboarding'],
+        title: 'Finish Murph onboarding follow-up',
+        vault: vaultRoot,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CRON_DELIVERY_REQUIRED',
     })
-    if (!job) {
-      throw new Error('Expected Linq participant automation to be seeded.')
-    }
 
-    expect(job.state.nextRunAt).toBe('2026-04-09T17:30:00.000Z')
-    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toMatchObject({
-      route: {
-        channel: 'linq',
-        deliverySource: {
-          fromPhoneNumber: '+15550001111',
-          kind: 'linq',
-        },
-        deliveryTarget: null,
-        participantId: '+15550002222',
-      },
-      status: 'active',
-    })
+    expect(findCanonicalAutomation(vaultRoot, 'finish-onboarding-followup')).toBeUndefined()
   })
 
   it('rejects Linq participant automation seeds without a Linq delivery source', async () => {
@@ -3955,8 +3944,8 @@ describe('assistant cron runtime orchestration', () => {
     expect(result.run.status).toBe('succeeded')
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
-        bindingDeliveryTarget: 'participant-1',
-        deliveryKind: 'participant',
+        bindingDeliveryTarget: 'thread-1',
+        deliveryKind: 'thread',
         deliverySource: {
           kind: 'linq',
           fromPhoneNumber: '+15550001111',
@@ -3968,8 +3957,8 @@ describe('assistant cron runtime orchestration', () => {
     )
     const notificationInput = cronMocks.sendAssistantMessageLocal.mock
       .calls[0]?.[0] as Record<string, unknown>
-    expect(notificationInput).toHaveProperty('bindingDeliveryTarget', 'participant-1')
-    expect(notificationInput).toHaveProperty('deliveryKind', 'participant')
+    expect(notificationInput).toHaveProperty('bindingDeliveryTarget', 'thread-1')
+    expect(notificationInput).toHaveProperty('deliveryKind', 'thread')
   })
 
   it('does not snapshot explicit-target Linq cron jobs as participant materialization', () => {

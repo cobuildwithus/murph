@@ -477,6 +477,7 @@ export async function startHostedLocalDevStack(input: {
       ...stripHostedLocalHostOnlyCodexEnv({
         ...runtimeEnv,
         ...cloudflareDevVars,
+        ...localOverrides,
       }),
       ...(hostedLocalCodexModelCatalogJson !== null
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: hostedLocalCodexModelCatalogJson }

@@ -623,10 +623,12 @@ export function parseHostedRuntimeLinqContactCardShareAfterOutboundRequest(
   );
 
   return {
-    authority: parseHostedRuntimeLinqExternalThreadRouteAuthority(
-      record.authority,
-      "Hosted runtime Linq contact-card share after-outbound request authority",
-    ),
+    authority: record.authority === undefined || record.authority === null
+      ? null
+      : parseHostedRuntimeLinqExternalThreadRouteAuthority(
+        record.authority,
+        "Hosted runtime Linq contact-card share after-outbound request authority",
+      ),
     chatId: requireString(
       record.chatId,
       "Hosted runtime Linq contact-card share after-outbound request chatId",

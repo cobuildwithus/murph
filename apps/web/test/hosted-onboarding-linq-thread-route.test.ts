@@ -197,6 +197,7 @@ function createPrisma(input: {
         },
       ];
     }),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
   };
   const hostedMemberRouting = {
     findMany: vi.fn().mockResolvedValue([]),
@@ -210,7 +211,6 @@ function createPrisma(input: {
   const hostedWorkspace = {
     upsert: vi.fn().mockResolvedValue({}),
   };
-
   return {
     hostedMember,
     hostedMemberRouting,
@@ -354,6 +354,7 @@ function createStatefulThreadRoutePrisma() {
       route.threadLookupKey = data.threadLookupKey;
       return route;
     }),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
   };
   const hostedMemberRouting = {
     findMany: vi.fn().mockResolvedValue([]),

@@ -7,9 +7,6 @@ import {
   readHostedThreadRouteByThreadIdentity,
 } from "../src/lib/hosted-routing/thread-route-store";
 import {
-  encryptHostedWebNullableString,
-} from "../src/lib/hosted-web/encryption";
-import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
   createHostedPhoneLookupKey,
@@ -289,30 +286,9 @@ describe("hosted thread route store", () => {
     });
   });
 
-  it("authorizes active member home Linq routes when no explicit route owns the chat", async () => {
+  it("does not authorize home Linq routing state without an explicit thread route", async () => {
     const prisma = createPrismaMock();
     prisma.hostedThreadRoute.findMany.mockResolvedValueOnce([]);
-    const member = {
-      billingStatus: "active",
-      createdAt: new Date("2026-06-24T00:00:00.000Z"),
-      id: "member_home_123",
-      suspendedAt: null,
-      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
-    };
-    prisma.hostedMemberRouting.findUnique.mockResolvedValueOnce({
-      linqChatIdEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-routing.home-linq-chat-id",
-        memberId: "member_home_123",
-        value: "chat_home_123",
-      }),
-      linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
-        field: "hosted-member-routing.home-linq-recipient-phone",
-        memberId: "member_home_123",
-        value: "+15550000000",
-      }),
-      member,
-      memberId: "member_home_123",
-    });
 
     await expect(assertHostedLinqRouteEgressAuthority({
       authority: {
@@ -322,23 +298,21 @@ describe("hosted thread route store", () => {
         threadId: "chat_home_123",
       },
       prisma,
-    })).resolves.toBeUndefined();
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+    });
 
     expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledTimes(1);
     expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           channel: "linq",
-          threadIdentityLookupKey: expect.any(Object),
+          threadLookupKey: expect.any(Object),
         }),
       }),
     );
     expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { memberId: "member_home_123" },
-      }),
-    );
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
   });
 
   it("fails closed when lookup candidates match multiple containers", async () => {

@@ -92,7 +92,20 @@ test("compactRecord removes undefined values and toIsoTimestamp rejects invalid 
   );
 
   assert.equal(toIsoTimestamp("2026-04-08T00:00:00.000Z"), "2026-04-08T00:00:00.000Z");
-  assert.throws(() => toIsoTimestamp("not-a-date"), /Invalid ISO timestamp: not-a-date/u);
+  assert.equal(toIsoTimestamp("2026-04-08T00:00:00+00:00"), "2026-04-08T00:00:00.000Z");
+  assert.equal(toIsoTimestamp("2026-04-08T05:00:00-05:00"), "2026-04-08T10:00:00.000Z");
+  assert.throws(
+    () => toIsoTimestamp("not-a-date"),
+    /Invalid ISO timestamp: not-a-date \(missing time zone\)/u,
+  );
+  assert.throws(
+    () => toIsoTimestamp("2026-04-08T00:00:00"),
+    /Invalid ISO timestamp: 2026-04-08T00:00:00 \(missing time zone\)/u,
+  );
+  assert.throws(
+    () => toIsoTimestamp("2026-04-08"),
+    /Invalid ISO timestamp: 2026-04-08 \(missing time zone\)/u,
+  );
 });
 
 test("sanitizeRawMetadata stringifies non-JSON primitives and drops undefined object fields", () => {

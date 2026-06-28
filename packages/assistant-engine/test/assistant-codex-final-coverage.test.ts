@@ -700,16 +700,6 @@ describe('Codex model catalog', () => {
       },
       {
         audience: {
-          bindingDelivery: { kind: 'participant', target: 'linq-participant' },
-          channel: 'linq',
-          explicitTarget: null,
-        },
-        deliverResponse: true,
-        expectedChannel: null,
-        name: 'Linq participant binding',
-      },
-      {
-        audience: {
           bindingDelivery: { kind: 'thread', target: 'telegram-thread' },
           channel: 'telegram',
           explicitTarget: null,

@@ -6,6 +6,8 @@
 - Treat improving agent capability as a design input. If a behavior can be handled by clear prompt/tool guidance and existing primitives, prefer that over bespoke orchestration code; do not preserve today's model limitations as permanent architecture.
 - Add code around agents only for hard guarantees: security, privacy, state integrity, idempotency, latency/retry bounds, protocol compatibility, deterministic runtime behavior, or failures proven by tests or production evidence that prompt/tool guidance cannot reliably cover.
 - Do not introduce broad managers, speculative frameworks, or compatibility layers when a named primitive, package-owned seam, or direct function can express the behavior clearly.
+- Review, audit, and ReviewGPT findings are inputs to engineering judgment, not architecture ownership. Do not accept a finding by adding a new state owner, lifecycle, queue, reconciliation loop, policy manager, or abstraction when the invariant can be preserved by deleting code, reordering existing writes, tightening an existing owner boundary, deriving from one source of truth, or adding a focused regression around the existing primitive.
+- If a review-suggested fix makes the architecture broader, require production-path proof that the simpler owner-boundary fix cannot satisfy the invariant. Otherwise reject, defer, or redesign the finding before changing code.
 - Keep production/source code free of branches, exports, routes, helpers, fixtures, and flags that exist only for tests or harnesses. Test-only needs belong in test files, fixtures, support modules, or test-specific composition outside the production source surface.
 - If a test needs a new source seam, make it a real production seam with clear runtime ownership and product/debug value. Do not widen package exports, public APIs, runtime env branches, or internal object methods only to make a harness easier to drive.
 - Tests and E2E checks should mock the fewest boundaries needed to stay deterministic and affordable. Prefer production-faithful libraries, binaries, protocols, and runtime integrations over bespoke mocks; stub only external provider edges, secrets, clocks, or failure cases that cannot safely run in repo automation.
@@ -15,6 +17,13 @@
 - Any operation that resumes, wakes, mutates, egresses, delivers, deletes, exports, or recovers user state across web, Cloudflare, assistant-runtime, provider callbacks, or UI routes must revalidate an explicit durable authority tuple owned by the source-of-truth plane. Process-local pointers, dashboard/layout state, provider callback state, session presence, or cached "active" state may optimize only after durable authority is proven.
 - A session proves who is present, not that a sensitive or lifecycle-specific action is authorized. Destructive actions, bulk exports, managed-auth completion, mailbox resume, checkout recovery, provider egress, and runtime wake/reuse must bind to the narrow action, user/member, route/target, attempt/lease/fence, freshness proof, or row lock that owns that action.
 - If durable authority is missing, stale, ambiguous, or mismatched, fail closed or fall back to the narrower safe flow. Do not "complete" by trusting ambient UI state, process memory, or provider success alone.
+
+## Product-Critical Flow Preservation
+
+- Do not fix safety, reliability, privacy, auth, or review findings by disabling, silently dropping, or degrading an existing user-critical flow unless the user explicitly asks for that product change.
+- User-critical flows include onboarding, signup and welcome delivery, replies to a current inbound message, billing and access transitions, authentication, device/data sync, and privacy or safety controls.
+- Any change that tightens a guard, permission check, egress policy, retry rule, route selection, or delivery decision must preserve an authorized success path for the existing UX, or replace it with an explicitly designed product path. Prove that path with a production-faithful test, E2E, or owner-level integration check.
+- If safety and UX appear to conflict, stop and surface the tradeoff. Do not ship a silent no-op, dropped message, blocked onboarding path, or unreachable recovery path as a safety fix.
 
 ## Stable Idempotency Identity
 

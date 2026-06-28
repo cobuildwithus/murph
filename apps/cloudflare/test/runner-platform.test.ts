@@ -59,6 +59,7 @@ import {
 } from "../src/runtime-platform.ts";
 import {
   fetchHostedWebControlPlaneJson,
+  HostedWebControlPlaneResponseError,
 } from "../src/runtime-platform/web-control-transport.ts";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
@@ -2474,6 +2475,52 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         userId: "member_123",
       }),
     );
+  });
+
+  it("preserves structured non-retryable web-control errors without raw JSON in the message", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
+        message: "Recent recipient reply required before iMessage delivery.",
+        retryable: false,
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 403,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: {
+        keyId: "v1",
+        privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    try {
+      await platform.workspacePort!.read!();
+      throw new Error("Expected web-control read to fail.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(HostedWebControlPlaneResponseError);
+      expect(error).toMatchObject({
+        code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
+        context: {
+          retryable: false,
+          status: 403,
+          statusCode: 403,
+        },
+        retryable: false,
+        status: 403,
+        statusCode: 403,
+      });
+      expect(error instanceof Error ? error.message : String(error))
+        .toContain("Recent recipient reply required before iMessage delivery.");
+      expect(error instanceof Error ? error.message : String(error))
+        .not.toContain("\"retryable\":false");
+    }
   });
 
   it("logs direct control-plane fetch failures with raw redacted error detail", async () => {

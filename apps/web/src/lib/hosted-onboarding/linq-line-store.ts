@@ -1,0 +1,333 @@
+import type { Prisma, PrismaClient } from "@prisma/client";
+
+import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
+import {
+  createHostedPhoneLookupKey,
+  readHostedPhoneHint,
+} from "./contact-privacy";
+import {
+  createHostedLinqProviderEventLookupKey,
+} from "./linq-observability-identifiers";
+import {
+  createHostedLinqProviderEventOrderId,
+} from "./linq-provider-ordering";
+import { normalizePhoneNumber } from "./phone";
+
+type HostedLinqLineClient = PrismaClient | Prisma.TransactionClient;
+
+export async function upsertHostedLinqLineForPhoneTx(input: {
+  activeMemberLimit?: number | null;
+  observedAt: Date;
+  phoneNumber: string;
+  prisma: HostedLinqLineClient;
+  source: "configured" | "provider" | "webhook";
+}) {
+  const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
+  const lookupKey = createHostedPhoneLookupKey(normalizedPhoneNumber);
+
+  if (!normalizedPhoneNumber || !lookupKey) {
+    throw new TypeError("Hosted Linq line upsert requires a valid phone number.");
+  }
+
+  return input.prisma.hostedLinqLine.upsert({
+    where: {
+      phoneNumber: normalizedPhoneNumber,
+    },
+    create: {
+      assignmentWeight: 100,
+      ...(input.activeMemberLimit === undefined ? {} : { activeMemberLimit: input.activeMemberLimit }),
+      configuredAt: input.source === "configured" ? input.observedAt : null,
+      egressPolicy: "enabled",
+      healthStatus: "unknown",
+      phoneNumber: normalizedPhoneNumber,
+      phoneNumberHint: readHostedPhoneHint(normalizedPhoneNumber),
+      phoneNumberLookupKey: lookupKey,
+      providerSeenAt: input.source === "provider" ? input.observedAt : null,
+      source: input.source,
+    },
+    update: {
+      ...(input.activeMemberLimit === undefined ? {} : { activeMemberLimit: input.activeMemberLimit }),
+      ...(input.source === "configured" ? { configuredAt: input.observedAt } : {}),
+      ...(input.source === "provider" ? { providerSeenAt: input.observedAt } : {}),
+      phoneNumber: normalizedPhoneNumber,
+      phoneNumberHint: readHostedPhoneHint(normalizedPhoneNumber),
+      ...(input.source === "webhook" ? {} : { source: input.source }),
+    },
+  });
+}
+
+export async function syncHostedLinqConfiguredLinesTx(input: {
+  activeMemberLimit: number | null;
+  observedAt?: Date;
+  phoneNumbers: readonly string[];
+  prisma: HostedLinqLineClient;
+}): Promise<void> {
+  const observedAt = input.observedAt ?? new Date();
+  for (const phoneNumber of input.phoneNumbers) {
+    await upsertHostedLinqLineForPhoneTx({
+      activeMemberLimit: input.activeMemberLimit,
+      observedAt,
+      phoneNumber,
+      prisma: input.prisma,
+      source: "configured",
+    });
+  }
+}
+
+export async function projectHostedLinqLineForProviderEventTx(input: {
+  event: ParsedHostedLinqProviderEvent;
+  lineLookupKey?: string | null;
+  prisma: HostedLinqLineClient;
+}): Promise<boolean> {
+  const lineLookupKey = input.lineLookupKey ?? await ensureHostedLinqLineForProviderEventTx(input);
+  if (!lineLookupKey) {
+    return false;
+  }
+
+  switch (input.event.eventType) {
+    case "message.received":
+      return projectMessageReceived(input.prisma, lineLookupKey, input.event);
+    case "message.delivered":
+      return projectMessageDelivered(input.prisma, lineLookupKey, input.event);
+    case "message.failed":
+      return projectMessageFailed(input.prisma, lineLookupKey, input.event);
+    case "phone_number.status_updated":
+      return projectPhoneNumberStatusUpdated(input.prisma, lineLookupKey, input.event);
+  }
+}
+
+export async function ensureHostedLinqLineForProviderEventTx(input: {
+  event: ParsedHostedLinqProviderEvent;
+  prisma: HostedLinqLineClient;
+}): Promise<string | null> {
+  if (!input.event.phoneNumberLookupKey) {
+    return null;
+  }
+
+  if (input.event.phoneNumberRole === "line" && input.event.phoneNumber) {
+    const line = await upsertHostedLinqLineForPhoneTx({
+      observedAt: input.event.providerCreatedAt,
+      phoneNumber: input.event.phoneNumber,
+      prisma: input.prisma,
+      source: "webhook",
+    });
+    return line.phoneNumberLookupKey;
+  }
+
+  const existing = await input.prisma.hostedLinqLine.findUnique({
+    where: {
+      phoneNumberLookupKey: input.event.phoneNumberLookupKey,
+    },
+    select: {
+      phoneNumberLookupKey: true,
+    },
+  });
+
+  return existing?.phoneNumberLookupKey ?? null;
+}
+
+async function projectMessageReceived(
+  prisma: HostedLinqLineClient,
+  phoneNumberLookupKey: string,
+  event: ParsedHostedLinqProviderEvent,
+): Promise<boolean> {
+  if (event.direction === "outbound") {
+    await prisma.hostedLinqLine.update({
+      where: { phoneNumberLookupKey },
+      data: {
+        totalOutboundCount: { increment: 1 },
+      },
+    });
+    const updated = await prisma.hostedLinqLine.updateMany({
+      where: {
+        phoneNumberLookupKey,
+        OR: [
+          { lastOutboundAt: null },
+          { lastOutboundAt: { lt: event.providerCreatedAt } },
+        ],
+      },
+      data: {
+        lastOutboundAt: event.providerCreatedAt,
+      },
+    });
+    return updated.count === 1;
+  }
+
+  await prisma.hostedLinqLine.update({
+    where: { phoneNumberLookupKey },
+    data: {
+      totalInboundCount: { increment: 1 },
+    },
+  });
+  const updated = await prisma.hostedLinqLine.updateMany({
+    where: {
+      phoneNumberLookupKey,
+      OR: [
+        { lastInboundAt: null },
+        { lastInboundAt: { lt: event.providerCreatedAt } },
+      ],
+    },
+    data: {
+      lastInboundAt: event.providerCreatedAt,
+    },
+  });
+  return updated.count === 1;
+}
+
+async function projectMessageDelivered(
+  prisma: HostedLinqLineClient,
+  phoneNumberLookupKey: string,
+  event: ParsedHostedLinqProviderEvent,
+): Promise<boolean> {
+  await prisma.hostedLinqLine.update({
+    where: { phoneNumberLookupKey },
+    data: {
+      totalDeliveredCount: { increment: 1 },
+    },
+  });
+
+  const updated = await prisma.hostedLinqLine.updateMany({
+    where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, event),
+    data: {
+      consecutiveFailures: 0,
+      healthStatus: "healthy",
+      lastDeliveredAt: event.providerCreatedAt,
+      lastReceiptAt: event.providerCreatedAt,
+      lastReceiptEventId: createHostedLinqProviderEventLookupKey(event.eventId),
+    },
+  });
+  return updated.count === 1;
+}
+
+async function projectMessageFailed(
+  prisma: HostedLinqLineClient,
+  phoneNumberLookupKey: string,
+  event: ParsedHostedLinqProviderEvent,
+): Promise<boolean> {
+  await prisma.hostedLinqLine.update({
+    where: { phoneNumberLookupKey },
+    data: {
+      totalFailedCount: { increment: 1 },
+    },
+  });
+
+  const updated = await prisma.hostedLinqLine.updateMany({
+    where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, event),
+    data: {
+      consecutiveFailures: { increment: 1 },
+      healthStatus: "warning",
+      lastFailedAt: event.providerCreatedAt,
+      lastFailureCode: event.failureCode,
+      lastFailureReason: event.failureReason,
+      lastReceiptAt: event.providerCreatedAt,
+      lastReceiptEventId: createHostedLinqProviderEventLookupKey(event.eventId),
+    },
+  });
+  return updated.count === 1;
+}
+
+async function projectPhoneNumberStatusUpdated(
+  prisma: HostedLinqLineClient,
+  phoneNumberLookupKey: string,
+  event: ParsedHostedLinqProviderEvent,
+): Promise<boolean> {
+  const healthStatus = classifyHostedLinqProviderStatus(event.providerStatus);
+  const egressPolicy = deriveHostedLinqEgressPolicy(event.providerStatus);
+  const updated = await prisma.hostedLinqLine.updateMany({
+    where: buildPhoneNumberStatusProjectionWhere(phoneNumberLookupKey, event),
+    data: {
+      ...(egressPolicy ? { egressPolicy } : {}),
+      healthStatus,
+      lastStatusEventId: createHostedLinqProviderEventLookupKey(event.eventId),
+      providerReason: event.providerReason,
+      providerStatus: event.providerStatus,
+      providerUpdatedAt: event.providerCreatedAt,
+    },
+  });
+  return updated.count === 1;
+}
+
+function buildMessageReceiptLineProjectionWhere(
+  phoneNumberLookupKey: string,
+  event: ParsedHostedLinqProviderEvent,
+): Prisma.HostedLinqLineWhereInput {
+  const eventId = createHostedLinqProviderEventOrderId(event.eventId);
+  return {
+    phoneNumberLookupKey,
+    OR: [
+      {
+        lastReceiptAt: null,
+      },
+      {
+        lastReceiptAt: {
+          lt: event.providerCreatedAt,
+        },
+      },
+      {
+        lastReceiptAt: event.providerCreatedAt,
+        lastReceiptEventId: null,
+      },
+      {
+        lastReceiptAt: event.providerCreatedAt,
+        lastReceiptEventId: {
+          lt: eventId,
+        },
+      },
+    ],
+  };
+}
+
+function buildPhoneNumberStatusProjectionWhere(
+  phoneNumberLookupKey: string,
+  event: ParsedHostedLinqProviderEvent,
+): Prisma.HostedLinqLineWhereInput {
+  const eventId = createHostedLinqProviderEventOrderId(event.eventId);
+  return {
+    phoneNumberLookupKey,
+    OR: [
+      {
+        providerUpdatedAt: null,
+      },
+      {
+        providerUpdatedAt: {
+          lt: event.providerCreatedAt,
+        },
+      },
+      {
+        lastStatusEventId: null,
+        providerUpdatedAt: event.providerCreatedAt,
+      },
+      {
+        lastStatusEventId: {
+          lt: eventId,
+        },
+        providerUpdatedAt: event.providerCreatedAt,
+      },
+    ],
+  };
+}
+
+function classifyHostedLinqProviderStatus(value: string | null): string {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  if (["active", "healthy", "ok", "ready"].includes(normalized)) {
+    return "healthy";
+  }
+  if (/critical|flagged|blocked|disabled|suspended|banned/u.test(normalized)) {
+    return "unhealthy";
+  }
+  if (/at_risk|at-risk|degraded|warning|limited|throttled/u.test(normalized)) {
+    return "degraded";
+  }
+  return "unknown";
+}
+
+function deriveHostedLinqEgressPolicy(value: string | null): string | null {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  if (/critical|flagged|blocked|disabled|suspended|banned/u.test(normalized)) {
+    return "disabled";
+  }
+  if (/at_risk|at-risk|degraded|warning|limited|throttled/u.test(normalized)) {
+    return "avoid_new_assignments";
+  }
+  return null;
+}

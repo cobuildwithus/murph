@@ -1846,44 +1846,6 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
-  it('keeps materialized Linq participant delivery confirmation-pending when no chat id is returned', async () => {
-    const sendLinq = vi.fn().mockResolvedValue({
-      providerMessageId: 'created-message',
-    })
-
-    const materialized = await ASSISTANT_CHANNEL_ADAPTERS.linq.send(
-      {
-        actorId: ' +15550001 ',
-        bindingDelivery: createAssistantBindingDelivery('participant', ' +15550001 '),
-        deliverySource: {
-          kind: 'linq',
-          fromPhoneNumber: '+15550000',
-        },
-        explicitTarget: null,
-        idempotencyKey: ' idem-created ',
-        identityId: null,
-        message: 'welcome',
-        replyToMessageId: null,
-      },
-      {
-        sendLinq,
-      },
-    ).then(
-      () => null,
-      (error: unknown) => error,
-    )
-
-    expect(materialized).toMatchObject({
-      code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
-      message: expect.stringContaining(
-        'Materialized iMessage participant delivery did not return a chat id.',
-      ),
-    })
-    expect(materialized).toMatchObject({
-      message: expect.not.stringContaining('Materialized Linq'),
-    })
-  })
-
   it('falls back to the original stale-chat error when Linq sender probing or recovery fails', async () => {
     vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
     const missingChatError = new VaultCliError(

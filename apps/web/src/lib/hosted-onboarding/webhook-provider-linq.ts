@@ -36,6 +36,9 @@ import {
   readHostedLinqDailyState,
 } from "./linq-daily-state";
 import {
+  recordHostedThreadRouteLinqInboundEngagementTx,
+} from "./linq-egress-engagement";
+import {
   type HostedLinqMessageReceivedEvent,
   type HostedLinqWebhookEvent,
   shouldIgnoreHostedLinqForLocalInboundGuard,
@@ -66,7 +69,6 @@ import {
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
 import {
-  createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
 import type {
@@ -356,11 +358,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
       incomingChatId: summary.chatId,
       incomingRecipientPhone: recipientPhoneNumber,
     });
-    const routeAuthority = buildHostedLinqHomeRouteEgressAuthority({
-      accountLookupKey: createHostedPhoneLookupKey(homeBindingRecipientPhone),
-      memberId: existingMember.id,
-      threadId: summary.chatId,
-    });
 
     const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
       dedupeKey: input.event.event_id,
@@ -380,7 +377,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
           },
           wakeMailboxItemId: existingMailboxItem.id,
           wakeUserId: existingMember.id,
-          ...(routeAuthority ? { linqReadReceiptRouteAuthority: routeAuthority } : {}),
         }),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {
           duplicate: true,
@@ -427,7 +423,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
         dailyQuotaReached: "active-member-daily-quota-reached",
         dailyQuotaReply: "active-member-daily-quota-reply",
       },
-      routeAuthority,
       usageGate,
     });
     if (admissionPlan) {
@@ -435,7 +430,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
     }
 
     const mailboxWake = buildHostedLinqConversationWakeForMailbox({
-      ...(routeAuthority ? { accountLookupKey: routeAuthority.accountLookupKey } : {}),
       eventId: input.event.event_id,
       linqMessage: {
         chatId: summary.chatId,
@@ -458,7 +452,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
       occurredAt,
       participantContact,
       rawParts: messageEvent.data.message.parts,
-      routeAuthority,
       userId: existingMember.id,
     });
 
@@ -478,7 +471,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
         wakeLinqChatId: summary.chatId,
         wakeMailboxItemId: mailboxAppend.item.id,
         wakeUserId: existingMember.id,
-        ...(routeAuthority ? { linqReadReceiptRouteAuthority: routeAuthority } : {}),
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
         dailyInboundCount: dailyState.inboundCount,
@@ -745,6 +737,14 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       }),
     );
   }
+
+  await recordHostedThreadRouteLinqInboundEngagementTx({
+    chatId: summary.chatId,
+    linePhoneNumberLookupKey: input.route.accountLookupKey,
+    memberId: input.route.containerMemberId,
+    occurredAt,
+    prisma: input.prisma,
+  });
 
   const dailyState = await incrementHostedLinqInboundDailyState({
     memberId: input.route.containerMemberId,
@@ -1039,23 +1039,6 @@ function buildHostedLinqThreadRouteEgressAuthority(input: {
     accountLookupKey: input.route.accountLookupKey,
     channel: "linq",
     containerMemberId: input.route.containerMemberId,
-    threadId: input.threadId,
-  };
-}
-
-function buildHostedLinqHomeRouteEgressAuthority(input: {
-  accountLookupKey: string | null;
-  memberId: string;
-  threadId: string;
-}): HostedLinqThreadRouteEgressAuthority | null {
-  if (!input.accountLookupKey) {
-    return null;
-  }
-
-  return {
-    accountLookupKey: input.accountLookupKey,
-    channel: "linq",
-    containerMemberId: input.memberId,
     threadId: input.threadId,
   };
 }

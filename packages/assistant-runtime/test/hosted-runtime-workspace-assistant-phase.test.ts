@@ -5441,8 +5441,42 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.createHostedAssistantProgressDeliveryDependencies).toHaveBeenCalledWith(
       expect.objectContaining({
-        linqDeliveryContext,
+        linqDeliveryContexts: [linqDeliveryContext],
         signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(mocks.createHostedAssistantChannelTypingDependencies).toHaveBeenCalledWith(
+      expect.objectContaining({
+        linqDeliveryContexts: [linqDeliveryContext],
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it("passes foreground Linq delivery context into hosted outbox delivery", async () => {
+    const linqDeliveryContext = {
+      directRecipientPhoneNumber: "+15550000001",
+      fromPhoneNumber: "+15550000002",
+      replyToMessageId: "linq-message-1",
+      routeAuthority: null,
+      service: null,
+      target: "linq-thread-1",
+      threadIsDirect: null,
+    };
+    const effect = createDeliveryEffect();
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([effect]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      linqDeliveryContext,
+    }));
+    await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryEffects: [effect],
+        linqDeliveryContexts: [linqDeliveryContext],
       }),
     );
   });
@@ -7124,6 +7158,7 @@ function createPhaseInput(input: {
         fetchedCount: input.importedCount ?? 0,
         importedCount: input.importedCount ?? 0,
         ...(input.linqDeliveryContext ? { latestLinqDeliveryContext: input.linqDeliveryContext } : {}),
+        ...(input.linqDeliveryContext ? { linqDeliveryContexts: [input.linqDeliveryContext] } : {}),
         state: {
           recentStatuses: [],
           watermarks: {
