@@ -2,7 +2,6 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertHostedLinqRouteEgressAuthority: vi.fn(),
-  assertHostedThreadRouteEgressAuthority: vi.fn(),
   getPrisma: vi.fn(),
   prisma: {},
   requireHostedCloudflareCallbackRequest: vi.fn(),
@@ -14,7 +13,6 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
   assertHostedLinqRouteEgressAuthority: mocks.assertHostedLinqRouteEgressAuthority,
-  assertHostedThreadRouteEgressAuthority: mocks.assertHostedThreadRouteEgressAuthority,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -37,7 +35,6 @@ describe("hosted runtime thread-route egress-authority callback route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue(undefined);
-    mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValue(undefined);
     mocks.getPrisma.mockReturnValue(mocks.prisma);
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
   });
@@ -62,10 +59,9 @@ describe("hosted runtime thread-route egress-authority callback route", () => {
       authority,
       prisma: mocks.prisma,
     });
-    expect(mocks.assertHostedThreadRouteEgressAuthority).not.toHaveBeenCalled();
   });
 
-  it("keeps non-Linq authorities on the explicit thread-route assertion", async () => {
+  it("fails non-Linq authorities closed", async () => {
     const authority = {
       accountLookupKey: "hbidx:telegram:v1:account",
       channel: "telegram",
@@ -77,13 +73,11 @@ describe("hosted runtime thread-route egress-authority callback route", () => {
       authority,
     }));
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-    });
-    expect(mocks.assertHostedThreadRouteEgressAuthority).toHaveBeenCalledWith({
-      authority,
-      prisma: mocks.prisma,
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_THREAD_ROUTE_EGRESS_CHANNEL_UNSUPPORTED",
+      },
     });
     expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
   });
@@ -105,7 +99,6 @@ describe("hosted runtime thread-route egress-authority callback route", () => {
       },
     });
     expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
-    expect(mocks.assertHostedThreadRouteEgressAuthority).not.toHaveBeenCalled();
   });
 });
 

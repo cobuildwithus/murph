@@ -25,7 +25,7 @@ import {
   sendHostedLinqChatMessage,
 } from "./linq";
 import {
-  maybeShareHostedLinqContactCardAfterOutbound,
+  maybeShareHostedLinqContactCardAfterOutboundWithAuthority,
 } from "./linq-contact-card-share";
 import {
   assertHostedLinqRouteEgressAuthority,
@@ -271,24 +271,17 @@ async function sendHostedLinqSideEffect(
     });
 
     const memberId = readHostedLinqSideEffectMemberId(effect.payload);
-    if (memberId && hasValidatedRouteAuthority) {
-      try {
-        await maybeShareHostedLinqContactCardAfterOutbound({
-          chatId: effect.payload.chatId,
-          eligibility: {
-            service: effect.payload.service ?? null,
-            threadIsDirect: effect.payload.threadIsDirect ?? null,
-          },
-          memberId,
-          prisma: options.prisma,
-          signal: options.signal,
-        });
-      } catch (error) {
-        console.warn(
-          "Hosted Linq contact-card side-effect share failed.",
-          buildHostedLinqContactCardSideEffectLogDetails(effect, error),
-        );
-      }
+    const routeAuthority = hasValidatedRouteAuthority && "routeAuthority" in effect.payload
+      ? effect.payload.routeAuthority
+      : null;
+    if (memberId && routeAuthority) {
+      queueHostedLinqContactCardSideEffectShare({
+        effect,
+        memberId,
+        prisma: options.prisma,
+        routeAuthority,
+        signal: options.signal,
+      });
     }
   } catch (error) {
     console.error(
@@ -297,6 +290,34 @@ async function sendHostedLinqSideEffect(
     );
     throw error;
   }
+}
+
+function queueHostedLinqContactCardSideEffectShare(share: {
+  effect: {
+    effectId: string;
+    payload: HostedLinqMessagePayload;
+  };
+  memberId: string;
+  prisma: HostedLinqTransportPersistenceClient;
+  routeAuthority: HostedLinqThreadRouteEgressAuthority;
+  signal?: AbortSignal;
+}): void {
+  void maybeShareHostedLinqContactCardAfterOutboundWithAuthority({
+    authority: share.routeAuthority,
+    boundUserId: share.memberId,
+    chatId: share.effect.payload.chatId,
+    eligibility: {
+      service: share.effect.payload.service ?? null,
+      threadIsDirect: share.effect.payload.threadIsDirect ?? null,
+    },
+    prisma: share.prisma,
+    ...(share.signal ? { signal: share.signal } : {}),
+  }).catch((error: unknown) => {
+    console.warn(
+      "Hosted Linq contact-card side-effect share failed.",
+      buildHostedLinqContactCardSideEffectLogDetails(share.effect, error),
+    );
+  });
 }
 
 async function assertHostedLinqSideEffectRouteAuthority(

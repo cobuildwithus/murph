@@ -3,23 +3,25 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 const mocks = vi.hoisted(() => ({
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   getPrisma: vi.fn(),
-  maybeShareHostedLinqContactCardAfterOutbound: vi.fn(),
-  prisma: {},
+  hostedLinqContactCardShare: {
+    create: vi.fn(),
+    findMany: vi.fn(),
+    updateMany: vi.fn(),
+  },
   requireHostedCloudflareCallbackRequest: vi.fn(),
+  shareHostedLinqContactCard: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
-  maybeShareHostedLinqContactCardAfterOutbound:
-    mocks.maybeShareHostedLinqContactCardAfterOutbound,
+vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
+  shareHostedLinqContactCard: mocks.shareHostedLinqContactCard,
 }));
 
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
-  assertHostedLinqRouteEgressAuthority:
-    mocks.assertHostedLinqRouteEgressAuthority,
+  assertHostedLinqRouteEgressAuthority: mocks.assertHostedLinqRouteEgressAuthority,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -48,20 +50,22 @@ describe("hosted runtime Linq contact-card share callback route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue(undefined);
-    mocks.getPrisma.mockReturnValue(mocks.prisma);
-    mocks.maybeShareHostedLinqContactCardAfterOutbound.mockResolvedValue({
-      action: "share",
+    mocks.getPrisma.mockReturnValue({
+      hostedLinqContactCardShare: mocks.hostedLinqContactCardShare,
     });
+    mocks.hostedLinqContactCardShare.create.mockResolvedValue({});
+    mocks.hostedLinqContactCardShare.findMany.mockResolvedValue([]);
+    mocks.hostedLinqContactCardShare.updateMany.mockResolvedValue({ count: 1 });
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
+    mocks.shareHostedLinqContactCard.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("asserts durable Linq thread authority before sharing the contact card", async () => {
+  it("asserts authority and shares the contact card through the shared helper", async () => {
     const response = await route.POST(buildRequest({
       authority: AUTHORITY,
       chatId: "linq_chat_123",
@@ -75,16 +79,17 @@ describe("hosted runtime Linq contact-card share callback route", () => {
     });
     expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith({
       authority: AUTHORITY,
-      prisma: mocks.prisma,
-    });
-    expect(mocks.maybeShareHostedLinqContactCardAfterOutbound).toHaveBeenCalledWith({
-      chatId: "linq_chat_123",
-      eligibility: {
-        service: "iMessage",
-        threadIsDirect: true,
+      prisma: {
+        hostedLinqContactCardShare: mocks.hostedLinqContactCardShare,
       },
-      memberId: "member_123",
-      prisma: mocks.prisma,
+    });
+    expect(mocks.hostedLinqContactCardShare.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        memberId: "member_123",
+      }),
+    });
+    expect(mocks.shareHostedLinqContactCard).toHaveBeenCalledWith({
+      chatId: "linq_chat_123",
     });
   });
 
@@ -106,7 +111,7 @@ describe("hosted runtime Linq contact-card share callback route", () => {
       },
     });
     expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
-    expect(mocks.maybeShareHostedLinqContactCardAfterOutbound).not.toHaveBeenCalled();
+    expect(mocks.shareHostedLinqContactCard).not.toHaveBeenCalled();
   });
 
   it("rejects callbacks whose authority thread does not match the requested chat", async () => {
@@ -127,8 +132,9 @@ describe("hosted runtime Linq contact-card share callback route", () => {
       },
     });
     expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
-    expect(mocks.maybeShareHostedLinqContactCardAfterOutbound).not.toHaveBeenCalled();
+    expect(mocks.shareHostedLinqContactCard).not.toHaveBeenCalled();
   });
+
 });
 
 function buildRequest(body: unknown): Request {

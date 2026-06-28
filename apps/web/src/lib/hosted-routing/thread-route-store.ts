@@ -2,7 +2,6 @@ import "server-only";
 
 import type {
   HostedExecutionConversationMessageChannel,
-  HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionLinqExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
 
@@ -22,11 +21,8 @@ import type {
   HostedMemberCoreState,
 } from "../hosted-onboarding/hosted-member-store";
 import {
-  readHostedMemberCoreState,
-} from "../hosted-onboarding/hosted-member-store";
-import {
-  readHostedMemberHomeLinqRoute,
-} from "../hosted-onboarding/hosted-member-routing-store";
+  readHostedMemberHomeLinqRoutePrivateState,
+} from "../hosted-onboarding/member-private-codecs";
 import type {
   HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
@@ -51,7 +47,11 @@ export interface HostedThreadRouteIdentitySnapshot {
   owner: HostedMemberCoreState;
 }
 
-export type HostedThreadRouteEgressAuthority = HostedExecutionExternalThreadRouteAuthority;
+interface HostedThreadRouteAuthorityIdentitySnapshot
+  extends HostedThreadRouteIdentitySnapshot {
+  threadLookupKey: string;
+}
+
 export type HostedLinqThreadRouteEgressAuthority =
   HostedExecutionLinqExternalThreadRouteAuthority;
 
@@ -247,48 +247,30 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
   };
 }
 
-export async function assertHostedThreadRouteEgressAuthority(input: {
-  authority: HostedThreadRouteEgressAuthority;
-  prisma: HostedOnboardingReadClient;
-}): Promise<void> {
-  const route = await readHostedThreadRouteByExternalThread({
-    accountLookupKey: input.authority.accountLookupKey,
-    channel: input.authority.channel,
-    prisma: input.prisma,
-    threadId: input.authority.threadId,
-  });
-
-  if (
-    route
-    && route.containerMemberId === input.authority.containerMemberId
-    && hasHostedMemberActiveAccess(route.container)
-    && hasHostedMemberActiveAccess(route.owner)
-  ) {
-    return;
-  }
-
-  throw hostedOnboardingError({
-    code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
-    httpStatus: 403,
-    message: "External thread route egress is no longer authorized.",
-    retryable: false,
-  });
-}
-
 export async function assertHostedLinqRouteEgressAuthority(input: {
   authority: HostedLinqThreadRouteEgressAuthority;
   prisma: HostedOnboardingReadClient;
 }): Promise<void> {
-  const explicitRoute = await readHostedThreadRouteByExternalThread({
-    accountLookupKey: input.authority.accountLookupKey,
-    channel: "linq",
+  const explicitRoutes = await readHostedLinqThreadRoutesByIdentity({
     prisma: input.prisma,
     threadId: input.authority.threadId,
   });
 
-  if (explicitRoute) {
+  if (explicitRoutes.length > 0) {
+    const authorizedThreadLookupKeys = new Set(
+      createHostedThreadRouteLookupKeyReadCandidates({
+        accountLookupKey: input.authority.accountLookupKey,
+        channel: "linq",
+        threadId: input.authority.threadId,
+      }).threadLookupKeys,
+    );
+    const explicitRoute = explicitRoutes.find((route) =>
+      authorizedThreadLookupKeys.has(route.threadLookupKey)
+    );
+
     if (
-      explicitRoute.containerMemberId === input.authority.containerMemberId
+      explicitRoute
+      && explicitRoute.containerMemberId === input.authority.containerMemberId
       && hasHostedMemberActiveAccess(explicitRoute.container)
       && hasHostedMemberActiveAccess(explicitRoute.owner)
     ) {
@@ -298,28 +280,13 @@ export async function assertHostedLinqRouteEgressAuthority(input: {
     throw buildHostedThreadRouteEgressUnauthorizedError();
   }
 
-  const mismatchedExplicitRoute = await readHostedThreadRouteByThreadIdentity({
-    channel: "linq",
+  const homeRoute = await readHostedMemberHomeLinqRouteAuthority({
+    memberId: input.authority.containerMemberId,
     prisma: input.prisma,
-    threadId: input.authority.threadId,
   });
-  if (mismatchedExplicitRoute) {
-    throw buildHostedThreadRouteEgressUnauthorizedError();
-  }
-
-  const [member, homeRoute] = await Promise.all([
-    readHostedMemberCoreState({
-      memberId: input.authority.containerMemberId,
-      prisma: input.prisma,
-    }),
-    readHostedMemberHomeLinqRoute({
-      memberId: input.authority.containerMemberId,
-      prisma: input.prisma,
-    }),
-  ]);
   if (
-    member
-    && hasHostedMemberActiveAccess(member)
+    homeRoute
+    && hasHostedMemberActiveAccess(homeRoute.member)
     && homeRoute?.linqChatId === input.authority.threadId
     && createHostedPhoneLookupKeyReadCandidates(homeRoute.linqRecipientPhone)
       .includes(input.authority.accountLookupKey)
@@ -328,6 +295,141 @@ export async function assertHostedLinqRouteEgressAuthority(input: {
   }
 
   throw buildHostedThreadRouteEgressUnauthorizedError();
+}
+
+async function readHostedLinqThreadRoutesByIdentity(input: {
+  prisma: HostedOnboardingReadClient;
+  threadId: string | number | null | undefined;
+}): Promise<HostedThreadRouteAuthorityIdentitySnapshot[]> {
+  const threadIdentityLookupKeys =
+    createHostedExternalThreadIdentityLookupKeyReadCandidates({
+      channel: "linq",
+      threadId: input.threadId,
+    });
+
+  if (threadIdentityLookupKeys.length === 0) {
+    return [];
+  }
+
+  const rows = await input.prisma.hostedThreadRoute.findMany({
+    orderBy: { createdAt: "asc" },
+    select: {
+      channel: true,
+      container: {
+        select: {
+          member: {
+            select: {
+              billingStatus: true,
+              createdAt: true,
+              id: true,
+              suspendedAt: true,
+              updatedAt: true,
+            },
+          },
+          owner: {
+            select: {
+              billingStatus: true,
+              createdAt: true,
+              id: true,
+              suspendedAt: true,
+              updatedAt: true,
+            },
+          },
+        },
+      },
+      containerMemberId: true,
+      threadLookupKey: true,
+    },
+    where: {
+      channel: "linq",
+      threadIdentityLookupKey: {
+        in: threadIdentityLookupKeys,
+      },
+    },
+  });
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const distinctContainerIds = new Set(rows.map((row) => row.containerMemberId));
+  if (distinctContainerIds.size > 1) {
+    throw hostedOnboardingError({
+      code: "HOSTED_THREAD_ROUTE_IDENTITY_LOOKUP_AMBIGUOUS",
+      details: {
+        channel: "linq",
+        matchCount: rows.length,
+      },
+      httpStatus: 500,
+      message: "External thread identity lookup matched multiple containers.",
+      retryable: true,
+    });
+  }
+
+  return rows.map((row) => {
+    if (!isHostedExternalThreadChannel(row.channel)) {
+      throw hostedOnboardingError({
+        code: "HOSTED_THREAD_ROUTE_CHANNEL_INVALID",
+        httpStatus: 500,
+        message: "External thread route has an unsupported channel.",
+        retryable: false,
+      });
+    }
+
+    return {
+      channel: row.channel,
+      container: row.container.member,
+      containerMemberId: row.containerMemberId,
+      owner: row.container.owner,
+      threadLookupKey: row.threadLookupKey,
+    };
+  });
+}
+
+async function readHostedMemberHomeLinqRouteAuthority(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<{
+  linqChatId: string | null;
+  linqRecipientPhone: string | null;
+  member: HostedMemberCoreState;
+  memberId: string;
+} | null> {
+  const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: {
+      linqChatIdEncrypted: true,
+      linqRecipientPhoneEncrypted: true,
+      member: {
+        select: {
+          billingStatus: true,
+          createdAt: true,
+          id: true,
+          suspendedAt: true,
+          updatedAt: true,
+        },
+      },
+      memberId: true,
+    },
+  });
+
+  if (!routingRecord) {
+    return null;
+  }
+
+  const privateState = await readHostedMemberHomeLinqRoutePrivateState(
+    routingRecord,
+    input.prisma,
+  );
+
+  return {
+    linqChatId: privateState.linqChatId,
+    linqRecipientPhone: privateState.linqRecipientPhone,
+    member: routingRecord.member,
+    memberId: routingRecord.memberId,
+  };
 }
 
 function buildHostedThreadRouteEgressUnauthorizedError() {

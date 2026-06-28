@@ -291,16 +291,14 @@ describe("hosted thread route store", () => {
 
   it("authorizes active member home Linq routes when no explicit route owns the chat", async () => {
     const prisma = createPrismaMock();
-    prisma.hostedThreadRoute.findMany
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
-    prisma.hostedMember.findUnique.mockResolvedValueOnce({
+    prisma.hostedThreadRoute.findMany.mockResolvedValueOnce([]);
+    const member = {
       billingStatus: "active",
       createdAt: new Date("2026-06-24T00:00:00.000Z"),
       id: "member_home_123",
       suspendedAt: null,
       updatedAt: new Date("2026-06-24T00:00:00.000Z"),
-    });
+    };
     prisma.hostedMemberRouting.findUnique.mockResolvedValueOnce({
       linqChatIdEncrypted: await encryptHostedWebNullableString({
         field: "hosted-member-routing.home-linq-chat-id",
@@ -312,6 +310,7 @@ describe("hosted thread route store", () => {
         memberId: "member_home_123",
         value: "+15550000000",
       }),
+      member,
       memberId: "member_home_123",
     });
 
@@ -325,12 +324,16 @@ describe("hosted thread route store", () => {
       prisma,
     })).resolves.toBeUndefined();
 
-    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledTimes(2);
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledWith(
+    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "member_home_123" },
+        where: expect.objectContaining({
+          channel: "linq",
+          threadIdentityLookupKey: expect.any(Object),
+        }),
       }),
     );
+    expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { memberId: "member_home_123" },

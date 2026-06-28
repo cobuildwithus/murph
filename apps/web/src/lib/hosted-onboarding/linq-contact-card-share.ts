@@ -1,11 +1,19 @@
 import { Prisma } from "@prisma/client";
 
 import { createHostedLinqChatLookupKey, createHostedLinqChatLookupKeyReadCandidates } from "./contact-privacy";
+import { hostedOnboardingError } from "./errors";
 import { shareHostedLinqContactCard } from "./linq-client";
 import {
   sanitizeHostedOnboardingStructuredLogDetails,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
+import {
+  assertHostedLinqRouteEgressAuthority,
+  type HostedLinqThreadRouteEgressAuthority,
+} from "../hosted-routing/thread-route-store";
+import type {
+  HostedOnboardingReadClient,
+} from "./shared";
 
 type HostedLinqContactCardSharePersistenceClient =
   {
@@ -76,6 +84,45 @@ export type HostedLinqContactCardShareDecision =
 type HostedLinqContactCardShareReserveDecision =
   | Extract<HostedLinqContactCardShareDecision, { action: "share" }>
   | Extract<HostedLinqContactCardShareDecision, { action: "skip" }>;
+
+export async function maybeShareHostedLinqContactCardAfterOutboundWithAuthority(input: {
+  authority: HostedLinqThreadRouteEgressAuthority;
+  boundUserId: string;
+  chatId: string;
+  eligibility: HostedLinqContactCardShareEligibility;
+  prisma: HostedOnboardingReadClient & HostedLinqContactCardSharePersistenceClient;
+  signal?: AbortSignal;
+}): Promise<HostedLinqContactCardShareDecision> {
+  if (input.authority.containerMemberId !== input.boundUserId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_CONTACT_CARD_SHARE_BOUND_USER_MISMATCH",
+      httpStatus: 403,
+      message: "Hosted Linq contact-card share authority does not match the runtime user.",
+      retryable: false,
+    });
+  }
+  if (input.authority.threadId !== input.chatId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_CONTACT_CARD_SHARE_THREAD_MISMATCH",
+      httpStatus: 403,
+      message: "Hosted Linq contact-card share authority does not match the requested chat.",
+      retryable: false,
+    });
+  }
+
+  await assertHostedLinqRouteEgressAuthority({
+    authority: input.authority,
+    prisma: input.prisma,
+  });
+
+  return await maybeShareHostedLinqContactCardAfterOutbound({
+    chatId: input.chatId,
+    eligibility: input.eligibility,
+    memberId: input.boundUserId,
+    prisma: input.prisma,
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+}
 
 async function reserveHostedLinqContactCardShareAttemptAfterOutbound(input: {
   chatId: string;

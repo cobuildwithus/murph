@@ -6,22 +6,12 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
-  hostedOnboardingError,
-} from "@/src/lib/hosted-onboarding/errors";
-import {
-  maybeShareHostedLinqContactCardAfterOutbound,
+  maybeShareHostedLinqContactCardAfterOutboundWithAuthority,
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 import {
   jsonOk,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
-import {
-  sanitizeHostedOnboardingStructuredLogDetails,
-  toHostedOnboardingLogIdSuffix,
-} from "@/src/lib/hosted-onboarding/logging";
-import {
-  assertHostedLinqRouteEgressAuthority,
-} from "@/src/lib/hosted-routing/thread-route-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -35,56 +25,18 @@ export const POST = withJsonError(async (request: Request) => {
     await readOptionalJsonObject(request),
   );
 
-  if (body.authority.containerMemberId !== userId) {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_CONTACT_CARD_SHARE_BOUND_USER_MISMATCH",
-      httpStatus: 403,
-      message: "Hosted Linq contact-card share authority does not match the runtime user.",
-      retryable: false,
-    });
-  }
-  if (body.authority.threadId !== body.chatId) {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_CONTACT_CARD_SHARE_THREAD_MISMATCH",
-      httpStatus: 403,
-      message: "Hosted Linq contact-card share authority does not match the requested chat.",
-      retryable: false,
-    });
-  }
-
   const prisma = getPrisma();
-  await assertHostedLinqRouteEgressAuthority({
+  await maybeShareHostedLinqContactCardAfterOutboundWithAuthority({
     authority: body.authority,
+    boundUserId: userId,
+    chatId: body.chatId,
+    eligibility: {
+      service: body.service,
+      threadIsDirect: body.threadIsDirect,
+    },
     prisma,
   });
-
-  try {
-    await maybeShareHostedLinqContactCardAfterOutbound({
-      chatId: body.chatId,
-      eligibility: {
-        service: body.service,
-        threadIsDirect: body.threadIsDirect,
-      },
-      memberId: userId,
-      prisma,
-    });
-    return jsonOk({
-      ok: true,
-    });
-  } catch (error) {
-    console.warn(
-      "Hosted Linq contact-card share callback failed.",
-      sanitizeHostedOnboardingStructuredLogDetails({
-        chatIdSuffix: toHostedOnboardingLogIdSuffix(body.chatId),
-        errorMessage: error instanceof Error ? error.message : null,
-        errorName: error instanceof Error ? error.name : null,
-        operation: "share_contact_card",
-        phase: "after_outbound",
-        provider: "linq",
-      }),
-    );
-    return jsonOk({
-      ok: true,
-    });
-  }
+  return jsonOk({
+    ok: true,
+  });
 });

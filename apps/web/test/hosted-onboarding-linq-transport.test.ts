@@ -23,7 +23,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
-  maybeShareHostedLinqContactCardAfterOutbound: vi.fn().mockResolvedValue({
+  maybeShareHostedLinqContactCardAfterOutboundWithAuthority: vi.fn().mockResolvedValue({
     action: "skip",
     reason: "recent_attempt",
   }),
@@ -67,7 +67,7 @@ import {
   releaseHostedLinqQuotaReplyNoticeClaim,
 } from "@/src/lib/hosted-onboarding/linq-daily-state";
 import {
-  maybeShareHostedLinqContactCardAfterOutbound,
+  maybeShareHostedLinqContactCardAfterOutboundWithAuthority,
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 import {
   createHostedWebhookLinqMessageSideEffect,
@@ -132,7 +132,7 @@ describe("hosted Linq webhook transport", () => {
     ).resolves.toBeUndefined();
 
     expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-    expect(maybeShareHostedLinqContactCardAfterOutbound).not.toHaveBeenCalled();
+    expect(maybeShareHostedLinqContactCardAfterOutboundWithAuthority).not.toHaveBeenCalled();
   });
 
   it("shares the contact card after an eligible send with validated route authority", async () => {
@@ -160,16 +160,47 @@ describe("hosted Linq webhook transport", () => {
     ).resolves.toBeUndefined();
 
     expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-    expect(maybeShareHostedLinqContactCardAfterOutbound).toHaveBeenCalledWith({
+    expect(maybeShareHostedLinqContactCardAfterOutboundWithAuthority).toHaveBeenCalledWith({
+      authority: route.authority,
+      boundUserId: "member-1",
       chatId: "chat-1",
       eligibility: {
         service: "iMessage",
         threadIsDirect: true,
       },
-      memberId: "member-1",
       prisma: route.prisma,
       signal: undefined,
     });
+  });
+
+  it("does not wait for contact-card sharing before completing side-effect delivery", async () => {
+    vi.mocked(maybeShareHostedLinqContactCardAfterOutboundWithAuthority)
+      .mockImplementationOnce(() => new Promise<never>(() => undefined));
+    const route = buildAuthorizedLinqRouteFixture({
+      memberId: "member-1",
+      threadId: "chat-1",
+    });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      routeAuthority: route.authority,
+      service: "iMessage",
+      sourceEventId: "event-contact-card-detached",
+      threadIsDirect: true,
+      template: "daily_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: route.prisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(maybeShareHostedLinqContactCardAfterOutboundWithAuthority).toHaveBeenCalledTimes(1);
   });
 
   it("rejects routed side effects when authority targets a different chat", async () => {
@@ -199,7 +230,7 @@ describe("hosted Linq webhook transport", () => {
     });
 
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(maybeShareHostedLinqContactCardAfterOutbound).not.toHaveBeenCalled();
+    expect(maybeShareHostedLinqContactCardAfterOutboundWithAuthority).not.toHaveBeenCalled();
     expect(route.prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
     expect(releaseHostedLinqQuotaReplyNoticeClaim).toHaveBeenCalledWith({
       memberId: "member-1",
@@ -235,7 +266,7 @@ describe("hosted Linq webhook transport", () => {
     });
 
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(maybeShareHostedLinqContactCardAfterOutbound).not.toHaveBeenCalled();
+    expect(maybeShareHostedLinqContactCardAfterOutboundWithAuthority).not.toHaveBeenCalled();
     expect(route.prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
     expect(releaseHostedLinqQuotaReplyNoticeClaim).toHaveBeenCalledWith({
       memberId: "member-1",
@@ -246,7 +277,7 @@ describe("hosted Linq webhook transport", () => {
 
   it("does not let contact-card share failures release successful notice claims", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.mocked(maybeShareHostedLinqContactCardAfterOutbound)
+    vi.mocked(maybeShareHostedLinqContactCardAfterOutboundWithAuthority)
       .mockRejectedValueOnce(new Error("share failed"));
     const route = buildAuthorizedLinqRouteFixture({
       memberId: "member-1",
@@ -274,16 +305,18 @@ describe("hosted Linq webhook transport", () => {
 
       expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
       expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();
-      expect(warnSpy).toHaveBeenCalledWith(
-        "Hosted Linq contact-card side-effect share failed.",
-        expect.objectContaining({
-          chatIdSuffix: "chat-1",
-          errorMessage: "share failed",
-          operation: "share_contact_card",
-          provider: "linq",
-          template: "daily_quota",
-        }),
-      );
+      await vi.waitFor(() => {
+        expect(warnSpy).toHaveBeenCalledWith(
+          "Hosted Linq contact-card side-effect share failed.",
+          expect.objectContaining({
+            chatIdSuffix: "chat-1",
+            errorMessage: "share failed",
+            operation: "share_contact_card",
+            provider: "linq",
+            template: "daily_quota",
+          }),
+        );
+      });
     } finally {
       warnSpy.mockRestore();
     }

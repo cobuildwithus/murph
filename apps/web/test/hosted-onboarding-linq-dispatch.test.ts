@@ -1681,7 +1681,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       mailboxItemId: "mailbox_evt_routed_read_receipt_stale",
     });
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenCalledTimes(3);
+    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenCalledTimes(2);
     expect(prisma.hostedThreadRoute?.findMany).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -1694,16 +1694,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
     expect(prisma.hostedThreadRoute?.findMany).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({
-        where: expect.objectContaining({
-          threadLookupKey: {
-            in: expect.arrayContaining([routeLookupKey]),
-          },
-        }),
-      }),
-    );
-    expect(prisma.hostedThreadRoute?.findMany).toHaveBeenNthCalledWith(
-      3,
       expect.objectContaining({
         where: expect.objectContaining({
           threadIdentityLookupKey: {
@@ -4459,7 +4449,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedMemberRouting: (() => {
         let route = staleHomeRoute;
         return {
-          findUnique: vi.fn().mockImplementation(async () => route),
+          findUnique: vi.fn().mockImplementation(async () =>
+            withHostedMemberRoutingMember(route)
+          ),
           updateMany: vi.fn().mockResolvedValue({ count: 0 }),
           upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
             route = {
@@ -4468,7 +4460,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
               ...update,
               memberId: "member_123",
             };
-            return route;
+            return withHostedMemberRoutingMember(route);
           }),
         };
       })(),
@@ -5780,8 +5772,11 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
 function createStatefulHostedMemberRoutingMock(initialRecord: Record<string, unknown> | null = null) {
   let hostedMemberRoutingRecord = initialRecord;
   return {
-    findFirst: vi.fn(async () => hostedMemberRoutingRecord),
-    findMany: vi.fn(async () => hostedMemberRoutingRecord ? [hostedMemberRoutingRecord] : []),
+    findFirst: vi.fn(async () => withHostedMemberRoutingMember(hostedMemberRoutingRecord)),
+    findMany: vi.fn(async () => {
+      const record = withHostedMemberRoutingMember(hostedMemberRoutingRecord);
+      return record ? [record] : [];
+    }),
     findUnique: vi.fn(async ({ where }: { where?: Record<string, unknown> } = {}) => {
       if (!hostedMemberRoutingRecord) {
         return null;
@@ -5792,7 +5787,7 @@ function createStatefulHostedMemberRoutingMock(initialRecord: Record<string, unk
       ) {
         return null;
       }
-      return hostedMemberRoutingRecord;
+      return withHostedMemberRoutingMember(hostedMemberRoutingRecord);
     }),
     updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     upsert: vi.fn(async ({ create, update }: {
@@ -5806,6 +5801,25 @@ function createStatefulHostedMemberRoutingMock(initialRecord: Record<string, unk
       return hostedMemberRoutingRecord;
     }),
     createMany: vi.fn().mockResolvedValue({ count: 1 }),
+  };
+}
+
+function withHostedMemberRoutingMember(
+  record: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!record || record.member) {
+    return record;
+  }
+  const memberId = typeof record.memberId === "string" ? record.memberId : "member_123";
+  return {
+    ...record,
+    member: {
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-03-26T00:00:00.000Z"),
+      id: memberId,
+      suspendedAt: null,
+      updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+    },
   };
 }
 
