@@ -3921,6 +3921,24 @@ test("Junction historical sleep completion webhooks fetch the bounded summary wi
         source_provider_slug: "garmin",
       },
     },
+    {
+      label: "documented-source-provider-slug",
+      data: {
+        user_id: "junction-user-1",
+        start_date: "2026-04-01",
+        end_date: "2026-04-02",
+        source_provider_slug: "garmin",
+      },
+    },
+    {
+      label: "documented-source-provider-camel",
+      data: {
+        user_id: "junction-user-1",
+        start_date: "2026-04-01",
+        end_date: "2026-04-02",
+        sourceProvider: "garmin",
+      },
+    },
   ] as const) {
     const requests: string[] = [];
     const importedSnapshots: unknown[] = [];

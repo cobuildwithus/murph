@@ -4601,7 +4601,7 @@ function isDocumentedJunctionHistoricalPullCompletedWebhookData(
   }
 
   const userId = normalizeString(data[JUNCTION_WEBHOOK_ROOT_FIELDS.userId]) ?? externalAccountId;
-  const provider = normalizeJunctionWebhookSourceProviderCandidate(data.provider);
+  const provider = extractJunctionWebhookSourceProviderSlug(data);
   const windowStart = toJunctionWebhookWindowBoundaryTimestampIfValid(data.start_date, "start");
   const windowEnd = toJunctionWebhookWindowBoundaryTimestampIfValid(data.end_date, "end");
   if (!userId || !provider || !windowStart || !windowEnd) {
