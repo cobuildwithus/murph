@@ -29,19 +29,21 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
   assertHostedOnboardingMutationOrigin: mocks.assertHostedOnboardingMutationOrigin,
 }));
 
-type HostedOpsGarminDiagnosticsRouteModule =
-  typeof import("../app/api/ops/device-sync/garmin-diagnostics/route");
+type HostedOpsJunctionDiagnosticsRouteModule =
+  typeof import("../app/api/ops/device-sync/junction-diagnostics/route");
 
-let hostedOpsGarminDiagnosticsRoute: HostedOpsGarminDiagnosticsRouteModule;
+let hostedOpsJunctionDiagnosticsRoute: HostedOpsJunctionDiagnosticsRouteModule;
+
+const SELECTED_SOURCE_PROVIDER = "oura";
 
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const originalDeviceSyncBackfillDiagnosticEnabled =
   process.env.DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED;
 
-describe("hosted ops Garmin diagnostics", () => {
+describe("hosted ops Junction diagnostics", () => {
   beforeAll(async () => {
-    hostedOpsGarminDiagnosticsRoute =
-      await import("../app/api/ops/device-sync/garmin-diagnostics/route");
+    hostedOpsJunctionDiagnosticsRoute =
+      await import("../app/api/ops/device-sync/junction-diagnostics/route");
   });
 
   beforeEach(() => {
@@ -96,7 +98,7 @@ describe("hosted ops Garmin diagnostics", () => {
           firstSeenAt: "2026-06-27T18:49:38.000Z",
           lastSeenAt: "2026-06-28T08:50:56.000Z",
           resourceCount: 18,
-          sourceProviderSlug: "garmin",
+          sourceProviderSlug: SELECTED_SOURCE_PROVIDER,
           status: "connected",
         },
       ],
@@ -154,7 +156,7 @@ describe("hosted ops Garmin diagnostics", () => {
         sourceProviders: {
           ok: true,
           recordCount: 1,
-          sourceProviderSlugs: ["garmin"],
+          sourceProviderSlugs: [SELECTED_SOURCE_PROVIDER],
         },
         summary: {
           hasUsefulHistoricalRecords: false,
@@ -179,7 +181,7 @@ describe("hosted ops Garmin diagnostics", () => {
           {
             request: {
               sourceFiltered: true,
-              sourceProviderSlug: "garmin",
+              sourceProviderSlug: SELECTED_SOURCE_PROVIDER,
             },
             response: {
               notPulled: [{ resource: "sleep" }],
@@ -208,7 +210,7 @@ describe("hosted ops Garmin diagnostics", () => {
           {
             request: {
               sourceFiltered: true,
-              sourceProviderSlug: "garmin",
+              sourceProviderSlug: SELECTED_SOURCE_PROVIDER,
             },
             response: {
               ok: true,
@@ -235,7 +237,7 @@ describe("hosted ops Garmin diagnostics", () => {
               resource: "activity",
               resourceCategory: "summary",
               sourceFiltered: true,
-              sourceProviderSlug: "garmin",
+              sourceProviderSlug: SELECTED_SOURCE_PROVIDER,
             },
             response: {
               ok: true,
@@ -255,7 +257,7 @@ describe("hosted ops Garmin diagnostics", () => {
         request: {
           endpoint: "matrix",
           resourceCount: 2,
-          sourceProviderSlug: "garmin",
+          sourceProviderSlug: SELECTED_SOURCE_PROVIDER,
           window: {
             windowEnd: "2026-06-28T23:59:59.999Z",
             windowStart: "2025-12-30T23:59:59.999Z",
@@ -279,12 +281,13 @@ describe("hosted ops Garmin diagnostics", () => {
     }
   });
 
-  it("runs a member-targeted Junction Garmin matrix diagnostic without returning raw payload data", async () => {
+  it("runs a member-targeted Junction source matrix diagnostic without returning raw payload data", async () => {
     const request = createJsonPostRequest(
-      "https://join.example.test/api/ops/device-sync/garmin-diagnostics",
+      "https://join.example.test/api/ops/device-sync/junction-diagnostics",
       {
         connectionId: "dspc_junction_123",
         memberId: "member_target",
+        sourceProvider: SELECTED_SOURCE_PROVIDER,
         windowEnd: "2026-06-28T23:59:59.999Z",
       },
       {
@@ -294,7 +297,7 @@ describe("hosted ops Garmin diagnostics", () => {
       },
     );
 
-    const response = await hostedOpsGarminDiagnosticsRoute.POST(request);
+    const response = await hostedOpsJunctionDiagnosticsRoute.POST(request);
 
     expect(response.status).toBe(200);
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(request);
@@ -316,7 +319,7 @@ describe("hosted ops Garmin diagnostics", () => {
     expect(mocks.probeRest).toHaveBeenCalledWith(expect.objectContaining({
       endpoint: "matrix",
       resource: null,
-      sourceProviderSlug: "garmin",
+      sourceProviderSlug: SELECTED_SOURCE_PROVIDER,
       timeoutSeconds: null,
       windowEnd: "2026-06-28T23:59:59.999Z",
       windowStart: "2025-12-30T23:59:59.999Z",
@@ -341,13 +344,13 @@ describe("hosted ops Garmin diagnostics", () => {
           {
             notPulledCount: 1,
             pulledCount: 1,
-            scope: "garmin",
+            scope: "selected_source",
           },
         ],
         introspection: [
           {
             resourceCount: 2,
-            scope: "garmin",
+            scope: "selected_source",
             sentCount: 2,
           },
         ],
@@ -372,7 +375,7 @@ describe("hosted ops Garmin diagnostics", () => {
         provider: "junction",
         status: "active",
       },
-      sourceProvider: "garmin",
+      sourceProvider: SELECTED_SOURCE_PROVIDER,
       webSourceProjection: {
         sourceCount: 1,
         totalResourceCount: 18,
@@ -391,11 +394,12 @@ describe("hosted ops Garmin diagnostics", () => {
       member: { id: "member_other" },
     });
 
-    const response = await hostedOpsGarminDiagnosticsRoute.POST(
+    const response = await hostedOpsJunctionDiagnosticsRoute.POST(
       createJsonPostRequest(
-        "https://join.example.test/api/ops/device-sync/garmin-diagnostics",
+        "https://join.example.test/api/ops/device-sync/junction-diagnostics",
         {
           memberId: "member_target",
+          sourceProvider: SELECTED_SOURCE_PROVIDER,
         },
         {
           headers: {
@@ -415,9 +419,9 @@ describe("hosted ops Garmin diagnostics", () => {
   });
 
   it("rejects missing target member ids before running provider diagnostics", async () => {
-    const response = await hostedOpsGarminDiagnosticsRoute.POST(
+    const response = await hostedOpsJunctionDiagnosticsRoute.POST(
       createJsonPostRequest(
-        "https://join.example.test/api/ops/device-sync/garmin-diagnostics",
+        "https://join.example.test/api/ops/device-sync/junction-diagnostics",
         {},
         {
           headers: {
@@ -432,7 +436,32 @@ describe("hosted ops Garmin diagnostics", () => {
     expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       error: {
-        code: "HOSTED_OPS_GARMIN_DIAGNOSTIC_MEMBER_ID_INVALID",
+        code: "HOSTED_OPS_JUNCTION_DIAGNOSTIC_MEMBER_ID_INVALID",
+      },
+    });
+  });
+
+  it("rejects missing source providers before running provider diagnostics", async () => {
+    const response = await hostedOpsJunctionDiagnosticsRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/ops/device-sync/junction-diagnostics",
+        {
+          memberId: "member_target",
+        },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.listConnections).not.toHaveBeenCalled();
+    expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_OPS_JUNCTION_DIAGNOSTIC_SOURCE_PROVIDER_INVALID",
       },
     });
   });

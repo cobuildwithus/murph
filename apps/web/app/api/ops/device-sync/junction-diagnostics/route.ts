@@ -1,16 +1,14 @@
 import { assertDeviceSyncDiagnosticRouteEnabled } from "@/src/lib/device-sync/backfill-diagnostic";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
-import { runHostedOpsGarminDiagnostic } from "@/src/lib/hosted-ops/device-sync-diagnostics";
 import { requireHostedOpsRequestAccess } from "@/src/lib/hosted-ops/access";
-import {
-  readHostedOnboardingJsonObject,
-} from "@/src/lib/hosted-onboarding/http";
+import { runHostedOpsJunctionDiagnostic } from "@/src/lib/hosted-ops/device-sync-diagnostics";
+import { readHostedOnboardingJsonObject } from "@/src/lib/hosted-onboarding/http";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
-const HOSTED_OPS_GARMIN_DIAGNOSTIC_BODY_LIMIT_BYTES = 4 * 1024;
+const HOSTED_OPS_JUNCTION_DIAGNOSTIC_BODY_LIMIT_BYTES = 4 * 1024;
 
 export const POST = withJsonError(async (request: Request) => {
   await requireHostedOpsRequestAccess(request, {
@@ -19,16 +17,17 @@ export const POST = withJsonError(async (request: Request) => {
   assertDeviceSyncDiagnosticRouteEnabled(request);
 
   const body = await readHostedOnboardingJsonObject(request, {
-    limitBytes: HOSTED_OPS_GARMIN_DIAGNOSTIC_BODY_LIMIT_BYTES,
-    tooLargeErrorCode: "HOSTED_OPS_GARMIN_DIAGNOSTIC_REQUEST_TOO_LARGE",
-    tooLargeErrorMessage: "Hosted ops Garmin diagnostic request body is too large.",
+    limitBytes: HOSTED_OPS_JUNCTION_DIAGNOSTIC_BODY_LIMIT_BYTES,
+    tooLargeErrorCode: "HOSTED_OPS_JUNCTION_DIAGNOSTIC_REQUEST_TOO_LARGE",
+    tooLargeErrorMessage: "Hosted ops Junction diagnostic request body is too large.",
   });
 
-  return jsonOk(await runHostedOpsGarminDiagnostic({
+  return jsonOk(await runHostedOpsJunctionDiagnostic({
     connectionId: readOptionalStringField(body, "connectionId"),
     lookbackDays: readOptionalNumberOrStringField(body, "lookbackDays"),
     memberId: readOptionalStringField(body, "memberId"),
     request,
+    sourceProvider: readOptionalStringField(body, "sourceProvider"),
     timeseriesDays: readOptionalNumberOrStringField(body, "timeseriesDays"),
     windowEnd: readOptionalStringField(body, "windowEnd"),
     windowStart: readOptionalStringField(body, "windowStart"),

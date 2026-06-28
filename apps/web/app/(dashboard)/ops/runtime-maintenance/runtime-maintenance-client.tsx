@@ -28,7 +28,7 @@ import type {
   HostedRuntimeMaintenanceWakeResult,
   HostedRuntimeMaintenanceWorkspace,
 } from "@/src/lib/hosted-ops/runtime-maintenance";
-import type { HostedOpsGarminDiagnosticResult } from "@/src/lib/hosted-ops/device-sync-diagnostic-types";
+import type { HostedOpsJunctionDiagnosticResult } from "@/src/lib/hosted-ops/device-sync-diagnostic-types";
 
 interface RuntimeMaintenanceClientProps {
   initialOverview: HostedRuntimeMaintenanceOverview;
@@ -43,7 +43,7 @@ interface HostedOpsLinqThreadRouteEnsureResult {
 
 type PendingAction =
   | { kind: "ensure-thread-route" }
-  | { kind: "garmin-diagnostic" }
+  | { kind: "junction-diagnostic" }
   | { kind: "refresh" }
   | { kind: "wake-batch"; limit: number }
   | { kind: "wake-user"; userId: string };
@@ -54,13 +54,13 @@ export function RuntimeMaintenanceClient({
   const [overview, setOverview] = useState(initialOverview);
   const [currentCursor, setCurrentCursor] = useState<string | null>(null);
   const [wakeResult, setWakeResult] = useState<HostedRuntimeMaintenanceWakeResult | null>(null);
-  const [garminDiagnosticResult, setGarminDiagnosticResult] =
-    useState<HostedOpsGarminDiagnosticResult | null>(null);
+  const [junctionDiagnosticResult, setJunctionDiagnosticResult] =
+    useState<HostedOpsJunctionDiagnosticResult | null>(null);
   const [threadRouteResult, setThreadRouteResult] =
     useState<HostedOpsLinqThreadRouteEnsureResult | null>(null);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [garminDiagnosticError, setGarminDiagnosticError] = useState<string | null>(null);
+  const [junctionDiagnosticError, setJunctionDiagnosticError] = useState<string | null>(null);
   const [threadRouteError, setThreadRouteError] = useState<string | null>(null);
   const generatedAt = useMemo(
     () => formatDateTime(overview.generatedAt),
@@ -165,18 +165,19 @@ export function RuntimeMaintenanceClient({
     }
   }
 
-  async function runGarminDiagnostic(formData: FormData): Promise<void> {
-    setPending({ kind: "garmin-diagnostic" });
-    setGarminDiagnosticError(null);
-    setGarminDiagnosticResult(null);
+  async function runJunctionDiagnostic(formData: FormData): Promise<void> {
+    setPending({ kind: "junction-diagnostic" });
+    setJunctionDiagnosticError(null);
+    setJunctionDiagnosticResult(null);
     try {
-      const result = await requestJson<HostedOpsGarminDiagnosticResult>(
-        "/api/ops/device-sync/garmin-diagnostics",
+      const result = await requestJson<HostedOpsJunctionDiagnosticResult>(
+        "/api/ops/device-sync/junction-diagnostics",
         {
           body: JSON.stringify({
             connectionId: readFormDataString(formData, "connectionId"),
             lookbackDays: readFormDataString(formData, "lookbackDays"),
             memberId: readFormDataString(formData, "memberId"),
+            sourceProvider: readFormDataString(formData, "sourceProvider"),
             timeseriesDays: readFormDataString(formData, "timeseriesDays"),
             windowEnd: readFormDataString(formData, "windowEnd"),
             windowStart: readFormDataString(formData, "windowStart"),
@@ -187,9 +188,9 @@ export function RuntimeMaintenanceClient({
           method: "POST",
         },
       );
-      setGarminDiagnosticResult(result);
+      setJunctionDiagnosticResult(result);
     } catch (diagnosticError) {
-      setGarminDiagnosticError(describeClientError(diagnosticError));
+      setJunctionDiagnosticError(describeClientError(diagnosticError));
     } finally {
       setPending(null);
     }
@@ -320,8 +321,8 @@ export function RuntimeMaintenanceClient({
       </section>
 
       <section
-        aria-busy={pending?.kind === "garmin-diagnostic"}
-        aria-labelledby="runtime-garmin-diagnostic-title"
+        aria-busy={pending?.kind === "junction-diagnostic"}
+        aria-labelledby="runtime-junction-diagnostic-title"
         className="rounded-xl border border-border/70 bg-card/90 p-5"
       >
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -331,18 +332,18 @@ export function RuntimeMaintenanceClient({
             </span>
             <h2
               className="mt-1 font-serif text-xl font-semibold tracking-tight text-foreground"
-              id="runtime-garmin-diagnostic-title"
+              id="runtime-junction-diagnostic-title"
             >
-              Garmin diagnostic
+              Junction source diagnostic
             </h2>
             <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Runs the Junction matrix probe for one hosted member and returns counts, status, and window metadata.
+              Runs the Junction matrix probe for one hosted member and selected source provider, then returns counts, status, and window metadata.
             </p>
           </div>
-          {garminDiagnosticResult ? (
+          {junctionDiagnosticResult ? (
             <Badge variant="secondary">
               <CheckCircle2Icon data-icon="inline-start" />
-              Generated {formatDateTime(garminDiagnosticResult.generatedAt)}
+              Generated {formatDateTime(junctionDiagnosticResult.generatedAt)}
             </Badge>
           ) : null}
         </div>
@@ -351,32 +352,42 @@ export function RuntimeMaintenanceClient({
           className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:grid-cols-4"
           onSubmit={(event) => {
             event.preventDefault();
-            void runGarminDiagnostic(new FormData(event.currentTarget));
+            void runJunctionDiagnostic(new FormData(event.currentTarget));
           }}
         >
-          <Field label="Member id" htmlFor="garmin-diagnostic-member-id">
+          <Field label="Member id" htmlFor="junction-diagnostic-member-id">
             <Input
               autoComplete="off"
-              id="garmin-diagnostic-member-id"
+              id="junction-diagnostic-member-id"
               name="memberId"
               placeholder="member_..."
               required
               spellCheck={false}
             />
           </Field>
-          <Field label="Connection id" htmlFor="garmin-diagnostic-connection-id" optional>
+          <Field label="Source provider" htmlFor="junction-diagnostic-source-provider">
             <Input
               autoComplete="off"
-              id="garmin-diagnostic-connection-id"
+              id="junction-diagnostic-source-provider"
+              name="sourceProvider"
+              placeholder="garmin, whoop_v2, oura"
+              required
+              spellCheck={false}
+            />
+          </Field>
+          <Field label="Connection id" htmlFor="junction-diagnostic-connection-id" optional>
+            <Input
+              autoComplete="off"
+              id="junction-diagnostic-connection-id"
               name="connectionId"
               placeholder="Only if ambiguous"
               spellCheck={false}
             />
           </Field>
-          <Field label="Lookback days" htmlFor="garmin-diagnostic-lookback-days">
+          <Field label="Lookback days" htmlFor="junction-diagnostic-lookback-days">
             <Input
               autoComplete="off"
-              id="garmin-diagnostic-lookback-days"
+              id="junction-diagnostic-lookback-days"
               inputMode="numeric"
               max={180}
               min={1}
@@ -386,10 +397,10 @@ export function RuntimeMaintenanceClient({
               type="number"
             />
           </Field>
-          <Field label="Timeseries probe days" htmlFor="garmin-diagnostic-timeseries-days">
+          <Field label="Timeseries probe days" htmlFor="junction-diagnostic-timeseries-days">
             <Input
               autoComplete="off"
-              id="garmin-diagnostic-timeseries-days"
+              id="junction-diagnostic-timeseries-days"
               inputMode="numeric"
               max={31}
               min={1}
@@ -399,19 +410,19 @@ export function RuntimeMaintenanceClient({
               type="number"
             />
           </Field>
-          <Field label="Window start" htmlFor="garmin-diagnostic-window-start" optional>
+          <Field label="Window start" htmlFor="junction-diagnostic-window-start" optional>
             <Input
               autoComplete="off"
-              id="garmin-diagnostic-window-start"
+              id="junction-diagnostic-window-start"
               name="windowStart"
               placeholder="Auto from lookback"
               spellCheck={false}
             />
           </Field>
-          <Field label="Window end" htmlFor="garmin-diagnostic-window-end" optional>
+          <Field label="Window end" htmlFor="junction-diagnostic-window-end" optional>
             <Input
               autoComplete="off"
-              id="garmin-diagnostic-window-end"
+              id="junction-diagnostic-window-end"
               name="windowEnd"
               placeholder="Now"
               spellCheck={false}
@@ -419,27 +430,27 @@ export function RuntimeMaintenanceClient({
           </Field>
           <div className="flex flex-col gap-3 lg:col-span-2 xl:col-span-4 sm:flex-row sm:items-center sm:justify-between">
             <div aria-live="polite" className="min-h-5 text-sm text-muted-foreground">
-              {pending?.kind === "garmin-diagnostic" ? "Running Garmin diagnostic." : ""}
+              {pending?.kind === "junction-diagnostic" ? "Running Junction diagnostic." : ""}
             </div>
             <Button
               disabled={pending !== null}
               type="submit"
             >
               <ActivityIcon data-icon="inline-start" />
-              {pending?.kind === "garmin-diagnostic" ? "Running..." : "Run diagnostic"}
+              {pending?.kind === "junction-diagnostic" ? "Running..." : "Run diagnostic"}
             </Button>
           </div>
         </form>
 
-        {garminDiagnosticError ? (
+        {junctionDiagnosticError ? (
           <Alert className="mt-4" variant="destructive">
             <AlertCircleIcon data-icon="inline-start" />
-            <AlertDescription className="min-w-0 break-words">{garminDiagnosticError}</AlertDescription>
+            <AlertDescription className="min-w-0 break-words">{junctionDiagnosticError}</AlertDescription>
           </Alert>
         ) : null}
 
-        {garminDiagnosticResult ? (
-          <GarminDiagnosticResultPanel result={garminDiagnosticResult} />
+        {junctionDiagnosticResult ? (
+          <JunctionDiagnosticResultPanel result={junctionDiagnosticResult} />
         ) : null}
       </section>
 
@@ -628,14 +639,14 @@ function ThreadRouteResultPanel({
   );
 }
 
-function GarminDiagnosticResultPanel({
+function JunctionDiagnosticResultPanel({
   result,
 }: {
-  result: HostedOpsGarminDiagnosticResult;
+  result: HostedOpsJunctionDiagnosticResult;
 }) {
   const matrix = result.matrix;
-  const filteredHistoricalPull = matrix?.historicalPull.find((entry) => entry.scope === "garmin") ?? null;
-  const filteredIntrospection = matrix?.introspection.find((entry) => entry.scope === "garmin") ?? null;
+  const filteredHistoricalPull = matrix?.historicalPull.find((entry) => entry.scope === "selected_source") ?? null;
+  const filteredIntrospection = matrix?.introspection.find((entry) => entry.scope === "selected_source") ?? null;
   const matrixRecordCount = matrix?.reads.reduce((total, entry) => total + (entry.recordCount ?? 0), 0) ?? 0;
 
   return (
@@ -658,6 +669,7 @@ function GarminDiagnosticResultPanel({
 
       <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-3">
         <ResultValue label="Member" value={result.memberId} />
+        <ResultValue label="Source provider" value={result.sourceProvider} />
         <ResultValue label="Window start" value={formatDateTime(result.window.windowStart)} />
         <ResultValue label="Window end" value={formatDateTime(result.window.windowEnd)} />
         <ResultValue label="Last sync start" value={formatNullableDateTime(result.selectedConnection.lastSyncStartedAt)} />
@@ -741,7 +753,7 @@ function GarminDiagnosticResultPanel({
                 <TableRow key={`${entry.resource ?? "resource"}:${entry.sourceFiltered}:${index}`}>
                   <TableCell className="font-mono text-xs text-foreground">{entry.resource ?? "-"}</TableCell>
                   <TableCell className="font-mono text-xs">
-                    {entry.sourceFiltered ? "Garmin" : "All"}
+                    {entry.sourceFiltered ? result.sourceProvider : "All"}
                   </TableCell>
                   <TableCell className="font-mono text-xs">{entry.resourceCategory ?? "-"}</TableCell>
                   <TableCell className="text-right font-mono text-xs tabular-nums">
@@ -991,7 +1003,7 @@ function describeMaintenancePendingAction(pending: PendingAction | null): string
   if (pending.kind === "wake-batch") {
     return `Waking ${formatInteger(pending.limit)} workspace${pending.limit === 1 ? "" : "s"}.`;
   }
-  if (pending.kind === "garmin-diagnostic") {
+  if (pending.kind === "junction-diagnostic") {
     return "";
   }
   return `Waking ${pending.userId}.`;

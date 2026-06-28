@@ -1,16 +1,15 @@
-export const HOSTED_OPS_GARMIN_SOURCE_PROVIDER = "garmin";
-
-export interface HostedOpsGarminDiagnosticInput {
+export interface HostedOpsJunctionDiagnosticInput {
   connectionId?: string | null;
   lookbackDays?: number | string | null;
   memberId?: string | null;
   request: Request;
+  sourceProvider?: string | null;
   timeseriesDays?: number | string | null;
   windowEnd?: string | null;
   windowStart?: string | null;
 }
 
-export interface HostedOpsGarminDiagnosticResult {
+export interface HostedOpsJunctionDiagnosticResult {
   backfill: {
     hasUsefulHistoricalRecords: boolean | null;
     sourceProviderCount: number | null;
@@ -43,7 +42,7 @@ export interface HostedOpsGarminDiagnosticResult {
     setupPhase: string | null;
     status: string;
   };
-  sourceProvider: typeof HOSTED_OPS_GARMIN_SOURCE_PROVIDER;
+  sourceProvider: string;
   webSourceProjection: {
     sourceCount: number;
     sources: Array<{
@@ -80,7 +79,7 @@ export interface HostedOpsIntrospectionSummary {
     sentCount: number | null;
   }>;
   responseStatus: number | null;
-  scope: "all_sources" | "garmin";
+  scope: "all_sources" | "selected_source";
   sentCount: number;
   sourceProviderCount: number | null;
 }
@@ -102,7 +101,7 @@ export interface HostedOpsHistoricalPullSummary {
   }>;
   pulledCount: number | null;
   responseStatus: number | null;
-  scope: "all_sources" | "garmin";
+  scope: "all_sources" | "selected_source";
   sourceProviderCount: number | null;
 }
 

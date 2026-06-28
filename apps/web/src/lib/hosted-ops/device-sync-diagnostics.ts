@@ -6,14 +6,11 @@ import {
   type HostedDeviceSyncBackfillDiagnosticResponse,
 } from "../device-sync/backfill-diagnostic";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import {
-  HOSTED_OPS_GARMIN_SOURCE_PROVIDER as GARMIN_SOURCE_PROVIDER,
-} from "./device-sync-diagnostic-types";
 import type {
   HostedOpsDiagnosticReadSummary,
   HostedOpsDiagnosticWindow,
-  HostedOpsGarminDiagnosticInput,
-  HostedOpsGarminDiagnosticResult,
+  HostedOpsJunctionDiagnosticInput,
+  HostedOpsJunctionDiagnosticResult,
   HostedOpsHistoricalPullSummary,
   HostedOpsIntrospectionSummary,
 } from "./device-sync-diagnostic-types";
@@ -25,12 +22,14 @@ const MAX_TIMESERIES_PROBE_DAYS = 31;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOSTED_OPS_DEVICE_SYNC_MEMBER_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,256}$/u;
 const HOSTED_OPS_DEVICE_SYNC_CONNECTION_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,256}$/u;
+const HOSTED_OPS_DEVICE_SYNC_SOURCE_PROVIDER_PATTERN = /^[A-Za-z0-9_.:-]{1,128}$/u;
 
-export async function runHostedOpsGarminDiagnostic(
-  input: HostedOpsGarminDiagnosticInput,
-): Promise<HostedOpsGarminDiagnosticResult> {
+export async function runHostedOpsJunctionDiagnostic(
+  input: HostedOpsJunctionDiagnosticInput,
+): Promise<HostedOpsJunctionDiagnosticResult> {
   const memberId = normalizeRequiredMemberId(input.memberId);
   const connectionId = normalizeOptionalConnectionId(input.connectionId);
+  const sourceProvider = normalizeRequiredSourceProvider(input.sourceProvider);
   const window = resolveOpsDiagnosticWindow(input);
   const controlPlane = createHostedDeviceSyncDiagnosticControlPlane(input.request);
   const fullDiagnostic = await runHostedDeviceSyncBackfillDiagnostic({
@@ -41,7 +40,7 @@ export async function runHostedOpsGarminDiagnostic(
     restProbe: {
       endpoint: "matrix",
       resource: null,
-      sourceProviderSlug: GARMIN_SOURCE_PROVIDER,
+      sourceProviderSlug: sourceProvider,
       timeoutSeconds: null,
     },
     timeseriesProbeDays: window.timeseriesDays,
@@ -49,18 +48,20 @@ export async function runHostedOpsGarminDiagnostic(
     windowStart: window.windowStart,
   });
 
-  return summarizeHostedOpsGarminDiagnostic({
+  return summarizeHostedOpsJunctionDiagnostic({
     fullDiagnostic,
     memberId,
+    sourceProvider,
     window,
   });
 }
 
-function summarizeHostedOpsGarminDiagnostic(input: {
+function summarizeHostedOpsJunctionDiagnostic(input: {
   fullDiagnostic: HostedDeviceSyncBackfillDiagnosticResponse;
   memberId: string;
-  window: HostedOpsGarminDiagnosticResult["window"];
-}): HostedOpsGarminDiagnosticResult {
+  sourceProvider: string;
+  window: HostedOpsJunctionDiagnosticResult["window"];
+}): HostedOpsJunctionDiagnosticResult {
   const diagnostic = input.fullDiagnostic.diagnostic;
   const summary = readRecord(diagnostic.summary);
   const timeseriesProbe = readRecord(diagnostic.timeseriesProbe);
@@ -99,7 +100,7 @@ function summarizeHostedOpsGarminDiagnostic(input: {
       setupPhase: input.fullDiagnostic.selectedConnection.setupPhase,
       status: input.fullDiagnostic.selectedConnection.status,
     },
-    sourceProvider: GARMIN_SOURCE_PROVIDER,
+    sourceProvider: input.sourceProvider,
     webSourceProjection: {
       sourceCount: sources.length,
       sources,
@@ -109,7 +110,7 @@ function summarizeHostedOpsGarminDiagnostic(input: {
   };
 }
 
-function summarizeMatrix(value: unknown): HostedOpsGarminDiagnosticResult["matrix"] {
+function summarizeMatrix(value: unknown): HostedOpsJunctionDiagnosticResult["matrix"] {
   const matrix = readRecord(value);
   if (!matrix) {
     return null;
@@ -167,7 +168,7 @@ function summarizeIntrospectionEntries(value: unknown): HostedOpsIntrospectionSu
         resourceCount: readNumber(response.resourceCount),
         resources,
         responseStatus: readNumber(response.responseStatus),
-        scope: readBoolean(request?.sourceFiltered) ? "garmin" : "all_sources",
+        scope: readBoolean(request?.sourceFiltered) ? "selected_source" : "all_sources",
         sentCount: resources.reduce((total, resource) => total + (resource.sentCount ?? 0), 0),
         sourceProviderCount: readNumber(response.sourceProviderCount),
       };
@@ -220,7 +221,7 @@ function summarizeHistoricalPullEntries(value: unknown): HostedOpsHistoricalPull
         pulled,
         pulledCount: readNumber(response.pulledCount),
         responseStatus: readNumber(response.responseStatus),
-        scope: readBoolean(request?.sourceFiltered) ? "garmin" : "all_sources",
+        scope: readBoolean(request?.sourceFiltered) ? "selected_source" : "all_sources",
         sourceProviderCount: readNumber(response.sourceProviderCount),
       };
     })
@@ -249,24 +250,24 @@ function summarizeMatrixRead(value: unknown): HostedOpsDiagnosticReadSummary | n
 }
 
 function resolveOpsDiagnosticWindow(
-  input: HostedOpsGarminDiagnosticInput,
-): HostedOpsGarminDiagnosticResult["window"] {
+  input: HostedOpsJunctionDiagnosticInput,
+): HostedOpsJunctionDiagnosticResult["window"] {
   const lookbackDays = normalizePositiveInteger(input.lookbackDays, DEFAULT_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS);
   const timeseriesDays = normalizePositiveInteger(
     input.timeseriesDays,
     DEFAULT_TIMESERIES_PROBE_DAYS,
     MAX_TIMESERIES_PROBE_DAYS,
   );
-  const windowEnd = normalizeOptionalIso(input.windowEnd, "HOSTED_OPS_GARMIN_DIAGNOSTIC_WINDOW_END_INVALID")
+  const windowEnd = normalizeOptionalIso(input.windowEnd, "HOSTED_OPS_JUNCTION_DIAGNOSTIC_WINDOW_END_INVALID")
     ?? new Date().toISOString();
-  const windowStart = normalizeOptionalIso(input.windowStart, "HOSTED_OPS_GARMIN_DIAGNOSTIC_WINDOW_START_INVALID")
+  const windowStart = normalizeOptionalIso(input.windowStart, "HOSTED_OPS_JUNCTION_DIAGNOSTIC_WINDOW_START_INVALID")
     ?? new Date(new Date(windowEnd).getTime() - (lookbackDays * DAY_MS)).toISOString();
 
   if (new Date(windowStart).getTime() >= new Date(windowEnd).getTime()) {
     throw hostedOnboardingError({
-      code: "HOSTED_OPS_GARMIN_DIAGNOSTIC_WINDOW_INVALID",
+      code: "HOSTED_OPS_JUNCTION_DIAGNOSTIC_WINDOW_INVALID",
       httpStatus: 400,
-      message: "Garmin diagnostic window start must be before window end.",
+      message: "Junction diagnostic window start must be before window end.",
     });
   }
 
@@ -282,9 +283,22 @@ function normalizeRequiredMemberId(value: string | null | undefined): string {
   const normalized = value?.trim() ?? "";
   if (!HOSTED_OPS_DEVICE_SYNC_MEMBER_ID_PATTERN.test(normalized)) {
     throw hostedOnboardingError({
-      code: "HOSTED_OPS_GARMIN_DIAGNOSTIC_MEMBER_ID_INVALID",
+      code: "HOSTED_OPS_JUNCTION_DIAGNOSTIC_MEMBER_ID_INVALID",
       httpStatus: 400,
-      message: "Garmin diagnostics require a valid member id.",
+      message: "Junction diagnostics require a valid member id.",
+    });
+  }
+
+  return normalized;
+}
+
+function normalizeRequiredSourceProvider(value: string | null | undefined): string {
+  const normalized = value?.trim() ?? "";
+  if (!HOSTED_OPS_DEVICE_SYNC_SOURCE_PROVIDER_PATTERN.test(normalized)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_OPS_JUNCTION_DIAGNOSTIC_SOURCE_PROVIDER_INVALID",
+      httpStatus: 400,
+      message: "Junction diagnostics require a valid source provider.",
     });
   }
 
@@ -299,9 +313,9 @@ function normalizeOptionalConnectionId(value: string | null | undefined): string
 
   if (!HOSTED_OPS_DEVICE_SYNC_CONNECTION_ID_PATTERN.test(normalized)) {
     throw hostedOnboardingError({
-      code: "HOSTED_OPS_GARMIN_DIAGNOSTIC_CONNECTION_ID_INVALID",
+      code: "HOSTED_OPS_JUNCTION_DIAGNOSTIC_CONNECTION_ID_INVALID",
       httpStatus: 400,
-      message: "Garmin diagnostics require a valid connection id.",
+      message: "Junction diagnostics require a valid connection id.",
     });
   }
 
@@ -337,7 +351,7 @@ function normalizeOptionalIso(value: string | null | undefined, code: string): s
     throw hostedOnboardingError({
       code,
       httpStatus: 400,
-      message: "Garmin diagnostic dates must be valid ISO timestamps.",
+      message: "Junction diagnostic dates must be valid ISO timestamps.",
     });
   }
 
