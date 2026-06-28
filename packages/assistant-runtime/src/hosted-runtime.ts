@@ -789,6 +789,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const phaseLogger = createHostedRuntimePhaseLogger();
   const emitPhaseLog = phaseLogger.emit;
   const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
+  const pendingPostSafePointCompletions = new Set<Promise<void>>();
   const trackCompletion = (
     pendingCompletions: Set<Promise<void>>,
     completion: Promise<void> | null,
@@ -805,15 +806,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   const trackMailboxPostCheckpointEffects = (completion: Promise<void> | null): void => {
     trackCompletion(pendingMailboxPostCheckpointEffectCompletions, completion);
   };
+  const trackStartedPostSafePointCompletion = (completion: Promise<void> | null): void => {
+    trackCompletion(pendingPostSafePointCompletions, completion);
+    trackHostedRuntimePostSafePointCompletion(completion);
+  };
   const drainStartedPostSafePointCompletionsBestEffort = async (): Promise<void> => {
     const pendingCompletions = [
       ...pendingMailboxPostCheckpointEffectCompletions,
+      ...pendingPostSafePointCompletions,
     ];
     if (pendingCompletions.length > 0) {
       await Promise.allSettled(pendingCompletions);
     }
-
-    await drainHostedRuntimePostSafePointCompletionsBestEffort();
   };
 
   try {
@@ -1026,7 +1030,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
-      onPostSafePointCompletionStarted: trackHostedRuntimePostSafePointCompletion,
+      onPostSafePointCompletionStarted: trackStartedPostSafePointCompletion,
       platform: runnerPlatform,
       requestId,
       runtimeWakeSignal: options.runtimeWakeSignal ?? null,

@@ -4867,6 +4867,152 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("does not let prior deferred usage block unrelated runtime failure cleanup", async () => {
+    const firstVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-prior-"));
+    const secondVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-fail-next-"));
+    const events: string[] = [];
+    const releaseUsageRecord = createDeferred<void>();
+    const usageRecordStarted = createDeferred<void>();
+    const usageRecordFinished = createDeferred<void>();
+    let firstResultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot: firstVaultRoot });
+      firstResultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_deferred_usage_previous_invocation",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`first.snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: `users/bundles/member-synthetic/prior-usage-${snapshotInput.reason}.bundle.json`,
+                size: 640,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: {
+            ...createPlatform({
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests: [],
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            usageRecordPort: {
+              async recordUsage(record: AssistantUsageRecord) {
+                events.push("first.usage:start");
+                usageRecordStarted.resolve();
+                await releaseUsageRecord.promise;
+                events.push("first.usage:done");
+                usageRecordFinished.resolve();
+                return {
+                  recorded: true,
+                  usageId: record.usageId,
+                };
+              },
+            },
+          },
+          async runAssistantPhase() {
+            events.push("first.assistant.phase");
+            return {
+              afterCheckpoint: async () => {
+                events.push("first.reply.deliver");
+                return {
+                  checkpointReason: "outbox_receipt",
+                };
+              },
+              checkpointReason: "assistant_runtime_commit",
+              deferredUsageRecords: [
+                createAssistantUsageRecord({
+                  usageId: "turn_entrypoint_deferred_usage_previous.attempt-1",
+                }),
+              ],
+              progressed: true,
+            };
+          },
+          vaultRoot: firstVaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        usageRecordStarted.promise,
+        1_000,
+        () => "Previous invocation deferred usage did not start.",
+      );
+      await withRealTimeout(
+        firstResultPromise,
+        1_000,
+        () => "Previous invocation did not return while deferred usage was pending.",
+      );
+      assert.equal(events.includes("first.usage:done"), false);
+
+      const failure = await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_deferred_usage_next_failure",
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "5",
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              throw new Error("Stale workspace failure should not snapshot.");
+            },
+            async importItem() {
+              throw new Error("Stale workspace failure should not import mailbox items.");
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests: [],
+                events,
+                workspace: createWorkspaceState({ version: "6" }),
+              }),
+            }),
+            vaultRoot: secondVaultRoot,
+          },
+        ).then(
+          () => null,
+          (error: unknown) => error,
+        ),
+        1_000,
+        () => "Unrelated runtime failure waited for previous invocation usage.",
+      );
+
+      assert.ok(failure instanceof HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError);
+      assert.equal(events.includes("first.usage:done"), false);
+
+      releaseUsageRecord.resolve();
+      await withRealTimeout(
+        usageRecordFinished.promise,
+        1_000,
+        () => "Previous invocation deferred usage did not finish after release.",
+      );
+    } finally {
+      releaseUsageRecord.resolve();
+      if (firstResultPromise) {
+        await firstResultPromise.catch(() => undefined);
+      }
+      await removeTempRoot(firstVaultRoot);
+      await removeTempRoot(secondVaultRoot);
+    }
+  });
+
   test("drains started deferred usage before rethrowing idle checkpoint failure", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-fail-"));
     const events: string[] = [];
