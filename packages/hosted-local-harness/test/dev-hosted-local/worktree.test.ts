@@ -165,19 +165,23 @@ describe("hosted-local worktree config", () => {
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
         ".tmp/hosted-local-worktrees/feature-a/cloudflared-linq-webhook.yml",
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
-      DEVICE_SYNC_PUBLIC_BASE_URL: "http://127.0.0.1:3101/api/device-sync",
-      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://127.0.0.1:3101",
-      HOSTED_WEB_BASE_URL: "http://127.0.0.1:3101",
+      DEVICE_SYNC_PUBLIC_BASE_URL: "http://localhost:3101/api/device-sync",
+      HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS:
+        "http://localhost:3101,http://127.0.0.1:3101",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://localhost:3101",
+      HOSTED_WEB_BASE_URL: "http://localhost:3101",
       MURPH_DEV_MINIO_PORT: "9101",
       MURPH_DEV_REUSE_EXISTING_WORKER: "0",
       MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
       MURPH_DEV_TEMPORAL: "managed",
       MURPH_DEV_TEMPORAL_PORT: "7301",
+      MURPH_DEV_WEB_HOST: "localhost",
       MURPH_DEV_WEB_PORT: "3101",
       MURPH_DEV_WORKER_PORT: "8801",
       NEXT_DIST_DIR_MODE: "smoke",
       NEXT_DIST_DIR_SUFFIX: "feature-a",
     });
+    expect(config.urls.webBaseUrl).toBe("http://localhost:3101");
 
     const rendered = formatHostedLocalWorktreeEnv(config);
     expect(rendered).toContain("export MURPH_HOSTED_LOCAL_PROFILE='dev'");
@@ -186,12 +190,48 @@ describe("hosted-local worktree config", () => {
     expect(rendered).toContain("export MURPH_DEV_LINQ_WEBHOOK_TUNNEL='0'");
     expect(rendered).toContain("export MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER='1'");
     expect(rendered).toContain("export MURPH_DEV_SKIP_STRIPE_LISTEN='1'");
+    expect(rendered).toContain("export MURPH_DEV_WEB_HOST='localhost'");
     expect(rendered).toContain("export MURPH_DEV_WEB_PORT='3101'");
-    expect(rendered).toContain("export DEVICE_SYNC_PUBLIC_BASE_URL='http://127.0.0.1:3101/api/device-sync'");
-    expect(rendered).toContain("export HOSTED_ONBOARDING_PUBLIC_BASE_URL='http://127.0.0.1:3101'");
-    expect(rendered).toContain("export HOSTED_WEB_BASE_URL='http://127.0.0.1:3101'");
+    expect(rendered).toContain("export DEVICE_SYNC_PUBLIC_BASE_URL='http://localhost:3101/api/device-sync'");
+    expect(rendered).toContain("export HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS='http://localhost:3101,http://127.0.0.1:3101'");
+    expect(rendered).toContain("export HOSTED_ONBOARDING_PUBLIC_BASE_URL='http://localhost:3101'");
+    expect(rendered).toContain("export HOSTED_WEB_BASE_URL='http://localhost:3101'");
     expect(rendered).not.toContain("MURPH_DEV_TEMP_DIR");
     expect(rendered).not.toContain(config.databaseUrl);
+  });
+
+  it("allows an explicit 127 worktree web host while accepting both browser origins", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        MURPH_DEV_WEB_HOST: "127.0.0.1",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    expect(config.urls.webBaseUrl).toBe("http://127.0.0.1:3101");
+    expect(config.env).toMatchObject({
+      DEVICE_SYNC_PUBLIC_BASE_URL: "http://127.0.0.1:3101/api/device-sync",
+      HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS:
+        "http://localhost:3101,http://127.0.0.1:3101",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://127.0.0.1:3101",
+      HOSTED_WEB_BASE_URL: "http://127.0.0.1:3101",
+      MURPH_DEV_WEB_HOST: "127.0.0.1",
+    });
+  });
+
+  it("rejects non-loopback worktree web hosts", () => {
+    for (const host of ["0.0.0.0", "example.test", "::1"]) {
+      expect(() =>
+        buildHostedLocalWorktreeConfig({
+          env: {
+            MURPH_DEV_WEB_HOST: host,
+          },
+          ports,
+          slug: "feature-a",
+        })
+      ).toThrow("web host must be localhost or 127.0.0.1");
+    }
   });
 
   it("allows an explicit worktree Stripe listener opt-in", () => {
@@ -387,7 +427,7 @@ describe("hosted-local worktree config", () => {
 
     expect(config.ports).toEqual(repeated.ports);
     expect(worktreeMocks.readFile).not.toHaveBeenCalled();
-    expect(config.urls.webBaseUrl).toBe(`http://127.0.0.1:${config.ports.web}`);
+    expect(config.urls.webBaseUrl).toBe(`http://localhost:${config.ports.web}`);
     expect(config.urls.workerBaseUrl).toBe(`http://127.0.0.1:${config.ports.worker}`);
   });
 

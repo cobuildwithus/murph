@@ -89,6 +89,13 @@ const HOSTED_LOCAL_WORKTREE_PORT_RANGES = {
 const HOSTED_LOCAL_WORKTREE_DB_CREATE_SKIP_ENV =
   "MURPH_DEV_SKIP_WORKTREE_DB_CREATE";
 const HOSTED_LOCAL_WORKTREE_DATABASE_URL_ENV = "MURPH_DEV_DATABASE_URL";
+const HOSTED_LOCAL_WORKTREE_DEFAULT_WEB_HOST = "localhost";
+const HOSTED_LOCAL_WORKTREE_WEB_HOSTS = [
+  "localhost",
+  "127.0.0.1",
+] as const;
+
+type HostedLocalWorktreeWebHost = typeof HOSTED_LOCAL_WORKTREE_WEB_HOSTS[number];
 
 export async function resolveHostedLocalWorktreeConfig(input: {
   env: NodeJS.ProcessEnv;
@@ -113,6 +120,8 @@ export function buildHostedLocalWorktreeConfig(input: {
   const databaseName = buildHostedLocalWorktreeDatabaseName(slug);
   const databaseUrl = buildHostedLocalWorktreeDatabaseUrl(databaseName, input.env);
   const buildId = `worktree-${slug}`;
+  const webHost = resolveHostedLocalWorktreeWebHost(input.env);
+  const webOrigin = buildHostedLocalWorktreeWebOrigin(webHost, input.ports.web);
   const rootDir = path.join(HOSTED_LOCAL_WORKTREE_ROOT, slug);
   const paths = {
     cryptoStatePath: path.join(rootDir, "hosted-local-crypto-state.dev.vars"),
@@ -135,6 +144,8 @@ export function buildHostedLocalWorktreeConfig(input: {
     paths,
     ports: input.ports,
     slug,
+    webHost,
+    webOrigin,
   });
   return {
     buildId,
@@ -146,7 +157,7 @@ export function buildHostedLocalWorktreeConfig(input: {
     profileName: HOSTED_LOCAL_WORKTREE_PROFILE,
     slug,
     urls: {
-      webBaseUrl: `http://127.0.0.1:${input.ports.web}`,
+      webBaseUrl: webOrigin,
       workerBaseUrl: `http://127.0.0.1:${input.ports.worker}`,
     },
   };
@@ -383,6 +394,10 @@ export function formatHostedLocalWorktreeEnv(
     ["MURPH_DEV_WEB_PORT", config.env.MURPH_DEV_WEB_PORT],
     ["DEVICE_SYNC_PUBLIC_BASE_URL", config.env.DEVICE_SYNC_PUBLIC_BASE_URL],
     ["HOSTED_ONBOARDING_PUBLIC_BASE_URL", config.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL],
+    [
+      "HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS",
+      config.env.HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS,
+    ],
     ["HOSTED_WEB_BASE_URL", config.env.HOSTED_WEB_BASE_URL],
     ["MURPH_DEV_WORKER_HOST", config.env.MURPH_DEV_WORKER_HOST],
     ["MURPH_DEV_WORKER_PORT", config.env.MURPH_DEV_WORKER_PORT],
@@ -585,9 +600,10 @@ function buildHostedLocalWorktreeEnv(input: {
   paths: HostedLocalWorktreePaths;
   ports: HostedLocalWorktreePorts;
   slug: string;
+  webHost: HostedLocalWorktreeWebHost;
+  webOrigin: string;
 }): NodeJS.ProcessEnv {
   const env = { ...input.baseEnv };
-  const webOrigin = `http://127.0.0.1:${input.ports.web}`;
   delete env.MURPH_DEV_TEMP_DIR;
 
   return {
@@ -595,9 +611,11 @@ function buildHostedLocalWorktreeEnv(input: {
     [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]: input.buildId,
     [HOSTED_LOCAL_WORKTREE_SCOPE_ENV]: input.slug,
     [USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV]: "0",
-    DEVICE_SYNC_PUBLIC_BASE_URL: `${webOrigin}/api/device-sync`,
-    HOSTED_ONBOARDING_PUBLIC_BASE_URL: webOrigin,
-    HOSTED_WEB_BASE_URL: webOrigin,
+    DEVICE_SYNC_PUBLIC_BASE_URL: `${input.webOrigin}/api/device-sync`,
+    HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS:
+      buildHostedLocalWorktreeAllowedMutationOrigins(input.ports.web),
+    HOSTED_ONBOARDING_PUBLIC_BASE_URL: input.webOrigin,
+    HOSTED_WEB_BASE_URL: input.webOrigin,
     MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "0",
     MURPH_HOSTED_LOCAL_PROFILE: HOSTED_LOCAL_WORKTREE_PROFILE,
     MURPH_DEV_CF_PERSIST_DIR: input.paths.wranglerPersistDir,
@@ -615,13 +633,47 @@ function buildHostedLocalWorktreeEnv(input: {
     MURPH_DEV_TEMPORAL: "managed",
     MURPH_DEV_TEMPORAL_HOST: "127.0.0.1",
     MURPH_DEV_TEMPORAL_PORT: String(input.ports.temporal),
-    MURPH_DEV_WEB_HOST: "127.0.0.1",
+    MURPH_DEV_WEB_HOST: input.webHost,
     MURPH_DEV_WEB_PORT: String(input.ports.web),
     MURPH_DEV_WORKER_HOST: "127.0.0.1",
     MURPH_DEV_WORKER_PORT: String(input.ports.worker),
     NEXT_DIST_DIR_MODE: "smoke",
     NEXT_DIST_DIR_SUFFIX: input.slug,
   };
+}
+
+function resolveHostedLocalWorktreeWebHost(
+  env: Readonly<Record<string, string | undefined>>,
+): HostedLocalWorktreeWebHost {
+  const configured = env.MURPH_DEV_WEB_HOST?.trim().toLowerCase();
+  if (!configured) {
+    return HOSTED_LOCAL_WORKTREE_DEFAULT_WEB_HOST;
+  }
+  if (isHostedLocalWorktreeWebHost(configured)) {
+    return configured;
+  }
+  throw new Error(
+    "Hosted-local worktree web host must be localhost or 127.0.0.1.",
+  );
+}
+
+function isHostedLocalWorktreeWebHost(
+  value: string,
+): value is HostedLocalWorktreeWebHost {
+  return HOSTED_LOCAL_WORKTREE_WEB_HOSTS.some((host) => host === value);
+}
+
+function buildHostedLocalWorktreeWebOrigin(
+  host: HostedLocalWorktreeWebHost,
+  port: number,
+): string {
+  return `http://${host}:${port}`;
+}
+
+function buildHostedLocalWorktreeAllowedMutationOrigins(port: number): string {
+  return HOSTED_LOCAL_WORKTREE_WEB_HOSTS
+    .map((host) => buildHostedLocalWorktreeWebOrigin(host, port))
+    .join(",");
 }
 
 function buildHostedLocalWorktreeLinqEnv(input: {
