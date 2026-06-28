@@ -1,5 +1,6 @@
 import type {
   HostedExecutionExternalThreadRouteAuthority,
+  HostedExecutionLinqExternalThreadRouteAuthority,
   HostedExecutionStructuredLogDetails,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
@@ -646,6 +647,7 @@ export interface HostedAssistantDeliveryPreparation {
 
 export interface HostedAssistantDeliveryPreparedDispatch {
   intentId: string;
+  linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   preparedDispatchToken: string;
   previousDispatchState: AssistantOutboxPreparedDispatchState;
 }
@@ -980,6 +982,7 @@ function resolveHostedAssistantOutboxIntentWakeAt(
 
 export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
   assistantDeliveryEffects: HostedAssistantDeliveryEffect[];
+  linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   now?: () => string;
   vaultRoot: string;
 }): Promise<HostedAssistantDeliveryPreparation> {
@@ -989,16 +992,34 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
     if (!shouldPrepareHostedAssistantDeliveryEffectForDispatch(effect)) {
       continue;
     }
+    const linqDeliveryContext = resolveHostedAssistantLinqDeliveryContextForEffect({
+      context: input.linqDeliveryContext ?? null,
+      effect,
+    });
     const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
       deliveryIdempotencyKey: effect.payload.idempotencyKey,
       deliveryTransportIdempotent: effect.payload.transportIdempotent,
+      ...(linqDeliveryContext?.routeAuthority
+        ? { externalThreadRouteAuthority: linqDeliveryContext.routeAuthority }
+        : {}),
+      ...(linqDeliveryContext?.service
+        ? { externalThreadService: linqDeliveryContext.service }
+        : {}),
       intentId: effect.effectId,
       startedAt,
       vault: input.vaultRoot,
     });
     if (prepared?.ownsDispatch === true && prepared.preparedDispatchToken) {
+      const preparedLinqDeliveryContext = linqDeliveryContext
+        ?? buildHostedAssistantLinqDeliveryContextFromPreparedIntent({
+          effect,
+          intent: prepared.intent,
+        });
       preparedDispatches.push({
         intentId: effect.effectId,
+        ...(preparedLinqDeliveryContext
+          ? { linqDeliveryContext: preparedLinqDeliveryContext }
+          : {}),
         preparedDispatchToken: prepared.preparedDispatchToken,
         previousDispatchState: prepared.previousDispatchState,
       });
@@ -1029,6 +1050,54 @@ function hasHostedAssistantVaultFileMedia(
   payload: HostedAssistantDeliveryPayload,
 ): boolean {
   return payload.media.some((item) => item.kind === "vault_file");
+}
+
+function resolveHostedAssistantLinqDeliveryContextForEffect(input: {
+  context: HostedAssistantLinqDeliveryContext | null;
+  effect: HostedAssistantDeliveryEffect;
+}): HostedAssistantLinqDeliveryContext | null {
+  for (const target of readHostedAssistantDeliveryPayloadTargets(input.effect.payload)) {
+    const context = resolveHostedAssistantLinqDeliveryContextForRequest({
+      context: input.context,
+      replyToMessageId: input.effect.payload.replyToMessageId,
+      target: target.target,
+      targetKind: target.targetKind,
+    });
+    if (context) {
+      return context;
+    }
+  }
+
+  return null;
+}
+
+function buildHostedAssistantLinqDeliveryContextFromPreparedIntent(input: {
+  effect: HostedAssistantDeliveryEffect;
+  intent: Pick<
+    AssistantOutboxIntent,
+    "externalThreadRouteAuthority" | "externalThreadService"
+  >;
+}): HostedAssistantLinqDeliveryContext | null {
+  const authority = input.intent.externalThreadRouteAuthority ?? null;
+  if (!authority || authority.channel !== "linq") {
+    return null;
+  }
+  const routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority = {
+    accountLookupKey: authority.accountLookupKey,
+    channel: "linq",
+    containerMemberId: authority.containerMemberId,
+    threadId: authority.threadId,
+  };
+
+  return {
+    directRecipientPhoneNumber: null,
+    fromPhoneNumber: null,
+    replyToMessageId: input.effect.payload.replyToMessageId,
+    routeAuthority,
+    service: input.intent.externalThreadService ?? null,
+    target: routeAuthority.threadId,
+    threadIsDirect: input.effect.payload.threadIsDirect,
+  };
 }
 
 export function createHostedAssistantProgressDeliveryDependencies(input: {
@@ -1563,9 +1632,15 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     if (disabledAutoReplyOutcome) {
       return disabledAutoReplyOutcome;
     }
-    const linqDeliveryContext = input.wake
-      ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
-      : null;
+    const linqDeliveryContext = input.preparedDispatch?.linqDeliveryContext
+      ?? (input.wake
+        ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
+        : null);
+    const routeAuthorityRequired = shouldRequireHostedAssistantLinqRouteAuthority({
+      effect: input.assistantDeliveryEffect,
+      linqDeliveryContext,
+      preparedDispatch: input.preparedDispatch,
+    });
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
         preflightDispatchIntent: async ({ intent, now: preflightNow, vault }) =>
@@ -1669,6 +1744,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             providerDispatchEntered = true;
           },
           providerFetch: input.providerFetch,
+          routeAuthorityRequired,
           signal: input.signal,
           vaultRoot: input.vaultRoot,
         }),
@@ -1681,13 +1757,12 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             providerDispatchEntered = true;
           },
           providerFetch: input.providerFetch,
+          routeAuthorityRequired,
           signal: input.signal,
         }),
         setLinqMessageReaction: async (request) => {
           await assertHostedDeliveryLiveNow(input);
-          const routeScopedContext = input.wake
-            ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
-            : null;
+          const routeScopedContext = linqDeliveryContext;
           await assertHostedAssistantLinqRouteAuthorityForDelivery({
             deliveryContext: resolveHostedAssistantLinqReactionDeliveryContextForRequest({
               context: routeScopedContext,
@@ -1695,6 +1770,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               targetMessageId: request.targetMessageId,
             }),
             effectsPort: input.effectsPort,
+            routeAuthorityRequired,
             routeScopedContext,
             signal: input.signal,
           });
@@ -1952,6 +2028,7 @@ function createHostedAssistantLinqSendDependency(input: {
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
+  routeAuthorityRequired?: boolean;
   signal: AbortSignal | null;
   vaultRoot?: string | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
@@ -1978,6 +2055,7 @@ function createHostedAssistantLinqSendDependency(input: {
     await assertHostedAssistantLinqRouteAuthorityForDelivery({
       deliveryContext,
       effectsPort: input.effectsPort ?? null,
+      routeAuthorityRequired: input.routeAuthorityRequired === true,
       routeScopedContext: input.linqDeliveryContext ?? null,
       signal: signal ?? null,
     });
@@ -2146,6 +2224,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
+  routeAuthorityRequired?: boolean;
   signal: AbortSignal | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinqVoiceMemo"]> {
   return async (request) => {
@@ -2165,6 +2244,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
     await assertHostedAssistantLinqRouteAuthorityForDelivery({
       deliveryContext,
       effectsPort: input.effectsPort ?? null,
+      routeAuthorityRequired: input.routeAuthorityRequired === true,
       routeScopedContext: input.linqDeliveryContext ?? null,
       signal: signal ?? null,
     });
@@ -2181,6 +2261,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
 async function assertHostedAssistantLinqRouteAuthorityForDelivery(input: {
   deliveryContext: HostedAssistantLinqDeliveryContext | null;
   effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null;
+  routeAuthorityRequired?: boolean;
   routeScopedContext?: HostedAssistantLinqDeliveryContext | null;
   signal: AbortSignal | null;
 }): Promise<void> {
@@ -2192,6 +2273,16 @@ async function assertHostedAssistantLinqRouteAuthorityForDelivery(input: {
         "Hosted Linq route authority does not match the requested delivery target.",
       );
     }
+    if (input.routeAuthorityRequired === true) {
+      throw createAssistantDeliveryBlockedError(
+        "ASSISTANT_LINQ_ROUTE_AUTHORITY_REQUIRED",
+        "Hosted Linq route authority is required before retrying this route-scoped delivery.",
+        {
+          blockKind: "linq_route_authority_missing",
+          resume: "recipient_inbound",
+        },
+      );
+    }
     return;
   }
 
@@ -2201,6 +2292,41 @@ async function assertHostedAssistantLinqRouteAuthorityForDelivery(input: {
   await assertAuthority(routeAuthority, {
     signal: input.signal,
   });
+}
+
+function shouldRequireHostedAssistantLinqRouteAuthority(input: {
+  effect: HostedAssistantDeliveryEffect;
+  linqDeliveryContext: HostedAssistantLinqDeliveryContext | null;
+  preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
+}): boolean {
+  if (input.linqDeliveryContext?.routeAuthority) {
+    return false;
+  }
+  if (!input.preparedDispatch) {
+    return false;
+  }
+  if (input.effect.deliveryPhase !== "background_retry") {
+    return false;
+  }
+  return isHostedAssistantLinqRouteScopedPayload(input.effect.payload);
+}
+
+function isHostedAssistantLinqRouteScopedPayload(
+  payload: HostedAssistantDeliveryPayload,
+): boolean {
+  return payload.channel === "linq"
+    && (
+      payload.bindingDeliveryKind === "thread"
+      || normalizeHostedLinqRouteScopedTarget(payload.threadId) !== null
+      || normalizeHostedLinqRouteScopedTarget(payload.explicitTarget) !== null
+    );
+}
+
+function normalizeHostedLinqRouteScopedTarget(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 && !normalized.startsWith("+") ? normalized : null;
 }
 
 function requireHostedAssistantLinqRouteAuthorityAssert(
@@ -3044,6 +3170,35 @@ function readHostedAssistantDeliveryPayloadTarget(
     target: null,
     targetKind: null,
   };
+}
+
+function readHostedAssistantDeliveryPayloadTargets(
+  payload: HostedAssistantDeliveryPayload,
+): Array<{ target: string; targetKind: string | null }> {
+  const targets: Array<{ target: string; targetKind: string | null }> = [];
+  appendHostedAssistantDeliveryPayloadTarget(targets, payload.explicitTarget, "explicit");
+  appendHostedAssistantDeliveryPayloadTarget(
+    targets,
+    payload.bindingDeliveryTarget,
+    payload.bindingDeliveryKind,
+  );
+  appendHostedAssistantDeliveryPayloadTarget(targets, payload.threadId, "thread");
+  return targets;
+}
+
+function appendHostedAssistantDeliveryPayloadTarget(
+  targets: Array<{ target: string; targetKind: string | null }>,
+  target: string | null | undefined,
+  targetKind: string | null,
+): void {
+  const normalized = target?.trim() ?? "";
+  if (!normalized || targets.some((item) => item.target === normalized)) {
+    return;
+  }
+  targets.push({
+    target: normalized,
+    targetKind,
+  });
 }
 
 function readAssistantDeliveryCleanupMessages(

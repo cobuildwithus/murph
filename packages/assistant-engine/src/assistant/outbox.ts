@@ -1534,6 +1534,8 @@ export async function beginAssistantOutboxIntentMirrorDispatch(input: {
 export async function beginAssistantOutboxIntentMirrorPreparedDispatch(input: {
   deliveryIdempotencyKey?: string | null
   deliveryTransportIdempotent: boolean
+  externalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
+  externalThreadService?: AssistantOutboxIntent['externalThreadService']
   intentId: string
   startedAt?: string
   vault: string
@@ -1551,6 +1553,12 @@ export async function beginAssistantOutboxIntentMirrorPreparedDispatch(input: {
   return markAssistantOutboxIntentMirrorSendingPrepared({
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+    ...(input.externalThreadRouteAuthority === undefined
+      ? {}
+      : { externalThreadRouteAuthority: input.externalThreadRouteAuthority }),
+    ...(input.externalThreadService === undefined
+      ? {}
+      : { externalThreadService: input.externalThreadService }),
     intent,
     intentPath,
     preparedDispatchToken: randomUUID(),

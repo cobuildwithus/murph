@@ -386,6 +386,110 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
+  it("persists Linq route authority when preparing a route-scoped delivery", async () => {
+    const routeAuthority = {
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq" as const,
+      containerMemberId: "member_123",
+      threadId: "linq_chat_123",
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "ain_hashed_thread",
+      replyToMessageId: "linq_message_1",
+      transportIdempotent: true,
+    });
+
+    const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: [effect],
+      linqDeliveryContext: {
+        directRecipientPhoneNumber: "+15550001",
+        fromPhoneNumber: null,
+        replyToMessageId: "linq_message_1",
+        routeAuthority,
+        service: "iMessage",
+        target: "linq_chat_123",
+        threadIsDirect: true,
+      },
+      now: () => "2026-04-08T00:00:05.000Z",
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(mocks.beginAssistantOutboxIntentMirrorPreparedDispatch).toHaveBeenCalledWith({
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      deliveryTransportIdempotent: true,
+      externalThreadRouteAuthority: routeAuthority,
+      externalThreadService: "iMessage",
+      intentId: "intent_123",
+      startedAt: "2026-04-08T00:00:05.000Z",
+      vault: HOSTED_WAKE.vaultRoot,
+    });
+    expect(preparation.preparedDispatches[0]).toEqual(expect.objectContaining({
+      linqDeliveryContext: expect.objectContaining({
+        routeAuthority,
+        service: "iMessage",
+      }),
+    }));
+  });
+
+  it("restores Linq route authority from a prepared retry intent", async () => {
+    const routeAuthority = {
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq" as const,
+      containerMemberId: "member_123",
+      threadId: "linq_chat_123",
+    };
+    mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockResolvedValueOnce({
+      intent: {
+        attemptCount: 2,
+        deliveryConfirmationPending: false,
+        deliveryIdempotencyKey: "assistant-outbox:intent_123",
+        deliveryTransportIdempotent: true,
+        externalThreadRouteAuthority: routeAuthority,
+        externalThreadService: "iMessage",
+        lastAttemptAt: "2026-04-08T00:05:00.000Z",
+        lastError: null,
+        nextAttemptAt: null,
+        preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
+        status: "sending",
+      },
+      ownsDispatch: true,
+      preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
+      previousDispatchState: createPreparedPreviousDispatchState({
+        deliveryTransportIdempotent: true,
+        status: "retryable",
+      }),
+    });
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      replyToMessageId: "linq_message_1",
+      threadIsDirect: true,
+      transportIdempotent: true,
+    });
+
+    const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: [effect],
+      now: () => "2026-04-08T00:05:00.000Z",
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(preparation.preparedDispatches[0]).toEqual(expect.objectContaining({
+      linqDeliveryContext: {
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        replyToMessageId: "linq_message_1",
+        routeAuthority,
+        service: "iMessage",
+        target: "linq_chat_123",
+        threadIsDirect: true,
+      },
+    }));
+  });
+
   it("pre-claims non-idempotent voice memo delivery effects before provider dispatch", async () => {
     const previousDispatchState = createPreparedPreviousDispatchState();
     mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockResolvedValueOnce({
@@ -5675,6 +5779,161 @@ describe("hosted runtime callbacks", () => {
       ok: true,
     });
     await Promise.resolve();
+  });
+
+  it("uses prepared Linq route authority for timer-wake retries and contact-card sharing", async () => {
+    const routeAuthority = {
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq" as const,
+      containerMemberId: "member_123",
+      threadId: "linq_chat_current",
+    };
+    const effect = createEffect({
+      actorId: "ain_hashed_actor",
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_current",
+      channel: "linq",
+      explicitTarget: "linq_chat_current",
+      replyToMessageId: "linq_message_current",
+      threadIsDirect: true,
+      transportIdempotent: true,
+    });
+    const assertAuthority = vi.fn(async () => undefined);
+    const maybeShareLinqContactCardAfterOutbound = vi.fn(async () => ({
+      action: "share" as const,
+      ok: true as const,
+    }));
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_retry_sent",
+      providerThreadId: "linq_chat_current",
+      target: "linq_chat_current",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from retry",
+        replyToMessageId: "linq_message_current",
+        target: "linq_chat_current",
+        targetKind: "thread",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqThreadRouteAuthority: assertAuthority,
+        maybeShareLinqContactCardAfterOutbound,
+      }),
+      preparedDispatches: [{
+        intentId: "intent_123",
+        linqDeliveryContext: {
+          directRecipientPhoneNumber: null,
+          fromPhoneNumber: null,
+          replyToMessageId: "linq_message_current",
+          routeAuthority,
+          service: "iMessage",
+          target: "linq_chat_current",
+          threadIsDirect: true,
+        },
+        preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
+        previousDispatchState: createPreparedPreviousDispatchState({
+          deliveryTransportIdempotent: true,
+          status: "retryable",
+        }),
+      }],
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(assertAuthority).toHaveBeenCalledWith(routeAuthority, {
+      signal: null,
+    });
+    expect(assertAuthority.mock.invocationCallOrder[0] ?? 0)
+      .toBeLessThan(mocks.sendLinqMessage.mock.invocationCallOrder[0] ?? 0);
+    expect(maybeShareLinqContactCardAfterOutbound).toHaveBeenCalledWith({
+      authority: routeAuthority,
+      chatId: "linq_chat_current",
+      service: "iMessage",
+      threadIsDirect: true,
+    }, {
+      signal: null,
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+      }),
+    ]);
+  });
+
+  it("fails closed for route-scoped Linq timer retries without prepared authority", async () => {
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_123",
+      deliveryPhase: "background_retry",
+      effectId: "intent_123",
+      payload: createPayload({
+        actorId: "ain_hashed_actor",
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "linq_chat_current",
+        channel: "linq",
+        explicitTarget: "linq_chat_current",
+        replyToMessageId: "linq_message_current",
+        threadIsDirect: true,
+        transportIdempotent: true,
+      }),
+    });
+    const assertAuthority = vi.fn(async () => undefined);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from retry",
+        replyToMessageId: "linq_message_current",
+        target: "linq_chat_current",
+        targetKind: "thread",
+      });
+      throw new Error("unreachable without route authority");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqThreadRouteAuthority: assertAuthority,
+      }),
+      preparedDispatches: [{
+        intentId: "intent_123",
+        preparedDispatchToken: PREPARED_DISPATCH_TOKEN,
+        previousDispatchState: createPreparedPreviousDispatchState({
+          deliveryTransportIdempotent: true,
+          status: "retryable",
+        }),
+      }],
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_LINQ_ROUTE_AUTHORITY_REQUIRED",
+    });
+
+    expect(assertAuthority).not.toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
   });
 
   it("logs Linq contact-card callback failures without failing the sent outcome", async () => {
