@@ -174,21 +174,9 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
   const cachePath = input.registrationCachePath === null
     ? null
     : input.registrationCachePath ?? path.join(repoRoot, DEFAULT_LINQ_WEBHOOK_REGISTRATION_CACHE);
-  const cachedRegistration = cachePath
-    ? await readLinqWebhookRegistrationCache(cachePath)
-    : null;
   const phoneNumberLabel = input.setup.phoneNumbers
     ? `${input.setup.phoneNumbers.length} configured phone number(s)`
     : "all Linq phone numbers";
-  if (
-    cachedRegistration?.fingerprint === registrationFingerprint
-    && cachedRegistration.targetUrl === input.setup.targetUrl
-  ) {
-    (input.stderrTarget ?? process.stderr).write(
-      `[linq] Local webhook target ${input.setup.targetUrl} is already registered for ${phoneNumberLabel}.\n`,
-    );
-    return;
-  }
 
   const existingRegistration = await findExistingLinqWebhookSubscription({
     env: registrationEnv,
@@ -202,8 +190,8 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
     if (existingRegistration.secretStatus === "mismatch") {
       throw new Error(
         [
-          "Existing Linq webhook subscription uses a signing secret that does not match local LINQ_WEBHOOK_SECRET.",
-          "Update the local secret to the subscription secret, or recreate the subscription expected by this environment.",
+          "Existing Linq webhook subscription uses a signing secret that does not match the effective local web LINQ_WEBHOOK_SECRET.",
+          "Update apps/web/.env.local to the subscription secret, remove the stale subscription, or recreate the subscription expected by this environment.",
         ].join(" "),
       );
     }
@@ -609,54 +597,6 @@ function createLinqWebhookRegistrationFingerprint(input: {
   return createHmac("sha256", input.webhookSecret)
     .update(payload)
     .digest("hex");
-}
-
-async function readLinqWebhookRegistrationCache(
-  cachePath: string,
-): Promise<LinqWebhookRegistrationCache | null> {
-  let text: string;
-  try {
-    text = await readFile(cachePath, "utf8");
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return null;
-    }
-    throw new Error("Unable to read repo-local Linq webhook registration cache.");
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(text);
-    return parseLinqWebhookRegistrationCache(parsed);
-  } catch {
-    return null;
-  }
-}
-
-function parseLinqWebhookRegistrationCache(
-  value: unknown,
-): LinqWebhookRegistrationCache | null {
-  if (!isPlainRecord(value)) {
-    return null;
-  }
-  if (
-    typeof value.fingerprint !== "string"
-    || value.secretVerified !== true
-    || typeof value.targetUrl !== "string"
-    || typeof value.updatedAt !== "string"
-  ) {
-    return null;
-  }
-  if (value.subscriptionId !== null && typeof value.subscriptionId !== "string") {
-    return null;
-  }
-
-  return {
-    fingerprint: value.fingerprint,
-    secretVerified: true,
-    subscriptionId: value.subscriptionId,
-    targetUrl: value.targetUrl,
-    updatedAt: value.updatedAt,
-  };
 }
 
 async function writeLinqWebhookRegistrationCache(
