@@ -1,6 +1,10 @@
 import type {
+  AttachmentCreateParams,
+  AttachmentCreateResponse,
   ChatCreateParams,
   ChatCreateResponse,
+  ChatSendVoicememoParams,
+  SupportedContentType,
   TextPart,
   WebhookEventType,
   WebhookSubscriptionCreateParams,
@@ -44,6 +48,7 @@ const HOSTED_LINQ_WEBHOOK_EVENT_TYPES = [
 ] as const satisfies readonly WebhookEventType[];
 const HOSTED_LINQ_WEBHOOK_EVENT_TYPE_SET: ReadonlySet<string> =
   new Set(HOSTED_LINQ_WEBHOOK_EVENT_TYPES);
+const HOSTED_LINQ_ATTACHMENT_UPLOAD_TIMEOUT_MS = 10_000;
 
 export type HostedLinqWebhookSubscription = {
   createdAt: string | null;
@@ -177,6 +182,83 @@ export async function createHostedLinqChat(input: {
   };
 }
 
+export async function uploadHostedLinqAttachment(input: {
+  bytes: Uint8Array;
+  contentType: SupportedContentType;
+  filename: string;
+  signal?: AbortSignal;
+  sizeBytes: number;
+}): Promise<{ attachmentId: string }> {
+  const body: AttachmentCreateParams = {
+    content_type: input.contentType,
+    filename: normalizeRequiredString(input.filename, "attachment filename"),
+    size_bytes: normalizeHostedLinqAttachmentSize(input.sizeBytes),
+  };
+  const response = await fetchHostedLinqApiOrThrow({
+    body: JSON.stringify(body),
+    method: "POST",
+    operation: "attachment creation",
+    path: "attachments",
+    signal: input.signal,
+    timeoutMessage: "Linq attachment creation timed out.",
+  });
+
+  if (!response.ok) {
+    throw buildHostedLinqRequestFailedError({
+      operation: "attachment creation",
+      retryable: isRetryableHostedLinqStatus(response.status),
+      status: response.status,
+    });
+  }
+
+  const payload = (await response.json()) as AttachmentCreateResponse;
+  const attachmentId = normalizeRequiredString(payload.attachment_id, "attachment id");
+  const uploadUrl = normalizeHostedLinqAttachmentUploadUrl(payload.upload_url);
+  const uploadResponse = await fetchHostedLinqAttachmentUploadUrl({
+    bytes: input.bytes,
+    requiredHeaders: payload.required_headers,
+    signal: input.signal,
+    uploadUrl,
+  });
+
+  if (!uploadResponse.ok) {
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      message: `Linq attachment upload failed with HTTP ${uploadResponse.status}.`,
+      httpStatus: 502,
+      retryable: isRetryableHostedLinqStatus(uploadResponse.status),
+    });
+  }
+
+  return { attachmentId };
+}
+
+export async function sendHostedLinqVoiceMemo(input: {
+  attachmentId: string;
+  chatId: string;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const body: ChatSendVoicememoParams = {
+    attachment_id: normalizeRequiredString(input.attachmentId, "attachment id"),
+  };
+  const response = await fetchHostedLinqApiOrThrow({
+    body: JSON.stringify(body),
+    method: "POST",
+    operation: "voice memo send",
+    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/voicememo`,
+    signal: input.signal,
+    timeoutMessage: "Linq voice memo send timed out.",
+  });
+
+  if (!response.ok) {
+    throw buildHostedLinqRequestFailedError({
+      operation: "voice memo send",
+      retryable: isRetryableHostedLinqStatus(response.status),
+      status: response.status,
+    });
+  }
+}
+
 export async function createHostedLinqWebhookSubscription(input: {
   phoneNumbers?: readonly string[] | null;
   signal?: AbortSignal;
@@ -284,6 +366,118 @@ function normalizeRequiredString(value: unknown, label: string): string {
 
 function isRetryableHostedLinqStatus(status: number): boolean {
   return status === 429 || status >= 500;
+}
+
+async function fetchHostedLinqAttachmentUploadUrl(input: {
+  bytes: Uint8Array;
+  requiredHeaders: Record<string, string>;
+  signal?: AbortSignal;
+  uploadUrl: string;
+}): Promise<Response> {
+  const { clearTimeout, didTimeout, signal } = createHostedLinqTimeoutSignal({
+    signal: input.signal,
+    timeoutMs: HOSTED_LINQ_ATTACHMENT_UPLOAD_TIMEOUT_MS,
+  });
+
+  try {
+    return await fetch(input.uploadUrl, {
+      body: copyBytesToArrayBuffer(input.bytes),
+      headers: normalizeHostedLinqAttachmentUploadHeaders(input.requiredHeaders),
+      method: "PUT",
+      signal,
+    });
+  } catch (error) {
+    if (didTimeout() && !input.signal?.aborted) {
+      throw hostedOnboardingError({
+        code: "LINQ_SEND_FAILED",
+        message: "Linq attachment upload timed out.",
+        httpStatus: 502,
+        retryable: true,
+      });
+    }
+
+    throw error;
+  } finally {
+    clearTimeout();
+  }
+}
+
+function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
+function createHostedLinqTimeoutSignal(input: {
+  signal?: AbortSignal;
+  timeoutMs: number;
+}): {
+  clearTimeout: () => void;
+  didTimeout: () => boolean;
+  signal: AbortSignal;
+} {
+  const controller = new AbortController();
+  let timedOut = false;
+  const onAbort = () => {
+    controller.abort(input.signal?.reason);
+  };
+
+  if (input.signal) {
+    if (input.signal.aborted) {
+      controller.abort(input.signal.reason);
+    } else {
+      input.signal.addEventListener("abort", onAbort, { once: true });
+    }
+  }
+
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new LinqApiTimeoutError("Linq attachment upload timed out."));
+  }, input.timeoutMs);
+
+  return {
+    clearTimeout: () => {
+      clearTimeout(timeoutId);
+      input.signal?.removeEventListener("abort", onAbort);
+    },
+    didTimeout: () => timedOut,
+    signal: controller.signal,
+  };
+}
+
+function normalizeHostedLinqAttachmentSize(value: number): number {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new TypeError("attachment size must be a positive integer.");
+  }
+
+  return value;
+}
+
+function normalizeHostedLinqAttachmentUploadUrl(value: unknown): string {
+  const normalized = normalizeRequiredString(value, "attachment upload URL");
+  const url = new URL(normalized);
+
+  if (url.protocol !== "https:") {
+    throw new TypeError("attachment upload URL must use HTTPS.");
+  }
+
+  return url.toString();
+}
+
+function normalizeHostedLinqAttachmentUploadHeaders(
+  value: Record<string, string>,
+): Headers {
+  const headers = new Headers();
+
+  for (const [name, headerValue] of Object.entries(value)) {
+    if (!name || typeof headerValue !== "string") {
+      throw new TypeError("attachment upload headers are invalid.");
+    }
+
+    headers.set(name, headerValue);
+  }
+
+  return headers;
 }
 
 function buildHostedLinqTextMessageBody(input: {

@@ -12,7 +12,9 @@ import {
   createHostedLinqWebhookSubscription,
   sendHostedLinqChatMessage,
   sendHostedLinqReadReceipt,
+  sendHostedLinqVoiceMemo,
   startHostedLinqTypingIndicator,
+  uploadHostedLinqAttachment,
 } from "@/src/lib/hosted-onboarding/linq";
 
 const originalFetch = globalThis.fetch;
@@ -322,6 +324,105 @@ describe("createHostedLinqChat", () => {
         ],
       },
       to: ["+15551234567"],
+    });
+  });
+});
+
+describe("hosted Linq attachment voice memo transport", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("creates an attachment and uploads raw bytes to the presigned URL", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = input.toString();
+
+      if (url === "https://linq.example.test/api/partner/v3/attachments") {
+        return createJsonResponse({
+          attachment_id: "attachment_123",
+          download_url: "https://cdn.linq.example.test/attachment_123",
+          expires_at: "2026-06-29T12:00:00.000Z",
+          http_method: "PUT",
+          required_headers: {
+            "content-type": "audio/x-m4a",
+            "x-upload-token": "upload-token",
+          },
+          upload_url: "https://uploads.linq.example.test/attachment_123",
+        }, 201);
+      }
+
+      if (url === "https://uploads.linq.example.test/attachment_123") {
+        return new Response(null, { status: 200 });
+      }
+
+      return new Response(null, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(uploadHostedLinqAttachment({
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "audio/x-m4a",
+      filename: "murph-ops-voice-memo.m4a",
+      sizeBytes: 3,
+    })).resolves.toEqual({
+      attachmentId: "attachment_123",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      new URL("attachments", "https://linq.example.test/api/partner/v3/"),
+      expect.objectContaining({
+        body: JSON.stringify({
+          content_type: "audio/x-m4a",
+          filename: "murph-ops-voice-memo.m4a",
+          size_bytes: 3,
+        }),
+        method: "POST",
+      }),
+    );
+    const uploadInit = expectRequestInit(fetchMock.mock.calls[1]?.[1]);
+    const uploadBody = uploadInit.body;
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://uploads.linq.example.test/attachment_123");
+    expect(uploadInit.method).toBe("PUT");
+    expect(uploadBody).toBeInstanceOf(ArrayBuffer);
+    if (!(uploadBody instanceof ArrayBuffer)) {
+      throw new Error("Expected attachment upload body to be an ArrayBuffer.");
+    }
+    expect(Array.from(new Uint8Array(uploadBody))).toEqual([1, 2, 3]);
+    expect(new Headers(uploadInit.headers).get("content-type")).toBe("audio/x-m4a");
+    expect(new Headers(uploadInit.headers).get("x-upload-token")).toBe("upload-token");
+    expect(new Headers(uploadInit.headers).get("authorization")).toBeNull();
+  });
+
+  it("sends a native voice memo by attachment id", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      createJsonResponse({
+        voice_memo: {
+          id: "voice_123",
+        },
+      }, 201),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendHostedLinqVoiceMemo({
+      attachmentId: "attachment_123",
+      chatId: "chat_123",
+    })).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("chats/chat_123/voicememo", "https://linq.example.test/api/partner/v3/"),
+      expect.objectContaining({
+        method: "POST",
+      }),
+    );
+    expect(readJsonRequestBody(fetchMock.mock.calls[0]?.[1])).toEqual({
+      attachment_id: "attachment_123",
     });
   });
 });
