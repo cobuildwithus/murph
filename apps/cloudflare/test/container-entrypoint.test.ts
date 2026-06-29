@@ -447,7 +447,57 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
-  it("rejects runtime wakes after shutdown starts", async () => {
+  it("advertises absent for runtime wakes after shutdown only when no runner work is active", async () => {
+    const drainStarted = createDeferred();
+    const releaseDrain = createDeferred();
+    mocks.drainHostedRuntimePostSafePointCompletionsBestEffort.mockImplementationOnce(async () => {
+      drainStarted.resolve();
+      await releaseDrain.promise;
+    });
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    try {
+      process.emit("SIGTERM", "SIGTERM");
+      await drainStarted.promise;
+
+      const lateWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+        body: JSON.stringify({
+          attemptId: "attempt_evt_runtime_wake_shutdown_idle",
+          leaseGeneration: "1",
+          userId: "u1",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+
+      expect(lateWake.status).toBe(204);
+      expect(lateWake.headers.get("x-runtime-wake-accepted")).toBe("0");
+      expect(lateWake.headers.get("x-runtime-wake-absent")).toBe("1");
+    } finally {
+      releaseDrain.resolve();
+    }
+
+    await vi.waitFor(() => {
+      expect(exit).toHaveBeenCalledWith(0);
+    });
+    const serverIndex = servers.indexOf(server);
+    if (serverIndex !== -1) {
+      servers.splice(serverIndex, 1);
+    }
+  });
+
+  it("rejects active runtime wakes after shutdown starts without advertising absence", async () => {
     const invocationReady = createDeferred();
     const releaseInvocation = createDeferred();
     const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
@@ -506,7 +556,7 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(lateWake.status).toBe(204);
     expect(lateWake.headers.get("x-runtime-wake-accepted")).toBe("0");
-    expect(lateWake.headers.get("x-runtime-wake-absent")).toBe("1");
+    expect(lateWake.headers.get("x-runtime-wake-absent")).toBeNull();
     expect(runtimeWakeCount).toBe(0);
     expect(invocationResponse.status).toBe(200);
     await vi.waitFor(() => {
@@ -601,7 +651,7 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(lateWake.status).toBe(204);
     expect(lateWake.headers["x-runtime-wake-accepted"]).toBe("0");
-    expect(lateWake.headers["x-runtime-wake-absent"]).toBe("1");
+    expect(lateWake.headers["x-runtime-wake-absent"]).toBeUndefined();
     expect(lateWake.json).toBeNull();
     expect(runtimeWakeCount).toBe(0);
     expect(invocationResponse.status).toBe(200);

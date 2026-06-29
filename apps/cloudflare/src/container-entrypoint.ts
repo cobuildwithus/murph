@@ -436,15 +436,29 @@ export async function startHostedContainerEntrypoint(input: {
             return false;
           }
 
+          const advertiseAbsent =
+            activeHostedRunnerJobCount === 0
+            && activeRuntimeWake === null
+            && !activeRuntimeWakePending
+            && activeRuntimeWakePendingAttemptId === null
+            && activeWorkspaceInvocationAbort === null;
           discardUnreadRequestBody(request);
           emitHostedExecutionStructuredLog({
             component: "container",
+            details: {
+              activeHostedRunnerJobCount,
+              runtimeWakeAbsent: advertiseAbsent,
+              workspaceAttemptId: activeRuntimeWakeAttemptId,
+              workspacePendingAttemptId: activeRuntimeWakePendingAttemptId,
+            },
             level: "warn",
             message: "Hosted container entrypoint rejected a runtime wake after shutdown started.",
             phase: "failed",
           });
           response.setHeader("x-runtime-wake-accepted", "0");
-          response.setHeader("x-runtime-wake-absent", "1");
+          if (advertiseAbsent) {
+            response.setHeader("x-runtime-wake-absent", "1");
+          }
           response.statusCode = 204;
           response.end();
           return true;
