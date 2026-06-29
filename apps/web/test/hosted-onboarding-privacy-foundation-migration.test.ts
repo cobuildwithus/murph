@@ -442,6 +442,27 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const linqFirstContactRejectedMessageMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260627230000_linq_first_contact_rejected_message_text/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const linqFirstContactScrubRejectedMessageMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260628000000_linq_first_contact_scrub_rejected_message_text/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const linqFirstContactDropRejectedMessageMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260628010000_linq_first_contact_drop_rejected_message_text/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -507,6 +528,9 @@ describe("hosted Prisma baseline migration", () => {
       "2026062600_computer_handoff_return_contact_kind",
       "20260626010000_linq_first_contact_admission_budget",
       "20260627210000_linq_first_contact_admission_drop_category",
+      "20260627230000_linq_first_contact_rejected_message_text",
+      "20260628000000_linq_first_contact_scrub_rejected_message_text",
+      "20260628010000_linq_first_contact_drop_rejected_message_text",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -673,6 +697,54 @@ describe("hosted Prisma baseline migration", () => {
       "prompt",
     );
     expect(linqFirstContactAdmissionDropCategoryMigrationSql).not.toContain(
+      "response",
+    );
+    expect(linqFirstContactRejectedMessageMigrationSql).toContain(
+      'ADD COLUMN "rejected_message_text" TEXT',
+    );
+    expect(linqFirstContactRejectedMessageMigrationSql).toContain(
+      'char_length("rejected_message_text") <= 2000',
+    );
+    expect(linqFirstContactRejectedMessageMigrationSql).toContain(
+      '"decision" = \'block\'',
+    );
+    expect(linqFirstContactRejectedMessageMigrationSql).not.toContain(
+      "prompt",
+    );
+    expect(linqFirstContactRejectedMessageMigrationSql).not.toContain(
+      "response",
+    );
+    expect(linqFirstContactScrubRejectedMessageMigrationSql).toContain(
+      'UPDATE "hosted_linq_first_contact_admission_decision"',
+    );
+    expect(linqFirstContactScrubRejectedMessageMigrationSql).toContain(
+      'SET "rejected_message_text" = NULL',
+    );
+    expect(linqFirstContactScrubRejectedMessageMigrationSql).toContain(
+      'WHERE "rejected_message_text" IS NOT NULL',
+    );
+    expect(linqFirstContactScrubRejectedMessageMigrationSql).not.toContain(
+      "DROP COLUMN",
+    );
+    expect(linqFirstContactScrubRejectedMessageMigrationSql).not.toContain(
+      "prompt",
+    );
+    expect(linqFirstContactScrubRejectedMessageMigrationSql).not.toContain(
+      "response",
+    );
+    expect(linqFirstContactDropRejectedMessageMigrationSql).toContain(
+      'SET "rejected_message_text" = NULL',
+    );
+    expect(linqFirstContactDropRejectedMessageMigrationSql).toContain(
+      'DROP CONSTRAINT IF EXISTS "hosted_linq_first_contact_admission_decision_rejected_message_check"',
+    );
+    expect(linqFirstContactDropRejectedMessageMigrationSql).toContain(
+      'DROP COLUMN IF EXISTS "rejected_message_text"',
+    );
+    expect(linqFirstContactDropRejectedMessageMigrationSql).not.toContain(
+      "prompt",
+    );
+    expect(linqFirstContactDropRejectedMessageMigrationSql).not.toContain(
       "response",
     );
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
