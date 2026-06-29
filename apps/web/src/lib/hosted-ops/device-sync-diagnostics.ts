@@ -78,6 +78,7 @@ function summarizeHostedOpsJunctionDiagnostic(input: {
   return {
     backfill: {
       hasUsefulHistoricalRecords: readBoolean(summary?.hasUsefulHistoricalRecords),
+      scope: "all_sources",
       sourceProviderCount: readNumber(sourceProviders?.sourceProviderCount ?? sourceProviders?.recordCount),
       summaryResourceCount: readArray(summary?.resources)?.length ?? null,
       timeseriesProbeDays: readNumber(timeseriesProbe?.days),

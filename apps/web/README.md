@@ -501,6 +501,8 @@ deploys `apps/web`. Production is the minimum.
 - Set `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET` to the same value used by the
   trusted auth edge that signs browser assertions for lower-level device-sync
   bridge routes.
+- Set `DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED=true` when admin
+  device-sync diagnostics should be available outside localhost.
 
 ## Browser auth contract
 

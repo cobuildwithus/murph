@@ -12,6 +12,7 @@ export interface HostedOpsJunctionDiagnosticInput {
 export interface HostedOpsJunctionDiagnosticResult {
   backfill: {
     hasUsefulHistoricalRecords: boolean | null;
+    scope: "all_sources";
     sourceProviderCount: number | null;
     summaryResourceCount: number | null;
     timeseriesProbeDays: number | null;

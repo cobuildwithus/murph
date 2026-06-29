@@ -679,7 +679,7 @@ function JunctionDiagnosticResultPanel({
 
       <div className="grid gap-3 md:grid-cols-3">
         <StatusTile
-          label="Backfill useful"
+          label="Connection backfill"
           value={formatBooleanStatus(result.backfill.hasUsefulHistoricalRecords)}
         />
         <StatusTile

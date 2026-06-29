@@ -123,6 +123,22 @@ export async function runHostedDeviceSyncBackfillDiagnostic(
   }
 
   const connection = activeCandidates[0];
+  const connectionSources = settings.connectionSources.filter(
+    (source) => source.connectionId === connection.id,
+  );
+  const restProbeSourceProviderSlug = normalizeQueryString(input.restProbe?.sourceProviderSlug ?? null);
+  if (
+    restProbeSourceProviderSlug
+    && !connectionSources.some((source) => source.sourceProviderSlug === restProbeSourceProviderSlug)
+  ) {
+    throw deviceSyncError({
+      code: "DEVICE_SYNC_DIAGNOSTIC_SOURCE_PROVIDER_NOT_FOUND",
+      message: "The selected device-sync connection does not expose the requested source provider for diagnostics.",
+      httpStatus: 409,
+      retryable: false,
+    });
+  }
+
   const provider = input.controlPlane.registry.get(connection.provider);
   if (!provider) {
     throw deviceSyncError({
@@ -195,7 +211,7 @@ export async function runHostedDeviceSyncBackfillDiagnostic(
         endpoint: input.restProbe.endpoint,
         now,
         resource: input.restProbe.resource,
-        sourceProviderSlug: input.restProbe.sourceProviderSlug,
+        sourceProviderSlug: restProbeSourceProviderSlug,
         timeoutSeconds: input.restProbe.timeoutSeconds,
         windowStart: input.windowStart,
         windowEnd: input.windowEnd,
@@ -220,9 +236,7 @@ export async function runHostedDeviceSyncBackfillDiagnostic(
       setupPhase: connection.setupPhase ?? null,
       status: connection.status,
     },
-    webSourceProjection: describeDiagnosticWebSourceProjection(
-      settings.connectionSources.filter((source) => source.connectionId === connection.id),
-    ),
+    webSourceProjection: describeDiagnosticWebSourceProjection(connectionSources),
     diagnostic: redactDiagnosticProviderIdentifiers(diagnostic.result),
     ...(restDiagnostic
       ? {
@@ -238,10 +252,12 @@ export async function runHostedDeviceSyncBackfillDiagnostic(
 
 export function assertDeviceSyncDiagnosticRouteEnabled(request: Request): void {
   const url = new URL(request.url);
-  const host = url.hostname.toLowerCase();
+  const host = normalizeDiagnosticHostname(url.hostname);
   const explicitlyEnabled = process.env.DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED === "true";
+  const allowLocalBypass =
+    process.env.NODE_ENV !== "production" && isLoopbackHostname(host);
 
-  if (explicitlyEnabled || host === "localhost" || host === "127.0.0.1" || host === "::1") {
+  if (explicitlyEnabled || allowLocalBypass) {
     return;
   }
 

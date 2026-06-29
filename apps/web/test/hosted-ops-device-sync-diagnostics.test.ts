@@ -39,6 +39,7 @@ const SELECTED_SOURCE_PROVIDER = "oura";
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const originalDeviceSyncBackfillDiagnosticEnabled =
   process.env.DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED;
+const originalNodeEnv = process.env.NODE_ENV;
 
 describe("hosted ops Junction diagnostics", () => {
   beforeAll(async () => {
@@ -279,6 +280,11 @@ describe("hosted ops Junction diagnostics", () => {
       process.env.DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED =
         originalDeviceSyncBackfillDiagnosticEnabled;
     }
+    if (originalNodeEnv === undefined) {
+      Reflect.deleteProperty(process.env, "NODE_ENV");
+    } else {
+      Reflect.set(process.env, "NODE_ENV", originalNodeEnv);
+    }
   });
 
   it("runs a member-targeted Junction source matrix diagnostic without returning raw payload data", async () => {
@@ -336,6 +342,7 @@ describe("hosted ops Junction diagnostics", () => {
     expect(JSON.parse(bodyText)).toMatchObject({
       backfill: {
         hasUsefulHistoricalRecords: false,
+        scope: "all_sources",
         sourceProviderCount: 1,
         timeseriesProbeDays: 7,
       },
@@ -385,6 +392,69 @@ describe("hosted ops Junction diagnostics", () => {
         timeseriesDays: 7,
         windowEnd: "2026-06-28T23:59:59.999Z",
         windowStart: "2025-12-30T23:59:59.999Z",
+      },
+    });
+  });
+
+  it("rejects requested source providers absent from the selected Junction connection", async () => {
+    const response = await hostedOpsJunctionDiagnosticsRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/ops/device-sync/junction-diagnostics",
+        {
+          connectionId: "dspc_junction_123",
+          memberId: "member_target",
+          sourceProvider: "garmin",
+        },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.listConnections).toHaveBeenCalledWith("member_target");
+    expect(mocks.registryGet).not.toHaveBeenCalled();
+    expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
+    expect(mocks.getStoredConnectionAccountForUser).not.toHaveBeenCalled();
+    expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
+    expect(mocks.probeRest).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "DEVICE_SYNC_DIAGNOSTIC_SOURCE_PROVIDER_NOT_FOUND",
+        retryable: false,
+      },
+    });
+  });
+
+  it("requires the diagnostic flag in production even for localhost request URLs", async () => {
+    delete process.env.DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED;
+    Reflect.set(process.env, "NODE_ENV", "production");
+
+    const response = await hostedOpsJunctionDiagnosticsRoute.POST(
+      createJsonPostRequest(
+        "https://localhost/api/ops/device-sync/junction-diagnostics",
+        {
+          memberId: "member_target",
+          sourceProvider: SELECTED_SOURCE_PROVIDER,
+        },
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+    );
+
+    expect(response.status).toBe(404);
+    expect(mocks.listConnections).not.toHaveBeenCalled();
+    expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
+    expect(mocks.probeRest).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "DEVICE_SYNC_DIAGNOSTIC_ROUTE_DISABLED",
+        retryable: false,
       },
     });
   });
