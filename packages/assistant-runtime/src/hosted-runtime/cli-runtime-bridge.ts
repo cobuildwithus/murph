@@ -141,7 +141,6 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
     await closeHostedCliBridgeServer(server, sockets);
     throw new TypeError("Hosted CLI bridge failed to bind a loopback TCP port.");
   }
-  const bridgeUrl = `http://127.0.0.1:${address.port}/`;
 
   return {
     consumeOffInvocationViolation() {
@@ -152,7 +151,7 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
     },
     env: {
       [HOSTED_CLI_BRIDGE_TOKEN_ENV]: token,
-      [HOSTED_CLI_BRIDGE_URL_ENV]: bridgeUrl,
+      [HOSTED_CLI_BRIDGE_URL_ENV]: `http://127.0.0.1:${address.port}/`,
     },
     get lastOffInvocationAuthenticatedRequestAt() {
       return lastOffInvocationAuthenticatedRequestAt;

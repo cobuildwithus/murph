@@ -1406,8 +1406,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             messagingReturnTarget: () => hostedCliBridgeMessagingReturnTarget,
             signal: runtimeAbortController.signal,
           },
-          async () => {
-            return await raceHostedRuntimeCancellation(
+          async () =>
+            await raceHostedRuntimeCancellation(
               runHostedWorkspaceUntilIdleOrBudget({
                 ...baseRunnerInput,
                 initialMailboxImport: passInput.initialMailboxImport,
@@ -1438,8 +1438,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 workspace: passInput.workspace,
               }),
               runtimeAbortController.signal,
-            );
-          },
+            ),
         );
         trackMailboxPostCheckpointEffects(passResult.mailboxPostCheckpointEffectsFinished);
         emitPhaseLog({
