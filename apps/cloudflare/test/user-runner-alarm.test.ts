@@ -1491,6 +1491,47 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
+  it("calls the legacy wakeRuntime fallback directly on the container stub", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const wakeRuntime = vi.fn<NonNullable<HostedExecutionContainerStubLike["wakeRuntime"]>>(
+      async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      wakeRuntime,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      workspaceVersion: "7",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "woken",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: expect.any(String),
+      runtimeAttemptId: token.attemptId,
+    });
+
+    expect(wakeRuntime).toHaveBeenCalledWith({
+      attemptId: token.attemptId,
+      leaseGeneration: String(token.generation),
+      orchestration: {
+        activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
+        userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
+      },
+      processingMode: "default",
+      userId: TEST_USER_ID,
+    });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it("does not coalesce retention-only requests into a default active write fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -3157,6 +3198,7 @@ function createRunnerHarness(input: {
   runtimeLogResponse?: () => Promise<Response> | Response;
   runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
+  wakeRuntime?: HostedExecutionContainerStubLike["wakeRuntime"];
   workspace?: HostedWorkspaceState | null;
 } = {}) {
   const durable = createDurableObjectState({
@@ -3203,6 +3245,24 @@ function createRunnerHarness(input: {
               }
               return await input.ensureProcessing?.call(this, ensureInput) ?? {
                 kind: "start-required",
+                reason: "no-active-child",
+              };
+            },
+          ),
+        }
+      : {}),
+    ...(input.wakeRuntime
+      ? {
+          wakeRuntime: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["wakeRuntime"]>
+          >(
+            async function (
+              this: HostedExecutionContainerStubLike,
+              wakeInput,
+            ) {
+              expect(this).toBe(stub);
+              return await input.wakeRuntime?.call(this, wakeInput) ?? {
+                kind: "not-wakeable",
                 reason: "no-active-child",
               };
             },
