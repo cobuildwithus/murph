@@ -339,7 +339,8 @@ describe("hosted Linq attachment voice memo transport", () => {
   });
 
   it("creates an attachment and uploads raw bytes to the presigned URL", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      void _init;
       const url = input.toString();
 
       if (url === "https://linq.example.test/api/partner/v3/attachments") {
@@ -401,13 +402,15 @@ describe("hosted Linq attachment voice memo transport", () => {
   });
 
   it("sends a native voice memo by attachment id", async () => {
-    const fetchMock = vi.fn(async () =>
-      createJsonResponse({
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return createJsonResponse({
         voice_memo: {
           id: "voice_123",
         },
-      }, 201),
-    );
+      }, 201);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(sendHostedLinqVoiceMemo({
@@ -427,13 +430,15 @@ describe("hosted Linq attachment voice memo transport", () => {
   });
 
   it("sends deterministic idempotency keys on native voice memo requests", async () => {
-    const fetchMock = vi.fn(async () =>
-      createJsonResponse({
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return createJsonResponse({
         voice_memo: {
           id: "voice_123",
         },
-      }, 201),
-    );
+      }, 201);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(sendHostedLinqVoiceMemo({
@@ -449,7 +454,8 @@ describe("hosted Linq attachment voice memo transport", () => {
   });
 
   it("rejects attachment upload responses with unsupported methods before uploading bytes", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      void _init;
       const url = input.toString();
 
       if (url === "https://linq.example.test/api/partner/v3/attachments") {
@@ -490,7 +496,8 @@ describe("hosted Linq attachment voice memo transport", () => {
     "https://[::1]/attachment_123",
     "https://uploads.local/attachment_123",
   ])("rejects unsafe attachment upload URL %s", async (uploadUrl) => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      void _init;
       const url = input.toString();
 
       if (url === "https://linq.example.test/api/partner/v3/attachments") {
