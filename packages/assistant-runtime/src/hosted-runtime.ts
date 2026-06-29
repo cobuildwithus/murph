@@ -161,6 +161,9 @@ import {
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   selectHostedRuntimeWakeCandidate,
 } from "./hosted-runtime/wake-candidates.ts";
+import {
+  consumePendingRuntimeWakeUnlessShuttingDown,
+} from "./hosted-runtime/runtime-wake.ts";
 export {
   createCoalescingRuntimeWakeSignal,
 } from "./hosted-runtime/runtime-wake.ts";
@@ -1117,7 +1120,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
       mergeHostedRuntimeWakeLatencySeeds(
         invocationOrchestrationLatencySeed,
-        consumePendingHostedRuntimeWake(options.runtimeWakeSignal ?? null),
+        consumePendingHostedRuntimeWake(
+          options.runtimeWakeSignal ?? null,
+          options.shutdownSignal ?? null,
+        ),
       ),
     );
     emitPhaseLog({
@@ -1623,10 +1629,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (deliveredWakeResult.kind === "external_wake") {
           return deliveredWakeResult;
         }
-        const pendingWake =
-          options.shutdownSignal?.aborted === true
-            ? null
-            : runtimeWakeSignal.consumePending();
+        const pendingWake = consumePendingRuntimeWakeUnlessShuttingDown({
+          runtimeWakeSignal,
+          shutdownSignal: options.shutdownSignal ?? null,
+        });
         if (pendingWake) {
           return {
             kind: "external_wake",
@@ -1814,7 +1820,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           continue;
         }
         const pendingWakeLatencySeed =
-          consumePendingHostedRuntimeWakeUnlessShuttingDown(
+          consumePendingHostedRuntimeWake(
             options.runtimeWakeSignal ?? null,
             options.shutdownSignal ?? null,
           );
@@ -1884,7 +1890,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               : "done",
         });
         const idleMaintenanceWakeLatencySeed =
-          consumePendingHostedRuntimeWakeUnlessShuttingDown(
+          consumePendingHostedRuntimeWake(
             options.runtimeWakeSignal ?? null,
             options.shutdownSignal ?? null,
           );
@@ -1998,7 +2004,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         };
         runtimeStateDirty = false;
         const checkpointWakeLatencySeed =
-          consumePendingHostedRuntimeWakeUnlessShuttingDown(
+          consumePendingHostedRuntimeWake(
             options.runtimeWakeSignal ?? null,
             options.shutdownSignal ?? null,
           );
@@ -2438,7 +2444,10 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
     vaultRoot: input.vaultRoot,
     wakeSignal: input.wakeSignal,
   });
-  const pendingWakeNotification = input.wakeSignal?.consumePending() ?? null;
+  const pendingWakeNotification = consumePendingRuntimeWakeUnlessShuttingDown({
+    runtimeWakeSignal: input.wakeSignal,
+    shutdownSignal: input.shutdownSignal,
+  });
   if (pendingWakeNotification) {
     throw new HostedRuntimeCheckpointInterruptedByWakeError({
       notification: pendingWakeNotification,
@@ -2501,21 +2510,14 @@ type HostedRuntimeMailboxPostCheckpointEffectWaitResult =
 
 function consumePendingHostedRuntimeWake(
   runtimeWakeSignal: RuntimeWakeSignal | null,
-): HostedRuntimeWakeLatencySeed | null {
-  return createHostedRuntimeWakeLatencySeed(
-    runtimeWakeSignal?.consumePending() ?? null,
-  );
-}
-
-function consumePendingHostedRuntimeWakeUnlessShuttingDown(
-  runtimeWakeSignal: RuntimeWakeSignal | null,
   shutdownSignal: AbortSignal | null,
 ): HostedRuntimeWakeLatencySeed | null {
-  if (shutdownSignal?.aborted === true) {
-    return null;
-  }
-
-  return consumePendingHostedRuntimeWake(runtimeWakeSignal);
+  return createHostedRuntimeWakeLatencySeed(
+    consumePendingRuntimeWakeUnlessShuttingDown({
+      runtimeWakeSignal,
+      shutdownSignal,
+    }),
+  );
 }
 
 function trackHostedRuntimePostSafePointCompletion(completion: Promise<void> | null): void {

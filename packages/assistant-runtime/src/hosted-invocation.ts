@@ -9,6 +9,9 @@ import {
   type HostedAssistantWorkspaceRuntimeJobResult,
   type RuntimeWakeSignal,
 } from "./hosted-runtime.ts";
+import {
+  consumePendingRuntimeWakeUnlessShuttingDown,
+} from "./hosted-runtime/runtime-wake.ts";
 export { drainHostedRuntimePostSafePointCompletionsBestEffort } from "./hosted-runtime.ts";
 export {
   consumeHostedCliRuntimeBridgeOffInvocationViolation,
@@ -71,9 +74,10 @@ export async function runHostedWorkspaceInvocation(
     // R2 upload and starts a doomed turn). The unconsumed wake stays durable in
     // the mailbox; reconciliation re-derives it for the replacement container.
     consumePendingRuntimeWake: () =>
-      input.shutdownSignal?.aborted === true
-        ? null
-        : runtimeWakeSignal.consumePending(),
+      consumePendingRuntimeWakeUnlessShuttingDown({
+        runtimeWakeSignal,
+        shutdownSignal: input.shutdownSignal ?? null,
+      }),
     decodeMailboxPayload: input.mailboxPayloadDecoder,
     platform: input.platform,
     readCurrentLease,
