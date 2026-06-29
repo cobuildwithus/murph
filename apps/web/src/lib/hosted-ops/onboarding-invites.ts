@@ -16,6 +16,10 @@ import {
   sendHostedLinqVoiceMemo,
   uploadHostedLinqAttachment,
 } from "../hosted-onboarding/linq-client";
+import {
+  lookupHostedMemberRoutingByHomeLinqChatId,
+  lookupHostedMemberRoutingByPendingLinqChatId,
+} from "../hosted-onboarding/hosted-member-routing-store";
 import { ensureHostedMemberForPhoneTx } from "../hosted-onboarding/member-identity-service";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -144,6 +148,8 @@ export async function sendHostedOpsOnboardingInvite(
   });
   const delivery = await resolveHostedOpsOnboardingInviteDelivery({
     inviteMessage,
+    memberId: issued.memberId,
+    prisma,
     request,
   });
   const sentAt = new Date();
@@ -237,6 +243,8 @@ export function buildHostedOpsOnboardingVoiceMemoFilename(extension: string): st
 
 async function resolveHostedOpsOnboardingInviteDelivery(input: {
   inviteMessage: string;
+  memberId: string;
+  prisma: PrismaClient;
   request: NormalizedHostedOpsOnboardingInviteInput;
 }): Promise<{
   chatId: string;
@@ -244,6 +252,12 @@ async function resolveHostedOpsOnboardingInviteDelivery(input: {
   openerMessageId: string | null;
 }> {
   if (input.request.deliveryMode === "existing_chat") {
+    await assertHostedOpsOnboardingExistingLinqChatAuthority({
+      linqChatId: input.request.linqChatId,
+      memberId: input.memberId,
+      prisma: input.prisma,
+    });
+
     await sendHostedLinqChatMessage({
       chatId: input.request.linqChatId,
       idempotencyKey: buildHostedOpsOnboardingIdempotencyKey(input.request.requestId, "invite"),
@@ -312,6 +326,10 @@ async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
     await sendHostedLinqVoiceMemo({
       attachmentId: attachment.attachmentId,
       chatId: input.chatId,
+      idempotencyKey: buildHostedOpsOnboardingIdempotencyKey(
+        input.request.requestId,
+        "voice-memo",
+      ),
     });
 
     return {
@@ -326,6 +344,36 @@ async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
       sent: false,
     };
   }
+}
+
+async function assertHostedOpsOnboardingExistingLinqChatAuthority(input: {
+  linqChatId: string;
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  const homeRoute = await lookupHostedMemberRoutingByHomeLinqChatId({
+    linqChatId: input.linqChatId,
+    prisma: input.prisma,
+  });
+  const pendingRoute = homeRoute
+    ? null
+    : await lookupHostedMemberRoutingByPendingLinqChatId({
+        linqChatId: input.linqChatId,
+        prisma: input.prisma,
+      });
+  const route = homeRoute ?? pendingRoute;
+
+  if (route?.routing.memberId === input.memberId) {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_OPS_ONBOARDING_LINQ_CHAT_NOT_BOUND",
+    httpStatus: 400,
+    message:
+      "Existing Linq chat is not bound to this hosted member. Use New chat to start onboarding, or wait for the inbound chat to bind before sending.",
+    retryable: false,
+  });
 }
 
 interface NormalizedHostedOpsOnboardingInviteInput {
@@ -549,7 +597,7 @@ function buildHostedOpsOnboardingInviteMessage(input: {
 
 function buildHostedOpsOnboardingIdempotencyKey(
   requestId: string,
-  step: "invite" | "open",
+  step: "invite" | "open" | "voice-memo",
 ): string {
   return `ops-onboarding-invite:${requestId}:${step}`;
 }

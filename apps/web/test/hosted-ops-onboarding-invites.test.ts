@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   ensureHostedMemberForPhoneTx: vi.fn(),
   getPrisma: vi.fn(),
   issueHostedInviteTx: vi.fn(),
+  lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
+  lookupHostedMemberRoutingByPendingLinqChatId: vi.fn(),
   requireHostedOpsRequestAccess: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   sendHostedLinqVoiceMemo: vi.fn(),
@@ -31,6 +33,11 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
   sendHostedLinqVoiceMemo: mocks.sendHostedLinqVoiceMemo,
   uploadHostedLinqAttachment: mocks.uploadHostedLinqAttachment,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  lookupHostedMemberRoutingByHomeLinqChatId: mocks.lookupHostedMemberRoutingByHomeLinqChatId,
+  lookupHostedMemberRoutingByPendingLinqChatId: mocks.lookupHostedMemberRoutingByPendingLinqChatId,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
@@ -70,6 +77,12 @@ describe("hosted ops onboarding invites", () => {
     mocks.requireHostedOpsRequestAccess.mockResolvedValue({ member: { id: "member_ops" } });
     mocks.ensureHostedMemberForPhoneTx.mockResolvedValue({ id: "member_123" });
     mocks.issueHostedInviteTx.mockResolvedValue(inviteRow({ sentAt: null }));
+    mocks.lookupHostedMemberRoutingByHomeLinqChatId.mockResolvedValue({
+      routing: {
+        memberId: "member_123",
+      },
+    });
+    mocks.lookupHostedMemberRoutingByPendingLinqChatId.mockResolvedValue(null);
     mocks.sendHostedLinqChatMessage.mockResolvedValue(undefined);
     mocks.createHostedLinqChat.mockResolvedValue({
       chatId: "chat_created",
@@ -95,6 +108,10 @@ describe("hosted ops onboarding invites", () => {
       channel: "linq",
       memberId: "member_123",
       prisma: tx,
+    });
+    expect(mocks.lookupHostedMemberRoutingByHomeLinqChatId).toHaveBeenCalledWith({
+      linqChatId: "chat_existing",
+      prisma,
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
       chatId: "chat_existing",
@@ -125,6 +142,51 @@ describe("hosted ops onboarding invites", () => {
       },
     });
     expect(JSON.stringify(result)).not.toContain("+15551234567");
+  });
+
+  it("allows existing-chat sends through a pending Linq chat route for the same member", async () => {
+    mocks.lookupHostedMemberRoutingByHomeLinqChatId.mockResolvedValue(null);
+    mocks.lookupHostedMemberRoutingByPendingLinqChatId.mockResolvedValue({
+      routing: {
+        memberId: "member_123",
+      },
+    });
+
+    await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_pending",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-pending",
+    });
+
+    expect(mocks.lookupHostedMemberRoutingByPendingLinqChatId).toHaveBeenCalledWith({
+      linqChatId: "chat_pending",
+      prisma,
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: "chat_pending",
+    }));
+  });
+
+  it("rejects existing-chat sends when the Linq route is not bound to the recipient member", async () => {
+    mocks.lookupHostedMemberRoutingByHomeLinqChatId.mockResolvedValue({
+      routing: {
+        memberId: "member_other",
+      },
+    });
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_existing",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-wrong-route",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_LINQ_CHAT_NOT_BOUND",
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
   });
 
   it("creates a new Linq chat with a non-link opener before sending the invite link", async () => {
@@ -196,6 +258,7 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledWith({
       attachmentId: "attachment_123",
       chatId: "chat_existing",
+      idempotencyKey: "ops-onboarding-invite:request-voice:voice-memo",
     });
     expect(result.voiceMemo).toEqual({
       error: null,

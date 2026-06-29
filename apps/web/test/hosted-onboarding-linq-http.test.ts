@@ -425,6 +425,102 @@ describe("hosted Linq attachment voice memo transport", () => {
       attachment_id: "attachment_123",
     });
   });
+
+  it("sends deterministic idempotency keys on native voice memo requests", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      createJsonResponse({
+        voice_memo: {
+          id: "voice_123",
+        },
+      }, 201),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendHostedLinqVoiceMemo({
+      attachmentId: "attachment_123",
+      chatId: "chat_123",
+      idempotencyKey: "ops-onboarding-invite:request-voice:voice-memo",
+    })).resolves.toBeUndefined();
+
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("idempotency-key")).toBe(
+      "ops-onboarding-invite:request-voice:voice-memo",
+    );
+  });
+
+  it("rejects attachment upload responses with unsupported methods before uploading bytes", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = input.toString();
+
+      if (url === "https://linq.example.test/api/partner/v3/attachments") {
+        return createJsonResponse({
+          attachment_id: "attachment_123",
+          expires_at: "2026-06-29T12:00:00.000Z",
+          http_method: "POST",
+          required_headers: {
+            "content-type": "audio/x-m4a",
+          },
+          upload_url: "https://uploads.linq.example.test/attachment_123",
+        }, 201);
+      }
+
+      return new Response(null, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(uploadHostedLinqAttachment({
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "audio/x-m4a",
+      filename: "murph-ops-voice-memo.m4a",
+      sizeBytes: 3,
+    })).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      message: "Linq attachment upload response returned an unsupported upload method.",
+      retryable: false,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    "https://user:pass@uploads.linq.example.test/attachment_123",
+    "https://uploads.linq.example.test/attachment_123#fragment",
+    "https://localhost/attachment_123",
+    "https://127.0.0.1/attachment_123",
+    "https://[::1]/attachment_123",
+    "https://uploads.local/attachment_123",
+  ])("rejects unsafe attachment upload URL %s", async (uploadUrl) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = input.toString();
+
+      if (url === "https://linq.example.test/api/partner/v3/attachments") {
+        return createJsonResponse({
+          attachment_id: "attachment_123",
+          expires_at: "2026-06-29T12:00:00.000Z",
+          http_method: "PUT",
+          required_headers: {
+            "content-type": "audio/x-m4a",
+          },
+          upload_url: uploadUrl,
+        }, 201);
+      }
+
+      return new Response(null, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(uploadHostedLinqAttachment({
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "audio/x-m4a",
+      filename: "murph-ops-voice-memo.m4a",
+      sizeBytes: 3,
+    })).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      retryable: false,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("createHostedLinqWebhookSubscription", () => {

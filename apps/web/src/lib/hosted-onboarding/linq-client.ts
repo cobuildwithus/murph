@@ -11,6 +11,7 @@ import type {
   WebhookSubscriptionCreateResponse,
 } from "@linqapp/sdk/resources";
 import type { MessageSendParams } from "@linqapp/sdk/resources/chats";
+import { isIP } from "node:net";
 
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError } from "./errors";
@@ -211,14 +212,14 @@ export async function uploadHostedLinqAttachment(input: {
     });
   }
 
-  const payload = (await response.json()) as AttachmentCreateResponse;
-  const attachmentId = normalizeRequiredString(payload.attachment_id, "attachment id");
-  const uploadUrl = normalizeHostedLinqAttachmentUploadUrl(payload.upload_url);
+  const attachment = parseHostedLinqAttachmentUploadResponse(
+    (await response.json()) as AttachmentCreateResponse,
+  );
   const uploadResponse = await fetchHostedLinqAttachmentUploadUrl({
     bytes: input.bytes,
-    requiredHeaders: payload.required_headers,
+    requiredHeaders: attachment.requiredHeaders,
     signal: input.signal,
-    uploadUrl,
+    uploadUrl: attachment.uploadUrl,
   });
 
   if (!uploadResponse.ok) {
@@ -230,19 +231,26 @@ export async function uploadHostedLinqAttachment(input: {
     });
   }
 
-  return { attachmentId };
+  return { attachmentId: attachment.attachmentId };
 }
 
 export async function sendHostedLinqVoiceMemo(input: {
   attachmentId: string;
   chatId: string;
+  idempotencyKey?: string | null;
   signal?: AbortSignal;
 }): Promise<void> {
   const body: ChatSendVoicememoParams = {
     attachment_id: normalizeRequiredString(input.attachmentId, "attachment id"),
   };
+  const idempotencyKey = normalizeNullableString(input.idempotencyKey);
   const response = await fetchHostedLinqApiOrThrow({
     body: JSON.stringify(body),
+    headers: idempotencyKey
+      ? {
+          "Idempotency-Key": idempotencyKey,
+        }
+      : undefined,
     method: "POST",
     operation: "voice memo send",
     path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/voicememo`,
@@ -310,6 +318,7 @@ export async function createHostedLinqWebhookSubscription(input: {
 
 async function fetchHostedLinqApiOrThrow(input: {
   body: string;
+  headers?: HeadersInit;
   method: string;
   operation: string;
   path: string;
@@ -323,6 +332,7 @@ async function fetchHostedLinqApiOrThrow(input: {
       apiBaseUrl,
       apiToken,
       body: input.body,
+      headers: input.headers,
       method: input.method,
       path: input.path,
       signal: input.signal,
@@ -454,14 +464,86 @@ function normalizeHostedLinqAttachmentSize(value: number): number {
 }
 
 function normalizeHostedLinqAttachmentUploadUrl(value: unknown): string {
-  const normalized = normalizeRequiredString(value, "attachment upload URL");
-  const url = new URL(normalized);
+  let url: URL;
+
+  try {
+    url = new URL(normalizeRequiredString(value, "attachment upload URL"));
+  } catch {
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      message: "Linq attachment upload URL was invalid.",
+      httpStatus: 502,
+      retryable: false,
+    });
+  }
 
   if (url.protocol !== "https:") {
-    throw new TypeError("attachment upload URL must use HTTPS.");
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      message: "Linq attachment upload URL must use HTTPS.",
+      httpStatus: 502,
+      retryable: false,
+    });
+  }
+
+  if (url.username || url.password || url.hash) {
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      message: "Linq attachment upload URL must not include credentials or fragments.",
+      httpStatus: 502,
+      retryable: false,
+    });
+  }
+
+  if (!isPublicHostedLinqAttachmentUploadHost(url.hostname)) {
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      message: "Linq attachment upload URL must use a public host.",
+      httpStatus: 502,
+      retryable: false,
+    });
   }
 
   return url.toString();
+}
+
+function parseHostedLinqAttachmentUploadResponse(
+  value: AttachmentCreateResponse,
+): {
+  attachmentId: string;
+  requiredHeaders: Record<string, string>;
+  uploadUrl: string;
+} {
+  const record = readRecord(value);
+  const attachmentId = normalizeNullableString(record?.attachment_id);
+  const uploadUrl = normalizeNullableString(record?.upload_url);
+  const expiresAt = normalizeNullableString(record?.expires_at);
+  const httpMethod = normalizeNullableString(record?.http_method);
+  const requiredHeaders = readStringRecord(record?.required_headers);
+
+  if (!attachmentId || !uploadUrl || !expiresAt || !requiredHeaders) {
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      message: "Linq attachment upload response was missing required fields.",
+      httpStatus: 502,
+      retryable: false,
+    });
+  }
+
+  if (httpMethod && httpMethod.toUpperCase() !== "PUT") {
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      message: "Linq attachment upload response returned an unsupported upload method.",
+      httpStatus: 502,
+      retryable: false,
+    });
+  }
+
+  return {
+    attachmentId,
+    requiredHeaders,
+    uploadUrl: normalizeHostedLinqAttachmentUploadUrl(uploadUrl),
+  };
 }
 
 function normalizeHostedLinqAttachmentUploadHeaders(
@@ -478,6 +560,47 @@ function normalizeHostedLinqAttachmentUploadHeaders(
   }
 
   return headers;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readStringRecord(value: unknown): Record<string, string> | null {
+  const record = readRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const output: Record<string, string> = {};
+  for (const [key, recordValue] of Object.entries(record)) {
+    if (typeof recordValue !== "string") {
+      return null;
+    }
+    output[key] = recordValue;
+  }
+
+  return output;
+}
+
+function isPublicHostedLinqAttachmentUploadHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.$/u, "");
+  if (
+    !normalized
+    || normalized === "localhost"
+    || normalized.endsWith(".localhost")
+    || normalized.endsWith(".local")
+  ) {
+    return false;
+  }
+
+  const ipLiteral = normalized.startsWith("[") && normalized.endsWith("]")
+    ? normalized.slice(1, -1)
+    : normalized;
+
+  return isIP(ipLiteral) === 0;
 }
 
 function buildHostedLinqTextMessageBody(input: {
