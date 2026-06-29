@@ -4095,6 +4095,68 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("drops a consumed workspace assistant wake after fresh system-mailbox delivery", async () => {
+    let now = "2026-05-08T16:00:00.000Z";
+    const consumedWakeAt = "2026-05-08T16:00:05.000Z";
+    mocks.resolveHostedAssistantOutboxNextWakeAt
+      .mockResolvedValueOnce(consumedWakeAt);
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: true,
+      nextWakeAt: consumedWakeAt,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+      now = "2026-05-08T16:00:08.000Z";
+      return [
+        {
+          cleanupMessages: [],
+          cleanupTargetAliases: [],
+          deliveryChannel: "linq",
+          deliveryErrorCode: null,
+          deliveryErrorMessage: null,
+          deliveryStatus: "sent",
+          effectFingerprint: "fingerprint_synthetic",
+          effectId: "effect_synthetic",
+          journalMethod: "PUT",
+          journalStatus: "200",
+          providerMessageId: "provider_synthetic",
+          providerMessageIds: [],
+          providerThreadId: "thread_synthetic",
+          retryable: false,
+          target: null,
+          targetKind: null,
+        },
+      ];
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [],
+      conversationImportedCount: 0,
+      importedCount: 1,
+      now: () => now,
+      workspace: createDueAssistantWorkspace({
+        checkpointedAt: "2026-05-08T16:00:00.000Z",
+        createdAt: "2026-05-08T16:00:00.000Z",
+        nextWakeAt: consumedWakeAt,
+        updatedAt: "2026-05-08T16:00:00.000Z",
+      }),
+    }));
+
+    expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: null,
+      redactedStatus: expect.objectContaining({
+        hostedAssistantNextWakeAt: null,
+        hostedOutboxDeliverySent: 1,
+        nextWakeAt: null,
+      }),
+    }));
+  });
+
   it("fast-dispatches idempotent active nudge delivery before the runner checkpoint", async () => {
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationProgressed: true,

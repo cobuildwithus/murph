@@ -3320,7 +3320,7 @@ function dropConsumedPostDeliveryWorkspaceAssistantWake(input: {
     return candidate;
   }
 
-  return consumedScheduledWorkspaceWake(input.phaseInput) ? null : candidate;
+  return isDueHostedWorkspaceWakeAt(input.phaseInput) ? null : candidate;
 }
 
 function isHostedAssistantDeliveryOutcomeTerminalized(
