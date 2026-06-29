@@ -2331,10 +2331,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("sends the signup link on the first inbound SMS phone message", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
-    mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValueOnce({
-      confidence: 1,
-      kind: "allow",
-      source: "deterministic",
+    const firstContactAdmissionOrder: string[] = [];
+    mocks.classifyHostedLinqFirstContactAdmission.mockImplementationOnce(async () => {
+      firstContactAdmissionOrder.push("classify");
+      return {
+        confidence: 1,
+        kind: "allow",
+        source: "deterministic",
+      };
     });
     const invite = {
       channel: "linq",
@@ -2359,7 +2363,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedLinqFirstContactAdmissionBudget: {
         count: vi.fn().mockResolvedValue(0),
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          firstContactAdmissionOrder.push("claim");
+          return data;
+        }),
         findFirst: vi.fn().mockResolvedValue(null),
       },
       hostedLinqFirstContactAdmissionDecision: {
@@ -2420,6 +2427,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
     expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledTimes(1);
+    expect(firstContactAdmissionOrder).toEqual(["claim", "classify"]);
     expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.createMany).toHaveBeenCalledWith({
       data: {
         confidence: 1,
@@ -2788,10 +2796,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "first-contact-admission-budget-exhausted",
     });
-    // Pre-flight checks same-event idempotency first (findFirst) so transport
-    // retries of an already-claimed event can re-run the classifier; only
-    // brand-new events for an already-exhausted contact short-circuit on the
-    // total-count read, before the advisory lock or any insert.
+    // The locked claim checks same-event idempotency first (findFirst) so
+    // transport retries of an already-claimed event can re-run the classifier;
+    // only brand-new events for an already-exhausted contact short-circuit on
+    // the total-count read, before model egress or any insert.
     expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.findFirst).toHaveBeenCalledWith({
       where: {
         eventId: "evt_first_contact_budget_exhausted",
@@ -3203,7 +3211,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       retryable: true,
     });
 
-    expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedLinqFirstContactAdmissionBudget.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.createMany).not.toHaveBeenCalled();
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
