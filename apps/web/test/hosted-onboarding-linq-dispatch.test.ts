@@ -2640,6 +2640,109 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
+  it("records classifier decisions in the same transaction as the budget claim", async () => {
+    mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
+    const admissionOrder: string[] = [];
+    mocks.classifyHostedLinqFirstContactAdmission.mockImplementationOnce(async () => {
+      admissionOrder.push("classify");
+      return {
+        confidence: 0.94,
+        kind: "block",
+        source: "model",
+      };
+    });
+    const transactionDecisionCreateMany = vi.fn(async () => {
+      admissionOrder.push("record");
+      return { count: 1 };
+    });
+    const transactionClient = {
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValue(0),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          admissionOrder.push("claim");
+          return data;
+        }),
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        createMany: transactionDecisionCreateMany,
+        findUnique: vi.fn().mockResolvedValue({
+          confidence: 0.94,
+          decision: "block",
+          eventId: "evt_transactional_first_contact_block",
+          source: "model",
+        }),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+    };
+    const rootDecisionCreateMany = vi.fn(async () => {
+      throw new Error("first-contact admission decision must be transaction-bound");
+    });
+    const prisma = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        createMany: rootDecisionCreateMany,
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+    }, transactionClient);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            {
+              type: "text",
+              value: "discount blast",
+            },
+          ],
+        },
+        eventId: "evt_transactional_first_contact_block",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "blocked-first-contact-admission",
+    });
+
+    expect(admissionOrder).toEqual(["claim", "classify", "record"]);
+    expect(rootDecisionCreateMany).not.toHaveBeenCalled();
+    expect(transactionDecisionCreateMany).toHaveBeenCalledWith({
+      data: {
+        confidence: 0.94,
+        decision: "block",
+        eventId: "evt_transactional_first_contact_block",
+        source: "model",
+      },
+      skipDuplicates: true,
+    });
+    expect(transactionClient.hostedMember.create).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
   it("deterministically blocks media-only unknown Linq first contacts without claiming a classifier-budget attempt", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
 
