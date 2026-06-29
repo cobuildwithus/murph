@@ -1199,6 +1199,9 @@ describe('assistant cron runtime orchestration', () => {
     const parentAutomationId = 'automation-device-activity-renamed-listener'
     const parentAutomation: MockAutomationRecord = {
       automationId: parentAutomationId,
+      assistantTargetOverride: {
+        reasoningEffort: 'high',
+      },
       continuityPolicy: 'fresh',
       createdAt: '2026-04-08T08:00:00.000Z',
       instructions: 'Ask about imported runs.',
@@ -1295,6 +1298,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         instructions: 'Ask about the imported run.',
+        reasoningEffort: 'high',
       }),
     )
   })
