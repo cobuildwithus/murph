@@ -349,15 +349,24 @@ async function sendHostedLinqSideEffect(
       scheduleAfterResponse: options.scheduleAfterResponse,
     });
   } catch (error) {
-    scheduleHostedLinqDeliveryMilestoneAfterAttempt({
-      attemptTask: deliveryAttemptTask,
-      milestoneTask: () => markHostedLinqDeliveryFailedBestEffort({
+    if (effect.payload.template === "invite_signup") {
+      await deliveryAttemptTask;
+      await markHostedLinqDeliveryFailedBestEffort({
         effect,
         error,
         prisma: options.prisma,
-      }),
-      scheduleAfterResponse: options.scheduleAfterResponse,
-    });
+      });
+    } else {
+      scheduleHostedLinqDeliveryMilestoneAfterAttempt({
+        attemptTask: deliveryAttemptTask,
+        milestoneTask: () => markHostedLinqDeliveryFailedBestEffort({
+          effect,
+          error,
+          prisma: options.prisma,
+        }),
+        scheduleAfterResponse: options.scheduleAfterResponse,
+      });
+    }
     console.error(
       "Hosted Linq side-effect delivery failed.",
       buildHostedLinqSideEffectLogDetails(effect, error, Date.now() - startedAtMs),
