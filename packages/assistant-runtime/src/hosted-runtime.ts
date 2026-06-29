@@ -1073,6 +1073,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ...projectHostedRuntimeTrustStoreEnv(process.env),
       ...guardedRuntime.forwardedEnv,
       ...guardedRuntime.userEnv,
+      ...hostedCliBridge.env,
       ...(imageCodexModelCatalogJson
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
         : {}),
@@ -1406,13 +1407,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             signal: runtimeAbortController.signal,
           },
           async () => {
-            // The bridge token is intentionally invocation-scoped. Codex does
-            // not expose a per-turn shell env override for resumed threads, so
-            // rotating this child env is the simple stale-shell rejection boundary.
-            const invocationRuntimeEnv = {
-              ...runtimeEnv,
-              ...hostedCliBridge.env,
-            };
             return await raceHostedRuntimeCancellation(
               runHostedWorkspaceUntilIdleOrBudget({
                 ...baseRunnerInput,
@@ -1435,7 +1429,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     request: input.request,
                     restored,
                     runtime: foregroundRuntime,
-                    runtimeEnv: invocationRuntimeEnv,
+                    runtimeEnv,
                     stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
                     suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
                     signal: runtimeAbortController.signal,

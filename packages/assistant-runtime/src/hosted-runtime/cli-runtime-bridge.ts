@@ -61,7 +61,6 @@ interface HostedCliRuntimeBridgeActiveInvocation {
   inFlight: Set<Promise<unknown>>;
   messagingReturnTarget: HostedCliRuntimeBridgeMessagingReturnTargetSource;
   signal: AbortSignal | null;
-  token: string;
 }
 
 let hostedCliRuntimeBridgePromise: Promise<HostedCliRuntimeBridge> | null = null;
@@ -102,7 +101,7 @@ export async function consumeHostedCliRuntimeBridgeOffInvocationViolation(): Pro
 }
 
 async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBridge> {
-  const idleToken = randomBytes(32).toString("base64url");
+  const token = randomBytes(32).toString("base64url");
   const sockets = new Set<Socket>();
   let active: HostedCliRuntimeBridgeActiveInvocation | null = null;
   let offInvocationAuthenticatedRequestCount = 0;
@@ -110,13 +109,13 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
   const server = createServer((request, response) => {
     void handleHostedCliBridgeRequest({
       getActive: () => active,
-      idleToken,
       recordOffInvocationAuthenticatedRequest: () => {
         offInvocationAuthenticatedRequestCount += 1;
         lastOffInvocationAuthenticatedRequestAt = new Date().toISOString();
       },
       request,
       response,
+      token,
     });
   });
   server.on("connection", (socket) => {
@@ -151,11 +150,9 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
       lastOffInvocationAuthenticatedRequestAt = null;
       return pending;
     },
-    get env() {
-      return {
-        [HOSTED_CLI_BRIDGE_TOKEN_ENV]: active?.token ?? idleToken,
-        [HOSTED_CLI_BRIDGE_URL_ENV]: bridgeUrl,
-      };
+    env: {
+      [HOSTED_CLI_BRIDGE_TOKEN_ENV]: token,
+      [HOSTED_CLI_BRIDGE_URL_ENV]: bridgeUrl,
     },
     get lastOffInvocationAuthenticatedRequestAt() {
       return lastOffInvocationAuthenticatedRequestAt;
@@ -182,7 +179,6 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
         inFlight: new Set(),
         messagingReturnTarget: input.messagingReturnTarget,
         signal: input.signal ?? null,
-        token: randomBytes(32).toString("base64url"),
       };
       active = invocation;
       try {
@@ -215,10 +211,10 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
 
 async function handleHostedCliBridgeRequest(input: {
   getActive: () => HostedCliRuntimeBridgeActiveInvocation | null;
-  idleToken: string;
   recordOffInvocationAuthenticatedRequest: () => void;
   request: IncomingMessage;
   response: ServerResponse;
+  token: string;
 }): Promise<void> {
   let requestTimedOut = false;
   input.request.setTimeout(HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS, () => {
@@ -258,9 +254,7 @@ async function handleHostedCliBridgeRequest(input: {
       return;
     }
 
-    const active = input.getActive();
-    const authorizedToken = active ? active.token : input.idleToken;
-    if (!isHostedCliBridgeAuthorized(input.request, authorizedToken)) {
+    if (!isHostedCliBridgeAuthorized(input.request, input.token)) {
       writeHostedCliBridgeError(
         input.response,
         401,
@@ -270,6 +264,7 @@ async function handleHostedCliBridgeRequest(input: {
       return;
     }
 
+    const active = input.getActive();
     if (!active || active.closing || active.signal?.aborted) {
       input.recordOffInvocationAuthenticatedRequest();
       writeHostedCliBridgeError(
