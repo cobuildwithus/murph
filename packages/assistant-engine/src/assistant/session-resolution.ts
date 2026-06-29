@@ -14,6 +14,7 @@ import {
   type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
+  isAssistantSessionNotFoundError,
   resolveAssistantSession,
   type ResolveAssistantSessionInput,
   type ResolvedAssistantSession,
@@ -193,13 +194,17 @@ export async function resolveAssistantSessionForMessage(input: {
     input.defaults,
     input.boundaryDefaultTarget ?? null,
   )
-  const resolved = await resolveAssistantSession(sessionInput)
   const hostedDefaultTarget =
     normalizeAssistantBackendTarget(
       normalizeAssistantExecutionContext(input.message.executionContext).hosted
         ?.defaultTarget ?? null,
     )
   const messageOverride = compactAssistantProviderConfigInput(input.message)
+  const resolved = await resolveAssistantSessionForMessageInput({
+    hostedDefaultTarget,
+    messageOverride,
+    sessionInput,
+  })
   const effectiveTarget = resolveEffectiveTargetForResolvedSession({
     hostedDefaultTarget,
     messageOverride,
@@ -209,6 +214,61 @@ export async function resolveAssistantSessionForMessage(input: {
   return effectiveTarget
     ? applyEffectiveTargetToResolvedSession(resolved, effectiveTarget)
     : resolved
+}
+
+async function resolveAssistantSessionForMessageInput(input: {
+  hostedDefaultTarget: AssistantModelTarget | null
+  messageOverride: AssistantProviderConfigInput | null
+  sessionInput: ResolveAssistantSessionInput
+}): Promise<ResolvedAssistantSession> {
+  if (!input.messageOverride) {
+    return await resolveAssistantSession(input.sessionInput)
+  }
+
+  try {
+    return await resolveAssistantSession(
+      buildAssistantSessionLookupInputForMessageOverride(input),
+    )
+  } catch (error) {
+    if (!isAssistantSessionNotFoundError(error)) {
+      throw error
+    }
+  }
+
+  return await resolveAssistantSession(input.sessionInput)
+}
+
+function buildAssistantSessionLookupInputForMessageOverride(input: {
+  hostedDefaultTarget: AssistantModelTarget | null
+  sessionInput: ResolveAssistantSessionInput
+}): ResolveAssistantSessionInput {
+  const locatorInput = stripAssistantSessionTargetResolutionInput(
+    input.sessionInput,
+  )
+  return {
+    ...locatorInput,
+    ...(input.hostedDefaultTarget ? { target: input.hostedDefaultTarget } : {}),
+    createIfMissing: false,
+  }
+}
+
+function stripAssistantSessionTargetResolutionInput(
+  input: ResolveAssistantSessionInput,
+): ResolveAssistantSessionInput {
+  const {
+    approvalPolicy: _approvalPolicy,
+    codexHome: _codexHome,
+    model: _model,
+    modelProvider: _modelProvider,
+    oss: _oss,
+    profile: _profile,
+    provider: _provider,
+    reasoningEffort: _reasoningEffort,
+    sandbox: _sandbox,
+    target: _target,
+    ...locatorInput
+  } = input
+  return locatorInput
 }
 
 function resolveEffectiveTargetForResolvedSession(input: {

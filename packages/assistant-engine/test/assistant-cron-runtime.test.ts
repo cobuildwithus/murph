@@ -1303,6 +1303,128 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('skips queued device activity jobs when the parent target override changes', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-device-activity-parent-target-stale-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const parentAutomationId = 'automation-device-activity-target-listener'
+    const parentAutomation: MockAutomationRecord = {
+      automationId: parentAutomationId,
+      assistantTargetOverride: {
+        reasoningEffort: 'low',
+      },
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Ask about imported runs.',
+      relativePath: 'bank/automations/device-activity-target-listener.md',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'deviceActivity',
+        after: '2026-04-08T08:00:00.000Z',
+        activityKind: 'run',
+        source: 'whoop',
+      },
+      slug: 'device-activity-target-listener',
+      status: 'active',
+      summary: null,
+      tags: ['device'],
+      title: 'Device activity target listener',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    }
+    const originalAuthorityKey = buildDeviceActivityAuthorityKey(parentAutomation)
+    parentAutomation.assistantTargetOverride = {
+      reasoningEffort: 'high',
+    }
+    parentAutomation.updatedAt = '2026-04-08T08:30:00.000Z'
+    getVaultAutomationStore(vaultRoot).push(parentAutomation)
+
+    const localJob = assistantCronJobSchema.parse({
+      createdAt: '2026-04-08T08:59:00.000Z',
+      enabled: true,
+      jobId: 'cron_device_activity_listener_target_stale',
+      keepAfterRun: false,
+      name: appendAssistantDeviceActivityCronJobMetadata(
+        'Device activity target listener',
+        {
+          authorityKey: originalAuthorityKey,
+          occurrenceKey: '1234567890abcdef1234567890abcdef12345670',
+          parentAutomationId,
+          parentAutomationRelativePath: 'bank/automations/device-activity-target-listener.md',
+        },
+      ),
+      prompt: 'Ask about the imported run.',
+      schedule: {
+        at: '2026-04-08T08:59:30.000Z',
+        kind: 'at',
+      },
+      schema: 'murph.assistant-cron-job.v1',
+      state: {
+        consecutiveFailures: 0,
+        lastError: null,
+        lastFailedAt: null,
+        lastRunAt: null,
+        lastSucceededAt: null,
+        nextRunAt: '2026-04-08T08:59:30.000Z',
+        runningAt: null,
+        runningPid: null,
+      },
+      target: {
+        alias: null,
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        sessionId: null,
+        threadId: null,
+      },
+      updatedAt: '2026-04-08T08:59:00.000Z',
+    })
+    await writeAssistantCronStore(paths, {
+      version: 1,
+      jobs: [localJob],
+    })
+
+    cronMocks.readAutomationByRelativePath.mockClear()
+    await expect(
+      processDueAssistantCronJobsLocal({
+        limit: 1,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(cronMocks.readAutomationByRelativePath).toHaveBeenCalledWith(
+      vaultRoot,
+      'bank/automations/device-activity-target-listener.md',
+    )
+    const runs = await listAssistantCronRuns({
+      job: localJob.jobId,
+      vault: vaultRoot,
+    })
+    expect(runs.runs).toEqual([
+      expect.objectContaining({
+        error: expect.stringContaining('parent listener is no longer authorized'),
+        response: null,
+        status: 'skipped',
+      }),
+    ])
+  })
+
   it('fails queued device activity outbox delivery when parent authority changes before dispatch', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-device-outbox-stale-',
@@ -4487,6 +4609,7 @@ function buildDeviceActivityAuthorityKey(automation: MockAutomationRecord): stri
 
   return buildAssistantDeviceActivityAuthorityKey({
     ...automation,
+    assistantTargetOverride: automation.assistantTargetOverride ?? null,
     schedule: {
       activityKind: automation.schedule.activityKind,
       source: automation.schedule.source,

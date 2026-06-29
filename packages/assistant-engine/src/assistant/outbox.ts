@@ -959,6 +959,7 @@ async function resolveDeviceActivityOutboxAuthorityError(input: {
     parentAutomation.schedule.kind !== 'deviceActivity' ||
     buildAssistantDeviceActivityAuthorityKey({
       ...parentAutomation,
+      assistantTargetOverride: parentAutomation.assistantTargetOverride,
       schedule: {
         activityKind: parentAutomation.schedule.activityKind,
         source: parentAutomation.schedule.source,

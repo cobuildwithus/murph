@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type {
+  AutomationAssistantTargetOverride,
   AutomationContinuityPolicy,
   AutomationDeviceActivityKind,
   AutomationDeviceActivitySource,
@@ -13,6 +14,7 @@ const ASSISTANT_DEVICE_ACTIVITY_DELIVERY_IDEMPOTENCY_PREFIX =
   'device-activity-cron:v1:'
 
 export interface AssistantDeviceActivityAuthorityInput {
+  assistantTargetOverride: AutomationAssistantTargetOverride | null
   automationId: string
   continuityPolicy: AutomationContinuityPolicy
   instructions: string
@@ -36,6 +38,9 @@ export function buildAssistantDeviceActivityAuthorityKey(
   return createHash('sha256')
     .update(JSON.stringify({
       activityKind: automation.schedule.activityKind ?? null,
+      assistantTargetOverride: normalizeAssistantDeviceActivityAuthorityTargetOverride(
+        automation.assistantTargetOverride,
+      ),
       automationId: automation.automationId,
       continuityPolicy: automation.continuityPolicy,
       instructions: automation.instructions,
@@ -44,6 +49,24 @@ export function buildAssistantDeviceActivityAuthorityKey(
     }))
     .digest('hex')
     .slice(0, 40)
+}
+
+function normalizeAssistantDeviceActivityAuthorityTargetOverride(
+  override: AutomationAssistantTargetOverride | null,
+): {
+  model: string | null
+  modelProvider: string | null
+  reasoningEffort: string | null
+} | null {
+  if (!override) {
+    return null
+  }
+
+  return {
+    model: override.model ?? null,
+    modelProvider: override.modelProvider ?? null,
+    reasoningEffort: override.reasoningEffort ?? null,
+  }
 }
 
 export function appendAssistantDeviceActivityCronJobMetadata(

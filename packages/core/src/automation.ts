@@ -127,6 +127,7 @@ export interface AdvanceAutomationDeviceActivityCursorInput {
   afterEntityId: string;
   afterOccurredAt: string;
   expectedActivityKind?: AutomationDeviceActivityKind;
+  expectedAssistantTargetOverride?: AutomationAssistantTargetOverride | null;
   expectedContinuityPolicy: AutomationContinuityPolicy;
   expectedInstructions: string;
   expectedRoute: AutomationRoute;
@@ -795,6 +796,10 @@ export async function advanceAutomationDeviceActivityCursor(
       existingRecord.continuityPolicy !== input.expectedContinuityPolicy ||
       existingRecord.instructions !== input.expectedInstructions ||
       !automationRoutesEqual(existingRecord.route, input.expectedRoute) ||
+      !automationAssistantTargetOverridesEqual(
+        existingRecord.assistantTargetOverride,
+        input.expectedAssistantTargetOverride ?? null,
+      ) ||
       existingRecord.schedule.kind !== "deviceActivity" ||
       existingRecord.schedule.activityKind !== input.expectedActivityKind ||
       existingRecord.schedule.source !== input.expectedSource
@@ -826,6 +831,7 @@ export async function advanceAutomationDeviceActivityCursor(
       instructions: existingRecord.instructions,
       now: input.now,
       route: existingRecord.route,
+      assistantTargetOverride: existingRecord.assistantTargetOverride,
       schedule: {
         ...existingRecord.schedule,
         after: cursor.after,
@@ -861,6 +867,14 @@ function assertAutomationPatchHasChanges(input: PatchAutomationInput): void {
 
 function automationRoutesEqual(left: AutomationRoute, right: AutomationRoute): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function automationAssistantTargetOverridesEqual(
+  left: AutomationAssistantTargetOverride | null,
+  right: AutomationAssistantTargetOverride | null,
+): boolean {
+  return JSON.stringify(normalizeAutomationAssistantTargetOverride(left)) ===
+    JSON.stringify(normalizeAutomationAssistantTargetOverride(right));
 }
 
 function resolveAdvancedDeviceActivityCursor(input: {
