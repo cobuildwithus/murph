@@ -303,6 +303,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/pr.diff`')
     expect(prDeepReviewPrompt).toContain('`review-gpt-pr-context/changed-files.txt`')
     expect(prDeepReviewPrompt).toContain('if you cannot read `review-gpt-pr-context/pr.diff`')
+    expect(prDeepReviewPrompt).toContain('cannot read the source snapshot / repomix attachments')
     expect(prDeepReviewPrompt).toContain('do not review from memory, a connector, pasted context, or the PR')
     expect(prDeepReviewPrompt).toContain('description alone')
     expect(prDeepReviewPrompt).not.toContain('app_connector="github"')

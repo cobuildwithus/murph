@@ -68,7 +68,7 @@ For every finding from a required audit pass:
 
 1. Read the real code path, adjacent files, and relevant tests before accepting the finding. When a finding depends on external behavior, check the dependency's docs, source, or types instead of guessing.
 2. Classify the finding as accepted/actionable, rejected, or out of scope. Reject speculative risks, unrealistic edge cases, broad rewrites, and fixes that add more complexity than the bug justifies.
-3. For accepted/actionable findings, fix the smallest correct surface at the right ownership boundary. If the finding reveals a bug class or repeated pattern, inspect the current task scope for sibling instances and fix the scoped bug class together when practical.
+3. For accepted/actionable findings, fix the smallest correct surface at the right ownership boundary. If repeated findings cluster around one mechanism, pause tactical patching and simplify the mechanism, split or abandon the PR, or explicitly reject the collapse finding.
 4. After any review-driven code, test, config, or docs change, rerun the focused verification that proves the changed surface.
 5. Rerun the affected audit pass when the fix materially changes that pass's risk surface:
    - rerun `security-privacy-review` for accepted security/privacy fixes on auth, secrets, trust boundaries, external surfaces, or concrete exposure behavior
