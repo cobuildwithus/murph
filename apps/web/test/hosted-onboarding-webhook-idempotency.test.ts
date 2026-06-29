@@ -393,7 +393,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        idempotencyKey: "linq-invite-signup:evt_123",
+        idempotencyKey: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
         message: buildHostedInviteReply({
           joinUrl: "https://join.example.test/join/code_first_contact",
         }),
@@ -420,7 +420,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
-  it("uses event-scoped idempotency for repeated first-contact signup link sends", async () => {
+  it("uses member/day idempotency for overlapping first-contact signup link sends", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
@@ -456,10 +456,11 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+    const expectedIdempotencyKey = "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        idempotencyKey: "linq-invite-signup:evt_first_contact_one",
+        idempotencyKey: expectedIdempotencyKey,
         message: buildHostedInviteReply({
           joinUrl: "https://join.example.test/join/code_first_contact",
         }),
@@ -469,7 +470,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        idempotencyKey: "linq-invite-signup:evt_first_contact_two",
+        idempotencyKey: expectedIdempotencyKey,
         message: buildHostedInviteReply({
           joinUrl: "https://join.example.test/join/code_first_contact",
         }),

@@ -28,6 +28,7 @@ import {
   claimHostedLinqQuotaReplyNotice,
   markHostedLinqOnboardingLinkNoticeSent,
   releaseHostedLinqQuotaReplyNoticeClaim,
+  resolveHostedLinqDayUtc,
 } from "./linq-daily-state";
 import {
   buildHostedDailyQuotaReply,
@@ -199,7 +200,8 @@ function buildHostedWebhookLinqMessageEffectId(
   input: CreateHostedWebhookLinqMessageSideEffectInput,
 ): string {
   if (input.template === "invite_signup") {
-    return `linq-invite-signup:${input.sourceEventId}`;
+    const dayUtc = resolveHostedLinqDayUtc(input.occurredAt).toISOString();
+    return `linq-invite-signup:${input.memberId}:${dayUtc}`;
   }
 
   if (input.template === "ai_usage_quota" && input.claimToken) {

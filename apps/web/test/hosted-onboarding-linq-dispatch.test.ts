@@ -221,7 +221,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
     readHostedLinqDailyState: mocks.readHostedLinqDailyState,
     releaseHostedLinqOnboardingLinkNoticeClaim: mocks.releaseHostedLinqOnboardingLinkNoticeClaim,
     releaseHostedLinqQuotaReplyNoticeClaim: mocks.releaseHostedLinqQuotaReplyNoticeClaim,
-    resolveHostedLinqDayUtc: vi.fn(),
   };
 });
 

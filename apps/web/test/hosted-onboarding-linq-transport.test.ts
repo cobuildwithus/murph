@@ -22,13 +22,19 @@ vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
   }),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
-  claimHostedLinqOnboardingLinkNotice: vi.fn().mockResolvedValue(true),
-  claimHostedLinqQuotaReplyNotice: vi.fn().mockResolvedValue(true),
-  markHostedLinqOnboardingLinkNoticeSent: vi.fn().mockResolvedValue(true),
-  releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn().mockResolvedValue(undefined),
-  releaseHostedLinqQuotaReplyNoticeClaim: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/linq-daily-state")
+  >("@/src/lib/hosted-onboarding/linq-daily-state");
+  return {
+    ...actual,
+    claimHostedLinqOnboardingLinkNotice: vi.fn().mockResolvedValue(true),
+    claimHostedLinqQuotaReplyNotice: vi.fn().mockResolvedValue(true),
+    markHostedLinqOnboardingLinkNoticeSent: vi.fn().mockResolvedValue(true),
+    releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn().mockResolvedValue(undefined),
+    releaseHostedLinqQuotaReplyNoticeClaim: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
   const actual = await vi.importActual<
@@ -461,7 +467,7 @@ describe("hosted Linq webhook transport", () => {
     });
   });
 
-  it("keys invite signup replies by source event instead of reused invite", () => {
+  it("keys invite signup replies by member/day notice identity", () => {
     const firstEffect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       inviteId: "invite-1",
@@ -471,13 +477,13 @@ describe("hosted Linq webhook transport", () => {
       sourceEventId: "event-invite-1",
       template: "invite_signup",
     });
-    const replayedEffect = createHostedWebhookLinqMessageSideEffect({
+    const sameDayEffect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       inviteId: "invite-1",
       memberId: "member-1",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      replyToMessageId: "message-1",
-      sourceEventId: "event-invite-1",
+      occurredAt: "2026-03-26T23:59:59.000Z",
+      replyToMessageId: "message-2",
+      sourceEventId: "event-invite-2",
       template: "invite_signup",
     });
     const laterEffect = createHostedWebhookLinqMessageSideEffect({
@@ -485,14 +491,14 @@ describe("hosted Linq webhook transport", () => {
       inviteId: "invite-1",
       memberId: "member-1",
       occurredAt: "2026-03-27T12:00:00.000Z",
-      replyToMessageId: "message-2",
-      sourceEventId: "event-invite-2",
+      replyToMessageId: "message-3",
+      sourceEventId: "event-invite-3",
       template: "invite_signup",
     });
 
-    expect(firstEffect.effectId).toBe("linq-invite-signup:event-invite-1");
-    expect(replayedEffect.effectId).toBe(firstEffect.effectId);
-    expect(laterEffect.effectId).toBe("linq-invite-signup:event-invite-2");
+    expect(firstEffect.effectId).toBe("linq-invite-signup:member-1:2026-03-26T00:00:00.000Z");
+    expect(sameDayEffect.effectId).toBe(firstEffect.effectId);
+    expect(laterEffect.effectId).toBe("linq-invite-signup:member-1:2026-03-27T00:00:00.000Z");
   });
 
   it("releases AI usage quota notice claims when delivery fails", async () => {
