@@ -7,16 +7,18 @@ import {
   useState,
 } from "react";
 
-import { LandingAuthActions, LandingAuthDialogButton } from "@/app/auth-controls";
-import { cn } from "@/src/lib/utils";
 import {
-  fetchHeroContactInfo,
-  type HeroContactInfo,
-} from "@/src/lib/hero-contact-info";
+  LandingAuthActions,
+  LandingAuthDialogButton,
+} from "@/app/auth-controls";
+import { cn } from "@/src/lib/utils";
+import { type HeroContactInfo } from "@/src/lib/hero-contact-info";
 import {
   buildMurphSmsHref,
   buildMurphTelegramTextHref,
 } from "@/src/lib/murph-contact-routing";
+
+export type HeroMessengerChannel = "imessage" | "telegram";
 
 import { ExperimentCard, type ExperimentResult } from "./phone-mock";
 
@@ -317,14 +319,22 @@ const FLOATER_INDEX_BY_TOPIC: Record<string, number> = FLOATERS.reduce(
   {} as Record<string, number>,
 );
 
-const FIRST_RUN_DELAY = 700;
+const FIRST_RUN_DELAY = 3000;
 const USER_BUBBLE_AT = 1400;
 const TYPING_AT = 2200;
 const REPLY_AT = 3600;
 const CYCLE_LENGTH = 7800;
 const MAX_ITEMS = 30;
 
-export function HeroClocksIn({ authenticated }: { authenticated: boolean }) {
+export function HeroClocksIn({
+  authenticated,
+  contactInfo,
+  messengerChannel,
+}: {
+  authenticated: boolean;
+  contactInfo: HeroContactInfo;
+  messengerChannel: HeroMessengerChannel;
+}) {
   const [items, setItems] = useState<ReadonlyArray<StreamItem>>([]);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const [typing, setTyping] = useState(false);
@@ -337,7 +347,6 @@ export function HeroClocksIn({ authenticated }: { authenticated: boolean }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const cancelDemoRef = useRef<(() => void) | null>(null);
   const engagedRef = useRef(false);
-  const contactsRef = useRef<HeroContactInfo | null>(null);
   const isAtBottomRef = useRef(true);
 
   const markFloaterUsed = (idx: number | null) => {
@@ -524,28 +533,19 @@ export function HeroClocksIn({ authenticated }: { authenticated: boolean }) {
     await new Promise((r) => setTimeout(r, 450));
     setTyping(true);
 
-    try {
-      let info = contactsRef.current;
-      if (!info) {
-        info = await fetchHeroContactInfo();
-        contactsRef.current = info;
-      }
-      await new Promise((r) => setTimeout(r, 1100));
-      setTyping(false);
-      setItems((prev) =>
-        [
-          ...prev,
-          {
-            kind: "contact",
-            id: ++idRef.current,
-            info: info!,
-            text: "Hey mate, shoot me a message and we can get started.",
-          } as ContactItem,
-        ].slice(-MAX_ITEMS),
-      );
-    } catch {
-      setTyping(false);
-    }
+    await new Promise((r) => setTimeout(r, 1100));
+    setTyping(false);
+    setItems((prev) =>
+      [
+        ...prev,
+        {
+          kind: "contact",
+          id: ++idRef.current,
+          info: contactInfo,
+          text: "Hey mate, shoot me a message and we can get started.",
+        } as ContactItem,
+      ].slice(-MAX_ITEMS),
+    );
   };
 
   const runExchangeOnce = async (ex: Exchange) => {
@@ -607,6 +607,13 @@ export function HeroClocksIn({ authenticated }: { authenticated: boolean }) {
     if (!ex) return;
     runExchangeOnce(ex);
   };
+
+  const channelIcon =
+    messengerChannel === "telegram" ? (
+      <TelegramLogo className="size-[18px]" />
+    ) : (
+      <IMessageLogo className="size-[18px]" />
+    );
 
   return (
     <section className="relative min-h-svh overflow-hidden bg-[#f5f0e8]">
@@ -725,6 +732,7 @@ export function HeroClocksIn({ authenticated }: { authenticated: boolean }) {
               authLabel="Meet Murph"
               authenticated={authenticated}
               context="hero"
+              leadingIcon={channelIcon}
               preloadAuthPanel
             />
           </div>
@@ -824,6 +832,7 @@ export function HeroClocksIn({ authenticated }: { authenticated: boolean }) {
             authLabel="Meet Murph"
             authenticated={authenticated}
             context="hero"
+            leadingIcon={channelIcon}
           />
         </div>
       </div>

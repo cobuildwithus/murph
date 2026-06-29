@@ -7,12 +7,16 @@ import { expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getMurphGithubStarCount: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
+  headers: vi.fn(() =>
+    Promise.resolve(new Headers([["x-vercel-ip-country", "US"]]))
+  ),
   LandingAuthActions: vi.fn(
     (props: {
       authenticated: boolean;
       context: "nav" | "hero" | "footer";
       authLabel: string;
       signupLabel?: string;
+      leadingIcon?: React.ReactNode;
       splitUnauthenticated?: boolean;
       preloadAuthPanel?: boolean;
     }) =>
@@ -36,6 +40,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
+
+vi.mock("next/headers", () => ({
+  headers: mocks.headers,
+}));
 
 vi.mock("next/image", () => ({
   default: (props: {
@@ -121,6 +129,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "hero",
       authLabel: "Meet Murph",
+      leadingIcon: expect.anything(),
       preloadAuthPanel: true,
     },
     undefined
@@ -131,6 +140,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "hero",
       authLabel: "Meet Murph",
+      leadingIcon: expect.anything(),
     },
     undefined
   );
@@ -159,8 +169,12 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /data-root-landing-auth-actions-context="nav"/);
   assert.match(markup, /data-root-landing-auth-actions-context="hero"/);
   assert.match(markup, /data-root-landing-auth-actions-context="footer"/);
-  assert.match(markup, /class="block">Health is<\/span>/);
-  assert.match(markup, /class="block">overwhelming\.<\/span>/);
+  assert.match(
+    markup,
+    /font-serif text-\[clamp\(2\.25rem,4\.8vw,4\.25rem\)\][^"]* text-black/,
+  );
+  assert.match(markup, /<span class="block">Health is<\/span>/);
+  assert.match(markup, /<span class="block">overwhelming\.<\/span>/);
   assert.match(markup, /Murph makes it easy\./);
   assert.match(markup, /Murph is your personal health assistant\. Wearables, bloodwork/);
   assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
@@ -239,7 +253,7 @@ test("HomePage metadata keeps the root route as the canonical landing URL", asyn
   ]);
 });
 
-test("HomePage keeps the mid-page CTA consistent for authenticated sessions", async () => {
+test("HomePage keeps the final CTA consistent for authenticated sessions", async () => {
   vi.clearAllMocks();
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -264,4 +278,5 @@ test("HomePage keeps the mid-page CTA consistent for authenticated sessions", as
   );
   assert.match(markup, /You’re already set up\./);
   assert.match(markup, /data-root-landing-auth-actions-label="Go to dashboard"/);
+  assert.match(markup, /Manage billing and connected wearables from one place\./);
 });

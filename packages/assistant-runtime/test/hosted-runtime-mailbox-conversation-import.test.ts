@@ -451,6 +451,75 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(JSON.stringify(latencyTraceRequests).includes("latency trace message body"), false);
   });
 
+  test("records Telegram staged trace callbacks with Telegram source", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-telegram-latency-"));
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const item = createResolvedConversationMailboxItem({
+      dedupeKey: "evt_synthetic_telegram_latency_001",
+      id: "mailbox_item_telegram_latency_001",
+    });
+    const decodedWake = createConversationWake({
+      eventId: "evt_synthetic_telegram_latency_001",
+      message: {
+        channel: "telegram",
+        telegramMessage: {
+          attachments: [],
+          messageId: "987654",
+          schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+          text: "telegram latency trace message body",
+          threadId: "telegram_chat_latency",
+        },
+      },
+    });
+    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        return {
+          captureId: null,
+          metrics: {
+            nextWakeAt: null,
+            parserProcessed: 0,
+          },
+        };
+      },
+      async prepareWakeContext() {},
+      item,
+      runtime: createRuntime({
+        platform: {
+          latencyTracePort: {
+            async record(request) {
+              latencyTraceRequests.push(request);
+              return {
+                matchedCount: 1,
+                recorded: true,
+                unmatchedCount: 0,
+              };
+            },
+          },
+        },
+      }),
+      runtimeAttemptId: "attempt_telegram_latency_trace_1",
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+    expect(latencyTraceRequests.map((request) => request.event)).toEqual([
+      expect.objectContaining({
+        mailboxItemId: "mailbox_item_telegram_latency_001",
+        runtimeAttemptId: "attempt_telegram_latency_trace_1",
+        source: "telegram",
+        type: "assistant_input_staged",
+      }),
+    ]);
+    assert.equal(
+      JSON.stringify(latencyTraceRequests).includes("telegram latency trace message body"),
+      false,
+    );
+  });
+
   test("omits impossible runtime wake notify time without dropping foreground wake timings", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-latency-"));
     tempRoots.push(parentRoot);

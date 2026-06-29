@@ -52,6 +52,9 @@ import type {
   HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  readHostedIngressLatencySource,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import type {
@@ -612,7 +615,8 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
   startedAt: string;
   turnLockWaitMs?: number;
 }): void {
-  if (input.source !== "linq") {
+  const source = readHostedIngressLatencySource(input.source);
+  if (!source) {
     return;
   }
   if (!input.latencyTracePort || input.assistantInputIds.length === 0) {
@@ -643,7 +647,7 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
         : {}),
       providerRequestOrdinal: input.providerRequestOrdinal,
       runtimeAttemptId: input.runtimeAttemptId ?? null,
-      source: "linq",
+      source,
       type: "provider_started",
     },
   }).catch(() => {
