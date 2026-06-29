@@ -3313,8 +3313,10 @@ function omitConsumedHostedAssistantCronWakeCandidate(input: {
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
 }): HostedRuntimeWakeCandidate | null {
   if (
-    (input.assistantMetrics?.assistantAutomationCronProcessed ?? 0) <= 0
-    || !consumedScheduledWorkspaceWake(input.phaseInput)
+    !assistantCronProcessedConsumedWorkspaceWake({
+      assistantMetrics: input.assistantMetrics,
+      phaseInput: input.phaseInput,
+    })
     || input.candidate?.reason !== HOSTED_ASSISTANT_WAKE_REASON
     || input.candidate.at !== input.phaseInput.workspace?.nextWakeAt
   ) {
@@ -3322,6 +3324,29 @@ function omitConsumedHostedAssistantCronWakeCandidate(input: {
   }
 
   return null;
+}
+
+function assistantCronProcessedConsumedWorkspaceWake(input: {
+  assistantMetrics: HostedAssistantMetrics | null;
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): boolean {
+  if ((input.assistantMetrics?.assistantAutomationCronProcessed ?? 0) <= 0) {
+    return false;
+  }
+
+  const wakeAt = input.phaseInput.workspace?.nextWakeAt ?? null;
+  if (!wakeAt) {
+    return false;
+  }
+
+  const wakeReason = input.phaseInput.workspace?.nextWakeReason ?? HOSTED_ASSISTANT_WAKE_REASON;
+  if (wakeReason !== HOSTED_ASSISTANT_WAKE_REASON) {
+    return false;
+  }
+
+  const wakeMs = Date.parse(wakeAt);
+  return Number.isFinite(wakeMs)
+    && wakeMs <= resolveHostedAssistantPhaseNowMs(input.phaseInput);
 }
 
 function countHostedPendingOutboxDeliveryOutcomes(
