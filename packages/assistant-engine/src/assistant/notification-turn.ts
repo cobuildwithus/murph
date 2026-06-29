@@ -129,6 +129,7 @@ export interface AssistantNotificationInput
       | 'onProviderEvent'
       | 'onTraceEvent'
       | 'operatorAuthority'
+      | 'providerConfigPersistence'
       | 'serviceTier'
       | 'showThinkingTraces'
       | 'turnEnvironment'
@@ -737,6 +738,7 @@ function buildAssistantNotificationMessageInput(
     profile: input.profile,
     prompt: normalizeRequiredText(input.instructions, 'instructions'),
     provider: input.provider,
+    providerConfigPersistence: input.providerConfigPersistence,
     receiptMetadata: null,
     reasoningEffort: input.reasoningEffort,
     sandbox: input.sandbox,

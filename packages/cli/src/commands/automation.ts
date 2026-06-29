@@ -16,6 +16,7 @@ import {
   automationScheduleKindValues,
   automationTimeScheduleKindValues,
   automationStatusValues,
+  type AutomationAssistantTargetOverride,
   type AutomationRoute,
   type AutomationScaffoldPayload,
   type AutomationDeviceActivityKind,
@@ -75,6 +76,17 @@ interface AutomationRouteOptions {
   identityId?: string;
   participantId?: string;
   threadId?: string;
+}
+
+interface AutomationAssistantTargetOverrideOptions {
+  assistantTargetOverrideModel?: string;
+  assistantTargetOverrideModelProvider?: string;
+  assistantTargetOverrideReasoningEffort?: string;
+}
+
+interface AutomationAssistantTargetOverrideEditOptions
+  extends AutomationAssistantTargetOverrideOptions {
+  clearAssistantTargetOverride?: boolean;
 }
 
 export const automationRecordSchema = z
@@ -316,6 +328,37 @@ function normalizeAutomationRouteOption(
   return normalized && normalized.length > 0 ? normalized : null;
 }
 
+function buildAutomationAssistantTargetOverrideFromOptions(
+  input: AutomationAssistantTargetOverrideOptions,
+): AutomationAssistantTargetOverride | undefined {
+  const model = normalizeAutomationRouteOption(input.assistantTargetOverrideModel);
+  const modelProvider = normalizeAutomationRouteOption(input.assistantTargetOverrideModelProvider);
+  const reasoningEffort = normalizeAutomationRouteOption(input.assistantTargetOverrideReasoningEffort);
+  const target = automationAssistantTargetOverrideSchema.parse({
+    ...(model ? { model } : {}),
+    ...(modelProvider ? { modelProvider } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+  });
+
+  return Object.keys(target).length > 0 ? target : undefined;
+}
+
+function buildAutomationAssistantTargetOverridePatchFromOptions(
+  input: AutomationAssistantTargetOverrideEditOptions,
+): AutomationAssistantTargetOverride | null | undefined {
+  const target = buildAutomationAssistantTargetOverrideFromOptions(input);
+  if (input.clearAssistantTargetOverride === true) {
+    if (target !== undefined) {
+      return invalidAutomationOption(
+        "--clear-assistant-target-override cannot be combined with assistant target override fields.",
+      );
+    }
+    return null;
+  }
+
+  return target;
+}
+
 function normalizeAutomationTagOptions(input: {
   tag?: readonly string[];
   tags?: readonly string[];
@@ -457,6 +500,24 @@ const automationSharedOptionSchemas = {
     .min(1)
     .optional()
     .describe("Optional route thread id."),
+  assistantTargetOverrideModel: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("Optional assistant model override for scheduled turns."),
+  assistantTargetOverrideModelProvider: z
+    .string()
+    .min(1)
+    .max(120)
+    .optional()
+    .describe("Optional assistant model provider override for scheduled turns."),
+  assistantTargetOverrideReasoningEffort: z
+    .string()
+    .min(1)
+    .max(80)
+    .optional()
+    .describe("Optional assistant reasoning effort override for scheduled turns."),
 };
 
 const automationSaveOptionSchemas = {
@@ -485,6 +546,10 @@ const automationEditOptionSchemas = {
     .min(1)
     .optional()
     .describe("Optional automation instructions."),
+  clearAssistantTargetOverride: z
+    .boolean()
+    .optional()
+    .describe("Clear the stored assistant target override."),
 };
 
 export function registerAutomationCommands(cli: Cli.Cli) {
@@ -546,6 +611,11 @@ export function registerAutomationCommands(cli: Cli.Cli) {
       const input: AutomationScaffoldPayload = automationScaffoldPayloadSchema.parse({
         automationId: context.options.id,
         continuityPolicy: context.options.continuityPolicy,
+        assistantTargetOverride: buildAutomationAssistantTargetOverrideFromOptions({
+          assistantTargetOverrideModel: context.options.assistantTargetOverrideModel,
+          assistantTargetOverrideModelProvider: context.options.assistantTargetOverrideModelProvider,
+          assistantTargetOverrideReasoningEffort: context.options.assistantTargetOverrideReasoningEffort,
+        }),
         instructions: context.options.instructions,
         route,
         schedule: buildAutomationScheduleFromOptions({
@@ -615,6 +685,12 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         participantId: context.options.participantId,
         threadId: context.options.threadId,
       };
+      const assistantTargetOverride = buildAutomationAssistantTargetOverridePatchFromOptions({
+        assistantTargetOverrideModel: context.options.assistantTargetOverrideModel,
+        assistantTargetOverrideModelProvider: context.options.assistantTargetOverrideModelProvider,
+        assistantTargetOverrideReasoningEffort: context.options.assistantTargetOverrideReasoningEffort,
+        clearAssistantTargetOverride: context.options.clearAssistantTargetOverride,
+      });
       const scheduleOptions = {
         activityKind: context.options.activityKind,
         deviceSource: context.options.deviceSource,
@@ -655,6 +731,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         assertActiveAutomationRouteCanDeliver(route ?? existing.route);
       }
       const result = await patchAutomation({
+        assistantTargetOverride,
         continuityPolicy: context.options.continuityPolicy,
         instructions: context.options.instructions,
         lookup: context.args.lookup,

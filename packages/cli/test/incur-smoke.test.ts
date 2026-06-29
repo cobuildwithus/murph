@@ -1785,6 +1785,9 @@ test('automation save and edit schemas expose typed automation fields and a sepa
     'identityId',
     'participantId',
     'threadId',
+    'assistantTargetOverrideModel',
+    'assistantTargetOverrideModelProvider',
+    'assistantTargetOverrideReasoningEffort',
   ]) {
     assert.equal(field in saveSchema.options.properties, true, field)
   }
@@ -1806,7 +1809,16 @@ test('automation save and edit schemas expose typed automation fields and a sepa
   assert.deepEqual(editSchema.args.required, ['lookup'])
   assert.equal('input' in editSchema.options.properties, false)
   assert.equal(editSchema.options.required?.includes('instructions') ?? false, false)
-  for (const field of ['title', 'continuityPolicy', 'instructions', 'channel']) {
+  for (const field of [
+    'title',
+    'continuityPolicy',
+    'instructions',
+    'channel',
+    'assistantTargetOverrideModel',
+    'assistantTargetOverrideModelProvider',
+    'assistantTargetOverrideReasoningEffort',
+    'clearAssistantTargetOverride',
+  ]) {
     assert.equal(field in editSchema.options.properties, true, field)
   }
 
