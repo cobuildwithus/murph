@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 
+import { AsksGridSection } from "@/src/components/homepage/asks-section";
 import { AssistantSection } from "@/src/components/homepage/assistant-section";
 import { FaqSection } from "@/src/components/homepage/faq-section";
-import { HeroSection } from "@/src/components/homepage/hero-section";
+import { HeroClocksIn } from "@/src/components/homepage/hero-clocks-in";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
+import { IntegrationsSection } from "@/src/components/homepage/integrations-section";
 import { LocalRunSection } from "@/src/components/homepage/local-run-section";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
@@ -74,9 +76,11 @@ export default async function HomePage() {
           githubStarCount={githubStarCount}
           preloadAuthPanel
         />
-        <HeroSection authenticated={authenticated} />
+        <HeroClocksIn authenticated={authenticated} />
+        <AsksGridSection />
         <TrustSection />
         <PersonasSection />
+        <IntegrationsSection authenticated={authenticated} />
         <HowItWorksSection />
         <AssistantSection />
         <SecurityTeaserSection />

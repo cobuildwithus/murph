@@ -100,7 +100,7 @@ function MessageStream({
   );
 }
 
-function ExperimentCard({ result }: { result: ExperimentResult }) {
+export function ExperimentCard({ result }: { result: ExperimentResult }) {
   const sideLabel =
     result.trend?.label ?? result.comparison?.label ?? null;
   const statColumns = result.stats?.length === 2 ? "grid-cols-2" : "grid-cols-3";
