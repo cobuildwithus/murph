@@ -53,6 +53,7 @@ const mocks = vi.hoisted(() => {
     deriveHostedOnboardingTimingErrorName: vi.fn(() => "Error"),
     claimHostedAiUsageLimitNotice: vi.fn(),
     releaseHostedAiUsageLimitNotice: vi.fn(),
+    claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
     claimHostedLinqOnboardingLinkNotice: vi.fn(),
     claimHostedLinqQuotaReplyNotice: vi.fn(),
     markHostedLinqOnboardingLinkNoticeSent: vi.fn(),
@@ -221,6 +222,16 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
     readHostedLinqDailyState: mocks.readHostedLinqDailyState,
     releaseHostedLinqOnboardingLinkNoticeClaim: mocks.releaseHostedLinqOnboardingLinkNoticeClaim,
     releaseHostedLinqQuotaReplyNoticeClaim: mocks.releaseHostedLinqQuotaReplyNoticeClaim,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/linq-delivery-store")
+  >("@/src/lib/hosted-onboarding/linq-delivery-store");
+  return {
+    ...actual,
+    claimHostedLinqDeliveryProviderDispatchTx: mocks.claimHostedLinqDeliveryProviderDispatchTx,
   };
 });
 
@@ -482,6 +493,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
+    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
+      claimed: true,
+      id: "hld_claimed",
+    });
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
     mocks.markHostedLinqOnboardingLinkNoticeSent.mockResolvedValue(true);

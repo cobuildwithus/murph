@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import {
   applyHostedLinqDeliveryReceiptTx,
+  claimHostedLinqDeliveryProviderDispatchTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
@@ -830,6 +831,140 @@ describe("hosted Linq observability stores", () => {
       | Record<string, unknown>
       | undefined;
     expect(updateData?.messageLookupKey).not.toBe("provider_message_123");
+  });
+
+  it("claims provider dispatch by creating the delivery idempotency row", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
+    const deliveryIdempotencyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
+      "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
+    );
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      idempotencyKey: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
+      targetKind: "thread",
+      template: "invite_signup",
+    })).resolves.toEqual({
+      claimed: true,
+      id: "hld_random",
+    });
+
+    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledWith({
+      select: expect.objectContaining({
+        attemptedAt: true,
+      }),
+      where: {
+        idempotencyKey: deliveryIdempotencyLookupKey,
+      },
+    });
+    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          attemptedAt,
+          idempotencyKey: deliveryIdempotencyLookupKey,
+          status: "attempted",
+        }),
+      }),
+    );
+  });
+
+  it("does not claim provider dispatch while the same idempotency row is already in flight", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_in_flight",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      skippedAt: null,
+      status: "attempted",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: new Date("2026-03-26T12:00:30.000Z"),
+      idempotencyKey: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
+      targetKind: "thread",
+      template: "invite_signup",
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_in_flight",
+    });
+
+    expect(fixture.hostedLinqDeliveryCreate).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "hld_in_flight",
+          OR: expect.arrayContaining([
+            expect.objectContaining({
+              attemptedAt: {
+                lte: new Date("2026-03-26T11:45:30.000Z"),
+              },
+              status: "attempted",
+            }),
+          ]),
+        }),
+      }),
+    );
+  });
+
+  it("reclaims stale pre-provider delivery rows for a later provider dispatch retry", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:30:00.000Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_stale_attempt",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      skippedAt: null,
+      status: "attempted",
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      idempotencyKey: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
+      targetKind: "thread",
+      template: "invite_signup",
+    })).resolves.toEqual({
+      claimed: true,
+      id: "hld_stale_attempt",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          attemptedAt,
+          failedAt: null,
+          skippedAt: null,
+          status: "attempted",
+        }),
+        where: expect.objectContaining({
+          id: "hld_stale_attempt",
+        }),
+      }),
+    );
   });
 
   it("records hosted runtime accepted Linq sends as delivery rows and line outbound totals", async () => {

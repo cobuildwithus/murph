@@ -36,6 +36,19 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/linq-delivery-store")
+  >("@/src/lib/hosted-onboarding/linq-delivery-store");
+  return {
+    ...actual,
+    claimHostedLinqDeliveryProviderDispatchTx: vi.fn().mockResolvedValue({
+      claimed: true,
+      id: "hld_claimed",
+    }),
+  };
+});
+
 vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
   const actual = await vi.importActual<
     typeof import("@/src/lib/hosted-execution/usage-allowance")
@@ -66,6 +79,9 @@ import {
   releaseHostedLinqOnboardingLinkNoticeClaim,
   releaseHostedLinqQuotaReplyNoticeClaim,
 } from "@/src/lib/hosted-onboarding/linq-daily-state";
+import {
+  claimHostedLinqDeliveryProviderDispatchTx,
+} from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
@@ -904,6 +920,15 @@ describe("hosted Linq webhook transport", () => {
       }),
     ).rejects.toThrow("send failed");
 
+    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith({
+      idempotencyKey: effect.effectId,
+      linqChatId: "chat-1",
+      prisma,
+      source: "hosted_webhook_side_effect",
+      sourceRef: effect.effectId,
+      targetKind: "thread",
+      template: "invite_signup",
+    });
     expect(claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(markHostedLinqOnboardingLinkNoticeSent).not.toHaveBeenCalled();
     expect(releaseHostedLinqOnboardingLinkNoticeClaim).not.toHaveBeenCalled();

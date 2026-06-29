@@ -26,6 +26,8 @@ import { normalizePhoneNumber } from "./phone";
 import { generateHostedRandomPrefixedId, sha256Hex } from "../primitives";
 
 type HostedLinqDeliveryClient = PrismaClient | Prisma.TransactionClient;
+const HOSTED_LINQ_PROVIDER_DISPATCH_STALE_ATTEMPT_MS = 15 * 60 * 1000;
+
 type HostedLinqDeliveryReceiptData = {
   deliveryStatus: "delivered" | "failed";
   eventId: string;
@@ -126,6 +128,98 @@ export async function recordHostedLinqDeliveryAttemptTx(input: {
     }
     return updateHostedLinqDeliveryAttemptIfPreProvider({
       data: updateData,
+      delivery: concurrent,
+      prisma: input.prisma,
+    });
+  }
+}
+
+export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
+  attemptedAt?: Date;
+  idempotencyKey?: string | null;
+  linqChatId?: string | null;
+  phoneNumber?: string | null;
+  prisma: HostedLinqDeliveryClient;
+  source: string;
+  sourceRef?: string | null;
+  targetKind?: string | null;
+  template?: string | null;
+}): Promise<{ claimed: boolean; id: string | null }> {
+  const attemptedAt = input.attemptedAt ?? new Date();
+  const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
+    normalizeNullable(input.idempotencyKey),
+  );
+  if (!idempotencyKey) {
+    return {
+      claimed: true,
+      id: null,
+    };
+  }
+
+  const phoneNumber = normalizePhoneNumber(input.phoneNumber);
+  const phoneNumberLookupKey = await ensureHostedLinqDeliveryLineTx({
+    observedAt: attemptedAt,
+    phoneNumber,
+    prisma: input.prisma,
+  });
+  const data = {
+    attemptedAt,
+    failedAt: null,
+    failureCode: null,
+    failureReason: null,
+    linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId),
+    phoneNumberHint: phoneNumber ? readHostedPhoneHint(phoneNumber) : null,
+    phoneNumberLookupKey,
+    skippedAt: null,
+    skipReason: null,
+    source: input.source,
+    sourceRef: createHostedLinqDeliverySourceRefLookupKey(normalizeNullable(input.sourceRef)),
+    status: "attempted",
+    targetKind: normalizeNullable(input.targetKind),
+    template: normalizeNullable(input.template),
+  };
+  const createData = {
+    ...data,
+    id: buildHostedLinqDeliveryId(idempotencyKey),
+    idempotencyKey,
+  };
+
+  const existing = await input.prisma.hostedLinqDelivery.findUnique({
+    where: { idempotencyKey },
+    select: hostedLinqDeliveryLifecycleSelect,
+  });
+  if (existing) {
+    return claimExistingHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      data,
+      delivery: existing,
+      prisma: input.prisma,
+    });
+  }
+
+  try {
+    const created = await input.prisma.hostedLinqDelivery.create({
+      data: createData,
+      select: { id: true },
+    });
+    return {
+      claimed: true,
+      id: created.id,
+    };
+  } catch (error) {
+    if (!isPrismaUniqueConstraintError(error)) {
+      throw error;
+    }
+    const concurrent = await input.prisma.hostedLinqDelivery.findUnique({
+      where: { idempotencyKey },
+      select: hostedLinqDeliveryLifecycleSelect,
+    });
+    if (!concurrent) {
+      throw error;
+    }
+    return claimExistingHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt,
+      data,
       delivery: concurrent,
       prisma: input.prisma,
     });
@@ -971,6 +1065,7 @@ function isHostedLinqDeliveryProviderCorrelated(input: {
 
 const hostedLinqDeliveryLifecycleSelect = {
   acceptedAt: true,
+  attemptedAt: true,
   deliveredAt: true,
   failedAt: true,
   id: true,
@@ -980,6 +1075,60 @@ const hostedLinqDeliveryLifecycleSelect = {
   skippedAt: true,
   status: true,
 } satisfies Prisma.HostedLinqDeliverySelect;
+
+async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
+  attemptedAt: Date;
+  data: Prisma.HostedLinqDeliveryUpdateInput;
+  delivery: {
+    acceptedAt: Date | null;
+    attemptedAt: Date;
+    deliveredAt: Date | null;
+    failedAt: Date | null;
+    id: string;
+    lastReceiptAt: Date | null;
+    messageLookupKey: string | null;
+    skippedAt: Date | null;
+    status: string;
+  };
+  prisma: HostedLinqDeliveryClient;
+}): Promise<{ claimed: boolean; id: string | null }> {
+  if (isHostedLinqDeliveryProviderCorrelated(input.delivery)) {
+    return {
+      claimed: false,
+      id: input.delivery.id,
+    };
+  }
+
+  const staleAttemptBefore = new Date(
+    input.attemptedAt.getTime() - HOSTED_LINQ_PROVIDER_DISPATCH_STALE_ATTEMPT_MS,
+  );
+  const updated = await input.prisma.hostedLinqDelivery.updateMany({
+    where: {
+      acceptedAt: null,
+      deliveredAt: null,
+      id: input.delivery.id,
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      OR: [
+        { failedAt: { not: null } },
+        { skippedAt: { not: null } },
+        { status: { in: ["failed", "skipped"] } },
+        {
+          attemptedAt: {
+            lte: staleAttemptBefore,
+          },
+          status: "attempted",
+        },
+      ],
+    },
+    data: input.data,
+  });
+
+  return {
+    claimed: updated.count === 1,
+    id: input.delivery.id,
+  };
+}
 
 async function updateHostedLinqDeliverySkippedIfPreProvider(input: {
   data: Prisma.HostedLinqDeliveryUpdateInput;

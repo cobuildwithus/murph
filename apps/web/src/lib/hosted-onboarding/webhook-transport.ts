@@ -11,6 +11,7 @@ import {
 import { sha256Hex } from "../primitives";
 import { hostedOnboardingError } from "./errors";
 import {
+  claimHostedLinqDeliveryProviderDispatchTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
@@ -761,7 +762,18 @@ async function claimHostedLinqNoticeForSideEffect(
   prisma: HostedLinqTransportPersistenceClient,
 ): Promise<boolean> {
   switch (effect.payload.template) {
-    case "invite_signup":
+    case "invite_signup": {
+      const claim = await claimHostedLinqDeliveryProviderDispatchTx({
+        idempotencyKey: effect.effectId,
+        linqChatId: effect.payload.chatId,
+        prisma,
+        source: "hosted_webhook_side_effect",
+        sourceRef: effect.effectId,
+        targetKind: "thread",
+        template: effect.payload.template,
+      });
+      return claim.claimed;
+    }
     case "invite_signin":
       return true;
     case "ai_usage_quota":

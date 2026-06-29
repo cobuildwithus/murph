@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   markHostedLinqOnboardingLinkNoticeSent: vi.fn(),
   releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn(),
   releaseHostedLinqQuotaReplyNoticeClaim: vi.fn(),
+  claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
   ensureHostedMemberForPhoneTx: vi.fn(),
   getPrisma: vi.fn(),
   incrementHostedLinqInboundDailyState: vi.fn(),
@@ -134,6 +135,16 @@ vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/linq-delivery-store")
+  >("@/src/lib/hosted-onboarding/linq-delivery-store");
+  return {
+    ...actual,
+    claimHostedLinqDeliveryProviderDispatchTx: mocks.claimHostedLinqDeliveryProviderDispatchTx,
+  };
+});
+
 import { buildHostedInviteReply } from "@/src/lib/hosted-onboarding/linq";
 import {
   createHostedLinqProviderEventLookupKey,
@@ -151,6 +162,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
+    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
+      claimed: true,
+      id: "hld_claimed",
+    });
     mocks.markHostedLinqOnboardingLinkNoticeSent.mockResolvedValue(true);
     mocks.releaseHostedLinqOnboardingLinkNoticeClaim.mockResolvedValue(undefined);
     mocks.releaseHostedLinqQuotaReplyNoticeClaim.mockResolvedValue(undefined);
@@ -420,7 +435,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
-  it("uses member/day idempotency for overlapping first-contact signup link sends", async () => {
+  it("uses member/day delivery admission for overlapping first-contact signup link sends", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
@@ -435,6 +450,15 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       id: "invite_123",
       inviteCode: "code_first_contact",
     });
+    mocks.claimHostedLinqDeliveryProviderDispatchTx
+      .mockResolvedValueOnce({
+        claimed: true,
+        id: "hld_first_contact",
+      })
+      .mockResolvedValueOnce({
+        claimed: false,
+        id: "hld_first_contact",
+      });
 
     await handleHostedOnboardingLinqWebhook({
       rawBody: buildLinqMessageWebhookBody({
@@ -455,8 +479,31 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       timestamp: null,
     });
 
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     const expectedIdempotencyKey = "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledTimes(2);
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        idempotencyKey: expectedIdempotencyKey,
+        linqChatId: "chat_123",
+        source: "hosted_webhook_side_effect",
+        sourceRef: expectedIdempotencyKey,
+        targetKind: "thread",
+        template: "invite_signup",
+      }),
+    );
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        idempotencyKey: expectedIdempotencyKey,
+        linqChatId: "chat_123",
+        source: "hosted_webhook_side_effect",
+        sourceRef: expectedIdempotencyKey,
+        targetKind: "thread",
+        template: "invite_signup",
+      }),
+    );
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -465,16 +512,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
           joinUrl: "https://join.example.test/join/code_first_contact",
         }),
         replyToMessageId: "msg_first_contact_one",
-      }),
-    );
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        idempotencyKey: expectedIdempotencyKey,
-        message: buildHostedInviteReply({
-          joinUrl: "https://join.example.test/join/code_first_contact",
-        }),
-        replyToMessageId: "msg_first_contact_two",
       }),
     );
   });
