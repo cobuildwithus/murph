@@ -336,19 +336,12 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   {
     body: {
       goal: "Book a dentist appointment.",
+      resumeAfterMailboxItemId: null,
+      resumeDeliveryContext: null,
       startUrl: "https://example.test",
-      taskKind: "appointment",
     },
-    name: "hosted computer start run",
+    name: "hosted computer open",
     path: HOSTED_COMPUTER_RUNS_PATH,
-  },
-  {
-    body: {},
-    name: "hosted computer observe",
-    path: buildHostedComputerRunOperationPath({
-      operation: "observe",
-      runId: "run_123",
-    }),
   },
   {
     body: {

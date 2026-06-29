@@ -151,18 +151,15 @@ first.
 
 ## Tools
 
-1. `murph.computer_start_run` starts or reuses a run in the member's
-   persistent browser profile. `startUrl` is only a first-page convenience.
-   Inspect the returned status before acting; an `awaiting_user` run is still
-   paused.
-2. `murph.computer_observe` reads the current URL, title, and visible text. Use
-   it after starting, resuming, or any action where page state is needed.
-3. `murph.computer_act` runs bounded Playwright code against the current page.
-4. `murph.computer_os_control` is a fallback for one OS-level mouse or keyboard
+1. `murph.computer_open` opens the member's persistent browser profile. It
+   creates, reuses, resumes, or reclaims the active run and returns the current
+   URL, title, and visible text. `startUrl` is only a first-page convenience.
+2. `murph.computer_act` runs bounded Playwright code against the current page.
+3. `murph.computer_os_control` is a fallback for one OS-level mouse or keyboard
    action when `computer_act` cannot operate the page surface.
-5. `murph.computer_pause_for_user` creates a durable pause for confirmation,
+4. `murph.computer_pause_for_user` creates a durable pause for confirmation,
    missing information, or secure user takeover.
-6. `murph.computer_finish_run` closes the run when the task is complete, failed,
+5. `murph.computer_finish_run` closes the run when the task is complete, failed,
    or canceled.
 
 ## Act primitive
@@ -180,7 +177,7 @@ inspection, and return concise JSON-serializable data when the result matters.
 }
 ```
 
-Use `computer_observe` between actions when you need to inspect the resulting
+Have `computer_act` return compact state when you need to inspect the resulting
 page. For example:
 
 ```json
@@ -205,8 +202,7 @@ Use `computer_os_control` only when Playwright cannot operate the page surface,
 such as a canvas, native picker, or focus trap. It can click, move, drag, scroll,
 type text, or press keys at the OS level. Do not use it for passwords, payment
 details, one-time codes, raw tokens, or other sensitive private input; pause for
-handoff instead. Observe before and after OS-control actions when page state
-matters.
+handoff instead. After OS-control, call `computer_open` when page state matters.
 
 The service returns the current URL, title, and your returned `result`.
 Do not query or return cookies, local storage, storage state, hidden browser
@@ -217,27 +213,28 @@ navigation policy. Pause for handoff when sensitive user input is needed.
 
 ## Browser control loop
 
-1. Start or reuse the run.
-2. Observe before acting. Identify the current domain, page purpose, login state,
-   selected account, cart or appointment state, and the next safe action.
+1. Open or reuse the run.
+2. Inspect current browser state before acting. Identify the current domain,
+   page purpose, login state, selected account, cart or appointment state, and
+   the next safe action.
 3. Take one bounded action.
-4. Observe after navigation, modal changes, selection, form submission, cart
-   mutation, or any action whose result affects the next step.
+4. Read current page state after navigation, modal changes, selection, form
+   submission, cart mutation, or any action whose result affects the next step.
 5. Verify the requested result on the site. A click is not completion.
 6. Finish the run with the correct outcome.
 
 Do not repeat a click because a page seems slow. Wait for a specific state or
-observe first. For side-effecting clicks such as add-to-cart, booking, checkout,
+inspect current page state first. For side-effecting clicks such as add-to-cart, booking, checkout,
 or final submit buttons, prefer one click followed by a specific confirmation,
 cart count, appointment state, or order state check. If a transport or browser
-error leaves the outcome unknown, observe before retrying so Murph does not
+error leaves the outcome unknown, call `computer_open` before retrying so Murph does not
 double-book, double-submit, or add duplicate cart items.
 
-If a control remains unresponsive after a specific wait/observe and one safe
+If a control remains unresponsive after a specific wait/current-state check and one safe
 alternate locator or keyboard path, or the site appears wedged, refresh the
 current page as a last resort. Do this only when no booking, purchase,
 submission, or other side effect is in an unknown state. After refreshing,
-observe again and re-check cart, form, account, appointment, or confirmation
+call `computer_open` again and re-check cart, form, account, appointment, or confirmation
 state before continuing. If refreshing would risk duplicate submission or losing
 important user-entered data, pause for user takeover or finish failed with the
 blocker instead.
@@ -253,7 +250,7 @@ blocker instead.
   autocomplete, search, or reactive control needs key events.
 - For comboboxes, autocomplete, calendars, and menus, fill or click once, then
   use `ArrowDown`, `ArrowUp`, `Enter`, `Tab`, or `Escape` when appropriate.
-  Observe the selected value afterward.
+  Check the selected value afterward.
 - Prefer `locator.waitFor()` on a meaningful confirmation, changed heading,
   modal, or success state over a blind delay. Keep `page.waitForTimeout()` short
   and exceptional.
@@ -352,13 +349,13 @@ clinical decision.
 ## Common snags and recovery
 
 - **Expired login or one-time code:** pause for secure handoff; do not ask for
-  secrets in chat. Resume the same run and observe.
+  secrets in chat. Resume the same run with `computer_open`.
 - **CAPTCHA or bot check:** pause for takeover. Do not bypass it.
 - **Wrong account or family member:** stop before exposing or changing data;
   ask the user to select the correct account privately.
 - **Location or timezone drift:** verify the displayed location and timezone
   before choosing a slot or delivery window.
-- **Stale appointment availability:** re-observe immediately before submission.
+- **Stale appointment availability:** re-check current page state immediately before submission.
   If the slot disappears, stay within the user's delegated bounds or pause.
 - **Duplicate cart or submission risk:** inspect quantity, cart, confirmation,
   and recent state before retrying.
@@ -373,7 +370,7 @@ clinical decision.
   treat it as a material term and pause if it falls outside authorization.
 - **Site error or maintenance:** preserve the run when a retry may help; finish
   failed with the blocker when the site makes progress impossible.
-- **Unknown result after submit:** observe for confirmation, cart state, order
+- **Unknown result after submit:** call `computer_open` for confirmation, cart state, order
   history, or appointment state before any retry.
 
 ## Secure handoff and resume
@@ -382,9 +379,9 @@ Pause only when Murph is actually blocked: expired login, CAPTCHA, missing
 payment or identity details, a choice the user has not authorized, sensitive
 entry that needs private takeover, or a page that needs direct user takeover.
 When pausing, use `computer_pause_for_user`; after the user replies in a way
-that intentionally continues the paused run, call `computer_start_run` normally,
-then observe before acting. The runtime supplies hidden mailbox proof and
-delivery context and selects the active awaiting run. Do not invent resume ids.
+that intentionally continues the paused run, call `computer_open`. The runtime
+supplies hidden mailbox proof and delivery context, selects the active awaiting
+run, and returns current page state. Do not invent resume ids.
 The pause tool stores state and may return a handoff URL; it does not send the
 chat message. Put the handoff URL and concise next step in the normal final
 reply when direct takeover is needed, or finish without reply when no additional
@@ -399,7 +396,7 @@ hosted login flow. Every other handoff purpose opens a live view of the
 browser at its current page and does not navigate. Before pausing for sign-in,
 payment, card entry, OTP, identity, or any other private form completion,
 drive the browser all the way to the specific page, form, or modal the user
-must fill in and observe to confirm the page is loaded. If the user opens the handoff and lands on a product page,
+must fill in and confirm the page is loaded. If the user opens the handoff and lands on a product page,
 account hub, or some other intermediate page, the handoff has missed its goal.
 Pause earlier only when the next click would itself transmit data or create a
 commitment, and in that case name the specific control the user should click
@@ -513,8 +510,8 @@ skill or reference update, not in one user's memory.
 
 ## Verify and stop
 
-After actions that might have navigated, submitted, or changed state, use
-`computer_observe` to inspect the result before continuing. Completion evidence
+After actions that might have navigated, submitted, or changed state, have the
+action return current state or call `computer_open` before continuing. Completion evidence
 should match the task:
 
 - appointment: provider/service, date/time/timezone, location, and confirmed

@@ -187,7 +187,7 @@ export function ComputerHandoffActiveView({
                     className="hidden size-11 rounded-2xl sm:inline-flex"
                     onClick={focusLiveView}
                     disabled={controlsDisabled}
-                    aria-label="Focus the private browser"
+                    aria-label="Focus the private browser for keyboard and paste"
                     title="Focus browser"
                   >
                     <Keyboard className="h-4 w-4" aria-hidden="true" />

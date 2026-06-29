@@ -59,12 +59,17 @@ export interface ComputerRunHandle {
   status: ComputerRunRecord["status"];
 }
 
-export interface ComputerObserveResult {
+export interface ComputerPageStateResult {
   runId: string;
   status: "running";
   title: string | null;
   url: string | null;
   visibleText: string;
+}
+
+export interface ComputerOpenResult extends ComputerPageStateResult {
+  expiresAt: string;
+  reused: boolean;
 }
 
 export interface ComputerOsControlResult {
@@ -176,6 +181,41 @@ export class ComputerUseService {
       memberId: input.memberId,
     });
     return await this.startRunWithStore(input, this.store);
+  }
+
+  async openRun(input: {
+    memberId: string;
+    resumeAfterMailboxItemId?: string | null;
+    resumeDeliveryContext?: HostedComputerDeliveryContext | null;
+    startUrl: string | null;
+  }): Promise<ComputerOpenResult> {
+    await this.store.requireMemberComputerUseAvailable({
+      memberId: input.memberId,
+    });
+    const handle = await this.startRunWithStore(input, this.store);
+    const now = this.now();
+    let run = await this.requireFreshRun({
+      memberId: input.memberId,
+      runId: handle.runId,
+    });
+    if (run.status === "awaiting_user") {
+      run = await this.reclaimLiveHandoffForOpen({
+        now,
+        run,
+        store: this.store,
+      });
+    }
+    const pageState = await this.readOpenBrowserState({
+      memberId: input.memberId,
+      run,
+      store: this.store,
+    });
+
+    return {
+      ...pageState,
+      expiresAt: run.expiresAt.toISOString(),
+      reused: handle.reused,
+    };
   }
 
   private async startRunWithStore(input: {
@@ -364,16 +404,17 @@ export class ComputerUseService {
     }
   }
 
-  async observe(input: {
+  private async readOpenBrowserState(input: {
     memberId: string;
-    runId: string;
-  }): Promise<ComputerObserveResult> {
-    await this.store.requireMemberComputerUseAvailable({
+    run: ComputerRunRecord;
+    store: ComputerUseStore;
+  }): Promise<ComputerPageStateResult> {
+    const run = await this.requireRunnableRun({
       memberId: input.memberId,
+      runId: input.run.id,
     });
-    const run = await this.requireRunnableRun(input);
     const state = await this.readBrowserState(run);
-    await this.store.updateRunBrowserState({
+    await input.store.updateRunBrowserState({
       expectedKernelSessionId: run.kernelSessionId,
       lastTitle: state.title,
       lastUrl: sanitizeComputerDisplayUrl(state.url),
@@ -384,7 +425,7 @@ export class ComputerUseService {
       runId: run.id,
       status: "running",
       title: state.title,
-      url: state.url,
+      url: sanitizeComputerDisplayUrl(state.url),
       visibleText: state.visibleText,
     };
   }
@@ -1748,6 +1789,59 @@ export class ComputerUseService {
     });
   }
 
+  private async reclaimLiveHandoffForOpen(input: {
+    now: Date;
+    run: ComputerRunRecord;
+    store: ComputerUseStore;
+  }): Promise<ComputerRunRecord> {
+    if (
+      input.run.status !== "awaiting_user" ||
+      !input.run.pausedAt ||
+      !input.run.pendingHandoffId ||
+      !input.run.kernelSessionId
+    ) {
+      return input.run;
+    }
+
+    let handoff = await input.store.findHandoffByRun({
+      handoffId: input.run.pendingHandoffId,
+      runId: input.run.id,
+    });
+    if (!handoff) {
+      return input.run;
+    }
+
+    if (
+      handoff.status === "checkpointing" &&
+      !isStaleCheckpointingHandoff(handoff, input.now)
+    ) {
+      throw handoffCheckpointingError();
+    }
+
+    if (handoff.status === "open" || handoff.status === "expired") {
+      return input.run;
+    }
+
+    if (handoff.status === "checkpointing") {
+      handoff = await input.store.markHandoffExpired({
+        expectedStatus: handoff.status,
+        expectedUpdatedAt: handoff.updatedAt,
+        handoffId: handoff.id,
+        now: input.now,
+      });
+    }
+
+    return await input.store.markRunRunning({
+      awaitingReason: input.run.awaitingReason,
+      expectedHandoffStatus: handoff.status,
+      expectedHandoffUpdatedAt: handoff.updatedAt,
+      expectedPausedAt: input.run.pausedAt,
+      expectedPendingHandoffId: input.run.pendingHandoffId,
+      now: input.now,
+      runId: input.run.id,
+    });
+  }
+
   private async requireFreshRun(input: {
     memberId: string;
     runId: string;
@@ -2125,7 +2219,7 @@ export class ComputerUseService {
       } else {
         throw computerUseConflictError({
           code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
-          message: "Computer run state changed; observe the run before retrying.",
+          message: "Computer run state changed; open the browser before retrying.",
           retryable: true,
         });
       }

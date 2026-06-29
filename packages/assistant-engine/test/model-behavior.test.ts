@@ -212,7 +212,7 @@ describe('assistant execution prompt contract', () => {
     ).toHaveLength(1)
     expect(
       prompt.match(
-        /never send progress updates for individual tool loops, searches, reads, observes, clicks, or status churn/g,
+        /never send progress updates for individual tool loops, searches, reads, page checks, clicks, or status churn/g,
       ) ?? [],
     ).toHaveLength(1)
     expect(prompt).not.toContain(
@@ -381,10 +381,10 @@ describe('assistant execution prompt contract', () => {
       'For repeat action tasks such as reordering supplements or products, booking or rescheduling with a known provider, or using a known portal, run `vault-cli memory show` when saved preferences could materially change the site, product, provider, delivery, or scheduling choice.',
     )
     expect(prompt).toContain(
-      'call `murph.computer_start_run` normally',
+      'call `murph.computer_open`',
     )
     expect(prompt).toContain(
-      'The runtime supplies hidden mailbox proof and delivery context and selects the active awaiting run.',
+      'The runtime supplies hidden mailbox proof and delivery context, selects the active awaiting run, and returns current page state.',
     )
     expect(prompt).toContain('vault-cli memory upsert')
     expect(prompt).toContain('standing instruction')

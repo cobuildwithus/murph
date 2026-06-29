@@ -225,8 +225,8 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Pause only when Murph is actually blocked: expired login, CAPTCHA',
     )
-    expect(raw).toContain('call `computer_start_run` normally')
-    expect(raw).toContain('selects the active awaiting run')
+    expect(raw).toContain('call `computer_open`')
+    expect(raw).toContain('supplies hidden mailbox proof and delivery context, selects the active awaiting')
     expect(raw).toContain('exact quoted phrase such as "place order"')
     expect(raw).toMatch(/ordinary\s+confirmations like "yes", "go\s+ahead", or "you're good" are enough/u)
     expect((playbook.match(/^### \d+\./gmu) ?? []).length).toBe(25)

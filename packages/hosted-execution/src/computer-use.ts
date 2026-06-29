@@ -7,7 +7,7 @@ import {
 
 export const HOSTED_COMPUTER_RUNS_PATH = "/api/internal/computer/runs";
 export const HOSTED_COMPUTER_RUN_OPERATION_PATH_PATTERN =
-  /^\/api\/internal\/computer\/runs\/(?<runId>[^/]+)\/(?<operation>observe|act|os-control|pause-for-user|finish)$/u;
+  /^\/api\/internal\/computer\/runs\/(?<runId>[^/]+)\/(?<operation>act|os-control|pause-for-user|finish)$/u;
 
 export const HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS = 25_000;
 export const HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH = 12_000;
@@ -124,7 +124,7 @@ export const hostedComputerDeliveryContextSchema = z
   })
   .strict();
 
-export const hostedComputerStartRunRequestSchema = z
+export const hostedComputerOpenRunRequestSchema = z
   .object({
     goal: z.string().trim().min(1).max(2_000).optional(),
     resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
@@ -133,8 +133,6 @@ export const hostedComputerStartRunRequestSchema = z
   })
   .strict()
   .transform(({ goal: _goal, ...request }) => request);
-
-export const hostedComputerObserveRequestSchema = z.object({}).strict();
 
 const hostedComputerActTimeoutSchema = z
   .number()
@@ -265,10 +263,8 @@ export const hostedComputerFinishRunRequestSchema = z
   .strict()
   .transform(({ summary: _summary, ...request }) => request);
 
-export type HostedComputerStartRunRequest =
-  z.infer<typeof hostedComputerStartRunRequestSchema>;
-export type HostedComputerObserveRequest =
-  z.infer<typeof hostedComputerObserveRequestSchema>;
+export type HostedComputerOpenRunRequest =
+  z.infer<typeof hostedComputerOpenRunRequestSchema>;
 export type HostedComputerActRequest =
   z.infer<typeof hostedComputerActRequestSchema>;
 export type HostedComputerOsControlRequest =
@@ -281,7 +277,6 @@ export type HostedComputerFinishRunRequest =
   z.infer<typeof hostedComputerFinishRunRequestSchema>;
 
 export type HostedComputerRunOperation =
-  | "observe"
   | "act"
   | "os-control"
   | "pause-for-user"
@@ -328,23 +323,13 @@ export function isHostedComputerWebControlRequest(input: {
     || readHostedComputerRunOperationRoute(input.path) !== null;
 }
 
-export function parseHostedComputerStartRunRequest(
+export function parseHostedComputerOpenRunRequest(
   value: unknown,
-): HostedComputerStartRunRequest {
+): HostedComputerOpenRunRequest {
   return parseHostedComputerRequest(
-    hostedComputerStartRunRequestSchema,
+    hostedComputerOpenRunRequestSchema,
     value,
-    "Hosted computer start-run request",
-  );
-}
-
-export function parseHostedComputerObserveRequest(
-  value: unknown,
-): HostedComputerObserveRequest {
-  return parseHostedComputerRequest(
-    hostedComputerObserveRequestSchema,
-    value,
-    "Hosted computer observe request",
+    "Hosted computer open-run request",
   );
 }
 
@@ -390,7 +375,6 @@ function readHostedComputerRunOperation(
   value: string | undefined,
 ): HostedComputerRunOperation | null {
   switch (value) {
-    case "observe":
     case "act":
     case "os-control":
     case "pause-for-user":

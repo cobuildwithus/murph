@@ -82,13 +82,13 @@ import {
 } from './dynamic-tools/generate-song.js'
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
-  'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying Playwright code or taking another step'
+  'computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step'
 
 export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
   name: 'send_progress_update',
   description:
-    'Send a brief, natural user-visible progress update to the current conversation only when longer, tool-heavy, or substantial user-content-inspection work would otherwise leave the user waiting. Use as the first assistant action for genuinely long tasks that require multiple tool steps, involve research or long vault scans, or recover substantial data from PDFs, lab reports, images, screenshots, CSVs, large pasted text, meal/product/supplement labels, workout exports, wearable exports, or health documents. For work likely to finish in about a minute or less, send at most one progress update. If the turn becomes unusually long-running after substantial tool work, you may send one more brief update so the user is not left hanging; never send a third. Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage unless the update materially improves UX. Skip automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed. Do not use for individual tool loops, searches, reads, observes, clicks, status churn, skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, one-shot logging/capture/memory saves that only need a straightforward write, or final conclusions.',
+    'Send a brief, natural user-visible progress update to the current conversation only when longer, tool-heavy, or substantial user-content-inspection work would otherwise leave the user waiting. Use as the first assistant action for genuinely long tasks that require multiple tool steps, involve research or long vault scans, or recover substantial data from PDFs, lab reports, images, screenshots, CSVs, large pasted text, meal/product/supplement labels, workout exports, wearable exports, or health documents. For work likely to finish in about a minute or less, send at most one progress update. If the turn becomes unusually long-running after substantial tool work, you may send one more brief update so the user is not left hanging; never send a third. Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage unless the update materially improves UX. Skip automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed. Do not use for individual tool loops, searches, reads, page checks, clicks, status churn, skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, one-shot logging/capture/memory saves that only need a straightforward write, or final conclusions.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -297,11 +297,11 @@ export const MURPH_REACT_TO_MESSAGE_TOOL = {
   },
 } as const
 
-export const MURPH_COMPUTER_START_RUN_TOOL = {
+export const MURPH_COMPUTER_OPEN_TOOL = {
   namespace: 'murph',
-  name: 'computer_start_run',
+  name: 'computer_open',
   description:
-    'Start or reuse a Kernel-backed browser run for website tasks such as checkout, appointment booking, login, payment, health/insurance forms, or general web automation.',
+    'Open the current Kernel-backed browser for website tasks. Creates, reuses, resumes, or reclaims the active browser run as needed, then returns the current URL, title, and visible page text. Use this before browser work and whenever browser control may have returned from a user handoff.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -311,21 +311,6 @@ export const MURPH_COMPUTER_START_RUN_TOOL = {
         default: null,
       },
     },
-  },
-} as const
-
-export const MURPH_COMPUTER_OBSERVE_TOOL = {
-  namespace: 'murph',
-  name: 'computer_observe',
-  description:
-    'Read the current browser state (URL, title, visible page text) for a computer run. Use only when starting or resuming a run, after an unknown-outcome failure or computer_os_control fallback, or when the previous computer_act could not return enough state. Do not routinely observe before or after every computer_act — a successful computer_act already returns the state needed for the next decision.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      runId: { type: 'string', minLength: 1 },
-    },
-    required: ['runId'],
   },
 } as const
 
@@ -392,7 +377,7 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'Execute one coherent browser macro-step against the current Kernel page using bounded Playwright TypeScript/JavaScript. Combine navigation, inspection, waits, known form entry, selection, clicking or submission, and final verification in a single call whenever the next operation does not require new model judgment. Split into a second call only at: ambiguity in user intent, missing user data, sensitive input (passwords, payment details, one-time codes), irreversible confirmation, an unknown page transition, or the per-call timeout. Prefer locator.waitFor(), page.waitForURL(), and page.waitForLoadState() over fixed sleeps. Return compact JSON-serializable state (URL, title, relevant text, errors) so the next decision does not need a follow-up computer_observe.',
+    'Execute one coherent browser macro-step against the current Kernel page using bounded Playwright TypeScript/JavaScript. Combine navigation, inspection, waits, known form entry, selection, clicking or submission, and final verification in a single call whenever the next operation does not require new model judgment. Split into a second call only at: ambiguity in user intent, missing user data, sensitive input (passwords, payment details, one-time codes), irreversible confirmation, an unknown page transition, or the per-call timeout. Prefer locator.waitFor(), page.waitForURL(), and page.waitForLoadState() over fixed sleeps. Return compact JSON-serializable state (URL, title, relevant text, errors) so the next decision does not need another computer_open call.',
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 
@@ -400,7 +385,7 @@ export const MURPH_COMPUTER_OS_CONTROL_TOOL = {
   namespace: 'murph',
   name: 'computer_os_control',
   description:
-    'Fallback only: run one bounded OS-level mouse or keyboard action against the current Kernel browser when computer_act cannot operate the page. Prefer computer_act for normal browser automation. Do not use for passwords, payment details, one-time codes, tokens, or any sensitive private input. After an OS-level action with an unknown outcome, use computer_observe once to confirm the resulting page state.',
+    'Fallback only: run one bounded OS-level mouse or keyboard action against the current Kernel browser when computer_act cannot operate the page. Prefer computer_act for normal browser automation. Do not use for passwords, payment details, one-time codes, tokens, or any sensitive private input. After an OS-level action with an unknown outcome, use computer_open once to confirm the resulting page state.',
   inputSchema: MURPH_COMPUTER_OS_CONTROL_INPUT_SCHEMA,
 } as const
 
@@ -474,8 +459,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
 ] as const
 
 const MURPH_COMPUTER_DYNAMIC_TOOLS = [
-  MURPH_COMPUTER_START_RUN_TOOL,
-  MURPH_COMPUTER_OBSERVE_TOOL,
+  MURPH_COMPUTER_OPEN_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
   MURPH_COMPUTER_OS_CONTROL_TOOL,
   MURPH_COMPUTER_PAUSE_FOR_USER_TOOL,
@@ -604,7 +588,7 @@ const submitProductFeedbackArgumentsSchema = z
 
 const computerRunIdSchema = z.string().trim().min(1)
 
-const COMPUTER_START_RUN_ARGUMENT_ROOT_KEYS = [
+const COMPUTER_OPEN_ARGUMENT_ROOT_KEYS = [
   'startUrl',
 ] as const
 
@@ -614,15 +598,9 @@ const computerNavigationUrlSchema = z
   .min(1)
   .max(4_000)
 
-const computerStartRunArgumentsSchema = z
+const computerOpenArgumentsSchema = z
   .object({
     startUrl: computerNavigationUrlSchema.nullable().default(null),
-  })
-  .strict()
-
-const computerObserveArgumentsSchema = z
-  .object({
-    runId: computerRunIdSchema,
   })
   .strict()
 
@@ -771,18 +749,13 @@ type MurphDynamicToolRpcResult = {
   }>
 }
 
-type ComputerObserveToolArgs = {
-  runId: string
-}
-
-type ComputerStartRunToolArgs = z.infer<typeof computerStartRunArgumentsSchema>
+type ComputerOpenToolArgs = z.infer<typeof computerOpenArgumentsSchema>
 
 type HostedComputerToolPayloadSanitizer =
   | 'act'
   | 'finish'
-  | 'observe'
   | 'os-control'
-  | 'start'
+  | 'open'
 
 export interface MurphDynamicToolExecutionResult {
   computerRunPausedForUser?: boolean
@@ -818,12 +791,8 @@ export type MurphDynamicToolRequest =
       args: GenerateSongToolArgs
     }
   | {
-      kind: 'computer-start-run'
-      args: ComputerStartRunToolArgs
-    }
-  | {
-      kind: 'computer-observe'
-      args: ComputerObserveToolArgs
+      kind: 'computer-open'
+      args: ComputerOpenToolArgs
     }
   | {
       kind: 'computer-act'
@@ -1067,27 +1036,16 @@ export function readMurphDynamicToolRequest(
         reaction: parsed.reaction,
       }
     }
-    case MURPH_COMPUTER_START_RUN_TOOL.name: {
+    case MURPH_COMPUTER_OPEN_TOOL.name: {
       const parsed = parseComputerArguments({
         argumentsValue: request.arguments,
-        schema: computerStartRunArgumentsSchema,
-        schemaName: 'murph.computer_start_run.input',
-        schemaRootKeys: COMPUTER_START_RUN_ARGUMENT_ROOT_KEYS,
-        toolName: 'murph.computer_start_run',
+        schema: computerOpenArgumentsSchema,
+        schemaName: 'murph.computer_open.input',
+        schemaRootKeys: COMPUTER_OPEN_ARGUMENT_ROOT_KEYS,
+        toolName: 'murph.computer_open',
       })
       return parsed.ok
-        ? { kind: 'computer-start-run', args: parsed.args }
-        : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
-    }
-    case MURPH_COMPUTER_OBSERVE_TOOL.name: {
-      const parsed = parseComputerArguments({
-        argumentsValue: request.arguments,
-        schema: computerObserveArgumentsSchema,
-        schemaName: 'murph.computer_observe.input',
-        toolName: 'murph.computer_observe',
-      })
-      return parsed.ok
-        ? { kind: 'computer-observe', args: parsed.args }
+        ? { kind: 'computer-open', args: parsed.args }
         : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
     }
     case MURPH_COMPUTER_ACT_TOOL.name: {
@@ -1148,8 +1106,7 @@ export function isComputerDynamicToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
   switch (request.kind) {
-    case 'computer-start-run':
-    case 'computer-observe':
+    case 'computer-open':
     case 'computer-act':
     case 'computer-os-control':
     case 'computer-pause-for-user':
@@ -1165,8 +1122,7 @@ function isExecutableComputerDynamicToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
   switch (request.kind) {
-    case 'computer-start-run':
-    case 'computer-observe':
+    case 'computer-open':
     case 'computer-act':
     case 'computer-os-control':
     case 'computer-pause-for-user':
@@ -1481,26 +1437,14 @@ export async function executeMurphDynamicToolRequest(input: {
         request: input.request,
       })
     }
-    case 'computer-start-run': {
-      return await executeHostedComputerStartRunTool({
+    case 'computer-open': {
+      return await executeHostedComputerOpenTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         fetchImpl: input.fetchImpl,
         hostedToolContext: input.hostedToolContext ?? null,
       })
     }
-    case 'computer-observe':
-      return await executeHostedComputerApiTool({
-        abortSignal: input.abortSignal ?? null,
-        body: {},
-        fetchImpl: input.fetchImpl,
-        path: buildHostedComputerRunOperationPath({
-          operation: 'observe',
-          runId: input.request.args.runId,
-        }),
-        sanitizer: 'observe',
-        unknownOutcomeOnTransportError: false,
-      })
     case 'computer-act': {
       const { runId, ...body } = input.request.args
       return await executeHostedComputerApiTool({
@@ -1655,27 +1599,27 @@ async function executeHostedComputerPauseForUserTool(input: {
   )
 }
 
-async function executeHostedComputerStartRunTool(input: {
+async function executeHostedComputerOpenTool(input: {
   abortSignal: AbortSignal | null
-  args: ComputerStartRunToolArgs
+  args: ComputerOpenToolArgs
   fetchImpl: typeof fetch
   hostedToolContext: AssistantHostedToolContext | null
 }): Promise<MurphDynamicToolExecutionResult> {
   return await executeHostedComputerApiTool({
     abortSignal: input.abortSignal,
-    body: buildHostedComputerStartRunBody({
+    body: buildHostedComputerOpenBody({
       args: input.args,
       hostedToolContext: input.hostedToolContext,
     }),
     fetchImpl: input.fetchImpl,
     path: HOSTED_COMPUTER_RUNS_PATH,
-    sanitizer: 'start',
+    sanitizer: 'open',
     unknownOutcomeOnTransportError: true,
   })
 }
 
-function buildHostedComputerStartRunBody(input: {
-  args: ComputerStartRunToolArgs
+function buildHostedComputerOpenBody(input: {
+  args: ComputerOpenToolArgs
   hostedToolContext: AssistantHostedToolContext | null
 }): Record<string, unknown> {
   const { startUrl } = input.args
@@ -1953,29 +1897,21 @@ function sanitizeHostedComputerPayload(
   }
 
   switch (sanitizer) {
-    case 'start':
+    case 'open':
       return {
-        ...readStringField(record, 'awaitingReason'),
         ...readStringField(record, 'expiresAt'),
-        ...readStringField(record, 'lastTitle'),
-        ...readStringOrNullField(record, 'lastUrl'),
         ...readBooleanField(record, 'reused'),
         ...readStringField(record, 'runId'),
         ...readStringField(record, 'status'),
-      }
-    case 'observe':
-      return {
-        ...readStringField(record, 'runId'),
-        ...readStringField(record, 'status'),
         ...readStringField(record, 'title'),
-        ...readStringOrNullField(record, 'url'),
+        ...readSanitizedComputerUrlField(record, 'url'),
         visibleText: typeof record.visibleText === 'string' ? record.visibleText : '',
       }
     case 'act':
       return {
         result: record.result ?? null,
         ...readStringField(record, 'title'),
-        ...readStringOrNullField(record, 'url'),
+        ...readSanitizedComputerUrlField(record, 'url'),
       }
     case 'os-control':
       return {
@@ -2010,6 +1946,36 @@ function readStringOrNullField(
     return { [field]: null }
   }
   return typeof value === 'string' ? { [field]: value } : {}
+}
+
+function readSanitizedComputerUrlField(
+  record: Record<string, unknown>,
+  field: string,
+): Record<string, string | null> {
+  const value = record[field]
+  if (value === null) {
+    return { [field]: null }
+  }
+  if (typeof value !== 'string') {
+    return {}
+  }
+  return { [field]: sanitizeComputerDisplayUrl(value) }
+}
+
+function sanitizeComputerDisplayUrl(value: string): string | null {
+  if (!value.trim()) {
+    return null
+  }
+  try {
+    const url = new URL(value)
+    url.username = ''
+    url.password = ''
+    url.search = ''
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return null
+  }
 }
 
 function readBooleanField(
