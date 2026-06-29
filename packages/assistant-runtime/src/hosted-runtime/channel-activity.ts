@@ -120,8 +120,10 @@ export function createHostedAssistantChannelTypingDependencies(input: {
       if (!assertRecentInbound) {
         return undefined;
       }
+      const currentInbound = deliveryContext.currentInbound ?? null;
       try {
         await assertRecentInbound({
+          ...(currentInbound ? { currentInbound } : {}),
           directRecipientPhoneNumber: deliveryContext.directRecipientPhoneNumber,
           engagementKind: "requires_recent_inbound",
           fromPhoneNumber: deliveryContext.fromPhoneNumber,

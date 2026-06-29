@@ -677,7 +677,7 @@ test("hosted progress Linq delivery sends recovered same-wake chat when request 
   });
 });
 
-test("hosted progress Linq delivery recovers redacted routed same-wake chat after authority assertion", async () => {
+test("hosted progress Linq delivery recovers redacted routed same-wake chat through engagement assertion", async () => {
   const routeAuthority = buildLinqRouteAuthority("linq_chat_current");
   const wake = buildHostedExecutionLinqConversationMessageWake({
     eventId: "evt_linq_progress_blinded_routed_target",
@@ -693,12 +693,10 @@ test("hosted progress Linq delivery recovers redacted routed same-wake chat afte
     routeAuthority,
     userId: "member_123",
   });
-  const assertAuthority = vi.fn(async () => undefined);
   const assertRecentInbound = vi.fn(async () => undefined);
   const delivery = createHostedAssistantProgressDeliveryDependencies({
     effectsPort: {
       assertLinqRecentInboundEngagement: assertRecentInbound,
-      assertLinqThreadRouteAuthority: assertAuthority,
       sendEmail: mocks.sendEmail,
     },
     forwardedEnv: {
@@ -720,9 +718,6 @@ test("hosted progress Linq delivery recovers redacted routed same-wake chat afte
     targetKind: "thread",
   });
 
-  expect(assertAuthority).toHaveBeenCalledWith(routeAuthority, {
-    signal: null,
-  });
   expect(assertRecentInbound).toHaveBeenCalledWith(
     expect.objectContaining({
       routeAuthority,

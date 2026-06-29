@@ -10,6 +10,7 @@ import {
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
   assertHostedLinqRecentInboundEngagementForRuntime,
+  type HostedLinqCurrentInboundProof,
 } from "@/src/lib/hosted-onboarding/linq-egress-engagement";
 import {
   hostedOnboardingError,
@@ -31,6 +32,7 @@ export const POST = withJsonError(async (request: Request) => {
   const routeAuthority = parseHostedLinqEgressRouteAuthority(body.routeAuthority);
 
   await assertHostedLinqRecentInboundEngagementForRuntime({
+    currentInbound: parseHostedLinqEgressCurrentInbound(body.currentInbound),
     directRecipientPhoneNumber: readOptionalBodyString(body.directRecipientPhoneNumber),
     engagementKind: parseHostedLinqEgressEngagementKind(body.engagementKind),
     fromPhoneNumber: readOptionalBodyString(body.fromPhoneNumber),
@@ -47,6 +49,54 @@ export const POST = withJsonError(async (request: Request) => {
     ok: true,
   });
 });
+
+function parseHostedLinqEgressCurrentInbound(
+  value: unknown,
+): HostedLinqCurrentInboundProof | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_EGRESS_CURRENT_INBOUND_INVALID",
+      httpStatus: 400,
+      message: "Hosted Linq egress current inbound proof is invalid.",
+      retryable: false,
+    });
+  }
+
+  const record = value as Record<string, unknown>;
+  const dedupeKey = readOptionalBodyString(record.dedupeKey);
+  const eventId = readOptionalBodyString(record.eventId);
+  const mailboxItemId = readOptionalBodyString(record.mailboxItemId);
+  const occurredAt = readOptionalBodyString(record.occurredAt);
+  const replyToMessageId = readOptionalBodyString(record.replyToMessageId);
+  const target = readOptionalBodyString(record.target);
+  if (
+    !dedupeKey
+    || !eventId
+    || !mailboxItemId
+    || !occurredAt
+    || !replyToMessageId
+    || !target
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_EGRESS_CURRENT_INBOUND_INVALID",
+      httpStatus: 400,
+      message: "Hosted Linq egress current inbound proof is incomplete.",
+      retryable: false,
+    });
+  }
+
+  return {
+    dedupeKey,
+    eventId,
+    mailboxItemId,
+    occurredAt,
+    replyToMessageId,
+    target,
+  };
+}
 
 function readOptionalBodyString(value: unknown): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";

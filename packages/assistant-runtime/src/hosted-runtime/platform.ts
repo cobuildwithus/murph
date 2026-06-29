@@ -188,7 +188,17 @@ export type HostedRuntimeLinqEngagementKind =
   | "first_contact"
   | "requires_recent_inbound";
 
+export interface HostedRuntimeLinqCurrentInboundProof {
+  dedupeKey: string;
+  eventId: string;
+  mailboxItemId: string;
+  occurredAt: string;
+  replyToMessageId: string;
+  target: string;
+}
+
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
+  currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
   engagementKind?: HostedRuntimeLinqEngagementKind | null;
   fromPhoneNumber?: string | null;
@@ -242,10 +252,6 @@ type HostedRuntimeEffectsPortBase = {
   readAssistantDeliveryRecord?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
   ): Promise<HostedAssistantDeliveryRecord | null>;
-  assertLinqThreadRouteAuthority?(
-    authority: HostedExecutionLinqExternalThreadRouteAuthority,
-    context?: { signal?: AbortSignal | null },
-  ): Promise<void>;
   assertLinqRecentInboundEngagement?(
     request: HostedRuntimeLinqRecentInboundEngagementRequest,
     context?: { signal?: AbortSignal | null },

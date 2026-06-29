@@ -71,7 +71,6 @@ import {
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
-  HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
@@ -309,18 +308,6 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "hosted issue recording",
     path: "/api/internal/hosted-execution/issues/record",
-  },
-  {
-    body: {
-      authority: {
-        accountLookupKey: "hbidx:phone:v1:account",
-        channel: "linq",
-        containerMemberId: "member_123",
-        threadId: "linq_chat_123",
-      },
-    },
-    name: "hosted thread-route egress authority assertion",
-    path: HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
   },
   {
     body: {
