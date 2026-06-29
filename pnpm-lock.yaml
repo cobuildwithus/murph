@@ -466,6 +466,9 @@ importers:
       '@cfworker/json-schema':
         specifier: ^4.1.1
         version: 4.1.1
+      '@junction-api/sdk':
+        specifier: 1.2.0
+        version: 1.2.0
       '@modelcontextprotocol/server':
         specifier: ^2.0.0-alpha.2
         version: 2.0.0-alpha.2(@cfworker/json-schema@4.1.1)
@@ -596,6 +599,9 @@ importers:
 
   packages/device-syncd:
     dependencies:
+      '@junction-api/sdk':
+        specifier: 1.2.0
+        version: 1.2.0
       '@murphai/importers':
         specifier: workspace:*
         version: link:../importers
@@ -657,6 +663,9 @@ importers:
 
   packages/hosted-execution:
     dependencies:
+      '@junction-api/sdk':
+        specifier: 1.2.0
+        version: 1.2.0
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -1990,6 +1999,10 @@ packages:
     engines: {node: '>=10.0'}
     peerDependencies:
       tslib: '2'
+
+  '@junction-api/sdk@1.2.0':
+    resolution: {integrity: sha512-D5SjCUEKWsdwEUQZqVoodhO17Tss11DxSn6tRT6/Dm8G9mdmAZKUmxjlvG7SXXZCFk/8+NNB0JfRVkl6NNz25Q==}
+    engines: {node: '>=18.0.0'}
 
   '@keyv/serialize@1.1.1':
     resolution: {integrity: sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA==}
@@ -11129,6 +11142,8 @@ snapshots:
       '@jsonjoy.com/buffers': 17.67.0(tslib@2.8.1)
       '@jsonjoy.com/codegen': 17.67.0(tslib@2.8.1)
       tslib: 2.8.1
+
+  '@junction-api/sdk@1.2.0': {}
 
   '@keyv/serialize@1.1.1': {}
 

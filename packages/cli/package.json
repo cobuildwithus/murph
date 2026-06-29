@@ -60,6 +60,7 @@
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
+    "@junction-api/sdk": "1.2.0",
     "@modelcontextprotocol/server": "^2.0.0-alpha.2",
     "@murphai/assistant-cli": "workspace:*",
     "@murphai/assistant-engine": "workspace:*",
