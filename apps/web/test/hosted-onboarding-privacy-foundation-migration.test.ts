@@ -440,6 +440,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const computerHandoffViewportSessionHintMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260629160000_computer_handoff_viewport_session_hint/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -505,6 +512,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260627210000_linq_first_contact_admission_drop_category",
       "20260627230000_linq_first_contact_rejected_message_text",
       "20260628000000_linq_first_contact_scrub_rejected_message_text",
+      "20260629160000_computer_handoff_viewport_session_hint",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -598,6 +606,12 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(computerHandoffReturnContactKindMigrationSql).toContain(
       'ADD CONSTRAINT "hosted_computer_handoff_return_contact_kind_check"',
+    );
+    expect(computerHandoffViewportSessionHintMigrationSql).toContain(
+      'ADD COLUMN "computer_handoff_viewport_width" INTEGER',
+    );
+    expect(computerHandoffViewportSessionHintMigrationSql).toContain(
+      'ADD COLUMN "computer_handoff_viewport_height" INTEGER',
     );
     expect(linqFirstContactAdmissionDecisionMigrationSql).toContain(
       'CREATE TABLE "hosted_linq_first_contact_admission_decision"',
