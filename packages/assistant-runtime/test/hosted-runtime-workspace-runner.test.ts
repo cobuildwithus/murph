@@ -438,8 +438,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
-        trackDeferredUsageCapture(completion) {
-          registeredDeferredUsageCaptures.push(completion);
+        trackDeferredUsageCapture(capture) {
+          registeredDeferredUsageCaptures.push(capture.completion);
         },
         async importItem(item) {
           assert.equal(

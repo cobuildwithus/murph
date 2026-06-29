@@ -261,6 +261,11 @@ export interface HostedWorkspaceRunnerRuntimePassDiagnostics {
   startedAtEpochMs: number;
 }
 
+export interface HostedWorkspaceRunnerDeferredUsageCapture {
+  completion: Promise<void>;
+  drainForProcessFatal(): Promise<void>;
+}
+
 export type HostedWorkspaceRunnerMailboxImportItem = (
   item: HostedMailboxResolvedImportItem,
   context?: HostedWorkspaceRunnerMailboxImportContext,
@@ -276,10 +281,7 @@ export interface HostedWorkspaceRunnerInput {
   initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
-  trackDeferredUsageCapture?: ((
-    completion: Promise<void>,
-    drainForProcessFatal: () => Promise<void>,
-  ) => void) | null;
+  trackDeferredUsageCapture?: ((capture: HostedWorkspaceRunnerDeferredUsageCapture) => void) | null;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
@@ -585,10 +587,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     closeDeferredUsageCapture();
     return completion;
   };
-  input.trackDeferredUsageCapture?.(
-    deferredUsageCompletion,
-    drainDeferredUsageCaptureForProcessFatal,
-  );
+  input.trackDeferredUsageCapture?.({
+    completion: deferredUsageCompletion,
+    drainForProcessFatal: drainDeferredUsageCaptureForProcessFatal,
+  });
   if (input.signal?.aborted) {
     startDeferredUsageCaptureOnAbort();
   } else {
