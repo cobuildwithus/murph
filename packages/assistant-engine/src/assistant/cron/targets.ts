@@ -97,13 +97,17 @@ export function validateAssistantCronDeliveryTarget(
       formatAssistantCronDeliveryIssueMessage(deliveryIssue.message),
     )
   }
+  const hasLinqParticipantDelivery =
+    channel === 'linq' &&
+    Boolean(participantId) &&
+    deliverySource?.kind === 'linq'
   const bindingDelivery = resolveAssistantBindingDelivery({
     channel,
     actorId: participantId,
     threadId,
     deliveryTarget,
   })
-  if (!deliveryTarget && !bindingDelivery) {
+  if (!deliveryTarget && !bindingDelivery && !hasLinqParticipantDelivery) {
     throw new VaultCliError(
       'ASSISTANT_CRON_DELIVERY_REQUIRED',
       'Assistant cron jobs must bind an explicit outbound route. Pass --thread, --participant, or --deliveryTarget for the selected channel.',
@@ -182,12 +186,34 @@ export function resolveAssistantCronTargetBindingDelivery(
     return null
   }
 
+  if (isLinqParticipantMaterializationTarget(target)) {
+    return {
+      kind: 'participant',
+      target: target.participantId,
+    }
+  }
+
   return resolveAssistantBindingDelivery({
     channel: target.channel,
     actorId: target.participantId,
     threadId: target.threadId,
     deliveryTarget: target.deliveryTarget,
   })
+}
+
+function isLinqParticipantMaterializationTarget(
+  target: AssistantCronTarget,
+): target is AssistantCronTarget & {
+  deliverySource: { kind: 'linq'; fromPhoneNumber: string }
+  participantId: string
+} {
+  return (
+    normalizeNullableString(target.deliveryTarget) === null &&
+    target.channel === 'linq' &&
+    Boolean(target.participantId) &&
+    target.deliverySource?.kind === 'linq' &&
+    Boolean(target.deliverySource.fromPhoneNumber)
+  )
 }
 
 export function assistantCronTargetAudienceEquals(
