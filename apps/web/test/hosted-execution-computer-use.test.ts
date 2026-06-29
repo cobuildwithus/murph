@@ -1076,6 +1076,53 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("keeps a completed handoff locked when open cannot read the browser state", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      completedAt: new Date("2026-06-17T12:04:00.000Z"),
+      purpose: "managed_login",
+      status: "completed",
+      updatedAt: new Date("2026-06-17T12:04:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingMessage: "Secure login is open.",
+        awaitingReason: "login_needed",
+        pausedAt: new Date("2026-06-17T12:00:00.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+        updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+      }),
+    });
+    const kernel = createFakeKernel({
+      onExecutePlaywright: () => {
+        throw new Error("read failed");
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.openRun({
+      memberId: "member_123",
+      startUrl: null,
+    })).rejects.toThrow("read failed");
+
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(store.run).toMatchObject({
+      awaitingReason: "login_needed",
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+    });
+    expect(store.handoff).toMatchObject({
+      status: "completed",
+    });
+    expect(store.lastResumeAwaitingReason).toBeNull();
+  });
+
   it("keeps an open managed-login handoff locked without resume proof", async () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const handoff = createHandoffRecord({
@@ -1157,6 +1204,226 @@ describe("ComputerUseService", () => {
     expect(store.handoff).toMatchObject({
       status: "checkpointing",
     });
+  });
+
+  it("opens a stale checkpointing handoff after hidden user reply proof", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "managed_login",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      resumeMailboxItems: [
+        createResumeMailboxItem({
+          id: "hmi_user_reply",
+          occurredAt: new Date("2026-06-17T12:04:00.000Z"),
+        }),
+      ],
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        pausedAt: new Date("2026-06-17T12:00:30.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Account",
+        url: "https://shop.example.test/account?session=1#ignored",
+        visibleText: "Signed in",
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    })).resolves.toMatchObject({
+      reused: true,
+      runId: "hcr_run123",
+      status: "running",
+      title: "Account",
+      url: "https://shop.example.test/account",
+      visibleText: "Signed in",
+    });
+
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(store.run).toMatchObject({
+      awaitingReason: null,
+      lastTitle: "Account",
+      lastUrl: "https://shop.example.test/account",
+      pendingHandoffId: null,
+      status: "running",
+    });
+    expect(store.handoff).toMatchObject({
+      status: "expired",
+    });
+    expect(store.lastResumeAwaitingReason).toBe("login_needed");
+  });
+
+  it("keeps a stale checkpointing handoff locked when open cannot read after hidden proof", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "managed_login",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      resumeMailboxItems: [
+        createResumeMailboxItem({
+          id: "hmi_user_reply",
+          occurredAt: new Date("2026-06-17T12:04:00.000Z"),
+        }),
+      ],
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        pausedAt: new Date("2026-06-17T12:00:30.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel({
+      onExecutePlaywright: () => {
+        throw new Error("read failed");
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    })).rejects.toThrow("read failed");
+
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(store.run).toMatchObject({
+      awaitingReason: "login_needed",
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+    });
+    expect(store.handoff).toMatchObject({
+      status: "checkpointing",
+    });
+    expect(store.lastResumeAwaitingReason).toBeNull();
+  });
+
+  it("does not unlock a stale checkpointing handoff if the browser session changes after read", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "managed_login",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      resumeMailboxItems: [
+        createResumeMailboxItem({
+          id: "hmi_user_reply",
+          occurredAt: new Date("2026-06-17T12:04:00.000Z"),
+        }),
+      ],
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        pausedAt: new Date("2026-06-17T12:00:30.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel({
+      executeResult: {
+        title: "Old browser",
+        url: "https://old.example.test/account",
+        visibleText: "Old session",
+      },
+      onExecutePlaywright: () => {
+        store.run = {
+          ...store.run,
+          kernelLiveViewUrlEncrypted: "encrypted-new-live-view",
+          kernelSessionId: "kernel-session-2",
+        };
+      },
+    });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.openRun({
+      memberId: "member_123",
+      resumeAfterMailboxItemId: "hmi_user_reply",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
+    });
+
+    expect(kernel.executePlaywrightCalls).toBe(1);
+    expect(store.run).toMatchObject({
+      awaitingReason: "login_needed",
+      kernelSessionId: "kernel-session-2",
+      lastTitle: "Scheduler",
+      lastUrl: "https://dentist.example.test",
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+    });
+    expect(store.handoff).toMatchObject({
+      status: "checkpointing",
+    });
+    expect(store.lastResumeAwaitingReason).toBeNull();
+  });
+
+  it("keeps a stale checkpointing handoff locked without hidden user reply proof", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const handoff = createHandoffRecord({
+      purpose: "managed_login",
+      status: "checkpointing",
+      updatedAt: new Date("2026-06-17T12:00:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      handoff,
+      run: createRunRecord({
+        awaitingReason: "login_needed",
+        pausedAt: new Date("2026-06-17T12:00:30.000Z"),
+        pendingHandoffId: handoff.id,
+        status: "awaiting_user",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.openRun({
+      memberId: "member_123",
+      startUrl: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_AWAITING_USER",
+    });
+
+    expect(kernel.executePlaywrightCalls).toBe(0);
+    expect(store.run).toMatchObject({
+      awaitingReason: "login_needed",
+      pendingHandoffId: handoff.id,
+      status: "awaiting_user",
+    });
+    expect(store.handoff).toMatchObject({
+      status: "checkpointing",
+    });
+    expect(store.lastResumeAwaitingReason).toBeNull();
   });
 
   it("does not reclaim browserless managed-login handoffs", async () => {
@@ -5492,6 +5759,7 @@ describe("PrismaComputerUseStore", () => {
 
     await store.markRunRunning({
       awaitingReason: "login_needed",
+      expectedKernelSessionId: "kernel-session-1",
       expectedPausedAt: pausedAt,
       expectedPendingHandoffId: "hch_handoff123",
       now,
@@ -5511,7 +5779,7 @@ describe("PrismaComputerUseStore", () => {
       where: {
         awaitingReason: "login_needed",
         id: "hcr_run123",
-        kernelSessionId: { not: null },
+        kernelSessionId: "kernel-session-1",
         pausedAt,
         pendingHandoffId: "hch_handoff123",
         status: "awaiting_user",
@@ -5542,6 +5810,7 @@ describe("PrismaComputerUseStore", () => {
       awaitingReason: "final_confirmation",
       expectedHandoffStatus: "open",
       expectedHandoffUpdatedAt: handoffUpdatedAt,
+      expectedKernelSessionId: "kernel-session-1",
       expectedPausedAt: pausedAt,
       expectedPendingHandoffId: "hch_handoff123",
       now,
@@ -5568,7 +5837,7 @@ describe("PrismaComputerUseStore", () => {
           },
         },
         id: "hcr_run123",
-        kernelSessionId: { not: null },
+        kernelSessionId: "kernel-session-1",
         pausedAt,
         pendingHandoffId: "hch_handoff123",
         status: "awaiting_user",
@@ -6394,6 +6663,7 @@ class FakeComputerUseStore implements ComputerUseStore {
       this.run.id !== input.runId
       || this.run.status !== "awaiting_user"
       || !this.run.kernelSessionId
+      || this.run.kernelSessionId !== input.expectedKernelSessionId
       || this.run.awaitingReason !== input.awaitingReason
       || this.run.pendingHandoffId !== input.expectedPendingHandoffId
       || !this.run.pausedAt

@@ -30,6 +30,7 @@ type SpawnMock = (
 ) => MockSpawnedProcess;
 
 const mocks = vi.hoisted(() => ({
+  drainHostedRuntimeDeferredUsageCompletionsBestEffort: vi.fn(async () => undefined),
   emitHostedExecutionStructuredLog: vi.fn(),
   runHostedWorkspaceInvocation: vi.fn(),
   snapshotExpectedCodexRootProcess: vi.fn(),
@@ -77,6 +78,8 @@ vi.mock("@murphai/assistant-runtime/hosted-invocation", async () => {
   );
   return {
     ...actual,
+    drainHostedRuntimeDeferredUsageCompletionsBestEffort:
+      mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort,
     stopHostedCliRuntimeBridge: mocks.stopHostedCliRuntimeBridge,
   };
 });
@@ -93,6 +96,7 @@ import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
 } from "../src/deploy-smoke-live-model.js";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
+import { HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE } from "../src/runner-container-error-codes.js";
 import * as hostedInvocation from "../src/hosted-workspace-invocation.js";
 
 const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
@@ -103,6 +107,7 @@ const TEST_SNAPSHOT_PATH_HASH_SECRET = "a".repeat(64);
 beforeEach(() => {
   vi.unstubAllGlobals();
   globalThis.fetch = nativeFetch;
+  mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort.mockResolvedValue(undefined);
   mocks.runHostedWorkspaceInvocation.mockResolvedValue(buildWorkspaceRunnerResult());
   mocks.snapshotExpectedCodexRootProcess.mockResolvedValue(null);
   mocks.spawn.mockReset();
@@ -384,6 +389,279 @@ describe("startHostedContainerEntrypoint", () => {
       poisoned: false,
       service: "cloudflare-hosted-runner-node",
     });
+  });
+
+  it("drains deferred usage completions before clean shutdown exit", async () => {
+    const drainStarted = createDeferred();
+    const releaseDrain = createDeferred();
+    mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort.mockImplementationOnce(
+      async () => {
+        drainStarted.resolve();
+        await releaseDrain.promise;
+      },
+    );
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await sendHostedContainerJsonRequest({
+      body: JSON.stringify(buildWorkspaceJobBody()),
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+    expect(response.status).toBe(200);
+
+    process.emit("SIGTERM", "SIGTERM");
+
+    await drainStarted.promise;
+    expect(exit).not.toHaveBeenCalled();
+
+    const lateResponse = await sendHostedContainerJsonRequest({
+      body: JSON.stringify(buildWorkspaceJobBody()),
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+    expect(lateResponse).toMatchObject({
+      json: {
+        code: HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+        error: "Hosted runner is shutting down.",
+      },
+      status: 503,
+    });
+    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(1);
+
+    releaseDrain.resolve();
+    await vi.waitFor(() => {
+      expect(exit).toHaveBeenCalledWith(0);
+    });
+    const serverIndex = servers.indexOf(server);
+    if (serverIndex !== -1) {
+      servers.splice(serverIndex, 1);
+    }
+  });
+
+  it("advertises absent for runtime wakes after shutdown only when no runner work is active", async () => {
+    const drainStarted = createDeferred();
+    const releaseDrain = createDeferred();
+    mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort.mockImplementationOnce(async () => {
+      drainStarted.resolve();
+      await releaseDrain.promise;
+    });
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    try {
+      process.emit("SIGTERM", "SIGTERM");
+      await drainStarted.promise;
+
+      const lateWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+        body: JSON.stringify({
+          attemptId: "attempt_evt_runtime_wake_shutdown_idle",
+          leaseGeneration: "1",
+          userId: "u1",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+
+      expect(lateWake.status).toBe(204);
+      expect(lateWake.headers.get("x-runtime-wake-accepted")).toBe("0");
+      expect(lateWake.headers.get("x-runtime-wake-absent")).toBe("1");
+    } finally {
+      releaseDrain.resolve();
+    }
+
+    await vi.waitFor(() => {
+      expect(exit).toHaveBeenCalledWith(0);
+    });
+    const serverIndex = servers.indexOf(server);
+    if (serverIndex !== -1) {
+      servers.splice(serverIndex, 1);
+    }
+  });
+
+  it("rejects active runtime wakes after shutdown starts without advertising absence", async () => {
+    const invocationReady = createDeferred();
+    const releaseInvocation = createDeferred();
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    let runtimeWakeCount = 0;
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
+      async (_job, options) => {
+        options?.onRuntimeWakeReady?.(() => {
+          runtimeWakeCount += 1;
+          return true;
+        });
+        invocationReady.resolve();
+        await releaseInvocation.promise;
+        return buildWorkspaceRunnerResult();
+      },
+    );
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const invocation = fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_runtime_wake_shutdown",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    await invocationReady.promise;
+    process.emit("SIGTERM", "SIGTERM");
+
+    const lateWake = await fetch(`http://127.0.0.1:${address.port}/internal/runtime-wake`, {
+      body: JSON.stringify({
+        attemptId: "attempt_evt_runtime_wake_shutdown",
+        leaseGeneration: "1",
+        userId: "u1",
+      }),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+    releaseInvocation.resolve();
+    const invocationResponse = await invocation;
+
+    expect(lateWake.status).toBe(204);
+    expect(lateWake.headers.get("x-runtime-wake-accepted")).toBe("0");
+    expect(lateWake.headers.get("x-runtime-wake-absent")).toBeNull();
+    expect(runtimeWakeCount).toBe(0);
+    expect(invocationResponse.status).toBe(200);
+    await vi.waitFor(() => {
+      expect(exit).toHaveBeenCalledWith(0);
+    });
+    const serverIndex = servers.indexOf(server);
+    if (serverIndex !== -1) {
+      servers.splice(serverIndex, 1);
+    }
+  });
+
+  it("rejects runtime wakes when shutdown starts while the wake body is being read", async () => {
+    const invocationReady = createDeferred();
+    const releaseInvocation = createDeferred();
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    let runtimeWakeCount = 0;
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
+      async (_job, options) => {
+        options?.onRuntimeWakeReady?.(() => {
+          runtimeWakeCount += 1;
+          return true;
+        });
+        invocationReady.resolve();
+        await releaseInvocation.promise;
+        return buildWorkspaceRunnerResult();
+      },
+    );
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const invocation = fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_runtime_wake_shutdown_body",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    await invocationReady.promise;
+    const lateWakeResponse = new Promise<{
+      headers: Record<string, string | string[] | undefined>;
+      json: unknown;
+      status: number;
+    }>((resolve, reject) => {
+      const request = httpRequest({
+        headers: {
+          connection: "close",
+          "content-type": "application/json; charset=utf-8",
+        },
+        host: "127.0.0.1",
+        method: "POST",
+        path: "/internal/runtime-wake",
+        port: address.port,
+      }, (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        response.on("end", () => {
+          const bodyText = Buffer.concat(chunks).toString("utf8");
+          resolve({
+            headers: response.headers,
+            json: bodyText.length > 0 ? JSON.parse(bodyText) : null,
+            status: response.statusCode ?? 0,
+          });
+        });
+      });
+      request.on("error", reject);
+      request.write("{\"attemptId\":\"attempt_evt_runtime_wake_shutdown_body\",");
+      setTimeout(() => {
+        process.emit("SIGTERM", "SIGTERM");
+        request.end("\"leaseGeneration\":\"1\",\"userId\":\"u1\"}");
+      }, 25);
+    });
+
+    const lateWake = await lateWakeResponse;
+    releaseInvocation.resolve();
+    const invocationResponse = await invocation;
+
+    expect(lateWake.status).toBe(204);
+    expect(lateWake.headers["x-runtime-wake-accepted"]).toBe("0");
+    expect(lateWake.headers["x-runtime-wake-absent"]).toBeUndefined();
+    expect(lateWake.json).toBeNull();
+    expect(runtimeWakeCount).toBe(0);
+    expect(invocationResponse.status).toBe(200);
+    await vi.waitFor(() => {
+      expect(exit).toHaveBeenCalledWith(0);
+    });
+    const serverIndex = servers.indexOf(server);
+    if (serverIndex !== -1) {
+      servers.splice(serverIndex, 1);
+    }
   });
 
   it("uses the default hosted process-lifetime shutdown hooks when the server closes", async () => {
@@ -3121,6 +3399,177 @@ describe("startHostedContainerEntrypoint", () => {
       lastCleanupStatus: "failed",
       poisoned: true,
     });
+  });
+
+  it("drains deferred usage completions before scheduling shell-isolation poison exit", async () => {
+    const childPid = process.pid + 2100;
+    let releaseDrain: () => void = () => undefined;
+    const drainReleased = new Promise<void>((resolve) => {
+      releaseDrain = resolve;
+    });
+
+    mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort.mockImplementationOnce(
+      async () => {
+        await drainReleased;
+      },
+    );
+
+    const kill = vi.fn();
+    const exit = vi.fn();
+    const readdir = vi.fn(async () => [
+      { isDirectory: () => true, name: String(process.pid) },
+      { isDirectory: () => true, name: String(childPid) },
+    ]);
+    const readFile = vi.fn(async (filePath: string) => {
+      if (String(filePath).endsWith(`/${childPid}/stat`)) {
+        return `${childPid} (child) S ${process.pid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(buildWorkspaceRunnerResult());
+
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        exitScheduler: exit,
+        processApi: { kill, readFile, readdir },
+        processIsolation: true,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const responsePromise = fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_descendant_cleanup_usage_drain",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort).toHaveBeenCalledTimes(1);
+    }, { timeout: 7_000 });
+    expect(exit).not.toHaveBeenCalled();
+
+    releaseDrain();
+    const response = await responsePromise;
+
+    expect(response.status).toBe(500);
+    expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort).toHaveBeenCalledWith(
+      expect.objectContaining({
+        closeActiveCaptures: true,
+        timeoutMs: expect.any(Number),
+      }),
+    );
+  });
+
+  it("drains deferred usage completions on shell-isolation poison after caller disconnects", async () => {
+    const childPid = process.pid + 2200;
+    let runnerStarted = false;
+    let releaseInvocation: () => void = () => undefined;
+    const invocationStarted = new Promise<void>((resolve) => {
+      vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(async () => {
+        runnerStarted = true;
+        resolve();
+        await new Promise<void>((release) => {
+          releaseInvocation = release;
+        });
+        return buildWorkspaceRunnerResult();
+      });
+    });
+    let releaseDrain: () => void = () => undefined;
+    const drainReleased = new Promise<void>((resolve) => {
+      releaseDrain = resolve;
+    });
+
+    mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort.mockImplementationOnce(
+      async () => {
+        await drainReleased;
+      },
+    );
+
+    const kill = vi.fn();
+    const exit = vi.fn();
+    const readdir = vi.fn(async () => [
+      { isDirectory: () => true, name: String(process.pid) },
+      ...(runnerStarted ? [{ isDirectory: () => true, name: String(childPid) }] : []),
+    ]);
+    const readFile = vi.fn(async (filePath: string) => {
+      if (String(filePath).endsWith(`/${childPid}/stat`)) {
+        return `${childPid} (child) S ${process.pid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        exitScheduler: exit,
+        processApi: { kill, readFile, readdir },
+        processIsolation: true,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const request = httpRequest({
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      host: "127.0.0.1",
+      method: "POST",
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+    request.on("error", () => undefined);
+    request.write(JSON.stringify(buildJobBody({
+      wake: {
+        event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+        eventId: "evt_descendant_cleanup_usage_drain_disconnect",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+    })));
+    request.end();
+
+    await invocationStarted;
+    request.destroy();
+    releaseInvocation();
+
+    await vi.waitFor(() => {
+      expect(mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort).toHaveBeenCalledTimes(1);
+    }, { timeout: 7_000 });
+    expect(exit).not.toHaveBeenCalled();
+
+    releaseDrain();
+    await vi.waitFor(() => {
+      expect(exit).toHaveBeenCalledTimes(1);
+    });
+    expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
+    expect(mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort).toHaveBeenCalledWith(
+      expect.objectContaining({
+        closeActiveCaptures: true,
+        timeoutMs: expect.any(Number),
+      }),
+    );
   });
 });
 

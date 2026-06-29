@@ -58,12 +58,11 @@ export async function ensureActiveRuntimeProcessing(
 
   const container = input.runnerContainerNamespace.getByName(runnerContainerName);
 
-  const ensureProcessing = container.ensureProcessing;
-  if (ensureProcessing) {
+  if (container.ensureProcessing) {
     try {
       const result = await runRuntimeProcessingCommandStep({
         budget: input.commandBudget,
-        operation: async () => await ensureProcessing({
+        operation: async () => await container.ensureProcessing!({
           activeRuntime: input.activeRuntime,
           userId: input.activeRuntime.userId,
         }),
@@ -95,8 +94,7 @@ export async function ensureActiveRuntimeProcessing(
     }
   }
 
-  const wakeRuntime = container.wakeRuntime;
-  if (!wakeRuntime) {
+  if (!container.wakeRuntime) {
     return { kind: "wake-unconfirmed", reason: "missing-wake-method" };
   }
 
@@ -104,7 +102,7 @@ export async function ensureActiveRuntimeProcessing(
     const runtimeWake = normalizeRunnerRuntimeWakeResult(
       await runRuntimeProcessingCommandStep({
         budget: input.commandBudget,
-        operation: async () => await wakeRuntime(input.activeRuntime),
+        operation: async () => await container.wakeRuntime!(input.activeRuntime),
         stepTimeoutMs: input.env.webControlTimeoutMs,
       }),
     );

@@ -206,6 +206,7 @@ export interface ComputerUseStore {
     awaitingReason: HostedComputerAwaitingReason | null;
     expectedHandoffStatus?: HostedComputerHandoffStatus | null;
     expectedHandoffUpdatedAt?: Date | null;
+    expectedKernelSessionId: string;
     expectedPausedAt: Date;
     expectedPendingHandoffId: string | null;
     now: Date;
@@ -806,6 +807,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     awaitingReason: HostedComputerAwaitingReason | null;
     expectedHandoffStatus?: HostedComputerHandoffStatus | null;
     expectedHandoffUpdatedAt?: Date | null;
+    expectedKernelSessionId: string;
     expectedPausedAt: Date;
     expectedPendingHandoffId: string | null;
     now: Date;
@@ -828,7 +830,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         where: {
           awaitingReason: input.awaitingReason,
           id: input.runId,
-          kernelSessionId: { not: null },
+          kernelSessionId: input.expectedKernelSessionId,
           pausedAt: input.expectedPausedAt,
           pendingHandoffId: input.expectedPendingHandoffId,
           status: "awaiting_user",
