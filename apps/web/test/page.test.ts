@@ -103,7 +103,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
 
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
   expect(mocks.getMurphGithubStarCount).toHaveBeenCalledTimes(1);
-  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(3);
+  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(5);
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
     1,
     {
@@ -120,13 +120,33 @@ test("HomePage renders the canonical landing page at the root route", async () =
     {
       authenticated: false,
       context: "hero",
-      authLabel: "Run your first experiment",
+      authLabel: "Meet Murph",
       preloadAuthPanel: true,
     },
     undefined
   );
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
     3,
+    {
+      authenticated: false,
+      context: "hero",
+      authLabel: "Meet Murph",
+    },
+    undefined
+  );
+  expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
+    4,
+    {
+      authenticated: false,
+      context: "footer",
+      authLabel: "Get started",
+      preloadAuthPanel: true,
+      signupLabel: "Get started",
+    },
+    undefined
+  );
+  expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
+    5,
     {
       authenticated: false,
       context: "footer",
@@ -141,22 +161,16 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /data-root-landing-auth-actions-context="footer"/);
   assert.match(
     markup,
-    /font-serif text-\[clamp\(2\.25rem,5\.2vw,4\.5rem\)\][^"]* text-balance/,
+    /font-serif text-\[clamp\(2\.25rem,4\.8vw,4\.25rem\)\][^"]* text-black/,
   );
-  assert.match(markup, /class="block lg:whitespace-nowrap">Stop guessing what<\/span>/);
-  assert.match(
-    markup,
-    /Stop guessing what<\/span><span class="block text-\[#d4b87a\] lg:whitespace-nowrap">makes/,
-  );
-  assert.match(
-    markup,
-    /class="block text-\[#d4b87a\] lg:whitespace-nowrap">makes you healthier\.<\/span>/,
-  );
+  assert.match(markup, /<span class="block">Health is<\/span>/);
+  assert.match(markup, /<span class="block">overwhelming\.<\/span>/);
+  assert.match(markup, /Murph makes it easy\./);
   assert.match(markup, /Murph is your personal health assistant\./);
   assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
   assert.match(
     markup,
-    /data-root-landing-auth-actions-label="Run your first experiment"/
+    /data-root-landing-auth-actions-label="Meet Murph"/
   );
   assert.match(markup, /Discover what actually makes you healthier\./);
   assert.match(markup, /data-root-landing-auth-actions-label="Get started"/);
@@ -229,7 +243,7 @@ test("HomePage metadata keeps the root route as the canonical landing URL", asyn
   ]);
 });
 
-test("HomePage keeps the mid-page CTA consistent for authenticated sessions", async () => {
+test("HomePage keeps the final CTA consistent for authenticated sessions", async () => {
   vi.clearAllMocks();
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -240,9 +254,9 @@ test("HomePage keeps the mid-page CTA consistent for authenticated sessions", as
 
   const markup = renderToStaticMarkup(await HomePage());
 
-  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(3);
+  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(5);
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
-    3,
+    5,
     {
       authenticated: true,
       context: "footer",
@@ -253,5 +267,5 @@ test("HomePage keeps the mid-page CTA consistent for authenticated sessions", as
     undefined
   );
   assert.match(markup, /You’re already set up\./);
-  assert.doesNotMatch(markup, /Discover what actually makes you healthier\./);
+  assert.match(markup, /Manage billing and connected wearables from one place\./);
 });
