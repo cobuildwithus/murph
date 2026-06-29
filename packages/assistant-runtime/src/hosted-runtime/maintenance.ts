@@ -49,6 +49,7 @@ import type {
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import type {
+  HostedIngressLatencySource,
   HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -607,7 +608,8 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
   startedAt: string;
   turnLockWaitMs?: number;
 }): void {
-  if (input.source !== "linq") {
+  const source = readHostedProviderStartLatencyTraceSource(input.source);
+  if (!source) {
     return;
   }
   if (!input.latencyTracePort || input.assistantInputIds.length === 0) {
@@ -638,12 +640,24 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
         : {}),
       providerRequestOrdinal: input.providerRequestOrdinal,
       runtimeAttemptId: input.runtimeAttemptId ?? null,
-      source: "linq",
+      source,
       type: "provider_started",
     },
   }).catch(() => {
     // Latency traces are diagnostic-only and must not affect runtime progress.
   });
+}
+
+function readHostedProviderStartLatencyTraceSource(
+  source: string,
+): HostedIngressLatencySource | null {
+  switch (source) {
+    case "linq":
+    case "telegram":
+      return source;
+    default:
+      return null;
+  }
 }
 
 const HOSTED_ASSISTANT_PROVIDER_START_TRACE_RETRY_DELAYS_MS = [250, 1_000] as const;

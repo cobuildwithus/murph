@@ -11,6 +11,7 @@ import {
   readHostedLinqConversationMessageAccountLookupKey,
 } from "@murphai/hosted-execution";
 import type {
+  HostedIngressLatencySource,
   HostedRuntimeLatencyTraceStagedMilestones,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -383,7 +384,8 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
   runtimeAttemptId?: string | null;
   wake: HostedExecutionConversationMessageWake;
 }): void {
-  if (input.wake.message.channel !== "linq") {
+  const source = readHostedConversationLatencyTraceSource(input.wake.message.channel);
+  if (!source) {
     return;
   }
   const latencyTracePort = input.runtime.platform.latencyTracePort ?? null;
@@ -412,7 +414,7 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
         ...(latencyMilestones?.phaseBreakdown === undefined
           ? {}
           : { phaseBreakdown: latencyMilestones.phaseBreakdown }),
-        source: "linq",
+        source,
         type: "assistant_input_staged",
         ...(latencyMilestones?.workspaceRestoreDoneAt === undefined
           ? {}
@@ -423,6 +425,19 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
     });
   } catch {
     // Latency traces are diagnostic-only and must not affect runtime progress.
+  }
+}
+
+function readHostedConversationLatencyTraceSource(
+  channel: HostedExecutionConversationMessageWake["message"]["channel"],
+): HostedIngressLatencySource | null {
+  switch (channel) {
+    case "linq":
+    case "telegram":
+      return channel;
+    case "whatsapp":
+    default:
+      return null;
   }
 }
 

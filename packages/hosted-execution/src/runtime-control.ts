@@ -796,6 +796,7 @@ export interface HostedRuntimeIssueExportResponse {
 
 export const HOSTED_INGRESS_LATENCY_SOURCES = [
   "linq",
+  "telegram",
 ] as const;
 
 export type HostedIngressLatencySource =

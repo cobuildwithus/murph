@@ -366,7 +366,7 @@ describe("hosted webhook Temporal handoff", () => {
     });
   });
 
-  it("signals Temporal for Telegram handoff", async () => {
+  it("signals Temporal and records latency traces for Telegram handoff", async () => {
     await expect(maybeHandoffHostedExecutionWebhookWake({
       eventId: "evt_inline_gap",
       mailboxItemId: "mailbox_123",
@@ -390,9 +390,15 @@ describe("hosted webhook Temporal handoff", () => {
     });
     expect(schedulerMocks.scheduleAfterResponse).not.toHaveBeenCalled();
     expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).not.toHaveBeenCalled();
-    expect(
-      latencyStoreMocks.recordHostedIngressTemporalSignalAccepted,
-    ).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(latencyStoreMocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(
+        expect.objectContaining({
+          expectedUserId: "user-123",
+          mailboxItemId: "mailbox_123",
+          source: "telegram",
+        }),
+      );
+    });
   });
 });
 
