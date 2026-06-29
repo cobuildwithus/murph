@@ -11,6 +11,7 @@ import {
   compactAssistantProviderConfigInput,
   isAssistantCodexTargetConfig,
   resolveAssistantChatProviderFromConfig,
+  type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
   resolveAssistantSession,
@@ -194,15 +195,43 @@ export async function resolveAssistantSessionForMessage(input: {
   )
   const resolved = await resolveAssistantSession(sessionInput)
   const hostedDefaultTarget =
-    normalizeAssistantExecutionContext(input.message.executionContext).hosted
-      ?.defaultTarget ?? null
-  const shouldProjectEffectiveTarget =
-    normalizeAssistantBackendTarget(hostedDefaultTarget) !== null ||
-    compactAssistantProviderConfigInput(input.message) !== null
+    normalizeAssistantBackendTarget(
+      normalizeAssistantExecutionContext(input.message.executionContext).hosted
+        ?.defaultTarget ?? null,
+    )
+  const messageOverride = compactAssistantProviderConfigInput(input.message)
+  const effectiveTarget = resolveEffectiveTargetForResolvedSession({
+    hostedDefaultTarget,
+    messageOverride,
+    resolved,
+  })
 
-  return shouldProjectEffectiveTarget
-    ? applyEffectiveTargetToResolvedSession(resolved, sessionInput.target)
+  return effectiveTarget
+    ? applyEffectiveTargetToResolvedSession(resolved, effectiveTarget)
     : resolved
+}
+
+function resolveEffectiveTargetForResolvedSession(input: {
+  hostedDefaultTarget: AssistantModelTarget | null
+  messageOverride: AssistantProviderConfigInput | null
+  resolved: ResolvedAssistantSession
+}): AssistantModelTarget | null {
+  if (!input.messageOverride) {
+    return input.hostedDefaultTarget
+  }
+
+  const baseTarget =
+    input.hostedDefaultTarget ??
+    normalizeAssistantBackendTarget(input.resolved.session.target)
+  if (!baseTarget) {
+    return null
+  }
+
+  return resolveAssistantExecutionPlan({
+    defaults: null,
+    override: input.messageOverride,
+    sessionTarget: baseTarget,
+  }).primaryTarget
 }
 
 export function applyEffectiveTargetToResolvedSession(
