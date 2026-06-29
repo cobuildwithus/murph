@@ -3235,9 +3235,7 @@ async function drainHostedPostCheckpointDelivery(input: {
   const postNextWake = selectHostedRuntimeWakeCandidate([
     postBaseNextWake,
     postAssistantCronWakeCandidate,
-    dropConsumedWorkspaceAssistantWake(
-      createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
-    ),
+    createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(providerCleanupNextWakeAt, "assistant"),
   ]);

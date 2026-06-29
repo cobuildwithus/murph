@@ -4036,7 +4036,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("drops a consumed workspace assistant wake echoed by post-delivery outbox state", async () => {
+  it("preserves a post-delivery outbox wake matching a consumed assistant wake", async () => {
     let now = "2026-05-08T16:00:00.000Z";
     const consumedWakeAt = "2026-05-08T16:00:05.000Z";
     mocks.resolveHostedAssistantOutboxNextWakeAt
@@ -4086,11 +4086,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledTimes(1);
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
-      nextWakeAt: null,
+      nextWakeAt: consumedWakeAt,
       redactedStatus: expect.objectContaining({
-        hostedAssistantNextWakeAt: null,
+        hostedAssistantNextWakeAt: consumedWakeAt,
         hostedOutboxDeliverySent: 1,
-        nextWakeAt: null,
+        nextWakeAt: consumedWakeAt,
       }),
     }));
   });
@@ -4098,8 +4098,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("drops a consumed workspace assistant wake after fresh system-mailbox delivery", async () => {
     let now = "2026-05-08T16:00:00.000Z";
     const consumedWakeAt = "2026-05-08T16:00:05.000Z";
-    mocks.resolveHostedAssistantOutboxNextWakeAt
-      .mockResolvedValueOnce(consumedWakeAt);
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationProgressed: true,
       nextWakeAt: consumedWakeAt,
