@@ -284,7 +284,7 @@ function findDoneButton(container: HTMLElement): HTMLButtonElement | null {
 
 function findFocusButton(container: HTMLElement): HTMLButtonElement | null {
   return container.querySelector<HTMLButtonElement>(
-    'button[aria-label="Focus the private browser"]',
+    'button[aria-label="Focus the private browser for keyboard and paste"]',
   );
 }
 
