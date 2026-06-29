@@ -1985,9 +1985,21 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         // that previously let inboxMediaRetentionWakeAt drift.
         servicedProjectedRuntimeWakeKey = null;
         if (durableCheckpointEffects.requiresFollowUpCheckpoint) {
+          const followUpCheckpointWake = selectEarliestHostedRuntimeWake([
+            {
+              at: accumulatedProjection.nextWakeAt,
+              reason: accumulatedProjection.nextWakeReason,
+            },
+            {
+              at: durableCheckpointWakeAt,
+              reason: durableCheckpointWakeReason,
+            },
+          ]);
           accumulatedProjection = {
             ...accumulatedProjection,
             committedWorkspace: checkpoint.workspace,
+            nextWakeAt: followUpCheckpointWake.nextWakeAt,
+            nextWakeReason: followUpCheckpointWake.nextWakeReason,
             projectedWakeCheckpointGateFresh: false,
             projectedWakeRequiresCheckpoint: true,
           };

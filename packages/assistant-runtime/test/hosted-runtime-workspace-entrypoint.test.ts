@@ -1714,6 +1714,8 @@ describe("hosted workspace runtime entrypoint", () => {
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
         ["0", "1"],
       );
+      assert.equal(checkpointRequests[1]?.nextWakeAt, durableWakeAt);
+      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
       assert.ok(checkpointEventIndexes[0] < events.indexOf("durable-effect"));
       assert.ok(events.indexOf("durable-effect") < checkpointEventIndexes[1]);
       assert.equal(result.status, "scheduled");
