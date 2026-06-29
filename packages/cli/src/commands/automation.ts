@@ -7,6 +7,7 @@ import {
   type HostedCliAssistantCurrentRoute,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
+  automationAssistantTargetOverrideSchema,
   automationContinuityPolicyValues,
   automationDeviceActivityKindSchema,
   automationRouteSchema,
@@ -85,6 +86,7 @@ export const automationRecordSchema = z
     summary: z.string().min(1).nullable(),
     schedule: automationScheduleSchema,
     route: automationRouteSchema,
+    assistantTargetOverride: automationAssistantTargetOverrideSchema.nullable(),
     continuityPolicy: z.enum(automationContinuityPolicyValues),
     tags: z.array(z.string().min(1)),
     createdAt: z.string().min(1),

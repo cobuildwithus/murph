@@ -15,6 +15,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type MockAutomationRecord = {
   automationId: string
+  assistantTargetOverride?: {
+    model?: string | null
+    modelProvider?: string | null
+    reasoningEffort?: string | null
+  } | null
   continuityPolicy: 'fresh' | 'preserve'
   createdAt: string
   instructions: string
@@ -336,6 +341,7 @@ beforeEach(() => {
   cronMocks.upsertAutomation.mockReset().mockImplementation(
     async (input: {
       automationId?: string
+      assistantTargetOverride?: MockAutomationRecord['assistantTargetOverride']
       continuityPolicy?: 'fresh' | 'preserve'
       instructions: string
       route: MockAutomationRecord['route']
@@ -357,6 +363,10 @@ beforeEach(() => {
         const existing = records[existingIndex] as MockAutomationRecord
         const updated: MockAutomationRecord = {
           ...existing,
+          assistantTargetOverride:
+            input.assistantTargetOverride === undefined
+              ? existing.assistantTargetOverride ?? null
+              : input.assistantTargetOverride,
           continuityPolicy: input.continuityPolicy ?? existing.continuityPolicy,
           instructions: input.instructions,
           route: { ...input.route },
@@ -376,6 +386,7 @@ beforeEach(() => {
 
       const created: MockAutomationRecord = {
         automationId: `automation-${cronMocks.nextAutomationId++}`,
+        assistantTargetOverride: input.assistantTargetOverride ?? null,
         continuityPolicy: input.continuityPolicy ?? 'preserve',
         createdAt: now,
         instructions: input.instructions,

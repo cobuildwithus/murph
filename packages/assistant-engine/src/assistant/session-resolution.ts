@@ -187,31 +187,37 @@ export async function resolveAssistantSessionForMessage(input: {
   defaults: AssistantOperatorDefaults | null
   message: AssistantMessageInput
 }) {
-  const resolved = await resolveAssistantSession(buildResolveAssistantSessionInput(
+  const sessionInput = buildResolveAssistantSessionInput(
     input.message,
     input.defaults,
     input.boundaryDefaultTarget ?? null,
-  ))
+  )
+  const resolved = await resolveAssistantSession(sessionInput)
   const hostedDefaultTarget =
     normalizeAssistantExecutionContext(input.message.executionContext).hosted
       ?.defaultTarget ?? null
+  const shouldProjectEffectiveTarget =
+    normalizeAssistantBackendTarget(hostedDefaultTarget) !== null ||
+    compactAssistantProviderConfigInput(input.message) !== null
 
-  return applyHostedDefaultTargetToResolvedSession(resolved, hostedDefaultTarget)
+  return shouldProjectEffectiveTarget
+    ? applyEffectiveTargetToResolvedSession(resolved, sessionInput.target)
+    : resolved
 }
 
-export function applyHostedDefaultTargetToResolvedSession(
+export function applyEffectiveTargetToResolvedSession(
   resolved: ResolvedAssistantSession,
-  hostedDefaultTarget: AssistantModelTarget | null | undefined,
+  effectiveTarget: AssistantModelTarget | null | undefined,
 ): ResolvedAssistantSession {
-  const defaultTarget = normalizeAssistantBackendTarget(hostedDefaultTarget ?? null)
-  if (!defaultTarget) {
+  const target = normalizeAssistantBackendTarget(effectiveTarget ?? null)
+  if (!target) {
     return resolved
   }
 
   const projectedSession = normalizeAssistantConversationSnapshot({
     ...resolved.session,
-    codexTarget: defaultTarget,
-    target: defaultTarget,
+    codexTarget: target,
+    target,
   })
   const continuityChanged =
     projectedSession.providerOptions.continuityFingerprint !==

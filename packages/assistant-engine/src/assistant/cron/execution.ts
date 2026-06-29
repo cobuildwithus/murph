@@ -355,6 +355,7 @@ export async function executeClaimedAssistantCronJob(input: {
           job: claimedJob,
         })
         const automationTurn = buildAssistantAutomationTurnEnvelope({
+          assistantTargetOverride: resolveAssistantCronAutomationTargetOverride(input.job),
           deliveryDispatchMode: input.deliveryDispatchMode,
           executionContext: input.executionContext,
           serviceTier,
@@ -654,6 +655,14 @@ function resolveAssistantCronTurnServiceTier(input: {
   // Retries after a failed (or deadline-aborted) flex run use the standard
   // tier so the existing 30s failure backoff bounds reminder lateness.
   return input.job.state.consecutiveFailures === 0 ? 'flex' : null
+}
+
+function resolveAssistantCronAutomationTargetOverride(
+  job: ResolvedAssistantCronJob,
+): AutomationQueryRecord['assistantTargetOverride'] | null {
+  return job.kind === 'canonical' && job.source.kind === 'automation'
+    ? job.source.assistantTargetOverride
+    : null
 }
 
 function resolveAssistantCronNotificationResponsePolicy(

@@ -73,8 +73,17 @@ describe('assistant infra final coverage', () => {
 
   it('covers session-resolution wrappers and undefined field fallbacks', async () => {
     const resolveAssistantSession = vi.fn(async (input) => ({
-      resolved: true,
-      input,
+      created: false,
+      paths: {
+        indexesDirectory: '/tmp/indexes',
+        rootDirectory: '/tmp/root',
+        sessionsDirectory: '/tmp/sessions',
+        statusDirectory: '/tmp/status',
+        transcriptsDirectory: '/tmp/transcripts',
+      },
+      session: createSession({
+        sessionId: input.sessionId ?? 'session-alpha',
+      }),
     }))
 
     vi.doMock('../src/assistant/store.js', async () => {

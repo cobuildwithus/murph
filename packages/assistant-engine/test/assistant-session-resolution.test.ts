@@ -530,6 +530,48 @@ describe('assistant session resolution', () => {
     expect(resolvedSession.session.resumeState?.threadId).toBe('thread_old')
   })
 
+  it('projects explicit message target overrides into hosted sessions before turn routing', async () => {
+    const hostedDefaultTarget = createCodexTarget({
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      reasoningEffort: 'low',
+    })
+    const resolvedSession = createResolvedAssistantSessionForTest({
+      target: hostedDefaultTarget,
+      resumeState: {
+        routeFingerprint: 'route-low',
+        threadId: 'thread_low',
+      },
+    })
+    sessionResolutionMocks.resolveAssistantSession.mockResolvedValue(resolvedSession)
+
+    const result = await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: hostedDefaultTarget,
+      defaults: createOperatorDefaults({
+        backend: hostedDefaultTarget,
+      }),
+      message: createMessageInput({
+        executionContext: {
+          hosted: {
+            defaultTarget: hostedDefaultTarget,
+            memberId: 'member-123',
+            userEnvKeys: [],
+          },
+        },
+        reasoningEffort: 'high',
+      }),
+    })
+
+    expect(result.session.target).toEqual(createCodexTarget({
+      model: 'gpt-5.5',
+      modelProvider: 'vercel-ai-gateway',
+      reasoningEffort: 'high',
+    }))
+    expect(result.session.providerOptions.reasoningEffort).toBe('high')
+    expect(result.session.resumeState).toBeNull()
+    expect(resolvedSession.session.providerOptions.reasoningEffort).toBe('low')
+  })
+
   it('keeps hosted resume state when the hosted default continuity has not changed', async () => {
     const hostedDefaultTarget = createCodexTarget({
       model: 'gpt-5.5',

@@ -8,6 +8,7 @@ import {
   automationScheduleKindValues,
   automationStatusValues,
   VAULT_LAYOUT,
+  type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
   type AutomationDeviceActivityKind,
   type AutomationDeviceActivitySource,
@@ -31,6 +32,7 @@ const AUTOMATIONS_DIRECTORY = VAULT_LAYOUT.automationsDirectory;
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
 export type {
+  AutomationAssistantTargetOverride,
   AutomationContinuityPolicy,
   AutomationRoute,
   AutomationSchedule,
@@ -47,6 +49,7 @@ export interface AutomationQueryRecord {
   summary: string | null;
   schedule: AutomationSchedule;
   route: AutomationRoute;
+  assistantTargetOverride: AutomationAssistantTargetOverride | null;
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
   createdAt: string;
@@ -267,6 +270,40 @@ function normalizeAutomationRoute(value: unknown): AutomationRoute {
   };
 }
 
+function normalizeAutomationAssistantTargetOverride(
+  value: unknown,
+): AutomationAssistantTargetOverride | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("assistantTargetOverride must be an object.");
+  }
+
+  const object = value as Record<string, unknown>;
+  const model = normalizeAutomationAssistantTargetOverrideString(object.model);
+  const modelProvider = normalizeAutomationAssistantTargetOverrideString(object.modelProvider);
+  const reasoningEffort = normalizeAutomationAssistantTargetOverrideString(object.reasoningEffort);
+  const target: AutomationAssistantTargetOverride = {
+    ...(model ? { model } : {}),
+    ...(modelProvider ? { modelProvider } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+  };
+
+  return Object.keys(target).length > 0 ? target : null;
+}
+
+function normalizeAutomationAssistantTargetOverrideString(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new Error("assistantTargetOverride values must be strings when provided.");
+  }
+
+  return normalizeNullableString(value);
+}
+
 function normalizeAutomationRouteDeliverySource(
   value: unknown,
 ): AutomationRoute["deliverySource"] {
@@ -338,6 +375,9 @@ function parseAutomationRecord(
     summary: normalizeNullableString(typeof attributes.summary === "string" ? attributes.summary : null),
     schedule: normalizeAutomationSchedule(attributes.schedule),
     route: normalizeAutomationRoute(attributes.route),
+    assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
+      attributes.assistantTargetOverride,
+    ),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeTags(attributes.tags),
     createdAt: requireStringValue(attributes.createdAt, "createdAt"),
@@ -383,6 +423,7 @@ function matchesAutomationText(record: AutomationQueryRecord, text: string | und
       record.continuityPolicy,
       JSON.stringify(record.schedule),
       JSON.stringify(record.route),
+      JSON.stringify(record.assistantTargetOverride),
       record.tags,
     ],
     text,

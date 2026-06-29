@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 type StoredAutomationRecord = {
   automationId: string
+  assistantTargetOverride?: {
+    model?: string | null
+    modelProvider?: string | null
+    reasoningEffort?: string | null
+  } | null
   continuityPolicy: 'fresh' | 'preserve'
   instructions: string
   route: {
@@ -171,6 +176,7 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation(async (input: {
       automationId?: string
+      assistantTargetOverride?: StoredAutomationRecord['assistantTargetOverride']
       continuityPolicy: 'fresh' | 'preserve'
       instructions: string
       route: StoredAutomationRecord['route']
@@ -185,6 +191,10 @@ beforeEach(() => {
       const existing = managedAutomationMocks.records.get(automationId) ?? null
       const record: StoredAutomationRecord = {
         automationId,
+        assistantTargetOverride:
+          input.assistantTargetOverride === undefined
+            ? existing?.assistantTargetOverride ?? null
+            : input.assistantTargetOverride,
         continuityPolicy: input.continuityPolicy,
         instructions: input.instructions,
         route: input.route,
@@ -206,6 +216,7 @@ beforeEach(() => {
   managedAutomationMocks.patchAutomation
     .mockReset()
     .mockImplementation(async (input: {
+      assistantTargetOverride?: StoredAutomationRecord['assistantTargetOverride']
       continuityPolicy?: 'fresh' | 'preserve'
       instructions?: string
       lookup: string
@@ -227,6 +238,10 @@ beforeEach(() => {
 
       const record: StoredAutomationRecord = {
         ...existing,
+        assistantTargetOverride:
+          input.assistantTargetOverride === undefined
+            ? existing.assistantTargetOverride
+            : input.assistantTargetOverride,
         continuityPolicy: input.continuityPolicy ?? existing.continuityPolicy,
         instructions: input.instructions ?? existing.instructions,
         route: input.route ?? existing.route,
@@ -258,6 +273,9 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(insightSeed.schedule.expression).toBe('0 12 * * 0')
     expect(insightSeed.instructions).toContain('On this scheduled weekly run')
+    expect(insightSeed.assistantTargetOverride).toEqual({
+      reasoningEffort: 'high',
+    })
     expect(insightSeed.instructions).not.toContain('Sunday at noon local time')
     expect(insightSeed.instructions).not.toContain('Wednesday')
     expect(insightSeed.instructions).not.toContain('Friday at 2:30 PM local time')

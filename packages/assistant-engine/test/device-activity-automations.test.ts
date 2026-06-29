@@ -1145,6 +1145,7 @@ function createDeviceActivityAutomation(input: {
   const automationId = input.automationId ?? 'auto_walk'
   return {
     automationId,
+    assistantTargetOverride: null,
     continuityPolicy: input.continuityPolicy ?? 'preserve',
     createdAt: '2026-06-07T10:00:00.000Z',
     docType: 'automation',
