@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 
 import {
   AuthDialog,
@@ -21,12 +21,14 @@ type LandingAuthContext = "nav" | "hero" | "footer";
 export function LandingAuthDialogButton({
   buttonClassName,
   buttonLabel,
+  leadingIcon,
   requireLaunchConsentOnCompletion = false,
   showArrow = false,
   showPassiveLegalNotice = false,
 }: {
   buttonClassName: string;
   buttonLabel: string;
+  leadingIcon?: ReactNode;
   requireLaunchConsentOnCompletion?: boolean;
   showArrow?: boolean;
   showPassiveLegalNotice?: boolean;
@@ -43,6 +45,11 @@ export function LandingAuthDialogButton({
         onPointerEnter={preloadHostedAuthPanelIsland}
         onClick={() => setOpen(true)}
       >
+        {leadingIcon ? (
+          <span aria-hidden="true" className="inline-flex shrink-0">
+            {leadingIcon}
+          </span>
+        ) : null}
         <span>{buttonLabel}</span>
         {showArrow ? (
           <span
@@ -120,6 +127,7 @@ export function LandingAuthActions({
   authLabel,
   authenticated,
   context,
+  leadingIcon,
   loginLabel = "Log in",
   preloadAuthPanel = false,
   splitUnauthenticated = false,
@@ -128,6 +136,7 @@ export function LandingAuthActions({
   authLabel: string;
   authenticated: boolean;
   context: LandingAuthContext;
+  leadingIcon?: ReactNode;
   loginLabel?: string;
   preloadAuthPanel?: boolean;
   splitUnauthenticated?: boolean;
@@ -140,7 +149,15 @@ export function LandingAuthActions({
   if (authenticated) {
     return (
       <div className={styles.container}>
-        <a href="/home" className={styles.settings}>
+        <a
+          href="/home"
+          className={cn(styles.settings, leadingIcon ? "gap-2" : null)}
+        >
+          {leadingIcon ? (
+            <span aria-hidden="true" className="inline-flex shrink-0">
+              {leadingIcon}
+            </span>
+          ) : null}
           {authLabel}
         </a>
       </div>
@@ -157,6 +174,7 @@ export function LandingAuthActions({
             "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5a6e32]"
           )}
           buttonLabel={authLabel}
+          leadingIcon={leadingIcon}
           requireLaunchConsentOnCompletion
           showArrow={context !== "nav"}
         />
