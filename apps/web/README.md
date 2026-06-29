@@ -154,9 +154,10 @@ The hosted Prisma schema keeps ownership sharp and nested:
   surfaces that cannot be operated through Playwright. The agent explicitly
   selects `managed_login` for Kernel Hosted UI plus a durable profile/domain
   connection, or `login` for the existing Live View takeover; CAPTCHA,
-  payment, missing-detail, and direct takeover handoffs remain Live View. Each authenticated
-  handoff matches the active browser viewport to the opening screen before
-  showing the live view.
+  payment, missing-detail, and direct takeover handoffs remain Live View. Authenticated
+  handoffs reuse the current hosted web session's last measured takeover surface
+  as a fast browser-viewport hint, then correct from the live client surface in
+  the background without blocking takeover.
 - `hosted_user_crypto_envelope` stores signed wrapped per-user/per-domain root
   envelopes; plaintext roots are never stored
 - `hosted_user_crypto_audit` records hosted crypto authority events

@@ -1,22 +1,19 @@
 import { CheckCircle2, Clock3 } from "lucide-react";
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 
 import { ComputerHandoffActiveView } from "@/src/components/computer-use/computer-handoff-active-view";
 import { ComputerHandoffAuthRequiredState } from "@/src/components/computer-use/computer-handoff-auth-required";
 import { ComputerHandoffReplyAction } from "@/src/components/computer-use/computer-handoff-reply-action";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { buttonVariants } from "@/src/components/ui/button";
+import { scheduleHostedWebSessionComputerHandoffViewportApply } from "@/src/lib/computer-use/handoff-viewport-session";
 import { createComputerUseService } from "@/src/lib/computer-use/service";
-import { resolveComputerBrowserViewportPreset } from "@/src/lib/computer-use/viewport";
 import { requireActiveHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import type { MurphContactKind, MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 const HANDOFF_DONE_REPLY_BODY = "Done";
-const HANDOFF_VIEWPORT_SSR_TIMEOUT_MS = 5_000;
-
 type HandoffSearchParams = {
   managed?: string | string[];
 };
@@ -139,35 +136,28 @@ export default async function ComputerHandoffPage({
     );
   }
 
-  const preset = resolveComputerBrowserViewportPreset(
-    (await headers()).get("user-agent"),
-  );
-  try {
-    await Promise.race([
-      service.ensureHandoffViewport({
-        memberId: session.member.id,
-        preset,
-        token,
-      }),
-      new Promise<never>((_, reject) => {
-        setTimeout(
-          () => reject(new Error("viewport resize timed out")),
-          HANDOFF_VIEWPORT_SSR_TIMEOUT_MS,
-        );
-      }),
-    ]);
-  } catch (error) {
-    console.warn("[computer-handoff] viewport resize failed", error);
-  }
+  const encodedToken = encodeURIComponent(token);
+  const doneEndpoint = `/api/computer/handoff/${encodedToken}/done`;
+  const viewportEndpoint = `/api/computer/handoff/${encodedToken}/viewport`;
+  const initialViewportSize = session.computerHandoffViewportSize;
 
-  const doneEndpoint = `/api/computer/handoff/${encodeURIComponent(token)}/done`;
+  if (initialViewportSize) {
+    scheduleHostedWebSessionComputerHandoffViewportApply({
+      memberId: session.member.id,
+      reason: "cached",
+      sessionId: session.sessionId,
+      token,
+    });
+  }
 
   return (
     <main className="relative min-h-dvh bg-foreground text-foreground">
       <ComputerHandoffActiveView
         doneEndpoint={doneEndpoint}
         iframeAllow={state.iframeAllow}
+        initialViewportSize={initialViewportSize}
         liveViewUrl={state.liveViewUrl}
+        viewportEndpoint={viewportEndpoint}
       />
     </main>
   );

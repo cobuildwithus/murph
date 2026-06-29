@@ -1,7 +1,16 @@
 import type { BeforeSendEvent as VercelAnalyticsBeforeSendEvent } from "@vercel/analytics/next";
 
-const PRIVATE_COMPUTER_HANDOFF_PATH_PREFIX = "/computer/handoff/";
-const REDACTED_PRIVATE_COMPUTER_HANDOFF_PATH = "/computer/handoff/[token]";
+const PRIVATE_COMPUTER_HANDOFF_PATH_MARKER = "/computer/handoff/";
+const PRIVATE_COMPUTER_HANDOFF_PATH_PREFIXES = [
+  {
+    prefix: "/computer/handoff/",
+    redactedPrefix: "/computer/handoff/[token]",
+  },
+  {
+    prefix: "/api/computer/handoff/",
+    redactedPrefix: "/api/computer/handoff/[token]",
+  },
+] as const;
 const URL_PARSE_BASE = "https://murph.invalid";
 
 export type VercelSpeedInsightsBeforeSendEvent = {
@@ -36,22 +45,23 @@ export function redactVercelSpeedInsightsEvent(
 }
 
 export function redactPrivateAnalyticsUrl(value: string): string {
-  if (!value.includes(PRIVATE_COMPUTER_HANDOFF_PATH_PREFIX)) {
+  if (!value.includes(PRIVATE_COMPUTER_HANDOFF_PATH_MARKER)) {
     return value;
   }
 
   try {
     const parsed = new URL(value, URL_PARSE_BASE);
+    const redactedPathname = redactPrivateComputerHandoffPathname(parsed.pathname);
 
-    if (!isPrivateComputerHandoffPath(parsed.pathname)) {
+    if (!redactedPathname) {
       return value;
     }
 
     if (hasExplicitOrigin(value)) {
-      return `${parsed.origin}${REDACTED_PRIVATE_COMPUTER_HANDOFF_PATH}`;
+      return `${parsed.origin}${redactedPathname}`;
     }
 
-    return REDACTED_PRIVATE_COMPUTER_HANDOFF_PATH;
+    return redactedPathname;
   } catch {
     return value;
   }
@@ -74,9 +84,22 @@ function hasExplicitOrigin(value: string): boolean {
   return /^[a-z][a-z\d+.-]*:\/\//iu.test(value);
 }
 
-function isPrivateComputerHandoffPath(pathname: string): boolean {
-  return (
-    pathname.startsWith(PRIVATE_COMPUTER_HANDOFF_PATH_PREFIX)
-    && pathname.length > PRIVATE_COMPUTER_HANDOFF_PATH_PREFIX.length
-  );
+function redactPrivateComputerHandoffPathname(pathname: string): string | null {
+  for (const { prefix, redactedPrefix } of PRIVATE_COMPUTER_HANDOFF_PATH_PREFIXES) {
+    if (!pathname.startsWith(prefix)) {
+      continue;
+    }
+
+    if (pathname.length <= prefix.length) {
+      return null;
+    }
+
+    const suffixStart = pathname.indexOf("/", prefix.length);
+
+    return suffixStart === -1
+      ? redactedPrefix
+      : `${redactedPrefix}${pathname.slice(suffixStart)}`;
+  }
+
+  return null;
 }

@@ -67,7 +67,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_web_session",
     label: "Hosted web app sessions",
     deletion: "live-delete",
-    note: "Deletes active and revoked hashed app-session tokens. Export reports counts only and omits token hashes.",
+    note: "Deletes active and revoked hashed app-session tokens plus per-session computer handoff viewport hints. Export reports counts only and omits token hashes.",
   },
   {
     slug: "prisma.hosted_sensitive_action_challenge",

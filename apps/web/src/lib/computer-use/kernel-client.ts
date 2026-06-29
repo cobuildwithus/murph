@@ -4,10 +4,7 @@ import type {
 } from "@murphai/hosted-execution/computer-use";
 
 import { computerUseError } from "./errors";
-import {
-  COMPUTER_BROWSER_VIEWPORTS,
-  type ComputerBrowserViewportPreset,
-} from "./viewport";
+import type { ComputerBrowserViewport } from "./viewport";
 import { isAllowedKernelManagedAuthHostedUrl } from "./managed-auth-origin";
 
 const KERNEL_REQUEST_TIMEOUT_MS = 30_000;
@@ -56,8 +53,8 @@ export interface ComputerKernelClient {
   deleteManagedAuthConnection(id: string): Promise<void>;
   deleteProfile(name: string): Promise<void>;
   ensureBrowserViewport(input: {
-    preset: ComputerBrowserViewportPreset;
     sessionId: string;
+    viewport: ComputerBrowserViewport;
   }): Promise<void>;
   ensureManagedAuthConnection(input: {
     domain: string;
@@ -112,23 +109,23 @@ export class KernelComputerClient implements ComputerKernelClient {
   }
 
   async ensureBrowserViewport(input: {
-    preset: ComputerBrowserViewportPreset;
     sessionId: string;
+    viewport: ComputerBrowserViewport;
   }): Promise<void> {
     try {
-      const viewport = COMPUTER_BROWSER_VIEWPORTS[input.preset];
       const browser = await this.kernel.browsers.retrieve(input.sessionId);
 
       if (
-        browser.viewport?.width === viewport.width
-        && browser.viewport?.height === viewport.height
+        browser.viewport?.width === input.viewport.width
+        && browser.viewport?.height === input.viewport.height
+        && browser.viewport?.refresh_rate === input.viewport.refresh_rate
       ) {
         return;
       }
 
       await this.kernel.browsers.update(input.sessionId, {
         viewport: {
-          ...viewport,
+          ...input.viewport,
           force: true,
         },
       });
