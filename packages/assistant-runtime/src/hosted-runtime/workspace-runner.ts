@@ -2322,9 +2322,7 @@ function mergeDeferredPostCheckpointWake(input: {
     return false;
   }
 
-  return selectedWake.at !== previousWake.at
-    || selectedWake.reason !== previousWake.reason
-    || postCheckpointWake.reason !== HOSTED_ASSISTANT_WAKE_REASON;
+  return selectedWake.at !== null;
 }
 
 function appendHostedWorkspaceDurableCheckpointEffect(input: {
