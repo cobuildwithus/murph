@@ -261,6 +261,11 @@ export interface HostedWorkspaceRunnerRuntimePassDiagnostics {
   startedAtEpochMs: number;
 }
 
+export interface HostedWorkspaceRunnerDeferredUsageDrain {
+  completion: Promise<void>;
+  start(): Promise<void> | null;
+}
+
 export type HostedWorkspaceRunnerMailboxImportItem = (
   item: HostedMailboxResolvedImportItem,
   context?: HostedWorkspaceRunnerMailboxImportContext,
@@ -276,7 +281,7 @@ export interface HostedWorkspaceRunnerInput {
   initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
-  registerDeferredUsageCompletion?: ((completion: Promise<void>) => void) | null;
+  registerDeferredUsageDrain?: ((drain: HostedWorkspaceRunnerDeferredUsageDrain) => void) | null;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
@@ -555,7 +560,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     );
     return deferredUsageFlushFinished;
   };
-  input.registerDeferredUsageCompletion?.(deferredUsageCompletion);
+  input.registerDeferredUsageDrain?.({
+    completion: deferredUsageCompletion,
+    start: startDeferredUsageFlushOnce,
+  });
   let foregroundConversationWorkObserved = false;
   const foregroundMailboxImportLoop =
     startHostedForegroundConversationMailboxImportLoop({

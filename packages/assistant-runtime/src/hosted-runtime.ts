@@ -118,6 +118,7 @@ import {
   type HostedWorkspaceDurableCheckpointEffect,
   type HostedWorkspaceDurableCheckpointEffectResult,
   type HostedWorkspaceRunnerHandledDeviceSyncWake,
+  type HostedWorkspaceRunnerDeferredUsageDrain,
   type HostedWorkspaceRunnerMailboxImportContext,
   type HostedWorkspaceRunnerInput,
   type HostedWorkspaceRunnerResult,
@@ -795,7 +796,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
   const phaseLogger = createHostedRuntimePhaseLogger();
   const emitPhaseLog = phaseLogger.emit;
-  const pendingDeferredUsageCompletions = new Set<Promise<void>>();
+  const pendingDeferredUsageDrains = new Set<HostedWorkspaceRunnerDeferredUsageDrain>();
   const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
   const trackCompletion = (
     pendingCompletions: Set<Promise<void>>,
@@ -810,18 +811,30 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       pendingCompletions.delete(completion);
     });
   };
-  const registerDeferredUsageCompletion = (completion: Promise<void> | null): void => {
-    trackCompletion(pendingDeferredUsageCompletions, completion);
-    trackHostedRuntimeDeferredUsageCompletion(completion);
+  const trackDeferredUsageDrain = (
+    pendingDrains: Set<HostedWorkspaceRunnerDeferredUsageDrain>,
+    drain: HostedWorkspaceRunnerDeferredUsageDrain | null,
+  ): void => {
+    if (drain === null) {
+      return;
+    }
+
+    pendingDrains.add(drain);
+    void drain.completion.finally(() => {
+      pendingDrains.delete(drain);
+    });
+  };
+  const registerDeferredUsageDrain = (
+    drain: HostedWorkspaceRunnerDeferredUsageDrain | null,
+  ): void => {
+    trackDeferredUsageDrain(pendingDeferredUsageDrains, drain);
+    trackHostedRuntimeDeferredUsageDrain(drain);
   };
   const trackMailboxPostCheckpointEffects = (completion: Promise<void> | null): void => {
     trackCompletion(pendingMailboxPostCheckpointEffectCompletions, completion);
   };
-  const drainDeferredUsageCompletionsBestEffort = async (): Promise<void> => {
-    const pendingCompletions = [...pendingDeferredUsageCompletions];
-    if (pendingCompletions.length > 0) {
-      await Promise.allSettled(pendingCompletions);
-    }
+  const drainDeferredUsageBestEffort = async (): Promise<void> => {
+    await drainDeferredUsageDrainsBestEffort([...pendingDeferredUsageDrains]);
   };
 
   try {
@@ -1034,7 +1047,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
-      registerDeferredUsageCompletion,
+      registerDeferredUsageDrain,
       platform: runnerPlatform,
       requestId,
       runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -1401,6 +1414,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             signal: runtimeAbortController.signal,
           },
           async () => {
+            // The bridge token is intentionally invocation-scoped. Codex does
+            // not expose a per-turn shell env override for resumed threads, so
+            // rotating this child env is the simple stale-shell rejection boundary.
             const invocationRuntimeEnv = {
               ...runtimeEnv,
               ...hostedCliBridge.env,
@@ -2180,7 +2196,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "fail",
     });
     if (!hostAbortObserved || error !== hostAbortReason) {
-      await drainDeferredUsageCompletionsBestEffort();
+      await drainDeferredUsageBestEffort();
     }
     throw error;
   } finally {
@@ -2499,7 +2515,8 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
 const DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const DEFAULT_HOSTED_FOREGROUND_MAILBOX_IMPORT_LIMIT = 10;
 const HOSTED_RUNTIME_MAX_TIMER_DELAY_MS = 2_147_483_647;
-const pendingHostedRuntimeDeferredUsageCompletions = new Set<Promise<void>>();
+const pendingHostedRuntimeDeferredUsageDrains =
+  new Set<HostedWorkspaceRunnerDeferredUsageDrain>();
 
 type HostedRuntimeDirtyWaitResult =
   | { kind: "external_wake"; notification: RuntimeWakeNotification }
@@ -2522,28 +2539,53 @@ function consumePendingHostedRuntimeWake(
   );
 }
 
-function trackHostedRuntimeDeferredUsageCompletion(completion: Promise<void> | null): void {
-  if (completion === null) {
+function trackHostedRuntimeDeferredUsageDrain(
+  drain: HostedWorkspaceRunnerDeferredUsageDrain | null,
+): void {
+  if (drain === null) {
     return;
   }
 
-  pendingHostedRuntimeDeferredUsageCompletions.add(completion);
-  void completion.finally(() => {
-    pendingHostedRuntimeDeferredUsageCompletions.delete(completion);
+  pendingHostedRuntimeDeferredUsageDrains.add(drain);
+  void drain.completion.finally(() => {
+    pendingHostedRuntimeDeferredUsageDrains.delete(drain);
   });
+}
+
+async function drainDeferredUsageDrainsBestEffort(
+  drains: readonly HostedWorkspaceRunnerDeferredUsageDrain[],
+): Promise<void> {
+  if (drains.length === 0) {
+    return;
+  }
+
+  const completions: Promise<void>[] = [];
+  for (const drain of drains) {
+    try {
+      const started = drain.start();
+      if (started) {
+        completions.push(started);
+      }
+    } catch {
+      // Best-effort fatal drain: still await the registered completion below.
+    }
+    completions.push(drain.completion);
+  }
+
+  await Promise.allSettled(completions);
 }
 
 export async function drainHostedRuntimeDeferredUsageCompletionsBestEffort(input: {
   timeoutMs?: number | null;
 } = {}): Promise<void> {
-  const pendingCompletions = [
-    ...pendingHostedRuntimeDeferredUsageCompletions,
+  const pendingDrains = [
+    ...pendingHostedRuntimeDeferredUsageDrains,
   ];
-  if (pendingCompletions.length === 0) {
+  if (pendingDrains.length === 0) {
     return;
   }
 
-  const finished = Promise.allSettled(pendingCompletions).then(() => undefined);
+  const finished = drainDeferredUsageDrainsBestEffort(pendingDrains);
   const timeoutMs = input.timeoutMs ?? null;
   if (timeoutMs === null) {
     await finished;

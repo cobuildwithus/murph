@@ -5548,15 +5548,10 @@ describe("hosted workspace runtime entrypoint", () => {
       void drainPromise.finally(() => {
         drainSettled = true;
       }).catch(() => undefined);
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      assert.equal(drainSettled, false);
-      assert.equal(events.includes("usage.record:start"), false);
-
-      assistantPhaseCanFinish.resolve();
       await withRealTimeout(
         usageRecordStarted.promise,
         1_000,
-        () => "Deferred usage recording did not start after the blocked phase finished.",
+        () => "Shutdown deferred usage drain did not start captured usage recording.",
       );
       assert.equal(drainSettled, false);
 
@@ -5572,6 +5567,7 @@ describe("hosted workspace runtime entrypoint", () => {
         () => "Shutdown deferred usage drain did not settle after usage finished.",
       );
       assert.equal(drainSettled, true);
+      assistantPhaseCanFinish.resolve();
     } finally {
       assistantPhaseCanFinish.resolve();
       releaseUsageRecord.resolve();
