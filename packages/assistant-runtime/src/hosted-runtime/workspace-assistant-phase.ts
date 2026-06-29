@@ -3209,17 +3209,18 @@ async function drainHostedPostCheckpointDelivery(input: {
   const postSystemMailboxWakeAt = await resolveHostedSystemMailboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
-  const postBaseNextWake = resolveHostedPostDeliveryBaseNextWake({
-    drainInput: input,
-    postAssistantCronWakeAvailable: postAssistantCronWake.available,
-  });
-  const postNextWake = selectHostedRuntimeWakeCandidate([
+  const postBaseNextWake = resolveHostedPostDeliveryBaseNextWake(input);
+  const selectedPostNextWake = selectHostedRuntimeWakeCandidate([
     postBaseNextWake,
     postAssistantCronWakeCandidate,
     createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(providerCleanupNextWakeAt, "assistant"),
   ]);
+  const postNextWake = normalizeHostedPostDeliveryCheckpointWake({
+    input: input.input,
+    wake: selectedPostNextWake,
+  });
   const postNextWakeAt = postNextWake.at;
   if (input.assistantDeliveryEffects.length > 0) {
     await writeHostedOutboxDeliveryRuntimeLog({
@@ -3260,13 +3261,12 @@ async function drainHostedPostCheckpointDelivery(input: {
   };
 }
 
-const HOSTED_POST_DELIVERY_BASE_ASSISTANT_WAKE_MIN_RUNWAY_MS = 10_000;
+const HOSTED_POST_DELIVERY_ASSISTANT_WAKE_MIN_RUNWAY_MS = 10_000;
 
-function resolveHostedPostDeliveryBaseNextWake(input: {
-  drainInput: Parameters<typeof drainHostedPostCheckpointDelivery>[0];
-  postAssistantCronWakeAvailable: boolean;
-}): HostedRuntimeWakeCandidate | null {
-  const baseNextWake = input.drainInput.baseNextWake;
+function resolveHostedPostDeliveryBaseNextWake(
+  input: Parameters<typeof drainHostedPostCheckpointDelivery>[0],
+): HostedRuntimeWakeCandidate | null {
+  const baseNextWake = input.baseNextWake;
   if (!baseNextWake.at) {
     return null;
   }
@@ -3277,53 +3277,41 @@ function resolveHostedPostDeliveryBaseNextWake(input: {
     return baseNextWake;
   }
 
-  const phaseInput = input.drainInput.input;
-  const nowMs = resolveHostedAssistantPhaseNowMs(phaseInput);
-  const nextWakeAt = normalizeHostedFutureWakeAt(baseNextWake.at, nowMs);
-  if (!nextWakeAt) {
-    return null;
-  }
-  if (
-    input.postAssistantCronWakeAvailable
-    && isNearDueWorkspaceAssistantWakeEcho({
-      nextWakeAt,
-      nowMs,
-      phaseInput,
-    })
-  ) {
-    return null;
-  }
-
   return createHostedRuntimeWakeCandidate(
-    nextWakeAt,
+    normalizeHostedFutureWakeAt(
+      baseNextWake.at,
+      resolveHostedAssistantPhaseNowMs(input.input),
+    ),
     baseNextWake.reason ?? HOSTED_ASSISTANT_WAKE_REASON,
   );
 }
 
-function isNearDueWorkspaceAssistantWakeEcho(input: {
-  nextWakeAt: string;
-  nowMs: number;
-  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
-}): boolean {
-  const workspaceWakeAt = input.phaseInput.workspace?.nextWakeAt ?? null;
-  if (!workspaceWakeAt) {
-    return false;
+function normalizeHostedPostDeliveryCheckpointWake(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  wake: HostedRuntimeWakeCandidate;
+}): HostedRuntimeWakeCandidate {
+  if (!input.wake.at) {
+    return input.wake;
   }
-  const workspaceWakeReason = input.phaseInput.workspace?.nextWakeReason ?? null;
   if (
-    workspaceWakeReason !== null
-    && workspaceWakeReason !== HOSTED_ASSISTANT_WAKE_REASON
+    input.wake.reason !== null
+    && input.wake.reason !== HOSTED_ASSISTANT_WAKE_REASON
   ) {
-    return false;
+    return input.wake;
   }
 
-  const workspaceWakeMs = Date.parse(workspaceWakeAt);
-  const nextWakeMs = Date.parse(input.nextWakeAt);
-  return Number.isFinite(workspaceWakeMs)
-    && Number.isFinite(nextWakeMs)
-    && workspaceWakeMs === nextWakeMs
-    && nextWakeMs - input.nowMs
-      <= HOSTED_POST_DELIVERY_BASE_ASSISTANT_WAKE_MIN_RUNWAY_MS;
+  const wakeMs = Date.parse(input.wake.at);
+  if (!Number.isFinite(wakeMs)) {
+    return input.wake;
+  }
+
+  const minWakeMs = resolveHostedAssistantPhaseNowMs(input.input)
+    + HOSTED_POST_DELIVERY_ASSISTANT_WAKE_MIN_RUNWAY_MS;
+  const nextWakeMs = Math.max(wakeMs, minWakeMs);
+  return createHostedRuntimeWakeCandidate(
+    new Date(nextWakeMs).toISOString(),
+    input.wake.reason ?? HOSTED_ASSISTANT_WAKE_REASON,
+  );
 }
 
 function isHostedAssistantDeliveryOutcomeTerminalized(

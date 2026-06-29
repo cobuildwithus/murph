@@ -4084,8 +4084,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("re-arms a due assistant cron wake found after clean fast dispatch", async () => {
+  it("re-arms a due assistant cron wake found after clean fast dispatch with checkpoint runway", async () => {
     const dueAt = "2026-05-08T16:00:00.000Z";
+    const checkpointSafeWakeAt = "2026-05-08T16:00:10.000Z";
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationProgressed: true,
       deviceSyncProcessed: 0,
@@ -4134,12 +4135,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(1);
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
-      nextWakeAt: dueAt,
+      nextWakeAt: checkpointSafeWakeAt,
       progressed: true,
       redactedStatus: expect.objectContaining({
-        hostedAssistantNextWakeAt: dueAt,
+        hostedAssistantNextWakeAt: checkpointSafeWakeAt,
         hostedOutboxDeliverySent: 1,
-        nextWakeAt: dueAt,
+        nextWakeAt: checkpointSafeWakeAt,
       }),
     }));
   });
@@ -4206,8 +4207,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("drops a near-due workspace assistant wake echo after clean fast dispatch", async () => {
+  it("re-arms a near-due workspace assistant wake echo after clean fast dispatch", async () => {
     const assistantNextWakeAt = "2026-05-08T16:00:00.000Z";
+    const checkpointSafeWakeAt = "2026-05-08T16:00:05.000Z";
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationProgressed: true,
       deviceSyncProcessed: 0,
@@ -4259,12 +4261,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
-      nextWakeAt: null,
+      nextWakeAt: checkpointSafeWakeAt,
       progressed: true,
       redactedStatus: expect.objectContaining({
-        hostedAssistantNextWakeAt: null,
+        hostedAssistantNextWakeAt: checkpointSafeWakeAt,
         hostedOutboxDeliverySent: 1,
-        nextWakeAt: null,
+        nextWakeAt: checkpointSafeWakeAt,
       }),
     }));
   });
@@ -6179,7 +6181,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
-      nextWakeAt: "2026-04-27T00:09:00.000Z",
+      nextWakeAt: "2026-04-27T00:09:10.000Z",
       progressed: true,
     }));
   });
@@ -6255,7 +6257,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
-      nextWakeAt: "2026-04-27T00:09:00.000Z",
+      nextWakeAt: "2026-04-27T00:09:10.000Z",
       progressed: true,
     }));
   });
