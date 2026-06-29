@@ -1,16 +1,14 @@
 import {
   parseHostedComputerActRequest,
   parseHostedComputerFinishRunRequest,
-  parseHostedComputerObserveRequest,
+  parseHostedComputerOpenRunRequest,
   parseHostedComputerOsControlRequest,
   parseHostedComputerPauseForUserRequest,
-  parseHostedComputerStartRunRequest,
   type HostedComputerActRequest,
   type HostedComputerFinishRunRequest,
-  type HostedComputerObserveRequest,
+  type HostedComputerOpenRunRequest,
   type HostedComputerOsControlRequest,
   type HostedComputerPauseForUserRequest,
-  type HostedComputerStartRunRequest,
 } from "@murphai/hosted-execution/computer-use";
 
 import { requireHostedCloudflareCallbackRequest } from "../hosted-execution/cloudflare-callback-auth";
@@ -26,16 +24,10 @@ const COMPUTER_USE_INTERNAL_BODY_LIMIT_BYTES = 256 * 1024;
 
 export { jsonOk, resolveDecodedRouteParam, withJsonError };
 
-export async function readSignedComputerStartRunRequest(
+export async function readSignedComputerOpenRunRequest(
   request: Request,
-): Promise<{ body: HostedComputerStartRunRequest; memberId: string }> {
-  return readSignedComputerJson(request, parseHostedComputerStartRunRequest);
-}
-
-export async function readSignedComputerObserveRequest(
-  request: Request,
-): Promise<{ body: HostedComputerObserveRequest; memberId: string }> {
-  return readSignedComputerJson(request, parseHostedComputerObserveRequest);
+): Promise<{ body: HostedComputerOpenRunRequest; memberId: string }> {
+  return readSignedComputerJson(request, parseHostedComputerOpenRunRequest);
 }
 
 export async function readSignedComputerActRequest(

@@ -1145,7 +1145,7 @@ async function lockMemberComputerUseAvailable(
 function staleRunStateConflictError(): Error {
   return computerUseConflictError({
     code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
-    message: "Computer run state changed; observe the run before retrying.",
+    message: "Computer run state changed; open the browser before retrying.",
     retryable: true,
   });
 }

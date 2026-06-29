@@ -222,7 +222,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       name !== "murph.send_progress_update"
     );
     expect(allToolNames).toContain("murph.react_to_message");
-    expect(allToolNames).toContain("murph.computer_start_run");
+    expect(allToolNames).toContain("murph.computer_open");
     expect(allToolNames).toContain("murph.connected_apps_manage");
     expect(allToolNames).toContain("murph.create_phone_call");
     expect(allToolNames).toContain("murph.send_progress_update");

@@ -38,8 +38,8 @@ import {
   isHostedComputerWebControlRequest,
   parseHostedComputerActRequest,
   parseHostedComputerFinishRunRequest,
+  parseHostedComputerOpenRunRequest,
   parseHostedComputerPauseForUserRequest,
-  parseHostedComputerStartRunRequest,
   readHostedComputerRunOperationRoute,
 } from "../src/computer-use.ts";
 import type {
@@ -690,31 +690,38 @@ describe("hosted execution coverage gaps", () => {
       method: "GET",
       path: pausePath,
     })).toBe(false);
+    expect(readHostedComputerRunOperationRoute(
+      "/api/internal/computer/runs/run_abc123/observe",
+    )).toBe(null);
+    expect(isHostedComputerWebControlRequest({
+      method: "POST",
+      path: "/api/internal/computer/runs/run_abc123/observe",
+    })).toBe(false);
 
-    expect(() => parseHostedComputerStartRunRequest({
+    expect(() => parseHostedComputerOpenRunRequest({
       profileKey: "appointments",
       startUrl: "https://example.test/start",
     })).toThrow(TypeError);
-    expect(() => parseHostedComputerStartRunRequest({
+    expect(() => parseHostedComputerOpenRunRequest({
       legacyProfileKey: "appointments",
       startUrl: "https://example.test/start",
     })).toThrow(TypeError);
-    expect(() => parseHostedComputerStartRunRequest({
+    expect(() => parseHostedComputerOpenRunRequest({
       memberScopedProfileRequired: true,
       startUrl: "https://example.test/start",
     })).toThrow(TypeError);
-    expect(() => parseHostedComputerStartRunRequest({
+    expect(() => parseHostedComputerOpenRunRequest({
       resumeRunId: "hcr_paused_run",
       startUrl: "https://example.test/start",
     })).toThrow(TypeError);
-    expect(parseHostedComputerStartRunRequest({
+    expect(parseHostedComputerOpenRunRequest({
       goal: "Runner goal.",
     })).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
       startUrl: null,
     });
-    expect(parseHostedComputerStartRunRequest({
+    expect(parseHostedComputerOpenRunRequest({
     })).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
@@ -740,14 +747,14 @@ describe("hosted execution coverage gaps", () => {
       code: "const buttons = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); await buttons.last().click(); return { count: await buttons.count() };",
       timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
     });
-    expect(parseHostedComputerStartRunRequest({
+    expect(parseHostedComputerOpenRunRequest({
       startUrl: "about:blank",
     })).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
       startUrl: "about:blank",
     });
-    expect(parseHostedComputerStartRunRequest({
+    expect(parseHostedComputerOpenRunRequest({
       startUrl: "http://127.0.0.1:3000",
     })).toEqual({
       resumeAfterMailboxItemId: null,

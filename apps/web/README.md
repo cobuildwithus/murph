@@ -144,10 +144,11 @@ The hosted Prisma schema keeps ownership sharp and nested:
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;
   `apps/web` owns Kernel lifecycle and encrypted browser capabilities. Awaiting
-  runs resume when normal `computer_start_run` selects the member's active
-  awaiting run and `apps/web` verifies a newer hosted `conversation.message`
-  mailbox item for the same member and delivery context; model-supplied run ids
-  or confirmation text are not proof.
+  runs open through `computer_open`, which creates, reuses, resumes, or safely
+  reclaims completed or stale-checkpointed active runs and returns current page
+  state. `apps/web` verifies newer
+  hosted `conversation.message` mailbox items and delivery context when reply
+  proof is required; model-supplied run ids or confirmation text are not proof.
   `computer_act` runs bounded raw Playwright code against the current Kernel
   page, and `computer_os_control` is a bounded mouse/keyboard fallback for page
   surfaces that cannot be operated through Playwright. The agent explicitly
@@ -657,8 +658,8 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `GET /api/internal/hosted-workspace`
 - `POST /api/internal/hosted-workspace/checkpoint`
 - `POST /api/internal/computer/runs`
-- `POST /api/internal/computer/runs/:runId/observe`
 - `POST /api/internal/computer/runs/:runId/act`
+- `POST /api/internal/computer/runs/:runId/os-control`
 - `POST /api/internal/computer/runs/:runId/pause-for-user`
 - `POST /api/internal/computer/runs/:runId/finish`
 - `GET /api/internal/hosted-onboarding/stripe/cron`

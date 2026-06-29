@@ -17,10 +17,9 @@ import { shortHash } from "./ids";
 type HostedComputerToolOperation =
   | "act"
   | "finish"
-  | "observe"
+  | "open"
   | "os-control"
-  | "pause-for-user"
-  | "start-run";
+  | "pause-for-user";
 type HostedComputerToolAction =
   | HostedComputerActRequest
   | HostedComputerOsControlRequest;

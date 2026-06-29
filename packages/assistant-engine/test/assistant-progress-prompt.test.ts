@@ -32,7 +32,7 @@ describe('assistant progress prompt contract', () => {
       'Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage',
     )
     expect(prompt).toContain(
-      'never send progress updates for individual tool loops, searches, reads, observes, clicks, or status churn',
+      'never send progress updates for individual tool loops, searches, reads, page checks, clicks, or status churn',
     )
     expect(prompt).toContain(
       'Keep the text to one or two short conversational sentences, specific to the immediate next step',
@@ -65,7 +65,7 @@ describe('assistant progress prompt contract', () => {
       'Use as the first assistant action',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'Do not use for individual tool loops, searches, reads, observes, clicks, status churn',
+      'Do not use for individual tool loops, searches, reads, page checks, clicks, status churn',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'PDFs, lab reports, images, screenshots, CSVs',
