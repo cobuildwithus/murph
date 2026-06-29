@@ -48,6 +48,14 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 type AttachRunBrowserInput = Parameters<ComputerUseStore["attachRunBrowser"]>[0];
 type ReplaceRunBrowserInput = Parameters<ComputerUseStore["replaceRunBrowser"]>[0];
 type AmbiguousBrowserWriteReplayResult = ComputerRunRecord | "unknown" | null;
+type AwaitingOpenResumeAuthority = {
+  expectedHandoffStatus: ComputerHandoffRecord["status"] | null;
+  expectedHandoffUpdatedAt: Date | null;
+  expectedKernelSessionId: string;
+  expectedPausedAt: Date;
+  expectedPendingHandoffId: string | null;
+  expireHandoffAfterResume: ComputerHandoffRecord | null;
+};
 
 export interface ComputerRunHandle {
   awaitingReason: HostedComputerAwaitingReason | null;
@@ -192,24 +200,26 @@ export class ComputerUseService {
     await this.store.requireMemberComputerUseAvailable({
       memberId: input.memberId,
     });
-    const handle = await this.startRunWithStore(input, this.store);
+    const handle = await this.acquireRunWithStore(input, this.store);
     const now = this.now();
-    let run = await this.requireFreshRun({
+    const run = await this.requireFreshRun({
       memberId: input.memberId,
       runId: handle.runId,
     });
-    if (run.status === "awaiting_user") {
-      run = await this.reclaimLiveHandoffForOpen({
-        now,
-        run,
-        store: this.store,
-      });
-    }
-    const pageState = await this.readOpenBrowserState({
-      memberId: input.memberId,
-      run,
-      store: this.store,
-    });
+    const pageState = run.status === "awaiting_user"
+      ? await this.readAwaitingOpenBrowserState({
+          memberId: input.memberId,
+          now,
+          resumeAfterMailboxItemId: input.resumeAfterMailboxItemId ?? null,
+          resumeDeliveryContext: input.resumeDeliveryContext ?? null,
+          run,
+          store: this.store,
+        })
+      : await this.readOpenBrowserState({
+          memberId: input.memberId,
+          run,
+          store: this.store,
+        });
 
     return {
       ...pageState,
@@ -222,6 +232,24 @@ export class ComputerUseService {
     memberId: string;
     resumeAfterMailboxItemId?: string | null;
     resumeDeliveryContext?: HostedComputerDeliveryContext | null;
+    startUrl: string | null;
+  }, store: ComputerUseStore): Promise<ComputerRunHandle> {
+    const handle = await this.acquireRunWithStore(input, store);
+    if (handle.status === "awaiting_user" && input.resumeAfterMailboxItemId) {
+      return await this.resumeAwaitingRunById({
+        memberId: input.memberId,
+        now: this.now(),
+        resumeAfterMailboxItemId: input.resumeAfterMailboxItemId,
+        resumeDeliveryContext: input.resumeDeliveryContext ?? null,
+        runId: handle.runId,
+        store,
+      });
+    }
+    return handle;
+  }
+
+  private async acquireRunWithStore(input: {
+    memberId: string;
     startUrl: string | null;
   }, store: ComputerUseStore): Promise<ComputerRunHandle> {
     const now = this.now();
@@ -247,18 +275,8 @@ export class ComputerUseService {
           now,
         });
         if (!activeRun) {
-          return await this.startRunWithStore(input, store);
+          return await this.acquireRunWithStore(input, store);
         }
-      }
-      if (activeRun.status === "awaiting_user" && input.resumeAfterMailboxItemId) {
-        return await this.resumeAwaitingRunById({
-          memberId: input.memberId,
-          now,
-          resumeAfterMailboxItemId: input.resumeAfterMailboxItemId,
-          resumeDeliveryContext: input.resumeDeliveryContext ?? null,
-          runId: activeRun.id,
-          store,
-        });
       }
       return runHandle(activeRun, true);
     }
@@ -298,7 +316,7 @@ export class ComputerUseService {
             store,
           });
           if (recovery !== "busy") {
-            return await this.startRunWithStore(input, store);
+            return await this.acquireRunWithStore(input, store);
           }
           throw browserProvisioningInProgressError();
         }
@@ -1789,26 +1807,127 @@ export class ComputerUseService {
     });
   }
 
-  private async reclaimLiveHandoffForOpen(input: {
+  private async readAwaitingOpenBrowserState(input: {
+    memberId: string;
     now: Date;
+    resumeAfterMailboxItemId: string | null;
+    resumeDeliveryContext: HostedComputerDeliveryContext | null;
     run: ComputerRunRecord;
     store: ComputerUseStore;
-  }): Promise<ComputerRunRecord> {
+  }): Promise<ComputerPageStateResult> {
+    const authority = await this.resolveAwaitingOpenResumeAuthority(input);
+    if (!authority) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_AWAITING_USER",
+        message: "Computer run is waiting for the user.",
+        retryable: true,
+      });
+    }
+
+    const state = await this.readBrowserState(input.run);
+    const resumed = await input.store.markRunRunning({
+      awaitingReason: input.run.awaitingReason,
+      expectedHandoffStatus: authority.expectedHandoffStatus,
+      expectedHandoffUpdatedAt: authority.expectedHandoffUpdatedAt,
+      expectedKernelSessionId: authority.expectedKernelSessionId,
+      expectedPausedAt: authority.expectedPausedAt,
+      expectedPendingHandoffId: authority.expectedPendingHandoffId,
+      now: input.now,
+      runId: input.run.id,
+    });
+    if (authority.expireHandoffAfterResume) {
+      await input.store.markHandoffExpired({
+        expectedStatus: authority.expireHandoffAfterResume.status === "checkpointing"
+          ? "checkpointing"
+          : "open",
+        expectedUpdatedAt: authority.expireHandoffAfterResume.updatedAt,
+        handoffId: authority.expireHandoffAfterResume.id,
+        now: input.now,
+      }).catch(() => {
+        // The run is no longer awaiting this stale or retired handoff.
+      });
+    }
+    const sanitizedUrl = sanitizeComputerDisplayUrl(state.url);
+    await input.store.updateRunBrowserState({
+      expectedKernelSessionId: resumed.kernelSessionId,
+      lastTitle: state.title,
+      lastUrl: sanitizedUrl,
+      runId: resumed.id,
+    });
+
+    return {
+      runId: resumed.id,
+      status: "running",
+      title: state.title,
+      url: sanitizedUrl,
+      visibleText: state.visibleText,
+    };
+  }
+
+  private async resolveAwaitingOpenResumeAuthority(input: {
+    memberId: string;
+    now: Date;
+    resumeAfterMailboxItemId: string | null;
+    resumeDeliveryContext: HostedComputerDeliveryContext | null;
+    run: ComputerRunRecord;
+    store: ComputerUseStore;
+  }): Promise<AwaitingOpenResumeAuthority | null> {
     if (
       input.run.status !== "awaiting_user" ||
       !input.run.pausedAt ||
-      !input.run.pendingHandoffId ||
       !input.run.kernelSessionId
     ) {
-      return input.run;
+      return null;
+    }
+    const pausedAt = input.run.pausedAt;
+    const expectedKernelSessionId = input.run.kernelSessionId;
+    const pendingHandoffId = input.run.pendingHandoffId;
+    const validateResumeProof = async (): Promise<boolean> => {
+      if (!input.resumeAfterMailboxItemId) {
+        return false;
+      }
+      await this.requireResumeMailboxItemAfterPause({
+        memberId: input.memberId,
+        pausedAt,
+        resumeAfterMailboxItemId: input.resumeAfterMailboxItemId,
+        resumeDeliveryContext: input.resumeDeliveryContext,
+        runCheckpointContext: input.run.checkpointContext,
+        store: input.store,
+      });
+      return true;
+    };
+
+    if (!pendingHandoffId) {
+      if (!await validateResumeProof()) {
+        return null;
+      }
+      return {
+        expectedHandoffStatus: null,
+        expectedHandoffUpdatedAt: null,
+        expectedKernelSessionId,
+        expectedPausedAt: pausedAt,
+        expectedPendingHandoffId: null,
+        expireHandoffAfterResume: null,
+      };
     }
 
-    let handoff = await input.store.findHandoffByRun({
-      handoffId: input.run.pendingHandoffId,
+    const handoff = await input.store.findHandoffByRun({
+      handoffId: pendingHandoffId,
       runId: input.run.id,
     });
     if (!handoff) {
-      return input.run;
+      return null;
+    }
+
+    if (handoff.status === "completed") {
+      return {
+        expectedHandoffStatus: handoff.status,
+        expectedHandoffUpdatedAt: handoff.updatedAt,
+        expectedKernelSessionId,
+        expectedPausedAt: pausedAt,
+        expectedPendingHandoffId: pendingHandoffId,
+        expireHandoffAfterResume: null,
+      };
     }
 
     if (
@@ -1818,28 +1937,35 @@ export class ComputerUseService {
       throw handoffCheckpointingError();
     }
 
-    if (handoff.status === "open" || handoff.status === "expired") {
-      return input.run;
-    }
-
     if (handoff.status === "checkpointing") {
-      handoff = await input.store.markHandoffExpired({
-        expectedStatus: handoff.status,
-        expectedUpdatedAt: handoff.updatedAt,
-        handoffId: handoff.id,
-        now: input.now,
-      });
+      if (!await validateResumeProof()) {
+        return null;
+      }
+      return {
+        expectedHandoffStatus: handoff.status,
+        expectedHandoffUpdatedAt: handoff.updatedAt,
+        expectedKernelSessionId,
+        expectedPausedAt: pausedAt,
+        expectedPendingHandoffId: pendingHandoffId,
+        expireHandoffAfterResume: handoff,
+      };
     }
 
-    return await input.store.markRunRunning({
-      awaitingReason: input.run.awaitingReason,
-      expectedHandoffStatus: handoff.status,
-      expectedHandoffUpdatedAt: handoff.updatedAt,
-      expectedPausedAt: input.run.pausedAt,
-      expectedPendingHandoffId: input.run.pendingHandoffId,
-      now: input.now,
-      runId: input.run.id,
-    });
+    if (isRetiredStaticPreviewHandoff(handoff)) {
+      if (!await validateResumeProof()) {
+        return null;
+      }
+      return {
+        expectedHandoffStatus: handoff.status,
+        expectedHandoffUpdatedAt: handoff.updatedAt,
+        expectedKernelSessionId,
+        expectedPausedAt: pausedAt,
+        expectedPendingHandoffId: pendingHandoffId,
+        expireHandoffAfterResume: handoff.status === "open" ? handoff : null,
+      };
+    }
+
+    return null;
   }
 
   private async requireFreshRun(input: {
@@ -2149,6 +2275,7 @@ export class ComputerUseService {
         }
         const resumed = await store.markRunRunning({
           awaitingReason: run.awaitingReason,
+          expectedKernelSessionId: requireKernelSessionId(restored),
           expectedPausedAt: pausedAt,
           expectedPendingHandoffId: run.pendingHandoffId,
           now: input.now,
@@ -2245,6 +2372,7 @@ export class ComputerUseService {
       awaitingReason: run.awaitingReason,
       expectedHandoffStatus: retiredStaticPreviewHandoff?.status ?? null,
       expectedHandoffUpdatedAt: retiredStaticPreviewHandoff?.updatedAt ?? null,
+      expectedKernelSessionId: requireKernelSessionId(run),
       expectedPausedAt: pausedAt,
       expectedPendingHandoffId: run.pendingHandoffId,
       now: input.now,
