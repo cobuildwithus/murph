@@ -70,6 +70,9 @@ The helper:
 - uses normal Linq webhook `auto` mode with a worktree-local registration cache
   and tunnel config path, so an active worktree can reuse the shared local
   tunnel identity when live webhook config is present
+- on `worktree up`, if the worktree-local Linq tunnel config is missing, copies
+  the shared `.tmp/cloudflared-linq-webhook.yml` from another git worktree when
+  available and rewrites its local web `service:` port to this worktree
 - keeps generated local crypto state paired with the slug-specific database
 
 Companion commands:
@@ -196,7 +199,10 @@ Use one of these:
 - Reuse the normal local Linq tunnel identity by setting
   `MURPH_DEV_LINQ_WEBHOOK_TUNNEL=auto` or `required`. The helper keeps the
   registration cache and default tunnel config path under the worktree's
-  `.tmp/hosted-local-worktrees/<slug>/` directory.
+  `.tmp/hosted-local-worktrees/<slug>/` directory. During `worktree up`, it can
+  seed that worktree-local config from an existing shared
+  `.tmp/cloudflared-linq-webhook.yml` in another git worktree and repoint the
+  local web service to this worktree's web port.
 - Set `MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL` to an HTTPS tunnel origin or full
   `/api/hosted-onboarding/linq/webhook` URL when an external tunnel process is
   already routing that public URL to this worktree.
