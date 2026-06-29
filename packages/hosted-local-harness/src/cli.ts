@@ -79,6 +79,7 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
     acquireHostedLocalWorktreeLock,
     ensureHostedLocalWorktreeDatabase,
     formatHostedLocalWorktreeEnv,
+    prepareHostedLocalWorktreeLinqTunnelConfig,
     removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing,
     resolveHostedLocalWorktreeConfig,
   } = await import("./dev-hosted-local/worktree.ts");
@@ -129,6 +130,7 @@ async function runWorktree(args: readonly string[], io: HostedLocalCliIo): Promi
           await lock.recordDatabaseCreated();
           databaseCreationRecorded = true;
         }
+        await prepareHostedLocalWorktreeLinqTunnelConfig(config);
         await runUp(["--profile", config.profileName], {
           ...io,
           env: config.env,

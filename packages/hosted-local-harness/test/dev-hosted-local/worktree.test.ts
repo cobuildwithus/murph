@@ -8,6 +8,12 @@ type SpawnSyncResult = {
   stdout?: string;
 };
 
+type SpawnSyncMock = (
+  command: string,
+  args?: readonly string[],
+  options?: unknown,
+) => SpawnSyncResult;
+
 const worktreeMocks = vi.hoisted(() => ({
   mkdir: vi.fn(async () => {}),
   readFile: vi.fn(async () => {
@@ -16,7 +22,7 @@ const worktreeMocks = vi.hoisted(() => ({
     throw error;
   }),
   rm: vi.fn(async () => {}),
-  spawnSync: vi.fn<() => SpawnSyncResult>(() => ({
+  spawnSync: vi.fn<SpawnSyncMock>(() => ({
     status: 0,
     stderr: "",
     stdout: "",
@@ -40,6 +46,7 @@ import {
   buildHostedLocalWorktreeConfig,
   ensureHostedLocalWorktreeDatabase,
   formatHostedLocalWorktreeEnv,
+  prepareHostedLocalWorktreeLinqTunnelConfig,
   removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing,
   resolveHostedLocalWorktreeConfig,
   resolveHostedLocalWorktreeBuildId,
@@ -161,10 +168,10 @@ describe("hosted-local worktree config", () => {
         ".tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars",
       MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
         ".tmp/hosted-local-worktrees/feature-a/linq-webhook-registration.json",
-      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "auto",
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
         ".tmp/hosted-local-worktrees/feature-a/cloudflared-linq-webhook.yml",
-      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "0",
       DEVICE_SYNC_PUBLIC_BASE_URL: "http://localhost:3101/api/device-sync",
       HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS:
         "http://localhost:3101,http://127.0.0.1:3101",
@@ -187,8 +194,8 @@ describe("hosted-local worktree config", () => {
     expect(rendered).toContain("export MURPH_HOSTED_LOCAL_PROFILE='dev'");
     expect(rendered).toContain("export MURPH_DEV_WORKTREE_SCOPE='feature-a'");
     expect(rendered).toContain("export MURPH_DEV_DATABASE_URL='[redacted]'");
-    expect(rendered).toContain("export MURPH_DEV_LINQ_WEBHOOK_TUNNEL='0'");
-    expect(rendered).toContain("export MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER='1'");
+    expect(rendered).toContain("export MURPH_DEV_LINQ_WEBHOOK_TUNNEL='auto'");
+    expect(rendered).toContain("export MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER='0'");
     expect(rendered).toContain("export MURPH_DEV_SKIP_STRIPE_LISTEN='1'");
     expect(rendered).toContain("export MURPH_DEV_WEB_HOST='localhost'");
     expect(rendered).toContain("export MURPH_DEV_WEB_PORT='3101'");
@@ -322,17 +329,44 @@ describe("hosted-local worktree config", () => {
     expect(profiled.env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED).toBe("0");
   });
 
-  it("rejects live Linq tunnel opt-in without a dedicated worktree tunnel", () => {
-    expect(() =>
-      buildHostedLocalWorktreeConfig({
-        env: {
-          MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "1",
-          MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME: "dev",
-        },
-        ports,
-        slug: "feature-a",
-      })
-    ).toThrow("live Linq tunnel delivery requires");
+  it("honors an explicit Linq tunnel disable for worktree startup", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    expect(config.env).toMatchObject({
+      MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
+        ".tmp/hosted-local-worktrees/feature-a/linq-webhook-registration.json",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
+        ".tmp/hosted-local-worktrees/feature-a/cloudflared-linq-webhook.yml",
+      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+    });
+  });
+
+  it("allows shared live Linq tunnel opt-in for the active worktree", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "1",
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME: "dev",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    expect(config.env).toMatchObject({
+      MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
+        ".tmp/hosted-local-worktrees/feature-a/linq-webhook-registration.json",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "1",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
+        ".tmp/hosted-local-worktrees/feature-a/cloudflared-linq-webhook.yml",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME: "dev",
+      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "0",
+    });
   });
 
   it("allows explicit live Linq opt-in with a dedicated worktree tunnel", () => {
@@ -358,6 +392,28 @@ describe("hosted-local worktree config", () => {
     });
   });
 
+  it("can start a shared Linq tunnel while skipping registration", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "required",
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME: "dev",
+        MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    expect(config.env).toMatchObject({
+      MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
+        ".tmp/hosted-local-worktrees/feature-a/linq-webhook-registration.json",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "required",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
+        ".tmp/hosted-local-worktrees/feature-a/cloudflared-linq-webhook.yml",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME: "dev",
+      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+    });
+  });
+
   it("uses auto Linq mode for explicit public URL registration without a tunnel", () => {
     const config = buildHostedLocalWorktreeConfig({
       env: {
@@ -376,6 +432,88 @@ describe("hosted-local worktree config", () => {
         ".tmp/hosted-local-worktrees/feature-a/cloudflared-linq-webhook.yml",
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "0",
     });
+  });
+
+  it("derives a worktree Linq tunnel config from another git worktree", async () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {},
+      ports,
+      slug: "feature-a",
+    });
+    worktreeMocks.spawnSync.mockImplementation((command, args) => {
+      if (command === "git" && args?.join(" ") === "worktree list --porcelain -z") {
+        return {
+          status: 0,
+          stderr: "",
+          stdout: [
+            "worktree /current",
+            "HEAD abc",
+            "worktree /shared-root",
+            "HEAD def",
+            "",
+          ].join("\0"),
+        };
+      }
+      return {
+        status: 0,
+        stderr: "",
+        stdout: "",
+      };
+    });
+    worktreeMocks.readFile.mockImplementation(async (filePath) => {
+      const normalized = String(filePath).replaceAll("\\", "/");
+      if (normalized === config.paths.linqWebhookTunnelConfigPath) {
+        const error = new Error("missing") as NodeJS.ErrnoException;
+        error.code = "ENOENT";
+        throw error;
+      }
+      if (normalized === "/shared-root/.tmp/cloudflared-linq-webhook.yml") {
+        return [
+          "tunnel: dev",
+          "ingress:",
+          "  - hostname: linq-webhook-dev.example.test",
+          "    service: http://localhost:3000",
+          "  - service: http_status:404",
+          "",
+        ].join("\n");
+      }
+      const error = new Error("missing") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      throw error;
+    });
+
+    await prepareHostedLocalWorktreeLinqTunnelConfig(config);
+
+    expect(worktreeMocks.writeFile).toHaveBeenCalledTimes(1);
+    const writeCall = worktreeMocks.writeFile.mock.calls[0];
+    expect(writeCall?.[0]).toBe(config.paths.linqWebhookTunnelConfigPath);
+    expect(writeCall?.[1]).toContain("hostname: linq-webhook-dev.example.test");
+    expect(writeCall?.[1]).toContain("service: http://localhost:3101");
+    expect(writeCall?.[1]).not.toContain("service: http://localhost:3000");
+    expect(writeCall?.[2]).toEqual({
+      encoding: "utf8",
+      mode: 0o600,
+    });
+  });
+
+  it("does not overwrite an existing worktree Linq tunnel config", async () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {},
+      ports,
+      slug: "feature-a",
+    });
+    worktreeMocks.readFile.mockImplementation(async (filePath) => {
+      if (String(filePath) === config.paths.linqWebhookTunnelConfigPath) {
+        return "existing";
+      }
+      const error = new Error("missing") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      throw error;
+    });
+
+    await prepareHostedLocalWorktreeLinqTunnelConfig(config);
+
+    expect(worktreeMocks.writeFile).not.toHaveBeenCalled();
   });
 
   it("preserves an existing loopback local database authority while replacing the database name", () => {

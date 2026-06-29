@@ -6,6 +6,7 @@ import path from "node:path";
 import process from "node:process";
 
 import {
+  DEFAULT_LINQ_WEBHOOK_TUNNEL_CONFIG,
   DEFAULT_DATABASE_URL,
   HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
   HOSTED_LOCAL_WORKTREE_ROOT,
@@ -21,6 +22,7 @@ import {
   isHostedLocalTruthyEnvValue,
   parseEnvText,
 } from "./environment.ts";
+import { parseCloudflaredTunnelHostname } from "./linq-webhook-tunnel.ts";
 import type { HostedLocalDevConfig } from "./types.ts";
 
 export interface HostedLocalWorktreeConfig {
@@ -433,6 +435,50 @@ export function formatHostedLocalWorktreeEnv(
   ].join("\n");
 }
 
+export async function prepareHostedLocalWorktreeLinqTunnelConfig(
+  config: HostedLocalWorktreeConfig,
+): Promise<void> {
+  if (!shouldPrepareHostedLocalWorktreeLinqTunnelConfig(config)) {
+    return;
+  }
+
+  try {
+    await readFile(config.paths.linqWebhookTunnelConfigPath, "utf8");
+    return;
+  } catch (error) {
+    if (!(isNodeError(error) && error.code === "ENOENT")) {
+      throw error;
+    }
+  }
+
+  for (const candidate of resolveHostedLocalSharedLinqTunnelConfigCandidates(config)) {
+    let sourceText: string;
+    try {
+      sourceText = await readFile(candidate, "utf8");
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+
+    const rewritten = rewriteHostedLocalWorktreeLinqTunnelConfig(sourceText, config);
+    if (rewritten === null) {
+      continue;
+    }
+
+    await mkdir(path.dirname(config.paths.linqWebhookTunnelConfigPath), {
+      mode: 0o700,
+      recursive: true,
+    });
+    await writeFile(config.paths.linqWebhookTunnelConfigPath, rewritten, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    return;
+  }
+}
+
 export function resolveHostedLocalWorktreeBuildId(slug: string): string {
   return buildHostedRunnerLocalBuildId(`worktree-${normalizeHostedLocalWorktreeSlug(slug)}`);
 }
@@ -683,51 +729,104 @@ function buildHostedLocalWorktreeLinqEnv(input: {
   const tunnelMode = input.baseEnv.MURPH_DEV_LINQ_WEBHOOK_TUNNEL?.trim();
   const skipRegister = input.baseEnv.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER?.trim();
   const publicUrl = input.baseEnv.MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL?.trim();
-  const wantsTunnel = tunnelMode !== undefined
-    && tunnelMode.length > 0
-    && !["0", "false", "no", "off", "disabled"].includes(tunnelMode.toLowerCase());
-  const wantsRegistration = skipRegister !== "1"
-    && (wantsTunnel || Boolean(publicUrl));
-  const resolvedTunnelMode = publicUrl && !tunnelMode ? "auto" : tunnelMode;
-
-  if (!wantsTunnel && !wantsRegistration) {
-    return {
-      MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
-        input.paths.linqWebhookRegistrationCachePath,
-      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
-      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG: input.paths.linqWebhookTunnelConfigPath,
-      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
-    };
-  }
-
   const tunnelConfig = input.baseEnv.MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG?.trim();
-  const tunnelName = input.baseEnv.MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME?.trim();
-  if (wantsTunnel && (!tunnelName || tunnelName === "dev" || !tunnelConfig)) {
-    throw new Error(
-      [
-        "Hosted-local worktree live Linq tunnel delivery requires",
-        "MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME to be non-default and",
-        "MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG to point at a dedicated worktree tunnel config.",
-      ].join(" "),
-    );
-  }
-
-  if (wantsRegistration && !wantsTunnel && !publicUrl) {
-    throw new Error(
-      "Hosted-local worktree live Linq registration requires MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL or a dedicated tunnel.",
-    );
-  }
+  const explicitlyDisabledTunnel = tunnelMode !== undefined
+    && tunnelMode.length > 0
+    && ["0", "false", "no", "off", "disabled"].includes(tunnelMode.toLowerCase());
+  const shouldRegister = skipRegister !== "1" && !explicitlyDisabledTunnel;
+  const resolvedTunnelMode = explicitlyDisabledTunnel
+    ? "0"
+    : tunnelMode || "auto";
 
   return {
+    ...(publicUrl ? { MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL: publicUrl } : {}),
     MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
       input.paths.linqWebhookRegistrationCachePath,
-    MURPH_DEV_LINQ_WEBHOOK_TUNNEL: resolvedTunnelMode ?? "0",
+    MURPH_DEV_LINQ_WEBHOOK_TUNNEL: resolvedTunnelMode,
     MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
       tunnelConfig ?? input.paths.linqWebhookTunnelConfigPath,
-    ...(wantsRegistration
+    ...(shouldRegister
       ? { MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "0" }
       : { MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1" }),
   };
+}
+
+function shouldPrepareHostedLocalWorktreeLinqTunnelConfig(
+  config: HostedLocalWorktreeConfig,
+): boolean {
+  if (config.env.MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL?.trim()) {
+    return false;
+  }
+  if (config.env.MURPH_DEV_LINQ_WEBHOOK_TUNNEL?.trim() === "0") {
+    return false;
+  }
+  return config.env.MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG?.trim()
+    === config.paths.linqWebhookTunnelConfigPath;
+}
+
+function resolveHostedLocalSharedLinqTunnelConfigCandidates(
+  config: HostedLocalWorktreeConfig,
+): string[] {
+  const currentWorktreeSharedConfig = path.resolve(
+    repoRoot,
+    DEFAULT_LINQ_WEBHOOK_TUNNEL_CONFIG,
+  );
+  const worktreeLocalConfig = path.resolve(config.paths.linqWebhookTunnelConfigPath);
+  const candidates = [
+    currentWorktreeSharedConfig,
+    ...resolveGitWorktreeRoots().map((worktreeRoot) =>
+      path.resolve(worktreeRoot, DEFAULT_LINQ_WEBHOOK_TUNNEL_CONFIG)
+    ),
+  ];
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    if (candidate === worktreeLocalConfig || seen.has(candidate)) {
+      return false;
+    }
+    seen.add(candidate);
+    return true;
+  });
+}
+
+function resolveGitWorktreeRoots(): string[] {
+  const result = spawnSync("git", ["worktree", "list", "--porcelain", "-z"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.status !== 0 || typeof result.stdout !== "string") {
+    return [];
+  }
+
+  return result.stdout
+    .split("\0")
+    .filter((entry) => entry.startsWith("worktree "))
+    .map((entry) => entry.slice("worktree ".length).trim())
+    .filter((entry) => entry.length > 0);
+}
+
+function rewriteHostedLocalWorktreeLinqTunnelConfig(
+  sourceText: string,
+  config: HostedLocalWorktreeConfig,
+): string | null {
+  const webHost = config.env.MURPH_DEV_WEB_HOST?.trim() || HOSTED_LOCAL_WORKTREE_DEFAULT_WEB_HOST;
+  const rewritten = sourceText.replace(
+    /^(\s*service:\s*)http:\/\/(?:localhost|127\.0\.0\.1):\d+(\s*)$/mu,
+    `$1http://${webHost}:${config.ports.web}$2`,
+  );
+  if (rewritten === sourceText) {
+    return null;
+  }
+
+  parseCloudflaredTunnelHostname(
+    rewritten,
+    config.paths.linqWebhookTunnelConfigPath,
+    {
+      webHost,
+      webPort: config.ports.web,
+    },
+  );
+  return rewritten;
 }
 
 function normalizeHostedLocalWorktreeSlug(value: string): string {
