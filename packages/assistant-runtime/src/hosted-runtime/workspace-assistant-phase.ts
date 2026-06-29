@@ -3202,29 +3202,37 @@ async function drainHostedPostCheckpointDelivery(input: {
   });
   const postAssistantCronWake =
     await resolveHostedAssistantCronWakeStateBestEffort(input.input);
-  let postAssistantCronWakeCandidate = resolveHostedAssistantCronWakeCandidate({
-    phaseInput: input.input,
-    state: postAssistantCronWake,
-  });
-  if (!postAssistantCronWake.available) {
-    postAssistantCronWakeCandidate = dropConsumedPostDeliveryWorkspaceAssistantWake({
-      candidate: postAssistantCronWakeCandidate,
+  const dropConsumedWorkspaceAssistantWake = (
+    candidate: HostedRuntimeWakeCandidate | null,
+  ): HostedRuntimeWakeCandidate | null =>
+    dropConsumedPostDeliveryWorkspaceAssistantWake({
+      candidate,
       phaseInput: input.input,
     });
-  }
+  const postAssistantCronWakeCandidate = dropConsumedWorkspaceAssistantWake(
+    resolveHostedAssistantCronWakeCandidate({
+      phaseInput: input.input,
+      state: postAssistantCronWake,
+    }),
+  );
   const postSystemMailboxWakeAt = await resolveHostedSystemMailboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
-  const postBaseNextWake = dropConsumedPostDeliveryWorkspaceAssistantWake({
-    candidate: resolveHostedPostDeliveryBaseNextWake(input),
-    phaseInput: input.input,
-  });
+  const postBaseNextWake = dropConsumedWorkspaceAssistantWake(
+    resolveHostedPostDeliveryBaseNextWake(input),
+  );
   const postNextWake = selectHostedRuntimeWakeCandidate([
     postBaseNextWake,
     postAssistantCronWakeCandidate,
-    createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
-    createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
-    createHostedRuntimeWakeCandidate(providerCleanupNextWakeAt, "assistant"),
+    dropConsumedWorkspaceAssistantWake(
+      createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
+    ),
+    dropConsumedWorkspaceAssistantWake(
+      createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
+    ),
+    dropConsumedWorkspaceAssistantWake(
+      createHostedRuntimeWakeCandidate(providerCleanupNextWakeAt, "assistant"),
+    ),
   ]);
   const postNextWakeAt = postNextWake.at;
   if (input.assistantDeliveryEffects.length > 0) {
