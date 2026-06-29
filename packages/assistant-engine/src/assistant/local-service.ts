@@ -35,6 +35,7 @@ import {
   emitHostedAssistantContextTimingTrace,
   emitHostedAssistantContextSessionResolvedTrace,
 } from './hosted-context-diagnostics.js'
+import { emitHostedAssistantTurnTimingTrace } from './hosted-turn-timing.js'
 import {
   deliverAssistantPrecedingReplies,
   deliverAssistantReaction,
@@ -463,6 +464,7 @@ export async function sendAssistantMessageLocal(
         const threadScope = resolveAssistantCodexThreadScope({
           turnTrigger: input.turnTrigger ?? null,
         })
+        const turnTimingStartedAt = lockAcquiredAt
         let currentInput = input
         const currentAudienceReplyDeliveryAvailable =
           isHostedCurrentAudienceReplyDeliveryAvailable({
@@ -808,6 +810,17 @@ export async function sendAssistantMessageLocal(
           acceptedInputIdsForProviderRequest
         let providerRequestAcceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[] =
           acceptedInputItemsForProviderRequest
+        let providerRequestStartedAtMs: number | null = null
+        let providerResultReturnedAt: number | null = null
+        const emitTurnTiming = (timingInput: Parameters<
+          typeof emitHostedAssistantTurnTimingTrace
+        >[0]) => {
+          emitHostedAssistantTurnTimingTrace({
+            executionContext,
+            onTraceEvent: currentInput.onTraceEvent ?? null,
+            ...timingInput,
+          })
+        }
         const drainLiveSteeredActiveTurnInputs = async (drainInput: {
           continuation:
             ExecutedAssistantProviderTurnResult['codexContinuation'] | null
@@ -954,6 +967,10 @@ export async function sendAssistantMessageLocal(
             acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
           },
           onProviderRequestStarted: (event) => {
+            const startedAtMs = Date.parse(event.startedAt)
+            if (Number.isFinite(startedAtMs)) {
+              providerRequestStartedAtMs = startedAtMs
+            }
             if (!currentInput.onProviderRequestStarted) {
               return
             }
@@ -980,6 +997,17 @@ export async function sendAssistantMessageLocal(
           progressDelivery,
           hostedToolContext,
           turnId: currentUserTurn.turnId,
+        })
+        providerResultReturnedAt = Date.now()
+        emitTurnTiming({
+          elapsedMs: elapsedSince(turnTimingStartedAt),
+          providerOutcomeKind: providerOutcome.kind,
+          providerRequestElapsedMs: providerRequestStartedAtMs === null
+            ? null
+            : Math.max(0, providerResultReturnedAt - providerRequestStartedAtMs),
+          providerRequestOrdinal,
+          sinceProviderResultMs: 0,
+          stage: 'provider-result-returned',
         })
         if (providerOutcome.kind === 'failed_terminal') {
           if (!providerRequestJournal) {
@@ -1020,12 +1048,22 @@ export async function sendAssistantMessageLocal(
             usage: providerOutcome.usage,
             usageAttribution: providerOutcome.usageAttribution,
           }
+          const usageRecordStartedAt = Date.now()
           await recordAssistantUsageEvent({
             executionContext,
             providerRequestOrdinal,
             providerRequestOutcome: providerOutcome.providerRequestOutcome,
             providerResult: failedProviderResult,
             turnId: currentUserTurn.turnId,
+          })
+          emitTurnTiming({
+            elapsedMs: elapsedSince(turnTimingStartedAt),
+            providerRequestOrdinal,
+            sinceProviderResultMs: providerResultReturnedAt === null
+              ? null
+              : elapsedSince(providerResultReturnedAt),
+            stage: 'usage-recorded',
+            stepElapsedMs: elapsedSince(usageRecordStartedAt),
           })
           await recordAdditionalAssistantUsageEvents({
             additionalUsages: providerOutcome.additionalUsages,
@@ -1098,6 +1136,7 @@ export async function sendAssistantMessageLocal(
               usageAttribution: providerOutcome.usageAttribution,
               workingDirectory: sharedPlan.requestedWorkingDirectory,
             }
+            const turnArtifactsStartedAt = Date.now()
             const session = await finalizeAssistantTurnArtifacts({
               assistantTranscriptText: null,
               input: currentInput,
@@ -1111,6 +1150,17 @@ export async function sendAssistantMessageLocal(
               turnId: currentUserTurn.turnId,
             })
             currentSession = session
+            emitTurnTiming({
+              elapsedMs: elapsedSince(turnTimingStartedAt),
+              finalReplySelected: false,
+              providerRequestOrdinal,
+              sinceProviderResultMs: providerResultReturnedAt === null
+                ? null
+                : elapsedSince(providerResultReturnedAt),
+              stage: 'turn-artifacts-finalized',
+              stepElapsedMs: elapsedSince(turnArtifactsStartedAt),
+            })
+            const replyDispatchStartedAt = Date.now()
             const {
               deliverySession,
               reactionDeliveryOutcomes,
@@ -1131,6 +1181,21 @@ export async function sendAssistantMessageLocal(
               reactionDeliveryOutcomes.length > 0
                 ? reactionDeliveryOutcomes[reactionDeliveryOutcomes.length - 1]!
                 : deliveryOutcome
+            emitTurnTiming({
+              deliveryAttempted: reactionDeliveryOutcomes.length > 0,
+              deliveryIntentPresent: 'intentId' in finalDeliveryOutcome
+                ? finalDeliveryOutcome.intentId !== null
+                : false,
+              deliveryOutcomeKind: finalDeliveryOutcome.kind,
+              elapsedMs: elapsedSince(turnTimingStartedAt),
+              finalReplySelected: false,
+              providerRequestOrdinal,
+              sinceProviderResultMs: providerResultReturnedAt === null
+                ? null
+                : elapsedSince(providerResultReturnedAt),
+              stage: 'reply-dispatched',
+              stepElapsedMs: elapsedSince(replyDispatchStartedAt),
+            })
             await finalizeDeliveredAssistantTurn({
               firstContactStateDocIds: sharedPlan.firstContactStateDocIds,
               outcome: finalDeliveryOutcome,
@@ -1208,11 +1273,21 @@ export async function sendAssistantMessageLocal(
           session: providerResult.session,
         })
         responseText = providerResult.response
+        const usageRecordStartedAt = Date.now()
         await recordAssistantUsageEvent({
           executionContext,
           providerRequestOrdinal,
           providerResult,
           turnId: currentUserTurn.turnId,
+        })
+        emitTurnTiming({
+          elapsedMs: elapsedSince(turnTimingStartedAt),
+          providerRequestOrdinal,
+          sinceProviderResultMs: providerResultReturnedAt === null
+            ? null
+            : elapsedSince(providerResultReturnedAt),
+          stage: 'usage-recorded',
+          stepElapsedMs: elapsedSince(usageRecordStartedAt),
         })
         await recordAdditionalAssistantUsageEvents({
           additionalUsages: providerResult.additionalUsages,
@@ -1295,6 +1370,7 @@ export async function sendAssistantMessageLocal(
           media: providerResult.responseMedia,
           response: finalResponseText,
         })
+        const turnArtifactsStartedAt = Date.now()
         const session = await finalizeAssistantTurnArtifacts({
           assistantTranscriptText,
           input: currentInput,
@@ -1308,6 +1384,16 @@ export async function sendAssistantMessageLocal(
           turnId: currentUserTurn.turnId,
         })
         currentSession = session
+        emitTurnTiming({
+          elapsedMs: elapsedSince(turnTimingStartedAt),
+          finalReplySelected: finalResponseText !== null,
+          providerRequestOrdinal,
+          sinceProviderResultMs: providerResultReturnedAt === null
+            ? null
+            : elapsedSince(providerResultReturnedAt),
+          stage: 'turn-artifacts-finalized',
+          stepElapsedMs: elapsedSince(turnArtifactsStartedAt),
+        })
         // Preceding-answer delivery is best-effort only when a final reply can
         // still compensate. If no final reply is selected, preceding delivery
         // work is the turn's only user-visible outbound work.
@@ -1369,6 +1455,7 @@ export async function sendAssistantMessageLocal(
         }
         let deliverySession =
           precedingDeliveryOutcomes.at(-1)?.session ?? session
+        const replyDispatchStartedAt = Date.now()
         const deliveryOutcome =
           finalResponseText !== null
             ? await dispatchAssistantReply({
@@ -1417,6 +1504,22 @@ export async function sendAssistantMessageLocal(
           reactionDeliveryOutcomes.length > 0
             ? reactionDeliveryOutcomes[reactionDeliveryOutcomes.length - 1]!
             : deliveryOutcome
+        emitTurnTiming({
+          deliveryAttempted:
+            finalResponseText !== null || reactionDeliveryOutcomes.length > 0,
+          deliveryIntentPresent: 'intentId' in finalDeliveryOutcome
+            ? finalDeliveryOutcome.intentId !== null
+            : false,
+          deliveryOutcomeKind: finalDeliveryOutcome.kind,
+          elapsedMs: elapsedSince(turnTimingStartedAt),
+          finalReplySelected: finalResponseText !== null,
+          providerRequestOrdinal,
+          sinceProviderResultMs: providerResultReturnedAt === null
+            ? null
+            : elapsedSince(providerResultReturnedAt),
+          stage: 'reply-dispatched',
+          stepElapsedMs: elapsedSince(replyDispatchStartedAt),
+        })
         const finalResponseDisposition =
           finalResponseText === null && deliveryOutcome.kind === 'not-requested'
             ? 'none'

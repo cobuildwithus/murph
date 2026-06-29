@@ -72,9 +72,9 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - encrypted hosted mailbox rows and lane counters for durable execution inputs
 - latest hosted workspace checkpoint metadata plus redacted runtime logs/status
 - immutable hosted AI usage rows in Postgres for billing-safe reconciliation
-- event-id keyed Linq first-contact classifier decisions, with bounded rejected
-  message text only on blocked decisions and no classifier prompt/response
-  bodies
+- event-id keyed Linq first-contact classifier decisions with no classifier
+  prompt/response bodies; the legacy rejected-message-text column is an ignored
+  deploy-skew compatibility column and is scrubbed by migration
 - bounded hosted product-feedback rows for explicit structured product feedback
 - member-bound hosted phone-call rows for web-owned Retell starts and signed
   Retell function/webhook results
@@ -501,6 +501,8 @@ deploys `apps/web`. Production is the minimum.
 - Set `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET` to the same value used by the
   trusted auth edge that signs browser assertions for lower-level device-sync
   bridge routes.
+- Set `DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED=true` when admin
+  device-sync diagnostics should be available outside localhost.
 
 ## Browser auth contract
 

@@ -1,6 +1,6 @@
 # PR Deep-Review Loop
 
-Last verified: 2026-06-26
+Last verified: 2026-06-28
 
 Required external deep-review loop that runs after the repo-required completion workflow, on PR-lane work.
 For PR-lane patch implementation, this loop is the audit gate: the worktree/PR-lane skip in `agent-docs/operations/completion-workflow.md` lets the parent agent default-skip the local required audit subagent passes and rely on this loop to cover that surface. For current-checkout (non-PR-lane) work it stays additive — it does not satisfy, replace, or reorder the local required completion audits in that document, and those passes still run there.
@@ -19,7 +19,9 @@ unpushed local changes, local patch text, or local ZIP/repomix context that
 does not represent the pushed PR head. If the current fixes are only local,
 commit and push them to the PR branch first, then run ReviewGPT against the PR
 URL. The reviewer must read the required ReviewGPT attachments for that pushed
-head: the guarded source snapshot ZIP and the matching repomix artifact.
+head: the guarded source snapshot ZIP, including
+`review-gpt-pr-context/pr.diff` and
+`review-gpt-pr-context/changed-files.txt`, plus the matching repomix artifact.
 
 The PR body must carry the intent contract from `agent-docs/operations/completion-workflow.md` § PR Description (why the PR exists, the user-visible goal it is meant to ship, and invariants to preserve). Before firing a round, confirm that block is present and current — if it is missing or stale (for example the PR's intended behavior has shifted since the last round), update the PR body first so the reviewer judges the diff against intent rather than the current runtime state.
 
@@ -41,7 +43,7 @@ Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit c
    pr_url="<pr-url>"
    scripts/review-gpt-pr-head-preflight.sh "$pr_url"
 
-   pnpm review:gpt pr-review \
+   REVIEW_GPT_PR_URL="$pr_url" pnpm review:gpt pr-review \
      --prompt "PR: $pr_url" \
      --zip \
      --send --wait --wait-timeout 90m \
@@ -49,11 +51,11 @@ Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit c
      --response-file audit-packages/pr-<number>-round-<k>.md
    ```
 
-   Run it as a background task and resume when the process exits. Use GPT-5.5 Pro / Pro Extended on the Eragon managed browser lane. Do not downgrade to non-Pro models, lower reasoning, connector-based context, or a different browser lane when the Pro run is slow or sticky; retry on Pro in a fresh Eragon thread instead. The repo defaults use `gpt-5.5-pro` with the guarded source snapshot ZIP and matching repomix attachment enabled. Before auto-send, confirm the Eragon composer has no selected app connector pill; the config intentionally uses `app_connector="current"` only to avoid selecting one, and the PR review context must come from attachments. ReviewGPT can take up to about 90 minutes before a usable final response is available, especially on Pro/Pro Extended, and occasional runs may take longer. While waiting or recapturing, poll or export about every 2 minutes — not more frequently — to keep parent-agent token usage low and avoid hammering the browser or starting duplicate threads. Keep the `90m` command timeout as the normal outer guard.
+   Run it as a background task and resume when the process exits. Use GPT-5.5 Pro / Pro Extended on the Eragon managed browser lane. Do not downgrade to non-Pro models, lower reasoning, connector-based context, or a different browser lane when the Pro run is slow or sticky; retry on Pro in a fresh Eragon thread instead. The repo defaults use `gpt-5.5-pro` with the guarded source snapshot ZIP and matching repomix attachment enabled. Setting `REVIEW_GPT_PR_URL` makes the packaging wrapper add the exact PR diff at `review-gpt-pr-context/pr.diff` and the touched-file list at `review-gpt-pr-context/changed-files.txt` inside `repo.snapshot.zip`; do not omit it for PR review rounds. Before auto-send, confirm the Eragon composer has no selected app connector pill; the config intentionally uses `app_connector="current"` only to avoid selecting one, and the PR review context must come from attachments. ReviewGPT can take up to about 90 minutes before a usable final response is available, especially on Pro/Pro Extended, and occasional runs may take longer. While waiting or recapturing, poll or export about every 2 minutes — not more frequently — to keep parent-agent token usage low and avoid hammering the browser or starting duplicate threads. Keep the `90m` command timeout as the normal outer guard.
 
    Active ReviewGPT runs on the same managed browser profile/port are not a reason to queue behind that profile by default. One profile can support about 10 concurrent ReviewGPT runs, so do not wait just because one or two other PR rounds are already running there. Wait, switch profiles, or report a blocker only when the profile is near that concurrency cap, rate-limited, browser-unresponsive, or otherwise failing to start a new thread safely.
 
-   If a round returns that ReviewGPT cannot access, read, or find the required ZIP/repomix attachments, confirm the command ran with `--zip` against the already-pushed PR head and retry the round once on the same Pro + Eragon configuration in a fresh thread. If the retry still cannot read the attachments, stop and report the context failure rather than silently routing the round through a connector, pasted text, local dirty-worktree archives, or another ad hoc context path.
+   If a round returns that ReviewGPT cannot access, read, or find the required ZIP/repomix attachments, or cannot find `review-gpt-pr-context/pr.diff` and `review-gpt-pr-context/changed-files.txt` inside `repo.snapshot.zip`, confirm the command ran with `--zip` and `REVIEW_GPT_PR_URL="$pr_url"` against the already-pushed PR head and retry the round once on the same Pro + Eragon configuration in a fresh thread. If the retry still cannot read the attachments, stop and report the context failure rather than silently routing the round through a connector, pasted text, local dirty-worktree archives, or another ad hoc context path.
 2. Check the captured response is the actual review before triaging it. If the response file is a short preliminary acknowledgment (for example "I'll inspect the PR and report back") instead of findings or an explicit no-findings summary, the model was still working when capture finished: the round does not count, and do not fire a new thread. Re-capture the finished reply from the same thread with `pnpm review:gpt thread export --chat-url <thread-url> --output audit-packages/pr-<number>-round-<k>-recapture.json` (the thread URL is in the run output) and read the final assistant message from that export. Note the conversation URL does not load (redirects home) while the turn is still generating, so wait a few minutes and retry the export until the thread loads. If the same thread still cannot load or export a final review after roughly 90 minutes, try recovery before abandoning the round: use the in-app browser or Computer Use against the managed browser session from `scripts/review-gpt.config.sh` to inspect the ChatGPT thread, recover the thread URL from the ReviewGPT output, or copy/export the final assistant reply. Start a fresh Pro thread only after the original thread is proven inaccessible, failed, or missing a final review.
 3. When the response lands, the local agent triages every finding before any fix:
    first decide whether it is worth fixing at all. Reject it when it is wrong,
@@ -81,8 +83,11 @@ Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit c
    deleting code, reordering existing durable writes, tightening an existing
    owner boundary, or deriving from one existing source of truth? Reject or
    defer the finding when the proposed cure is a broader state machine than the
-   confirmed bug justifies. ReviewGPT is strongest as an adversarial reviewer,
-   not as the final architecture owner.
+   confirmed bug justifies. When repeated findings cluster on one mechanism,
+   pause tactical patching and either collapse that mechanism to a simpler
+   ownership shape, split/abandon the PR, or explicitly reject the collapse
+   finding. ReviewGPT is strongest as an adversarial reviewer, not as the final
+   architecture owner.
 4. Fix only accepted findings after the reproduction/proof above is in place,
    run the verification required by
    `agent-docs/operations/verification-and-runtime.md` for the touched owners,
@@ -115,6 +120,6 @@ fires immediately, in parallel with CI).
 ## Boundaries
 
 - For current-checkout (non-PR-lane) work, never use this loop (or any `review:gpt`/`thread wake` flow) to satisfy the local required completion audits; see `agent-docs/operations/completion-workflow.md`. For PR-lane patch implementation, the worktree/PR-lane skip in that document explicitly lets this loop serve as the audit gate, so the local subagent passes default-skip and this loop must run to zero accepted findings before merge.
-- Do not use pasted text, connector context, local dirty-worktree context, or ad hoc archives for this PR-lane loop. The reviewer must inspect the pushed PR through ReviewGPT's guarded source snapshot ZIP plus matching repomix attachment for that pushed head, so the review, CI, and merge target all refer to the same code.
+- Do not use pasted text, connector context, local dirty-worktree context, or ad hoc archives for this PR-lane loop. The reviewer must inspect the pushed PR through ReviewGPT's guarded source snapshot ZIP, its generated `review-gpt-pr-context/pr.diff` and `review-gpt-pr-context/changed-files.txt`, plus the matching repomix attachment for that pushed head, so the review, CI, and merge target all refer to the same code.
 - Response files under `audit-packages/` are local working artifacts and stay uncommitted.
 - The managed browser profile, port, model, and attachment defaults live in `scripts/review-gpt.config.sh`; the prompt lives in `scripts/chatgpt-review-presets/pr-deep-review.md`. Change them there, not inline.

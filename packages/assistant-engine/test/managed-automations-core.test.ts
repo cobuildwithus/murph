@@ -117,11 +117,25 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
     expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
     expect(insightRecord?.instructions).toContain('Do not scan every wiki page')
+    expect(insightRecord?.instructions).toContain('find zero or one useful')
+    expect(insightRecord?.instructions).toContain('better to send nothing')
     expect(insightRecord?.instructions).toContain('knowledge append-section weekly-health-insights YYYY-MM-DD')
     expect(insightRecord?.instructions).toContain('section already exists')
-    expect(insightRecord?.instructions).toContain('still send the concise note')
-    expect(insightRecord?.instructions).toContain('Then send one concise note')
+    expect(insightRecord?.instructions).toContain('useful enough to repeat now')
+    expect(insightRecord?.instructions).toContain('apply the same current interestingness gate')
+    expect(insightRecord?.instructions).toContain(
+      '{"kind":"skip","privateSummary":"No weekly health insight cleared the interestingness bar."}',
+    )
+    expect(insightRecord?.instructions).toContain(
+      '{"kind":"skip","privateSummary":"Existing weekly health insight did not clear the current send bar."}',
+    )
+    expect(insightRecord?.instructions).not.toContain('finish_without_reply')
+    expect(insightRecord?.instructions).toContain('Do not send a process note')
+    expect(insightRecord?.instructions).toContain('Then, only when the finding clears the bar')
     expect(insightRecord?.instructions).toContain('plain adult language')
+    expect(insightRecord?.instructions).toContain('clear claim anchored in recognizable context')
+    expect(insightRecord?.instructions).toContain('Use dates for traceability, not as the story')
+    expect(insightRecord?.instructions).toContain('Name the outcome before contrasting causes')
     expect(insightRecord?.instructions).toContain('simple translation')
     expect(insightRecord?.instructions).toContain('raw biomarker names')
     expect(insightRecord?.instructions).toContain('TSH is the brain\'s signal')
