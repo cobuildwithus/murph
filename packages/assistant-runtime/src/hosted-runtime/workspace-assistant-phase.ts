@@ -3202,14 +3202,23 @@ async function drainHostedPostCheckpointDelivery(input: {
   });
   const postAssistantCronWake =
     await resolveHostedAssistantCronWakeStateBestEffort(input.input);
-  const postAssistantCronWakeCandidate = resolveHostedAssistantCronWakeCandidate({
+  let postAssistantCronWakeCandidate = resolveHostedAssistantCronWakeCandidate({
     phaseInput: input.input,
     state: postAssistantCronWake,
   });
+  if (!postAssistantCronWake.available) {
+    postAssistantCronWakeCandidate = dropConsumedPostDeliveryWorkspaceAssistantWake({
+      candidate: postAssistantCronWakeCandidate,
+      phaseInput: input.input,
+    });
+  }
   const postSystemMailboxWakeAt = await resolveHostedSystemMailboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
-  const postBaseNextWake = resolveHostedPostDeliveryBaseNextWake(input);
+  const postBaseNextWake = dropConsumedPostDeliveryWorkspaceAssistantWake({
+    candidate: resolveHostedPostDeliveryBaseNextWake(input),
+    phaseInput: input.input,
+  });
   const postNextWake = selectHostedRuntimeWakeCandidate([
     postBaseNextWake,
     postAssistantCronWakeCandidate,
@@ -3278,6 +3287,32 @@ function resolveHostedPostDeliveryBaseNextWake(
     ),
     baseNextWake.reason ?? HOSTED_ASSISTANT_WAKE_REASON,
   );
+}
+
+function dropConsumedPostDeliveryWorkspaceAssistantWake(input: {
+  candidate: HostedRuntimeWakeCandidate | null;
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): HostedRuntimeWakeCandidate | null {
+  const candidate = input.candidate;
+  if (!candidate?.at) {
+    return candidate;
+  }
+  if (candidate.reason !== HOSTED_ASSISTANT_WAKE_REASON) {
+    return candidate;
+  }
+  const workspaceWakeAt = input.phaseInput.workspace?.nextWakeAt ?? null;
+  if (candidate.at !== workspaceWakeAt) {
+    return candidate;
+  }
+  const workspaceWakeReason = input.phaseInput.workspace?.nextWakeReason ?? null;
+  if (
+    workspaceWakeReason !== null
+    && workspaceWakeReason !== HOSTED_ASSISTANT_WAKE_REASON
+  ) {
+    return candidate;
+  }
+
+  return consumedScheduledWorkspaceWake(input.phaseInput) ? null : candidate;
 }
 
 function isHostedAssistantDeliveryOutcomeTerminalized(
