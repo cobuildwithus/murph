@@ -121,7 +121,7 @@ Sample records may also carry optional `externalRef` provenance with the same sh
 - Food frontmatter:
   `schemaVersion`, `docType`, `foodId`, `slug`, `title`, `status`, `kind`, `vendor`, `ingredients`, optional `autoLogDaily.time`
 - Automation frontmatter:
-  `schemaVersion`, `docType`, `automationId`, `slug`, `title`, `status`, schedule fields, and prompt/delivery policy fields
+  `schemaVersion`, `docType`, `automationId`, `slug`, `title`, `status`, schedule fields, optional assistant target override, and prompt/delivery policy fields
 - Scheduled-log frontmatter:
   `schemaVersion`, `docType`, `scheduledLogId`, `slug`, `title`, `status`, schedule fields, and log template fields
 - Recipe frontmatter:

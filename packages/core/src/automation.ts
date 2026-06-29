@@ -2,6 +2,7 @@ import {
   AUTOMATION_DOC_TYPE,
   AUTOMATION_SCHEMA_VERSION,
   MIN_AUTOMATION_EVERY_MS,
+  assistantReasoningEffortValues,
   automationFrontmatterSchema,
   automationContinuityPolicyValues,
   automationDeviceActivityKindSchema,
@@ -11,6 +12,7 @@ import {
   compareDeviceActivityCoverageKeys,
   isValidAutomationCronExpression,
   resolveNextDeviceActivityCoverageCursor,
+  type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
   type AutomationDeviceActivityKind,
   type AutomationDeviceActivitySource,
@@ -63,6 +65,7 @@ function rejectRecurringScheduleTimeZone(object: Record<string, unknown>): void 
 }
 
 export type {
+  AutomationAssistantTargetOverride,
   AutomationContinuityPolicy,
   AutomationRoute,
   AutomationSchedule,
@@ -79,6 +82,7 @@ export interface AutomationRecord {
   summary: string | null;
   schedule: AutomationSchedule;
   route: AutomationRoute;
+  assistantTargetOverride: AutomationAssistantTargetOverride | null;
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
   createdAt: string;
@@ -109,6 +113,7 @@ export interface PatchAutomationInput {
   lookup: string;
   now?: Date;
   route?: AutomationRoute;
+  assistantTargetOverride?: AutomationAssistantTargetOverride | null;
   schedule?: AutomationSchedule;
   slug?: string;
   status?: AutomationStatus;
@@ -372,6 +377,68 @@ function normalizeAutomationRouteChannel(value: unknown): string {
   }
 }
 
+function normalizeAutomationAssistantTargetOverride(
+  value: unknown,
+): AutomationAssistantTargetOverride | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const object = requireObject(value, "assistantTargetOverride");
+  const model = normalizeAutomationAssistantTargetOverrideString(
+    object.model,
+    "assistantTargetOverride.model",
+    200,
+  );
+  const modelProvider = normalizeAutomationAssistantTargetOverrideString(
+    object.modelProvider,
+    "assistantTargetOverride.modelProvider",
+    120,
+  );
+  const reasoningEffort = normalizeAutomationAssistantTargetOverrideReasoningEffort(
+    object.reasoningEffort,
+  );
+  const target: AutomationAssistantTargetOverride = {
+    ...(model ? { model } : {}),
+    ...(modelProvider ? { modelProvider } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+  };
+
+  return Object.keys(target).length > 0 ? target : null;
+}
+
+function normalizeAutomationAssistantTargetOverrideReasoningEffort(
+  value: unknown,
+): AutomationAssistantTargetOverride["reasoningEffort"] | null {
+  return optionalEnum(
+    value,
+    assistantReasoningEffortValues,
+    "assistantTargetOverride.reasoningEffort",
+  ) ?? null;
+}
+
+function normalizeAutomationAssistantTargetOverrideString(
+  value: unknown,
+  fieldName: string,
+  maxLength: number,
+): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  return requireString(value, fieldName, maxLength);
+}
+
+function buildAutomationAssistantTargetOverrideFrontmatter(
+  target: AutomationAssistantTargetOverride,
+): FrontmatterObject {
+  return {
+    ...(target.model ? { model: target.model } : {}),
+    ...(target.modelProvider ? { modelProvider: target.modelProvider } : {}),
+    ...(target.reasoningEffort ? { reasoningEffort: target.reasoningEffort } : {}),
+  };
+}
+
 function normalizeAutomationInstructions(value: unknown): string {
   const instructions = requireString(value, "instructions", 40_000).replace(/\s+$/u, "");
   if (!instructions.trim()) {
@@ -473,6 +540,13 @@ function buildAutomationFrontmatter(record: AutomationRecord): FrontmatterObject
     ...(record.summary === null ? {} : { summary: record.summary }),
     schedule: buildAutomationScheduleFrontmatter(record.schedule),
     route: buildAutomationRouteFrontmatter(record.route),
+    ...(record.assistantTargetOverride === null
+      ? {}
+      : {
+          assistantTargetOverride: buildAutomationAssistantTargetOverrideFrontmatter(
+            record.assistantTargetOverride,
+          ),
+        }),
     continuityPolicy: record.continuityPolicy,
     tags: record.tags,
     createdAt: record.createdAt,
@@ -507,6 +581,9 @@ function parseAutomationRecord(
     summary: normalizeAutomationSummary(attributes.summary),
     schedule: normalizeAutomationSchedule(attributes.schedule),
     route: normalizeAutomationRoute(attributes.route),
+    assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
+      attributes.assistantTargetOverride,
+    ),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeAutomationTags(attributes.tags),
     createdAt: requireString(attributes.createdAt, "createdAt", 64),
@@ -550,6 +627,7 @@ function matchesAutomationText(record: AutomationRecord, text: string | undefine
     record.instructions,
     JSON.stringify(record.schedule),
     JSON.stringify(record.route),
+    JSON.stringify(record.assistantTargetOverride),
     record.continuityPolicy,
     ...(record.tags ?? []),
   ]
@@ -598,6 +676,7 @@ export function scaffoldAutomationPayload(): AutomationScaffoldPayload {
       participantId: null,
       threadId: null,
     },
+    assistantTargetOverride: null,
     instructions: "Write the scheduled assistant instructions here.",
     summary: "Weekly scheduled assistant notification instructions.",
     tags: ["assistant", "scheduled"],
@@ -688,6 +767,10 @@ export async function patchAutomation(
       instructions: input.instructions ?? existingRecord.instructions,
       now: input.now,
       route: input.route ?? existingRecord.route,
+      assistantTargetOverride:
+        input.assistantTargetOverride === undefined
+          ? existingRecord.assistantTargetOverride
+          : normalizeAutomationAssistantTargetOverride(input.assistantTargetOverride),
       schedule: input.schedule ?? existingRecord.schedule,
       slug: input.slug ?? existingRecord.slug,
       status: input.status ?? existingRecord.status,
@@ -752,6 +835,7 @@ export async function advanceAutomationDeviceActivityCursor(
       instructions: existingRecord.instructions,
       now: input.now,
       route: existingRecord.route,
+      assistantTargetOverride: existingRecord.assistantTargetOverride,
       schedule: {
         ...existingRecord.schedule,
         after: cursor.after,
@@ -870,6 +954,10 @@ async function upsertAutomationWithLatestRegistry(
       input.route !== undefined
         ? normalizeAutomationRoute(input.route)
         : existingRecord?.route ?? scaffoldAutomationPayload().route,
+    assistantTargetOverride:
+      input.assistantTargetOverride === undefined
+        ? existingRecord?.assistantTargetOverride ?? null
+        : normalizeAutomationAssistantTargetOverride(input.assistantTargetOverride),
     continuityPolicy:
       normalizeAutomationContinuityPolicy(input.continuityPolicy ?? existingRecord?.continuityPolicy),
     tags:
@@ -932,6 +1020,9 @@ export function buildAutomationMarkdownPreview(
     summary: normalizeAutomationSummary(input.summary),
     schedule: normalizeAutomationSchedule(input.schedule),
     route: normalizeAutomationRoute(input.route),
+    assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
+      input.assistantTargetOverride,
+    ),
     continuityPolicy: normalizeAutomationContinuityPolicy(input.continuityPolicy),
     tags: normalizeAutomationTags(input.tags),
     createdAt: new Date().toISOString(),
