@@ -588,9 +588,9 @@ const VISUALS: Record<string, ReactNode> = {
   "handoff-viewport-match": (
     <StatBlock
       label="Handoff browser"
-      before="Desktop"
-      after="Phone-shaped"
-      caption="from the first frame"
+      before="Default"
+      after="Session-sized"
+      caption="remembered per device"
     />
   ),
   "handoff-mobile-takeover-overlay": (

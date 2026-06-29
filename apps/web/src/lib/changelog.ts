@@ -763,7 +763,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-06-23",
     title: "Passkeys, and a handoff that fits your phone",
     summary:
-      "Add a passkey as your second factor in one tap, computer handoff sizes to your phone from the first frame, and auto-replies remember the conversation that came before them.",
+      "Add a passkey as your second factor in one tap, computer handoff remembers each device's browser size, and auto-replies remember the conversation that came before them.",
     items: [
       {
         id: "passkey-mfa-setup",
@@ -785,9 +785,9 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "Browser handoff matches your phone",
         summary:
-          "When Murph hands the browser off to you, the page now sizes to your phone or laptop from the first frame — no more zoomed-out desktop on mobile.",
+          "When Murph hands the browser off to you, the page remembers this browser session's last handoff size and corrects it from the live takeover surface.",
         details:
-          "Murph reads your screen on the server, resizes the remote browser once, then renders. A pulse loader holds the page while everything lines up.",
+          "Murph starts from the saved size for this device session, then measures the actual handoff surface and resizes the remote browser in the background without blocking takeover.",
         relevanceTags: ["browser", "automation", "mobile"],
         sourcePullRequests: [268],
       },

@@ -16,6 +16,9 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 interface StoredHostedWebSession {
+  computerHandoffViewportHeight: number | null;
+  computerHandoffViewportObservedAt: Date | null;
+  computerHandoffViewportWidth: number | null;
   createdAt: Date;
   expiresAt: Date;
   id: string;
@@ -199,10 +202,33 @@ describe("hosted app session", () => {
       prisma: harness.prismaClient,
     });
     expect(session).toEqual({
+      computerHandoffViewportSize: null,
       expiresAt: new Date("2099-01-31T00:00:00.000Z"),
       member: createHostedMember(),
       privyUserId: "did:privy:user_123",
       sessionId: result.sessionId,
+    });
+  });
+
+  it("resolves a saved computer handoff viewport size from the current web session", async () => {
+    const {
+      getHostedAppSessionFromRequest,
+      issueHostedAppSession,
+    } = await import("@/src/lib/hosted-onboarding/app-session");
+    const result = await issueHostedAppSession({
+      memberId: "member_123",
+      now: new Date("2099-01-01T00:00:00.000Z"),
+      privyUserId: "did:privy:user_123",
+    });
+    const record = findStoredSession(result.sessionId);
+    record.computerHandoffViewportHeight = 843;
+    record.computerHandoffViewportWidth = 391;
+
+    const session = await getHostedAppSessionFromRequest(requestWithCookie(result.cookie));
+
+    expect(session?.computerHandoffViewportSize).toEqual({
+      height: 844,
+      width: 392,
     });
   });
 
@@ -286,6 +312,9 @@ function createHostedWebSessionDelegate(records: StoredHostedWebSession[]) {
   const create = vi.fn(async (input: HostedWebSessionCreateInput): Promise<StoredHostedWebSession> => {
     const record = {
       ...input.data,
+      computerHandoffViewportHeight: null,
+      computerHandoffViewportObservedAt: null,
+      computerHandoffViewportWidth: null,
       revokedAt: null,
       revokeReason: null,
     };
@@ -417,6 +446,9 @@ function buildStoredSession(input: {
   revokedAt?: Date | null;
 }): StoredHostedWebSession {
   return {
+    computerHandoffViewportHeight: null,
+    computerHandoffViewportObservedAt: null,
+    computerHandoffViewportWidth: null,
     createdAt: input.createdAt,
     expiresAt: input.expiresAt ?? new Date("2099-01-01T00:00:00.000Z"),
     id: input.id,
