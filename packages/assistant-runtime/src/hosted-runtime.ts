@@ -118,7 +118,6 @@ import {
   type HostedWorkspaceDurableCheckpointEffect,
   type HostedWorkspaceDurableCheckpointEffectResult,
   type HostedWorkspaceRunnerHandledDeviceSyncWake,
-  type HostedWorkspaceRunnerDeferredUsageDrain,
   type HostedWorkspaceRunnerMailboxImportContext,
   type HostedWorkspaceRunnerInput,
   type HostedWorkspaceRunnerResult,
@@ -796,7 +795,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
   const phaseLogger = createHostedRuntimePhaseLogger();
   const emitPhaseLog = phaseLogger.emit;
-  const pendingDeferredUsageDrains = new Set<HostedWorkspaceRunnerDeferredUsageDrain>();
+  const pendingDeferredUsageCompletions = new Set<Promise<void>>();
   const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
   const trackCompletion = (
     pendingCompletions: Set<Promise<void>>,
@@ -811,30 +810,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       pendingCompletions.delete(completion);
     });
   };
-  const trackDeferredUsageDrain = (
-    pendingDrains: Set<HostedWorkspaceRunnerDeferredUsageDrain>,
-    drain: HostedWorkspaceRunnerDeferredUsageDrain | null,
+  const trackDeferredUsageCompletion = (
+    completion: Promise<void> | null,
   ): void => {
-    if (drain === null) {
-      return;
-    }
-
-    pendingDrains.add(drain);
-    void drain.completion.finally(() => {
-      pendingDrains.delete(drain);
-    });
-  };
-  const registerDeferredUsageDrain = (
-    drain: HostedWorkspaceRunnerDeferredUsageDrain | null,
-  ): void => {
-    trackDeferredUsageDrain(pendingDeferredUsageDrains, drain);
-    trackHostedRuntimeDeferredUsageDrain(drain);
+    trackCompletion(pendingDeferredUsageCompletions, completion);
+    trackHostedRuntimeDeferredUsageCompletion(completion);
   };
   const trackMailboxPostCheckpointEffects = (completion: Promise<void> | null): void => {
     trackCompletion(pendingMailboxPostCheckpointEffectCompletions, completion);
   };
   const drainDeferredUsageBestEffort = async (): Promise<void> => {
-    await drainDeferredUsageDrainsBestEffort([...pendingDeferredUsageDrains]);
+    await Promise.allSettled([...pendingDeferredUsageCompletions]);
   };
 
   try {
@@ -1047,7 +1033,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
-      registerDeferredUsageDrain,
+      trackDeferredUsageCompletion,
       platform: runnerPlatform,
       requestId,
       runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -2515,8 +2501,7 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
 const DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const DEFAULT_HOSTED_FOREGROUND_MAILBOX_IMPORT_LIMIT = 10;
 const HOSTED_RUNTIME_MAX_TIMER_DELAY_MS = 2_147_483_647;
-const pendingHostedRuntimeDeferredUsageDrains =
-  new Set<HostedWorkspaceRunnerDeferredUsageDrain>();
+const pendingHostedRuntimeDeferredUsageCompletions = new Set<Promise<void>>();
 
 type HostedRuntimeDirtyWaitResult =
   | { kind: "external_wake"; notification: RuntimeWakeNotification }
@@ -2539,53 +2524,30 @@ function consumePendingHostedRuntimeWake(
   );
 }
 
-function trackHostedRuntimeDeferredUsageDrain(
-  drain: HostedWorkspaceRunnerDeferredUsageDrain | null,
+function trackHostedRuntimeDeferredUsageCompletion(
+  completion: Promise<void> | null,
 ): void {
-  if (drain === null) {
+  if (completion === null) {
     return;
   }
 
-  pendingHostedRuntimeDeferredUsageDrains.add(drain);
-  void drain.completion.finally(() => {
-    pendingHostedRuntimeDeferredUsageDrains.delete(drain);
+  pendingHostedRuntimeDeferredUsageCompletions.add(completion);
+  void completion.finally(() => {
+    pendingHostedRuntimeDeferredUsageCompletions.delete(completion);
   });
-}
-
-async function drainDeferredUsageDrainsBestEffort(
-  drains: readonly HostedWorkspaceRunnerDeferredUsageDrain[],
-): Promise<void> {
-  if (drains.length === 0) {
-    return;
-  }
-
-  const completions: Promise<void>[] = [];
-  for (const drain of drains) {
-    try {
-      const started = drain.start();
-      if (started) {
-        completions.push(started);
-      }
-    } catch {
-      // Best-effort fatal drain: still await the registered completion below.
-    }
-    completions.push(drain.completion);
-  }
-
-  await Promise.allSettled(completions);
 }
 
 export async function drainHostedRuntimeDeferredUsageCompletionsBestEffort(input: {
   timeoutMs?: number | null;
 } = {}): Promise<void> {
-  const pendingDrains = [
-    ...pendingHostedRuntimeDeferredUsageDrains,
+  const pendingCompletions = [
+    ...pendingHostedRuntimeDeferredUsageCompletions,
   ];
-  if (pendingDrains.length === 0) {
+  if (pendingCompletions.length === 0) {
     return;
   }
 
-  const finished = drainDeferredUsageDrainsBestEffort(pendingDrains);
+  const finished = Promise.allSettled(pendingCompletions);
   const timeoutMs = input.timeoutMs ?? null;
   if (timeoutMs === null) {
     await finished;

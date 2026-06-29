@@ -5463,9 +5463,14 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-abort-drain-"));
     const events: string[] = [];
     const assistantPhaseCanFinish = createDeferred<void>();
-    const usageRecordStarted = createDeferred<void>();
-    const releaseUsageRecord = createDeferred<void>();
-    const usageRecordFinished = createDeferred<void>();
+    const recordLateUsage = createDeferred<void>();
+    const lateUsageRecorded = createDeferred<void>();
+    const usageRecordStartedA = createDeferred<void>();
+    const usageRecordStartedB = createDeferred<void>();
+    const releaseUsageRecordA = createDeferred<void>();
+    const releaseUsageRecordB = createDeferred<void>();
+    const usageRecordFinishedA = createDeferred<void>();
+    const usageRecordFinishedB = createDeferred<void>();
     const hostAbortController = new AbortController();
     const hostAbortReason = new Error("synthetic host abort before deferred usage flush start");
     let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
@@ -5502,15 +5507,20 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
             usageRecordPort: {
               async recordUsage(record: AssistantUsageRecord) {
-                events.push("usage.record:start");
-                assert.equal(
-                  record.usageId,
-                  "turn_entrypoint_deferred_usage_abort_drain.attempt-1",
-                );
-                usageRecordStarted.resolve();
-                await releaseUsageRecord.promise;
-                events.push("usage.record:done");
-                usageRecordFinished.resolve();
+                events.push(`usage.record:start:${record.usageId}`);
+                if (record.usageId === "turn_entrypoint_deferred_usage_abort_drain.attempt-1") {
+                  usageRecordStartedA.resolve();
+                  await releaseUsageRecordA.promise;
+                  events.push(`usage.record:done:${record.usageId}`);
+                  usageRecordFinishedA.resolve();
+                } else if (record.usageId === "turn_entrypoint_deferred_usage_abort_drain.attempt-2") {
+                  usageRecordStartedB.resolve();
+                  await releaseUsageRecordB.promise;
+                  events.push(`usage.record:done:${record.usageId}`);
+                  usageRecordFinishedB.resolve();
+                } else {
+                  assert.fail(`Unexpected usage record ${record.usageId}`);
+                }
                 return {
                   recorded: true,
                   usageId: record.usageId,
@@ -5524,6 +5534,11 @@ describe("hosted workspace runtime entrypoint", () => {
               usageId: "turn_entrypoint_deferred_usage_abort_drain.attempt-1",
             }));
             hostAbortController.abort(hostAbortReason);
+            await recordLateUsage.promise;
+            input.recordDeferredUsage?.(createAssistantUsageRecord({
+              usageId: "turn_entrypoint_deferred_usage_abort_drain.attempt-2",
+            }));
+            lateUsageRecorded.resolve();
             await assistantPhaseCanFinish.promise;
             throw hostAbortReason;
           },
@@ -5541,36 +5556,60 @@ describe("hosted workspace runtime entrypoint", () => {
         (error: unknown) => error,
       );
       assert.equal(outcome, hostAbortReason);
-      assert.equal(events.includes("usage.record:start"), false);
+      await withRealTimeout(
+        usageRecordStartedA.promise,
+        1_000,
+        () => "Deferred usage recording did not start after host abort.",
+      );
+      assert.equal(
+        events.includes("usage.record:done:turn_entrypoint_deferred_usage_abort_drain.attempt-1"),
+        false,
+      );
 
       const drainPromise = drainHostedRuntimeDeferredUsageCompletionsBestEffort();
       let drainSettled = false;
       void drainPromise.finally(() => {
         drainSettled = true;
       }).catch(() => undefined);
+      recordLateUsage.resolve();
       await withRealTimeout(
-        usageRecordStarted.promise,
+        lateUsageRecorded.promise,
         1_000,
-        () => "Shutdown deferred usage drain did not start captured usage recording.",
+        () => "Assistant phase did not record late deferred usage after host abort.",
+      );
+      await withRealTimeout(
+        usageRecordStartedB.promise,
+        1_000,
+        () => "Started deferred usage capture did not start late usage recording.",
       );
       assert.equal(drainSettled, false);
 
-      releaseUsageRecord.resolve();
+      releaseUsageRecordA.resolve();
+      releaseUsageRecordB.resolve();
       await withRealTimeout(
-        usageRecordFinished.promise,
+        usageRecordFinishedA.promise,
         1_000,
-        () => "Deferred usage recording did not finish after release.",
+        () => "First deferred usage recording did not finish after release.",
       );
+      await withRealTimeout(
+        usageRecordFinishedB.promise,
+        1_000,
+        () => "Late deferred usage recording did not finish after release.",
+      );
+      await Promise.resolve();
+      assert.equal(drainSettled, false);
+      assistantPhaseCanFinish.resolve();
       await withRealTimeout(
         drainPromise,
         1_000,
-        () => "Shutdown deferred usage drain did not settle after usage finished.",
+        () => "Shutdown deferred usage drain did not settle after capture closed.",
       );
       assert.equal(drainSettled, true);
-      assistantPhaseCanFinish.resolve();
     } finally {
+      recordLateUsage.resolve();
       assistantPhaseCanFinish.resolve();
-      releaseUsageRecord.resolve();
+      releaseUsageRecordA.resolve();
+      releaseUsageRecordB.resolve();
       if (resultPromise) {
         await resultPromise.catch(() => undefined);
       }

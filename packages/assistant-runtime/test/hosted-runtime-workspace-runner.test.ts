@@ -418,10 +418,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     });
     let resultPromise: Promise<Awaited<ReturnType<typeof runHostedWorkspaceUntilIdleOrBudget>>>
       | null = null;
-    const registeredDeferredUsageDrains: {
-      completion: Promise<void>;
-      start: () => Promise<void> | null;
-    }[] = [];
+    const registeredDeferredUsageCompletions: Promise<void>[] = [];
     const workspacePort = createWorkspacePort({
       checkpointRequests,
       async onCheckpoint() {
@@ -441,8 +438,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           snapshotRef: null,
         }),
         expectedUserId: TEST_USER_ID,
-        registerDeferredUsageDrain(drain) {
-          registeredDeferredUsageDrains.push(drain);
+        trackDeferredUsageCompletion(completion) {
+          registeredDeferredUsageCompletions.push(completion);
         },
         async importItem(item) {
           assert.equal(
@@ -511,11 +508,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
       assert.equal(result.latestWorkspace, null);
       assert.deepEqual(checkpointRequests, []);
-      assert.equal(registeredDeferredUsageDrains.length, 1);
-      const registeredDeferredUsageDrain = registeredDeferredUsageDrains[0];
-      assert.ok(registeredDeferredUsageDrain);
+      assert.equal(registeredDeferredUsageCompletions.length, 1);
+      const registeredDeferredUsageCompletion = registeredDeferredUsageCompletions[0];
+      assert.ok(registeredDeferredUsageCompletion);
       let deferredUsageCompletionSettled = false;
-      void registeredDeferredUsageDrain.completion.finally(() => {
+      void registeredDeferredUsageCompletion.finally(() => {
         deferredUsageCompletionSettled = true;
       }).catch(() => undefined);
       await Promise.resolve();

@@ -261,11 +261,6 @@ export interface HostedWorkspaceRunnerRuntimePassDiagnostics {
   startedAtEpochMs: number;
 }
 
-export interface HostedWorkspaceRunnerDeferredUsageDrain {
-  completion: Promise<void>;
-  start(): Promise<void> | null;
-}
-
 export type HostedWorkspaceRunnerMailboxImportItem = (
   item: HostedMailboxResolvedImportItem,
   context?: HostedWorkspaceRunnerMailboxImportContext,
@@ -281,7 +276,7 @@ export interface HostedWorkspaceRunnerInput {
   initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
-  registerDeferredUsageDrain?: ((drain: HostedWorkspaceRunnerDeferredUsageDrain) => void) | null;
+  trackDeferredUsageCompletion?: ((completion: Promise<void>) => void) | null;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
@@ -526,7 +521,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
 
   const runAssistantPhase = input.runAssistantPhase;
   const deferredUsageRecords: AssistantUsageRecord[] = [];
-  let deferredUsageFlushFinished: Promise<void> | null = null;
+  const pendingDeferredUsageWrites = new Set<Promise<void>>();
+  let deferredUsageCaptureClosed = false;
+  let deferredUsageCaptureStarted = false;
+  let deferredUsageCompletionTracked = false;
   let deferredUsageCompletionSettled = false;
   let resolveDeferredUsageCompletion: () => void = () => undefined;
   const deferredUsageCompletion = new Promise<void>((resolve) => {
@@ -540,30 +538,62 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     deferredUsageCompletionSettled = true;
     resolveDeferredUsageCompletion();
   };
-  const startDeferredUsageFlushOnce = (): Promise<void> | null => {
-    if (deferredUsageFlushFinished) {
-      return deferredUsageFlushFinished;
-    }
-
-    if (deferredUsageRecords.length === 0) {
+  const maybeResolveDeferredUsageCompletion = (): void => {
+    if (deferredUsageCaptureClosed && pendingDeferredUsageWrites.size === 0) {
       resolveDeferredUsageCompletionOnce();
-      return null;
+    }
+  };
+  const trackDeferredUsageCompletionOnce = (): void => {
+    if (deferredUsageCompletionTracked) {
+      return;
     }
 
-    deferredUsageFlushFinished = flushHostedAssistantUsageRecordsBestEffort({
-      input,
-      records: [...deferredUsageRecords],
-    });
-    void deferredUsageFlushFinished.then(
-      resolveDeferredUsageCompletionOnce,
-      resolveDeferredUsageCompletionOnce,
-    );
-    return deferredUsageFlushFinished;
+    deferredUsageCompletionTracked = true;
+    input.trackDeferredUsageCompletion?.(deferredUsageCompletion);
   };
-  input.registerDeferredUsageDrain?.({
-    completion: deferredUsageCompletion,
-    start: startDeferredUsageFlushOnce,
-  });
+  const startDeferredUsageRecords = (
+    records: readonly AssistantUsageRecord[],
+  ): void => {
+    if (records.length === 0) {
+      maybeResolveDeferredUsageCompletion();
+      return;
+    }
+
+    const completion = flushHostedAssistantUsageRecordsBestEffort({
+      input,
+      records,
+    });
+    pendingDeferredUsageWrites.add(completion);
+    void completion.finally(() => {
+      pendingDeferredUsageWrites.delete(completion);
+      maybeResolveDeferredUsageCompletion();
+    });
+  };
+  const startDeferredUsageCaptureOnce = (): Promise<void> => {
+    if (deferredUsageCaptureStarted) {
+      return deferredUsageCompletion;
+    }
+
+    deferredUsageCaptureStarted = true;
+    trackDeferredUsageCompletionOnce();
+    startDeferredUsageRecords(deferredUsageRecords.splice(0));
+    maybeResolveDeferredUsageCompletion();
+    return deferredUsageCompletion;
+  };
+  const closeDeferredUsageCapture = (): void => {
+    deferredUsageCaptureClosed = true;
+    maybeResolveDeferredUsageCompletion();
+  };
+  const startDeferredUsageCaptureOnAbort = (): void => {
+    void startDeferredUsageCaptureOnce();
+  };
+  if (input.signal?.aborted) {
+    startDeferredUsageCaptureOnAbort();
+  } else {
+    input.signal?.addEventListener("abort", startDeferredUsageCaptureOnAbort, {
+      once: true,
+    });
+  }
   let foregroundConversationWorkObserved = false;
   const foregroundMailboxImportLoop =
     startHostedForegroundConversationMailboxImportLoop({
@@ -585,6 +615,11 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         input,
       }),
     recordDeferredUsage(record: AssistantUsageRecord): void {
+      if (deferredUsageCaptureStarted) {
+        startDeferredUsageRecords([record]);
+        return;
+      }
+
       deferredUsageRecords.push(record);
     },
     shouldYieldBackgroundMaintenance: () => foregroundConversationWorkObserved,
@@ -728,12 +763,14 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       runnerError ??= error;
       throw error;
     } finally {
-      const deferredUsageFlush = startDeferredUsageFlushOnce();
+      input.signal?.removeEventListener("abort", startDeferredUsageCaptureOnAbort);
+      const deferredUsageCompletionForRunner = startDeferredUsageCaptureOnce();
+      closeDeferredUsageCapture();
       if (
         runnerError !== null
         && !isHostedWorkspaceRunnerAbortError(runnerError, input.signal ?? null)
       ) {
-        await deferredUsageFlush;
+        await deferredUsageCompletionForRunner;
       }
     }
   }
