@@ -19,10 +19,15 @@ import type {
 import {
   drainHostedRuntimeLogWritesBestEffort,
 } from "./hosted-runtime/runtime-logs.ts";
+import {
+  drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
+} from "./hosted-runtime/callbacks.ts";
 // Re-exported so the container entrypoint's process-fatal handler can flush
-// queued info-log writes (bounded by its exit backstop) before the process
-// dies — the crash tail is exactly the diagnostics worth keeping durable.
+// queued diagnostics (bounded by its exit backstop) before the process dies.
 export { drainHostedRuntimeLogWritesBestEffort } from "./hosted-runtime/runtime-logs.ts";
+export {
+  drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
+} from "./hosted-runtime/callbacks.ts";
 import {
   createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
   createHostedWorkspaceRuntimeBridgeJobOptions,
@@ -92,6 +97,9 @@ export async function runHostedWorkspaceInvocation(
       signal: input.signal ?? null,
     });
   } finally {
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort({
+      timeoutMs: 2_000,
+    });
     // Info-level runtime log writes are queued off the reply hot path; flush
     // them before the invocation result commits so a normal container stop
     // never drops queued diagnostics. Bounded so a degraded log endpoint

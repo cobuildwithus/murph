@@ -35,6 +35,7 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   consumeHostedCliRuntimeBridgeOffInvocationViolation,
+  drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
   drainHostedRuntimeLogWritesBestEffort,
   stopHostedCliRuntimeBridge,
 } from "@murphai/assistant-runtime/hosted-invocation";
@@ -1144,6 +1145,7 @@ function installHostedContainerProcessFatalHandlers(): void {
       // both. Neither promise ever rejects.
       void Promise.allSettled([
         reportHostedContainerFatalBestEffort({ error, stage }),
+        drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort(),
         drainHostedRuntimeLogWritesBestEffort(),
       ]).then(() => {
         process.exitCode = 1;

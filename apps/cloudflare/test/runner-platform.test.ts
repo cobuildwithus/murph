@@ -26,6 +26,7 @@ import {
 } from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
 import {
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
+  HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
 } from "@murphai/hosted-execution/routes";
 
@@ -3819,6 +3820,58 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("write-fences Linq delivery outcomes through direct web-control", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe(HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH);
+      return new Response(JSON.stringify({ ok: true, recorded: true }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    const recordLinqDeliveryOutcome = platform.effectsPort.recordLinqDeliveryOutcome;
+    if (!recordLinqDeliveryOutcome) {
+      throw new Error("Expected hosted Linq delivery outcome effect.");
+    }
+
+    await recordLinqDeliveryOutcome({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey: "assistant-outbox:intent_123",
+      intentId: "intent_123",
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "direct Linq delivery request");
+    expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH}`);
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+    await expect(request.clone().json()).resolves.toEqual(
+      expect.objectContaining({
+        acceptedAt: "2026-04-26T00:00:04.000Z",
+        attemptedAt: "2026-04-26T00:00:03.000Z",
+        idempotencyKey: "assistant-outbox:intent_123",
+        providerMessageId: "linq_message_sent",
+      }),
+    );
   });
 
   it("fails closed before direct web-control fetches with incomplete write-fence headers", async () => {

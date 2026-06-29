@@ -7,6 +7,7 @@ import {
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
   recordHostedLinqDeliveryAttemptTx,
+  recordHostedLinqRuntimeDeliveryOutcomeTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
 import {
@@ -112,14 +113,8 @@ describe("hosted Linq observability stores", () => {
           lastFailureCode: "30007",
           lastFailureReason: "[redacted]",
           lastReceiptEventId: createHostedLinqProviderEventLookupKey("evt_failed_123"),
-        }),
-      }),
-    );
-    expect(fixture.hostedLinqLineUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: {
           totalFailedCount: { increment: 1 },
-        },
+        }),
       }),
     );
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
@@ -191,6 +186,7 @@ describe("hosted Linq observability stores", () => {
       }),
     );
     expect(fixture.hostedLinqLineUpdateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqLineUpdate).not.toHaveBeenCalled();
     expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
   });
 
@@ -228,6 +224,7 @@ describe("hosted Linq observability stores", () => {
         }),
       }),
     );
+    expect(fixture.hostedLinqLineUpdate).not.toHaveBeenCalled();
     expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
   });
 
@@ -329,6 +326,61 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
+  it("does not double-count runtime-owned outbound message.received echoes", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
+      id: "hld_runtime_accepted",
+      phoneNumberLookupKey: "hbidx:phone:runtime-line",
+      source: "hosted_runtime_linq_delivery",
+    });
+    const event = requireParsedProviderEvent(buildMessageReceivedEvent({
+      direction: "outbound",
+      eventId: "evt_runtime_outbound_echo",
+      isFromMe: true,
+      messageId: "msg_runtime_outbound",
+    }));
+
+    await expect(ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual({
+      alertIds: [],
+      duplicate: false,
+    });
+
+    expect(fixture.hostedLinqLineUpdate).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqLineUpdateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps counting non-runtime outbound message.received echoes", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
+      id: "hld_web_side_effect",
+      phoneNumberLookupKey: "hbidx:phone:web-line",
+      source: "hosted_webhook_side_effect",
+    });
+    const event = requireParsedProviderEvent(buildMessageReceivedEvent({
+      direction: "outbound",
+      eventId: "evt_web_outbound_echo",
+      isFromMe: true,
+      messageId: "msg_web_outbound",
+    }));
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqLineUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          totalOutboundCount: { increment: 1 },
+        },
+      }),
+    );
+  });
+
   it("counts inbound message.received events against line reply health", async () => {
     const fixture = createObservabilityPrismaFixture();
     const event = requireParsedProviderEvent(buildMessageReceivedEvent({
@@ -392,6 +444,72 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqLineUpdate).not.toHaveBeenCalled();
     expect(fixture.hostedLinqDeliveryUpdate).not.toHaveBeenCalled();
     expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not re-advance delivery rows for same-timestamp delivered receipts", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const providerCreatedAt = new Date("2026-03-26T12:00:00.000Z");
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
+      id: "hld_delivered_same_timestamp",
+      phoneNumberLookupKey: null,
+    });
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        message_id: "msg_delivered_same_timestamp",
+        phone_number: "+15550000000",
+      },
+      eventId: "evt_delivered_same_timestamp",
+      eventType: "message.delivered",
+    }));
+
+    await applyHostedLinqDeliveryReceiptTx({
+      event,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "hld_delivered_same_timestamp",
+          OR: [
+            { lastReceiptAt: null },
+            { lastReceiptAt: { lt: providerCreatedAt } },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("does not re-advance line totals for same-timestamp delivered receipts", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const providerCreatedAt = new Date("2026-03-26T12:00:00.000Z");
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        message_id: "msg_delivered_line_same_timestamp",
+        phone_number: "+15550000000",
+      },
+      eventId: "evt_delivered_line_same_timestamp",
+      eventType: "message.delivered",
+    }));
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          totalDeliveredCount: { increment: 1 },
+        }),
+        where: expect.objectContaining({
+          OR: [
+            { lastReceiptAt: null },
+            { lastReceiptAt: { lt: providerCreatedAt } },
+          ],
+        }),
+      }),
+    );
   });
 
   it("preserves the stored line lookup key when the phone blind-index key rotated", async () => {
@@ -714,6 +832,311 @@ describe("hosted Linq observability stores", () => {
     expect(updateData?.messageLookupKey).not.toBe("provider_message_123");
   });
 
+  it("records hosted runtime accepted Linq sends as delivery rows and line outbound totals", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
+    const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
+    const deliveryIdempotencyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
+      "assistant-outbox:intent_123",
+    );
+    fixture.hostedLinqLineFindUnique.mockResolvedValueOnce({
+      phoneNumberHint: "+0000",
+      phoneNumberLookupKey: "hbidx:phone:runtime-line",
+    });
+
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt,
+      attemptedAt,
+      idempotencyKey: "assistant-outbox:intent_123",
+      linqChatId: "linq_chat_123",
+      messageId: "provider_message_123",
+      phoneNumber: "+15550000000",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_123",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      recorded: true,
+    });
+
+    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledWith({
+      select: expect.objectContaining({
+        phoneNumberLookupKey: true,
+      }),
+      where: {
+        idempotencyKey: deliveryIdempotencyLookupKey,
+      },
+    });
+    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          acceptedAt,
+          attemptedAt,
+          idempotencyKey: deliveryIdempotencyLookupKey,
+          messageIdSuffix: "ge_123",
+          phoneNumberLookupKey: "hbidx:phone:runtime-line",
+          source: "hosted_runtime_linq_delivery",
+          status: "accepted",
+          targetKind: "thread",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqLineUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          totalOutboundCount: { increment: 1 },
+        },
+      }),
+    );
+    expect(fixture.hostedLinqProviderEventFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          messageLookupKey: expect.objectContaining({
+            in: expect.arrayContaining([
+              expect.stringMatching(/^hbidx:linq-message:/u),
+            ]),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("does not create or project a runtime raw sender line that is not already known", async () => {
+    const fixture = createObservabilityPrismaFixture();
+
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      idempotencyKey: "assistant-outbox:intent_unknown_line",
+      linqChatId: "linq_chat_123",
+      messageId: "provider_message_123",
+      phoneNumber: "+15550000000",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_unknown_line",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      recorded: true,
+    });
+
+    expect(fixture.hostedLinqLineUpsert).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          phoneNumberHint: null,
+          phoneNumberLookupKey: null,
+          status: "accepted",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqLineUpdate).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqLineUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not double-count outbound totals when the provider echo lands before runtime acceptance", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqLineFindUnique.mockResolvedValueOnce({
+      phoneNumberHint: "+0000",
+      phoneNumberLookupKey: "hbidx:phone:runtime-line",
+    });
+    fixture.hostedLinqProviderEventFindFirst.mockResolvedValueOnce({
+      eventId: createHostedLinqProviderEventLookupKey("evt_outbound_echo_first"),
+    });
+
+    await recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      idempotencyKey: "assistant-outbox:intent_echo_first",
+      linqChatId: "linq_chat_123",
+      messageId: "provider_message_123",
+      phoneNumber: "+15550000000",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_echo_first",
+      targetKind: "thread",
+    });
+
+    expect(fixture.hostedLinqProviderEventFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          direction: "outbound",
+          eventType: "message.received",
+          messageLookupKey: expect.objectContaining({
+            in: expect.arrayContaining([
+              expect.stringMatching(/^hbidx:linq-message:/u),
+            ]),
+          }),
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqLineUpdate).not.toHaveBeenCalled();
+  });
+
+  it("projects receipt-before-runtime delivery callbacks through the accepted delivery line", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const receiptAt = new Date("2026-03-26T12:00:03.000Z");
+    fixture.hostedLinqLineFindUnique.mockResolvedValueOnce({
+      phoneNumberHint: "+0000",
+      phoneNumberLookupKey: "hbidx:phone:runtime-line",
+    });
+    fixture.hostedLinqProviderEventFindMany.mockResolvedValueOnce([
+      {
+        deliveryStatus: "delivered",
+        eventId: createHostedLinqProviderEventLookupKey("evt_delivered_123"),
+        failureCode: null,
+        failureReason: null,
+        phoneNumberLookupKey: null,
+        providerCreatedAt: receiptAt,
+        service: "imessage",
+      },
+    ]);
+
+    await recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      idempotencyKey: "assistant-outbox:intent_123",
+      linqChatId: "linq_chat_123",
+      messageId: "provider_message_123",
+      phoneNumber: "+15550000000",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_123",
+      targetKind: "thread",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          deliveredAt: receiptAt,
+          lastReceiptAt: receiptAt,
+          status: "delivered",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          healthStatus: "healthy",
+          lastDeliveredAt: receiptAt,
+          lastReceiptAt: receiptAt,
+          totalDeliveredCount: { increment: 1 },
+        }),
+      }),
+    );
+  });
+
+  it("lets a hosted runtime acceptance replace a pre-provider skipped delivery", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const deliveryIdempotencyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
+      "assistant-outbox:intent_123",
+    );
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_skipped_runtime_retry",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      skippedAt: new Date("2026-03-26T12:00:00.000Z"),
+      status: "skipped",
+    });
+    fixture.hostedLinqLineFindUnique.mockResolvedValueOnce({
+      phoneNumberHint: "+0000",
+      phoneNumberLookupKey: "hbidx:phone:runtime-line",
+    });
+
+    await recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt: new Date("2026-03-26T12:05:01.000Z"),
+      attemptedAt: new Date("2026-03-26T12:05:00.000Z"),
+      idempotencyKey: "assistant-outbox:intent_123",
+      linqChatId: "linq_chat_123",
+      messageId: "provider_message_123",
+      phoneNumber: "+15550000000",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_123",
+      targetKind: "thread",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          acceptedAt: new Date("2026-03-26T12:05:01.000Z"),
+          skippedAt: null,
+          skipReason: null,
+          status: "accepted",
+        }),
+        where: expect.objectContaining({
+          acceptedAt: null,
+          deliveredAt: null,
+          idempotencyKey: deliveryIdempotencyLookupKey,
+          lastReceiptAt: null,
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryUpdateMany.mock.calls[0]?.[0]?.where)
+      .not.toHaveProperty("skippedAt");
+  });
+
+  it("treats concurrent runtime delivery creation as an idempotent accepted update", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const acceptedAt = new Date("2026-03-26T12:05:01.000Z");
+    const attemptedAt = new Date("2026-03-26T12:05:00.000Z");
+    fixture.hostedLinqDeliveryFindUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: new Date("2026-03-26T12:04:59.000Z"),
+        id: "hld_concurrent_failed",
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        phoneNumberLookupKey: null,
+        skippedAt: null,
+        status: "failed",
+      });
+    fixture.hostedLinqDeliveryCreate.mockRejectedValueOnce({
+      code: "P2002",
+    });
+    fixture.hostedLinqLineFindUnique.mockResolvedValueOnce({
+      phoneNumberHint: "+0000",
+      phoneNumberLookupKey: "hbidx:phone:runtime-line",
+    });
+
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt,
+      attemptedAt,
+      idempotencyKey: "assistant-outbox:intent_123",
+      linqChatId: "linq_chat_123",
+      messageId: "provider_message_123",
+      phoneNumber: "+15550000000",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_123",
+      targetKind: "thread",
+    })).resolves.toEqual({
+      deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      recorded: true,
+    });
+
+    expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledTimes(2);
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          acceptedAt,
+          failedAt: null,
+          messageLookupKey: expect.stringMatching(/^hbidx:linq-message:/u),
+          skippedAt: null,
+          status: "accepted",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqLineUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          totalOutboundCount: { increment: 1 },
+        },
+      }),
+    );
+  });
+
   it("lets a retry acceptance replace a pre-provider send failure", async () => {
     const fixture = createObservabilityPrismaFixture();
     const deliveryIdempotencyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(
@@ -856,6 +1279,7 @@ describe("hosted Linq observability stores", () => {
 
     fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
       id: "hld_skipped_retry",
+      phoneNumberLookupKey: null,
     });
     await expect(applyHostedLinqDeliveryReceiptTx({
       event: requireParsedProviderEvent(buildProviderEvent({
@@ -871,6 +1295,7 @@ describe("hosted Linq observability stores", () => {
     })).resolves.toEqual({
       advanced: true,
       deliveryId: "hld_skipped_retry",
+      phoneNumberLookupKey: null,
     });
 
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenLastCalledWith(
