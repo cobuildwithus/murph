@@ -571,6 +571,7 @@ export async function runHostedWorkspaceAssistantPhase(
         assistantCronWakeAfterPassCandidate,
       ]);
       const postDelivery = await drainHostedPostCheckpointDelivery({
+        assistantMetrics,
         assistantDeliveryEffects: deliveryEffects,
         assistantDeliveryPreparation: deliveryEffectsPreparation,
         baseNextWake: fastDispatchBaseNextWake,
@@ -729,6 +730,7 @@ export async function runHostedWorkspaceAssistantPhase(
                 };
               }
               return await drainHostedPostCheckpointDelivery({
+                assistantMetrics,
                 assistantDeliveryEffects: deliveryEffects,
                 assistantDeliveryPreparation: deliveryEffectsPreparation,
                 baseNextWake,
@@ -2940,6 +2942,7 @@ async function runForegroundAssistantReplyPhase(input: {
       systemMailboxWakeAt: input.systemMailboxWakeAt,
     });
     const postDelivery = await drainHostedPostCheckpointDelivery({
+      assistantMetrics: input.assistantMetrics,
       assistantDeliveryEffects: deliveryEffects,
       assistantDeliveryPreparation: preparedDeliveryEffects.preparation,
       baseNextWake: fastDispatchBaseNextWake,
@@ -3085,6 +3088,7 @@ async function runForegroundAssistantReplyPhase(input: {
               createHostedRuntimeWakeCandidate(input.deferredProviderCleanupWakeAt, "assistant"),
             ]);
             return await drainHostedPostCheckpointDelivery({
+              assistantMetrics: input.assistantMetrics,
               assistantDeliveryEffects: deliveryEffects,
               assistantDeliveryPreparation: preparedDeliveryEffects.preparation,
               baseNextWake,
@@ -3123,6 +3127,7 @@ async function runForegroundAssistantReplyPhase(input: {
 
 async function drainHostedPostCheckpointDelivery(input: {
   afterDurableCheckpoint?: HostedWorkspaceRunnerAssistantPhasePostCheckpoint["afterDurableCheckpoint"] | null;
+  assistantMetrics?: HostedAssistantMetrics | null;
   assistantDeliveryEffects: HostedAssistantDeliveryEffects;
   assistantDeliveryPreparation?: HostedAssistantDeliveryPreparation | null;
   baseNextWake: HostedRuntimeWakeCandidate;
@@ -3223,7 +3228,8 @@ async function drainHostedPostCheckpointDelivery(input: {
   });
   const postAssistantCronWake =
     await resolveHostedAssistantCronWakeStateBestEffort(input.input);
-  const postAssistantCronWakeCandidate = resolveHostedAssistantCronWakeCandidate({
+  const postAssistantCronWakeCandidate = resolvePostDeliveryAssistantCronWakeCandidate({
+    assistantMetrics: input.assistantMetrics ?? null,
     phaseInput: input.input,
     state: postAssistantCronWake,
   });
@@ -3231,7 +3237,11 @@ async function drainHostedPostCheckpointDelivery(input: {
     vaultRoot: input.input.restored.vaultRoot,
   });
   const postNextWake = selectHostedRuntimeWakeCandidate([
-    input.baseNextWake,
+    omitConsumedHostedAssistantCronWakeCandidate({
+      assistantMetrics: input.assistantMetrics ?? null,
+      candidate: input.baseNextWake,
+      phaseInput: input.input,
+    }),
     postAssistantCronWakeCandidate,
     createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
@@ -3258,9 +3268,71 @@ async function drainHostedPostCheckpointDelivery(input: {
       ).length,
       ...providerCleanupRedactedStatus,
       ...(input.redactedStatus ?? {}),
+      hostedOutboxPendingDeliveryEffects:
+        countHostedPendingOutboxDeliveryOutcomes(outcomes),
       nextWakeAt: postNextWakeAt,
     },
   };
+}
+
+function resolvePostDeliveryAssistantCronWakeCandidate(input: {
+  assistantMetrics: HostedAssistantMetrics | null;
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+  state: HostedAssistantCronWakeState;
+}): HostedRuntimeWakeCandidate | null {
+  if (input.state.available) {
+    return omitConsumedHostedAssistantCronWakeCandidate({
+      assistantMetrics: input.assistantMetrics,
+      candidate: resolveHostedAssistantCronWakeCandidate({
+        phaseInput: input.phaseInput,
+        state: input.state,
+      }),
+      phaseInput: input.phaseInput,
+    });
+  }
+
+  return selectHostedRuntimeWakeCandidate([
+    omitConsumedHostedAssistantCronWakeCandidate({
+      assistantMetrics: input.assistantMetrics,
+      candidate: createExistingHostedAssistantWorkspaceWakeCandidate(input.phaseInput),
+      phaseInput: input.phaseInput,
+    }),
+    createHostedRuntimeWakeCandidate(
+      new Date(
+        resolveHostedAssistantPhaseNowMs(input.phaseInput)
+          + HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS,
+      ).toISOString(),
+      HOSTED_ASSISTANT_WAKE_REASON,
+    ),
+  ]);
+}
+
+function omitConsumedHostedAssistantCronWakeCandidate(input: {
+  assistantMetrics: HostedAssistantMetrics | null;
+  candidate: HostedRuntimeWakeCandidate | null;
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): HostedRuntimeWakeCandidate | null {
+  if (
+    (input.assistantMetrics?.assistantAutomationCronProcessed ?? 0) <= 0
+    || !consumedScheduledWorkspaceWake(input.phaseInput)
+    || input.candidate?.reason !== HOSTED_ASSISTANT_WAKE_REASON
+    || input.candidate.at !== input.phaseInput.workspace?.nextWakeAt
+  ) {
+    return input.candidate;
+  }
+
+  return null;
+}
+
+function countHostedPendingOutboxDeliveryOutcomes(
+  outcomes: readonly HostedAssistantDeliveryOutcome[],
+): number {
+  return outcomes.filter((outcome) =>
+    outcome.retryable === true
+    || outcome.deliveryStatus === "pending"
+    || outcome.deliveryStatus === "retryable"
+    || outcome.deliveryStatus === "sending"
+  ).length;
 }
 
 async function flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(

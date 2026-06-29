@@ -3714,7 +3714,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(result.redactedStatus).toEqual(expect.objectContaining({
       hostedOutboxDeliveryAttempted: 1,
       hostedOutboxDeliverySent: 1,
-      hostedOutboxPendingDeliveryEffects: 1,
+      hostedOutboxPendingDeliveryEffects: 0,
       nextWakeAt: null,
     }));
     expect(result.nextWakeAt).toBeNull();
@@ -3836,6 +3836,147 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         nextWakeAt: dueAt,
       }),
     }));
+  });
+
+  it("drops the consumed assistant cron wake after clean post-checkpoint delivery", async () => {
+    vi.useFakeTimers();
+    try {
+      const consumedWakeAt = "2026-05-08T16:00:00.000Z";
+      vi.setSystemTime(new Date("2026-05-08T16:00:00.100Z"));
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationCronProcessed: 1,
+        assistantAutomationProgressed: true,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: consumedWakeAt,
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      });
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+        createDeliveryEffect(),
+      ]);
+      mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+        vi.setSystemTime(new Date("2026-05-08T16:00:01.000Z"));
+        return [createSentDeliveryOutcome()];
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 0,
+        workspace: {
+          checkpointedAt: "2026-05-08T15:59:50.000Z",
+          createdAt: "2026-05-08T15:00:00.000Z",
+          nextWakeAt: consumedWakeAt,
+          nextWakeReason: "assistant",
+          redactedStatus: null,
+          snapshotRef: null,
+          updatedAt: "2026-05-08T15:59:50.000Z",
+          userId: "member_synthetic_phase",
+          version: "8",
+        },
+      }));
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_sending",
+        nextWakeAt: null,
+        progressed: true,
+        redactedStatus: expect.objectContaining({
+          hostedOutboxPendingDeliveryEffects: 1,
+        }),
+      }));
+
+      const postCheckpoint = await result.afterCheckpoint?.();
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+        nextWakeAt: null,
+        redactedStatus: expect.objectContaining({
+          hostedOutboxDeliveryAttempted: 1,
+          hostedOutboxDeliverySent: 1,
+          hostedOutboxPendingDeliveryEffects: 0,
+          nextWakeAt: null,
+        }),
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a retry wake when post-delivery assistant cron status cannot be read", async () => {
+    vi.useFakeTimers();
+    try {
+      const consumedWakeAt = "2026-05-08T16:00:00.000Z";
+      const retryWakeAt = "2026-05-08T16:00:31.000Z";
+      vi.setSystemTime(new Date("2026-05-08T16:00:00.100Z"));
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationCronProcessed: 1,
+        assistantAutomationProgressed: true,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: consumedWakeAt,
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      });
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+        createDeliveryEffect(),
+      ]);
+      mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+        vi.setSystemTime(new Date("2026-05-08T16:00:01.000Z"));
+        return [createSentDeliveryOutcome()];
+      });
+      mocks.getAssistantCronStatus
+        .mockResolvedValueOnce({
+          dueJobs: 0,
+          enabledJobs: 0,
+          nextRunAt: null,
+          runningJobs: 0,
+          totalJobs: 0,
+        })
+        .mockResolvedValueOnce({
+          dueJobs: 0,
+          enabledJobs: 0,
+          nextRunAt: null,
+          runningJobs: 0,
+          totalJobs: 0,
+        })
+        .mockRejectedValueOnce(new Error("cron status unavailable"));
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 0,
+        workspace: {
+          checkpointedAt: "2026-05-08T15:59:50.000Z",
+          createdAt: "2026-05-08T15:00:00.000Z",
+          nextWakeAt: consumedWakeAt,
+          nextWakeReason: "assistant",
+          redactedStatus: null,
+          snapshotRef: null,
+          updatedAt: "2026-05-08T15:59:50.000Z",
+          userId: "member_synthetic_phase",
+          version: "8",
+        },
+      }));
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_sending",
+        nextWakeAt: null,
+        progressed: true,
+      }));
+
+      const postCheckpoint = await result.afterCheckpoint?.();
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+        nextWakeAt: retryWakeAt,
+        redactedStatus: expect.objectContaining({
+          hostedOutboxDeliveryAttempted: 1,
+          hostedOutboxDeliverySent: 1,
+          hostedOutboxPendingDeliveryEffects: 0,
+          nextWakeAt: retryWakeAt,
+        }),
+      }));
+      expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("preserves the assistant wake after clean fast dispatch", async () => {
@@ -7388,6 +7529,27 @@ function createFailedDeliveryOutcome(input: {
     providerMessageIds: [],
     providerThreadId: null,
     retryable: true,
+    target: null,
+    targetKind: null,
+  };
+}
+
+function createSentDeliveryOutcome(): HostedAssistantDeliveryOutcome {
+  return {
+    cleanupMessages: [],
+    cleanupTargetAliases: [],
+    deliveryChannel: "telegram",
+    deliveryErrorCode: null,
+    deliveryErrorMessage: null,
+    deliveryStatus: "sent",
+    effectFingerprint: "fingerprint_synthetic",
+    effectId: "effect_synthetic",
+    journalMethod: "PUT",
+    journalStatus: "200",
+    providerMessageId: null,
+    providerMessageIds: [],
+    providerThreadId: "thread_synthetic",
+    retryable: false,
     target: null,
     targetKind: null,
   };

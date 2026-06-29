@@ -223,6 +223,7 @@ export async function runHostedAssistantAutomationLane(input: {
       )
     : {
         currentTurnDeliveryIntentIds: [],
+        cronProcessed: 0,
         nextWakeAt: null,
         progressed: false,
         redactedLogEntries: [],
@@ -243,6 +244,7 @@ export async function runHostedAssistantAutomationLane(input: {
       assistantResult.currentTurnDeliveryIntentIds ?? [],
     assistantAutomationElapsedMs,
     assistantAutomationPassElapsedMs: assistantResult.timings?.passElapsedMs ?? null,
+    assistantAutomationCronProcessed: assistantResult.cronProcessed,
     assistantAutomationProgressed: assistantResult.progressed,
     assistantAutomationReplyFailed: assistantResult.replyFailed,
     assistantAutomationTotalElapsedMs: assistantResult.timings?.totalElapsedMs ?? null,
@@ -271,6 +273,7 @@ export async function runHostedAssistantAutomation(
   },
 ): Promise<{
   currentTurnDeliveryIntentIds: string[];
+  cronProcessed: number;
   nextWakeAt: string | null;
   progressed: boolean;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
@@ -522,6 +525,7 @@ export async function runHostedAssistantAutomation(
     }));
     return {
       currentTurnDeliveryIntentIds,
+      cronProcessed: result.cronProcessed,
       nextWakeAt,
       progressed: result.progressed,
       redactedLogEntries,
@@ -556,6 +560,7 @@ export async function runHostedAssistantAutomation(
       }));
       return {
         currentTurnDeliveryIntentIds: [],
+        cronProcessed: 0,
         nextWakeAt,
         progressed: true,
         redactedLogEntries,
