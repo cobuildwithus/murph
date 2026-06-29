@@ -127,6 +127,10 @@ export function createCloudflareEffectsPort(input: {
               boundUserId: input.boundUserId,
               description: "Hosted Linq recent inbound engagement assertion",
               fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description: "Hosted Linq recent inbound engagement assertion",
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
               path: HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,

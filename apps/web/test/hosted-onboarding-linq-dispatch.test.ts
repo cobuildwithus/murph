@@ -55,6 +55,7 @@ const mocks = vi.hoisted(() => {
     releaseHostedAiUsageLimitNotice: vi.fn(),
     claimHostedLinqOnboardingLinkNotice: vi.fn(),
     claimHostedLinqQuotaReplyNotice: vi.fn(),
+    markHostedLinqOnboardingLinkNoticeSent: vi.fn(),
     classifyHostedLinqFirstContactAdmission: vi.fn(),
     releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn(),
     releaseHostedLinqQuotaReplyNoticeClaim: vi.fn(),
@@ -214,6 +215,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
     ...actual,
     claimHostedLinqOnboardingLinkNotice: mocks.claimHostedLinqOnboardingLinkNotice,
     claimHostedLinqQuotaReplyNotice: mocks.claimHostedLinqQuotaReplyNotice,
+    markHostedLinqOnboardingLinkNoticeSent: mocks.markHostedLinqOnboardingLinkNoticeSent,
     incrementHostedLinqInboundDailyState: mocks.incrementHostedLinqInboundDailyState,
     incrementHostedLinqOutboundDailyState: mocks.incrementHostedLinqOutboundDailyState,
     readHostedLinqDailyState: mocks.readHostedLinqDailyState,
@@ -483,6 +485,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
+    mocks.markHostedLinqOnboardingLinkNoticeSent.mockResolvedValue(true);
     mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValue({
       confidence: 0.9,
       kind: "allow",
@@ -2110,13 +2113,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
+    expect(mocks.markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledWith({
       memberId: "member_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
-    expect(mocks.claimHostedLinqOnboardingLinkNotice.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
+    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.markHostedLinqOnboardingLinkNoticeSent.mock.invocationCallOrder[0],
     );
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
@@ -2314,7 +2317,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
     });
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalled();
+    expect(mocks.markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
@@ -2433,7 +2436,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
+    expect(mocks.markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledWith({
       memberId: "member_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
@@ -3125,7 +3128,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
+    expect(mocks.markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledWith({
       memberId: invite.memberId,
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
@@ -3322,7 +3325,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
+    expect(mocks.markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledWith({
       memberId: invite.memberId,
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
@@ -3462,7 +3465,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         occurredAt: "2026-03-26T12:00:00.000Z",
         prisma,
       });
-      expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
+      expect(mocks.markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledWith({
         memberId: "member_123",
         occurredAt: "2026-03-26T12:00:00.000Z",
         prisma,
@@ -5013,7 +5016,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("skips signup link delivery when another request already claimed the one-shot notice", async () => {
+  it("does not let a stale pre-send signup notice claim suppress first reach-out", async () => {
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValueOnce(false);
     mocks.readHostedLinqDailyState.mockResolvedValueOnce(null);
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState());
@@ -5072,12 +5075,21 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "sent-signup-link",
     });
     expect(hostedInviteCreate).toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: expect.stringContaining("https://join.example.test/join/code_first_text"),
+        replyToMessageId: "msg_123",
+      }),
+    );
+    expect(mocks.markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledWith({
       memberId: "member_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
+    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.markHostedLinqOnboardingLinkNoticeSent.mock.invocationCallOrder[0],
+    );
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });

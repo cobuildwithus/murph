@@ -25,6 +25,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
   claimHostedLinqOnboardingLinkNotice: vi.fn().mockResolvedValue(true),
   claimHostedLinqQuotaReplyNotice: vi.fn().mockResolvedValue(true),
+  markHostedLinqOnboardingLinkNoticeSent: vi.fn().mockResolvedValue(true),
   releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn().mockResolvedValue(undefined),
   releaseHostedLinqQuotaReplyNoticeClaim: vi.fn().mockResolvedValue(undefined),
 }));
@@ -55,6 +56,7 @@ import {
 import {
   claimHostedLinqOnboardingLinkNotice,
   claimHostedLinqQuotaReplyNotice,
+  markHostedLinqOnboardingLinkNoticeSent,
   releaseHostedLinqOnboardingLinkNoticeClaim,
   releaseHostedLinqQuotaReplyNoticeClaim,
 } from "@/src/lib/hosted-onboarding/linq-daily-state";
@@ -834,7 +836,7 @@ describe("hosted Linq webhook transport", () => {
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("releases invite signup notice claims when delivery fails", async () => {
+  it("does not mark invite signup notices sent when delivery fails", async () => {
     vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(new Error("send failed"));
     const prisma = {
       hostedInvite: {
@@ -862,16 +864,9 @@ describe("hosted Linq webhook transport", () => {
       }),
     ).rejects.toThrow("send failed");
 
-    expect(claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
-      memberId: "member-1",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      prisma,
-    });
-    expect(releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalledWith({
-      memberId: "member-1",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      prisma,
-    });
+    expect(claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(markHostedLinqOnboardingLinkNoticeSent).not.toHaveBeenCalled();
+    expect(releaseHostedLinqOnboardingLinkNoticeClaim).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
   });
 });

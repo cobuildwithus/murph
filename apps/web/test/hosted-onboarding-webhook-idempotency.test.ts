@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   claimHostedLinqOnboardingLinkNotice: vi.fn(),
   claimHostedLinqQuotaReplyNotice: vi.fn(),
+  markHostedLinqOnboardingLinkNoticeSent: vi.fn(),
   releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn(),
   releaseHostedLinqQuotaReplyNoticeClaim: vi.fn(),
   ensureHostedMemberForPhoneTx: vi.fn(),
@@ -110,6 +111,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
     ...actual,
     claimHostedLinqOnboardingLinkNotice: mocks.claimHostedLinqOnboardingLinkNotice,
     claimHostedLinqQuotaReplyNotice: mocks.claimHostedLinqQuotaReplyNotice,
+    markHostedLinqOnboardingLinkNoticeSent: mocks.markHostedLinqOnboardingLinkNoticeSent,
     incrementHostedLinqInboundDailyState: mocks.incrementHostedLinqInboundDailyState,
     incrementHostedLinqOutboundDailyState: mocks.incrementHostedLinqOutboundDailyState,
     readHostedLinqDailyState: mocks.readHostedLinqDailyState,
@@ -149,6 +151,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     );
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
+    mocks.markHostedLinqOnboardingLinkNoticeSent.mockResolvedValue(true);
     mocks.releaseHostedLinqOnboardingLinkNoticeClaim.mockResolvedValue(undefined);
     mocks.releaseHostedLinqQuotaReplyNoticeClaim.mockResolvedValue(undefined);
     mocks.readHostedLinqDailyState.mockResolvedValue(null);
@@ -405,13 +408,13 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         id: "invite_123",
       },
     });
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
+    expect(mocks.markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledWith({
       memberId: "member_123",
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
-    expect(mocks.claimHostedLinqOnboardingLinkNotice.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
+    expect(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.markHostedLinqOnboardingLinkNoticeSent.mock.invocationCallOrder[0],
     );
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();

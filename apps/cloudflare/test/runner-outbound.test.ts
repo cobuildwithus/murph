@@ -70,6 +70,7 @@ import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
+  HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
@@ -218,6 +219,15 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "device-sync connect-target connect-link",
     path: "/api/internal/device-sync/connect-targets/google/connect-link",
+  },
+  {
+    body: {
+      engagementKind: "requires_recent_inbound",
+      target: "chat_123",
+      targetKind: "thread",
+    },
+    name: "hosted Linq egress engagement",
+    path: HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   },
   {
     body: {
@@ -621,6 +631,7 @@ describe("handleRunnerOutboundRequest", () => {
                   ...(path === "/api/internal/hosted-workspace/checkpoint"
                     || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
                     || path === HOSTED_RUNTIME_LATENCY_TRACE_PATH
+                    || path === HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH
                     || path === HOSTED_RUNTIME_CODEX_AUTH_PATH
                     || isHostedComputerWebControlRequest({ method: "POST", path })
                     ? {
@@ -731,6 +742,41 @@ describe("handleRunnerOutboundRequest", () => {
             source: "linq",
             type: "assistant_input_staged",
           },
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects Linq egress engagement assertions without the active runtime fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}`, {
+        body: JSON.stringify({
+          engagementKind: "requires_recent_inbound",
+          target: "chat_123",
+          targetKind: "thread",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
