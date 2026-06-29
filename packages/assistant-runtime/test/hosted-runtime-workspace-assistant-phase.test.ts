@@ -3340,7 +3340,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("synthetic-whoop-secret");
   });
 
-  it("injects reconnect-required hosted device sync status as dynamic context", async () => {
+  it("injects reconnect-required hosted device sync status as dynamic context for due cron lanes", async () => {
     let fetchSnapshotCalls = 0;
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),
@@ -3406,9 +3406,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     } satisfies RuntimeDeviceSyncPort;
 
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: null,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      assistantInputIds: ["ain_00000000000000000000000000000042"],
-      importedCount: 1,
       resolvedDeviceSync: {
         providerConfigs: {
           junction: {

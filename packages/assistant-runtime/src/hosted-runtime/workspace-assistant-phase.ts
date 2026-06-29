@@ -343,12 +343,16 @@ export async function runHostedWorkspaceAssistantPhase(
     };
     const shouldIncludeDeviceSyncStatusPrompt = async (): Promise<boolean> => {
       if (
-        hasFreshConversationInput
-        || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null
-        || systemMailboxMaintenance.continueAssistantLane
+        systemMailboxMaintenance.continueAssistantLane
         || managedAutomationsResult !== null
       ) {
         return true;
+      }
+      if (
+        hasFreshConversationInput
+        || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null
+      ) {
+        return false;
       }
 
       return await hasDueHostedAssistantCronJob(input);
