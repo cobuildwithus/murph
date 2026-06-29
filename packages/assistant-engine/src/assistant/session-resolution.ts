@@ -189,19 +189,28 @@ export async function resolveAssistantSessionForMessage(input: {
   defaults: AssistantOperatorDefaults | null
   message: AssistantMessageInput
 }) {
+  const messageOverride = compactAssistantProviderConfigInput(input.message)
   const sessionInput = buildResolveAssistantSessionInput(
     input.message,
     input.defaults,
     input.boundaryDefaultTarget ?? null,
   )
+  const createSessionInput =
+    input.message.providerConfigPersistence === 'turn' && messageOverride
+      ? () => buildResolveAssistantSessionInput(
+          stripAssistantMessageProviderConfig(input.message),
+          input.defaults,
+          input.boundaryDefaultTarget ?? null,
+        )
+      : null
   const hostedDefaultTarget =
     normalizeAssistantBackendTarget(
       normalizeAssistantExecutionContext(input.message.executionContext).hosted
         ?.defaultTarget ?? null,
     )
-  const messageOverride = compactAssistantProviderConfigInput(input.message)
   const resolved = await resolveAssistantSessionForMessageInput({
     hostedDefaultTarget,
+    createSessionInput,
     messageOverride,
     sessionInput,
   })
@@ -210,13 +219,37 @@ export async function resolveAssistantSessionForMessage(input: {
     messageOverride,
     resolved,
   })
+  const durableTarget =
+    input.message.providerConfigPersistence === 'turn' && messageOverride
+      ? hostedDefaultTarget
+      : effectiveTarget
 
-  return effectiveTarget
-    ? applyEffectiveTargetToResolvedSession(resolved, effectiveTarget)
+  return durableTarget
+    ? applyEffectiveTargetToResolvedSession(resolved, durableTarget)
     : resolved
 }
 
+function stripAssistantMessageProviderConfig(
+  input: AssistantMessageInput,
+): AssistantMessageInput {
+  const {
+    approvalPolicy: _approvalPolicy,
+    codexCommand: _codexCommand,
+    codexHome: _codexHome,
+    model: _model,
+    modelProvider: _modelProvider,
+    oss: _oss,
+    profile: _profile,
+    provider: _provider,
+    reasoningEffort: _reasoningEffort,
+    sandbox: _sandbox,
+    ...message
+  } = input
+  return message
+}
+
 async function resolveAssistantSessionForMessageInput(input: {
+  createSessionInput?: (() => ResolveAssistantSessionInput) | null
   hostedDefaultTarget: AssistantModelTarget | null
   messageOverride: AssistantProviderConfigInput | null
   sessionInput: ResolveAssistantSessionInput
@@ -235,7 +268,9 @@ async function resolveAssistantSessionForMessageInput(input: {
     }
   }
 
-  return await resolveAssistantSession(input.sessionInput)
+  return await resolveAssistantSession(
+    input.createSessionInput ? input.createSessionInput() : input.sessionInput,
+  )
 }
 
 function buildAssistantSessionLookupInputForMessageOverride(input: {

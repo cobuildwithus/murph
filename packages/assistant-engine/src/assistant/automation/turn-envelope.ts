@@ -16,6 +16,7 @@ export type AssistantAutomationTurnEnvelope = Pick<
   | 'executionContext'
   | 'model'
   | 'modelProvider'
+  | 'providerConfigPersistence'
   | 'reasoningEffort'
   | 'serviceTier'
   | 'turnEnvironment'
@@ -43,6 +44,7 @@ export function buildAssistantAutomationTurnEnvelope(input: {
     ...(targetOverride?.modelProvider
       ? { modelProvider: targetOverride.modelProvider }
       : {}),
+    ...(targetOverride ? { providerConfigPersistence: 'turn' as const } : {}),
     ...(targetOverride?.reasoningEffort
       ? { reasoningEffort: targetOverride.reasoningEffort }
       : {}),

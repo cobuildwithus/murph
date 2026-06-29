@@ -14,6 +14,7 @@ describe('assistant automation turn envelope', () => {
     })).toMatchObject({
       model: 'gpt-5.5',
       modelProvider: 'vercel-ai-gateway',
+      providerConfigPersistence: 'turn',
       reasoningEffort: 'high',
       serviceTier: null,
       turnEnvironment: null,
@@ -26,5 +27,9 @@ describe('assistant automation turn envelope', () => {
       assistantTargetOverride: {},
       turnTrigger: 'automation-cron',
     })).not.toHaveProperty('reasoningEffort')
+    expect(buildAssistantAutomationTurnEnvelope({
+      assistantTargetOverride: {},
+      turnTrigger: 'automation-cron',
+    })).not.toHaveProperty('providerConfigPersistence')
   })
 })

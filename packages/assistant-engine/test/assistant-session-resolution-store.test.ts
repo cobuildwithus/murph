@@ -92,6 +92,93 @@ describe('assistant session resolution store integration', () => {
       created.session.sessionId,
     ])
   })
+
+  it('keeps turn-scoped message target overrides out of durable session targets', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-session-resolution-turn-scoped-',
+    )
+    cleanupPaths.push(parentRoot)
+
+    const sessionTarget = createCodexTarget({
+      model: 'gpt-5-session',
+      modelProvider: 'vercel-ai-gateway',
+      profile: 'session-profile',
+      reasoningEffort: 'low',
+    })
+    const created = await resolveAssistantSession({
+      actorId: 'linq-participant',
+      channel: 'linq',
+      identityId: 'linq-identity',
+      target: sessionTarget,
+      threadId: 'linq-thread',
+      threadIsDirect: true,
+      vault: vaultRoot,
+    })
+
+    const resolved = await resolveAssistantSessionForMessage({
+      defaults: null,
+      message: {
+        actorId: 'linq-participant',
+        channel: 'linq',
+        identityId: 'linq-identity',
+        prompt: 'Ask about the activity.',
+        providerConfigPersistence: 'turn',
+        reasoningEffort: 'high',
+        threadId: 'linq-thread',
+        threadIsDirect: true,
+        vault: vaultRoot,
+      },
+    })
+
+    expect(resolved.created).toBe(false)
+    expect(resolved.session.sessionId).toBe(created.session.sessionId)
+    expect(resolved.session.target).toEqual(sessionTarget)
+
+    const sessions = await listAssistantSessions(vaultRoot)
+    expect(sessions.map((session) => session.sessionId)).toEqual([
+      created.session.sessionId,
+    ])
+    expect(sessions[0]?.target).toEqual(sessionTarget)
+  })
+
+  it('creates turn-scoped message override sessions with the durable base target', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-session-resolution-turn-scoped-create-',
+    )
+    cleanupPaths.push(parentRoot)
+
+    const durableTarget = createCodexTarget({
+      model: 'gpt-5-session',
+      modelProvider: 'vercel-ai-gateway',
+      profile: 'session-profile',
+      reasoningEffort: 'low',
+    })
+
+    const resolved = await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: durableTarget,
+      defaults: null,
+      message: {
+        actorId: 'linq-participant',
+        channel: 'linq',
+        identityId: 'linq-identity',
+        prompt: 'Ask about the activity.',
+        providerConfigPersistence: 'turn',
+        reasoningEffort: 'high',
+        threadId: 'linq-thread',
+        threadIsDirect: true,
+        vault: vaultRoot,
+      },
+    })
+
+    expect(resolved.created).toBe(true)
+    expect(resolved.session.target).toEqual(durableTarget)
+
+    const sessions = await listAssistantSessions(vaultRoot)
+    expect(sessions.map((session) => session.sessionId)).toEqual([
+      resolved.session.sessionId,
+    ])
+    expect(sessions[0]?.target).toEqual(durableTarget)
+  })
 })
 
 function createCodexTarget(

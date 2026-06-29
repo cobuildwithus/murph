@@ -279,7 +279,8 @@ export async function persistAssistantTurnAndSession(input: {
 
   const updatedAt = new Date().toISOString()
   const shouldApplyProviderConfigToSession =
-    input.providerResumeStateAction !== 'preserve-existing'
+    input.providerResumeStateAction !== 'preserve-existing' &&
+    input.input.providerConfigPersistence !== 'turn'
   const nextTarget = shouldApplyProviderConfigToSession
     ? createAssistantModelTarget({
         ...assistantBackendTargetToProviderConfigInput(input.session.target),
@@ -297,14 +298,17 @@ export async function persistAssistantTurnAndSession(input: {
         assistantBackendTargetToProviderConfigInput(nextTarget),
       )
     : input.session.providerOptions
-  const nextResumeState = resolveAssistantNextResumeState({
-    action: input.providerResumeStateAction,
-    assistantContractFingerprint: input.providerResult.assistantContractFingerprint,
-    codexRolloutRelativePath: input.providerResult.codexRolloutRelativePath,
-    codexThreadId: input.providerResult.codexThreadId,
-    routeFingerprint: readCodexThreadRouteFingerprint(input.providerResult.route),
-    sessionResumeState: readAssistantCodexResume(input.session),
-  })
+  const nextResumeState =
+    input.input.providerConfigPersistence === 'turn'
+      ? null
+      : resolveAssistantNextResumeState({
+          action: input.providerResumeStateAction,
+          assistantContractFingerprint: input.providerResult.assistantContractFingerprint,
+          codexRolloutRelativePath: input.providerResult.codexRolloutRelativePath,
+          codexThreadId: input.providerResult.codexThreadId,
+          routeFingerprint: readCodexThreadRouteFingerprint(input.providerResult.route),
+          sessionResumeState: readAssistantCodexResume(input.session),
+        })
 
   const savedSession = await state.sessions.save({
     ...input.session,

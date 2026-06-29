@@ -126,6 +126,11 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   operatorAuthority?: AssistantOperatorAuthority
   persistUserPromptOnFailure?: boolean
   prompt: string
+  // Defaults to "session": explicit provider fields become the session target
+  // after successful provider turns. Automation-owned overrides use "turn" so
+  // the provider route changes for one turn without rewriting durable session
+  // ownership.
+  providerConfigPersistence?: 'session' | 'turn'
   turnContext?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null

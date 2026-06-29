@@ -3505,6 +3505,58 @@ describe("assistant turn finalizer seam", () => {
     expect(saved.target).toEqual(session.target);
     expect(saved.provider).toBe("codex-cli");
   });
+
+  it("keeps turn-scoped provider overrides out of durable session targets", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T16:05:00.000Z"));
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+
+    const session = createAssistantSession({
+      providerOptions: createProviderOptions({
+        model: "gpt-5.5",
+        modelProvider: "vercel-ai-gateway",
+        reasoningEffort: "low",
+      }),
+      resumeState: {
+        routeFingerprint: "route-low",
+        threadId: "provider-session-low",
+      },
+    });
+
+    const saved = await persistAssistantTurnAndSession({
+      input: {
+        prompt: "Run the high-effort automation turn.",
+        providerConfigPersistence: "turn",
+        reasoningEffort: "high",
+        turnTrigger: "automation-cron",
+        vault: "/vault",
+      },
+      plan: createSharedPlan(),
+      providerResult: createProviderResult({
+        codexThreadId: "provider-session-high",
+        route: createRoute({
+          providerOptions: createProviderOptions({
+            model: "gpt-5.5",
+            modelProvider: "vercel-ai-gateway",
+            reasoningEffort: "high",
+          }),
+          routeId: "route-high",
+        }),
+        session,
+      }),
+      providerResumeStateAction: "persist-from-provider-turn",
+      session,
+      turnCreatedAt: "2026-04-08T16:04:00.000Z",
+      turnId: "turn-finalizer-turn-scoped-provider",
+    });
+
+    expect(saved.target).toEqual(session.target);
+    expect(saved.providerOptions).toEqual(session.providerOptions);
+    expect(saved.resumeState).toBeNull();
+    expect(saved.codexResume).toBeNull();
+  });
 });
 
 function createRuntimeStateStub() {
