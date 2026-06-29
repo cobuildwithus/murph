@@ -300,8 +300,10 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain('Use the attached review artifacts to read the repository context.')
     expect(prDeepReviewPrompt).toContain('Do not review the diff in isolation.')
     expect(prDeepReviewPrompt).toContain('Do not use app connectors for this preset.')
-    expect(prDeepReviewPrompt).toContain('if you cannot read the PR diff or the touched files from the required ZIP/repomix attachments')
-    expect(prDeepReviewPrompt).toContain('do not review from memory, a connector, pasted context, or the PR description alone')
+    expect(prDeepReviewPrompt).toContain('if you cannot read `review-gpt-pr-context/pr.diff`')
+    expect(prDeepReviewPrompt).toContain('cannot read the source snapshot / repomix attachments')
+    expect(prDeepReviewPrompt).toContain('do not review from memory, a connector, pasted context, or the PR')
+    expect(prDeepReviewPrompt).toContain('description alone')
     expect(prDeepReviewPrompt).toContain('start the final message with a single `Checked:` line')
     expect(prDeepReviewPrompt).toContain('`Checked: PR #123 @ abc1234`')
     const prDeepReviewLoop = readFileSync(
