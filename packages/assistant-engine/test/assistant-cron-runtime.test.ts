@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -1303,6 +1304,107 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('runs queued device activity jobs with legacy no-override authority keys', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-device-activity-legacy-authority-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const parentAutomationId = 'automation-device-activity-legacy-listener'
+    const parentAutomation: MockAutomationRecord = {
+      automationId: parentAutomationId,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Ask about imported runs.',
+      relativePath: 'bank/automations/device-activity-legacy-listener.md',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        kind: 'deviceActivity',
+        after: '2026-04-08T08:00:00.000Z',
+        activityKind: 'run',
+        source: 'whoop',
+      },
+      slug: 'device-activity-legacy-listener',
+      status: 'active',
+      summary: null,
+      tags: ['device'],
+      title: 'Device activity legacy listener',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    }
+    getVaultAutomationStore(vaultRoot).push(parentAutomation)
+    const localJob = assistantCronJobSchema.parse({
+      createdAt: '2026-04-08T08:59:00.000Z',
+      enabled: true,
+      jobId: 'cron_device_activity_listener_legacy',
+      keepAfterRun: false,
+      name: appendAssistantDeviceActivityCronJobMetadata(
+        'Device activity legacy listener',
+        {
+          authorityKey: buildLegacyDeviceActivityAuthorityKey(parentAutomation),
+          occurrenceKey: '1234567890abcdef1234567890abcdef12345671',
+          parentAutomationId,
+          parentAutomationRelativePath: 'bank/automations/device-activity-legacy-listener.md',
+        },
+      ),
+      prompt: 'Ask about the imported run.',
+      schedule: {
+        at: '2026-04-08T08:59:30.000Z',
+        kind: 'at',
+      },
+      schema: 'murph.assistant-cron-job.v1',
+      state: {
+        consecutiveFailures: 0,
+        lastError: null,
+        lastFailedAt: null,
+        lastRunAt: null,
+        lastSucceededAt: null,
+        nextRunAt: '2026-04-08T08:59:30.000Z',
+        runningAt: null,
+        runningPid: null,
+      },
+      target: {
+        alias: null,
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        sessionId: null,
+        threadId: null,
+      },
+      updatedAt: '2026-04-08T08:59:00.000Z',
+    })
+    await writeAssistantCronStore(paths, {
+      version: 1,
+      jobs: [localJob],
+    })
+
+    await expect(
+      processDueAssistantCronJobsLocal({
+        limit: 1,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instructions: 'Ask about the imported run.',
+      }),
+    )
+  })
+
   it('skips queued device activity jobs when the parent target override changes', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
@@ -1423,6 +1525,90 @@ describe('assistant cron runtime orchestration', () => {
         status: 'skipped',
       }),
     ])
+  })
+
+  it('accepts queued device activity outbox intents with legacy no-override authority keys', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-device-outbox-legacy-',
+    )
+    const parentAutomationId = 'auto_device_activity_outbox_legacy'
+    const parentAutomation: MockAutomationRecord = {
+      automationId: parentAutomationId,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Ask about the imported run.',
+      relativePath: 'bank/automations/device-activity-outbox-legacy-listener.md',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        after: '2026-04-08T08:00:00.000Z',
+        activityKind: 'run',
+        kind: 'deviceActivity',
+        source: 'whoop',
+      },
+      slug: 'device-activity-outbox-legacy-listener',
+      status: 'active',
+      summary: null,
+      tags: ['device'],
+      title: 'Device activity outbox legacy listener',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    }
+    getVaultAutomationStore(vaultRoot).push(parentAutomation)
+    const metadata = {
+      authorityKey: buildLegacyDeviceActivityAuthorityKey(parentAutomation),
+      occurrenceKey: 'abcdef1234567890abcdef1234567890abcdef13',
+      parentAutomationId,
+      parentAutomationRelativePath: 'bank/automations/device-activity-outbox-legacy-listener.md',
+    }
+    const intent = buildTestLinqOutboxIntent({
+      createdAt: '2026-04-08T08:01:00.000Z',
+      intentId: 'outbox_device_activity_legacy',
+      message: 'How did that run feel?',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...intent,
+      deliveryIdempotencyKey: buildAssistantDeviceActivityDeliveryIdempotencyKey({
+        discriminator: {
+          jobId: 'cron_device_activity_listener_legacy',
+          target: intent.targetFingerprint,
+        },
+        metadata,
+      }),
+      nextAttemptAt: '2026-04-08T08:02:00.000Z',
+    })
+
+    const prepareDispatchIntent = vi.fn(async () => undefined)
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        prepareDispatchIntent,
+      },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-04-08T08:02:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(prepareDispatchIntent).toHaveBeenCalledTimes(1)
+    expect(prepareDispatchIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intent: expect.objectContaining({
+          deliveryIdempotencyKey: expect.stringContaining(
+            metadata.authorityKey,
+          ),
+        }),
+      }),
+    )
+    expect(dispatched.deliveryError).not.toEqual(
+      expect.objectContaining({
+        code: 'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
+      }),
+    )
   })
 
   it('fails queued device activity outbox delivery when parent authority changes before dispatch', async () => {
@@ -4615,6 +4801,26 @@ function buildDeviceActivityAuthorityKey(automation: MockAutomationRecord): stri
       source: automation.schedule.source,
     },
   })
+}
+
+function buildLegacyDeviceActivityAuthorityKey(
+  automation: MockAutomationRecord,
+): string {
+  if (automation.schedule.kind !== 'deviceActivity') {
+    throw new Error('Expected device activity automation.')
+  }
+
+  return createHash('sha256')
+    .update(JSON.stringify({
+      activityKind: automation.schedule.activityKind ?? null,
+      automationId: automation.automationId,
+      continuityPolicy: automation.continuityPolicy,
+      instructions: automation.instructions,
+      route: automation.route,
+      source: automation.schedule.source ?? null,
+    }))
+    .digest('hex')
+    .slice(0, 40)
 }
 
 function getVaultScheduledLogStore(vault: string): ScheduledLogQueryRecord[] {

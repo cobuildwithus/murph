@@ -87,7 +87,7 @@ import {
 } from './response-media.js'
 import { writeAssistantAutoReplyIntentProvenance } from './automation/intent-provenance.js'
 import {
-  buildAssistantDeviceActivityAuthorityKey,
+  assistantDeviceActivityAuthorityKeyMatches,
   readAssistantDeviceActivityDeliveryIdempotencyMetadata,
 } from './device-activity-cron-tags.js'
 import { readAssistantDeviceActivityParentAutomation } from './device-activity-parent-automation.js'
@@ -957,14 +957,17 @@ async function resolveDeviceActivityOutboxAuthorityError(input: {
     !parentAutomation ||
     parentAutomation.status !== 'active' ||
     parentAutomation.schedule.kind !== 'deviceActivity' ||
-    buildAssistantDeviceActivityAuthorityKey({
-      ...parentAutomation,
-      assistantTargetOverride: parentAutomation.assistantTargetOverride,
-      schedule: {
-        activityKind: parentAutomation.schedule.activityKind,
-        source: parentAutomation.schedule.source,
+    !assistantDeviceActivityAuthorityKeyMatches({
+      authorityKey: metadata.authorityKey,
+      automation: {
+        ...parentAutomation,
+        assistantTargetOverride: parentAutomation.assistantTargetOverride,
+        schedule: {
+          activityKind: parentAutomation.schedule.activityKind,
+          source: parentAutomation.schedule.source,
+        },
       },
-    }) !== metadata.authorityKey
+    })
   ) {
     return new VaultCliError(
       'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',

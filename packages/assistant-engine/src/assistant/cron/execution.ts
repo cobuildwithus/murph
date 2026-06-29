@@ -40,7 +40,7 @@ import {
 } from './runtime-state.js'
 import { runScheduledLogCronJob } from './scheduled-log.js'
 import {
-  buildAssistantDeviceActivityAuthorityKey,
+  assistantDeviceActivityAuthorityKeyMatches,
   buildAssistantDeviceActivityDeliveryIdempotencyKey,
   readAssistantDeviceActivityCronJobMetadata,
 } from '../device-activity-cron-tags.js'
@@ -940,14 +940,17 @@ async function resolveDeviceActivityParentAuthority(input: {
     }
   }
 
-  const authorityMatches = buildAssistantDeviceActivityAuthorityKey({
-    ...parentAutomation,
-    assistantTargetOverride: parentAutomation.assistantTargetOverride,
-    schedule: {
-      activityKind: parentAutomation.schedule.activityKind,
-      source: parentAutomation.schedule.source,
+  const authorityMatches = assistantDeviceActivityAuthorityKeyMatches({
+    authorityKey: metadata.authorityKey,
+    automation: {
+      ...parentAutomation,
+      assistantTargetOverride: parentAutomation.assistantTargetOverride,
+      schedule: {
+        activityKind: parentAutomation.schedule.activityKind,
+        source: parentAutomation.schedule.source,
+      },
     },
-  }) === metadata.authorityKey
+  })
 
   return authorityMatches
     ? {
