@@ -1407,7 +1407,7 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
-  it('skips queued device activity jobs when the parent target override changes', async () => {
+  it('runs queued device activity jobs with the current target override after target-only edits', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T09:00:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -1508,10 +1508,17 @@ describe('assistant cron runtime orchestration', () => {
     ).resolves.toEqual({
       failed: 0,
       processed: 1,
-      succeeded: 0,
+      succeeded: 1,
     })
 
-    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantTargetOverride: {
+          reasoningEffort: 'high',
+        },
+        instructions: 'Ask about the imported run.',
+      }),
+    )
     expect(cronMocks.readAutomationByRelativePath).toHaveBeenCalledWith(
       vaultRoot,
       'bank/automations/device-activity-target-listener.md',
@@ -1522,9 +1529,8 @@ describe('assistant cron runtime orchestration', () => {
     })
     expect(runs.runs).toEqual([
       expect.objectContaining({
-        error: expect.stringContaining('parent listener is no longer authorized'),
-        response: null,
-        status: 'skipped',
+        error: null,
+        status: 'succeeded',
       }),
     ])
   })
@@ -1606,6 +1612,89 @@ describe('assistant cron runtime orchestration', () => {
         }),
       }),
     )
+    expect(dispatched.deliveryError).not.toEqual(
+      expect.objectContaining({
+        code: 'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
+      }),
+    )
+  })
+
+  it('accepts queued device activity outbox intents after target-only edits', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-device-outbox-target-edit-',
+    )
+    const parentAutomationId = 'auto_device_activity_outbox_target_edit'
+    const parentAutomation: MockAutomationRecord = {
+      automationId: parentAutomationId,
+      assistantTargetOverride: {
+        reasoningEffort: 'low',
+      },
+      continuityPolicy: 'fresh',
+      createdAt: '2026-04-08T08:00:00.000Z',
+      instructions: 'Ask about the imported run.',
+      relativePath: 'bank/automations/device-activity-outbox-target-edit-listener.md',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'linq_chat_device_activity',
+        identityId: null,
+        participantId: null,
+        threadId: null,
+      },
+      schedule: {
+        after: '2026-04-08T08:00:00.000Z',
+        activityKind: 'run',
+        kind: 'deviceActivity',
+        source: 'whoop',
+      },
+      slug: 'device-activity-outbox-target-edit-listener',
+      status: 'active',
+      summary: null,
+      tags: ['device'],
+      title: 'Device activity outbox target edit listener',
+      updatedAt: '2026-04-08T08:00:00.000Z',
+    }
+    const metadata = {
+      authorityKey: buildDeviceActivityAuthorityKey(parentAutomation),
+      occurrenceKey: 'abcdef1234567890abcdef1234567890abcdef14',
+      parentAutomationId,
+      parentAutomationRelativePath:
+        'bank/automations/device-activity-outbox-target-edit-listener.md',
+    }
+    parentAutomation.assistantTargetOverride = {
+      reasoningEffort: 'high',
+    }
+    parentAutomation.updatedAt = '2026-04-08T08:01:30.000Z'
+    getVaultAutomationStore(vaultRoot).push(parentAutomation)
+    const intent = buildTestLinqOutboxIntent({
+      createdAt: '2026-04-08T08:01:00.000Z',
+      intentId: 'outbox_device_activity_target_edit',
+      message: 'How did that run feel?',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...intent,
+      deliveryIdempotencyKey: buildAssistantDeviceActivityDeliveryIdempotencyKey({
+        discriminator: {
+          jobId: 'cron_device_activity_listener_target_edit',
+          target: intent.targetFingerprint,
+        },
+        metadata,
+      }),
+      nextAttemptAt: '2026-04-08T08:02:00.000Z',
+    })
+
+    const prepareDispatchIntent = vi.fn(async () => undefined)
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        prepareDispatchIntent,
+      },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-04-08T08:02:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(prepareDispatchIntent).toHaveBeenCalledTimes(1)
     expect(dispatched.deliveryError).not.toEqual(
       expect.objectContaining({
         code: 'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
@@ -4797,7 +4886,6 @@ function buildDeviceActivityAuthorityKey(automation: MockAutomationRecord): stri
 
   return buildAssistantDeviceActivityAuthorityKey({
     ...automation,
-    assistantTargetOverride: automation.assistantTargetOverride ?? null,
     schedule: {
       activityKind: automation.schedule.activityKind,
       source: automation.schedule.source,

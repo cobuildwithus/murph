@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
 import type {
-  AutomationAssistantTargetOverride,
   AutomationContinuityPolicy,
   AutomationDeviceActivityKind,
   AutomationDeviceActivitySource,
@@ -14,7 +13,6 @@ const ASSISTANT_DEVICE_ACTIVITY_DELIVERY_IDEMPOTENCY_PREFIX =
   'device-activity-cron:v1:'
 
 export interface AssistantDeviceActivityAuthorityInput {
-  assistantTargetOverride: AutomationAssistantTargetOverride | null
   automationId: string
   continuityPolicy: AutomationContinuityPolicy
   instructions: string
@@ -37,9 +35,6 @@ export function buildAssistantDeviceActivityAuthorityKey(
 ): string {
   return hashAssistantDeviceActivityAuthorityPayload({
     activityKind: automation.schedule.activityKind ?? null,
-    assistantTargetOverride: normalizeAssistantDeviceActivityAuthorityTargetOverride(
-      automation.assistantTargetOverride,
-    ),
     automationId: automation.automationId,
     continuityPolicy: automation.continuityPolicy,
     instructions: automation.instructions,
@@ -52,33 +47,7 @@ export function assistantDeviceActivityAuthorityKeyMatches(input: {
   automation: AssistantDeviceActivityAuthorityInput
   authorityKey: string
 }): boolean {
-  if (buildAssistantDeviceActivityAuthorityKey(input.automation) === input.authorityKey) {
-    return true
-  }
-
-  if (
-    normalizeAssistantDeviceActivityAuthorityTargetOverride(
-      input.automation.assistantTargetOverride,
-    ) !== null
-  ) {
-    return false
-  }
-
-  return buildLegacyAssistantDeviceActivityAuthorityKey(input.automation) ===
-    input.authorityKey
-}
-
-function buildLegacyAssistantDeviceActivityAuthorityKey(
-  automation: AssistantDeviceActivityAuthorityInput,
-): string {
-  return hashAssistantDeviceActivityAuthorityPayload({
-    activityKind: automation.schedule.activityKind ?? null,
-    automationId: automation.automationId,
-    continuityPolicy: automation.continuityPolicy,
-    instructions: automation.instructions,
-    route: automation.route,
-    source: automation.schedule.source ?? null,
-  })
+  return buildAssistantDeviceActivityAuthorityKey(input.automation) === input.authorityKey
 }
 
 function hashAssistantDeviceActivityAuthorityPayload(
@@ -88,27 +57,6 @@ function hashAssistantDeviceActivityAuthorityPayload(
     .update(JSON.stringify(payload))
     .digest('hex')
     .slice(0, 40)
-}
-
-function normalizeAssistantDeviceActivityAuthorityTargetOverride(
-  override: AutomationAssistantTargetOverride | null,
-): {
-  model: string | null
-  modelProvider: string | null
-  reasoningEffort: string | null
-} | null {
-  if (!override) {
-    return null
-  }
-
-  const normalized = {
-    model: override.model ?? null,
-    modelProvider: override.modelProvider ?? null,
-    reasoningEffort: override.reasoningEffort ?? null,
-  }
-  return Object.values(normalized).some((value) => value !== null)
-    ? normalized
-    : null
 }
 
 export function appendAssistantDeviceActivityCronJobMetadata(

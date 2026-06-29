@@ -296,7 +296,6 @@ describe("markdown document primitives", () => {
       afterOccurredAt: "2026-06-07T11:30:00.000Z",
       afterEntityId: "evt_walk",
       expectedActivityKind: "walk",
-      expectedAssistantTargetOverride: created.record.assistantTargetOverride,
       expectedContinuityPolicy: created.record.continuityPolicy,
       expectedInstructions: created.record.instructions,
       expectedRoute: created.record.route,
@@ -326,7 +325,6 @@ describe("markdown document primitives", () => {
       afterOccurredAt: "2026-06-07T11:15:00.000Z",
       afterEntityId: "evt_older",
       expectedActivityKind: "walk",
-      expectedAssistantTargetOverride: created.record.assistantTargetOverride,
       expectedContinuityPolicy: created.record.continuityPolicy,
       expectedInstructions: created.record.instructions,
       expectedRoute: created.record.route,
@@ -346,14 +344,13 @@ describe("markdown document primitives", () => {
       now: new Date("2026-06-07T12:01:45.000Z"),
     });
 
-    const targetSkipped = await advanceAutomationDeviceActivityCursor({
+    const targetAdvanced = await advanceAutomationDeviceActivityCursor({
       vaultRoot,
       lookup: created.record.automationId,
       after: "2026-06-07T12:30:00.000Z",
       afterOccurredAt: "2026-06-07T12:15:00.000Z",
       afterEntityId: "evt_target_edit",
       expectedActivityKind: "walk",
-      expectedAssistantTargetOverride: created.record.assistantTargetOverride,
       expectedContinuityPolicy: created.record.continuityPolicy,
       expectedInstructions: created.record.instructions,
       expectedRoute: created.record.route,
@@ -361,11 +358,18 @@ describe("markdown document primitives", () => {
       now: new Date("2026-06-07T12:02:00.000Z"),
     });
 
-    expect(targetSkipped.advanced).toBe(false);
-    expect(targetSkipped.record.assistantTargetOverride).toEqual(
+    expect(targetAdvanced.advanced).toBe(true);
+    expect(targetAdvanced.record.assistantTargetOverride).toEqual(
       targetEdited.record.assistantTargetOverride,
     );
-    expect(targetSkipped.record.schedule).toEqual(advanced.record.schedule);
+    expect(targetAdvanced.record.schedule).toEqual({
+      kind: "deviceActivity",
+      after: "2026-06-07T12:30:00.000Z",
+      afterOccurredAt: "2026-06-07T12:15:00.000Z",
+      afterEntityId: "evt_target_edit",
+      activityKind: "walk",
+      source: "whoop",
+    });
 
     const retargeted = await patchAutomation({
       vaultRoot,
@@ -392,7 +396,6 @@ describe("markdown document primitives", () => {
       expectedInstructions: created.record.instructions,
       expectedRoute: created.record.route,
       expectedSource: "whoop",
-      expectedAssistantTargetOverride: targetEdited.record.assistantTargetOverride,
       now: new Date("2026-06-07T12:03:00.000Z"),
     });
 

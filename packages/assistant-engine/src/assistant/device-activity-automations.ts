@@ -639,7 +639,6 @@ async function advanceDeviceActivityAutomationCursor(input: {
     afterOccurredAt: cursor.afterOccurredAt,
     afterEntityId: cursor.afterEntityId,
     expectedActivityKind: input.automation.schedule.activityKind,
-    expectedAssistantTargetOverride: input.automation.assistantTargetOverride,
     expectedContinuityPolicy: input.automation.continuityPolicy,
     expectedInstructions: input.automation.instructions,
     expectedRoute: input.automation.route,

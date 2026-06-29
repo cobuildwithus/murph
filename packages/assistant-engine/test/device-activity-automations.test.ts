@@ -807,6 +807,70 @@ describe('device activity triggered automations', () => {
     expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).not.toHaveBeenCalled()
   })
 
+  it('keeps already-queued device activity jobs covered after target-only edits', async () => {
+    const automation = createDeviceActivityAutomation({
+      activityKind: 'run',
+      after: '2026-06-07T12:00:00.000Z',
+      assistantTargetOverride: {
+        reasoningEffort: 'low',
+      },
+      automationId: 'auto_run_target_edit_queued',
+      instructions: 'Report run progress.',
+    })
+    deviceActivityMocks.automations = [automation]
+    deviceActivityMocks.readModel = createVaultReadModel({
+      entities: [
+        createActivityEntity({
+          entityId: 'evt_run_target_edit_queued',
+          occurredAt: '2026-06-07T12:05:00.000Z',
+          title: 'Target edit queued run',
+          workoutType: 'Running',
+        }),
+      ],
+      vaultRoot,
+    })
+
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:06:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:06:00.000Z',
+      scheduled: 1,
+    })
+
+    const queuedBeforeEdit = await readQueuedCronJobs(vaultRoot)
+    automation.assistantTargetOverride = {
+      reasoningEffort: 'high',
+    }
+    deviceActivityMocks.advanceAutomationDeviceActivityCursor.mockClear()
+    await expect(
+      scheduleDeviceActivityTriggeredAutomations({
+        now: () => '2026-06-07T12:07:00.000Z',
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual({
+      matched: 1,
+      nextWakeAt: '2026-06-07T12:07:00.000Z',
+      scheduled: 0,
+    })
+
+    expect(await readQueuedCronJobs(vaultRoot)).toEqual(queuedBeforeEdit)
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledOnce()
+    expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        after: '2026-06-07T12:05:00.000Z',
+        afterOccurredAt: '2026-06-07T12:05:00.000Z',
+        afterEntityId: 'evt_run_target_edit_queued',
+        expectedActivityKind: 'run',
+        lookup: 'auto_run_target_edit_queued',
+        vaultRoot,
+      }),
+    )
+  })
+
   it('restores a replaced occurrence slot after a listener cursor patch failure', async () => {
     deviceActivityMocks.automations = [
       createDeviceActivityAutomation({
@@ -1244,6 +1308,7 @@ function createDeviceActivityAutomation(input: {
   after: string
   afterEntityId?: string
   afterOccurredAt?: string
+  assistantTargetOverride?: AutomationQueryRecord['assistantTargetOverride']
   automationId?: string
   continuityPolicy?: 'fresh' | 'preserve'
   instructions?: string
@@ -1253,7 +1318,7 @@ function createDeviceActivityAutomation(input: {
   const automationId = input.automationId ?? 'auto_walk'
   return {
     automationId,
-    assistantTargetOverride: null,
+    assistantTargetOverride: input.assistantTargetOverride ?? null,
     continuityPolicy: input.continuityPolicy ?? 'preserve',
     createdAt: '2026-06-07T10:00:00.000Z',
     docType: 'automation',

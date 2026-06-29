@@ -944,7 +944,6 @@ async function resolveDeviceActivityParentAuthority(input: {
     authorityKey: metadata.authorityKey,
     automation: {
       ...parentAutomation,
-      assistantTargetOverride: parentAutomation.assistantTargetOverride,
       schedule: {
         activityKind: parentAutomation.schedule.activityKind,
         source: parentAutomation.schedule.source,
