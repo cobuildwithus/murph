@@ -19,6 +19,7 @@ import {
 import {
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqChatId,
+  upsertHostedMemberPendingLinqBindingTx,
 } from "../hosted-onboarding/hosted-member-routing-store";
 import { ensureHostedMemberForPhoneTx } from "../hosted-onboarding/member-identity-service";
 import {
@@ -26,6 +27,7 @@ import {
   normalizeNullableString,
 } from "../hosted-onboarding/shared";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
+import { getHostedOnboardingEnvironment } from "../hosted-onboarding/runtime";
 
 export const HOSTED_OPS_ONBOARDING_VOICE_MEMO_MAX_BYTES = 10 * 1024 * 1024;
 
@@ -125,6 +127,11 @@ export async function sendHostedOpsOnboardingInvite(
 ): Promise<HostedOpsOnboardingInviteResult> {
   const prisma = input.prisma ?? getPrisma();
   const request = normalizeHostedOpsOnboardingInviteInput(input);
+
+  if (request.deliveryMode === "new_chat") {
+    assertHostedOpsOnboardingAuthorizedLinqSenderPhone(request.linqFromPhoneNumber);
+  }
+
   const issued = await prisma.$transaction(async (tx) => {
     const member = await ensureHostedMemberForPhoneTx({
       phoneNumber: request.recipientPhoneNumber,
@@ -288,6 +295,15 @@ async function resolveHostedOpsOnboardingInviteDelivery(input: {
     });
   }
 
+  await input.prisma.$transaction(async (tx) => {
+    await upsertHostedMemberPendingLinqBindingTx({
+      linqChatId: chatId,
+      memberId: input.memberId,
+      prisma: tx,
+      recipientPhone: input.request.linqFromPhoneNumber,
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
   await sendHostedLinqChatMessage({
     chatId,
     idempotencyKey: buildHostedOpsOnboardingIdempotencyKey(input.request.requestId, "invite"),
@@ -374,6 +390,37 @@ async function assertHostedOpsOnboardingExistingLinqChatAuthority(input: {
       "Existing Linq chat is not bound to this hosted member. Use New chat to start onboarding, or wait for the inbound chat to bind before sending.",
     retryable: false,
   });
+}
+
+function assertHostedOpsOnboardingAuthorizedLinqSenderPhone(senderPhone: string): void {
+  const authorizedSenderPhones = new Set<string>();
+
+  for (const configuredPhone of getHostedOnboardingEnvironment().linqConversationPhoneNumbers) {
+    const normalized = normalizePhoneNumber(configuredPhone);
+
+    if (normalized) {
+      authorizedSenderPhones.add(normalized);
+    }
+  }
+
+  if (authorizedSenderPhones.size === 0) {
+    throw hostedOnboardingError({
+      code: "HOSTED_OPS_ONBOARDING_LINQ_CONVERSATION_PHONE_REQUIRED",
+      httpStatus: 500,
+      message:
+        "Configure hosted Linq conversation phone numbers before creating a new onboarding chat.",
+      retryable: false,
+    });
+  }
+
+  if (!authorizedSenderPhones.has(senderPhone)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_UNAUTHORIZED",
+      httpStatus: 400,
+      message: "Linq sender phone must be a configured hosted conversation phone.",
+      retryable: false,
+    });
+  }
 }
 
 interface NormalizedHostedOpsOnboardingInviteInput {

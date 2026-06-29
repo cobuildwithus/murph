@@ -10,10 +10,17 @@ import {
   jsonOk,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
+import { readRawBodyBuffer } from "@/src/lib/http";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const revalidate = 0;
+
+const HOSTED_OPS_ONBOARDING_MULTIPART_OVERHEAD_MAX_BYTES = 256 * 1024;
+
+export const HOSTED_OPS_ONBOARDING_FORM_BODY_MAX_BYTES =
+  HOSTED_OPS_ONBOARDING_VOICE_MEMO_MAX_BYTES
+  + HOSTED_OPS_ONBOARDING_MULTIPART_OVERHEAD_MAX_BYTES;
 
 export const POST = withJsonError(async (request: Request) => {
   await requireHostedOpsRequestAccess(request, {
@@ -49,8 +56,31 @@ export const POST = withJsonError(async (request: Request) => {
 });
 
 async function readHostedOpsOnboardingFormData(request: Request): Promise<FormData> {
+  let body: Buffer;
+
   try {
-    return await request.formData();
+    body = await readRawBodyBuffer(request, {
+      limitBytes: HOSTED_OPS_ONBOARDING_FORM_BODY_MAX_BYTES,
+    });
+  } catch (error) {
+    if (error instanceof RangeError) {
+      throw hostedOnboardingError({
+        code: "HOSTED_OPS_ONBOARDING_FORM_TOO_LARGE",
+        httpStatus: 413,
+        message: "Onboarding invite form data is too large.",
+        retryable: false,
+      });
+    }
+
+    throw error;
+  }
+
+  try {
+    return await new Request(request.url, {
+      body: new Blob([new Uint8Array(body)]),
+      headers: request.headers,
+      method: request.method,
+    }).formData();
   } catch {
     throw hostedOnboardingError({
       code: "HOSTED_OPS_ONBOARDING_FORM_INVALID",

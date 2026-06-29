@@ -6,12 +6,14 @@ const mocks = vi.hoisted(() => ({
   createHostedLinqChat: vi.fn(),
   ensureHostedMemberForPhoneTx: vi.fn(),
   getPrisma: vi.fn(),
+  getHostedOnboardingEnvironment: vi.fn(),
   issueHostedInviteTx: vi.fn(),
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqChatId: vi.fn(),
   requireHostedOpsRequestAccess: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   sendHostedLinqVoiceMemo: vi.fn(),
+  upsertHostedMemberPendingLinqBindingTx: vi.fn(),
   uploadHostedLinqAttachment: vi.fn(),
 }));
 
@@ -38,10 +40,15 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   lookupHostedMemberRoutingByHomeLinqChatId: mocks.lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqChatId: mocks.lookupHostedMemberRoutingByPendingLinqChatId,
+  upsertHostedMemberPendingLinqBindingTx: mocks.upsertHostedMemberPendingLinqBindingTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
   ensureHostedMemberForPhoneTx: mocks.ensureHostedMemberForPhoneTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  getHostedOnboardingEnvironment: mocks.getHostedOnboardingEnvironment,
 }));
 
 type ServiceModule = typeof import("../src/lib/hosted-ops/onboarding-invites");
@@ -74,6 +81,9 @@ describe("hosted ops onboarding invites", () => {
       },
     };
     mocks.getPrisma.mockReturnValue(prisma);
+    mocks.getHostedOnboardingEnvironment.mockReturnValue({
+      linqConversationPhoneNumbers: ["+15557654321"],
+    });
     mocks.requireHostedOpsRequestAccess.mockResolvedValue({ member: { id: "member_ops" } });
     mocks.ensureHostedMemberForPhoneTx.mockResolvedValue({ id: "member_123" });
     mocks.issueHostedInviteTx.mockResolvedValue(inviteRow({ sentAt: null }));
@@ -88,6 +98,7 @@ describe("hosted ops onboarding invites", () => {
       chatId: "chat_created",
       messageId: "message_open",
     });
+    mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
     mocks.uploadHostedLinqAttachment.mockResolvedValue({ attachmentId: "attachment_123" });
     mocks.sendHostedLinqVoiceMemo.mockResolvedValue(undefined);
   });
@@ -209,6 +220,17 @@ describe("hosted ops onboarding invites", () => {
       idempotencyKey: "ops-onboarding-invite:request-456:invite",
       message: "Murph setup link:\nhttps://join.example.test/invite_code\n\nReply here when you are in.",
     });
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledWith({
+      linqChatId: "chat_created",
+      memberId: "member_123",
+      prisma: tx,
+      recipientPhone: "+15557654321",
+    });
+    expect(
+      mocks.upsertHostedMemberPendingLinqBindingTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
+    );
     expect(result).toMatchObject({
       chatId: "chat_created",
       deliveryMode: "new_chat",
@@ -218,6 +240,27 @@ describe("hosted ops onboarding invites", () => {
       recipientPhoneHint: "*** 4567",
     });
     expect(JSON.stringify(result)).not.toContain("+15557654321");
+  });
+
+  it("rejects a new chat sender that is not a configured hosted Linq conversation phone", async () => {
+    mocks.getHostedOnboardingEnvironment.mockReturnValue({
+      linqConversationPhoneNumbers: ["+15550000000"],
+    });
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-unauthorized-from",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_UNAUTHORIZED",
+    });
+
+    expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("rejects a new chat opener that includes a URL before issuing an invite", async () => {
@@ -324,6 +367,40 @@ describe("hosted ops onboarding invites", () => {
     });
     expect(JSON.stringify(payload)).not.toContain("local-personal-recording");
   });
+
+  it("rejects declared oversized voice memo forms before parsing multipart data", async () => {
+    const response = await route.POST(new Request("https://app.example.test/api/ops/onboarding-invites", {
+      body: "",
+      headers: {
+        "content-length": String(route.HOSTED_OPS_ONBOARDING_FORM_BODY_MAX_BYTES + 1),
+        "content-type": "multipart/form-data; boundary=oversized",
+      },
+      method: "POST",
+    }));
+    const payload = await response.json() as { error?: { code?: string } };
+
+    expect(response.status).toBe(413);
+    expect(payload.error?.code).toBe("HOSTED_OPS_ONBOARDING_FORM_TOO_LARGE");
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.uploadHostedLinqAttachment).not.toHaveBeenCalled();
+  });
+
+  it("rejects streamed oversized voice memo forms before parsing multipart data", async () => {
+    const response = await route.POST(new Request("https://app.example.test/api/ops/onboarding-invites", {
+      body: createBodyStream(route.HOSTED_OPS_ONBOARDING_FORM_BODY_MAX_BYTES + 1),
+      headers: {
+        "content-type": "multipart/form-data; boundary=oversized",
+      },
+      method: "POST",
+      duplex: "half",
+    } as RequestInit & { duplex: "half" }));
+    const payload = await response.json() as { error?: { code?: string } };
+
+    expect(response.status).toBe(413);
+    expect(payload.error?.code).toBe("HOSTED_OPS_ONBOARDING_FORM_TOO_LARGE");
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.uploadHostedLinqAttachment).not.toHaveBeenCalled();
+  });
 });
 
 function inviteRow(input: {
@@ -338,4 +415,13 @@ function inviteRow(input: {
     memberId: "member_123",
     sentAt: input.sentAt,
   };
+}
+
+function createBodyStream(byteLength: number): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array(byteLength));
+      controller.close();
+    },
+  });
 }
