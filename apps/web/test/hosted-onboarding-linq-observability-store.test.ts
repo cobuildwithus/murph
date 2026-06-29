@@ -562,7 +562,7 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("guards line status projection with provider event-id ordering", async () => {
+  it("lets degraded status tighten same-timestamp healthy line state", async () => {
     const fixture = createObservabilityPrismaFixture();
     const event = requireParsedProviderEvent(buildProviderEvent({
       data: {
@@ -593,12 +593,8 @@ describe("hosted Linq observability stores", () => {
               },
             },
             {
-              lastStatusEventId: null,
-              providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
-            },
-            {
-              lastStatusEventId: {
-                lt: createHostedLinqProviderEventLookupKey("evt_status_older"),
+              egressPolicy: {
+                notIn: ["disabled", "avoid_new_assignments"],
               },
               providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
             },
@@ -608,7 +604,7 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("uses provider event id as the same-timestamp status tie breaker", async () => {
+  it("lets disabled status tighten same-timestamp line state", async () => {
     const fixture = createObservabilityPrismaFixture();
     const event = requireParsedProviderEvent(buildProviderEvent({
       data: {
@@ -634,9 +630,7 @@ describe("hosted Linq observability stores", () => {
         where: expect.objectContaining({
           OR: expect.arrayContaining([
             {
-              lastStatusEventId: {
-                lt: createHostedLinqProviderEventLookupKey("evt_status_critical"),
-              },
+              egressPolicy: { not: "disabled" },
               providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
             },
           ]),
@@ -1003,7 +997,6 @@ describe("hosted Linq observability stores", () => {
       expect.objectContaining({
         orderBy: [
           { providerCreatedAt: "desc" },
-          { eventId: "desc" },
         ],
         take: 20,
         where: expect.objectContaining({
@@ -1038,14 +1031,11 @@ describe("hosted Linq observability stores", () => {
               },
             },
             {
-              lastProviderEventId: null,
               lastReceiptAt: new Date("2026-03-26T12:00:05.000Z"),
-            },
-            {
-              lastProviderEventId: {
-                lt: createHostedLinqProviderEventLookupKey("evt_failed_123"),
-              },
-              lastReceiptAt: new Date("2026-03-26T12:00:05.000Z"),
+              OR: [
+                { failedAt: null },
+                { failedAt: { not: new Date("2026-03-26T12:00:05.000Z") } },
+              ],
             },
           ]),
         }),

@@ -8,9 +8,6 @@ import {
 import {
   createHostedLinqProviderEventLookupKey,
 } from "./linq-observability-identifiers";
-import {
-  createHostedLinqProviderEventOrderId,
-} from "./linq-provider-ordering";
 import { normalizePhoneNumber } from "./phone";
 
 type HostedLinqLineClient = PrismaClient | Prisma.TransactionClient;
@@ -249,7 +246,6 @@ function buildMessageReceiptLineProjectionWhere(
   phoneNumberLookupKey: string,
   event: ParsedHostedLinqProviderEvent,
 ): Prisma.HostedLinqLineWhereInput {
-  const eventId = createHostedLinqProviderEventOrderId(event.eventId);
   return {
     phoneNumberLookupKey,
     OR: [
@@ -263,13 +259,10 @@ function buildMessageReceiptLineProjectionWhere(
       },
       {
         lastReceiptAt: event.providerCreatedAt,
-        lastReceiptEventId: null,
-      },
-      {
-        lastReceiptAt: event.providerCreatedAt,
-        lastReceiptEventId: {
-          lt: eventId,
-        },
+        OR: [
+          { lastFailedAt: null },
+          { lastFailedAt: { not: event.providerCreatedAt } },
+        ],
       },
     ],
   };
@@ -279,7 +272,6 @@ function buildPhoneNumberStatusProjectionWhere(
   phoneNumberLookupKey: string,
   event: ParsedHostedLinqProviderEvent,
 ): Prisma.HostedLinqLineWhereInput {
-  const eventId = createHostedLinqProviderEventOrderId(event.eventId);
   return {
     phoneNumberLookupKey,
     OR: [
@@ -291,18 +283,34 @@ function buildPhoneNumberStatusProjectionWhere(
           lt: event.providerCreatedAt,
         },
       },
-      {
-        lastStatusEventId: null,
-        providerUpdatedAt: event.providerCreatedAt,
-      },
-      {
-        lastStatusEventId: {
-          lt: eventId,
-        },
-        providerUpdatedAt: event.providerCreatedAt,
-      },
+      ...buildSameTimestampStatusProjectionWhere(event),
     ],
   };
+}
+
+function buildSameTimestampStatusProjectionWhere(
+  event: ParsedHostedLinqProviderEvent,
+): Prisma.HostedLinqLineWhereInput[] {
+  const egressPolicy = deriveHostedLinqEgressPolicy(event.providerStatus);
+  if (egressPolicy === "disabled") {
+    return [
+      {
+        egressPolicy: { not: "disabled" },
+        providerUpdatedAt: event.providerCreatedAt,
+      },
+    ];
+  }
+
+  if (egressPolicy === "avoid_new_assignments") {
+    return [
+      {
+        egressPolicy: { notIn: ["disabled", "avoid_new_assignments"] },
+        providerUpdatedAt: event.providerCreatedAt,
+      },
+    ];
+  }
+
+  return [];
 }
 
 function classifyHostedLinqProviderStatus(value: string | null): string {
