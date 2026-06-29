@@ -970,6 +970,124 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("services a checkpoint-blocked projected assistant wake after idle checkpointing", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const dueWakeAt = TEST_NOW;
+    let assistantPass = 0;
+    let snapshotCount = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_checkpoint_blocked_due_wake",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            snapshotCount += 1;
+            events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: String(snapshotCount).repeat(64),
+                key: `users/bundles/member-synthetic/checkpoint-blocked-due-wake-${snapshotCount}.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Checkpoint-blocked wake test should not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assistantPass += 1;
+            events.push(`assistant:${assistantPass}`);
+
+            if (assistantPass === 1) {
+              const redactedStatus: HostedRuntimeRedactedJson = {
+                hostedOutboxPendingDeliveryEffects: 1,
+              };
+              return {
+                afterCheckpoint: async () => ({
+                  checkpointReason: "outbox_receipt",
+                  nextWakeAt: dueWakeAt,
+                  nextWakeReason: "assistant",
+                  redactedStatus: {
+                    hostedOutboxDeliverySent: 1,
+                  },
+                }),
+                checkpointReason: "outbox_sending",
+                progressed: true,
+                redactedStatus,
+              };
+            }
+
+            if (assistantPass === 2) {
+              assert.equal(input.workspace?.nextWakeAt, dueWakeAt);
+              assert.equal(input.workspace?.nextWakeReason, "assistant");
+              const redactedStatus: HostedRuntimeRedactedJson = {
+                hostedAssistantProgressed: true,
+                hostedAssistantNextWakeAt: null,
+              };
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: null,
+                nextWakeReason: null,
+                progressed: true,
+                redactedStatus,
+              };
+            }
+
+            throw new Error("Checkpoint-blocked wake should be serviced exactly once.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPass, 2);
+      assert.deepEqual(
+        checkpointRequests.map((request) => [
+          request.reason,
+          request.expectedWorkspaceVersion,
+          request.nextWakeAt,
+          request.nextWakeReason,
+        ]),
+        [
+          ["idle_shutdown", "0", dueWakeAt, "assistant"],
+          ["idle_shutdown", "1", null, null],
+        ],
+      );
+      assert.ok(
+        events.indexOf("workspace.checkpoint") < events.indexOf("assistant:2"),
+      );
+      assert.ok(
+        events.indexOf("assistant:2") < events.lastIndexOf("workspace.checkpoint"),
+      );
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("carries inbox media retention wake through the idle checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -3863,7 +3981,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-post-checkpoint-wake-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const postCheckpointWakeAt = new Date(Date.now() - 1_000).toISOString();
+    const postCheckpointWakeAt = new Date(Date.now() + 60_000).toISOString();
     let assistantPhaseCalls = 0;
 
     try {

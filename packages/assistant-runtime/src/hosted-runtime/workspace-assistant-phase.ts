@@ -3210,17 +3210,13 @@ async function drainHostedPostCheckpointDelivery(input: {
     vaultRoot: input.input.restored.vaultRoot,
   });
   const postBaseNextWake = resolveHostedPostDeliveryBaseNextWake(input);
-  const selectedPostNextWake = selectHostedRuntimeWakeCandidate([
+  const postNextWake = selectHostedRuntimeWakeCandidate([
     postBaseNextWake,
     postAssistantCronWakeCandidate,
     createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(providerCleanupNextWakeAt, "assistant"),
   ]);
-  const postNextWake = normalizeHostedPostDeliveryCheckpointWake({
-    input: input.input,
-    wake: selectedPostNextWake,
-  });
   const postNextWakeAt = postNextWake.at;
   if (input.assistantDeliveryEffects.length > 0) {
     await writeHostedOutboxDeliveryRuntimeLog({
@@ -3261,8 +3257,6 @@ async function drainHostedPostCheckpointDelivery(input: {
   };
 }
 
-const HOSTED_POST_DELIVERY_ASSISTANT_WAKE_MIN_RUNWAY_MS = 10_000;
-
 function resolveHostedPostDeliveryBaseNextWake(
   input: Parameters<typeof drainHostedPostCheckpointDelivery>[0],
 ): HostedRuntimeWakeCandidate | null {
@@ -3283,34 +3277,6 @@ function resolveHostedPostDeliveryBaseNextWake(
       resolveHostedAssistantPhaseNowMs(input.input),
     ),
     baseNextWake.reason ?? HOSTED_ASSISTANT_WAKE_REASON,
-  );
-}
-
-function normalizeHostedPostDeliveryCheckpointWake(input: {
-  input: HostedWorkspaceRuntimeAssistantPhaseInput;
-  wake: HostedRuntimeWakeCandidate;
-}): HostedRuntimeWakeCandidate {
-  if (!input.wake.at) {
-    return input.wake;
-  }
-  if (
-    input.wake.reason !== null
-    && input.wake.reason !== HOSTED_ASSISTANT_WAKE_REASON
-  ) {
-    return input.wake;
-  }
-
-  const wakeMs = Date.parse(input.wake.at);
-  if (!Number.isFinite(wakeMs)) {
-    return input.wake;
-  }
-
-  const minWakeMs = resolveHostedAssistantPhaseNowMs(input.input)
-    + HOSTED_POST_DELIVERY_ASSISTANT_WAKE_MIN_RUNWAY_MS;
-  const nextWakeMs = Math.max(wakeMs, minWakeMs);
-  return createHostedRuntimeWakeCandidate(
-    new Date(nextWakeMs).toISOString(),
-    input.wake.reason ?? HOSTED_ASSISTANT_WAKE_REASON,
   );
 }
 

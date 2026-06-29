@@ -1692,7 +1692,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const runIdleWakeForegroundPass = async (wakeInput: {
         latencySeed?: HostedRuntimeWakeLatencySeed | null;
         projectedWakeKeyBeingServiced: string | null;
-        requestIdKind: "checkpoint-interrupt" | "idle-wake";
+        requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
       }): Promise<HostedWorkspaceRunnerResult> => {
         idleWakeOrdinal += 1;
         const passWorkspace = projectHostedWorkspaceWakeForForegroundPass({
@@ -1738,6 +1738,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         return result;
       };
       while (runtimeStateDirty) {
+        let checkpointBlockedProjectedWakeKey: string | null = null;
         if (
           accumulatedProjection.status !== "budget_exhausted"
           && !forceIdleCheckpointBeforeWake
@@ -1758,6 +1759,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               pendingDurableCheckpointEffects.length > 0
               || accumulatedProjection.projectedWakeRequiresCheckpoint
             );
+          const projectedWakeBlockedByFreshAssistantCheckpointGate =
+            projectedWakeBlockedByCheckpoint
+            && pendingDurableCheckpointEffects.length === 0
+            && accumulatedProjection.projectedWakeCheckpointGateFresh
+            && accumulatedProjection.nextWakeReason === "assistant";
+          checkpointBlockedProjectedWakeKey = projectedWakeBlockedByFreshAssistantCheckpointGate
+            ? projectedRuntimeWakeKey
+            : null;
           const projectedRuntimeWakeAt =
             !projectedWakeBlockedByCheckpoint
               && projectedWakeIsUnserviced
@@ -1979,6 +1988,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           accumulatedProjection = {
             ...accumulatedProjection,
             committedWorkspace: checkpoint.workspace,
+            projectedWakeCheckpointGateFresh: false,
             projectedWakeRequiresCheckpoint: true,
           };
           runtimeStateDirty = true;
@@ -2002,6 +2012,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           inboxMediaRetentionWakeAt: checkpoint.workspace.inboxMediaRetentionWakeAt ?? null,
           nextWakeAt: checkpointProjectionWake.nextWakeAt,
           nextWakeReason: checkpointProjectionWake.nextWakeReason,
+          projectedWakeCheckpointGateFresh: false,
           projectedWakeRequiresCheckpoint: false,
           redactedStatus: checkpoint.workspace.redactedStatus ?? accumulatedProjection.redactedStatus,
         };
@@ -2038,6 +2049,22 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             },
           );
           runtimeStateDirty = result.runtimeStateDirty;
+          continue;
+        }
+        const checkpointProjectionWakeKey = buildHostedRuntimeWakeKey({
+          nextWakeAt: accumulatedProjection.nextWakeAt,
+          nextWakeReason: accumulatedProjection.nextWakeReason,
+        });
+        if (
+          checkpointBlockedProjectedWakeKey !== null
+          && checkpointProjectionWakeKey === checkpointBlockedProjectedWakeKey
+          && hostedRuntimeWakeIsDue(accumulatedProjection.nextWakeAt)
+        ) {
+          await runIdleWakeForegroundPass({
+            latencySeed: null,
+            projectedWakeKeyBeingServiced: checkpointBlockedProjectedWakeKey,
+            requestIdKind: "checkpoint-wake",
+          });
           continue;
         }
         const browserVaultRefresh = await runBrowserVaultRefreshMaintenance({
@@ -2579,6 +2606,7 @@ export async function drainHostedRuntimeDeferredUsageCompletionsBestEffort(input
 interface HostedWorkspaceInvocationProjection {
   committedWorkspace: HostedWorkspaceState | null;
   inboxMediaRetentionWakeAt: string | null;
+  projectedWakeCheckpointGateFresh: boolean;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
   projectedWakeRequiresCheckpoint: boolean;
@@ -2624,6 +2652,7 @@ function buildHostedWorkspaceInvocationProjection(input: {
     inboxMediaRetentionWakeAt: committedWorkspace?.inboxMediaRetentionWakeAt ?? null,
     nextWakeAt: nextWake.nextWakeAt,
     nextWakeReason: nextWake.nextWakeReason,
+    projectedWakeCheckpointGateFresh: input.result.projectedWakeRequiresCheckpoint,
     projectedWakeRequiresCheckpoint: input.result.projectedWakeRequiresCheckpoint,
     redactedStatus,
     status: resolveHostedWorkspaceInvocationStatus({
@@ -2669,6 +2698,7 @@ function mergeHostedWorkspaceInvocationProjection(
         },
       ]);
   let selectedWakeRequiresCheckpoint = false;
+  let selectedWakeCheckpointGateFresh = false;
   if (preserveCheckpointGatedWake) {
     selectedWakeRequiresCheckpoint = true;
   } else if (options.replaceWake) {
@@ -2678,13 +2708,19 @@ function mergeHostedWorkspaceInvocationProjection(
         && next.nextWakeAt !== null
         && next.nextWakeReason !== "assistant"
       );
+    selectedWakeCheckpointGateFresh =
+      selectedWakeRequiresCheckpoint
+      && next.projectedWakeCheckpointGateFresh;
   } else {
     if (hostedWorkspaceInvocationProjectionWakeMatches(selectedWake, previous)) {
       selectedWakeRequiresCheckpoint ||= previous.projectedWakeRequiresCheckpoint;
+      selectedWakeCheckpointGateFresh ||= previous.projectedWakeCheckpointGateFresh;
     }
     if (hostedWorkspaceInvocationProjectionWakeMatches(selectedWake, next)) {
       selectedWakeRequiresCheckpoint ||= next.projectedWakeRequiresCheckpoint;
+      selectedWakeCheckpointGateFresh ||= next.projectedWakeCheckpointGateFresh;
     }
+    selectedWakeCheckpointGateFresh &&= selectedWakeRequiresCheckpoint;
   }
 
   return {
@@ -2694,6 +2730,7 @@ function mergeHostedWorkspaceInvocationProjection(
       : previous.inboxMediaRetentionWakeAt,
     nextWakeAt: selectedWake.nextWakeAt,
     nextWakeReason: selectedWake.nextWakeReason,
+    projectedWakeCheckpointGateFresh: selectedWakeCheckpointGateFresh,
     projectedWakeRequiresCheckpoint: selectedWakeRequiresCheckpoint,
     redactedStatus: {
       ...previous.redactedStatus,
@@ -2992,6 +3029,13 @@ function resolveHostedProjectedRuntimeWakeDelayMs(
   }
 
   return Math.max(0, wakeMs - nowMs);
+}
+
+function hostedRuntimeWakeIsDue(
+  nextWakeAt: string | null,
+  nowMs = Date.now(),
+): boolean {
+  return resolveHostedProjectedRuntimeWakeDelayMs(nextWakeAt, nowMs) === 0;
 }
 
 async function checkpointHostedRuntimeDirtyWorkspace(input: {
