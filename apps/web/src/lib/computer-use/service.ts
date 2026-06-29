@@ -31,7 +31,7 @@ import {
   type ComputerUseStore,
   type PersistedComputerHandoffPurpose,
 } from "./store";
-import type { ComputerBrowserViewportPreset } from "./viewport";
+import type { ComputerBrowserViewport } from "./viewport";
 
 const COMPUTER_RUN_TTL_MS = 60 * 60 * 1000;
 const COMPUTER_HANDOFF_TTL_MS = 20 * 60 * 1000;
@@ -824,8 +824,8 @@ export class ComputerUseService {
 
   async ensureHandoffViewport(input: {
     memberId: string;
-    preset: ComputerBrowserViewportPreset;
     token: string;
+    viewport: ComputerBrowserViewport;
   }): Promise<void> {
     await this.store.requireMemberComputerUseAvailable({
       memberId: input.memberId,
@@ -849,8 +849,8 @@ export class ComputerUseService {
     }
 
     await this.requireKernel().ensureBrowserViewport({
-      preset: input.preset,
       sessionId: requireKernelSessionId(run),
+      viewport: input.viewport,
     });
   }
 

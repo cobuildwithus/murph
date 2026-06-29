@@ -467,6 +467,23 @@ test("hosted CLI runtime bridge fails closed when accepted request drain times o
     assert.match(await closingRequest.text(), /HOSTED_CLI_BRIDGE_UNAVAILABLE/u);
     assert.equal(bridge.offInvocationAuthenticatedRequestCount, 1);
     expect(deviceSyncPort.createConnectLink).toHaveBeenCalledTimes(1);
+
+    assert.equal(await consumeHostedCliRuntimeBridgeOffInvocationViolation(), true);
+    const nextDeviceSyncPort = createDeviceSyncPortStub();
+    const nextResult = await bridge.runWithInvocation(
+      { deviceSyncPort: nextDeviceSyncPort },
+      async () => await requestHostedCliDeviceConnectLink({
+        bridge: {
+          token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+          url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+        },
+        connectTarget: "garmin",
+      }),
+    );
+    assert.equal(nextResult.provider, "garmin");
+    expect(nextDeviceSyncPort.createConnectLink).toHaveBeenCalledWith({
+      connectTarget: "garmin",
+    });
   } finally {
     await bridge.stop();
     vi.useRealTimers();
@@ -505,6 +522,7 @@ test("hosted CLI runtime bridge keeps stable env while swapping active invocatio
     assert.equal(await consumeHostedCliRuntimeBridgeOffInvocationViolation(), false);
 
     await bridge.runWithInvocation({ deviceSyncPort: firstDeviceSyncPort }, async () => {
+      assert.deepEqual(bridge.env, stableEnv);
       await requestHostedCliDeviceConnectLink({
         bridge: {
           token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
@@ -522,6 +540,7 @@ test("hosted CLI runtime bridge keeps stable env while swapping active invocatio
     assert.deepEqual(sameBridge.env, stableEnv);
 
     await sameBridge.runWithInvocation({ deviceSyncPort: secondDeviceSyncPort }, async () => {
+      assert.deepEqual(sameBridge.env, stableEnv);
       await requestHostedCliDeviceConnectLink({
         bridge: {
           token: sameBridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],

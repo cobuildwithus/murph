@@ -63,6 +63,16 @@ import {
   type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  ASSISTANT_USAGE_SCHEMA,
+  type AssistantUsageRecord,
+} from "@murphai/hosted-execution/assistant-usage";
+import {
+  HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH,
+  HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
+  HOSTED_CLI_BRIDGE_TOKEN_ENV,
+  HOSTED_CLI_BRIDGE_URL_ENV,
+} from "@murphai/hosted-execution/cli-runtime-bridge";
 import type {
   HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
@@ -140,6 +150,7 @@ import {
   HostedRuntimeCheckpointInterruptedByWakeError,
   HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError,
   HostedWorkspaceRunnerUserMismatchError,
+  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   parseHostedAssistantWorkspaceRuntimeJobInput,
   runHostedWorkspaceRuntimeJobInProcess,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
@@ -147,6 +158,9 @@ import {
 import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "../src/hosted-runtime/checkpoint-bridge.ts";
+import {
+  stopHostedCliRuntimeBridge,
+} from "../src/hosted-runtime/cli-runtime-bridge.ts";
 import {
   ensureHostedInboxSidecarReady,
 } from "../src/hosted-runtime/context.ts";
@@ -956,6 +970,124 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("services a checkpoint-blocked projected assistant wake after idle checkpointing", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const dueWakeAt = TEST_NOW;
+    let assistantPass = 0;
+    let snapshotCount = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_checkpoint_blocked_due_wake",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            snapshotCount += 1;
+            events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: String(snapshotCount).repeat(64),
+                key: `users/bundles/member-synthetic/checkpoint-blocked-due-wake-${snapshotCount}.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Checkpoint-blocked wake test should not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assistantPass += 1;
+            events.push(`assistant:${assistantPass}`);
+
+            if (assistantPass === 1) {
+              const redactedStatus: HostedRuntimeRedactedJson = {
+                hostedOutboxPendingDeliveryEffects: 1,
+              };
+              return {
+                afterCheckpoint: async () => ({
+                  checkpointReason: "outbox_receipt",
+                  nextWakeAt: dueWakeAt,
+                  nextWakeReason: "assistant",
+                  redactedStatus: {
+                    hostedOutboxDeliverySent: 1,
+                  },
+                }),
+                checkpointReason: "outbox_sending",
+                progressed: true,
+                redactedStatus,
+              };
+            }
+
+            if (assistantPass === 2) {
+              assert.equal(input.workspace?.nextWakeAt, dueWakeAt);
+              assert.equal(input.workspace?.nextWakeReason, "assistant");
+              const redactedStatus: HostedRuntimeRedactedJson = {
+                hostedAssistantProgressed: true,
+                hostedAssistantNextWakeAt: null,
+              };
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: null,
+                nextWakeReason: null,
+                progressed: true,
+                redactedStatus,
+              };
+            }
+
+            throw new Error("Checkpoint-blocked wake should be serviced exactly once.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPass, 2);
+      assert.deepEqual(
+        checkpointRequests.map((request) => [
+          request.reason,
+          request.expectedWorkspaceVersion,
+          request.nextWakeAt,
+          request.nextWakeReason,
+        ]),
+        [
+          ["idle_shutdown", "0", dueWakeAt, "assistant"],
+          ["idle_shutdown", "1", null, null],
+        ],
+      );
+      assert.ok(
+        events.indexOf("workspace.checkpoint") < events.indexOf("assistant:2"),
+      );
+      assert.ok(
+        events.indexOf("assistant:2") < events.lastIndexOf("workspace.checkpoint"),
+      );
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("carries inbox media retention wake through the idle checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -1428,6 +1560,82 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("retention-only shutdown ignores pending runtime wake and checkpoints retry wake", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-15T00:00:00.000Z"));
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const shutdownController = new AbortController();
+    const dueWakeAt = "2026-04-15T00:00:00.000Z";
+    const retryWakeAt = "2026-04-15T00:05:00.000Z";
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      shutdownController.abort(new Error("Synthetic container SIGTERM."));
+      runtimeWakeSignal.notify(new Date("2026-04-15T00:00:01.000Z").getTime());
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_retention_only_shutdown_pending_wake",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            processingMode: "inbox_media_retention",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            events.push("snapshot:idle_shutdown");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "6".repeat(64),
+                key: "users/bundles/member-synthetic/retention-only-shutdown-pending-wake.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                inboxMediaRetentionWakeAt: dueWakeAt,
+                version: "0",
+              }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            throw new Error("Retention-only processing must not enter assistant phase.");
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[0]?.inboxMediaRetentionWakeAt, retryWakeAt);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, retryWakeAt);
+      assert.equal(result.nextWakeReason, "inbox_media_retention");
+      assert.equal(events.includes("snapshot:idle_shutdown"), true);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("checkpoints local mutations from deferred durable checkpoint effects before returning", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -1506,6 +1714,8 @@ describe("hosted workspace runtime entrypoint", () => {
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
         ["0", "1"],
       );
+      assert.equal(checkpointRequests[1]?.nextWakeAt, durableWakeAt);
+      assert.equal(checkpointRequests[1]?.nextWakeReason, "assistant");
       assert.ok(checkpointEventIndexes[0] < events.indexOf("durable-effect"));
       assert.ok(events.indexOf("durable-effect") < checkpointEventIndexes[1]);
       assert.equal(result.status, "scheduled");
@@ -3773,7 +3983,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-post-checkpoint-wake-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const postCheckpointWakeAt = new Date(Date.now() - 1_000).toISOString();
+    const postCheckpointWakeAt = new Date(Date.now() + 60_000).toISOString();
     let assistantPhaseCalls = 0;
 
     try {
@@ -3846,6 +4056,119 @@ describe("hosted workspace runtime entrypoint", () => {
       ]);
       assert.equal(checkpointRequests[0]?.nextWakeAt, postCheckpointWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("same-timestamp post-checkpoint projected wakes wait for the idle checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-post-checkpoint-same-wake-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const postCheckpointWakeAt = new Date(Date.now() + 15).toISOString();
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_post_checkpoint_same_projected_wake",
+            idleCheckpointDelayMs: 75,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-post-checkpoint-same-wake.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: postCheckpointWakeAt,
+                nextWakeReason: "assistant",
+                version: "4",
+              }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            events.push(
+              `assistant.phase:${assistantPhaseCalls}:${input.workspace?.nextWakeAt ?? "none"}`,
+            );
+            if (assistantPhaseCalls === 1) {
+              return {
+                afterCheckpoint: async () => ({
+                  checkpointReason: "outbox_receipt",
+                  nextWakeAt: postCheckpointWakeAt,
+                  nextWakeReason: "assistant",
+                }),
+                checkpointReason: "outbox_sending",
+                nextWakeAt: postCheckpointWakeAt,
+                nextWakeReason: "assistant",
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                  hostedOutboxPendingDeliveryEffects: 1,
+                },
+              };
+            }
+
+            return {
+              checkpointReason: "canonical_runtime_commit",
+              nextWakeAt: null,
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+                hostedOutboxPendingDeliveryEffects: 0,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+      assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(
+        events.filter((event) =>
+          event.startsWith("assistant.phase:") || event.startsWith("snapshot:")
+        ),
+        [
+          `assistant.phase:1:${postCheckpointWakeAt}`,
+          "snapshot:idle_shutdown",
+          `assistant.phase:2:${postCheckpointWakeAt}`,
+          "snapshot:idle_shutdown",
+        ],
+      );
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+        "idle_shutdown",
+      ]);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, postCheckpointWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.equal(checkpointRequests[1]?.nextWakeAt, null);
+      assert.equal(checkpointRequests[1]?.nextWakeReason, null);
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -4650,6 +4973,1166 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("deferred usage flushing does not block the delivered reply idle checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const restoredState = createEmptyHostedMailboxImportState();
+    restoredState.watermarks.conversation = "1";
+    const bundle = createMailboxImportStateBundle(restoredState);
+    const usageRecordStarted = createDeferred<void>();
+    const usageRecordFinished = createDeferred<void>();
+    const releaseUsageRecord = createDeferred<void>();
+    const checkpointInboxMediaRetentionWakeAt = "2099-04-27T00:02:00.000Z";
+    const earlierWakeAt = "2099-04-27T00:05:00.000Z";
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+    let resultSettled = false;
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const platform = createPlatform({
+        artifactBytesByHash: new Map([[bundle.hash, bundle.bytes]]),
+        mailboxPort: createMailboxPort({
+          events,
+          items: [],
+        }),
+        workspacePort: {
+          async read() {
+            events.push("workspace.read");
+            return {
+              fetchedAt: TEST_NOW,
+              workspace: createWorkspaceState({
+                redactedStatus: {
+                  hostedMailboxConversationImportedSeq: "1",
+                },
+                snapshotRef: createBundleRef({
+                  hash: bundle.hash,
+                  key: "users/bundles/member-synthetic/deferred-usage-clean-wake-before.bundle.json",
+                  size: bundle.bytes.byteLength,
+                }),
+                version: "4",
+              }),
+            };
+          },
+          async checkpoint(request) {
+            events.push(`workspace.checkpoint:${request.reason}`);
+            checkpointRequests.push(request);
+            return {
+              checkpointed: true,
+              workspace: createWorkspaceState({
+                inboxMediaRetentionWakeAt:
+                  request.reason === "idle_shutdown"
+                    ? checkpointInboxMediaRetentionWakeAt
+                    : request.inboxMediaRetentionWakeAt ?? null,
+                nextWakeAt: request.nextWakeAt ?? null,
+                nextWakeReason: request.nextWakeReason ?? null,
+                redactedStatus: request.redactedStatus ?? null,
+                snapshotRef: request.snapshotRef,
+                version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+              }),
+            };
+          },
+        },
+      });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_deferred_usage_idle_checkpoint",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            const hashPrefix =
+              snapshotInput.reason === "assistant_runtime_commit"
+                ? "a"
+                : snapshotInput.reason === "outbox_receipt"
+                  ? "b"
+                  : "c";
+            return {
+              snapshotRef: createBundleRef({
+                hash: hashPrefix.repeat(64),
+                key: `users/bundles/member-synthetic/deferred-usage-${snapshotInput.reason}.bundle.json`,
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return {
+              assistantInputId: await stageAssistantInputEventForMailboxItem({
+                item: item.item,
+                vaultRoot,
+              }),
+              status: "imported",
+            };
+          },
+          platform: {
+            ...platform,
+            usageRecordPort: {
+              async recordUsage(record: AssistantUsageRecord) {
+                events.push("usage.record:start");
+                usageRecordStarted.resolve();
+                await releaseUsageRecord.promise;
+                events.push("usage.record:done");
+                usageRecordFinished.resolve();
+                return {
+                  recorded: true,
+                  usageId: record.usageId,
+                };
+              },
+            },
+          },
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls > 1) {
+              return {
+                foregroundReplyFailed: 0,
+                nextWakeAt: "2099-04-27T00:10:00.000Z",
+                nextWakeReason: "mailbox.retry",
+                progressed: false,
+              };
+            }
+
+            input.recordDeferredUsage?.(createAssistantUsageRecord({
+              usageId: "turn_entrypoint_deferred_usage.attempt-1",
+            }));
+            return {
+              afterCheckpoint: async () => {
+                events.push("reply.deliver");
+                return {
+                  checkpointReason: "outbox_receipt",
+                };
+              },
+              checkpointReason: "assistant_runtime_commit",
+              nextWakeAt: earlierWakeAt,
+              nextWakeReason: "assistant",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      ).finally(() => {
+        resultSettled = true;
+      });
+
+      await withRealTimeout(
+        usageRecordStarted.promise,
+        1_000,
+        () => "Deferred usage recording did not start.",
+      );
+      await waitUntil(() => {
+        assert.equal(
+          checkpointRequests.some((request) => request.reason === "idle_shutdown"),
+          true,
+        );
+      });
+      assert.equal(assistantPhaseCalls, 1);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(events.includes("usage.record:done"), false);
+      assert.equal(events.includes("browser.refresh"), false);
+      const result = await withRealTimeout(
+        resultPromise,
+        1_000,
+        () => "Runtime did not settle while deferred usage recording was pending.",
+      );
+      assert.equal(resultSettled, true);
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(events.includes("usage.record:done"), false);
+
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, checkpointInboxMediaRetentionWakeAt);
+      assert.deepEqual(events.filter((event) => event.startsWith("snapshot:")), [
+        "snapshot:idle_shutdown",
+      ]);
+      assert.equal(events.includes("reply.deliver"), true);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.nextWakeAt), [
+        earlierWakeAt,
+      ]);
+
+      releaseUsageRecord.resolve();
+      await withRealTimeout(
+        usageRecordFinished.promise,
+        1_000,
+        () => "Deferred usage recording did not finish after release.",
+      );
+    } finally {
+      releaseUsageRecord.resolve();
+      if (resultPromise) {
+        await resultPromise.catch(() => undefined);
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("does not let prior deferred usage block unrelated runtime failure cleanup", async () => {
+    const firstVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-prior-"));
+    const secondVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-fail-next-"));
+    const events: string[] = [];
+    const releaseUsageRecord = createDeferred<void>();
+    const usageRecordStarted = createDeferred<void>();
+    const usageRecordFinished = createDeferred<void>();
+    let firstResultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot: firstVaultRoot });
+      firstResultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_deferred_usage_previous_invocation",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`first.snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: `users/bundles/member-synthetic/prior-usage-${snapshotInput.reason}.bundle.json`,
+                size: 640,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: {
+            ...createPlatform({
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests: [],
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            usageRecordPort: {
+              async recordUsage(record: AssistantUsageRecord) {
+                events.push("first.usage:start");
+                usageRecordStarted.resolve();
+                await releaseUsageRecord.promise;
+                events.push("first.usage:done");
+                usageRecordFinished.resolve();
+                return {
+                  recorded: true,
+                  usageId: record.usageId,
+                };
+              },
+            },
+          },
+          async runAssistantPhase(input) {
+            events.push("first.assistant.phase");
+            input.recordDeferredUsage?.(createAssistantUsageRecord({
+              usageId: "turn_entrypoint_deferred_usage_previous.attempt-1",
+            }));
+            return {
+              afterCheckpoint: async () => {
+                events.push("first.reply.deliver");
+                return {
+                  checkpointReason: "outbox_receipt",
+                };
+              },
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot: firstVaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        usageRecordStarted.promise,
+        1_000,
+        () => "Previous invocation deferred usage did not start.",
+      );
+      await withRealTimeout(
+        firstResultPromise,
+        1_000,
+        () => "Previous invocation did not return while deferred usage was pending.",
+      );
+      assert.equal(events.includes("first.usage:done"), false);
+
+      const failure = await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_deferred_usage_next_failure",
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "5",
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              throw new Error("Stale workspace failure should not snapshot.");
+            },
+            async importItem() {
+              throw new Error("Stale workspace failure should not import mailbox items.");
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests: [],
+                events,
+                workspace: createWorkspaceState({ version: "6" }),
+              }),
+            }),
+            vaultRoot: secondVaultRoot,
+          },
+        ).then(
+          () => null,
+          (error: unknown) => error,
+        ),
+        1_000,
+        () => "Unrelated runtime failure waited for previous invocation usage.",
+      );
+
+      assert.ok(failure instanceof HostedWorkspaceRuntimeJobWorkspaceVersionMismatchError);
+      assert.equal(events.includes("first.usage:done"), false);
+
+      releaseUsageRecord.resolve();
+      await withRealTimeout(
+        usageRecordFinished.promise,
+        1_000,
+        () => "Previous invocation deferred usage did not finish after release.",
+      );
+    } finally {
+      releaseUsageRecord.resolve();
+      if (firstResultPromise) {
+        await firstResultPromise.catch(() => undefined);
+      }
+      await removeTempRoot(firstVaultRoot);
+      await removeTempRoot(secondVaultRoot);
+    }
+  });
+
+  test("drains started deferred usage before rethrowing idle checkpoint failure", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-fail-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const usageRecordStarted = createDeferred<void>();
+    const releaseUsageRecord = createDeferred<void>();
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+    let resultSettled = false;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_deferred_usage_idle_checkpoint_failure",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: `users/bundles/member-synthetic/deferred-usage-fail-${snapshotInput.reason}.bundle.json`,
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: {
+            ...createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: {
+                async read() {
+                  events.push("workspace.read");
+                  return {
+                    fetchedAt: TEST_NOW,
+                    workspace: createWorkspaceState({ version: "4" }),
+                  };
+                },
+                async checkpoint(request) {
+                  events.push(`workspace.checkpoint:${request.reason}`);
+                  checkpointRequests.push(request);
+                  if (request.reason === "idle_shutdown") {
+                    throw new Error("Synthetic idle checkpoint failure.");
+                  }
+                  return {
+                    checkpointed: true,
+                    workspace: createWorkspaceState({
+                      snapshotRef: request.snapshotRef,
+                      version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                    }),
+                  };
+                },
+              },
+            }),
+            usageRecordPort: {
+              async recordUsage(record: AssistantUsageRecord) {
+                events.push("usage.record:start");
+                usageRecordStarted.resolve();
+                await releaseUsageRecord.promise;
+                events.push("usage.record:done");
+                return {
+                  recorded: true,
+                  usageId: record.usageId,
+                };
+              },
+            },
+          },
+          async runAssistantPhase(input) {
+            events.push("assistant.phase");
+            input.recordDeferredUsage?.(createAssistantUsageRecord({
+              usageId: "turn_entrypoint_deferred_usage_failure.attempt-1",
+            }));
+            return {
+              afterCheckpoint: async () => {
+                events.push("reply.deliver");
+                return {
+                  checkpointReason: "outbox_receipt",
+                };
+              },
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+      void resultPromise.finally(() => {
+        resultSettled = true;
+      }).catch(() => undefined);
+
+      await withRealTimeout(
+        usageRecordStarted.promise,
+        1_000,
+        () => "Deferred usage recording did not start before checkpoint failure.",
+      );
+      await waitUntil(() => {
+        assert.equal(
+          checkpointRequests.some((request) => request.reason === "idle_shutdown"),
+          true,
+        );
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.equal(events.includes("usage.record:done"), false);
+      assert.equal(resultSettled, false);
+
+      releaseUsageRecord.resolve();
+      await expect(resultPromise).rejects.toThrow("Synthetic idle checkpoint failure.");
+      assert.equal(events.includes("usage.record:done"), true);
+    } finally {
+      releaseUsageRecord.resolve();
+      if (resultPromise) {
+        await resultPromise.catch(() => undefined);
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("does not drain started deferred usage when host abort wins before runner result returns", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-abort-"));
+    const events: string[] = [];
+    const usageRecordStarted = createDeferred<void>();
+    const releaseUsageRecord = createDeferred<void>();
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("synthetic host abort after deferred usage starts");
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+    let resultSettled = false;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_deferred_usage_host_abort",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: `users/bundles/member-synthetic/deferred-usage-abort-${snapshotInput.reason}.bundle.json`,
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: {
+            ...createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: {
+                async read() {
+                  events.push("workspace.read");
+                  return {
+                    fetchedAt: TEST_NOW,
+                    workspace: createWorkspaceState({ version: "4" }),
+                  };
+                },
+                async checkpoint(request) {
+                  events.push(`workspace.checkpoint:${request.reason}`);
+                  return {
+                    checkpointed: true,
+                    workspace: createWorkspaceState({
+                      snapshotRef: request.snapshotRef,
+                      version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                    }),
+                  };
+                },
+              },
+            }),
+            usageRecordPort: {
+              async recordUsage(record: AssistantUsageRecord) {
+                events.push("usage.record:start");
+                assert.equal(
+                  record.usageId,
+                  "turn_entrypoint_deferred_usage_host_abort.attempt-1",
+                );
+                usageRecordStarted.resolve();
+                hostAbortController.abort(hostAbortReason);
+                await releaseUsageRecord.promise;
+                events.push("usage.record:done");
+                return {
+                  recorded: true,
+                  usageId: record.usageId,
+                };
+              },
+            },
+          },
+          async runAssistantPhase(input) {
+            events.push("assistant.phase");
+            input.recordDeferredUsage?.(createAssistantUsageRecord({
+              usageId: "turn_entrypoint_deferred_usage_host_abort.attempt-1",
+            }));
+            return {
+              afterCheckpoint: async () => {
+                events.push("reply.deliver");
+                return {
+                  checkpointReason: "outbox_receipt",
+                };
+              },
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+      void resultPromise.finally(() => {
+        resultSettled = true;
+      }).catch(() => undefined);
+
+      await withRealTimeout(
+        usageRecordStarted.promise,
+        1_000,
+        () => "Deferred usage recording did not start before host abort.",
+      );
+      const outcome = await withRealTimeout(
+        resultPromise,
+        1_000,
+        () => "Runtime waited for deferred usage recording after host abort.",
+      ).then(
+        () => "resolved" as const,
+        (error: unknown) => error,
+      );
+
+      assert.equal(outcome, hostAbortReason);
+      assert.equal(resultSettled, true);
+      assert.equal(events.includes("usage.record:done"), false);
+
+      releaseUsageRecord.resolve();
+      await waitUntil(() => {
+        assert.equal(events.includes("usage.record:done"), true);
+      });
+      assert.deepEqual(events.filter((event) => event.startsWith("usage.record:")), [
+        "usage.record:start",
+        "usage.record:done",
+      ]);
+      assert.equal(events.includes("reply.deliver"), true);
+    } finally {
+      releaseUsageRecord.resolve();
+      if (resultPromise) {
+        await resultPromise.catch(() => undefined);
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("starts captured deferred usage without blocking when host abort prevents the phase result", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-abort-before-result-"));
+    const events: string[] = [];
+    const usageRecordStarted = createDeferred<void>();
+    const usageRecordFinished = createDeferred<void>();
+    const releaseUsageRecord = createDeferred<void>();
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("synthetic host abort before assistant phase result");
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_deferred_usage_host_abort_before_result",
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Host abort before phase result should not checkpoint.");
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: {
+            ...createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests: [],
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            usageRecordPort: {
+              async recordUsage(record: AssistantUsageRecord) {
+                events.push("usage.record:start");
+                assert.equal(
+                  record.usageId,
+                  "turn_entrypoint_deferred_usage_abort_before_result.attempt-1",
+                );
+                usageRecordStarted.resolve();
+                await releaseUsageRecord.promise;
+                events.push("usage.record:done");
+                usageRecordFinished.resolve();
+                return {
+                  recorded: true,
+                  usageId: record.usageId,
+                };
+              },
+            },
+          },
+          async runAssistantPhase(input) {
+            events.push("assistant.phase");
+            input.recordDeferredUsage?.(createAssistantUsageRecord({
+              usageId: "turn_entrypoint_deferred_usage_abort_before_result.attempt-1",
+            }));
+            hostAbortController.abort(hostAbortReason);
+            throw hostAbortReason;
+          },
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        usageRecordStarted.promise,
+        1_000,
+        () => "Deferred usage recording did not start after host abort.",
+      );
+      const outcome = await withRealTimeout(
+        resultPromise,
+        1_000,
+        () => "Runtime waited for captured deferred usage after host abort.",
+      ).then(
+        () => "resolved" as const,
+        (error: unknown) => error,
+      );
+
+      assert.equal(outcome, hostAbortReason);
+      assert.equal(events.includes("usage.record:done"), false);
+
+      releaseUsageRecord.resolve();
+      await withRealTimeout(
+        usageRecordFinished.promise,
+        1_000,
+        () => "Deferred usage recording did not finish after release.",
+      );
+    } finally {
+      releaseUsageRecord.resolve();
+      if (resultPromise) {
+        await resultPromise.catch(() => undefined);
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("shutdown drain waits for captured deferred usage when host abort wins before flush starts", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-abort-drain-"));
+    const events: string[] = [];
+    const assistantPhaseCanFinish = createDeferred<void>();
+    const recordLateUsage = createDeferred<void>();
+    const lateUsageRecorded = createDeferred<void>();
+    const usageRecordStartedA = createDeferred<void>();
+    const usageRecordStartedB = createDeferred<void>();
+    const releaseUsageRecordA = createDeferred<void>();
+    const releaseUsageRecordB = createDeferred<void>();
+    const usageRecordFinishedA = createDeferred<void>();
+    const usageRecordFinishedB = createDeferred<void>();
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("synthetic host abort before deferred usage flush start");
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_deferred_usage_abort_drain",
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Host abort before phase result should not checkpoint.");
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: {
+            ...createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests: [],
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            usageRecordPort: {
+              async recordUsage(record: AssistantUsageRecord) {
+                events.push(`usage.record:start:${record.usageId}`);
+                if (record.usageId === "turn_entrypoint_deferred_usage_abort_drain.attempt-1") {
+                  usageRecordStartedA.resolve();
+                  await releaseUsageRecordA.promise;
+                  events.push(`usage.record:done:${record.usageId}`);
+                  usageRecordFinishedA.resolve();
+                } else if (record.usageId === "turn_entrypoint_deferred_usage_abort_drain.attempt-2") {
+                  usageRecordStartedB.resolve();
+                  await releaseUsageRecordB.promise;
+                  events.push(`usage.record:done:${record.usageId}`);
+                  usageRecordFinishedB.resolve();
+                } else {
+                  assert.fail(`Unexpected usage record ${record.usageId}`);
+                }
+                return {
+                  recorded: true,
+                  usageId: record.usageId,
+                };
+              },
+            },
+          },
+          async runAssistantPhase(input) {
+            events.push("assistant.phase");
+            input.recordDeferredUsage?.(createAssistantUsageRecord({
+              usageId: "turn_entrypoint_deferred_usage_abort_drain.attempt-1",
+            }));
+            hostAbortController.abort(hostAbortReason);
+            await recordLateUsage.promise;
+            input.recordDeferredUsage?.(createAssistantUsageRecord({
+              usageId: "turn_entrypoint_deferred_usage_abort_drain.attempt-2",
+            }));
+            lateUsageRecorded.resolve();
+            await assistantPhaseCanFinish.promise;
+            throw hostAbortReason;
+          },
+          signal: hostAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      const outcome = await withRealTimeout(
+        resultPromise,
+        1_000,
+        () => "Runtime did not return the host abort while assistant phase was blocked.",
+      ).then(
+        () => "resolved" as const,
+        (error: unknown) => error,
+      );
+      assert.equal(outcome, hostAbortReason);
+      await withRealTimeout(
+        usageRecordStartedA.promise,
+        1_000,
+        () => "Deferred usage recording did not start after host abort.",
+      );
+      assert.equal(
+        events.includes("usage.record:done:turn_entrypoint_deferred_usage_abort_drain.attempt-1"),
+        false,
+      );
+
+      const drainPromise = drainHostedRuntimeDeferredUsageCompletionsBestEffort();
+      let drainSettled = false;
+      void drainPromise.finally(() => {
+        drainSettled = true;
+      }).catch(() => undefined);
+      recordLateUsage.resolve();
+      await withRealTimeout(
+        lateUsageRecorded.promise,
+        1_000,
+        () => "Assistant phase did not record late deferred usage after host abort.",
+      );
+      await withRealTimeout(
+        usageRecordStartedB.promise,
+        1_000,
+        () => "Started deferred usage capture did not start late usage recording.",
+      );
+      assert.equal(drainSettled, false);
+
+      releaseUsageRecordA.resolve();
+      releaseUsageRecordB.resolve();
+      await withRealTimeout(
+        usageRecordFinishedA.promise,
+        1_000,
+        () => "First deferred usage recording did not finish after release.",
+      );
+      await withRealTimeout(
+        usageRecordFinishedB.promise,
+        1_000,
+        () => "Late deferred usage recording did not finish after release.",
+      );
+      await Promise.resolve();
+      assert.equal(drainSettled, false);
+      assistantPhaseCanFinish.resolve();
+      await withRealTimeout(
+        drainPromise,
+        1_000,
+        () => "Shutdown deferred usage drain did not settle after capture closed.",
+      );
+      assert.equal(drainSettled, true);
+    } finally {
+      recordLateUsage.resolve();
+      assistantPhaseCanFinish.resolve();
+      releaseUsageRecordA.resolve();
+      releaseUsageRecordB.resolve();
+      if (resultPromise) {
+        await resultPromise.catch(() => undefined);
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("process-fatal drain starts captured deferred usage before runner cleanup", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-fatal-drain-"));
+    const events: string[] = [];
+    const assistantPhaseCanFinish = createDeferred<void>();
+    const usageCaptured = createDeferred<void>();
+    const usageRecordStarted = createDeferred<void>();
+    const releaseUsageRecord = createDeferred<void>();
+    const usageRecordFinished = createDeferred<void>();
+    const usageId = "turn_entrypoint_deferred_usage_fatal_drain.attempt-1";
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_deferred_usage_fatal_drain",
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Blocked fatal-drain phase should not checkpoint.");
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: {
+            ...createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests: [],
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            usageRecordPort: {
+              async recordUsage(record: AssistantUsageRecord) {
+                events.push("usage.record:start");
+                assert.equal(record.usageId, usageId);
+                usageRecordStarted.resolve();
+                await releaseUsageRecord.promise;
+                events.push("usage.record:done");
+                usageRecordFinished.resolve();
+                return {
+                  recorded: true,
+                  usageId: record.usageId,
+                };
+              },
+            },
+          },
+          async runAssistantPhase(input) {
+            events.push("assistant.phase");
+            input.recordDeferredUsage?.(createAssistantUsageRecord({ usageId }));
+            usageCaptured.resolve();
+            await assistantPhaseCanFinish.promise;
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        usageCaptured.promise,
+        1_000,
+        () => "Assistant phase did not capture deferred usage.",
+      );
+      await Promise.resolve();
+      assert.equal(events.includes("usage.record:start"), false);
+
+      const drainPromise = drainHostedRuntimeDeferredUsageCompletionsBestEffort({
+        closeActiveCaptures: true,
+        timeoutMs: 1_000,
+      });
+      let drainSettled = false;
+      void drainPromise.finally(() => {
+        drainSettled = true;
+      }).catch(() => undefined);
+
+      await withRealTimeout(
+        usageRecordStarted.promise,
+        1_000,
+        () => "Process-fatal deferred usage drain did not start captured usage.",
+      );
+      assert.equal(drainSettled, false);
+
+      releaseUsageRecord.resolve();
+      await withRealTimeout(
+        usageRecordFinished.promise,
+        1_000,
+        () => "Deferred usage recording did not finish after release.",
+      );
+      await withRealTimeout(
+        drainPromise,
+        1_000,
+        () => "Process-fatal deferred usage drain did not settle after usage finished.",
+      );
+      assert.equal(drainSettled, true);
+
+      assistantPhaseCanFinish.resolve();
+      assert.ok(resultPromise);
+      await withRealTimeout(
+        resultPromise,
+        1_000,
+        () => "Runtime did not finish after blocked fatal-drain phase was released.",
+      );
+    } finally {
+      assistantPhaseCanFinish.resolve();
+      releaseUsageRecord.resolve();
+      if (resultPromise) {
+        await resultPromise.catch(() => undefined);
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("drains completed runner deferred usage before rethrowing CLI bridge drain failure", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-bridge-fail-"));
+    const events: string[] = [];
+    const usageRecordStarted = createDeferred<void>();
+    const releaseUsageRecord = createDeferred<void>();
+    const deviceSnapshotStarted = createDeferred<void>();
+    const releaseDeviceSnapshot = createDeferred<void>();
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+    let resultSettled = false;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const deviceSyncPort = createSnapshotDeviceSyncPort({
+        connectionId: "connection_synthetic_bridge_drain_failure",
+        nextReconcileAt: "2099-01-01T00:00:00.000Z",
+        onFetchSnapshot: async () => {
+          events.push("device.snapshot:start");
+          deviceSnapshotStarted.resolve();
+          await releaseDeviceSnapshot.promise;
+          events.push("device.snapshot:done");
+        },
+      });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_deferred_usage_bridge_drain_failure",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: `users/bundles/member-synthetic/deferred-usage-bridge-fail-${snapshotInput.reason}.bundle.json`,
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: {
+            ...createPlatform({
+              deviceSyncPort,
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: {
+                async read() {
+                  events.push("workspace.read");
+                  return {
+                    fetchedAt: TEST_NOW,
+                    workspace: createWorkspaceState({ version: "4" }),
+                  };
+                },
+                async checkpoint(request) {
+                  events.push(`workspace.checkpoint:${request.reason}`);
+                  return {
+                    checkpointed: true,
+                    workspace: createWorkspaceState({
+                      snapshotRef: request.snapshotRef,
+                      version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                    }),
+                  };
+                },
+              },
+            }),
+            usageRecordPort: {
+              async recordUsage(record: AssistantUsageRecord) {
+                events.push("usage.record:start");
+                usageRecordStarted.resolve();
+                await releaseUsageRecord.promise;
+                events.push("usage.record:done");
+                return {
+                  recorded: true,
+                  usageId: record.usageId,
+                };
+              },
+            },
+          },
+          async runAssistantPhase(phaseInput) {
+            events.push("assistant.phase");
+            const bridgeUrl = phaseInput.runtimeEnv[HOSTED_CLI_BRIDGE_URL_ENV];
+            const bridgeToken = phaseInput.runtimeEnv[HOSTED_CLI_BRIDGE_TOKEN_ENV];
+            assert.ok(bridgeUrl);
+            assert.ok(bridgeToken);
+            const bridgeRequest = fetch(
+              new URL(HOSTED_CLI_BRIDGE_DEVICE_ACCOUNT_LIST_PATH, bridgeUrl),
+              {
+                body: JSON.stringify({}),
+                headers: {
+                  authorization: `Bearer ${bridgeToken}`,
+                  "content-type": "application/json",
+                },
+                method: "POST",
+              },
+            );
+            void bridgeRequest.catch(() => undefined);
+            await withRealTimeout(
+              deviceSnapshotStarted.promise,
+              1_000,
+              () => "CLI bridge device snapshot request did not start.",
+            );
+            phaseInput.recordDeferredUsage?.(createAssistantUsageRecord({
+              usageId: "turn_entrypoint_deferred_usage_bridge_failure.attempt-1",
+            }));
+            return {
+              afterCheckpoint: async () => {
+                events.push("reply.deliver");
+                return {
+                  checkpointReason: "outbox_receipt",
+                };
+              },
+              checkpointReason: "assistant_runtime_commit",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+      void resultPromise.finally(() => {
+        resultSettled = true;
+      }).catch(() => undefined);
+
+      await withRealTimeout(
+        usageRecordStarted.promise,
+        1_000,
+        () => "Deferred usage recording did not start before CLI bridge drain failure.",
+      );
+      await new Promise((resolve) =>
+        setTimeout(resolve, HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS + 50)
+      );
+      assert.equal(events.includes("usage.record:done"), false);
+      assert.equal(resultSettled, false);
+
+      releaseUsageRecord.resolve();
+      await expect(
+        withRealTimeout(
+          resultPromise,
+          2_000,
+          () => "Runtime did not reject after deferred usage recording finished.",
+        ),
+      ).rejects.toThrow("Hosted CLI bridge in-flight request drain timed out.");
+      assert.equal(events.includes("usage.record:done"), true);
+    } finally {
+      releaseUsageRecord.resolve();
+      releaseDeviceSnapshot.resolve();
+      if (resultPromise) {
+        await resultPromise.catch(() => undefined);
+      }
+      await stopHostedCliRuntimeBridge();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("runtime wakes during the final idle checkpoint drain after the checkpoint commits", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
@@ -5382,6 +6865,116 @@ describe("hosted workspace runtime entrypoint", () => {
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls === 1) {
               setTimeout(() => runtimeWakeSignal.notify(), 0);
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: earlierWakeAt,
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantNextWakeAt: earlierWakeAt,
+                  hostedAssistantProgressed: true,
+                },
+              };
+            }
+
+            return {
+              nextWakeAt: laterWakeAt,
+              progressed: false,
+              redactedStatus: {
+                hostedAssistantNextWakeAt: laterWakeAt,
+                hostedAssistantProgressed: false,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, earlierWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, earlierWakeAt);
+      assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
+        "assistant.phase:1",
+        "assistant.phase:2",
+      ]);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("checkpoint-captured no-progress wake preserves earlier checkpointed wake metadata", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const earlierWakeAt = "2099-04-27T00:01:00.000Z";
+    const laterWakeAt = "2099-04-27T00:05:00.000Z";
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_checkpoint_wake_no_progress_hint",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-checkpoint-wake-no-progress-hint.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: {
+              async read() {
+                events.push("workspace.read");
+                return {
+                  fetchedAt: TEST_NOW,
+                  workspace: createWorkspaceState({ version: "4" }),
+                };
+              },
+              async checkpoint(request) {
+                checkpointRequests.push(request);
+                events.push("workspace.checkpoint");
+                runtimeWakeSignal.notify();
+                return {
+                  checkpointed: true,
+                  workspace: createWorkspaceState({
+                    nextWakeAt: request.nextWakeAt ?? null,
+                    nextWakeReason: request.nextWakeReason ?? null,
+                    redactedStatus: request.redactedStatus ?? null,
+                    snapshotRef: request.snapshotRef,
+                    version: "5",
+                  }),
+                };
+              },
+            },
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
               return {
                 checkpointReason: "assistant_runtime_commit",
                 nextWakeAt: earlierWakeAt,
@@ -11782,6 +13375,50 @@ function createWorkspaceState(overrides: Partial<HostedWorkspaceState> = {}): Ho
   };
 }
 
+function createAssistantUsageRecord(
+  overrides: Partial<AssistantUsageRecord> = {},
+): AssistantUsageRecord {
+  return {
+    apiKeyEnv: null,
+    attemptCount: 1,
+    baseUrl: null,
+    cacheWriteTokens: null,
+    cachedInputTokens: null,
+    credentialSource: "platform",
+    featureKey: null,
+    gatewayTags: [],
+    inputTokens: 10,
+    memberId: TEST_USER_ID,
+    occurredAt: TEST_NOW,
+    outputTokens: 5,
+    provider: "codex-cli",
+    providerName: "OpenAI",
+    providerRequestId: null,
+    providerRequestOutcome: "succeeded",
+    providerRequestOrdinal: 0,
+    rawUsageJson: null,
+    rawUsageJsonHash: null,
+    reasoningTokens: null,
+    reportingUserId: null,
+    requestedModel: "gpt-5.5",
+    routeId: "primary",
+    schema: ASSISTANT_USAGE_SCHEMA,
+    servedModel: "gpt-5.5",
+    sessionId: "asst_entrypoint_usage",
+    stripeMeterSource: "murph",
+    surface: null,
+    tokenPricingBasis: "standard",
+    totalTokens: 15,
+    triggerKind: null,
+    turnId: "turn_entrypoint_usage",
+    turnProfileJson: null,
+    usageExtractionSourcePath: null,
+    usageExtractionVersion: "codex-usage-v1",
+    usageId: "turn_entrypoint_usage.attempt-1",
+    ...overrides,
+  };
+}
+
 function createDeviceSyncResolvedConfig(): HostedAssistantRuntimeResolvedConfig {
   return {
     channelCapabilities: {
@@ -12111,6 +13748,185 @@ describe("hosted runtime shutdown signal", () => {
       assert.equal(result.nextWakeAt, retryWakeAt);
     } finally {
       vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  }, 30_000);
+
+  test("a pending runtime wake after shutdown does not interrupt the idle shutdown checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const shutdownController = new AbortController();
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_shutdown_pending_runtime_wake",
+            idleCheckpointDelayMs: 120_000,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/shutdown-pending-runtime-wake.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            if (assistantPhaseCalls === 1) {
+              shutdownController.abort(
+                new DOMException("Synthetic container SIGTERM.", "AbortError"),
+              );
+              runtimeWakeSignal.notify(1_777_000_000_075);
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                progressed: true,
+              };
+            }
+
+            throw new Error("Runtime wake should not run a foreground pass after shutdown starts.");
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(result.status, "scheduled");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  }, 30_000);
+
+  test("a runtime wake after shutdown does not interrupt pending import enrichment", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const shutdownController = new AbortController();
+    const enrichmentGate = createDeferred<void>();
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_shutdown_pending_import_wake",
+            idleCheckpointDelayMs: 120_000,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/shutdown-pending-import-wake.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            events.push("import");
+            return {
+              afterCheckpoint: async () => {
+                events.push("mailbox:afterCheckpoint:start");
+                await enrichmentGate.promise;
+                events.push("mailbox:afterCheckpoint:done");
+                return {
+                  attachmentEvidenceUpdated: true,
+                  kind: "inbox_projection",
+                  projectionUpdated: true,
+                  reasonCode: null,
+                  status: "succeeded",
+                };
+              },
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            if (assistantPhaseCalls === 1) {
+              shutdownController.abort(
+                new DOMException("Synthetic container SIGTERM.", "AbortError"),
+              );
+              runtimeWakeSignal.notify(1_777_000_000_085);
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                progressed: true,
+              };
+            }
+
+            throw new Error("Runtime wake should not preempt pending import enrichment.");
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+
+      await waitUntil(() => {
+        assert.equal(events.includes("mailbox:afterCheckpoint:start"), true);
+      });
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(events.includes("snapshot:idle_shutdown"), false);
+
+      enrichmentGate.resolve();
+      const result = await resultPromise;
+
+      assert.equal(assistantPhaseCalls, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(result.status, "scheduled");
+      assert.ok(
+        requireEventIndex(events, "mailbox:afterCheckpoint:done")
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
+      );
+    } finally {
+      enrichmentGate.resolve();
       await removeTempRoot(vaultRoot);
     }
   }, 30_000);

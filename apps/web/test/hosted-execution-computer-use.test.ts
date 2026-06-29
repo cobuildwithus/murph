@@ -861,8 +861,8 @@ describe("ComputerUseService", () => {
     });
     await expect(service.ensureHandoffViewport({
       memberId: "member_123",
-      preset: "desktop",
       token: "handoff-token",
+      viewport: { height: 1080, refresh_rate: 25, width: 1920 },
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
     });
@@ -3599,13 +3599,13 @@ describe("ComputerUseService", () => {
 
     await expect(service.ensureHandoffViewport({
       memberId: "member_123",
-      preset: "mobile",
       token: "handoff-token",
+      viewport: { height: 844, refresh_rate: 60, width: 390 },
     })).resolves.toBeUndefined();
     expect(kernel.ensureBrowserViewportInputs).toEqual([
       {
-        preset: "mobile",
         sessionId: "kernel-session-1",
+        viewport: { height: 844, refresh_rate: 60, width: 390 },
       },
     ]);
   });
@@ -3630,8 +3630,8 @@ describe("ComputerUseService", () => {
 
     await expect(service.ensureHandoffViewport({
       memberId: "member_123",
-      preset: "mobile",
       token: "handoff-token",
+      viewport: { height: 844, refresh_rate: 60, width: 390 },
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_HANDOFF_CLOSED",
     });

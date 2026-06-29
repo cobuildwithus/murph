@@ -584,6 +584,6 @@ describe("container entrypoint abort boundary", () => {
         poisoned: true,
       });
     }, 7000);
-    expect(exit).not.toHaveBeenCalled();
+    expect(exit).toHaveBeenCalledTimes(1);
   });
 });

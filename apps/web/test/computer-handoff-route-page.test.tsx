@@ -16,14 +16,16 @@ const mocks = vi.hoisted(() => {
   };
 
   return {
+    assertHostedOnboardingMutationOrigin: vi.fn(),
     createComputerUseService: vi.fn(() => service),
     getHostedMurphContactContext: vi.fn(),
-    headers: vi.fn(),
-    requireActiveHostedAppSession: vi.fn(),
     redirect: vi.fn((url: string) => {
       throw Object.assign(new Error("NEXT_REDIRECT"), { url });
     }),
+    requireActiveHostedAppSession: vi.fn(),
     requireActiveHostedAppSessionFromRequest: vi.fn(),
+    saveHostedWebSessionComputerHandoffViewportSize: vi.fn(),
+    scheduleHostedWebSessionComputerHandoffViewportApply: vi.fn(),
     service,
   };
 });
@@ -34,18 +36,26 @@ vi.mock("next/navigation", () => ({
   redirect: mocks.redirect,
 }));
 
-vi.mock("next/headers", () => ({
-  headers: mocks.headers,
-}));
-
 vi.mock("@/src/lib/computer-use/service", () => ({
   createComputerUseService: mocks.createComputerUseService,
+}));
+
+vi.mock("@/src/lib/computer-use/handoff-viewport-session", () => ({
+  saveHostedWebSessionComputerHandoffViewportSize:
+    mocks.saveHostedWebSessionComputerHandoffViewportSize,
+  scheduleHostedWebSessionComputerHandoffViewportApply:
+    mocks.scheduleHostedWebSessionComputerHandoffViewportApply,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   requireActiveHostedAppSession: mocks.requireActiveHostedAppSession,
   requireActiveHostedAppSessionFromRequest:
     mocks.requireActiveHostedAppSessionFromRequest,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
+  assertHostedOnboardingMutationOrigin:
+    mocks.assertHostedOnboardingMutationOrigin,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-contact-context", () => ({
@@ -58,12 +68,16 @@ type ComputerHandoffDoneRouteModule = typeof import(
 type ComputerManagedLoginRouteModule = typeof import(
   "../app/api/computer/handoff/[token]/managed-login/route"
 );
+type ComputerHandoffViewportRouteModule = typeof import(
+  "../app/api/computer/handoff/[token]/viewport/route"
+);
 type ComputerHandoffPageModule = typeof import(
   "../app/computer/handoff/[token]/page"
 );
 
 let computerHandoffDoneRoute: ComputerHandoffDoneRouteModule;
 let computerManagedLoginRoute: ComputerManagedLoginRouteModule;
+let computerHandoffViewportRoute: ComputerHandoffViewportRouteModule;
 let computerHandoffPage: ComputerHandoffPageModule;
 
 describe("computer handoff route and page", () => {
@@ -73,6 +87,9 @@ describe("computer handoff route and page", () => {
     );
     computerManagedLoginRoute = await import(
       "../app/api/computer/handoff/[token]/managed-login/route"
+    );
+    computerHandoffViewportRoute = await import(
+      "../app/api/computer/handoff/[token]/viewport/route"
     );
     computerHandoffPage = await import("../app/computer/handoff/[token]/page");
   });
@@ -91,12 +108,12 @@ describe("computer handoff route and page", () => {
       url: "https://auth.onkernel.com/login/test",
     });
     mocks.service.ensureHandoffViewport.mockResolvedValue(undefined);
+    mocks.saveHostedWebSessionComputerHandoffViewportSize.mockResolvedValue(true);
     mocks.service.readHandoffPageState.mockResolvedValue({
       kind: "completed",
       returnContactKind: "text",
       suggestedReply: "finished_browser_step",
     });
-    mocks.headers.mockResolvedValue(createHeaders(null));
     mocks.getHostedMurphContactContext.mockResolvedValue(createContactContext());
   });
 
@@ -497,43 +514,7 @@ describe("computer handoff route and page", () => {
     assert.equal(markup.includes("finished_browser_step"), false);
   });
 
-  it.each([
-    [
-      "mobile",
-      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1",
-    ],
-    [
-      "desktop",
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
-    ],
-  ] as const)(
-    "resizes the kernel browser to %s before rendering the live view",
-    async (preset, userAgent) => {
-      mocks.service.readHandoffPageState.mockResolvedValueOnce({
-        handoffId: "hch_open",
-        iframeAllow: "clipboard-read",
-        interaction: "takeover",
-        kind: "open",
-        liveViewUrl: "https://browser.example.test/live",
-        purpose: "login",
-        suggestedReply: "done",
-      });
-      mocks.headers.mockResolvedValueOnce(createHeaders(userAgent));
-
-      const markup = renderToStaticMarkup(await computerHandoffPage.default({
-        params: Promise.resolve({ token: "handoff-token" }),
-      }));
-
-      expect(mocks.service.ensureHandoffViewport).toHaveBeenCalledWith({
-        memberId: "member_123",
-        preset,
-        token: "handoff-token",
-      });
-      assert.match(markup, /<iframe[^>]+src="https:\/\/browser\.example\.test\/live"/);
-    },
-  );
-
-  it("still renders the live view when the kernel resize fails", async () => {
+  it("renders the live view immediately without a cached viewport resize", async () => {
     mocks.service.readHandoffPageState.mockResolvedValueOnce({
       handoffId: "hch_open",
       iframeAllow: "clipboard-read",
@@ -543,35 +524,181 @@ describe("computer handoff route and page", () => {
       purpose: "login",
       suggestedReply: "done",
     });
-    mocks.service.ensureHandoffViewport.mockRejectedValueOnce(
-      new Error("kernel hiccup"),
+
+    const markup = renderToStaticMarkup(await computerHandoffPage.default({
+      params: Promise.resolve({ token: "handoff-token" }),
+    }));
+
+    expect(mocks.service.ensureHandoffViewport).not.toHaveBeenCalled();
+    expect(
+      mocks.scheduleHostedWebSessionComputerHandoffViewportApply,
+    ).not.toHaveBeenCalled();
+    assert.match(markup, /<iframe[^>]+src="https:\/\/browser\.example\.test\/live"/);
+  });
+
+  it("starts a cached viewport resize in the background when the web session has a saved handoff size", async () => {
+    mocks.requireActiveHostedAppSession.mockResolvedValueOnce(createSession({
+      computerHandoffViewportSize: { height: 844, width: 390 },
+    }));
+    mocks.service.readHandoffPageState.mockResolvedValueOnce({
+      handoffId: "hch_open",
+      iframeAllow: "clipboard-read",
+      interaction: "takeover",
+      kind: "open",
+      liveViewUrl: "https://browser.example.test/live",
+      purpose: "login",
+      suggestedReply: "done",
+    });
+
+    const markup = renderToStaticMarkup(await computerHandoffPage.default({
+      params: Promise.resolve({ token: "handoff-token" }),
+    }));
+
+    assert.match(markup, /<iframe[^>]+src="https:\/\/browser\.example\.test\/live"/);
+    expect(
+      mocks.scheduleHostedWebSessionComputerHandoffViewportApply,
+    ).toHaveBeenCalledWith({
+      memberId: "member_123",
+      reason: "cached",
+      sessionId: "hws_test",
+      token: "handoff-token",
+    });
+    expect(mocks.service.ensureHandoffViewport).not.toHaveBeenCalled();
+  });
+
+  it("saves a measured handoff viewport and schedules background apply", async () => {
+    const observedAt = "2026-06-29T12:00:00.000Z";
+    const response = await computerHandoffViewportRoute.POST(
+      new Request("https://join.example.test/api/computer/handoff/handoff-token/viewport", {
+        body: JSON.stringify({ height: 844, observedAt, width: 390 }),
+        headers: {
+          "content-type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+      createRouteContext({ token: "handoff-token" }),
     );
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    try {
-      const markup = renderToStaticMarkup(await computerHandoffPage.default({
-        params: Promise.resolve({ token: "handoff-token" }),
-      }));
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(
+      expect.any(Request),
+    );
+    expect(mocks.saveHostedWebSessionComputerHandoffViewportSize).toHaveBeenCalledWith({
+      memberId: "member_123",
+      now: expect.any(Date),
+      observedAt: new Date(observedAt),
+      sessionId: "hws_test",
+      size: { height: 844, width: 392 },
+    });
+    expect(
+      mocks.scheduleHostedWebSessionComputerHandoffViewportApply,
+    ).toHaveBeenCalledWith({
+      memberId: "member_123",
+      reason: "measured",
+      sessionId: "hws_test",
+      token: "handoff-token",
+    });
+  });
 
-      assert.match(markup, /<iframe[^>]+src="https:\/\/browser\.example\.test\/live"/);
-      expect(warn).toHaveBeenCalled();
-    } finally {
-      warn.mockRestore();
-    }
+  it("does not schedule background apply for stale viewport observations", async () => {
+    mocks.saveHostedWebSessionComputerHandoffViewportSize.mockResolvedValueOnce(false);
+
+    const response = await computerHandoffViewportRoute.POST(
+      new Request("https://join.example.test/api/computer/handoff/handoff-token/viewport", {
+        body: JSON.stringify({
+          height: 844,
+          observedAt: "2026-06-29T12:00:00.000Z",
+          width: 390,
+        }),
+        headers: {
+          "content-type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+      createRouteContext({ token: "handoff-token" }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(mocks.saveHostedWebSessionComputerHandoffViewportSize).toHaveBeenCalledOnce();
+    expect(
+      mocks.scheduleHostedWebSessionComputerHandoffViewportApply,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid measured handoff viewport bodies", async () => {
+    const response = await computerHandoffViewportRoute.POST(
+      new Request("https://join.example.test/api/computer/handoff/handoff-token/viewport", {
+        body: JSON.stringify({
+          height: "844",
+          observedAt: "2026-06-29T12:00:00.000Z",
+          width: 390,
+        }),
+        headers: {
+          "content-type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+      createRouteContext({ token: "handoff-token" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.saveHostedWebSessionComputerHandoffViewportSize).not.toHaveBeenCalled();
+    expect(
+      mocks.scheduleHostedWebSessionComputerHandoffViewportApply,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("clamps future measured handoff viewport observations to server time", async () => {
+    const beforeRequestMs = Date.now();
+    const response = await computerHandoffViewportRoute.POST(
+      new Request("https://join.example.test/api/computer/handoff/handoff-token/viewport", {
+        body: JSON.stringify({
+          height: 844,
+          observedAt: new Date(beforeRequestMs + 60_000).toISOString(),
+          width: 390,
+        }),
+        headers: {
+          "content-type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+      createRouteContext({ token: "handoff-token" }),
+    );
+    const afterRequestMs = Date.now();
+
+    expect(response.status).toBe(202);
+    const savedInput = mocks.saveHostedWebSessionComputerHandoffViewportSize.mock
+      .calls[0]?.[0];
+    expect(savedInput).toMatchObject({
+      memberId: "member_123",
+      sessionId: "hws_test",
+      size: { height: 844, width: 392 },
+    });
+    expect(savedInput.observedAt.getTime()).toBeGreaterThanOrEqual(beforeRequestMs);
+    expect(savedInput.observedAt.getTime()).toBeLessThanOrEqual(afterRequestMs);
+    expect(
+      mocks.scheduleHostedWebSessionComputerHandoffViewportApply,
+    ).toHaveBeenCalledWith({
+      memberId: "member_123",
+      reason: "measured",
+      sessionId: "hws_test",
+      token: "handoff-token",
+    });
   });
 
 });
 
-function createHeaders(userAgent: string | null): Headers {
-  const headers = new Headers();
-  if (userAgent !== null) {
-    headers.set("user-agent", userAgent);
-  }
-  return headers;
-}
 
-function createSession() {
+function createSession(input: {
+  computerHandoffViewportSize?: { height: number; width: number } | null;
+} = {}) {
   return {
+    computerHandoffViewportSize: input.computerHandoffViewportSize ?? null,
     expiresAt: new Date("2035-06-22T12:00:00.000Z"),
     member: {
       id: "member_123",
