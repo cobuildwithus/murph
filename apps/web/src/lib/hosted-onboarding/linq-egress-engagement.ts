@@ -4,6 +4,12 @@ import type {
   HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionLinqExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
+import {
+  isHostedLinqConversationMessageWake,
+} from "@murphai/hosted-execution";
+import {
+  parseHostedExecutionWake,
+} from "@murphai/hosted-execution/parsers";
 
 import {
   createHostedExternalThreadLookupKeyReadCandidates,
@@ -19,6 +25,11 @@ import type {
 import {
   assertHostedThreadRouteEgressAuthority,
 } from "../hosted-routing/thread-route-store";
+import {
+  decodeHostedMailboxStoredPayload,
+  readHostedMailboxItemById,
+  readHostedMailboxPayload,
+} from "../hosted-mailbox/store";
 import {
   hostedOnboardingError,
 } from "./errors";
@@ -44,6 +55,15 @@ export type HostedLinqRecentInboundDecision =
       reason: "missing_inbound" | "stale_inbound";
     };
 
+export interface HostedLinqCurrentInboundProof {
+  dedupeKey: string;
+  eventId: string;
+  mailboxItemId: string;
+  occurredAt: string;
+  replyToMessageId: string;
+  target: string;
+}
+
 export function decideHostedLinqRecentInbound(input: {
   lastInboundAt: Date | null;
   now?: Date;
@@ -68,7 +88,7 @@ export async function recordHostedMemberLinqInboundEngagementTx(input: {
   occurredAt: Date | string;
   linePhoneNumber?: string | null;
   now?: Date;
-  prisma: Prisma.TransactionClient;
+  prisma: HostedLinqEngagementClient;
 }): Promise<void> {
   const occurredAt = normalizeHostedLinqInboundEngagementAt({
     now: input.now,
@@ -118,7 +138,7 @@ export async function recordHostedThreadRouteLinqInboundEngagementTx(input: {
   linePhoneNumberLookupKey: string | null;
   memberId: string;
   now?: Date;
-  prisma: Prisma.TransactionClient;
+  prisma: HostedLinqEngagementClient;
 }): Promise<void> {
   const occurredAt = normalizeHostedLinqInboundEngagementAt({
     now: input.now,
@@ -227,6 +247,7 @@ export function assertHostedLinqRouteAuthorityMatchesTarget(input: {
 }
 
 export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
+  currentInbound?: HostedLinqCurrentInboundProof | null;
   directRecipientPhoneNumber?: string | null;
   engagementKind?: HostedLinqEgressEngagementKind | null;
   fromPhoneNumber?: string | null;
@@ -274,9 +295,15 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
       })
     : null;
   const fallbackChatId = input.targetKind === "participant" ? null : input.target;
-  const fallbackRecipientPhone = input.targetKind === "participant"
-    ? input.directRecipientPhoneNumber ?? input.target
-    : null;
+  let fallbackRecipientPhone: string | null = null;
+  if (input.targetKind === "participant") {
+    await assertHostedLinqParticipantTargetMatchesMemberIdentity({
+      memberId: input.memberId,
+      participantPhone: input.target ?? input.directRecipientPhoneNumber ?? null,
+      prisma: input.prisma,
+    });
+    fallbackRecipientPhone = input.fromPhoneNumber ?? null;
+  }
   const decision = route
     ? decideHostedLinqRecentInbound({
       lastInboundAt: route.lastInboundAt,
@@ -295,13 +322,26 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   if (decision.allowed) {
     return;
   }
+  const currentInboundDecision = await readHostedLinqCurrentInboundDecision({
+    currentInbound: input.currentInbound ?? null,
+    memberId: input.memberId,
+    now,
+    prisma: input.prisma,
+    route,
+    routeAuthority,
+    target: input.target,
+  });
+  if (currentInboundDecision?.allowed) {
+    return;
+  }
+  const failureDecision = currentInboundDecision ?? decision;
 
   await markHostedLinqDeliverySkippedTx({
     idempotencyKey: input.idempotencyKey,
     linqChatId: input.targetKind === "participant" ? null : input.target,
     phoneNumber: input.fromPhoneNumber,
     prisma: input.prisma,
-    reason: buildHostedLinqRecentInboundSkipReason(decision.lastInboundAt),
+    reason: buildHostedLinqRecentInboundSkipReason(failureDecision.lastInboundAt),
     skippedAt: now,
     source: "hosted_runtime_linq_egress_guard",
     sourceRef: input.intentId,
@@ -311,12 +351,212 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   throw hostedOnboardingError({
     code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
     details: {
-      lastInboundAt: decision.lastInboundAt?.toISOString() ?? null,
+      lastInboundAt: failureDecision.lastInboundAt?.toISOString() ?? null,
       policyDays: HOSTED_LINQ_RECENT_INBOUND_WINDOW_DAYS,
-      reason: decision.reason,
+      reason: failureDecision.reason,
     },
     httpStatus: 403,
     message: `Linq/iMessage delivery requires a recipient reply within the last ${HOSTED_LINQ_RECENT_INBOUND_WINDOW_DAYS} days.`,
+    retryable: false,
+  });
+}
+
+async function readHostedLinqCurrentInboundDecision(input: {
+  currentInbound: HostedLinqCurrentInboundProof | null;
+  memberId: string;
+  now: Date;
+  prisma: PrismaClient;
+  route: { accountLookupKey: string; lastInboundAt: Date | null } | null;
+  routeAuthority: HostedExecutionLinqExternalThreadRouteAuthority | null;
+  target: string | null;
+}): Promise<HostedLinqRecentInboundDecision | null> {
+  const proof = normalizeHostedLinqCurrentInboundProof(input.currentInbound);
+  const target = normalizeNullable(input.target);
+  if (!proof || !target || proof.target !== target) {
+    return null;
+  }
+
+  const item = await readHostedMailboxItemById({
+    mailboxItemId: proof.mailboxItemId,
+    prisma: input.prisma,
+  });
+  if (
+    !item
+    || item.id !== proof.mailboxItemId
+    || item.dedupeKey !== proof.dedupeKey
+    || item.userId !== input.memberId
+    || item.kind !== "conversation.message"
+    || item.lane !== "conversation"
+    || !hostedLinqIsoStringsRepresentSameInstant(item.occurredAt, proof.occurredAt)
+    || isHostedLinqMailboxItemExpired(item.expiresAt ?? null, input.now)
+  ) {
+    return null;
+  }
+
+  const sidecarPayload = item.payloadInlineCiphertext
+    ? null
+    : await readHostedMailboxPayload({
+        dedupeKey: item.dedupeKey,
+        mailboxItemId: item.id,
+        payloadRef: item.payloadRef ?? null,
+        prisma: input.prisma,
+        userId: item.userId,
+      });
+  const decodedPayload = await decodeHostedMailboxStoredPayload({
+    dedupeKey: item.dedupeKey,
+    kind: item.kind,
+    lane: item.lane,
+    laneSeq: item.laneSeq,
+    mailboxItemId: item.id,
+    occurredAt: item.occurredAt,
+    payloadCiphertext: sidecarPayload?.payloadCiphertext ?? null,
+    payloadInlineCiphertext: item.payloadInlineCiphertext ?? null,
+    payloadSchema: item.payloadSchema,
+    prisma: input.prisma,
+    userId: item.userId,
+  }).catch(() => null);
+  if (!decodedPayload) {
+    return null;
+  }
+
+  const wake = parseHostedLinqCurrentInboundWake(decodedPayload);
+  if (
+    !wake
+    || wake.userId !== input.memberId
+    || wake.eventId !== proof.eventId
+    || !hostedLinqIsoStringsRepresentSameInstant(wake.occurredAt, proof.occurredAt)
+    || !hostedLinqIsoStringsRepresentSameInstant(wake.occurredAt, item.occurredAt)
+    || wake.message.linqMessage.isFromMe
+    || normalizeNullable(wake.message.linqMessage.chatId) !== proof.target
+    || normalizeNullable(wake.message.linqMessage.messageId) !== proof.replyToMessageId
+  ) {
+    return null;
+  }
+
+  const occurredAt = parseHostedLinqCurrentInboundDate(proof.occurredAt);
+  if (!occurredAt) {
+    return null;
+  }
+  const decision = decideHostedLinqRecentInbound({
+    lastInboundAt: occurredAt,
+    now: input.now,
+  });
+  if (!decision.allowed) {
+    return decision;
+  }
+
+  if (input.routeAuthority && input.route) {
+    await recordHostedThreadRouteLinqInboundEngagementTx({
+      chatId: proof.target,
+      linePhoneNumberLookupKey: input.route.accountLookupKey,
+      memberId: input.memberId,
+      now: input.now,
+      occurredAt,
+      prisma: input.prisma,
+    });
+  } else {
+    await recordHostedMemberLinqInboundEngagementTx({
+      chatId: proof.target,
+      memberId: input.memberId,
+      now: input.now,
+      occurredAt,
+      prisma: input.prisma,
+    });
+  }
+
+  return decision;
+}
+
+function parseHostedLinqCurrentInboundWake(value: unknown) {
+  try {
+    const wake = parseHostedExecutionWake(value);
+    return isHostedLinqConversationMessageWake(wake) ? wake : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeHostedLinqCurrentInboundProof(
+  proof: HostedLinqCurrentInboundProof | null,
+): HostedLinqCurrentInboundProof | null {
+  if (!proof) {
+    return null;
+  }
+  const dedupeKey = normalizeNullable(proof.dedupeKey);
+  const eventId = normalizeNullable(proof.eventId);
+  const mailboxItemId = normalizeNullable(proof.mailboxItemId);
+  const occurredAt = normalizeNullable(proof.occurredAt);
+  const replyToMessageId = normalizeNullable(proof.replyToMessageId);
+  const target = normalizeNullable(proof.target);
+  if (
+    !dedupeKey
+    || !eventId
+    || !mailboxItemId
+    || !occurredAt
+    || !replyToMessageId
+    || !target
+  ) {
+    return null;
+  }
+
+  return {
+    dedupeKey,
+    eventId,
+    mailboxItemId,
+    occurredAt,
+    replyToMessageId,
+    target,
+  };
+}
+
+function parseHostedLinqCurrentInboundDate(value: string): Date | null {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function hostedLinqIsoStringsRepresentSameInstant(left: string, right: string): boolean {
+  const leftDate = parseHostedLinqCurrentInboundDate(left);
+  const rightDate = parseHostedLinqCurrentInboundDate(right);
+  return !!leftDate && !!rightDate && leftDate.getTime() === rightDate.getTime();
+}
+
+function isHostedLinqMailboxItemExpired(expiresAt: string | null, now: Date): boolean {
+  if (!expiresAt) {
+    return false;
+  }
+  const expiresAtDate = parseHostedLinqCurrentInboundDate(expiresAt);
+  return !expiresAtDate || expiresAtDate.getTime() <= now.getTime();
+}
+
+async function assertHostedLinqParticipantTargetMatchesMemberIdentity(input: {
+  memberId: string;
+  participantPhone?: string | null;
+  prisma: HostedLinqEngagementClient;
+}): Promise<void> {
+  const participantPhone = normalizePhoneNumber(input.participantPhone);
+  const participantPhoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(participantPhone);
+  if (!participantPhone || participantPhoneLookupKeys.length === 0) {
+    throwHostedLinqParticipantEgressAuthorityMismatch();
+  }
+
+  const identity = await input.prisma.hostedMemberIdentity.findUnique({
+    where: { memberId: input.memberId },
+    select: { phoneLookupKey: true },
+  });
+
+  if (
+    !identity?.phoneLookupKey
+    || !participantPhoneLookupKeys.includes(identity.phoneLookupKey)
+  ) {
+    throwHostedLinqParticipantEgressAuthorityMismatch();
+  }
+}
+
+function throwHostedLinqParticipantEgressAuthorityMismatch(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
+    httpStatus: 403,
+    message: "Linq participant egress requires the participant target to match the runtime user.",
     retryable: false,
   });
 }

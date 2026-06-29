@@ -145,7 +145,6 @@ export function createHostedRuntimeEffectsPortStub(
       return null;
     },
     async assertLinqRecentInboundEngagement() {},
-    async assertLinqThreadRouteAuthority() {},
     async sendEmail() {},
     async writeAssistantDeliveryRecord(
       record: HostedAssistantDeliveryRecord,

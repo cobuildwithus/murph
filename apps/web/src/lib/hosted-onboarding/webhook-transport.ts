@@ -25,9 +25,8 @@ import { sanitizeHostedOnboardingLogString } from "./http";
 import { buildHostedInviteUrl } from "./invite-service";
 import { normalizePhoneNumber } from "./phone";
 import {
-  claimHostedLinqOnboardingLinkNotice,
   claimHostedLinqQuotaReplyNotice,
-  releaseHostedLinqOnboardingLinkNoticeClaim,
+  markHostedLinqOnboardingLinkNoticeSent,
   releaseHostedLinqQuotaReplyNoticeClaim,
 } from "./linq-daily-state";
 import {
@@ -298,6 +297,7 @@ export async function drainHostedLinqSideEffectsDirect(input: {
     }
 
     if (isHostedInviteLinqMessagePayload(effect.payload)) {
+      await markHostedLinqNoticeSentForSideEffect(effect, input.prisma);
       await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
     }
   }
@@ -874,11 +874,6 @@ async function claimHostedLinqNoticeForSideEffect(
 ): Promise<boolean> {
   switch (effect.payload.template) {
     case "invite_signup":
-      return claimHostedLinqOnboardingLinkNotice({
-        memberId: effect.payload.memberId,
-        occurredAt: effect.payload.occurredAt,
-        prisma,
-      });
     case "invite_signin":
       return true;
     case "ai_usage_quota":
@@ -901,11 +896,6 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
   try {
     switch (effect.payload.template) {
       case "invite_signup":
-        await releaseHostedLinqOnboardingLinkNoticeClaim({
-          memberId: effect.payload.memberId,
-          occurredAt: effect.payload.occurredAt,
-          prisma,
-        });
         return;
       case "daily_quota":
         await releaseHostedLinqQuotaReplyNoticeClaim({
@@ -935,6 +925,21 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
       buildHostedLinqSideEffectLogDetails(effect, error, 0),
     );
   }
+}
+
+async function markHostedLinqNoticeSentForSideEffect(
+  effect: HostedLinqMessageSideEffect,
+  prisma: HostedLinqTransportPersistenceClient,
+): Promise<void> {
+  if (effect.payload.template !== "invite_signup") {
+    return;
+  }
+
+  await markHostedLinqOnboardingLinkNoticeSent({
+    memberId: effect.payload.memberId,
+    occurredAt: effect.payload.occurredAt,
+    prisma,
+  });
 }
 
 async function markHostedLinqDeliverySkippedBestEffort(input: {

@@ -346,7 +346,10 @@ export async function importHostedConversationMailboxItem(input: {
     });
   }
 
-  const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(decoded.wake);
+  const linqDeliveryContext = buildHostedAssistantLinqDeliveryContextFromWake(
+    decoded.wake,
+    input.item.item,
+  );
   assertHostedConversationMailboxImportLive(input.signal ?? null);
   const projectionEffect = await projectHostedConversationAssistantInputBestEffort({
     importConversationWake,

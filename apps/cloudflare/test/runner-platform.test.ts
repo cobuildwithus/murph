@@ -27,6 +27,7 @@ import {
 import {
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
+  HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
 } from "@murphai/hosted-execution/routes";
 
 const mocks = vi.hoisted(() => ({
@@ -3800,6 +3801,45 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
       expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     }
+  });
+
+  it("write-fences Linq engagement assertions through direct web-control", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe(HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH);
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    const assertLinqRecentInboundEngagement =
+      platform.effectsPort.assertLinqRecentInboundEngagement;
+    if (!assertLinqRecentInboundEngagement) {
+      throw new Error("Expected hosted Linq engagement assertion effect.");
+    }
+
+    await assertLinqRecentInboundEngagement({
+      engagementKind: "requires_recent_inbound",
+      target: "chat_123",
+      targetKind: "thread",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "direct Linq engagement request");
+    expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}`);
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
   it("fails closed before direct web-control fetches with incomplete write-fence headers", async () => {

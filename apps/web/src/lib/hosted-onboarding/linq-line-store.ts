@@ -8,9 +8,6 @@ import {
 import {
   createHostedLinqProviderEventLookupKey,
 } from "./linq-observability-identifiers";
-import {
-  createHostedLinqProviderEventOrderId,
-} from "./linq-provider-ordering";
 import { normalizePhoneNumber } from "./phone";
 
 type HostedLinqLineClient = PrismaClient | Prisma.TransactionClient;
@@ -31,7 +28,7 @@ export async function upsertHostedLinqLineForPhoneTx(input: {
 
   return input.prisma.hostedLinqLine.upsert({
     where: {
-      phoneNumber: normalizedPhoneNumber,
+      phoneNumberLookupKey: lookupKey,
     },
     create: {
       assignmentWeight: 100,
@@ -39,7 +36,6 @@ export async function upsertHostedLinqLineForPhoneTx(input: {
       configuredAt: input.source === "configured" ? input.observedAt : null,
       egressPolicy: "enabled",
       healthStatus: "unknown",
-      phoneNumber: normalizedPhoneNumber,
       phoneNumberHint: readHostedPhoneHint(normalizedPhoneNumber),
       phoneNumberLookupKey: lookupKey,
       providerSeenAt: input.source === "provider" ? input.observedAt : null,
@@ -49,7 +45,6 @@ export async function upsertHostedLinqLineForPhoneTx(input: {
       ...(input.activeMemberLimit === undefined ? {} : { activeMemberLimit: input.activeMemberLimit }),
       ...(input.source === "configured" ? { configuredAt: input.observedAt } : {}),
       ...(input.source === "provider" ? { providerSeenAt: input.observedAt } : {}),
-      phoneNumber: normalizedPhoneNumber,
       phoneNumberHint: readHostedPhoneHint(normalizedPhoneNumber),
       ...(input.source === "webhook" ? {} : { source: input.source }),
     },
@@ -251,7 +246,6 @@ function buildMessageReceiptLineProjectionWhere(
   phoneNumberLookupKey: string,
   event: ParsedHostedLinqProviderEvent,
 ): Prisma.HostedLinqLineWhereInput {
-  const eventId = createHostedLinqProviderEventOrderId(event.eventId);
   return {
     phoneNumberLookupKey,
     OR: [
@@ -265,13 +259,10 @@ function buildMessageReceiptLineProjectionWhere(
       },
       {
         lastReceiptAt: event.providerCreatedAt,
-        lastReceiptEventId: null,
-      },
-      {
-        lastReceiptAt: event.providerCreatedAt,
-        lastReceiptEventId: {
-          lt: eventId,
-        },
+        OR: [
+          { lastFailedAt: null },
+          { lastFailedAt: { not: event.providerCreatedAt } },
+        ],
       },
     ],
   };
@@ -281,7 +272,6 @@ function buildPhoneNumberStatusProjectionWhere(
   phoneNumberLookupKey: string,
   event: ParsedHostedLinqProviderEvent,
 ): Prisma.HostedLinqLineWhereInput {
-  const eventId = createHostedLinqProviderEventOrderId(event.eventId);
   return {
     phoneNumberLookupKey,
     OR: [
@@ -293,18 +283,34 @@ function buildPhoneNumberStatusProjectionWhere(
           lt: event.providerCreatedAt,
         },
       },
-      {
-        lastStatusEventId: null,
-        providerUpdatedAt: event.providerCreatedAt,
-      },
-      {
-        lastStatusEventId: {
-          lt: eventId,
-        },
-        providerUpdatedAt: event.providerCreatedAt,
-      },
+      ...buildSameTimestampStatusProjectionWhere(event),
     ],
   };
+}
+
+function buildSameTimestampStatusProjectionWhere(
+  event: ParsedHostedLinqProviderEvent,
+): Prisma.HostedLinqLineWhereInput[] {
+  const egressPolicy = deriveHostedLinqEgressPolicy(event.providerStatus);
+  if (egressPolicy === "disabled") {
+    return [
+      {
+        egressPolicy: { not: "disabled" },
+        providerUpdatedAt: event.providerCreatedAt,
+      },
+    ];
+  }
+
+  if (egressPolicy === "avoid_new_assignments") {
+    return [
+      {
+        egressPolicy: { notIn: ["disabled", "avoid_new_assignments"] },
+        providerUpdatedAt: event.providerCreatedAt,
+      },
+    ];
+  }
+
+  return [];
 }
 
 function classifyHostedLinqProviderStatus(value: string | null): string {

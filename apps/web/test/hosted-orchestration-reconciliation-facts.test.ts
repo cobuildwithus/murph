@@ -537,10 +537,6 @@ describe("hosted orchestration reconciliation facts", () => {
       sentAt: new Date(FIXED_NOW),
     });
     expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith({
-      currentInboundReply: {
-        chatId: "chat_runtime_denied",
-        messageId: "msg_runtime_denied",
-      },
       prisma: { kind: "prisma" },
       sideEffects: [
         expect.objectContaining({
@@ -556,6 +552,8 @@ describe("hosted orchestration reconciliation facts", () => {
         }),
       ],
     });
+    const linqDrainInput = mocks.drainHostedLinqSideEffectsDirect.mock.calls[0]?.[0];
+    expect(linqDrainInput).not.toHaveProperty("currentInboundReply");
   });
 
   it("sends the current-chat Telegram usage-limit notice when pending conversation work is runtime-denied", async () => {

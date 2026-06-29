@@ -2,8 +2,21 @@ import type {
   HostedExecutionLinqExternalThreadRouteAuthority,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
+import type {
+  HostedMailboxItem,
+} from "@murphai/hosted-execution/runtime-control";
+
+export interface HostedAssistantLinqCurrentInboundProof {
+  dedupeKey: string;
+  eventId: string;
+  mailboxItemId: string;
+  occurredAt: string;
+  replyToMessageId: string;
+  target: string;
+}
 
 export interface HostedAssistantLinqDeliveryContext {
+  currentInbound?: HostedAssistantLinqCurrentInboundProof | null;
   directRecipientPhoneNumber: string | null;
   fromPhoneNumber: string | null;
   replyToMessageId: string | null;
@@ -15,6 +28,7 @@ export interface HostedAssistantLinqDeliveryContext {
 
 export function buildHostedAssistantLinqDeliveryContextFromWake(
   wake: HostedRuntimeEvent,
+  mailboxItem?: HostedMailboxItem | null,
 ): HostedAssistantLinqDeliveryContext | null {
   if (
     wake.kind !== "conversation.message"
@@ -23,13 +37,24 @@ export function buildHostedAssistantLinqDeliveryContextFromWake(
     return null;
   }
 
+  const replyToMessageId = normalizeHostedLinqDeliveryContextText(
+    wake.message.linqMessage.messageId,
+  );
+  const target = normalizeHostedLinqDeliveryContextText(wake.message.linqMessage.chatId);
+
   return {
+    currentInbound: buildHostedAssistantLinqCurrentInboundProof({
+      mailboxItem: mailboxItem ?? null,
+      replyToMessageId,
+      target,
+      wake,
+    }),
     directRecipientPhoneNumber: normalizeHostedLinqDeliveryContextText(wake.message.linqMessage.from),
     fromPhoneNumber: null,
-    replyToMessageId: normalizeHostedLinqDeliveryContextText(wake.message.linqMessage.messageId),
+    replyToMessageId,
     routeAuthority: wake.message.routeAuthority ?? null,
     service: normalizeHostedLinqDeliveryContextText(wake.message.linqMessage.service),
-    target: normalizeHostedLinqDeliveryContextText(wake.message.linqMessage.chatId),
+    target,
     threadIsDirect: typeof wake.message.linqMessage.threadIsDirect === "boolean"
       ? wake.message.linqMessage.threadIsDirect
       : null,
@@ -137,6 +162,32 @@ export function resolveHostedAssistantLinqReactionDeliveryContextFromCandidatesF
 function normalizeHostedLinqDeliveryContextText(value: string | null | undefined): string | null {
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized : null;
+}
+
+function buildHostedAssistantLinqCurrentInboundProof(input: {
+  mailboxItem: HostedMailboxItem | null;
+  replyToMessageId: string | null;
+  target: string | null;
+  wake: HostedRuntimeEvent;
+}): HostedAssistantLinqCurrentInboundProof | null {
+  if (
+    !input.mailboxItem
+    || !input.replyToMessageId
+    || !input.target
+    || input.mailboxItem.kind !== "conversation.message"
+    || input.mailboxItem.lane !== "conversation"
+  ) {
+    return null;
+  }
+
+  return {
+    dedupeKey: input.mailboxItem.dedupeKey,
+    eventId: input.wake.eventId,
+    mailboxItemId: input.mailboxItem.id,
+    occurredAt: input.wake.occurredAt,
+    replyToMessageId: input.replyToMessageId,
+    target: input.target,
+  };
 }
 
 function looksLikeHostedAssistantRedactedLinqTarget(value: string | null): boolean {

@@ -145,6 +145,14 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(outcome.status, "imported");
     assert.equal(outcome.reasonCode, "conversation-import.projection-failed");
     assert.deepEqual(outcome.linqDeliveryContext, {
+      currentInbound: {
+        dedupeKey: "evt_synthetic_conversation_001",
+        eventId: "evt_synthetic_conversation_001",
+        mailboxItemId: "mailbox_item_conversation_001",
+        occurredAt: TEST_NOW,
+        replyToMessageId: "msg_synthetic_projection_failure",
+        target: "chat_synthetic",
+      },
       directRecipientPhoneNumber: "redacted-contact-sentinel",
       fromPhoneNumber: null,
       replyToMessageId: "msg_synthetic_projection_failure",

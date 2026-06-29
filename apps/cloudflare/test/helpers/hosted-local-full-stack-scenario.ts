@@ -108,6 +108,7 @@ export interface HostedLocalFullStackScenario {
   bindActiveHostedLinqHomeChat(input: {
     chatId: string;
     memberId: string;
+    recentInboundAt?: Date | string | null;
     recipientPhone: string;
   }): Promise<void>;
   bindActiveHostedTelegramMember(input: {
@@ -328,6 +329,7 @@ export async function startHostedLocalFullStackScenario(input: {
           chatId: bindingInput.chatId,
           environment: buildScenarioSeedEnvironment(),
           memberId: bindingInput.memberId,
+          recentInboundAt: bindingInput.recentInboundAt,
           recipientPhone: bindingInput.recipientPhone,
         });
       },

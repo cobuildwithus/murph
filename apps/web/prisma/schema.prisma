@@ -846,7 +846,6 @@ model HostedLinqFirstContactAdmissionDecision {
   category            String?
   confidence          Float
   source              String
-  rejectedMessageText String?  @map("rejected_message_text") @ignore
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
@@ -971,7 +970,6 @@ model HostedThreadRoute {
 
 model HostedLinqLine {
   phoneNumberLookupKey       String    @id @map("phone_number_lookup_key")
-  phoneNumber                String    @unique @map("phone_number")
   phoneNumberHint            String    @map("phone_number_hint")
   source                     String    @default("unknown")
   configuredAt               DateTime? @map("configured_at")

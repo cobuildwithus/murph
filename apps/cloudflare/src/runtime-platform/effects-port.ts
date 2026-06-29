@@ -1,11 +1,7 @@
 import type { HostedRuntimeEffectsPort } from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import type {
-  HostedExecutionExternalThreadRouteAuthority,
-} from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
-  HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
 } from "@murphai/hosted-execution/routes";
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
@@ -126,29 +122,16 @@ export function createCloudflareEffectsPort(input: {
     },
     ...(webControlTransport
       ? {
-          async assertLinqThreadRouteAuthority(
-            authority: HostedExecutionExternalThreadRouteAuthority,
-            context?: { signal?: AbortSignal | null },
-          ) {
-            await fetchHostedWebControlPlaneJson({
-              body: {
-                authority,
-              },
-              boundUserId: input.boundUserId,
-              description: "Hosted Linq thread route authority assertion",
-              fetchImpl: input.fetchImpl,
-              path: HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
-              signal: context?.signal ?? null,
-              timeoutMs: input.timeoutMs,
-              transport: webControlTransport,
-            });
-          },
           async assertLinqRecentInboundEngagement(request, context) {
             await fetchHostedWebControlPlaneJson({
               body: request,
               boundUserId: input.boundUserId,
               description: "Hosted Linq recent inbound engagement assertion",
               fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description: "Hosted Linq recent inbound engagement assertion",
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
               path: HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,

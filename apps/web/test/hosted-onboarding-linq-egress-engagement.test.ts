@@ -184,6 +184,104 @@ describe("hosted Linq egress engagement", () => {
     expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
   });
 
+  it("allows participant follow-up egress when the member replied to the hosted Linq line", async () => {
+    const memberPhoneLookupKey = createHostedPhoneLookupKey("+15550100001");
+    const homeLineLookupKey = createHostedPhoneLookupKey("+15550100099");
+    if (!memberPhoneLookupKey || !homeLineLookupKey) {
+      throw new Error("Expected test phone lookup keys.");
+    }
+    const prisma = {
+      hostedLinqDelivery: {
+        create: vi.fn(),
+        findUnique: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue({
+          phoneLookupKey: memberPhoneLookupKey,
+        }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatLookupKey: null,
+          linqLastInboundAt: new Date("2026-06-25T12:00:00.000Z"),
+          linqRecipientPhoneLookupKey: homeLineLookupKey,
+          pendingLinqChatLookupKey: null,
+          pendingLinqLastInboundAt: null,
+          pendingLinqRecipientPhoneLookupKey: null,
+        }),
+      },
+      hostedThreadRoute: {
+        findUnique: vi.fn(),
+      },
+    };
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey: "assistant-outbox:intent-1",
+      intentId: "intent-1",
+      memberId: "member-1",
+      now: new Date("2026-06-25T12:05:00.000Z"),
+      prisma: prisma as never,
+      target: "+15550100001",
+      targetKind: "participant",
+    })).resolves.toBeUndefined();
+
+    expect(prisma.hostedMemberIdentity.findUnique).toHaveBeenCalledWith({
+      where: { memberId: "member-1" },
+      select: { phoneLookupKey: true },
+    });
+    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalledWith({
+      where: { memberId: "member-1" },
+      select: {
+        linqChatLookupKey: true,
+        linqLastInboundAt: true,
+        linqRecipientPhoneLookupKey: true,
+        pendingLinqChatLookupKey: true,
+        pendingLinqLastInboundAt: true,
+        pendingLinqRecipientPhoneLookupKey: true,
+      },
+    });
+    expect(prisma.hostedThreadRoute.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects participant follow-up egress when the participant target is not the runtime user", async () => {
+    const memberPhoneLookupKey = createHostedPhoneLookupKey("+15550100001");
+    if (!memberPhoneLookupKey) {
+      throw new Error("Expected test phone lookup key.");
+    }
+    const prisma = {
+      hostedLinqDelivery: {
+        create: vi.fn(),
+        findUnique: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue({
+          phoneLookupKey: memberPhoneLookupKey,
+        }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn(),
+      },
+    };
+
+    await expect(assertHostedLinqRecentInboundEngagementForRuntime({
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey: "assistant-outbox:intent-1",
+      memberId: "member-1",
+      now: new Date("2026-06-25T12:05:00.000Z"),
+      prisma: prisma as never,
+      target: "+15550100002",
+      targetKind: "participant",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
+      httpStatus: 403,
+    });
+
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
+  });
+
   it("allows invite side effects as explicit first contact", async () => {
     await expect(readHostedLinqSideEffectRecentInboundDecision({
       payload: {

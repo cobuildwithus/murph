@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -22,6 +23,9 @@ vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
   syncHostedLinqConfiguredLinesTx: linqLineStoreMocks.syncHostedLinqConfiguredLinesTx,
 }));
 
+import {
+  createHostedPhoneLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   getHostedLinqContactCard,
   listHostedLinqContactCards,
@@ -181,18 +185,27 @@ describe("hosted Linq contact card client", () => {
   it("reconciles configured line contact cards without provider-wide scans", async () => {
     const observedAt = new Date("2026-06-25T12:30:00.000Z");
     runtimeMocks.getHostedOnboardingEnvironment.mockReturnValue({
+      contactPrivacyKeyring: {
+        currentVersion: "v1",
+        keysByVersion: {
+          v1: Buffer.alloc(32),
+        },
+        readVersions: ["v1"],
+      },
       linqConversationPhoneNumbers: ["+15550000001", "+15550000002", "+15550000002"],
       linqMaxActiveMembersPerConversationPhone: 1000,
       publicBaseUrl: "https://app.example.test",
     });
     const contactCardImageUrl = "https://app.example.test/murph_headshot.png";
+    const firstLookupKey = createHostedPhoneLookupKey("+15550000001");
+    const secondLookupKey = createHostedPhoneLookupKey("+15550000002");
     const findMany = vi.fn().mockResolvedValue([
       {
-        phoneNumber: "+15550000001",
+        phoneNumberLookupKey: firstLookupKey,
         providerStatus: "HEALTHY",
       },
       {
-        phoneNumber: "+15550000002",
+        phoneNumberLookupKey: secondLookupKey,
         providerStatus: "AT_RISK",
       },
     ]);
@@ -289,17 +302,14 @@ describe("hosted Linq contact card client", () => {
       prisma,
     });
     expect(findMany).toHaveBeenCalledWith({
-      orderBy: {
-        phoneNumber: "asc",
-      },
       select: {
-        phoneNumber: true,
+        phoneNumberLookupKey: true,
         providerStatus: true,
       },
       take: 50,
       where: {
-        phoneNumber: {
-          in: ["+15550000001", "+15550000002"],
+        phoneNumberLookupKey: {
+          in: [firstLookupKey, secondLookupKey],
         },
       },
     });

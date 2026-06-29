@@ -461,6 +461,7 @@ export async function bindHostedActiveLinqHomeChat(input: {
   chatId: string;
   environment?: NodeJS.ProcessEnv;
   memberId: string;
+  recentInboundAt?: Date | string | null;
   recipientPhone: string;
 }): Promise<void> {
   if (!input.memberId.trim() || !input.chatId.trim() || !input.recipientPhone.trim()) {
@@ -485,6 +486,16 @@ export async function bindHostedActiveLinqHomeChat(input: {
           prisma: tx,
           recipientPhone: input.recipientPhone,
         });
+        const recentInboundAt = input.recentInboundAt === undefined
+          ? null
+          : normalizeHostedMemberSeedDate(input.recentInboundAt);
+        if (recentInboundAt) {
+          await updateHostedMemberSeedLinqLastInboundAtTx({
+            memberId: input.memberId,
+            tx,
+            value: recentInboundAt,
+          });
+        }
       });
     } finally {
       await prisma.$disconnect();

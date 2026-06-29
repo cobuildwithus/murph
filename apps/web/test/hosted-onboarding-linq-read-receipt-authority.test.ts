@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   maybeHandoffHostedExecutionWebhookWake: vi.fn(),
   planHostedOnboardingLinqWebhook: vi.fn(),
   requireHostedLinqMessageReceivedEvent: vi.fn(),
+  resolveHostedLinqRecipientPhoneNumber: vi.fn(() => "+15555550123"),
   sendHostedLinqReadReceipt: vi.fn(),
   startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
     baseDetails,
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
   requireHostedLinqMessageReceivedEvent: mocks.requireHostedLinqMessageReceivedEvent,
+  resolveHostedLinqRecipientPhoneNumber: mocks.resolveHostedLinqRecipientPhoneNumber,
   sendHostedLinqReadReceipt: mocks.sendHostedLinqReadReceipt,
   verifyAndParseHostedLinqWebhookRequest: mocks.verifyAndParseHostedLinqWebhookRequest,
 }));
@@ -72,6 +74,30 @@ describe("hosted Linq read receipt route authority", () => {
     mocks.verifyAndParseHostedLinqWebhookRequest.mockReturnValue({
       event_id: "evt_read_receipt_mismatch",
       event_type: "message.received",
+    });
+    mocks.requireHostedLinqMessageReceivedEvent.mockReturnValue({
+      api_version: "2026-01-01",
+      data: {
+        chat_id: "chat_123",
+        created_at: "2026-06-28T12:00:00.000Z",
+        direction: "inbound",
+        is_from_me: false,
+        message: {
+          id: "linq_message_123",
+          parts: [
+            {
+              type: "text",
+              value: "hello",
+            },
+          ],
+        },
+        recipient: "+15555550123",
+        service: "iMessage",
+        thread_is_direct: true,
+      },
+      event_id: "evt_read_receipt_mismatch",
+      event_type: "message.received",
+      webhook_version: "2026-01-01",
     });
     mocks.maybeHandoffHostedExecutionWebhookWake.mockResolvedValue({
       reason: null,

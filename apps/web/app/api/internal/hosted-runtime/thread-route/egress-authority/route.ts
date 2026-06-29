@@ -13,7 +13,7 @@ import {
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
 import {
-  assertHostedLinqRouteEgressAuthority,
+  assertHostedThreadRouteEgressAuthority,
 } from "@/src/lib/hosted-routing/thread-route-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
@@ -39,21 +39,9 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  const prisma = getPrisma();
-  if (authority.channel !== "linq") {
-    throw hostedOnboardingError({
-      code: "HOSTED_THREAD_ROUTE_EGRESS_CHANNEL_UNSUPPORTED",
-      httpStatus: 403,
-      message: "External thread route egress authority is not supported for this channel.",
-      retryable: false,
-    });
-  }
-  await assertHostedLinqRouteEgressAuthority({
-    authority: {
-      ...authority,
-      channel: "linq",
-    },
-    prisma,
+  await assertHostedThreadRouteEgressAuthority({
+    authority,
+    prisma: getPrisma(),
   });
 
   return jsonOk({

@@ -15,10 +15,6 @@ import {
   createHostedLinqProviderEventLookupKey,
 } from "./linq-observability-identifiers";
 import {
-  compareHostedLinqProviderEventOrder,
-  createHostedLinqProviderEventOrderId,
-} from "./linq-provider-ordering";
-import {
   sanitizeHostedOnboardingPersistedErrorCode,
   sanitizeHostedOnboardingPersistedErrorMessage,
 } from "./http";
@@ -376,7 +372,6 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
     where: {
       id: delivery.id,
       OR: buildReceiptOrderingWhere({
-        eventId: input.event.eventId,
         providerCreatedAt: input.event.providerCreatedAt,
       }),
     },
@@ -453,7 +448,6 @@ async function applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx(input: {
     },
     orderBy: [
       { providerCreatedAt: "desc" },
-      { eventId: "desc" },
     ],
     select: {
       deliveryStatus: true,
@@ -481,14 +475,18 @@ async function applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx(input: {
 }
 
 function buildReceiptOrderingWhere(
-  receipt: Pick<HostedLinqDeliveryReceiptData, "eventId" | "providerCreatedAt">,
+  receipt: Pick<HostedLinqDeliveryReceiptData, "providerCreatedAt">,
 ): Prisma.HostedLinqDeliveryWhereInput[] {
-  const eventId = createHostedLinqProviderEventOrderId(receipt.eventId);
   return [
     { lastReceiptAt: null },
     { lastReceiptAt: { lt: receipt.providerCreatedAt } },
-    { lastReceiptAt: receipt.providerCreatedAt, lastProviderEventId: null },
-    { lastReceiptAt: receipt.providerCreatedAt, lastProviderEventId: { lt: eventId } },
+    {
+      lastReceiptAt: receipt.providerCreatedAt,
+      OR: [
+        { failedAt: null },
+        { failedAt: { not: receipt.providerCreatedAt } },
+      ],
+    },
   ];
 }
 
@@ -524,11 +522,28 @@ function selectLatestHostedLinqReceiptData(
       selected = receipt;
       continue;
     }
-    if (compareHostedLinqProviderEventOrder(receipt, selected) > 0) {
+    if (compareHostedLinqReceiptProgress(receipt, selected) > 0) {
       selected = receipt;
     }
   }
   return selected;
+}
+
+function compareHostedLinqReceiptProgress(
+  left: HostedLinqDeliveryReceiptData,
+  right: HostedLinqDeliveryReceiptData,
+): number {
+  const createdAtDelta = left.providerCreatedAt.getTime() - right.providerCreatedAt.getTime();
+  if (createdAtDelta !== 0) {
+    return createdAtDelta;
+  }
+
+  return rankHostedLinqReceiptStatus(left.deliveryStatus)
+    - rankHostedLinqReceiptStatus(right.deliveryStatus);
+}
+
+function rankHostedLinqReceiptStatus(status: HostedLinqDeliveryReceiptData["deliveryStatus"]): number {
+  return status === "failed" ? 2 : 1;
 }
 
 function isHostedLinqDeliveryLifecycleFinal(input: {
