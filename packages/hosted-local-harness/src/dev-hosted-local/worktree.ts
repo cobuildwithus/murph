@@ -683,48 +683,23 @@ function buildHostedLocalWorktreeLinqEnv(input: {
   const tunnelMode = input.baseEnv.MURPH_DEV_LINQ_WEBHOOK_TUNNEL?.trim();
   const skipRegister = input.baseEnv.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER?.trim();
   const publicUrl = input.baseEnv.MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL?.trim();
-  const wantsTunnel = tunnelMode !== undefined
-    && tunnelMode.length > 0
-    && !["0", "false", "no", "off", "disabled"].includes(tunnelMode.toLowerCase());
-  const wantsRegistration = skipRegister !== "1"
-    && (wantsTunnel || Boolean(publicUrl));
-  const resolvedTunnelMode = publicUrl && !tunnelMode ? "auto" : tunnelMode;
-
-  if (!wantsTunnel && !wantsRegistration) {
-    return {
-      MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
-        input.paths.linqWebhookRegistrationCachePath,
-      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
-      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG: input.paths.linqWebhookTunnelConfigPath,
-      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
-    };
-  }
-
   const tunnelConfig = input.baseEnv.MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG?.trim();
-  const tunnelName = input.baseEnv.MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME?.trim();
-  if (wantsTunnel && (!tunnelName || tunnelName === "dev" || !tunnelConfig)) {
-    throw new Error(
-      [
-        "Hosted-local worktree live Linq tunnel delivery requires",
-        "MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME to be non-default and",
-        "MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG to point at a dedicated worktree tunnel config.",
-      ].join(" "),
-    );
-  }
-
-  if (wantsRegistration && !wantsTunnel && !publicUrl) {
-    throw new Error(
-      "Hosted-local worktree live Linq registration requires MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL or a dedicated tunnel.",
-    );
-  }
+  const explicitlyDisabledTunnel = tunnelMode !== undefined
+    && tunnelMode.length > 0
+    && ["0", "false", "no", "off", "disabled"].includes(tunnelMode.toLowerCase());
+  const shouldRegister = skipRegister !== "1" && !explicitlyDisabledTunnel;
+  const resolvedTunnelMode = explicitlyDisabledTunnel
+    ? "0"
+    : tunnelMode || "auto";
 
   return {
+    ...(publicUrl ? { MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL: publicUrl } : {}),
     MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
       input.paths.linqWebhookRegistrationCachePath,
-    MURPH_DEV_LINQ_WEBHOOK_TUNNEL: resolvedTunnelMode ?? "0",
+    MURPH_DEV_LINQ_WEBHOOK_TUNNEL: resolvedTunnelMode,
     MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
       tunnelConfig ?? input.paths.linqWebhookTunnelConfigPath,
-    ...(wantsRegistration
+    ...(shouldRegister
       ? { MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "0" }
       : { MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1" }),
   };

@@ -161,10 +161,10 @@ describe("hosted-local worktree config", () => {
         ".tmp/hosted-local-worktrees/feature-a/hosted-local-crypto-state.dev.vars",
       MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
         ".tmp/hosted-local-worktrees/feature-a/linq-webhook-registration.json",
-      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "auto",
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
         ".tmp/hosted-local-worktrees/feature-a/cloudflared-linq-webhook.yml",
-      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "0",
       DEVICE_SYNC_PUBLIC_BASE_URL: "http://localhost:3101/api/device-sync",
       HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS:
         "http://localhost:3101,http://127.0.0.1:3101",
@@ -187,8 +187,8 @@ describe("hosted-local worktree config", () => {
     expect(rendered).toContain("export MURPH_HOSTED_LOCAL_PROFILE='dev'");
     expect(rendered).toContain("export MURPH_DEV_WORKTREE_SCOPE='feature-a'");
     expect(rendered).toContain("export MURPH_DEV_DATABASE_URL='[redacted]'");
-    expect(rendered).toContain("export MURPH_DEV_LINQ_WEBHOOK_TUNNEL='0'");
-    expect(rendered).toContain("export MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER='1'");
+    expect(rendered).toContain("export MURPH_DEV_LINQ_WEBHOOK_TUNNEL='auto'");
+    expect(rendered).toContain("export MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER='0'");
     expect(rendered).toContain("export MURPH_DEV_SKIP_STRIPE_LISTEN='1'");
     expect(rendered).toContain("export MURPH_DEV_WEB_HOST='localhost'");
     expect(rendered).toContain("export MURPH_DEV_WEB_PORT='3101'");
@@ -322,17 +322,44 @@ describe("hosted-local worktree config", () => {
     expect(profiled.env.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED).toBe("0");
   });
 
-  it("rejects live Linq tunnel opt-in without a dedicated worktree tunnel", () => {
-    expect(() =>
-      buildHostedLocalWorktreeConfig({
-        env: {
-          MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "1",
-          MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME: "dev",
-        },
-        ports,
-        slug: "feature-a",
-      })
-    ).toThrow("live Linq tunnel delivery requires");
+  it("honors an explicit Linq tunnel disable for worktree startup", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    expect(config.env).toMatchObject({
+      MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
+        ".tmp/hosted-local-worktrees/feature-a/linq-webhook-registration.json",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
+        ".tmp/hosted-local-worktrees/feature-a/cloudflared-linq-webhook.yml",
+      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+    });
+  });
+
+  it("allows shared live Linq tunnel opt-in for the active worktree", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "1",
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME: "dev",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    expect(config.env).toMatchObject({
+      MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
+        ".tmp/hosted-local-worktrees/feature-a/linq-webhook-registration.json",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "1",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
+        ".tmp/hosted-local-worktrees/feature-a/cloudflared-linq-webhook.yml",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME: "dev",
+      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "0",
+    });
   });
 
   it("allows explicit live Linq opt-in with a dedicated worktree tunnel", () => {
@@ -355,6 +382,28 @@ describe("hosted-local worktree config", () => {
         ".tmp/cloudflared-linq-webhook.feature-a.yml",
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME: "feature-a",
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "0",
+    });
+  });
+
+  it("can start a shared Linq tunnel while skipping registration", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "required",
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME: "dev",
+        MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    expect(config.env).toMatchObject({
+      MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE:
+        ".tmp/hosted-local-worktrees/feature-a/linq-webhook-registration.json",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "required",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
+        ".tmp/hosted-local-worktrees/feature-a/cloudflared-linq-webhook.yml",
+      MURPH_DEV_LINQ_WEBHOOK_TUNNEL_NAME: "dev",
+      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
     });
   });
 

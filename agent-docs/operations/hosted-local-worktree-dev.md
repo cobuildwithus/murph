@@ -1,6 +1,6 @@
 # Hosted Local Worktree Dev
 
-Last verified: 2026-06-23
+Last verified: 2026-06-29
 
 ## Purpose
 
@@ -67,8 +67,9 @@ The helper:
   both `localhost:<web-port>` and `127.0.0.1:<web-port>` for hosted-onboarding
   browser mutations
 - preserves live Stripe support
-- disables live Linq tunnel startup and webhook registration by default; a
-  worktree must opt in with a dedicated public URL or tunnel config
+- uses normal Linq webhook `auto` mode with a worktree-local registration cache
+  and tunnel config path, so an active worktree can reuse the shared local
+  tunnel identity when live webhook config is present
 - keeps generated local crypto state paired with the slug-specific database
 
 Companion commands:
@@ -111,8 +112,9 @@ MURPH_DEV_CF_PERSIST_DIR='../.tmp/hosted-local-worktrees/<slug>/wrangler-state' 
 MURPH_DEV_MINIO_DATA_DIR='.tmp/hosted-local-worktrees/<slug>/minio-r2' \
 MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH='.tmp/hosted-local-worktrees/<slug>/hosted-local-crypto-state.dev.vars' \
 MURPH_DEV_LINQ_WEBHOOK_REGISTRATION_CACHE='.tmp/hosted-local-worktrees/<slug>/linq-webhook-registration.json' \
-MURPH_DEV_LINQ_WEBHOOK_TUNNEL=0 \
-MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1 \
+MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG='.tmp/hosted-local-worktrees/<slug>/cloudflared-linq-webhook.yml' \
+MURPH_DEV_LINQ_WEBHOOK_TUNNEL=auto \
+MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=0 \
 NEXT_DIST_DIR_MODE=smoke \
 NEXT_DIST_DIR_SUFFIX='<slug>' \
 pnpm hosted-local up --profile dev
@@ -186,19 +188,22 @@ the main checkout:
 
 ## Webhook Tunnels
 
-Linq webhook testing needs a tunnel that routes to the worktree web port, not
-the main checkout's web port.
+Linq webhook testing needs a tunnel that routes to the active worktree web
+port, not a stale web port from another checkout.
 
 Use one of these:
 
-- Set `MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL` to a dedicated HTTPS tunnel origin or
-  full `/api/hosted-onboarding/linq/webhook` URL for this worktree.
-- Or set `MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG` to a worktree-local
-  `.tmp/cloudflared-linq-webhook.<slug>.yml` whose ingress service targets the
-  worktree web port.
+- Reuse the normal local Linq tunnel identity by setting
+  `MURPH_DEV_LINQ_WEBHOOK_TUNNEL=auto` or `required`. The helper keeps the
+  registration cache and default tunnel config path under the worktree's
+  `.tmp/hosted-local-worktrees/<slug>/` directory.
+- Set `MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL` to an HTTPS tunnel origin or full
+  `/api/hosted-onboarding/linq/webhook` URL when an external tunnel process is
+  already routing that public URL to this worktree.
 
-The helper sets these defaults. Agents should keep them unless the task
-explicitly requires inbound provider delivery:
+The helper defaults to Linq webhook `auto` mode. If the worktree-local tunnel
+config is missing, or Linq credentials/allowlist are unavailable, the runtime
+does not start live webhook delivery. To force webhooks off for a task, set:
 
 ```bash
 MURPH_DEV_LINQ_WEBHOOK_TUNNEL=0 \
@@ -206,8 +211,9 @@ MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1
 ```
 
 When live Linq delivery is required, set the local inbound phone allowlist and
-use a dedicated tunnel target. Do not reuse the main checkout's tunnel name or
-hostname unless its service has been intentionally repointed to this worktree.
+ensure the tunnel service targets the worktree web port. Reusing the same public
+hostname avoids per-worktree provider dashboard changes, but only one local
+stack should own that live webhook receiver at a time.
 
 ## Implementation Notes
 
