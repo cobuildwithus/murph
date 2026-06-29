@@ -1,4 +1,7 @@
-import type { AutomationAssistantTargetOverride } from '@murphai/contracts'
+import {
+  automationAssistantTargetOverrideSchema,
+  type AutomationAssistantTargetOverride,
+} from '@murphai/contracts'
 import type {
   AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -15,13 +18,15 @@ export function compactAutomationAssistantTargetOverride(
   const model = normalizeNullableString(input.model)
   const modelProvider = normalizeNullableString(input.modelProvider)
   const reasoningEffort = normalizeNullableString(input.reasoningEffort)
-  const target: AutomationAssistantTargetOverride = {
+  const target = {
     ...(model ? { model } : {}),
     ...(modelProvider ? { modelProvider } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
   }
 
-  return Object.keys(target).length > 0 ? target : null
+  return Object.keys(target).length > 0
+    ? automationAssistantTargetOverrideSchema.parse(target)
+    : null
 }
 
 export function automationAssistantTargetOverrideToProviderConfigInput(

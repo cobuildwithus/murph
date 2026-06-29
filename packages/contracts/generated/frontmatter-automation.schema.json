@@ -277,8 +277,12 @@
           "anyOf": [
             {
               "type": "string",
-              "minLength": 1,
-              "maxLength": 80
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "xhigh"
+              ]
             },
             {
               "type": "null"

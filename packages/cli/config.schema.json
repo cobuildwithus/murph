@@ -1307,8 +1307,12 @@
                         "assistantTargetOverrideReasoningEffort": {
                           "description": "Optional assistant reasoning effort override for scheduled turns.",
                           "type": "string",
-                          "minLength": 1,
-                          "maxLength": 80
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh"
+                          ]
                         },
                         "instructions": {
                           "type": "string",
@@ -1500,8 +1504,12 @@
                         "assistantTargetOverrideReasoningEffort": {
                           "description": "Optional assistant reasoning effort override for scheduled turns.",
                           "type": "string",
-                          "minLength": 1,
-                          "maxLength": 80
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh"
+                          ]
                         },
                         "instructions": {
                           "description": "Optional automation instructions.",

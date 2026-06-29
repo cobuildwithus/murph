@@ -7,6 +7,7 @@ import {
   type HostedCliAssistantCurrentRoute,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
+  assistantReasoningEffortValues,
   automationAssistantTargetOverrideSchema,
   automationContinuityPolicyValues,
   automationDeviceActivityKindSchema,
@@ -522,9 +523,7 @@ const automationSharedOptionSchemas = {
     .optional()
     .describe("Optional assistant model provider override for scheduled turns."),
   assistantTargetOverrideReasoningEffort: z
-    .string()
-    .min(1)
-    .max(80)
+    .enum(assistantReasoningEffortValues)
     .optional()
     .describe("Optional assistant reasoning effort override for scheduled turns."),
 };

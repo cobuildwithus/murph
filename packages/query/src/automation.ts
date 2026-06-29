@@ -2,6 +2,7 @@ import {
   AUTOMATION_DOC_TYPE,
   AUTOMATION_SCHEMA_VERSION,
   MIN_AUTOMATION_EVERY_MS,
+  assistantReasoningEffortValues,
   automationContinuityPolicyValues,
   automationDeviceActivityKindSchema,
   automationDeviceActivitySourceValues,
@@ -30,6 +31,9 @@ import { parseFrontmatterDocument, type FrontmatterObject } from "./health/share
 
 const AUTOMATIONS_DIRECTORY = VAULT_LAYOUT.automationsDirectory;
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
+type AutomationAssistantReasoningEffort = NonNullable<
+  AutomationAssistantTargetOverride["reasoningEffort"]
+>;
 
 export type {
   AutomationAssistantTargetOverride,
@@ -283,7 +287,9 @@ function normalizeAutomationAssistantTargetOverride(
   const object = value as Record<string, unknown>;
   const model = normalizeAutomationAssistantTargetOverrideString(object.model);
   const modelProvider = normalizeAutomationAssistantTargetOverrideString(object.modelProvider);
-  const reasoningEffort = normalizeAutomationAssistantTargetOverrideString(object.reasoningEffort);
+  const reasoningEffort = normalizeAutomationAssistantTargetOverrideReasoningEffort(
+    object.reasoningEffort,
+  );
   const target: AutomationAssistantTargetOverride = {
     ...(model ? { model } : {}),
     ...(modelProvider ? { modelProvider } : {}),
@@ -302,6 +308,33 @@ function normalizeAutomationAssistantTargetOverrideString(value: unknown): strin
   }
 
   return normalizeNullableString(value);
+}
+
+function normalizeAutomationAssistantTargetOverrideReasoningEffort(
+  value: unknown,
+): AutomationAssistantReasoningEffort | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new Error("assistantTargetOverride.reasoningEffort must be a string.");
+  }
+
+  const normalized = normalizeNullableString(value);
+  if (!normalized) {
+    return null;
+  }
+  if (
+    !assistantReasoningEffortValues.includes(
+      normalized as AutomationAssistantReasoningEffort,
+    )
+  ) {
+    throw new Error(
+      `assistantTargetOverride.reasoningEffort must be one of ${assistantReasoningEffortValues.join(", ")}.`,
+    );
+  }
+
+  return normalized as AutomationAssistantReasoningEffort;
 }
 
 function normalizeAutomationRouteDeliverySource(

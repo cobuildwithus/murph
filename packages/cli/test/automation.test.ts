@@ -398,6 +398,36 @@ test("automation save and edit manage assistant target overrides from typed fiel
     });
     registerAutomationCommands(cli);
 
+    const invalidReasoningEffort = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Invalid target override reminder",
+      "--slug",
+      "invalid-target-override-reminder",
+      "--instructions",
+      "This should fail before writing.",
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "08:30",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "telegram_thread_real",
+      "--assistant-target-override-reasoning-effort",
+      "hihg",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(invalidReasoningEffort.exitCode, 1);
+    assert.equal(invalidReasoningEffort.envelope.ok, false);
+    assert.match(
+      invalidReasoningEffort.envelope.ok
+        ? ""
+        : invalidReasoningEffort.envelope.error.message ?? "",
+      /assistantTargetOverrideReasoningEffort|reasoning effort|low|medium|high|xhigh/u,
+    );
+
     const saved = await runInProcessJsonCli<{
       automationId: string;
       created: boolean;

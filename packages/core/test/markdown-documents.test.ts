@@ -55,6 +55,25 @@ afterEach(async () => {
 });
 
 describe("markdown document primitives", () => {
+  it("rejects invalid automation assistant reasoning effort before writing", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const invalidInput = JSON.parse(JSON.stringify({
+      vaultRoot,
+      ...createAutomationPayload(),
+    }));
+    invalidInput.assistantTargetOverride = {
+      reasoningEffort: "hihg",
+    };
+
+    await expect(upsertAutomation(invalidInput)).rejects.toThrow(
+      /assistantTargetOverride\.reasoningEffort must be one of low, medium, high, xhigh/u,
+    );
+    await expect(listAutomations({ vaultRoot })).resolves.toEqual({
+      count: 0,
+      items: [],
+    });
+  });
+
   it("keeps the existing slug by default and only renames when explicitly allowed", () => {
     const existingRecord = {
       recordId: "goal_01",

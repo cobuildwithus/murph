@@ -9,6 +9,7 @@ import {
   isValidExecutableCronExpression,
   MIN_EXECUTABLE_SCHEDULE_EVERY_MS,
 } from "./schedule-intent.ts";
+import { assistantReasoningEffortValues } from "./assistant.ts";
 import { withContractMetadata } from "./schema-metadata.ts";
 
 export const AUTOMATION_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.automationFrontmatter;
@@ -236,7 +237,7 @@ export const automationAssistantTargetOverrideSchema = z
   .object({
     model: z.string().min(1).max(200).nullable().optional(),
     modelProvider: z.string().min(1).max(120).nullable().optional(),
-    reasoningEffort: z.string().min(1).max(80).nullable().optional(),
+    reasoningEffort: z.enum(assistantReasoningEffortValues).nullable().optional(),
   })
   .strict();
 

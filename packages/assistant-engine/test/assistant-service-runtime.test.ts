@@ -363,7 +363,7 @@ describe("assistant service turn route", () => {
     };
     const input = {
       assistantTargetOverride: {
-        reasoningEffort: "high",
+        reasoningEffort: "high" as const,
       },
       model: "gpt-5-mini",
       prompt: "Summarize today.",

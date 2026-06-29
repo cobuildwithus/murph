@@ -2,6 +2,7 @@ import {
   AUTOMATION_DOC_TYPE,
   AUTOMATION_SCHEMA_VERSION,
   MIN_AUTOMATION_EVERY_MS,
+  assistantReasoningEffortValues,
   automationFrontmatterSchema,
   automationContinuityPolicyValues,
   automationDeviceActivityKindSchema,
@@ -394,10 +395,8 @@ function normalizeAutomationAssistantTargetOverride(
     "assistantTargetOverride.modelProvider",
     120,
   );
-  const reasoningEffort = normalizeAutomationAssistantTargetOverrideString(
+  const reasoningEffort = normalizeAutomationAssistantTargetOverrideReasoningEffort(
     object.reasoningEffort,
-    "assistantTargetOverride.reasoningEffort",
-    80,
   );
   const target: AutomationAssistantTargetOverride = {
     ...(model ? { model } : {}),
@@ -406,6 +405,16 @@ function normalizeAutomationAssistantTargetOverride(
   };
 
   return Object.keys(target).length > 0 ? target : null;
+}
+
+function normalizeAutomationAssistantTargetOverrideReasoningEffort(
+  value: unknown,
+): AutomationAssistantTargetOverride["reasoningEffort"] | null {
+  return optionalEnum(
+    value,
+    assistantReasoningEffortValues,
+    "assistantTargetOverride.reasoningEffort",
+  ) ?? null;
 }
 
 function normalizeAutomationAssistantTargetOverrideString(
