@@ -1047,6 +1047,7 @@ export class RunnerContainer extends Container {
     const operationAbortController = new AbortController();
     let activeOperationAcquired = false;
     let cleanupWarmContainerOnFailure = false;
+    let invokeFailure: unknown = null;
     let preserveActiveOperationAfterTransportFailure = false;
     let stopRunnerActivityRenewal: (() => void) | null = null;
     this.workspaceInvocationAbortController = operationAbortController;
@@ -1170,6 +1171,7 @@ export class RunnerContainer extends Container {
       completedSuccessfully = true;
       return result;
     } catch (error) {
+      invokeFailure = error;
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -1203,7 +1205,7 @@ export class RunnerContainer extends Container {
           if (!completedSuccessfully) {
             if (!preserveActiveOperationAfterTransportFailure) {
               await this.stopWarmContainer({
-                failClosed: true,
+                failClosed: !(invokeFailure instanceof HostedRunnerContainerShuttingDownError),
                 reason: "invoke-failure",
               });
             }
