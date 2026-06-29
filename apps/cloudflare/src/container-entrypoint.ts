@@ -979,6 +979,7 @@ export async function startHostedContainerEntrypoint(input: {
             stage: "shell_isolation_poison",
           }),
           drainHostedRuntimeDeferredUsageCompletionsBestEffort({
+            closeActiveCaptures: true,
             timeoutMs: HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS,
           }),
         ]);
@@ -1223,6 +1224,7 @@ function installHostedContainerProcessFatalHandlers(): void {
         reportHostedContainerFatalBestEffort({ error, stage }),
         drainHostedRuntimeLogWritesBestEffort(),
         drainHostedRuntimeDeferredUsageCompletionsBestEffort({
+          closeActiveCaptures: true,
           timeoutMs: HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS,
         }),
       ]).then(() => {

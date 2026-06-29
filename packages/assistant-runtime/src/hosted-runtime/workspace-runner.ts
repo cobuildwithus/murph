@@ -276,7 +276,10 @@ export interface HostedWorkspaceRunnerInput {
   initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
-  trackDeferredUsageCompletion?: ((completion: Promise<void>) => void) | null;
+  trackDeferredUsageCapture?: ((
+    completion: Promise<void>,
+    drainForProcessFatal: () => Promise<void>,
+  ) => void) | null;
   platform: HostedWorkspaceRunnerPlatform;
   requestId: string;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
@@ -524,7 +527,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   const pendingDeferredUsageWrites = new Set<Promise<void>>();
   let deferredUsageCaptureClosed = false;
   let deferredUsageCaptureStarted = false;
-  let deferredUsageCompletionTracked = false;
   let deferredUsageCompletionSettled = false;
   let resolveDeferredUsageCompletion: () => void = () => undefined;
   const deferredUsageCompletion = new Promise<void>((resolve) => {
@@ -542,14 +544,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     if (deferredUsageCaptureClosed && pendingDeferredUsageWrites.size === 0) {
       resolveDeferredUsageCompletionOnce();
     }
-  };
-  const trackDeferredUsageCompletionOnce = (): void => {
-    if (deferredUsageCompletionTracked) {
-      return;
-    }
-
-    deferredUsageCompletionTracked = true;
-    input.trackDeferredUsageCompletion?.(deferredUsageCompletion);
   };
   const startDeferredUsageRecords = (
     records: readonly AssistantUsageRecord[],
@@ -575,7 +569,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }
 
     deferredUsageCaptureStarted = true;
-    trackDeferredUsageCompletionOnce();
     startDeferredUsageRecords(deferredUsageRecords.splice(0));
     maybeResolveDeferredUsageCompletion();
     return deferredUsageCompletion;
@@ -587,6 +580,15 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   const startDeferredUsageCaptureOnAbort = (): void => {
     void startDeferredUsageCaptureOnce();
   };
+  const drainDeferredUsageCaptureForProcessFatal = (): Promise<void> => {
+    const completion = startDeferredUsageCaptureOnce();
+    closeDeferredUsageCapture();
+    return completion;
+  };
+  input.trackDeferredUsageCapture?.(
+    deferredUsageCompletion,
+    drainDeferredUsageCaptureForProcessFatal,
+  );
   if (input.signal?.aborted) {
     startDeferredUsageCaptureOnAbort();
   } else {

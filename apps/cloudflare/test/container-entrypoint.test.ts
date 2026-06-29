@@ -3470,7 +3470,10 @@ describe("startHostedContainerEntrypoint", () => {
     expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
     expect(exit).toHaveBeenCalledTimes(1);
     expect(mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort).toHaveBeenCalledWith(
-      expect.objectContaining({ timeoutMs: expect.any(Number) }),
+      expect.objectContaining({
+        closeActiveCaptures: true,
+        timeoutMs: expect.any(Number),
+      }),
     );
   });
 
@@ -3561,6 +3564,12 @@ describe("startHostedContainerEntrypoint", () => {
       expect(exit).toHaveBeenCalledTimes(1);
     });
     expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
+    expect(mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort).toHaveBeenCalledWith(
+      expect.objectContaining({
+        closeActiveCaptures: true,
+        timeoutMs: expect.any(Number),
+      }),
+    );
   });
 });
 

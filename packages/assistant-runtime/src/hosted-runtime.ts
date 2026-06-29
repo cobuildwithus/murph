@@ -810,11 +810,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       pendingCompletions.delete(completion);
     });
   };
-  const trackDeferredUsageCompletion = (
+  const trackDeferredUsageCapture = (
     completion: Promise<void> | null,
+    drainForProcessFatal: (() => Promise<void>) | null,
   ): void => {
     trackCompletion(pendingDeferredUsageCompletions, completion);
-    trackHostedRuntimeDeferredUsageCompletion(completion);
+    trackHostedRuntimeDeferredUsageCapture(completion, drainForProcessFatal);
   };
   const trackMailboxPostCheckpointEffects = (completion: Promise<void> | null): void => {
     trackCompletion(pendingMailboxPostCheckpointEffectCompletions, completion);
@@ -1033,7 +1034,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
-      trackDeferredUsageCompletion,
+      trackDeferredUsageCapture,
       platform: runnerPlatform,
       requestId,
       runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -2502,6 +2503,7 @@ const DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const DEFAULT_HOSTED_FOREGROUND_MAILBOX_IMPORT_LIMIT = 10;
 const HOSTED_RUNTIME_MAX_TIMER_DELAY_MS = 2_147_483_647;
 const pendingHostedRuntimeDeferredUsageCompletions = new Set<Promise<void>>();
+const activeHostedRuntimeDeferredUsageCaptureDrains = new Set<() => Promise<void>>();
 
 type HostedRuntimeDirtyWaitResult =
   | { kind: "external_wake"; notification: RuntimeWakeNotification }
@@ -2537,11 +2539,40 @@ function trackHostedRuntimeDeferredUsageCompletion(
   });
 }
 
+function trackHostedRuntimeDeferredUsageCapture(
+  completion: Promise<void> | null,
+  drainForProcessFatal: (() => Promise<void>) | null,
+): void {
+  trackHostedRuntimeDeferredUsageCompletion(completion);
+  if (completion === null || drainForProcessFatal === null) {
+    return;
+  }
+
+  activeHostedRuntimeDeferredUsageCaptureDrains.add(drainForProcessFatal);
+  void completion.finally(() => {
+    activeHostedRuntimeDeferredUsageCaptureDrains.delete(drainForProcessFatal);
+  });
+}
+
 export async function drainHostedRuntimeDeferredUsageCompletionsBestEffort(input: {
+  closeActiveCaptures?: boolean | null;
   timeoutMs?: number | null;
 } = {}): Promise<void> {
+  const fatalDrainCompletions: Promise<void>[] = [];
+  if (input.closeActiveCaptures === true) {
+    for (const drainForProcessFatal of [
+      ...activeHostedRuntimeDeferredUsageCaptureDrains,
+    ]) {
+      try {
+        fatalDrainCompletions.push(drainForProcessFatal());
+      } catch {
+        // Best-effort fatal drain: keep awaiting any registered completions.
+      }
+    }
+  }
   const pendingCompletions = [
     ...pendingHostedRuntimeDeferredUsageCompletions,
+    ...fatalDrainCompletions,
   ];
   if (pendingCompletions.length === 0) {
     return;

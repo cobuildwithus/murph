@@ -5617,6 +5617,127 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("process-fatal drain starts captured deferred usage before runner cleanup", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-fatal-drain-"));
+    const events: string[] = [];
+    const assistantPhaseCanFinish = createDeferred<void>();
+    const usageCaptured = createDeferred<void>();
+    const usageRecordStarted = createDeferred<void>();
+    const releaseUsageRecord = createDeferred<void>();
+    const usageRecordFinished = createDeferred<void>();
+    const usageId = "turn_entrypoint_deferred_usage_fatal_drain.attempt-1";
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_deferred_usage_fatal_drain",
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Blocked fatal-drain phase should not checkpoint.");
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: {
+            ...createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests: [],
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            usageRecordPort: {
+              async recordUsage(record: AssistantUsageRecord) {
+                events.push("usage.record:start");
+                assert.equal(record.usageId, usageId);
+                usageRecordStarted.resolve();
+                await releaseUsageRecord.promise;
+                events.push("usage.record:done");
+                usageRecordFinished.resolve();
+                return {
+                  recorded: true,
+                  usageId: record.usageId,
+                };
+              },
+            },
+          },
+          async runAssistantPhase(input) {
+            events.push("assistant.phase");
+            input.recordDeferredUsage?.(createAssistantUsageRecord({ usageId }));
+            usageCaptured.resolve();
+            await assistantPhaseCanFinish.promise;
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      await withRealTimeout(
+        usageCaptured.promise,
+        1_000,
+        () => "Assistant phase did not capture deferred usage.",
+      );
+      await Promise.resolve();
+      assert.equal(events.includes("usage.record:start"), false);
+
+      const drainPromise = drainHostedRuntimeDeferredUsageCompletionsBestEffort({
+        closeActiveCaptures: true,
+        timeoutMs: 1_000,
+      });
+      let drainSettled = false;
+      void drainPromise.finally(() => {
+        drainSettled = true;
+      }).catch(() => undefined);
+
+      await withRealTimeout(
+        usageRecordStarted.promise,
+        1_000,
+        () => "Process-fatal deferred usage drain did not start captured usage.",
+      );
+      assert.equal(drainSettled, false);
+
+      releaseUsageRecord.resolve();
+      await withRealTimeout(
+        usageRecordFinished.promise,
+        1_000,
+        () => "Deferred usage recording did not finish after release.",
+      );
+      await withRealTimeout(
+        drainPromise,
+        1_000,
+        () => "Process-fatal deferred usage drain did not settle after usage finished.",
+      );
+      assert.equal(drainSettled, true);
+
+      assistantPhaseCanFinish.resolve();
+      assert.ok(resultPromise);
+      await withRealTimeout(
+        resultPromise,
+        1_000,
+        () => "Runtime did not finish after blocked fatal-drain phase was released.",
+      );
+    } finally {
+      assistantPhaseCanFinish.resolve();
+      releaseUsageRecord.resolve();
+      if (resultPromise) {
+        await resultPromise.catch(() => undefined);
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("drains completed runner deferred usage before rethrowing CLI bridge drain failure", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-deferred-usage-bridge-fail-"));
     const events: string[] = [];
