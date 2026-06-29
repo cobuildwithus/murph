@@ -36,6 +36,18 @@ describe('Codex provider config overrides', () => {
     ])
   })
 
+  it('can enable hosted MultiAgent V2 as a process-launch override', () => {
+    const overrides = mergeCodexConfigOverrides({
+      enableMultiAgentV2: true,
+      modelProvider: 'openai-local-test',
+      showThinkingTraces: false,
+    })
+
+    expect(overrides).toEqual([
+      'features.multi_agent_v2=true',
+    ])
+  })
+
   it('fails closed when a provider id has no known provider config', () => {
     expect(() =>
       mergeCodexConfigOverrides({
