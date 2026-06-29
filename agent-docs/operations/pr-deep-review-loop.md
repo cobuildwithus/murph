@@ -83,8 +83,11 @@ Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit c
    deleting code, reordering existing durable writes, tightening an existing
    owner boundary, or deriving from one existing source of truth? Reject or
    defer the finding when the proposed cure is a broader state machine than the
-   confirmed bug justifies. ReviewGPT is strongest as an adversarial reviewer,
-   not as the final architecture owner.
+   confirmed bug justifies. When repeated findings cluster on one mechanism,
+   pause tactical patching and either collapse that mechanism to a simpler
+   ownership shape, split/abandon the PR, or explicitly reject the collapse
+   finding. ReviewGPT is strongest as an adversarial reviewer, not as the final
+   architecture owner.
 4. Fix only accepted findings after the reproduction/proof above is in place,
    run the verification required by
    `agent-docs/operations/verification-and-runtime.md` for the touched owners,
