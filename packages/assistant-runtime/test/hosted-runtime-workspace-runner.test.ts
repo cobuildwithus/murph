@@ -5123,6 +5123,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
               redactedStatus: {
                 hostedOutboxDeliveryAttempted: 1,
                 hostedOutboxDeliverySent: 1,
+                hostedOutboxPendingDeliveryEffects: 0,
               },
             }),
             checkpointReason: "outbox_sending",
@@ -5140,6 +5141,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       ]);
       assert.equal(result.latestWorkspace?.version, "0");
       assert.equal(result.assistantPhaseResult?.nextWakeAt, "2026-04-26T00:05:00.000Z");
+      assert.deepEqual(result.assistantPhaseResult?.redactedStatus, {
+        hostedOutboxDeliveryAttempted: 1,
+        hostedOutboxDeliverySent: 1,
+        hostedOutboxPendingDeliveryEffects: 0,
+      });
       const deferredLog = logRequests.flatMap((request) => request.entries)
         .find((entry) =>
           entry.eventCode === "checkpoint.runtime_residue_deferred"

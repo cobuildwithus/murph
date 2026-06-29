@@ -704,6 +704,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
           platform: input.platform,
           runtimeLogContext: input.runtimeLogContext,
         });
+        mergeDeferredPostCheckpointRedactedStatus({
+          assistantPhaseResult,
+          postCheckpoint,
+        });
         projectedWakeRequiresCheckpoint = mergeDeferredPostCheckpointWake({
           assistantPhaseResult,
           postCheckpoint,
@@ -2263,6 +2267,20 @@ function requireHostedWorkspaceAssistantPhaseCheckpointReason(
     throw new TypeError("Hosted workspace assistant phase checkpoint requires an explicit reason.");
   }
   return result.checkpointReason;
+}
+
+function mergeDeferredPostCheckpointRedactedStatus(input: {
+  assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
+  postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint;
+}): void {
+  if (input.assistantPhaseResult.progressed !== true || !input.postCheckpoint.redactedStatus) {
+    return;
+  }
+
+  input.assistantPhaseResult.redactedStatus = {
+    ...(input.assistantPhaseResult.redactedStatus ?? {}),
+    ...input.postCheckpoint.redactedStatus,
+  };
 }
 
 function mergeDeferredPostCheckpointWake(input: {
