@@ -2641,9 +2641,8 @@ async function invokeRunnerContainerProcessing(
     return await container.invoke(invokeRequest);
   }
 
-  const ensureProcessing = container.ensureProcessing.bind(container);
   const ensure = async () =>
-    await ensureProcessing({
+    await container.ensureProcessing!({
       invoke: invokeRequest,
       userId: invokeRequest.userId,
     });

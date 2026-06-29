@@ -3187,19 +3187,26 @@ function createRunnerHarness(input: {
     ...(ensureReadyForProcessing ? { ensureReadyForProcessing } : {}),
     ...(input.ensureProcessing
       ? {
-          ensureProcessing: async (ensureInput) => {
-            if (ensureInput.invoke) {
-              return {
-                action: ensureInput.activeRuntime ? "restarted" : "started",
-                kind: "accepted",
-                result: await invoke(ensureInput.invoke),
+          ensureProcessing: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>
+          >(
+            async function (
+              this: HostedExecutionContainerStubLike,
+              ensureInput,
+            ) {
+              if (ensureInput.invoke) {
+                return {
+                  action: ensureInput.activeRuntime ? "restarted" : "started",
+                  kind: "accepted",
+                  result: await invoke(ensureInput.invoke),
+                };
+              }
+              return await input.ensureProcessing?.call(this, ensureInput) ?? {
+                kind: "start-required",
+                reason: "no-active-child",
               };
-            }
-            return await input.ensureProcessing?.(ensureInput) ?? {
-              kind: "start-required",
-              reason: "no-active-child",
-            };
-          },
+            },
+          ),
         }
       : {}),
     invoke,
