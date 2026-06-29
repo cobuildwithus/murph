@@ -16,6 +16,7 @@ type LatencyWritePrisma = NonNullable<
 type LatencyDashboardRow = {
   acceptedAt: Date;
   assistantInputStagedAt: Date | null;
+  phaseBreakdownJson?: unknown;
   providerStartAt: Date | null;
   temporalSignalAcceptedAt: Date | null;
 };
@@ -85,6 +86,54 @@ describe("hosted runtime latency dashboard store", () => {
     expect(dashboard.completedCount).toBe(3);
     expect(dashboard.stageLatencyMs.acceptedToTemporalSignalP50).toBeNull();
     expect(dashboard.stageLatencyMs.stagedToProviderStartP50).toBe(1_000);
+  });
+
+  it("reports Linq egress guard latency from provider phaseBreakdown", async () => {
+    const prisma = createLatencyDashboardPrisma([
+      {
+        acceptedAt: instant("2026-05-27T12:00:00.000Z"),
+        assistantInputStagedAt: instant("2026-05-27T12:00:01.000Z"),
+        phaseBreakdownJson: {
+          schemaVersion: 1,
+          provider: { linqEgressGuardMs: 10 },
+        },
+        providerStartAt: instant("2026-05-27T12:00:02.000Z"),
+        temporalSignalAcceptedAt: null,
+      },
+      {
+        acceptedAt: instant("2026-05-27T12:01:00.000Z"),
+        assistantInputStagedAt: instant("2026-05-27T12:01:01.000Z"),
+        phaseBreakdownJson: {
+          schemaVersion: 1,
+          provider: { linqEgressGuardMs: 30 },
+        },
+        providerStartAt: instant("2026-05-27T12:01:02.000Z"),
+        temporalSignalAcceptedAt: null,
+      },
+      {
+        acceptedAt: instant("2026-05-27T12:02:00.000Z"),
+        assistantInputStagedAt: instant("2026-05-27T12:02:01.000Z"),
+        phaseBreakdownJson: {
+          schemaVersion: 1,
+          provider: { linqEgressGuardMs: "not-a-number" },
+        },
+        providerStartAt: instant("2026-05-27T12:02:02.000Z"),
+        temporalSignalAcceptedAt: null,
+      },
+    ]);
+
+    const dashboard = await readHostedIngressLatencyDashboard({
+      inFlightGraceMs: 0,
+      now: instant("2026-05-27T12:05:00.000Z"),
+      prisma,
+      source: "linq",
+      windowHours: 1,
+    });
+
+    expect(dashboard.linqEgressGuardMs).toEqual({
+      p50: 20,
+      p95: 29,
+    });
   });
 
   it("stores mailbox accepted timestamps as real instants when DB-local wall time differs from UTC", async () => {

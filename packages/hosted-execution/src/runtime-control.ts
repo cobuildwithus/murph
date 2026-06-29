@@ -878,6 +878,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     promptBuildMs?: number;
     admissionMs?: number;
     preProviderSetupMs?: number;
+    linqEgressGuardMs?: number;
   };
 }
 
@@ -952,6 +953,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "promptBuildMs",
     "admissionMs",
     "preProviderSetupMs",
+    "linqEgressGuardMs",
   ],
 } as const;
 

@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type {
+  HostedRuntimeLatencyTraceRequest,
   HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -5675,6 +5676,38 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("passes foreground Linq egress latency trace into hosted delivery dependencies", async () => {
+    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
+    const effect = createDeliveryEffect();
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([effect]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      runtimeLatencyTraceRequests: latencyTraceRequests,
+    }));
+    await result.afterCheckpoint?.();
+
+    const expectedTrace = expect.objectContaining({
+      assistantInputIds: ["ain_00000000000000000000000000000001"],
+      latencyTracePort: expect.objectContaining({
+        record: expect.any(Function),
+      }),
+      runtimeAttemptId: "attempt_synthetic_phase",
+    });
+    expect(mocks.createHostedAssistantProgressDeliveryDependencies).toHaveBeenCalledWith(
+      expect.objectContaining({
+        linqEgressLatencyTrace: expectedTrace,
+      }),
+    );
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryEffects: [effect],
+        linqEgressLatencyTrace: expectedTrace,
+      }),
+    );
+  });
+
   it("passes restored foreground assistant input ids through as fresh ids", async () => {
     const assistantInputIds = [
       "ain_00000000000000000000000000000001",
@@ -7319,6 +7352,7 @@ function createPhaseInput(input: {
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeForwardedEnv?: Record<string, string>;
+  runtimeLatencyTraceRequests?: HostedRuntimeLatencyTraceRequest[];
   runtimeEnv?: Record<string, string>;
   operatorHomeRoot?: string;
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
@@ -7439,6 +7473,20 @@ function createPhaseInput(input: {
           ? { actionApprovalPort: input.runtimeActionApprovalPort }
           : {}),
         ...(input.runtimeUsageRecordPort ? { usageRecordPort: input.runtimeUsageRecordPort } : {}),
+        ...(input.runtimeLatencyTraceRequests
+          ? {
+              latencyTracePort: {
+                async record(request: HostedRuntimeLatencyTraceRequest) {
+                  input.runtimeLatencyTraceRequests?.push(request);
+                  return {
+                    matchedCount: 1,
+                    recorded: true,
+                    unmatchedCount: 0,
+                  };
+                },
+              },
+            }
+          : {}),
       },
       platformEnv: {},
       resolvedConfig: {

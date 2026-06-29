@@ -89,6 +89,10 @@ export interface HostedIngressLatencyDashboard {
     acceptedToTemporalSignalP50: number | null;
     stagedToProviderStartP50: number | null;
   };
+  linqEgressGuardMs: {
+    p50: number | null;
+    p95: number | null;
+  };
   stagedButMissingProviderCount: number;
   totalAcceptedCount: number;
   truncated: boolean;
@@ -347,6 +351,7 @@ export async function readHostedIngressLatencyDashboard(
     select: {
       acceptedAt: true,
       assistantInputStagedAt: true,
+      phaseBreakdownJson: true,
       providerStartAt: true,
       temporalSignalAcceptedAt: true,
     },
@@ -364,6 +369,7 @@ export async function readHostedIngressLatencyDashboard(
   const completedDurations: number[] = [];
   const acceptedToSignalDurations: number[] = [];
   const acceptedToStagedDurations: number[] = [];
+  const linqEgressGuardDurations: number[] = [];
   const stagedToProviderDurations: number[] = [];
   const recentSlowRows: HostedIngressLatencyDashboardSlowRow[] = [];
   let invalidNegativeLatencyCount = 0;
@@ -377,6 +383,14 @@ export async function readHostedIngressLatencyDashboard(
     const providerStartMs = row.providerStartAt?.getTime() ?? null;
     const stagedAtMs = row.assistantInputStagedAt?.getTime() ?? null;
     const signalAtMs = row.temporalSignalAcceptedAt?.getTime() ?? null;
+    const linqEgressGuardMs = readHostedIngressLatencyPhaseBreakdownNumber(
+      row.phaseBreakdownJson,
+      "provider",
+      "linqEgressGuardMs",
+    );
+    if (linqEgressGuardMs !== null) {
+      linqEgressGuardDurations.push(linqEgressGuardMs);
+    }
     const mature = row.acceptedAt <= inFlightCutoff;
     const missingStaged = stagedAtMs === null;
     const hasNegativeSignal = signalAtMs !== null && signalAtMs < acceptedAtMs;
@@ -475,6 +489,10 @@ export async function readHostedIngressLatencyDashboard(
       acceptedToTemporalSignalP50: percentile(acceptedToSignalDurations, 0.5),
       stagedToProviderStartP50: percentile(stagedToProviderDurations, 0.5),
     },
+    linqEgressGuardMs: {
+      p50: percentile(linqEgressGuardDurations, 0.5),
+      p95: percentile(linqEgressGuardDurations, 0.95),
+    },
     stagedButMissingProviderCount,
     totalAcceptedCount: visibleRows.length,
     truncated,
@@ -484,6 +502,32 @@ export async function readHostedIngressLatencyDashboard(
       start: windowStart.toISOString(),
     },
   };
+}
+
+function readHostedIngressLatencyPhaseBreakdownNumber(
+  phaseBreakdownJson: unknown,
+  phase: HostedRuntimeLatencyPhaseBreakdownPhase,
+  leafKey: string,
+): number | null {
+  if (
+    !phaseBreakdownJson
+    || typeof phaseBreakdownJson !== "object"
+    || Array.isArray(phaseBreakdownJson)
+  ) {
+    return null;
+  }
+  const phaseValue = (phaseBreakdownJson as Record<string, unknown>)[phase];
+  if (
+    !phaseValue
+    || typeof phaseValue !== "object"
+    || Array.isArray(phaseValue)
+  ) {
+    return null;
+  }
+  const value = (phaseValue as Record<string, unknown>)[leafKey];
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
 }
 
 function normalizeHostedIngressLatencySource(

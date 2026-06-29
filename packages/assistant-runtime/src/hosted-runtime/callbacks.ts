@@ -74,6 +74,7 @@ import type {
   HostedRuntimeLinqDeliveryOutcomeRequest,
   HostedRuntimeLinqEngagementKind,
   HostedRuntimeLinqSendResponse,
+  HostedRuntimePlatform,
   HostedRuntimeProviderTargetKind,
 } from "./platform.ts";
 import {
@@ -114,6 +115,12 @@ const HOSTED_TELEGRAM_VOICE_MEMO_DELIVERY_OPERATION =
   "Hosted assistant Telegram voice memo delivery";
 
 type HostedAssistantDeliveryDetails = Record<string, boolean | number | null | string>;
+
+export interface HostedAssistantLinqEgressLatencyTrace {
+  assistantInputIds: readonly string[];
+  latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
+  runtimeAttemptId?: string | null;
+}
 
 interface HostedAssistantDeliveryBoundaryFields {
   actorId: string | null;
@@ -1049,6 +1056,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
   forwardedEnv?: Readonly<Record<string, string>>;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
+  linqEgressLatencyTrace?: HostedAssistantLinqEgressLatencyTrace | null;
   platformEnv?: Readonly<Record<string, string>>;
   providerFetch?: typeof fetch | null;
   signal?: AbortSignal | null;
@@ -1085,6 +1093,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       effectsPort: input.effectsPort ?? null,
       linqEnv,
       linqDeliveryContexts,
+      linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
       providerFetch: input.providerFetch ?? null,
       signal: input.signal ?? null,
     }),
@@ -1092,6 +1101,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       effectsPort: input.effectsPort ?? null,
       linqEnv,
       linqDeliveryContexts,
+      linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
       providerFetch: input.providerFetch ?? null,
       signal: input.signal ?? null,
     }),
@@ -1181,6 +1191,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   forwardedEnv?: Readonly<Record<string, string>>;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
+  linqEgressLatencyTrace?: HostedAssistantLinqEgressLatencyTrace | null;
   platformEnv?: Readonly<Record<string, string>>;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
@@ -1265,6 +1276,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         signal: input.signal ?? null,
         linqEnv,
         linqDeliveryContexts,
+        linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
         preparedDispatch: ownsPreparedDispatch ? preparedDispatch : null,
         telegramEnv,
         telegramVoiceMemoEnv,
@@ -1399,6 +1411,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   signal: AbortSignal | null;
   linqEnv: NodeJS.ProcessEnv;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  linqEgressLatencyTrace: HostedAssistantLinqEgressLatencyTrace | null;
   preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   telegramEnv: NodeJS.ProcessEnv;
   telegramVoiceMemoEnv: NodeJS.ProcessEnv;
@@ -1541,6 +1554,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           intentId: input.assistantDeliveryEffect.effectId,
           linqEnv: input.linqEnv,
           linqDeliveryContexts: input.linqDeliveryContexts,
+          linqEgressLatencyTrace: input.linqEgressLatencyTrace,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
@@ -1553,6 +1567,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           effectsPort: input.effectsPort,
           linqEnv: input.linqEnv,
           linqDeliveryContexts: input.linqDeliveryContexts,
+          linqEgressLatencyTrace: input.linqEgressLatencyTrace,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
@@ -1574,6 +1589,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
             idempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey ?? null,
             intentId: input.assistantDeliveryEffect.effectId,
+            linqEgressLatencyTrace: input.linqEgressLatencyTrace,
             replyToMessageId: request.targetMessageId,
             signal: input.signal,
             target: request.target,
@@ -1840,6 +1856,7 @@ function createHostedAssistantLinqSendDependency(input: {
   expectedDedupeKey?: string | null;
   intentId?: string | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
+  linqEgressLatencyTrace?: HostedAssistantLinqEgressLatencyTrace | null;
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
@@ -1869,6 +1886,7 @@ function createHostedAssistantLinqSendDependency(input: {
       fromPhoneNumber,
       idempotencyKey: request.idempotencyKey ?? null,
       intentId: input.intentId ?? null,
+      linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
       replyToMessageId: request.replyToMessageId ?? null,
       signal: signal ?? null,
       target: request.target,
@@ -2085,6 +2103,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   > | null;
   intentId?: string | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
+  linqEgressLatencyTrace?: HostedAssistantLinqEgressLatencyTrace | null;
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
@@ -2112,6 +2131,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
       idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
       intentId: input.intentId ?? null,
+      linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
       replyToMessageId: deliveryContext?.replyToMessageId ?? null,
       signal: signal ?? null,
       target: providerTarget,
@@ -2307,6 +2327,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   fromPhoneNumber: string | null;
   idempotencyKey: string | null;
   intentId: string | null;
+  linqEgressLatencyTrace?: HostedAssistantLinqEgressLatencyTrace | null;
   replyToMessageId: string | null;
   signal: AbortSignal | null;
   target: string;
@@ -2322,6 +2343,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   }
   const targetKind = normalizeHostedAssistantLinqTargetKind(input.targetKind);
   const currentInbound = input.deliveryContext?.currentInbound ?? null;
+  const startedAtMs = Date.now();
   await assertRecentInbound({
     ...(currentInbound ? { currentInbound } : {}),
     directRecipientPhoneNumber: input.directRecipientPhoneNumber,
@@ -2338,6 +2360,44 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   }, {
     signal: input.signal,
   });
+  recordHostedAssistantLinqEgressGuardLatencyBestEffort({
+    durationMs: Math.max(0, Date.now() - startedAtMs),
+    latencyTrace: input.linqEgressLatencyTrace ?? null,
+  });
+}
+
+function recordHostedAssistantLinqEgressGuardLatencyBestEffort(input: {
+  durationMs: number;
+  latencyTrace: HostedAssistantLinqEgressLatencyTrace | null;
+}): void {
+  const latencyTracePort = input.latencyTrace?.latencyTracePort ?? null;
+  const assistantInputIds = input.latencyTrace?.assistantInputIds ?? [];
+  if (!latencyTracePort || assistantInputIds.length === 0) {
+    return;
+  }
+
+  try {
+    void latencyTracePort.record({
+      event: {
+        assistantInputIds: [...assistantInputIds],
+        at: new Date().toISOString(),
+        phaseBreakdown: {
+          provider: {
+            linqEgressGuardMs: input.durationMs,
+          },
+          schemaVersion: 1,
+        },
+        providerRequestOrdinal: 0,
+        runtimeAttemptId: input.latencyTrace?.runtimeAttemptId ?? null,
+        source: "linq",
+        type: "provider_started",
+      },
+    }).catch(() => {
+      // Latency traces are diagnostic-only and must not affect delivery.
+    });
+  } catch {
+    // Latency traces are diagnostic-only and must not affect delivery.
+  }
 }
 
 function normalizeHostedAssistantLinqTargetKind(

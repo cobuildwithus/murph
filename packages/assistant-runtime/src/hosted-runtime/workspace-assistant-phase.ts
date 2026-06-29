@@ -48,6 +48,7 @@ import {
   resetHostedPreparedAssistantDeliveryEffects,
   resolveHostedAssistantOutboxNextWakeAt,
   type HostedAssistantDeliveryPreparation,
+  type HostedAssistantLinqEgressLatencyTrace,
 } from "./callbacks.ts";
 import {
   buildHostedLinqChannelEnv,
@@ -188,6 +189,22 @@ function resolveHostedInitialMailboxLinqDeliveryContexts(
     : [];
 }
 
+function buildHostedAssistantLinqEgressLatencyTrace(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): HostedAssistantLinqEgressLatencyTrace | null {
+  const latencyTracePort = input.runtime.platform.latencyTracePort ?? null;
+  const assistantInputIds = input.initialMailboxImport.importResult.assistantInputIds ?? [];
+  if (!latencyTracePort || assistantInputIds.length === 0) {
+    return null;
+  }
+
+  return {
+    assistantInputIds,
+    latencyTracePort,
+    runtimeAttemptId: input.request.attemptId,
+  };
+}
+
 export async function runHostedWorkspaceAssistantPhase(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
@@ -211,6 +228,7 @@ export async function runHostedWorkspaceAssistantPhase(
   const initialLinqDeliveryContexts = resolveHostedInitialMailboxLinqDeliveryContexts(
     input.initialMailboxImport.importResult,
   );
+  const linqEgressLatencyTrace = buildHostedAssistantLinqEgressLatencyTrace(input);
   if (shouldWriteHostedDeviceConnectContextLog({ deviceConnectProviders, input })) {
     void writeHostedDeviceConnectRuntimeLog({
       deviceConnectProviders,
@@ -230,6 +248,7 @@ export async function runHostedWorkspaceAssistantPhase(
           effectsPort: input.runtime.platform.effectsPort,
           forwardedEnv: input.runtime.forwardedEnv,
           linqDeliveryContexts: initialLinqDeliveryContexts,
+          linqEgressLatencyTrace,
           platformEnv: input.runtime.platformEnv,
           providerFetch: input.runtime.platform.providerFetch ?? null,
           signal: channelAbortController.signal,
@@ -3185,6 +3204,7 @@ async function drainHostedPostCheckpointDelivery(input: {
         effectsPort: input.input.platform.effectsPort,
         forwardedEnv: input.input.runtime.forwardedEnv,
         linqDeliveryContexts: input.linqDeliveryContexts ?? null,
+        linqEgressLatencyTrace: buildHostedAssistantLinqEgressLatencyTrace(input.input),
         platformEnv: input.input.runtime.platformEnv,
         preparedDispatches: input.assistantDeliveryPreparation?.preparedDispatches ?? null,
         providerFetch: input.input.runtime.platform.providerFetch ?? null,

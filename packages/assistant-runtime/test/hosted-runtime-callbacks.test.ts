@@ -7,6 +7,9 @@ import {
   buildHostedExecutionRuntimeTimerWake,
 } from "@murphai/hosted-execution";
 import type {
+  HostedRuntimeLatencyTraceRequest,
+} from "@murphai/hosted-execution/runtime-control";
+import type {
   AssistantOutboxPreparedDispatchState,
 } from "@murphai/assistant-engine";
 import {
@@ -5480,6 +5483,110 @@ describe("hosted runtime callbacks", () => {
         deliveryStatus: "sent",
       }),
     ]);
+  });
+
+  it("records Linq egress guard latency without blocking provider egress", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-29T12:00:00.000Z"));
+    try {
+      const effect = createEffect({
+        actorId: "ain_hashed_actor",
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "linq_chat_current",
+        channel: "linq",
+        explicitTarget: "linq_chat_current",
+        replyToMessageId: "linq_message_current",
+        transportIdempotent: true,
+      });
+      const assertRecentInbound = vi.fn(async () => {
+        vi.setSystemTime(new Date("2026-06-29T12:00:00.017Z"));
+      });
+      const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
+      const latencyTraceRecord = vi.fn(async (request: HostedRuntimeLatencyTraceRequest) => {
+        latencyTraceRequests.push(request);
+        return {
+          matchedCount: 1,
+          recorded: true,
+          unmatchedCount: 0,
+        };
+      });
+      mocks.sendLinqMessage.mockResolvedValueOnce({
+        providerMessageId: "linq_message_sent",
+        providerThreadId: "linq_chat_current",
+        target: "linq_chat_current",
+        targetKind: "thread" as const,
+      });
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+        const delivery = await dependencies.sendLinq({
+          directRecipientPhoneNumber: null,
+          fromPhoneNumber: null,
+          idempotencyKey: "assistant-outbox:intent_hashed_target",
+          message: "hello from hosted",
+          replyToMessageId: "linq_message_current",
+          target: "linq_chat_current",
+          targetKind: "thread",
+        });
+
+        return createDispatchResult({
+          delivery: createDelivery({
+            channel: "linq",
+            providerMessageId: delivery.providerMessageId,
+            providerThreadId: delivery.providerThreadId,
+            target: delivery.target,
+            targetKind: delivery.targetKind,
+          }),
+          status: "sent",
+        });
+      });
+
+      const outcomes = await drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertLinqRecentInboundEngagement: assertRecentInbound,
+        }),
+        linqEgressLatencyTrace: {
+          assistantInputIds: ["input_latency_1"],
+          latencyTracePort: {
+            record: latencyTraceRecord,
+          },
+          runtimeAttemptId: "attempt_latency_1",
+        },
+        providerFetch: vi.fn<typeof fetch>(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+
+      expect(latencyTraceRequests).toEqual([
+        {
+          event: {
+            assistantInputIds: ["input_latency_1"],
+            at: "2026-06-29T12:00:00.017Z",
+            phaseBreakdown: {
+              provider: {
+                linqEgressGuardMs: 17,
+              },
+              schemaVersion: 1,
+            },
+            providerRequestOrdinal: 0,
+            runtimeAttemptId: "attempt_latency_1",
+            source: "linq",
+            type: "provider_started",
+          },
+        },
+      ]);
+      expect(assertRecentInbound.mock.invocationCallOrder[0] ?? 0)
+        .toBeLessThan(latencyTraceRecord.mock.invocationCallOrder[0] ?? 0);
+      expect(latencyTraceRecord.mock.invocationCallOrder[0] ?? 0)
+        .toBeLessThan(mocks.sendLinqMessage.mock.invocationCallOrder[0] ?? 0);
+      expect(outcomes).toEqual([
+        expect.objectContaining({
+          deliveryChannel: "linq",
+          deliveryStatus: "sent",
+        }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("selects routed Linq authority from the matching delivery context", async () => {
