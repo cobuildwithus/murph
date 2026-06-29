@@ -795,7 +795,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
   const phaseLogger = createHostedRuntimePhaseLogger();
   const emitPhaseLog = phaseLogger.emit;
-  const pendingPostSafePointCompletions = new Set<Promise<void>>();
+  const pendingDeferredUsageCompletions = new Set<Promise<void>>();
   const pendingMailboxPostCheckpointEffectCompletions = new Set<Promise<void>>();
   const trackCompletion = (
     pendingCompletions: Set<Promise<void>>,
@@ -810,16 +810,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       pendingCompletions.delete(completion);
     });
   };
-  const registerPostSafePointCompletion = (completion: Promise<void> | null): void => {
-    trackCompletion(pendingPostSafePointCompletions, completion);
-    trackHostedRuntimePostSafePointCompletion(completion);
+  const registerDeferredUsageCompletion = (completion: Promise<void> | null): void => {
+    trackCompletion(pendingDeferredUsageCompletions, completion);
+    trackHostedRuntimeDeferredUsageCompletion(completion);
   };
   const trackMailboxPostCheckpointEffects = (completion: Promise<void> | null): void => {
     trackCompletion(pendingMailboxPostCheckpointEffectCompletions, completion);
-    registerPostSafePointCompletion(completion);
   };
-  const drainPostSafePointCompletionsBestEffort = async (): Promise<void> => {
-    const pendingCompletions = [...pendingPostSafePointCompletions];
+  const drainDeferredUsageCompletionsBestEffort = async (): Promise<void> => {
+    const pendingCompletions = [...pendingDeferredUsageCompletions];
     if (pendingCompletions.length > 0) {
       await Promise.allSettled(pendingCompletions);
     }
@@ -1035,7 +1034,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
-      registerPostSafePointCompletion,
+      registerDeferredUsageCompletion,
       platform: runnerPlatform,
       requestId,
       runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -1069,7 +1068,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ...projectHostedRuntimeTrustStoreEnv(process.env),
       ...guardedRuntime.forwardedEnv,
       ...guardedRuntime.userEnv,
-      ...hostedCliBridge.env,
       ...(imageCodexModelCatalogJson
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
         : {}),
@@ -1403,6 +1401,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             signal: runtimeAbortController.signal,
           },
           async () => {
+            const invocationRuntimeEnv = {
+              ...runtimeEnv,
+              ...hostedCliBridge.env,
+            };
             return await raceHostedRuntimeCancellation(
               runHostedWorkspaceUntilIdleOrBudget({
                 ...baseRunnerInput,
@@ -1425,7 +1427,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     request: input.request,
                     restored,
                     runtime: foregroundRuntime,
-                    runtimeEnv,
+                    runtimeEnv: invocationRuntimeEnv,
                     stagedDirtyAcks: stagedDeviceSyncDirtyAcks,
                     suppressDirtyPendingFetch: suppressDirtyPendingFetchUntilCheckpoint,
                     signal: runtimeAbortController.signal,
@@ -2178,7 +2180,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "fail",
     });
     if (!hostAbortObserved || error !== hostAbortReason) {
-      await drainPostSafePointCompletionsBestEffort();
+      await drainDeferredUsageCompletionsBestEffort();
     }
     throw error;
   } finally {
@@ -2497,7 +2499,7 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
 const DEFAULT_HOSTED_RUNTIME_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const DEFAULT_HOSTED_FOREGROUND_MAILBOX_IMPORT_LIMIT = 10;
 const HOSTED_RUNTIME_MAX_TIMER_DELAY_MS = 2_147_483_647;
-const pendingHostedRuntimePostSafePointCompletions = new Set<Promise<void>>();
+const pendingHostedRuntimeDeferredUsageCompletions = new Set<Promise<void>>();
 
 type HostedRuntimeDirtyWaitResult =
   | { kind: "external_wake"; notification: RuntimeWakeNotification }
@@ -2520,22 +2522,22 @@ function consumePendingHostedRuntimeWake(
   );
 }
 
-function trackHostedRuntimePostSafePointCompletion(completion: Promise<void> | null): void {
+function trackHostedRuntimeDeferredUsageCompletion(completion: Promise<void> | null): void {
   if (completion === null) {
     return;
   }
 
-  pendingHostedRuntimePostSafePointCompletions.add(completion);
+  pendingHostedRuntimeDeferredUsageCompletions.add(completion);
   void completion.finally(() => {
-    pendingHostedRuntimePostSafePointCompletions.delete(completion);
+    pendingHostedRuntimeDeferredUsageCompletions.delete(completion);
   });
 }
 
-export async function drainHostedRuntimePostSafePointCompletionsBestEffort(input: {
+export async function drainHostedRuntimeDeferredUsageCompletionsBestEffort(input: {
   timeoutMs?: number | null;
 } = {}): Promise<void> {
   const pendingCompletions = [
-    ...pendingHostedRuntimePostSafePointCompletions,
+    ...pendingHostedRuntimeDeferredUsageCompletions,
   ];
   if (pendingCompletions.length === 0) {
     return;

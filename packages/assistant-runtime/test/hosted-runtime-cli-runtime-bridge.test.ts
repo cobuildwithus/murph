@@ -8,6 +8,7 @@ import {
   HOSTED_CLI_BRIDGE_TOKEN_ENV,
   HOSTED_CLI_BRIDGE_URL_ENV,
   HOSTED_CLI_BRIDGE_DEVICE_CONNECT_LINK_PATH,
+  HostedCliBridgeRequestError,
   requestHostedCliAssistantCurrentRoute,
   requestHostedCliDeviceAccountList,
   requestHostedCliDeviceConnectLink,
@@ -473,7 +474,7 @@ test("hosted CLI runtime bridge fails closed when accepted request drain times o
   }
 });
 
-test("hosted CLI runtime bridge keeps stable env while swapping active invocations", async () => {
+test("hosted CLI runtime bridge keeps stable idle env while swapping active invocations", async () => {
   await stopHostedCliRuntimeBridge();
   const bridge = await getOrCreateHostedCliRuntimeBridge();
   const firstDeviceSyncPort = createDeviceSyncPortStub();
@@ -537,6 +538,67 @@ test("hosted CLI runtime bridge keeps stable env while swapping active invocatio
     expect(firstDeviceSyncPort.createConnectLink).toHaveBeenCalledWith({
       connectTarget: "whoop",
     });
+    expect(secondDeviceSyncPort.createConnectLink).toHaveBeenCalledWith({
+      connectTarget: "oura",
+    });
+  } finally {
+    await bridge.stop();
+  }
+});
+
+test("hosted CLI runtime bridge rejects stale tokens from earlier invocations", async () => {
+  await stopHostedCliRuntimeBridge();
+  const bridge = await getOrCreateHostedCliRuntimeBridge();
+  const firstDeviceSyncPort = createDeviceSyncPortStub();
+  const secondDeviceSyncPort = createDeviceSyncPortStub();
+  const firstInvocationBridge: { current: { token: string; url: string } | null } = {
+    current: null,
+  };
+
+  try {
+    await bridge.runWithInvocation({ deviceSyncPort: firstDeviceSyncPort }, async () => {
+      firstInvocationBridge.current = {
+        token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+        url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+      };
+      await requestHostedCliDeviceConnectLink({
+        bridge: firstInvocationBridge.current,
+        connectTarget: "whoop",
+      });
+    });
+
+    const staleInvocationBridge = firstInvocationBridge.current;
+    assert.ok(staleInvocationBridge);
+    await bridge.runWithInvocation({ deviceSyncPort: secondDeviceSyncPort }, async () => {
+      const secondInvocationBridge = {
+        token: bridge.env[HOSTED_CLI_BRIDGE_TOKEN_ENV],
+        url: bridge.env[HOSTED_CLI_BRIDGE_URL_ENV],
+      };
+      assert.notEqual(secondInvocationBridge.token, staleInvocationBridge.token);
+
+      await assert.rejects(
+        () => requestHostedCliDeviceConnectLink({
+          bridge: staleInvocationBridge,
+          connectTarget: "garmin",
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof HostedCliBridgeRequestError);
+          assert.equal(error.code, "HOSTED_CLI_BRIDGE_UNAUTHORIZED");
+          return true;
+        },
+      );
+
+      await requestHostedCliDeviceConnectLink({
+        bridge: secondInvocationBridge,
+        connectTarget: "oura",
+      });
+    });
+
+    expect(firstDeviceSyncPort.createConnectLink).toHaveBeenCalledTimes(1);
+    expect(firstDeviceSyncPort.createConnectLink).toHaveBeenCalledWith({
+      connectTarget: "whoop",
+    });
+    expect(secondDeviceSyncPort.createConnectLink).toHaveBeenCalledTimes(1);
     expect(secondDeviceSyncPort.createConnectLink).toHaveBeenCalledWith({
       connectTarget: "oura",
     });

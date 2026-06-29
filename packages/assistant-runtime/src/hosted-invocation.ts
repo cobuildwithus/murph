@@ -12,7 +12,7 @@ import {
 import {
   consumePendingRuntimeWakeUnlessShuttingDown,
 } from "./hosted-runtime/runtime-wake.ts";
-export { drainHostedRuntimePostSafePointCompletionsBestEffort } from "./hosted-runtime.ts";
+export { drainHostedRuntimeDeferredUsageCompletionsBestEffort } from "./hosted-runtime.ts";
 export {
   consumeHostedCliRuntimeBridgeOffInvocationViolation,
   stopHostedCliRuntimeBridge,

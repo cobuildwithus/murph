@@ -30,7 +30,7 @@ type SpawnMock = (
 ) => MockSpawnedProcess;
 
 const mocks = vi.hoisted(() => ({
-  drainHostedRuntimePostSafePointCompletionsBestEffort: vi.fn(async () => undefined),
+  drainHostedRuntimeDeferredUsageCompletionsBestEffort: vi.fn(async () => undefined),
   emitHostedExecutionStructuredLog: vi.fn(),
   runHostedWorkspaceInvocation: vi.fn(),
   snapshotExpectedCodexRootProcess: vi.fn(),
@@ -78,8 +78,8 @@ vi.mock("@murphai/assistant-runtime/hosted-invocation", async () => {
   );
   return {
     ...actual,
-    drainHostedRuntimePostSafePointCompletionsBestEffort:
-      mocks.drainHostedRuntimePostSafePointCompletionsBestEffort,
+    drainHostedRuntimeDeferredUsageCompletionsBestEffort:
+      mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort,
     stopHostedCliRuntimeBridge: mocks.stopHostedCliRuntimeBridge,
   };
 });
@@ -107,7 +107,7 @@ const TEST_SNAPSHOT_PATH_HASH_SECRET = "a".repeat(64);
 beforeEach(() => {
   vi.unstubAllGlobals();
   globalThis.fetch = nativeFetch;
-  mocks.drainHostedRuntimePostSafePointCompletionsBestEffort.mockResolvedValue(undefined);
+  mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort.mockResolvedValue(undefined);
   mocks.runHostedWorkspaceInvocation.mockResolvedValue(buildWorkspaceRunnerResult());
   mocks.snapshotExpectedCodexRootProcess.mockResolvedValue(null);
   mocks.spawn.mockReset();
@@ -391,10 +391,10 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("drains post-safe-point completions before clean shutdown exit", async () => {
+  it("drains deferred usage completions before clean shutdown exit", async () => {
     const drainStarted = createDeferred();
     const releaseDrain = createDeferred();
-    mocks.drainHostedRuntimePostSafePointCompletionsBestEffort.mockImplementationOnce(
+    mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort.mockImplementationOnce(
       async () => {
         drainStarted.resolve();
         await releaseDrain.promise;
@@ -450,7 +450,7 @@ describe("startHostedContainerEntrypoint", () => {
   it("advertises absent for runtime wakes after shutdown only when no runner work is active", async () => {
     const drainStarted = createDeferred();
     const releaseDrain = createDeferred();
-    mocks.drainHostedRuntimePostSafePointCompletionsBestEffort.mockImplementationOnce(async () => {
+    mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort.mockImplementationOnce(async () => {
       drainStarted.resolve();
       await releaseDrain.promise;
     });
@@ -3401,14 +3401,14 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("drains post-safe-point completions before scheduling shell-isolation poison exit", async () => {
+  it("drains deferred usage completions before scheduling shell-isolation poison exit", async () => {
     const childPid = process.pid + 2100;
     let releaseDrain: () => void = () => undefined;
     const drainReleased = new Promise<void>((resolve) => {
       releaseDrain = resolve;
     });
 
-    mocks.drainHostedRuntimePostSafePointCompletionsBestEffort.mockImplementationOnce(
+    mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort.mockImplementationOnce(
       async () => {
         await drainReleased;
       },
@@ -3459,7 +3459,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     await vi.waitFor(() => {
-      expect(mocks.drainHostedRuntimePostSafePointCompletionsBestEffort).toHaveBeenCalledTimes(1);
+      expect(mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort).toHaveBeenCalledTimes(1);
     }, { timeout: 7_000 });
     expect(exit).not.toHaveBeenCalled();
 
@@ -3469,12 +3469,12 @@ describe("startHostedContainerEntrypoint", () => {
     expect(response.status).toBe(500);
     expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
     expect(exit).toHaveBeenCalledTimes(1);
-    expect(mocks.drainHostedRuntimePostSafePointCompletionsBestEffort).toHaveBeenCalledWith(
+    expect(mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort).toHaveBeenCalledWith(
       expect.objectContaining({ timeoutMs: expect.any(Number) }),
     );
   });
 
-  it("drains post-safe-point completions on shell-isolation poison after caller disconnects", async () => {
+  it("drains deferred usage completions on shell-isolation poison after caller disconnects", async () => {
     const childPid = process.pid + 2200;
     let runnerStarted = false;
     let releaseInvocation: () => void = () => undefined;
@@ -3493,7 +3493,7 @@ describe("startHostedContainerEntrypoint", () => {
       releaseDrain = resolve;
     });
 
-    mocks.drainHostedRuntimePostSafePointCompletionsBestEffort.mockImplementationOnce(
+    mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort.mockImplementationOnce(
       async () => {
         await drainReleased;
       },
@@ -3552,7 +3552,7 @@ describe("startHostedContainerEntrypoint", () => {
     releaseInvocation();
 
     await vi.waitFor(() => {
-      expect(mocks.drainHostedRuntimePostSafePointCompletionsBestEffort).toHaveBeenCalledTimes(1);
+      expect(mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort).toHaveBeenCalledTimes(1);
     }, { timeout: 7_000 });
     expect(exit).not.toHaveBeenCalled();
 

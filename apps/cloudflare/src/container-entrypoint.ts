@@ -36,7 +36,7 @@ import {
 import {
   consumeHostedCliRuntimeBridgeOffInvocationViolation,
   drainHostedRuntimeLogWritesBestEffort,
-  drainHostedRuntimePostSafePointCompletionsBestEffort,
+  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   stopHostedCliRuntimeBridge,
 } from "@murphai/assistant-runtime/hosted-invocation";
 import {
@@ -978,7 +978,7 @@ export async function startHostedContainerEntrypoint(input: {
             error,
             stage: "shell_isolation_poison",
           }),
-          drainHostedRuntimePostSafePointCompletionsBestEffort({
+          drainHostedRuntimeDeferredUsageCompletionsBestEffort({
             timeoutMs: HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS,
           }),
         ]);
@@ -1056,7 +1056,7 @@ export async function startHostedContainerEntrypoint(input: {
     }
     containerShutdownExitStarted = true;
     void (async () => {
-      await drainHostedRuntimePostSafePointCompletionsBestEffort({
+      await drainHostedRuntimeDeferredUsageCompletionsBestEffort({
         timeoutMs: HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS,
       });
       emitHostedExecutionStructuredLog({
@@ -1222,7 +1222,7 @@ function installHostedContainerProcessFatalHandlers(): void {
       void Promise.allSettled([
         reportHostedContainerFatalBestEffort({ error, stage }),
         drainHostedRuntimeLogWritesBestEffort(),
-        drainHostedRuntimePostSafePointCompletionsBestEffort({
+        drainHostedRuntimeDeferredUsageCompletionsBestEffort({
           timeoutMs: HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS,
         }),
       ]).then(() => {
