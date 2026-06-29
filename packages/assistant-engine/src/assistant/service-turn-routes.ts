@@ -5,6 +5,7 @@ import type { AssistantOperatorDefaults } from '@murphai/operator-config/operato
 import type { CodexThreadIdentity } from './codex-thread-route.js'
 import {
   compactAssistantProviderConfigInput,
+  type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
   buildResolveAssistantSessionInput,
@@ -18,6 +19,9 @@ import {
   resolveAssistantSession,
 } from './store.js'
 import { resolveAssistantExecutionPlan } from './execution-plan.js'
+import {
+  automationAssistantTargetOverrideToProviderConfigInput,
+} from './automation/target-override.js'
 
 export function resolveAssistantTurnRoute(
   input: AssistantMessageInput,
@@ -26,7 +30,7 @@ export function resolveAssistantTurnRoute(
 ): CodexThreadIdentity {
   return resolveAssistantExecutionPlan({
     defaults,
-    override: compactAssistantProviderConfigInput(input),
+    override: resolveAssistantTurnRouteOverride(input),
     sessionTarget: resolved.session.target,
   }).codexRoute
 }
@@ -56,7 +60,22 @@ export async function resolveAssistantTurnRouteForMessage(
     return resolveAssistantExecutionPlan({
       boundaryDefaultTarget,
       defaults,
-      override: compactAssistantProviderConfigInput(input),
+      override: resolveAssistantTurnRouteOverride(input),
     }).codexRoute
   }
+}
+
+function resolveAssistantTurnRouteOverride(
+  input: AssistantMessageInput,
+): AssistantProviderConfigInput | null {
+  const messageOverride = compactAssistantProviderConfigInput(input)
+  const automationOverride =
+    automationAssistantTargetOverrideToProviderConfigInput(
+      input.assistantTargetOverride,
+    )
+
+  return compactAssistantProviderConfigInput({
+    ...(messageOverride ?? {}),
+    ...(automationOverride ?? {}),
+  })
 }

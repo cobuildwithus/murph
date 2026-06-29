@@ -129,7 +129,7 @@ export interface AssistantNotificationInput
       | 'onProviderEvent'
       | 'onTraceEvent'
       | 'operatorAuthority'
-      | 'providerConfigPersistence'
+      | 'assistantTargetOverride'
       | 'serviceTier'
       | 'showThinkingTraces'
       | 'turnEnvironment'
@@ -738,7 +738,6 @@ function buildAssistantNotificationMessageInput(
     profile: input.profile,
     prompt: normalizeRequiredText(input.instructions, 'instructions'),
     provider: input.provider,
-    providerConfigPersistence: input.providerConfigPersistence,
     receiptMetadata: null,
     reasoningEffort: input.reasoningEffort,
     sandbox: input.sandbox,
@@ -748,6 +747,7 @@ function buildAssistantNotificationMessageInput(
     threadId: input.threadId,
     threadIsDirect: input.threadIsDirect,
     turnEnvironment: input.turnEnvironment ?? null,
+    assistantTargetOverride: input.assistantTargetOverride ?? null,
     turnTrigger: input.turnTrigger ?? 'automation-cron',
     userMessageContent: null,
     vault: input.vault,

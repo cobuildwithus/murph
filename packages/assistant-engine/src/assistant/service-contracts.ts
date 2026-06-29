@@ -18,6 +18,9 @@ import type {
   AssistantProviderServiceTier,
   AssistantProviderTurnExecutionResult,
 } from './providers/types.js'
+import type {
+  AutomationAssistantTargetOverride,
+} from '@murphai/contracts'
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantCliAccessContext } from '../assistant-cli-access.js'
 import type { AssistantOutboxDispatchMode } from './outbox.js'
@@ -106,6 +109,9 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   } | null
   activeTurnCheckpoint?: AssistantActiveTurnInputCheckpointHook
   activeTurnInput?: AssistantActiveTurnInputAdmissionHook
+  // Automation-owned per-turn provider route override. It is execution input,
+  // not durable session target state.
+  assistantTargetOverride?: AutomationAssistantTargetOverride | null
   codexCommand?: string
   deliverResponse?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
@@ -126,11 +132,6 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   operatorAuthority?: AssistantOperatorAuthority
   persistUserPromptOnFailure?: boolean
   prompt: string
-  // Defaults to "session": explicit provider fields become the session target
-  // after successful provider turns. Automation-owned overrides use "turn" so
-  // the provider route changes for one turn without rewriting durable session
-  // ownership.
-  providerConfigPersistence?: 'session' | 'turn'
   turnContext?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null

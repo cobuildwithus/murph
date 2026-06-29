@@ -7,17 +7,16 @@ import type {
   AssistantMessageInput,
   AssistantTurnEnvironment,
 } from '../service-contracts.js'
-import { normalizeNullableString } from '../shared.js'
+import {
+  compactAutomationAssistantTargetOverride,
+} from './target-override.js'
 
 export type AssistantAutomationTurnEnvelope = Pick<
   AssistantMessageInput,
   | 'abortSignal'
+  | 'assistantTargetOverride'
   | 'deliveryDispatchMode'
   | 'executionContext'
-  | 'model'
-  | 'modelProvider'
-  | 'providerConfigPersistence'
-  | 'reasoningEffort'
   | 'serviceTier'
   | 'turnEnvironment'
   | 'turnTrigger'
@@ -38,37 +37,11 @@ export function buildAssistantAutomationTurnEnvelope(input: {
 
   return {
     abortSignal: input.signal,
+    ...(targetOverride ? { assistantTargetOverride: targetOverride } : {}),
     deliveryDispatchMode: input.deliveryDispatchMode,
     executionContext: input.executionContext,
-    ...(targetOverride?.model ? { model: targetOverride.model } : {}),
-    ...(targetOverride?.modelProvider
-      ? { modelProvider: targetOverride.modelProvider }
-      : {}),
-    ...(targetOverride ? { providerConfigPersistence: 'turn' as const } : {}),
-    ...(targetOverride?.reasoningEffort
-      ? { reasoningEffort: targetOverride.reasoningEffort }
-      : {}),
     serviceTier: input.serviceTier ?? null,
     turnEnvironment: input.turnEnvironment ?? null,
     turnTrigger: input.turnTrigger,
   }
-}
-
-function compactAutomationAssistantTargetOverride(
-  input: AutomationAssistantTargetOverride | null | undefined,
-): AutomationAssistantTargetOverride | null {
-  if (!input) {
-    return null
-  }
-
-  const model = normalizeNullableString(input.model)
-  const modelProvider = normalizeNullableString(input.modelProvider)
-  const reasoningEffort = normalizeNullableString(input.reasoningEffort)
-  const target: AutomationAssistantTargetOverride = {
-    ...(model ? { model } : {}),
-    ...(modelProvider ? { modelProvider } : {}),
-    ...(reasoningEffort ? { reasoningEffort } : {}),
-  }
-
-  return Object.keys(target).length > 0 ? target : null
 }

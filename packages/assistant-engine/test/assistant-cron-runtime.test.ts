@@ -1298,8 +1298,10 @@ describe('assistant cron runtime orchestration', () => {
     })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
+        assistantTargetOverride: {
+          reasoningEffort: 'high',
+        },
         instructions: 'Ask about the imported run.',
-        reasoningEffort: 'high',
       }),
     )
   })

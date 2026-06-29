@@ -60,6 +60,7 @@ describe('assistant session resolution store integration', () => {
     })
 
     const resolved = await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: sessionTarget,
       defaults: null,
       message: {
         actorId: 'linq-participant',
@@ -93,7 +94,7 @@ describe('assistant session resolution store integration', () => {
     ])
   })
 
-  it('keeps turn-scoped message target overrides out of durable session targets', async () => {
+  it('keeps automation target overrides out of durable session targets', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'assistant-session-resolution-turn-scoped-',
     )
@@ -116,14 +117,16 @@ describe('assistant session resolution store integration', () => {
     })
 
     const resolved = await resolveAssistantSessionForMessage({
+      boundaryDefaultTarget: sessionTarget,
       defaults: null,
       message: {
         actorId: 'linq-participant',
         channel: 'linq',
         identityId: 'linq-identity',
         prompt: 'Ask about the activity.',
-        providerConfigPersistence: 'turn',
-        reasoningEffort: 'high',
+        assistantTargetOverride: {
+          reasoningEffort: 'high',
+        },
         threadId: 'linq-thread',
         threadIsDirect: true,
         vault: vaultRoot,
@@ -141,7 +144,7 @@ describe('assistant session resolution store integration', () => {
     expect(sessions[0]?.target).toEqual(sessionTarget)
   })
 
-  it('creates turn-scoped message override sessions with the durable base target', async () => {
+  it('creates automation target override sessions with the durable base target', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'assistant-session-resolution-turn-scoped-create-',
     )
@@ -162,8 +165,9 @@ describe('assistant session resolution store integration', () => {
         channel: 'linq',
         identityId: 'linq-identity',
         prompt: 'Ask about the activity.',
-        providerConfigPersistence: 'turn',
-        reasoningEffort: 'high',
+        assistantTargetOverride: {
+          reasoningEffort: 'high',
+        },
         threadId: 'linq-thread',
         threadIsDirect: true,
         vault: vaultRoot,

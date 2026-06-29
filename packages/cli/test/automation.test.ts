@@ -488,6 +488,8 @@ test("automation save and edit manage assistant target overrides from typed fiel
     assert.equal(editedShown.exitCode, null);
     assert.equal(editedShown.envelope.ok, true);
     assert.deepEqual(editedShown.envelope.data?.automation?.assistantTargetOverride, {
+      model: "gpt-5.5",
+      modelProvider: "vercel-ai-gateway",
       reasoningEffort: "medium",
     });
 

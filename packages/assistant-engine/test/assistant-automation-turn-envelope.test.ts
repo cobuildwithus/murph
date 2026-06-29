@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { buildAssistantAutomationTurnEnvelope } from '../src/assistant/automation/turn-envelope.ts'
 
 describe('assistant automation turn envelope', () => {
-  it('projects automation target overrides onto the assistant message input', () => {
+  it('carries automation target overrides as turn-scoped input', () => {
     expect(buildAssistantAutomationTurnEnvelope({
       assistantTargetOverride: {
         model: 'gpt-5.5',
@@ -12,10 +12,11 @@ describe('assistant automation turn envelope', () => {
       },
       turnTrigger: 'automation-cron',
     })).toMatchObject({
-      model: 'gpt-5.5',
-      modelProvider: 'vercel-ai-gateway',
-      providerConfigPersistence: 'turn',
-      reasoningEffort: 'high',
+      assistantTargetOverride: {
+        model: 'gpt-5.5',
+        modelProvider: 'vercel-ai-gateway',
+        reasoningEffort: 'high',
+      },
       serviceTier: null,
       turnEnvironment: null,
       turnTrigger: 'automation-cron',
@@ -26,10 +27,6 @@ describe('assistant automation turn envelope', () => {
     expect(buildAssistantAutomationTurnEnvelope({
       assistantTargetOverride: {},
       turnTrigger: 'automation-cron',
-    })).not.toHaveProperty('reasoningEffort')
-    expect(buildAssistantAutomationTurnEnvelope({
-      assistantTargetOverride: {},
-      turnTrigger: 'automation-cron',
-    })).not.toHaveProperty('providerConfigPersistence')
+    })).not.toHaveProperty('assistantTargetOverride')
   })
 })

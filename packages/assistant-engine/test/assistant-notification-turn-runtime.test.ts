@@ -275,8 +275,9 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     onTraceEvent(event) {
       traceEvents.push(event)
     },
-    providerConfigPersistence: 'turn',
-    reasoningEffort: 'high',
+    assistantTargetOverride: {
+      reasoningEffort: 'high',
+    },
     vault: '/vaults/test',
   } satisfies Parameters<typeof sendAssistantNotificationLocal>[0] & Record<string, unknown>
 
@@ -340,11 +341,9 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
     },
   )
   assert.ok(firstResolvedNotificationSessionInput?.message)
-  assert.equal(
-    firstResolvedNotificationSessionInput.message.providerConfigPersistence,
-    'turn',
-  )
-  assert.equal(firstResolvedNotificationSessionInput.message.reasoningEffort, 'high')
+  assert.deepEqual(firstResolvedNotificationSessionInput.message.assistantTargetOverride, {
+    reasoningEffort: 'high',
+  })
   assert.deepEqual(result.decision, {
     kind: 'send_message',
     privateSummary: 'summary',

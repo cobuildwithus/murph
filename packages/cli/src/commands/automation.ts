@@ -344,7 +344,9 @@ function buildAutomationAssistantTargetOverrideFromOptions(
 }
 
 function buildAutomationAssistantTargetOverridePatchFromOptions(
-  input: AutomationAssistantTargetOverrideEditOptions,
+  input: AutomationAssistantTargetOverrideEditOptions & {
+    existingAssistantTargetOverride?: AutomationAssistantTargetOverride | null;
+  },
 ): AutomationAssistantTargetOverride | null | undefined {
   const target = buildAutomationAssistantTargetOverrideFromOptions(input);
   if (input.clearAssistantTargetOverride === true) {
@@ -356,7 +358,14 @@ function buildAutomationAssistantTargetOverridePatchFromOptions(
     return null;
   }
 
-  return target;
+  if (target === undefined) {
+    return undefined;
+  }
+
+  return automationAssistantTargetOverrideSchema.parse({
+    ...(input.existingAssistantTargetOverride ?? {}),
+    ...target,
+  });
 }
 
 function normalizeAutomationTagOptions(input: {
@@ -685,12 +694,17 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         participantId: context.options.participantId,
         threadId: context.options.threadId,
       };
-      const assistantTargetOverride = buildAutomationAssistantTargetOverridePatchFromOptions({
+      const assistantTargetOverrideOptions = {
         assistantTargetOverrideModel: context.options.assistantTargetOverrideModel,
         assistantTargetOverrideModelProvider: context.options.assistantTargetOverrideModelProvider,
         assistantTargetOverrideReasoningEffort: context.options.assistantTargetOverrideReasoningEffort,
         clearAssistantTargetOverride: context.options.clearAssistantTargetOverride,
-      });
+      };
+      const needsExistingForAssistantTargetOverride =
+        context.options.clearAssistantTargetOverride === true ||
+        buildAutomationAssistantTargetOverrideFromOptions(
+          assistantTargetOverrideOptions,
+        ) !== undefined;
       const scheduleOptions = {
         activityKind: context.options.activityKind,
         deviceSource: context.options.deviceSource,
@@ -710,6 +724,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         : undefined;
       const needsExisting =
         context.options.status === "active" ||
+        needsExistingForAssistantTargetOverride ||
         (
           route !== undefined &&
           context.options.status !== "paused" &&
@@ -730,6 +745,10 @@ export function registerAutomationCommands(cli: Cli.Cli) {
       ) {
         assertActiveAutomationRouteCanDeliver(route ?? existing.route);
       }
+      const assistantTargetOverride = buildAutomationAssistantTargetOverridePatchFromOptions({
+        ...assistantTargetOverrideOptions,
+        existingAssistantTargetOverride: existing?.assistantTargetOverride ?? null,
+      });
       const result = await patchAutomation({
         assistantTargetOverride,
         continuityPolicy: context.options.continuityPolicy,

@@ -27,6 +27,9 @@ import type {
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
 } from './service-contracts.js'
+import {
+  compactAutomationAssistantTargetOverride,
+} from './automation/target-override.js'
 
 export const ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX =
   'murph.assistant-no-reply.v1 '
@@ -278,9 +281,13 @@ export async function persistAssistantTurnAndSession(input: {
   })
 
   const updatedAt = new Date().toISOString()
+  const hasTurnScopedTargetOverride =
+    compactAutomationAssistantTargetOverride(
+      input.input.assistantTargetOverride,
+    ) !== null
   const shouldApplyProviderConfigToSession =
     input.providerResumeStateAction !== 'preserve-existing' &&
-    input.input.providerConfigPersistence !== 'turn'
+    !hasTurnScopedTargetOverride
   const nextTarget = shouldApplyProviderConfigToSession
     ? createAssistantModelTarget({
         ...assistantBackendTargetToProviderConfigInput(input.session.target),
@@ -299,7 +306,7 @@ export async function persistAssistantTurnAndSession(input: {
       )
     : input.session.providerOptions
   const nextResumeState =
-    input.input.providerConfigPersistence === 'turn'
+    hasTurnScopedTargetOverride
       ? null
       : resolveAssistantNextResumeState({
           action: input.providerResumeStateAction,

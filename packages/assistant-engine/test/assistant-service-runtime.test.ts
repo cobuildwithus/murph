@@ -362,6 +362,9 @@ describe("assistant service turn route", () => {
       }),
     };
     const input = {
+      assistantTargetOverride: {
+        reasoningEffort: "high",
+      },
       model: "gpt-5-mini",
       prompt: "Summarize today.",
       provider: "codex-cli" as const,
@@ -379,6 +382,7 @@ describe("assistant service turn route", () => {
       defaults,
       override: expect.objectContaining({
         model: "gpt-5-mini",
+        reasoningEffort: "high",
       }),
       sessionTarget: resolved.session.target,
     });
@@ -3506,7 +3510,7 @@ describe("assistant turn finalizer seam", () => {
     expect(saved.provider).toBe("codex-cli");
   });
 
-  it("keeps turn-scoped provider overrides out of durable session targets", async () => {
+  it("keeps automation target overrides out of durable session targets", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T16:05:00.000Z"));
     runtimeState.sessions.save.mockImplementation(
@@ -3527,9 +3531,10 @@ describe("assistant turn finalizer seam", () => {
 
     const saved = await persistAssistantTurnAndSession({
       input: {
+        assistantTargetOverride: {
+          reasoningEffort: "high",
+        },
         prompt: "Run the high-effort automation turn.",
-        providerConfigPersistence: "turn",
-        reasoningEffort: "high",
         turnTrigger: "automation-cron",
         vault: "/vault",
       },
