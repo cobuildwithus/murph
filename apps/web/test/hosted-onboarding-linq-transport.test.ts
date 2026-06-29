@@ -461,6 +461,40 @@ describe("hosted Linq webhook transport", () => {
     });
   });
 
+  it("keys invite signup replies by source event instead of reused invite", () => {
+    const firstEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-invite-1",
+      template: "invite_signup",
+    });
+    const replayedEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-invite-1",
+      template: "invite_signup",
+    });
+    const laterEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-27T12:00:00.000Z",
+      replyToMessageId: "message-2",
+      sourceEventId: "event-invite-2",
+      template: "invite_signup",
+    });
+
+    expect(firstEffect.effectId).toBe("linq-invite-signup:event-invite-1");
+    expect(replayedEffect.effectId).toBe(firstEffect.effectId);
+    expect(laterEffect.effectId).toBe("linq-invite-signup:event-invite-2");
+  });
+
   it("releases AI usage quota notice claims when delivery fails", async () => {
     vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(new Error("send failed"));
     const effect = createHostedWebhookLinqMessageSideEffect({

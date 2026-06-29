@@ -393,7 +393,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
-        idempotencyKey: "linq-invite-signup:invite_123",
+        idempotencyKey: "linq-invite-signup:evt_123",
         message: buildHostedInviteReply({
           joinUrl: "https://join.example.test/join/code_first_contact",
         }),
@@ -420,7 +420,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
-  it("uses invite-scoped idempotency for repeated first-contact signup link sends", async () => {
+  it("uses event-scoped idempotency for repeated first-contact signup link sends", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
@@ -459,7 +459,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        idempotencyKey: "linq-invite-signup:invite_123",
+        idempotencyKey: "linq-invite-signup:evt_first_contact_one",
         message: buildHostedInviteReply({
           joinUrl: "https://join.example.test/join/code_first_contact",
         }),
@@ -469,7 +469,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        idempotencyKey: "linq-invite-signup:invite_123",
+        idempotencyKey: "linq-invite-signup:evt_first_contact_two",
         message: buildHostedInviteReply({
           joinUrl: "https://join.example.test/join/code_first_contact",
         }),

@@ -199,7 +199,7 @@ function buildHostedWebhookLinqMessageEffectId(
   input: CreateHostedWebhookLinqMessageSideEffectInput,
 ): string {
   if (input.template === "invite_signup") {
-    return `linq-invite-signup:${input.inviteId}`;
+    return `linq-invite-signup:${input.sourceEventId}`;
   }
 
   if (input.template === "ai_usage_quota" && input.claimToken) {

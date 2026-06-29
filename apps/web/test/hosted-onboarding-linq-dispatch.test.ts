@@ -2640,10 +2640,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("records classifier decisions in the same transaction as the budget claim", async () => {
+  it("does not hold the budget transaction open while classifying first contact", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     const admissionOrder: string[] = [];
+    let transactionOpen = false;
     mocks.classifyHostedLinqFirstContactAdmission.mockImplementationOnce(async () => {
+      expect(transactionOpen).toBe(false);
       admissionOrder.push("classify");
       return {
         confidence: 0.94,
@@ -2652,8 +2654,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       };
     });
     const transactionDecisionCreateMany = vi.fn(async () => {
-      admissionOrder.push("record");
-      return { count: 1 };
+      throw new Error("first-contact admission decision should not be recorded inside the budget transaction");
     });
     const transactionClient = {
       hostedLinqFirstContactAdmissionBudget: {
@@ -2666,12 +2667,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedLinqFirstContactAdmissionDecision: {
         createMany: transactionDecisionCreateMany,
-        findUnique: vi.fn().mockResolvedValue({
-          confidence: 0.94,
-          decision: "block",
-          eventId: "evt_transactional_first_contact_block",
-          source: "model",
-        }),
+        findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedMember: {
         create: vi.fn(),
@@ -2680,9 +2676,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
     };
     const rootDecisionCreateMany = vi.fn(async () => {
-      throw new Error("first-contact admission decision must be transaction-bound");
+      admissionOrder.push("record");
+      return { count: 1 };
     });
-    const prisma = withPrismaTransaction({
+    const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -2696,14 +2693,34 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedLinqFirstContactAdmissionDecision: {
         createMany: rootDecisionCreateMany,
-        findUnique: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({
+            confidence: 0.94,
+            decision: "block",
+            eventId: "evt_transactional_first_contact_block",
+            source: "model",
+          }),
       },
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue(null),
         update: vi.fn(),
       },
-    }, transactionClient);
+    }) as HostedOnboardingLinqWebhookPrismaFixture & {
+      $transaction: MockedFunction;
+    };
+    const transactionPrisma = asPrismaTransactionClient(transactionClient);
+    prisma.$transaction = vi.fn(async (
+      callback: (innerTx: typeof transactionPrisma) => Promise<unknown>,
+    ) => {
+      transactionOpen = true;
+      try {
+        return await callback(transactionPrisma);
+      } finally {
+        transactionOpen = false;
+      }
+    });
 
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
@@ -2728,8 +2745,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(admissionOrder).toEqual(["claim", "classify", "record"]);
-    expect(rootDecisionCreateMany).not.toHaveBeenCalled();
-    expect(transactionDecisionCreateMany).toHaveBeenCalledWith({
+    expect(transactionDecisionCreateMany).not.toHaveBeenCalled();
+    expect(rootDecisionCreateMany).toHaveBeenCalledWith({
       data: {
         confidence: 0.94,
         decision: "block",

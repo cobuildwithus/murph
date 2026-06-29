@@ -15,6 +15,9 @@ import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
+  assertHostedLinqRouteAuthorityMatchesTarget,
+} from "@/src/lib/hosted-onboarding/linq-egress-engagement";
+import {
   jsonOk,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
@@ -61,16 +64,25 @@ export const POST = withJsonError(async (request: Request) => {
     body.attemptedAt,
     "attemptedAt",
   );
-  const routeLineLookupKey = routeAuthority
-    ? await readHostedLinqDeliveryRouteLineLookupKey({
-        memberId: userId,
-        prisma,
-        routeAuthority,
-      })
-    : null;
   const providerTarget = readOptionalBodyString(body.providerTarget);
   const providerThreadId = readOptionalBodyString(body.providerThreadId);
   const target = readOptionalBodyString(body.target);
+  const linqChatId = providerThreadId
+    ?? (targetKind === "participant" ? null : providerTarget ?? target);
+  const validatedRouteAuthority = routeAuthority
+    ? assertHostedLinqRouteAuthorityMatchesTarget({
+        chatId: linqChatId,
+        memberId: userId,
+        routeAuthority,
+      })
+    : null;
+  const routeLineLookupKey = validatedRouteAuthority
+    ? await readHostedLinqDeliveryRouteLineLookupKey({
+        memberId: userId,
+        prisma,
+        routeAuthority: validatedRouteAuthority,
+      })
+    : null;
   const result = await recordHostedLinqRuntimeDeliveryOutcomeTx({
     acceptedAt,
     attemptedAt,
@@ -78,8 +90,7 @@ export const POST = withJsonError(async (request: Request) => {
     failureCode: readOptionalBodyString(body.failureCode),
     failureReason: readOptionalBodyString(body.failureReason),
     idempotencyKey: readOptionalBodyString(body.idempotencyKey),
-    linqChatId: providerThreadId
-      ?? (targetKind === "participant" ? null : providerTarget ?? target),
+    linqChatId,
     messageId: readOptionalBodyString(body.providerMessageId),
     phoneNumber: routeLineLookupKey ? null : readOptionalBodyString(body.fromPhoneNumber),
     phoneNumberLookupKey: routeLineLookupKey,

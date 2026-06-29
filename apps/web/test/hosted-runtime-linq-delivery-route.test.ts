@@ -133,6 +133,19 @@ describe("hosted runtime Linq delivery route", () => {
 
     expect(mismatch.status).toBe(403);
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledTimes(1);
+
+    const targetMismatch = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_456",
+      providerThreadId: "linq_chat_other",
+      routeAuthority,
+      target: "linq_chat_123",
+      targetKind: "thread",
+    }));
+
+    expect(targetMismatch.status).toBe(403);
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledTimes(1);
   });
 });
 
