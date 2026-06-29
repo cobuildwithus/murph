@@ -8,6 +8,7 @@ import {
 } from '@murphai/core'
 import {
   MURPH_PRODUCT_ORIGIN,
+  type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
   type AutomationRoute,
   type AutomationSchedule,
@@ -36,6 +37,7 @@ export type MurphManagedAutomationSchedule = Exclude<
 
 export interface MurphManagedAutomationSeed {
   automationId: string
+  assistantTargetOverride?: AutomationAssistantTargetOverride | null
   continuityPolicy?: AutomationContinuityPolicy
   instructions: string
   requiredRuntimeEnvKeys?: readonly string[]
@@ -195,6 +197,9 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       expression: '0 12 * * 0',
     },
     continuityPolicy: 'fresh',
+    assistantTargetOverride: {
+      reasoningEffort: 'high',
+    },
     tags: [
       'murph-managed:weekly-health-insight',
     ],
@@ -463,6 +468,9 @@ export async function applyMurphManagedAutomations(
         continuityPolicy: resolveMurphManagedAutomationContinuity(seed),
         instructions: seed.instructions,
         now,
+        ...(seed.assistantTargetOverride === undefined
+          ? {}
+          : { assistantTargetOverride: seed.assistantTargetOverride }),
         route,
         schedule: seed.schedule,
         slug: seed.slug,
@@ -543,6 +551,9 @@ export async function applyMurphManagedAutomations(
       continuityPolicy: resolveMurphManagedAutomationContinuity(seed),
       instructions: seed.instructions,
       now,
+      ...(seed.assistantTargetOverride === undefined
+        ? {}
+        : { assistantTargetOverride: seed.assistantTargetOverride }),
       // Routes are user/runtime-owned: seeds never carry one, so updates
       // preserve the existing route without re-checking deliverability.
       // Only the create path validates routes, because that is the only
@@ -770,6 +781,13 @@ function murphManagedAutomationSeedChanged(
     (summary !== null && existing.summary !== summary) ||
     existing.continuityPolicy !== resolveMurphManagedAutomationContinuity(seed) ||
     existing.instructions !== seed.instructions ||
+    (
+      seed.assistantTargetOverride !== undefined &&
+      !murphManagedAutomationValuesEqual(
+        existing.assistantTargetOverride,
+        seed.assistantTargetOverride,
+      )
+    ) ||
     (
       options.ignoreSchedule !== true &&
       !murphManagedAutomationValuesEqual(existing.schedule, seed.schedule)

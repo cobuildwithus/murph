@@ -542,6 +542,43 @@ describe("automation helpers", () => {
     await expect(listAutomations(emptyPromptVault)).rejects.toThrow(
       /instructions body must contain text\./u,
     );
+
+    const invalidReasoningEffortVault = await createVaultRoot();
+    await writeAutomationDocument(
+      invalidReasoningEffortVault,
+      "broken-target-override",
+      [
+        "---",
+        "schemaVersion: murph.frontmatter.automation.v1",
+        "docType: automation",
+        "automationId: auto_broken_target_override",
+        "slug: broken-target-override",
+        "title: Broken target override",
+        "status: active",
+        "schedule:",
+        "  kind: dailyLocal",
+        "  localTime: 08:30",
+        "route:",
+        "  channel: linq",
+        "  deliveryTarget: linq-target",
+        "  identityId: null",
+        "  participantId: null",
+        "  threadId: null",
+        "assistantTargetOverride:",
+        "  reasoningEffort: hihg",
+        "continuityPolicy: preserve",
+        "createdAt: 2026-06-07T12:00:00.000Z",
+        "updatedAt: 2026-06-07T12:00:00.000Z",
+        "---",
+        "",
+        "Broken target override body.",
+        "",
+      ].join("\n"),
+    );
+
+    await expect(listAutomations(invalidReasoningEffortVault)).rejects.toThrow(
+      /assistantTargetOverride\.reasoningEffort must be one of low, medium, high, xhigh/u,
+    );
   });
 });
 

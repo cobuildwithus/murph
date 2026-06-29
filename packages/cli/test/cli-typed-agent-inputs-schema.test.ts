@@ -284,6 +284,9 @@ const canonicalTypedCommands = [
       'identityId',
       'participantId',
       'threadId',
+      'assistantTargetOverrideModel',
+      'assistantTargetOverrideModelProvider',
+      'assistantTargetOverrideReasoningEffort',
     ],
   },
   {
@@ -308,6 +311,10 @@ const canonicalTypedCommands = [
       'identityId',
       'participantId',
       'threadId',
+      'assistantTargetOverrideModel',
+      'assistantTargetOverrideModelProvider',
+      'assistantTargetOverrideReasoningEffort',
+      'clearAssistantTargetOverride',
     ],
   },
   {
