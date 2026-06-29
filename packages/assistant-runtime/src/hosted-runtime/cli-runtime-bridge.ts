@@ -189,12 +189,15 @@ async function startHostedCliRuntimeBridgeServer(): Promise<HostedCliRuntimeBrid
         return await operation();
       } finally {
         invocation.closing = true;
-        await waitForInFlightBridgeRequests(
-          invocation,
-          HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
-        );
-        if (active === invocation) {
-          active = null;
+        try {
+          await waitForInFlightBridgeRequests(
+            invocation,
+            HOSTED_CLI_BRIDGE_REQUEST_TIMEOUT_MS,
+          );
+        } finally {
+          if (active === invocation) {
+            active = null;
+          }
         }
       }
     },
