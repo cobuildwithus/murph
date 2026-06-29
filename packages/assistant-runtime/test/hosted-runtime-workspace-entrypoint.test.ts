@@ -3541,7 +3541,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(assistantPass?.redactedJson?.deviceSyncSkipped, true);
       assert.equal(assistantPass?.redactedJson?.nextWakeAtPresent, false);
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
-      assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
     } finally {
       await removeTempRoot(vaultRoot);
     }

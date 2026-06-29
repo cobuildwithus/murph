@@ -3340,6 +3340,104 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("synthetic-whoop-secret");
   });
 
+  it("injects reconnect-required hosted device sync status as dynamic context", async () => {
+    let fetchSnapshotCalls = 0;
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      async fetchSnapshot(request) {
+        fetchSnapshotCalls += 1;
+        expect(request).toEqual({ signal: expect.any(AbortSignal) });
+        return {
+          connections: [
+            {
+              connection: {
+                accessTokenExpiresAt: null,
+                connectedAt: "2026-04-29T00:00:00.000Z",
+                createdAt: "2026-04-29T00:00:00.000Z",
+                displayName: null,
+                externalAccountId: "synthetic-external-account",
+                id: "conn_synthetic_whoop",
+                metadata: {},
+                provider: "junction",
+                scopes: [],
+                status: "active",
+              },
+              credential: {
+                credentialMetadata: {},
+                kind: "provider_config",
+                providerConfigKey: "junction",
+              },
+              localState: {
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSyncCompletedAt: "2026-04-22T00:00:00.000Z",
+                lastSyncErrorAt: null,
+                lastSyncStartedAt: "2026-04-29T00:00:00.000Z",
+                lastWebhookAt: null,
+                nextReconcileAt: null,
+              },
+              sources: [
+                {
+                  displayName: null,
+                  firstSeenAt: "2026-04-22T00:00:00.000Z",
+                  lastErrorCode: "TOKEN_REFRESH_FAILED",
+                  lastErrorMessage: "refresh failed",
+                  lastSeenAt: "2026-04-29T00:00:00.000Z",
+                  resourceCount: 0,
+                  sourceProviderSlug: "whoop_v2",
+                  status: "error",
+                },
+              ],
+            },
+          ],
+          generatedAt: "2026-04-29T00:00:00.000Z",
+          userId: "member_synthetic_phase",
+        };
+      },
+    } satisfies RuntimeDeviceSyncPort;
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: ["ain_00000000000000000000000000000042"],
+      importedCount: 1,
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["whoop_v2"],
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
+    }));
+
+    const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    const dynamicContextPrompts =
+      assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts;
+    expect(fetchSnapshotCalls).toBe(1);
+    expect(dynamicContextPrompts).toHaveLength(1);
+    expect(dynamicContextPrompts?.[0]).toContain("WHOOP currently needs reconnect");
+    expect(dynamicContextPrompts?.[0]).toContain("source `whoop_v2`");
+    expect(dynamicContextPrompts?.[0]).toContain("`TOKEN_REFRESH_FAILED`");
+    expect(dynamicContextPrompts?.[0]).toContain(
+      "vault-cli device connect whoop --format json",
+    );
+    expect(dynamicContextPrompts?.[0]).not.toContain("synthetic-external-account");
+    expect(dynamicContextPrompts?.[0]).not.toContain("refresh failed");
+  });
+
   it("logs hosted device connect helper failures without leaking response details", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const deviceSyncPort = {

@@ -36,6 +36,7 @@ import {
 } from "@murphai/assistant-engine/assistant-automation";
 import {
   listConfiguredDeviceSyncConnectTargets,
+  listConfiguredDeviceSyncReconnectTargets,
 } from "@murphai/device-syncd/config";
 import type {
   AssistantCurrentDeliveryRoute,
@@ -67,6 +68,10 @@ import {
   runHostedDeviceSyncWakeLane,
   resolveHostedDeviceSyncNextWakeAt,
 } from "./maintenance.ts";
+import {
+  buildHostedDeviceSyncStatusPrompt,
+  type HostedDeviceSyncStatusPromptReconnectTarget,
+} from "./device-sync-status-prompt.ts";
 import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
@@ -258,7 +263,6 @@ export async function runHostedWorkspaceAssistantPhase(
       runtimeEnv: input.runtimeEnv,
     },
   );
-
   try {
     const hasFreshConversationInput = hasFreshHostedConversationInput(input);
     const pendingAssistantInputWakeAt = await resolveInitialPendingAssistantInputWakeAt({
@@ -314,7 +318,44 @@ export async function runHostedWorkspaceAssistantPhase(
     const freshAssistantInputIds =
       input.initialMailboxImport.importResult.assistantInputIds ?? [];
     const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
-    const runAutomationLane = async () => {
+    let assistantLaneExecutionContextWithDynamicPrompt: AssistantExecutionContext | null = null;
+    const resolveAssistantLaneExecutionContext = async (options: {
+      includeDeviceSyncStatusPrompt: boolean;
+    }): Promise<AssistantExecutionContext> => {
+      if (!options.includeDeviceSyncStatusPrompt) {
+        return executionContext;
+      }
+      if (assistantLaneExecutionContextWithDynamicPrompt) {
+        return assistantLaneExecutionContextWithDynamicPrompt;
+      }
+
+      const deviceSyncStatusPrompt = await buildHostedDeviceSyncStatusPrompt({
+        deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
+        reconnectTargets: resolveHostedWorkspaceDeviceReconnectTargets(input.runtime),
+        signal: channelAbortController.signal,
+      });
+      assistantLaneExecutionContextWithDynamicPrompt =
+        withHostedAssistantDynamicContextPrompt({
+          executionContext,
+          prompt: deviceSyncStatusPrompt,
+        });
+      return assistantLaneExecutionContextWithDynamicPrompt;
+    };
+    const shouldIncludeDeviceSyncStatusPrompt = async (): Promise<boolean> => {
+      if (
+        hasFreshConversationInput
+        || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null
+        || systemMailboxMaintenance.continueAssistantLane
+        || managedAutomationsResult !== null
+      ) {
+        return true;
+      }
+
+      return await hasDueHostedAssistantCronJob(input);
+    };
+    const runAutomationLane = async (options: {
+      includeDeviceSyncStatusPrompt: boolean;
+    }) => {
       const automationLaneStartedAt = Date.now();
       const assistantRuntimeState = await prepareHostedAssistantAutomationForWake(
         input.restored.vaultRoot,
@@ -325,11 +366,16 @@ export async function runHostedWorkspaceAssistantPhase(
           operatorHomeRoot: input.restored.operatorHomeRoot,
         },
       );
+      const automationExecutionContext = await resolveAssistantLaneExecutionContext({
+        includeDeviceSyncStatusPrompt:
+          options.includeDeviceSyncStatusPrompt
+          && assistantRuntimeState.assistantConfigured,
+      });
       const assistantMetrics = await (async () => {
         try {
           return await runHostedAssistantAutomationLane({
             assistantRuntimeState,
-            executionContext,
+            executionContext: automationExecutionContext,
             freshAssistantInputIds,
             requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
             runtime: {
@@ -382,7 +428,9 @@ export async function runHostedWorkspaceAssistantPhase(
           : { redactedLogEntries: [...assistantAutomationRedactedLogEntries] }),
       };
     };
-    let assistantMetrics = await runAutomationLane();
+    let assistantMetrics = await runAutomationLane({
+      includeDeviceSyncStatusPrompt: await shouldIncludeDeviceSyncStatusPrompt(),
+    });
     let currentTurnDeliveryIntentIds =
       assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
     let foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
@@ -418,7 +466,9 @@ export async function runHostedWorkspaceAssistantPhase(
         || deferredPendingSystemMailboxMaintenance.deviceSyncMaintenanceRan;
     }
     if (deferredPendingSystemMailboxMaintenance?.continueAssistantLane === true) {
-      assistantMetrics = await runAutomationLane();
+      assistantMetrics = await runAutomationLane({
+        includeDeviceSyncStatusPrompt: true,
+      });
       currentTurnDeliveryIntentIds =
         assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
       foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
@@ -4592,6 +4642,50 @@ function resolveHostedWorkspaceDeviceConnectProviders(
     label: target.label,
     provider: target.connectTarget,
   }));
+}
+
+function resolveHostedWorkspaceDeviceReconnectTargets(
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "resolvedConfig">,
+): HostedDeviceSyncStatusPromptReconnectTarget[] {
+  const providerConfigs = runtime.resolvedConfig.deviceSync?.providerConfigs ?? null;
+  if (!providerConfigs) {
+    return [];
+  }
+
+  return listConfiguredDeviceSyncReconnectTargets(providerConfigs).map((target) => ({
+    label: target.label,
+    provider: target.connectTarget,
+    ...(target.sourceProviderSlug
+      ? { sourceProviderSlug: target.sourceProviderSlug }
+      : {}),
+  }));
+}
+
+function withHostedAssistantDynamicContextPrompt(input: {
+  executionContext: AssistantExecutionContext;
+  prompt: string | null;
+}): AssistantExecutionContext {
+  if (!input.prompt || !input.executionContext.hosted) {
+    return input.executionContext;
+  }
+
+  return {
+    hosted: {
+      ...input.executionContext.hosted,
+      dynamicContextPrompts: [
+        ...(input.executionContext.hosted.dynamicContextPrompts ?? []),
+        input.prompt,
+      ],
+    },
+  };
+}
+
+async function hasDueHostedAssistantCronJob(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): Promise<boolean> {
+  const cronStatus = await getAssistantCronStatus(input.restored.vaultRoot)
+    .catch(() => null);
+  return (cronStatus?.dueJobs ?? 0) > 0;
 }
 
 function resolveHostedWorkspaceIssueDeviceConnectLink(input: {
