@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
+import { createHostedLinqChatLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import * as barrel from "@/src/lib/hosted-onboarding/member-service";
 import {
   completeHostedPrivyVerification,
@@ -21,7 +22,10 @@ import {
 import {
   ensureHostedMemberForPhone,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
-import { upsertHostedMemberHomeLinqBindingTx } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import {
+  upsertHostedMemberHomeLinqBindingTx,
+  upsertHostedMemberPendingLinqBindingTx,
+} from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
@@ -790,6 +794,81 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
         recipientPhone: null,
       }),
     ).rejects.toThrow("Hosted Linq routing requires a non-empty chat id.");
+  });
+
+  it("treats the same pending Linq chat as already owned when conflicts fail closed", async () => {
+    const pendingLookupKey = createHostedLinqChatLookupKey("chat_existing");
+    if (!pendingLookupKey) {
+      throw new Error("Expected test Linq chat id to produce a lookup key.");
+    }
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const findUnique = vi.fn().mockResolvedValue({
+      linqChatLookupKey: null,
+      pendingLinqChatLookupKey: pendingLookupKey,
+    });
+    const updateMany = vi.fn();
+    const upsert = vi.fn();
+    const prisma = asRootPrisma({
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        findUnique,
+        updateMany,
+        upsert,
+      },
+    });
+
+    await upsertHostedMemberPendingLinqBindingTx({
+      existingChatPolicy: "fail",
+      linqChatId: "chat_existing",
+      memberId: "member_123",
+      prisma: prisma as never,
+      recipientPhone: "+15550100001",
+    });
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(findUnique).toHaveBeenCalledWith({
+      select: {
+        linqChatLookupKey: true,
+        pendingLinqChatLookupKey: true,
+      },
+      where: {
+        memberId: "member_123",
+      },
+    });
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before overwriting a different pending Linq chat", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const findUnique = vi.fn().mockResolvedValue({
+      linqChatLookupKey: null,
+      pendingLinqChatLookupKey: "hbidx:linq-chat:v1:other",
+    });
+    const updateMany = vi.fn();
+    const upsert = vi.fn();
+    const prisma = asRootPrisma({
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        findUnique,
+        updateMany,
+        upsert,
+      },
+    });
+
+    await expect(upsertHostedMemberPendingLinqBindingTx({
+      existingChatPolicy: "fail",
+      linqChatId: "chat_new",
+      memberId: "member_123",
+      prisma: prisma as never,
+      recipientPhone: "+15550100001",
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_PENDING_CHAT_CONFLICT",
+    });
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
   });
 });
 

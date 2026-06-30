@@ -252,9 +252,10 @@ async function sendHostedOpsOnboardingVoiceFirstNewChat(input: {
     request: input.request,
   });
   const openIdempotencyKey = buildHostedOpsOnboardingIdempotencyKey({
-    requestId: input.request.requestId,
+    scopeKey: "voice-first-new-chat",
     step: "open",
     targetParts: [
+      memberId,
       input.request.linqFromPhoneNumber,
       input.request.recipientPhoneNumber,
     ],
@@ -287,6 +288,7 @@ async function sendHostedOpsOnboardingVoiceFirstNewChat(input: {
 
   await input.prisma.$transaction(async (tx) => {
     await upsertHostedMemberPendingLinqBindingTx({
+      existingChatPolicy: "fail",
       linqChatId: chatId,
       memberId,
       prisma: tx,
@@ -328,6 +330,15 @@ async function prepareHostedOpsOnboardingNewChatMemberId(input: {
       memberId: member.id,
       prisma: tx,
     });
+
+    if (routing?.linqChatId) {
+      throw hostedOnboardingError({
+        code: "HOSTED_OPS_ONBOARDING_HOME_LINQ_CHAT_EXISTS",
+        httpStatus: 409,
+        message: "This recipient already has a Linq chat. Use existing chat mode instead.",
+        retryable: false,
+      });
+    }
 
     if (routing?.pendingLinqChatId) {
       throw hostedOnboardingError({
@@ -401,7 +412,7 @@ async function resolveHostedOpsOnboardingInviteDelivery(input: {
   await sendHostedLinqChatMessage({
     chatId: input.request.linqChatId,
     idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
-      requestId: input.request.requestId,
+      scopeKey: input.request.requestId,
       step: "invite",
       targetParts: [
         input.memberId,
@@ -766,13 +777,13 @@ function buildHostedOpsOnboardingInviteMessage(input: {
 }
 
 function buildHostedOpsOnboardingIdempotencyKey(input: {
-  requestId: string;
+  scopeKey: string;
   step: "invite" | "open";
   targetParts: readonly string[];
 }): string {
   const digest = createHash("sha256");
 
-  for (const part of [input.requestId, ...input.targetParts]) {
+  for (const part of [input.scopeKey, ...input.targetParts]) {
     digest.update(`${part.length}:`, "utf8");
     digest.update(part, "utf8");
     digest.update("\n", "utf8");

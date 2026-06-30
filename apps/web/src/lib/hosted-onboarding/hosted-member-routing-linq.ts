@@ -15,11 +15,13 @@ import {
   normalizeHostedLinqParticipantContactValue,
   type HostedLinqParticipantContact,
 } from "./linq-participant-contact";
+import { hostedOnboardingError } from "./errors";
 import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
 import { normalizePhoneNumber } from "./phone";
 import { type HostedOnboardingReadClient } from "./shared";
 
 export async function upsertHostedMemberPendingLinqBindingTx(input: {
+  existingChatPolicy?: "replace" | "fail";
   linqChatId: string;
   memberId: string;
   participantContact?: HostedLinqParticipantContact | null;
@@ -29,6 +31,7 @@ export async function upsertHostedMemberPendingLinqBindingTx(input: {
 }): Promise<void> {
   await writeHostedMemberLinqBindingTx({
     clearPending: false,
+    existingChatPolicy: input.existingChatPolicy ?? "replace",
     kind: "pending",
     linqChatId: input.linqChatId,
     memberId: input.memberId,
@@ -176,6 +179,7 @@ export async function upsertHostedMemberHomeLinqBindingTx(input: {
 }): Promise<void> {
   await writeHostedMemberLinqBindingTx({
     clearPending: input.clearPending ?? false,
+    existingChatPolicy: "replace",
     kind: "home",
     linqChatId: input.linqChatId,
     memberId: input.memberId,
@@ -331,6 +335,7 @@ export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
 
 async function writeHostedMemberLinqBindingTx(input: {
   clearPending: boolean;
+  existingChatPolicy: "replace" | "fail";
   kind: "home" | "pending";
   linqChatId: string;
   memberId: string;
@@ -344,6 +349,45 @@ async function writeHostedMemberLinqBindingTx(input: {
 
   if (!linqChatLookupKey || linqChatLookupKeys.length === 0) {
     throw new TypeError("Hosted Linq routing requires a non-empty chat id.");
+  }
+
+  if (input.kind === "pending" && input.existingChatPolicy === "fail") {
+    await acquireHostedLinqRoutingWriteLockTx({
+      lockValue: input.memberId,
+      namespace: "member",
+      tx: input.prisma,
+    });
+    const existingRouting = await input.prisma.hostedMemberRouting.findUnique({
+      where: {
+        memberId: input.memberId,
+      },
+      select: {
+        linqChatLookupKey: true,
+        pendingLinqChatLookupKey: true,
+      },
+    });
+
+    if (existingRouting?.linqChatLookupKey) {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_HOME_CHAT_ALREADY_BOUND",
+        httpStatus: 409,
+        message: "Hosted Linq routing already has a home chat for this member.",
+        retryable: false,
+      });
+    }
+
+    if (existingRouting?.pendingLinqChatLookupKey) {
+      if (linqChatLookupKeys.includes(existingRouting.pendingLinqChatLookupKey)) {
+        return;
+      }
+
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_PENDING_CHAT_CONFLICT",
+        httpStatus: 409,
+        message: "Hosted Linq routing already has a different pending chat for this member.",
+        retryable: false,
+      });
+    }
   }
 
   const participantContactLookupKeys = input.participantContact
@@ -721,7 +765,7 @@ function buildHostedRecipientPhoneLookupEntries(
 
 async function acquireHostedLinqRoutingWriteLockTx(input: {
   lockValue: string | null;
-  namespace: "chat" | "participant-contact" | "recipient-assignment";
+  namespace: "chat" | "member" | "participant-contact" | "recipient-assignment";
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const lockValue = input.lockValue?.trim() ?? "";
