@@ -224,6 +224,10 @@ export function PulseTrialResetClient() {
             <MetricTile label="Candidates" value={formatInteger(summary.candidates)} />
             <MetricTile label="Would reset" value={formatInteger(summary.wouldReset)} />
             <MetricTile label="Reset" value={formatInteger(summary.reset)} />
+            <MetricTile
+              label="Usage periods"
+              value={formatInteger(summary.usagePeriodsReset)}
+            />
             <MetricTile label="Failures" value={formatInteger(totalCount(summary.failures))} />
           </div>
 

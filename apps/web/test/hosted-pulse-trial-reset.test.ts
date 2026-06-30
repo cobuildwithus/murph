@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { describe, test } from "vitest";
+import { describe, test, vi } from "vitest";
 
 import {
   buildHostedPulseTrialResetStripeUpdateParams,
   buildHostedPulseTrialResetWindow,
   classifyHostedPulseTrialResetSubscription,
+  createPrismaHostedPulseTrialResetCandidateSource,
   parseHostedPulseTrialResetBatchSize,
   resetHostedPulseTrials,
   type HostedPulseTrialResetCandidate,
@@ -98,6 +99,7 @@ describe("Pulse Trial reset service", () => {
 
     assert.equal(summary.candidates, 1);
     assert.equal(summary.reset, 1);
+    assert.equal(summary.usagePeriodsReset, 0);
     assert.equal(summary.wouldReset, 0);
     assert.equal(stripe.updateCalls.length, 1);
     assert.equal(source.updateCalls.length, 1);
@@ -135,6 +137,69 @@ describe("Pulse Trial reset service", () => {
         trial_end: 1_783_684_800,
       },
     );
+  });
+
+  test("Prisma candidate updates reset billing and the matching AI usage period together", async () => {
+    const billingRefUpdate = vi.fn(async () => ({}));
+    const usagePeriodUpsert = vi.fn(async (args: unknown) => args);
+    const tx = {
+      hostedAiUsagePeriod: {
+        upsert: usagePeriodUpsert,
+      },
+      hostedMemberBillingRef: {
+        update: billingRefUpdate,
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (transaction: typeof tx) => Promise<unknown>) =>
+        callback(tx),
+      ),
+    };
+    const resetWindow = buildHostedPulseTrialResetWindow(
+      new Date("2026-06-30T12:00:00.000Z"),
+    );
+
+    const result = await createPrismaHostedPulseTrialResetCandidateSource(
+      prisma as never,
+    ).updateCandidateTrialWindow({
+      candidate: makeCandidate(),
+      resetWindow,
+    });
+
+    assert.deepEqual(result, {
+      usagePeriodReset: true,
+    });
+    assert.equal(prisma.$transaction.mock.calls.length, 1);
+    assert.equal(billingRefUpdate.mock.calls.length, 1);
+    assert.equal(usagePeriodUpsert.mock.calls.length, 1);
+    assert.deepEqual(usagePeriodUpsert.mock.calls[0]?.[0], {
+      create: {
+        billingPlanCode: "launch_monthly",
+        blockedAt: null,
+        lastUsageAt: null,
+        limitNoticeSentAt: null,
+        limitUsdMicros: 4_500_000n,
+        memberId: "member_123",
+        periodEnd: new Date("2026-07-10T12:00:00.000Z"),
+        periodStart: new Date("2026-06-30T12:00:00.000Z"),
+        spentUsdMicros: 0n,
+      },
+      update: {
+        billingPlanCode: "launch_monthly",
+        blockedAt: null,
+        lastUsageAt: null,
+        limitNoticeSentAt: null,
+        limitUsdMicros: 4_500_000n,
+        periodEnd: new Date("2026-07-10T12:00:00.000Z"),
+        spentUsdMicros: 0n,
+      },
+      where: {
+        memberId_periodStart: {
+          memberId: "member_123",
+          periodStart: new Date("2026-06-30T12:00:00.000Z"),
+        },
+      },
+    });
   });
 });
 

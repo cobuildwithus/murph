@@ -82,6 +82,7 @@ describe("hosted ops Pulse Trial reset route", () => {
         stripe_customer_mismatch: 0,
         stripe_subscription_not_trialing: 1,
       },
+      usagePeriodsReset: 0,
       wouldReset: 1,
     });
   });
@@ -91,6 +92,7 @@ describe("hosted ops Pulse Trial reset route", () => {
       ...makeResetSummary(),
       mode: "apply",
       reset: 1,
+      usagePeriodsReset: 1,
       wouldReset: 0,
     });
 
@@ -115,6 +117,7 @@ describe("hosted ops Pulse Trial reset route", () => {
     await expect(response.json()).resolves.toMatchObject({
       mode: "apply",
       reset: 1,
+      usagePeriodsReset: 1,
       wouldReset: 0,
     });
   });
@@ -215,6 +218,7 @@ function makeResetSummary(): HostedPulseTrialResetSummary {
       stripe_customer_mismatch: 0,
       stripe_subscription_not_trialing: 1,
     },
+    usagePeriodsReset: 0,
     wouldReset: 1,
   };
 }

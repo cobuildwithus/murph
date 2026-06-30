@@ -1,4 +1,9 @@
-import { HostedBillingStatus, type HostedMemberBillingRef, type PrismaClient } from "@prisma/client";
+import {
+  HostedBillingStatus,
+  type HostedMemberBillingRef,
+  type Prisma,
+  type PrismaClient,
+} from "@prisma/client";
 import type Stripe from "stripe";
 
 import {
@@ -40,7 +45,11 @@ export interface HostedPulseTrialResetCandidateSource {
   updateCandidateTrialWindow(input: {
     candidate: HostedPulseTrialResetCandidate;
     resetWindow: HostedPulseTrialResetWindow;
-  }): Promise<void>;
+  }): Promise<HostedPulseTrialResetCandidateUpdateResult | void>;
+}
+
+export interface HostedPulseTrialResetCandidateUpdateResult {
+  usagePeriodReset: boolean;
 }
 
 export interface HostedPulseTrialResetStripeSubscription {
@@ -82,6 +91,7 @@ export interface HostedPulseTrialResetSummary {
   reset: number;
   resetWindow: HostedPulseTrialResetWindow;
   skipped: Record<HostedPulseTrialResetSkipReason, number>;
+  usagePeriodsReset: number;
   wouldReset: number;
 }
 
@@ -95,6 +105,7 @@ export interface HostedPulseTrialResetSerializedSummary {
     trialStartedAt: string;
   };
   skipped: Record<HostedPulseTrialResetSkipReason, number>;
+  usagePeriodsReset: number;
   wouldReset: number;
 }
 
@@ -225,8 +236,9 @@ export async function resetHostedPulseTrials(input: {
         continue;
       }
 
+      let updateResult: HostedPulseTrialResetCandidateUpdateResult | void;
       try {
-        await input.candidateSource.updateCandidateTrialWindow({
+        updateResult = await input.candidateSource.updateCandidateTrialWindow({
           candidate,
           resetWindow,
         });
@@ -236,6 +248,9 @@ export async function resetHostedPulseTrials(input: {
       }
 
       summary.reset += 1;
+      if (updateResult?.usagePeriodReset === true) {
+        summary.usagePeriodsReset += 1;
+      }
     }
   }
 }
@@ -287,6 +302,7 @@ export function serializeHostedPulseTrialResetSummary(
       trialStartedAt: summary.resetWindow.trialStartedAt.toISOString(),
     },
     skipped: summary.skipped,
+    usagePeriodsReset: summary.usagePeriodsReset,
     wouldReset: summary.wouldReset,
   };
 }
@@ -325,22 +341,34 @@ export function createPrismaHostedPulseTrialResetCandidateSource(
       ));
     },
     async updateCandidateTrialWindow(input) {
-      await prisma.hostedMemberBillingRef.update({
-        data: {
-          currentBillingPhase: "trial",
-          currentBillingPlanCode: "launch_monthly",
-          currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
-          currentPeriodEnd: input.resetWindow.trialEndsAt,
-          currentPeriodStart: input.resetWindow.trialStartedAt,
-          currentTrialEndsAt: input.resetWindow.trialEndsAt,
-          currentTrialStartedAt: input.resetWindow.trialStartedAt,
-          lastStripeEventCreatedAt: input.resetWindow.trialStartedAt,
-          pulseTrialPolicyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
-          pulseTrialRedeemedAt: input.resetWindow.trialStartedAt,
-        },
-        where: {
-          memberId: input.candidate.memberId,
-        },
+      return prisma.$transaction(async (tx) => {
+        await tx.hostedMemberBillingRef.update({
+          data: {
+            currentBillingPhase: "trial",
+            currentBillingPlanCode: "launch_monthly",
+            currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+            currentPeriodEnd: input.resetWindow.trialEndsAt,
+            currentPeriodStart: input.resetWindow.trialStartedAt,
+            currentTrialEndsAt: input.resetWindow.trialEndsAt,
+            currentTrialStartedAt: input.resetWindow.trialStartedAt,
+            lastStripeEventCreatedAt: input.resetWindow.trialStartedAt,
+            pulseTrialPolicyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
+            pulseTrialRedeemedAt: input.resetWindow.trialStartedAt,
+          },
+          where: {
+            memberId: input.candidate.memberId,
+          },
+        });
+
+        await resetHostedPulseTrialUsagePeriodTx({
+          candidate: input.candidate,
+          resetWindow: input.resetWindow,
+          tx,
+        });
+
+        return {
+          usagePeriodReset: true,
+        };
       });
     },
   };
@@ -392,6 +420,7 @@ function buildEmptyHostedPulseTrialResetSummary(input: {
       stripe_customer_mismatch: 0,
       stripe_subscription_not_trialing: 0,
     },
+    usagePeriodsReset: 0,
     wouldReset: 0,
   };
 }
@@ -419,5 +448,47 @@ async function projectHostedPulseTrialResetCandidate(
     memberId: snapshot.memberId,
     stripeCustomerId: snapshot.stripeCustomerId,
     stripeSubscriptionId: snapshot.stripeSubscriptionId,
+  };
+}
+
+async function resetHostedPulseTrialUsagePeriodTx(input: {
+  candidate: HostedPulseTrialResetCandidate;
+  resetWindow: HostedPulseTrialResetWindow;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.tx.hostedAiUsagePeriod.upsert({
+    create: buildHostedPulseTrialUsagePeriodResetData(input),
+    update: {
+      billingPlanCode: "launch_monthly",
+      blockedAt: null,
+      lastUsageAt: null,
+      limitNoticeSentAt: null,
+      limitUsdMicros: HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
+      periodEnd: input.resetWindow.trialEndsAt,
+      spentUsdMicros: 0n,
+    },
+    where: {
+      memberId_periodStart: {
+        memberId: input.candidate.memberId,
+        periodStart: input.resetWindow.trialStartedAt,
+      },
+    },
+  });
+}
+
+function buildHostedPulseTrialUsagePeriodResetData(input: {
+  candidate: HostedPulseTrialResetCandidate;
+  resetWindow: HostedPulseTrialResetWindow;
+}) {
+  return {
+    billingPlanCode: "launch_monthly",
+    blockedAt: null,
+    lastUsageAt: null,
+    limitNoticeSentAt: null,
+    limitUsdMicros: HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
+    memberId: input.candidate.memberId,
+    periodEnd: input.resetWindow.trialEndsAt,
+    periodStart: input.resetWindow.trialStartedAt,
+    spentUsdMicros: 0n,
   };
 }
