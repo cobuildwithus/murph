@@ -51,8 +51,13 @@ interface LinqWebhookSubscriptionSummary {
 interface LinqWebhookSubscriptionMatch {
   eventStatus: "different" | "exact";
   phoneNumberStatus: "different" | "exact";
-  secretStatus: "mismatch" | "unavailable" | "verified";
+  secretStatus: "matches-configured" | "unavailable" | "uses-provider-secret";
   subscription: LinqWebhookSubscriptionSummary;
+}
+
+export interface HostedLocalLinqWebhookRegistrationResult {
+  webhookSecret: string;
+  webhookSecretSource: "configured" | "created" | "existing-provider";
 }
 
 export interface HostedLocalLinqWebhookSetup {
@@ -81,11 +86,11 @@ export async function resolveHostedLocalLinqWebhookSetup(input: {
   );
   const readTextFile = input.readTextFile ?? readTextFileDefault;
   const fileExists = input.fileExists ?? pathExistsDefault;
-  const hasRequiredLinqEnv = hasRequiredLinqWebhookEnvironment(input.env);
+  const hasRegistrationEnv = hasLinqWebhookRegistrationEnvironment(input.env);
   const shouldProbeDefaultTunnelConfig =
     input.config.linqWebhookTunnelMode === "required"
     || explicitPublicUrl !== null
-    || hasRequiredLinqEnv
+    || hasRegistrationEnv
     || input.config.linqWebhookTunnelConfigPath.trim() !== "";
   const configExists = shouldProbeDefaultTunnelConfig
     ? await fileExists(tunnelConfigPath)
@@ -104,7 +109,7 @@ export async function resolveHostedLocalLinqWebhookSetup(input: {
   }
   if (
     !explicitPublicUrl
-    && !hasRequiredLinqEnv
+    && !hasRegistrationEnv
     && input.config.linqWebhookTunnelMode === "auto"
   ) {
     return null;
@@ -122,18 +127,18 @@ export async function resolveHostedLocalLinqWebhookSetup(input: {
     )}`);
 
   if (
-    !hasRequiredLinqEnv
+    !hasRegistrationEnv
     && input.config.linqWebhookTunnelMode === "required"
     && !input.config.skipLinqWebhookRegister
   ) {
     throw new Error(
       [
-        "Linq webhook tunnel setup requires LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET.",
-        "Set both env vars or disable registration with MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1.",
+        "Linq webhook tunnel setup requires LINQ_API_TOKEN.",
+        "Set it or disable registration with MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER=1.",
       ].join(" "),
     );
   }
-  if (hasRequiredLinqEnv) {
+  if (hasRegistrationEnv) {
     assertLocalAllowedInboundPhoneNumbersConfigured(input.env);
   }
 
@@ -141,7 +146,7 @@ export async function resolveHostedLocalLinqWebhookSetup(input: {
     phoneNumbers: readLinqConversationPhoneNumbers(input.env),
     publicBaseUrl: target.publicBaseUrl,
     shouldRegister:
-      !input.config.skipLinqWebhookRegister && hasRequiredLinqEnv,
+      !input.config.skipLinqWebhookRegister && hasRegistrationEnv,
     shouldStartTunnel: configExists,
     targetUrl: target.targetUrl,
     tunnelConfigPath: configExists ? tunnelConfigPath : null,
@@ -155,40 +160,20 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
   setup: HostedLocalLinqWebhookSetup;
   stderrTarget?: NodeJS.WritableStream;
   registrationCachePath?: string | null;
-}): Promise<void> {
-  const webhookSecret = normalizeOptionalString(input.env.LINQ_WEBHOOK_SECRET);
-  if (!webhookSecret) {
-    throw new Error("LINQ_WEBHOOK_SECRET must be set before registering the Linq webhook.");
-  }
+}): Promise<HostedLocalLinqWebhookRegistrationResult> {
+  const configuredWebhookSecret = normalizeOptionalString(input.env.LINQ_WEBHOOK_SECRET);
   const linqApiToken = normalizeOptionalString(input.env.LINQ_API_TOKEN);
   if (!linqApiToken) {
     throw new Error("LINQ_API_TOKEN must be set before registering the Linq webhook.");
   }
   const registrationEnv = buildLinqWebhookRegistrationEnv(input.env, linqApiToken);
 
-  const registrationFingerprint = createLinqWebhookRegistrationFingerprint({
-    phoneNumbers: input.setup.phoneNumbers,
-    targetUrl: input.setup.targetUrl,
-    webhookSecret,
-  });
   const cachePath = input.registrationCachePath === null
     ? null
     : input.registrationCachePath ?? path.join(repoRoot, DEFAULT_LINQ_WEBHOOK_REGISTRATION_CACHE);
-  const cachedRegistration = cachePath
-    ? await readLinqWebhookRegistrationCache(cachePath)
-    : null;
   const phoneNumberLabel = input.setup.phoneNumbers
     ? `${input.setup.phoneNumbers.length} configured phone number(s)`
     : "all Linq phone numbers";
-  if (
-    cachedRegistration?.fingerprint === registrationFingerprint
-    && cachedRegistration.targetUrl === input.setup.targetUrl
-  ) {
-    (input.stderrTarget ?? process.stderr).write(
-      `[linq] Local webhook target ${input.setup.targetUrl} is already registered for ${phoneNumberLabel}.\n`,
-    );
-    return;
-  }
 
   const existingRegistration = await findExistingLinqWebhookSubscription({
     env: registrationEnv,
@@ -196,66 +181,78 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
     phoneNumbers: input.setup.phoneNumbers,
     subscribedEvents: [HOSTED_LOCAL_LINQ_WEBHOOK_EVENT],
     targetUrl: input.setup.targetUrl,
-    webhookSecret,
+    webhookSecret: configuredWebhookSecret,
   });
   if (existingRegistration !== null) {
-    if (existingRegistration.secretStatus === "mismatch") {
-      throw new Error(
-        [
-          "Existing Linq webhook subscription uses a signing secret that does not match local LINQ_WEBHOOK_SECRET.",
-          "Update the local secret to the subscription secret, or recreate the subscription expected by this environment.",
-        ].join(" "),
+    const existingWebhookSecret = existingRegistration.subscription.signingSecret;
+    if (
+      existingRegistration.eventStatus === "exact"
+      && existingRegistration.phoneNumberStatus === "exact"
+      && existingWebhookSecret !== null
+    ) {
+      if (cachePath) {
+        await writeLinqWebhookRegistrationCache(cachePath, {
+          fingerprint: createLinqWebhookRegistrationFingerprint({
+            phoneNumbers: input.setup.phoneNumbers,
+            targetUrl: input.setup.targetUrl,
+            webhookSecret: existingWebhookSecret,
+          }),
+          secretVerified: true,
+          subscriptionId: existingRegistration.subscription.id,
+          targetUrl: input.setup.targetUrl,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      if (existingRegistration.secretStatus === "uses-provider-secret") {
+        (input.stderrTarget ?? process.stderr).write(
+          "[linq] Using Linq-provided signing secret for local webhook env.\n",
+        );
+      }
+      (input.stderrTarget ?? process.stderr).write(
+        `[linq] Local webhook target ${input.setup.targetUrl} is already registered for ${phoneNumberLabel}.\n`,
       );
+      return {
+        webhookSecret: existingWebhookSecret,
+        webhookSecretSource: "existing-provider",
+      };
     }
     if (existingRegistration.eventStatus === "different") {
       (input.stderrTarget ?? process.stderr).write(
         [
           `[linq] Local webhook target ${input.setup.targetUrl} already has an active Linq subscription,`,
           "but its event set differs from local hosted onboarding registration.",
-          "Continuing without creating a duplicate subscription or updating the local registration cache.",
-          "Update or recreate the Linq webhook subscription if local message delivery does not match this environment.",
+          "Registering an exact local subscription so this worktree can use the matching signing secret.",
           "\n",
         ].join(" "),
       );
-      return;
-    }
-    if (existingRegistration.phoneNumberStatus === "different") {
+    } else if (existingRegistration.phoneNumberStatus === "different") {
       (input.stderrTarget ?? process.stderr).write(
         [
           `[linq] Local webhook target ${input.setup.targetUrl} already has an active Linq subscription,`,
           "but its phone-number filter differs from local hosted onboarding registration.",
-          "Continuing without creating a duplicate subscription or updating the local registration cache.",
-          "Update or recreate the Linq webhook subscription if local message delivery does not match this environment.",
+          "Registering an exact local subscription so this worktree can use the matching signing secret.",
           "\n",
         ].join(" "),
       );
-      return;
-    }
-    if (existingRegistration.secretStatus === "unavailable") {
+    } else if (existingRegistration.secretStatus === "unavailable" && configuredWebhookSecret) {
       (input.stderrTarget ?? process.stderr).write(
         [
           `[linq] Local webhook target ${input.setup.targetUrl} is already registered for ${phoneNumberLabel},`,
-          "but Linq did not return its signing secret; continuing without updating the local registration cache.",
-          "If webhook callbacks fail signature verification, recreate the Linq webhook subscription for this environment.",
+          "but Linq did not return its signing secret, so the configured local LINQ_WEBHOOK_SECRET cannot be verified.",
+          "Registering an exact local subscription so this worktree can use the matching signing secret.",
           "\n",
         ].join(" "),
       );
-      return;
+    } else if (existingRegistration.secretStatus === "unavailable") {
+      (input.stderrTarget ?? process.stderr).write(
+        [
+          `[linq] Local webhook target ${input.setup.targetUrl} is already registered for ${phoneNumberLabel},`,
+          "but Linq did not return its signing secret and no local secret is configured.",
+          "Registering an exact local subscription so this worktree can use the matching signing secret.",
+          "\n",
+        ].join(" "),
+      );
     }
-
-    if (cachePath) {
-      await writeLinqWebhookRegistrationCache(cachePath, {
-        fingerprint: registrationFingerprint,
-        secretVerified: true,
-        subscriptionId: existingRegistration.subscription.id,
-        targetUrl: input.setup.targetUrl,
-        updatedAt: new Date().toISOString(),
-      });
-    }
-    (input.stderrTarget ?? process.stderr).write(
-      `[linq] Local webhook target ${input.setup.targetUrl} is already registered for ${phoneNumberLabel}.\n`,
-    );
-    return;
   }
 
   const result = await createLinqWebhookSubscription(
@@ -269,18 +266,27 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
     },
   );
   const returnedSecret = normalizeOptionalString(result.signingSecret);
-  if (returnedSecret && returnedSecret !== webhookSecret) {
+  if (!returnedSecret) {
     throw new Error(
       [
-        "Linq webhook subscription returned a signing secret that does not match local LINQ_WEBHOOK_SECRET.",
-        "Update the local secret to the returned subscription secret, or recreate the subscription expected by this environment.",
+        "Linq webhook subscription did not return a signing secret.",
+        "Set LINQ_WEBHOOK_SECRET to the subscription secret or recreate the subscription in a Linq environment that returns signing_secret on creation.",
       ].join(" "),
+    );
+  }
+  if (returnedSecret !== configuredWebhookSecret) {
+    (input.stderrTarget ?? process.stderr).write(
+      "[linq] Using Linq-provided signing secret for local webhook env.\n",
     );
   }
 
   if (cachePath) {
     await writeLinqWebhookRegistrationCache(cachePath, {
-      fingerprint: registrationFingerprint,
+      fingerprint: createLinqWebhookRegistrationFingerprint({
+        phoneNumbers: input.setup.phoneNumbers,
+        targetUrl: input.setup.targetUrl,
+        webhookSecret: returnedSecret,
+      }),
       secretVerified: true,
       subscriptionId: normalizeOptionalString(result.id),
       targetUrl: input.setup.targetUrl,
@@ -291,6 +297,10 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
   (input.stderrTarget ?? process.stderr).write(
     `[linq] Registered local webhook target ${input.setup.targetUrl} for ${phoneNumberLabel}.\n`,
   );
+  return {
+    webhookSecret: returnedSecret,
+    webhookSecretSource: "created",
+  };
 }
 
 export function normalizeLinqWebhookPublicUrl(value: string): {
@@ -379,7 +389,7 @@ async function findExistingLinqWebhookSubscription(input: {
   phoneNumbers: readonly string[] | null;
   subscribedEvents: readonly string[];
   targetUrl: string;
-  webhookSecret: string;
+  webhookSecret: string | null;
 }): Promise<LinqWebhookSubscriptionMatch | null> {
   const token = normalizeOptionalString(input.env.LINQ_API_TOKEN);
   if (!token) {
@@ -418,19 +428,10 @@ async function findExistingLinqWebhookSubscription(input: {
   const verified = matches.find((match) =>
     match.eventStatus === "exact"
     && match.phoneNumberStatus === "exact"
-    && match.secretStatus === "verified"
+    && match.secretStatus !== "unavailable"
   );
   if (verified) {
     return verified;
-  }
-
-  const mismatched = matches.find((match) =>
-    match.eventStatus === "exact"
-    && match.phoneNumberStatus === "exact"
-    && match.secretStatus === "mismatch"
-  ) ?? matches.find((match) => match.secretStatus === "mismatch");
-  if (mismatched) {
-    return mismatched;
   }
 
   return matches.find((match) =>
@@ -446,13 +447,13 @@ function createLinqWebhookSubscriptionMatch(input: {
   expectedPhoneNumbers: readonly string[] | null;
   expectedSubscribedEvents: readonly string[];
   subscription: LinqWebhookSubscriptionSummary;
-  webhookSecret: string;
+  webhookSecret: string | null;
 }): LinqWebhookSubscriptionMatch {
   let secretStatus: LinqWebhookSubscriptionMatch["secretStatus"] = "unavailable";
-  if (input.subscription.signingSecret === input.webhookSecret) {
-    secretStatus = "verified";
-  } else if (input.subscription.signingSecret !== null) {
-    secretStatus = "mismatch";
+  if (input.subscription.signingSecret !== null) {
+    secretStatus = input.subscription.signingSecret === input.webhookSecret
+      ? "matches-configured"
+      : "uses-provider-secret";
   }
 
   return {
@@ -609,54 +610,6 @@ function createLinqWebhookRegistrationFingerprint(input: {
   return createHmac("sha256", input.webhookSecret)
     .update(payload)
     .digest("hex");
-}
-
-async function readLinqWebhookRegistrationCache(
-  cachePath: string,
-): Promise<LinqWebhookRegistrationCache | null> {
-  let text: string;
-  try {
-    text = await readFile(cachePath, "utf8");
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return null;
-    }
-    throw new Error("Unable to read repo-local Linq webhook registration cache.");
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(text);
-    return parseLinqWebhookRegistrationCache(parsed);
-  } catch {
-    return null;
-  }
-}
-
-function parseLinqWebhookRegistrationCache(
-  value: unknown,
-): LinqWebhookRegistrationCache | null {
-  if (!isPlainRecord(value)) {
-    return null;
-  }
-  if (
-    typeof value.fingerprint !== "string"
-    || value.secretVerified !== true
-    || typeof value.targetUrl !== "string"
-    || typeof value.updatedAt !== "string"
-  ) {
-    return null;
-  }
-  if (value.subscriptionId !== null && typeof value.subscriptionId !== "string") {
-    return null;
-  }
-
-  return {
-    fingerprint: value.fingerprint,
-    secretVerified: true,
-    subscriptionId: value.subscriptionId,
-    targetUrl: value.targetUrl,
-    updatedAt: value.updatedAt,
-  };
 }
 
 async function writeLinqWebhookRegistrationCache(
@@ -865,11 +818,8 @@ function assertLocalAllowedInboundPhoneNumbersConfigured(env: NodeJS.ProcessEnv)
   );
 }
 
-function hasRequiredLinqWebhookEnvironment(env: NodeJS.ProcessEnv): boolean {
-  return Boolean(
-    normalizeOptionalString(env.LINQ_API_TOKEN)
-    && normalizeOptionalString(env.LINQ_WEBHOOK_SECRET),
-  );
+function hasLinqWebhookRegistrationEnvironment(env: NodeJS.ProcessEnv): boolean {
+  return Boolean(normalizeOptionalString(env.LINQ_API_TOKEN));
 }
 
 function stripYamlScalarQuotes(value: string): string {

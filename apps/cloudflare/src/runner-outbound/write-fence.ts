@@ -100,10 +100,10 @@ export async function requireRunnerRuntimeWriteFenceWorkspaceWrite(input: {
   env: RunnerOutboundEnvironmentSource;
   request: Request;
   userId: string;
-  validateWorkspaceVersion?: boolean;
 }): Promise<RunnerRuntimeWriteFenceWorkspaceAuthority> {
   const headers = requireRunnerRuntimeWriteFenceHeaders(input.request);
-  if (!headers.workspaceVersion) {
+  const workspaceVersion = readValidWorkspaceVersionOrNull(headers.workspaceVersion);
+  if (!workspaceVersion) {
     throw new RunnerRuntimeWriteFenceError();
   }
   const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
@@ -111,9 +111,6 @@ export async function requireRunnerRuntimeWriteFenceWorkspaceWrite(input: {
     attemptId: headers.attemptId,
     generation: headers.generation,
     userId: input.userId,
-    ...(input.validateWorkspaceVersion
-      ? { workspaceVersion: headers.workspaceVersion }
-      : {}),
   });
   if (!ownsWriteFence) {
     throw new RunnerRuntimeWriteFenceError();
@@ -121,8 +118,15 @@ export async function requireRunnerRuntimeWriteFenceWorkspaceWrite(input: {
 
   return {
     ...headers,
-    workspaceVersion: headers.workspaceVersion,
+    workspaceVersion,
   };
+}
+
+function readValidWorkspaceVersionOrNull(value: string | null): string | null {
+  if (!value || !/^[0-9]+$/u.test(value)) {
+    return null;
+  }
+  return value;
 }
 
 async function validateRunnerRuntimeWriteFence(
@@ -131,7 +135,6 @@ async function validateRunnerRuntimeWriteFence(
     attemptId: string;
     generation: string;
     userId: string;
-    workspaceVersion?: string | null;
   },
 ): Promise<boolean> {
   const validateRuntimeWriteFence = stub.validateRuntimeWriteFence;

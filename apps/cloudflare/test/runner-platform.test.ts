@@ -5124,6 +5124,159 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(artifactRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
   });
 
+  it("uses the advanced checkpoint version for direct-R2 snapshot start and complete", async () => {
+    const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
+      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    );
+    let currentLease = {
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    };
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "checkpointed snapshot fetch");
+      if (request.url === "http://web-control.worker/api/internal/hosted-workspace/checkpoint") {
+        return new Response(JSON.stringify({
+          checkpointed: true,
+          workspace: {
+            checkpointedAt: "2026-04-26T00:00:04.000Z",
+            createdAt: "2026-04-26T00:00:00.000Z",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            redactedStatus: {},
+            snapshotRef: null,
+            updatedAt: "2026-04-26T00:00:04.000Z",
+            userId: "member_123",
+            version: "5",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (request.url.includes("/workspace-snapshots/start")) {
+        return new Response(
+          JSON.stringify({
+            encryption: {
+              aad: buildHostedWorkspaceSnapshotV2Aad({
+                objectKey: ref.objectKey,
+                snapshotId: ref.snapshotId,
+                userId: "member_123",
+              }),
+              dataKeyBase64,
+              ivBase64: ref.encryption.ivBase64,
+              rootKeyId: ref.encryption.rootKeyId,
+              scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+              wrappedDataKey: ref.encryption.wrappedDataKey,
+            },
+            limits: {
+              maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+              warnEncryptedBytes: 128 * 1024 * 1024,
+            },
+            objectKey: ref.objectKey,
+            snapshotId: ref.snapshotId,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
+        return new Response(
+          JSON.stringify({
+            checkpoint: {
+              checkpointed: true,
+              workspace: {
+                checkpointedAt: "2026-04-26T00:00:05.000Z",
+                createdAt: "2026-04-26T00:00:00.000Z",
+                nextWakeAt: null,
+                nextWakeReason: null,
+                redactedStatus: null,
+                snapshotRef: ref,
+                updatedAt: "2026-04-26T00:00:05.000Z",
+                userId: "member_123",
+                version: "6",
+              },
+            },
+            ok: true,
+            snapshotRef: ref,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => currentLease,
+        recordCheckpoint: ({ workspaceVersion }) => {
+          currentLease = {
+            ...currentLease,
+            workspaceVersion,
+          };
+        },
+      },
+    });
+
+    await platform.workspacePort!.checkpoint({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "import",
+      redactedStatus: {},
+      snapshotRef: null,
+    });
+    await platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "5",
+      reason: "idle_shutdown",
+    });
+    await platform.workspaceSnapshotPort!.completeSnapshotSession({
+      checkpointRequest: {
+        attemptId: "attempt_1",
+        expectedWorkspaceVersion: "5",
+        leaseGeneration: "9",
+        reason: "idle_shutdown",
+        snapshotRef: ref,
+      },
+      ref,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const startRequest = requireFetchRequest(fetchMock.mock.calls[1], "advanced snapshot start");
+    expect(startRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(startRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(startRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
+    await expect(startRequest.json()).resolves.toEqual(expect.objectContaining({
+      expectedWorkspaceVersion: "5",
+      reason: "idle_shutdown",
+    }));
+    const completeRequest = requireFetchRequest(fetchMock.mock.calls[2], "advanced snapshot complete");
+    expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(completeRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
+    await expect(completeRequest.json()).resolves.toEqual(expect.objectContaining({
+      checkpointRequest: expect.objectContaining({
+        expectedWorkspaceVersion: "5",
+      }),
+    }));
+  });
+
   it("uses locally prepared artifact upload write-fence headers without transport restamping", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const readCurrentLease = vi.fn(() => {

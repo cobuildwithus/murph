@@ -70,6 +70,10 @@ The helper:
 - uses normal Linq webhook `auto` mode with a worktree-local registration cache
   and tunnel config path, so an active worktree can reuse the shared local
   tunnel identity when live webhook config is present
+- resolves the effective Linq webhook signing secret during startup before web
+  is spawned, preferring the provider-returned subscription secret and updating
+  the ignored `apps/web/.env.local` `LINQ_WEBHOOK_SECRET` override when Linq
+  returns a new local secret
 - on `worktree up`, if the worktree-local Linq tunnel config is missing, copies
   the shared `.tmp/cloudflared-linq-webhook.yml` from another git worktree when
   available and rewrites its local web `service:` port to this worktree
@@ -208,8 +212,13 @@ Use one of these:
   already routing that public URL to this worktree.
 
 The helper defaults to Linq webhook `auto` mode. If the worktree-local tunnel
-config is missing, or Linq credentials/allowlist are unavailable, the runtime
-does not start live webhook delivery. To force webhooks off for a task, set:
+config is missing, or the Linq API token/allowlist are unavailable, the runtime
+does not start live webhook delivery. When the Linq API token is present, the
+helper registers or adopts the local webhook subscription before starting web
+and injects the effective `LINQ_WEBHOOK_SECRET` into the child env. If Linq
+returns a new signing secret, the helper also updates the ignored
+`apps/web/.env.local` override so later worktree starts keep using the same
+local subscription secret. To force webhooks off for a task, set:
 
 ```bash
 MURPH_DEV_LINQ_WEBHOOK_TUNNEL=0 \

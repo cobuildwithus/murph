@@ -1533,32 +1533,47 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     }
     return jsonError("Hosted workspace snapshot checkpoint user mismatch.", 502);
   }
-  if (!checkpoint.checkpointed) {
-    const cleanupRetryResponse = await completeAlreadyCheckpointedWorkspaceSnapshotCleanup({
-      bucket: input.bucket,
-      checkpoint,
+	if (!checkpoint.checkpointed) {
+		const cleanupRetryResponse = await completeAlreadyCheckpointedWorkspaceSnapshotCleanup({
+			bucket: input.bucket,
+			checkpoint,
       env: input.env,
       environment: input.environment,
       session,
       snapshotRef,
       userId: input.userId,
     });
-    if (cleanupRetryResponse) {
-      return cleanupRetryResponse;
-    }
-    const cleanupResponse = await retireAfterAmbiguousCheckpoint();
-    if (cleanupResponse) {
-      return cleanupResponse;
-    }
-    if (checkpoint.checkpointConflictReason === "foreground_pending") {
+		if (cleanupRetryResponse) {
+			return cleanupRetryResponse;
+		}
+		if (checkpoint.checkpointConflictReason !== "foreground_pending") {
+			emitHostedExecutionStructuredLog({
+				component: "runner",
+				details: {
+					checkpointConflictReason: checkpoint.checkpointConflictReason ?? "unknown",
+					checkpointWorkspaceVersion: checkpoint.workspace.version,
+					expectedWorkspaceVersion: checkpointRequest.expectedWorkspaceVersion,
+					method: "POST",
+					operation: "workspace_snapshot_complete",
+				},
+				level: "warn",
+				message: "Hosted workspace snapshot checkpoint CAS conflict.",
+				phase: "wake.running",
+			});
+		}
+		const cleanupResponse = await retireAfterAmbiguousCheckpoint();
+		if (cleanupResponse) {
+			return cleanupResponse;
+		}
+		if (checkpoint.checkpointConflictReason === "foreground_pending") {
       return json({
         checkpoint,
         ok: true,
-        snapshotRef,
-      });
-    }
-    return jsonError("Hosted workspace snapshot checkpoint CAS failed.", 409);
-  }
+			snapshotRef,
+		});
+	}
+	return jsonError("Hosted workspace snapshot checkpoint CAS failed.", 409);
+}
 
   const checkpointSnapshotRef = checkpoint.workspace.snapshotRef;
   if (
@@ -2337,10 +2352,7 @@ async function requireWorkspaceSnapshotWriteFence(input: {
   userId: string;
 }) {
   try {
-    return await requireRunnerRuntimeWriteFenceWorkspaceWrite({
-      ...input,
-      validateWorkspaceVersion: true,
-    });
+    return await requireRunnerRuntimeWriteFenceWorkspaceWrite(input);
   } catch (error) {
     if (error instanceof RunnerRuntimeWriteFenceError) {
       return null;

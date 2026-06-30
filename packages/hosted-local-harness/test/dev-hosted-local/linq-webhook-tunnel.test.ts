@@ -199,7 +199,6 @@ describe("resolveHostedLocalLinqWebhookSetup", () => {
           " +15550000001, +15550000002 ",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: "+15550000003",
         LINQ_API_TOKEN: "linq-token",
-        LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
       },
       fileExists: async () => true,
       readTextFile: async () => "ingress:\n  - hostname: tunnel.example.test\n    service: http://localhost:3000",
@@ -360,16 +359,27 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
     ));
   });
 
-  it("uses the local registration cache to avoid duplicate create calls", async () => {
+  it("keeps the local registration cache secret-safe but still verifies Linq remotely", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
       "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-linq-registration-cache-"));
     const registrationCachePath = path.join(tempDir, "cache.json");
     const stderrTarget = new CapturingWritable();
-    const fetchImplementation = vi.fn<typeof fetch>(async () =>
-      Response.json({ subscriptions: [] })
-    );
+    const fetchImplementation = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ subscriptions: [] }))
+      .mockResolvedValueOnce(Response.json({
+        subscriptions: [
+          {
+            id: "subscription-1",
+            is_active: true,
+            phone_numbers: ["+15550000001"],
+            signing_secret: "linq-webhook-secret",
+            subscribed_events: ["message.received"],
+            target_url: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+          },
+        ],
+      }));
     const setup = {
       phoneNumbers: ["+15550000001"],
       publicBaseUrl: "https://tunnel.example.test",
@@ -407,7 +417,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
       });
 
       expect(createLinqWebhookSubscription).toHaveBeenCalledTimes(1);
-      expect(fetchImplementation).toHaveBeenCalledTimes(1);
+      expect(fetchImplementation).toHaveBeenCalledTimes(2);
       const call = createLinqWebhookSubscription.mock.calls[0];
       expect(call).toBeDefined();
       if (!call) {
@@ -421,6 +431,71 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
       expect(cacheText).not.toContain("linq-webhook-secret");
       expect(cacheText).not.toContain("+15550000001");
       expect(cacheText).not.toContain("unrelated-secret");
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it("adopts a provider signing secret when it differs from the configured local secret", async () => {
+    const { registerHostedLocalLinqWebhookSubscription } = await import(
+      "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
+    );
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "murph-linq-registration-cache-"));
+    const registrationCachePath = path.join(tempDir, "cache.json");
+    const setup = {
+      phoneNumbers: ["+15550000001"],
+      publicBaseUrl: "https://tunnel.example.test",
+      shouldRegister: true,
+      shouldStartTunnel: true,
+      targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+      tunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
+      tunnelName: "dev",
+    };
+    const fetchImplementation = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ subscriptions: [] }))
+      .mockResolvedValueOnce(Response.json({
+        subscriptions: [
+          {
+            id: "subscription-1",
+            is_active: true,
+            phone_numbers: ["+15550000001"],
+            signing_secret: "different-secret",
+            subscribed_events: ["message.received"],
+            target_url: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+          },
+        ],
+      }));
+
+    try {
+      await registerHostedLocalLinqWebhookSubscription({
+        env: {
+          LINQ_API_TOKEN: "linq-token",
+          LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+        },
+        fetchImplementation,
+        registrationCachePath,
+        setup,
+      });
+
+      const result = await registerHostedLocalLinqWebhookSubscription({
+        env: {
+          LINQ_API_TOKEN: "linq-token",
+          LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+        },
+        fetchImplementation,
+        registrationCachePath,
+        setup,
+      });
+
+      expect(createLinqWebhookSubscription).toHaveBeenCalledTimes(1);
+      expect(fetchImplementation).toHaveBeenCalledTimes(2);
+      expect(result).toEqual({
+        webhookSecret: "different-secret",
+        webhookSecretSource: "existing-provider",
+      });
+      const cacheText = await readFile(registrationCachePath, "utf8");
+      expect(cacheText).not.toContain("different-secret");
+      expect(cacheText).not.toContain("linq-webhook-secret");
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }
@@ -492,7 +567,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
     }
   });
 
-  it("continues without caching when Linq does not expose an existing signing secret", async () => {
+  it("creates a local registration when Linq does not expose an existing signing secret", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
       "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
@@ -514,7 +589,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
     );
 
     try {
-      await registerHostedLocalLinqWebhookSubscription({
+      const result = await registerHostedLocalLinqWebhookSubscription({
         env: {
           LINQ_API_TOKEN: "linq-token",
           LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
@@ -533,17 +608,34 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
         stderrTarget,
       });
 
-      expect(createLinqWebhookSubscription).not.toHaveBeenCalled();
-      await expect(readFile(registrationCachePath, "utf8")).rejects.toThrow();
+      expect(createLinqWebhookSubscription).toHaveBeenCalledWith(
+        {
+          phoneNumbers: ["+15550000001"],
+          subscribedEvents: ["message.received"],
+          targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+        },
+        {
+          env: {
+            LINQ_API_TOKEN: "linq-token",
+          },
+        },
+      );
+      expect(result).toEqual({
+        webhookSecret: "linq-webhook-secret",
+        webhookSecretSource: "created",
+      });
+      const cacheText = await readFile(registrationCachePath, "utf8");
+      expect(cacheText).toContain("\"secretVerified\": true");
+      expect(cacheText).not.toContain("linq-webhook-secret");
       expect(stderrTarget.writeMock).toHaveBeenCalledWith(expect.stringContaining(
-        "did not return its signing secret",
+        "configured local LINQ_WEBHOOK_SECRET cannot be verified",
       ));
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }
   });
 
-  it("fails when an existing Linq webhook subscription returns a different signing secret", async () => {
+  it("uses an existing provider signing secret when it differs from local env", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
       "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
@@ -562,7 +654,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
       })
     );
 
-    await expect(registerHostedLocalLinqWebhookSubscription({
+    const result = await registerHostedLocalLinqWebhookSubscription({
       env: {
         LINQ_API_TOKEN: "linq-token",
         LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
@@ -578,7 +670,12 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
         tunnelConfigPath: ".tmp/cloudflared-linq-webhook.yml",
         tunnelName: "dev",
       },
-    })).rejects.toThrow("Existing Linq webhook subscription uses a signing secret");
+    });
+
+    expect(result).toEqual({
+      webhookSecret: "different-secret",
+      webhookSecretSource: "existing-provider",
+    });
     expect(createLinqWebhookSubscription).not.toHaveBeenCalled();
   });
 
@@ -643,7 +740,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
     }
   });
 
-  it("continues without duplicate create when the remote target has extra events", async () => {
+  it("registers an exact local subscription when the remote target has extra events", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
       "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
@@ -662,7 +759,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
       })
     );
 
-    await registerHostedLocalLinqWebhookSubscription({
+    const result = await registerHostedLocalLinqWebhookSubscription({
       env: {
         LINQ_API_TOKEN: "linq-token",
         LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
@@ -681,13 +778,17 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
       stderrTarget,
     });
 
-    expect(createLinqWebhookSubscription).not.toHaveBeenCalled();
+    expect(createLinqWebhookSubscription).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      webhookSecret: "linq-webhook-secret",
+      webhookSecretSource: "created",
+    });
     expect(stderrTarget.writeMock).toHaveBeenCalledWith(expect.stringContaining(
       "event set differs",
     ));
   });
 
-  it("continues without duplicate create when the remote target has a different phone filter", async () => {
+  it("registers an exact local subscription when the remote target has a different phone filter", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
       "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
@@ -706,7 +807,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
       })
     );
 
-    await registerHostedLocalLinqWebhookSubscription({
+    const result = await registerHostedLocalLinqWebhookSubscription({
       env: {
         LINQ_API_TOKEN: "linq-token",
         LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
@@ -725,13 +826,17 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
       stderrTarget,
     });
 
-    expect(createLinqWebhookSubscription).not.toHaveBeenCalled();
+    expect(createLinqWebhookSubscription).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      webhookSecret: "linq-webhook-secret",
+      webhookSecretSource: "created",
+    });
     expect(stderrTarget.writeMock).toHaveBeenCalledWith(expect.stringContaining(
       "phone-number filter differs",
     ));
   });
 
-  it("fails if Linq returns a different signing secret", async () => {
+  it("uses the returned signing secret when creating a subscription", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
       "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
@@ -749,7 +854,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
       Response.json({ subscriptions: [] })
     );
 
-    await expect(registerHostedLocalLinqWebhookSubscription({
+    const result = await registerHostedLocalLinqWebhookSubscription({
       env: {
         LINQ_API_TOKEN: "linq-token",
         LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
@@ -765,6 +870,11 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
         tunnelName: null,
       },
       registrationCachePath: null,
-    })).rejects.toThrow("does not match local LINQ_WEBHOOK_SECRET");
+    });
+
+    expect(result).toEqual({
+      webhookSecret: "different-secret",
+      webhookSecretSource: "created",
+    });
   });
 });

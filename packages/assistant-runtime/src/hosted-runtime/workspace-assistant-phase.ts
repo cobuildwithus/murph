@@ -3279,13 +3279,15 @@ async function drainHostedPostCheckpointDelivery(input: {
       canConsumeWorkspaceAssistantWake: input.canConsumeWorkspaceAssistantWake,
       phaseInput: input.input,
     });
-  let postAssistantCronWakeCandidate = resolveHostedAssistantCronWakeCandidate({
-    phaseInput: input.input,
-    state: postAssistantCronWake,
-  });
+  let postAssistantCronWakeCandidate = dropConsumedWorkspaceAssistantWake(
+    resolveHostedAssistantCronWakeCandidate({
+      phaseInput: input.input,
+      state: postAssistantCronWake,
+    }),
+  );
   if (!postAssistantCronWake.available) {
     postAssistantCronWakeCandidate = selectHostedRuntimeWakeCandidate([
-      dropConsumedWorkspaceAssistantWake(postAssistantCronWakeCandidate),
+      postAssistantCronWakeCandidate,
       createHostedRuntimeWakeCandidate(
         new Date(
           resolveHostedAssistantPhaseNowMs(input.input)

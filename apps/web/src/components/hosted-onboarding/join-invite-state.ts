@@ -149,7 +149,7 @@ export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): st
       }
       return status.invite?.verificationMode === "manual_phone"
         ? "Add the phone number Murph should use for experiment check-ins."
-        : "Use the number that received this join link.";
+        : "";
     case "checkout":
       return status.messagingSetupRequired
         ? "Add your phone or Telegram so Murph can message you."

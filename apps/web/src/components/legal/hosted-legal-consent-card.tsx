@@ -186,13 +186,7 @@ function HostedLegalConsentCardState({
         role="status"
         className={joinClassNames(cardClassName(mode), className)}
       >
-        {mode === "compact" ? (
-          <ConsentSkeleton />
-        ) : (
-          <div className="text-sm text-muted-foreground">
-            <span>Loading...</span>
-          </div>
-        )}
+        <ConsentSkeleton />
       </div>
     );
   }
@@ -467,7 +461,7 @@ function joinClassNames(...values: Array<string | null | undefined>): string {
   return values.filter(Boolean).join(" ");
 }
 
-function ConsentSkeleton() {
+export function ConsentSkeleton() {
   return (
     <div className="w-full animate-pulse space-y-8">
       <div className="space-y-6">

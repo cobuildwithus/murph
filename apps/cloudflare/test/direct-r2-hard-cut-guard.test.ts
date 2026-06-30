@@ -285,7 +285,6 @@ function createRunnerOutboundGuardEnv(
     attemptId: string;
     generation: string;
     userId: string;
-    workspaceVersion?: string | null;
   }) => Promise<boolean>,
 ): RunnerOutboundEnvironmentSource {
   return {

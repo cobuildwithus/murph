@@ -6,8 +6,9 @@ import {
   readHostedPhoneHint,
 } from "./contact-privacy";
 import {
-  createHostedLinqProviderEventLookupKey,
-} from "./linq-observability-identifiers";
+  type HostedLinqProviderEventProgress,
+  createHostedLinqProviderEventProgress,
+} from "./linq-provider-event-progress";
 import { normalizePhoneNumber } from "./phone";
 
 type HostedLinqLineClient = PrismaClient | Prisma.TransactionClient;
@@ -190,17 +191,15 @@ async function projectMessageDelivered(
   phoneNumberLookupKey: string,
   event: Pick<ParsedHostedLinqProviderEvent, "eventId" | "providerCreatedAt">,
 ): Promise<boolean> {
+  const progress = createHostedLinqProviderEventProgress(event);
   const updated = await prisma.hostedLinqLine.updateMany({
-    where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, {
-      deliveryStatus: "delivered",
-      providerCreatedAt: event.providerCreatedAt,
-    }),
+    where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, progress),
     data: {
       consecutiveFailures: 0,
       healthStatus: "healthy",
       lastDeliveredAt: event.providerCreatedAt,
       lastReceiptAt: event.providerCreatedAt,
-      lastReceiptEventId: createHostedLinqProviderEventLookupKey(event.eventId),
+      lastReceiptEventId: progress.eventLookupKey,
       totalDeliveredCount: { increment: 1 },
     },
   });
@@ -215,11 +214,9 @@ async function projectMessageFailed(
     "eventId" | "failureCode" | "failureReason" | "providerCreatedAt"
   >,
 ): Promise<boolean> {
+  const progress = createHostedLinqProviderEventProgress(event);
   const updated = await prisma.hostedLinqLine.updateMany({
-    where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, {
-      deliveryStatus: "failed",
-      providerCreatedAt: event.providerCreatedAt,
-    }),
+    where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, progress),
     data: {
       consecutiveFailures: { increment: 1 },
       healthStatus: "warning",
@@ -227,7 +224,7 @@ async function projectMessageFailed(
       lastFailureCode: event.failureCode,
       lastFailureReason: event.failureReason,
       lastReceiptAt: event.providerCreatedAt,
-      lastReceiptEventId: createHostedLinqProviderEventLookupKey(event.eventId),
+      lastReceiptEventId: progress.eventLookupKey,
       totalFailedCount: { increment: 1 },
     },
   });
@@ -241,12 +238,17 @@ async function projectPhoneNumberStatusUpdated(
 ): Promise<boolean> {
   const healthStatus = classifyHostedLinqProviderStatus(event.providerStatus);
   const egressPolicy = deriveHostedLinqEgressPolicy(event.providerStatus);
+  const progress = createHostedLinqProviderEventProgress({
+    eventId: event.eventId,
+    providerCreatedAt: event.providerCreatedAt,
+    rank: rankHostedLinqLineStatusProgress(event.providerStatus),
+  });
   const updated = await prisma.hostedLinqLine.updateMany({
-    where: buildPhoneNumberStatusProjectionWhere(phoneNumberLookupKey, event),
+    where: buildPhoneNumberStatusProjectionWhere(phoneNumberLookupKey, progress),
     data: {
       ...(egressPolicy ? { egressPolicy } : {}),
       healthStatus,
-      lastStatusEventId: createHostedLinqProviderEventLookupKey(event.eventId),
+      lastStatusEventId: progress.eventLookupKey,
       providerReason: event.providerReason,
       providerStatus: event.providerStatus,
       providerUpdatedAt: event.providerCreatedAt,
@@ -257,10 +259,7 @@ async function projectPhoneNumberStatusUpdated(
 
 function buildMessageReceiptLineProjectionWhere(
   phoneNumberLookupKey: string,
-  event: {
-    deliveryStatus: "delivered" | "failed";
-    providerCreatedAt: Date;
-  },
+  progress: HostedLinqProviderEventProgress,
 ): Prisma.HostedLinqLineWhereInput {
   const orderingWhere: Prisma.HostedLinqLineWhereInput[] = [
     {
@@ -268,20 +267,18 @@ function buildMessageReceiptLineProjectionWhere(
     },
     {
       lastReceiptAt: {
-        lt: event.providerCreatedAt,
+        lt: progress.providerCreatedAt,
       },
     },
   ];
 
-  if (event.deliveryStatus === "failed") {
-    orderingWhere.push({
-      lastReceiptAt: event.providerCreatedAt,
-      OR: [
-        { lastFailedAt: null },
-        { lastFailedAt: { not: event.providerCreatedAt } },
-      ],
-    });
-  }
+  orderingWhere.push({
+    lastReceiptAt: progress.providerCreatedAt,
+    OR: [
+      { lastReceiptEventId: null },
+      { lastReceiptEventId: { lt: progress.eventLookupKey } },
+    ],
+  });
 
   return {
     phoneNumberLookupKey,
@@ -291,7 +288,7 @@ function buildMessageReceiptLineProjectionWhere(
 
 function buildPhoneNumberStatusProjectionWhere(
   phoneNumberLookupKey: string,
-  event: ParsedHostedLinqProviderEvent,
+  progress: HostedLinqProviderEventProgress,
 ): Prisma.HostedLinqLineWhereInput {
   return {
     phoneNumberLookupKey,
@@ -301,37 +298,62 @@ function buildPhoneNumberStatusProjectionWhere(
       },
       {
         providerUpdatedAt: {
-          lt: event.providerCreatedAt,
+          lt: progress.providerCreatedAt,
         },
       },
-      ...buildSameTimestampStatusProjectionWhere(event),
+      ...buildSameTimestampStatusProjectionWhere(progress),
     ],
   };
 }
 
 function buildSameTimestampStatusProjectionWhere(
-  event: ParsedHostedLinqProviderEvent,
+  progress: HostedLinqProviderEventProgress,
 ): Prisma.HostedLinqLineWhereInput[] {
-  const egressPolicy = deriveHostedLinqEgressPolicy(event.providerStatus);
-  if (egressPolicy === "disabled") {
+  const sameTimestamp = progress.providerCreatedAt;
+  if (progress.rank === 2) {
     return [
       {
         egressPolicy: { not: "disabled" },
-        providerUpdatedAt: event.providerCreatedAt,
+        providerUpdatedAt: sameTimestamp,
+      },
+      {
+        egressPolicy: "disabled",
+        providerUpdatedAt: sameTimestamp,
+        OR: [
+          { lastStatusEventId: null },
+          { lastStatusEventId: { lt: progress.eventLookupKey } },
+        ],
       },
     ];
   }
 
-  if (egressPolicy === "avoid_new_assignments") {
+  if (progress.rank === 1) {
     return [
       {
         egressPolicy: { notIn: ["disabled", "avoid_new_assignments"] },
-        providerUpdatedAt: event.providerCreatedAt,
+        providerUpdatedAt: sameTimestamp,
+      },
+      {
+        egressPolicy: "avoid_new_assignments",
+        providerUpdatedAt: sameTimestamp,
+        OR: [
+          { lastStatusEventId: null },
+          { lastStatusEventId: { lt: progress.eventLookupKey } },
+        ],
       },
     ];
   }
 
-  return [];
+  return [
+    {
+      egressPolicy: { notIn: ["disabled", "avoid_new_assignments"] },
+      providerUpdatedAt: sameTimestamp,
+      OR: [
+        { lastStatusEventId: null },
+        { lastStatusEventId: { lt: progress.eventLookupKey } },
+      ],
+    },
+  ];
 }
 
 function classifyHostedLinqProviderStatus(value: string | null): string {
@@ -357,4 +379,15 @@ function deriveHostedLinqEgressPolicy(value: string | null): string | null {
     return "avoid_new_assignments";
   }
   return null;
+}
+
+function rankHostedLinqLineStatusProgress(value: string | null): number {
+  const egressPolicy = deriveHostedLinqEgressPolicy(value);
+  if (egressPolicy === "disabled") {
+    return 2;
+  }
+  if (egressPolicy === "avoid_new_assignments") {
+    return 1;
+  }
+  return 0;
 }

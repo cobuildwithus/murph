@@ -11,6 +11,7 @@ import {
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
 import { IntegrationsSection } from "@/src/components/homepage/integrations-section";
 import { LocalRunSection } from "@/src/components/homepage/local-run-section";
+import { pickRandomMurphHeadshotSrc } from "@/src/components/homepage/murph-headshot-avatar";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
@@ -96,6 +97,7 @@ export default async function HomePage() {
   ]);
   const country = headerList.get("x-vercel-ip-country") ?? "";
   const messengerChannel = resolveHeroMessengerChannel(country);
+  const murphHeadshotSrc = pickRandomMurphHeadshotSrc();
   const installCommandUrl =
     resolveHostedInstallScriptUrl() ?? "https://www.withmurph.ai/install.sh";
   const launchPricingSummary = formatHostedLandingPricingLongSummary();
@@ -132,13 +134,14 @@ export default async function HomePage() {
           authenticated={authenticated}
           contactInfo={heroContactInfo}
           messengerChannel={messengerChannel}
+          murphHeadshotSrc={murphHeadshotSrc}
         />
         <AsksGridSection />
         <TrustSection />
-        <PersonasSection />
+        <PersonasSection murphHeadshotSrc={murphHeadshotSrc} />
         <IntegrationsSection authenticated={authenticated} />
         <HowItWorksSection />
-        <AssistantSection />
+        <AssistantSection murphHeadshotSrc={murphHeadshotSrc} />
         <SecurityTeaserSection />
         <FaqSection />
         <SignupCtaSection authenticated={authenticated} signupCta={signupCta} />

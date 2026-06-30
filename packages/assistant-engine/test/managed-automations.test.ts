@@ -305,6 +305,9 @@ describe('applyMurphManagedAutomations', () => {
     }
 
     expect(researchScoutSeed.schedule.expression).toBe('30 19 * * 3')
+    expect(researchScoutSeed.assistantTargetOverride).toEqual({
+      reasoningEffort: 'high',
+    })
     expect(researchScoutSeed.instructions).toContain('On this scheduled weekly run')
     expect(researchScoutSeed.instructions).not.toContain('7:30 PM local time')
     expect(researchScoutSeed.instructions).not.toContain('Friday morning')
@@ -335,7 +338,12 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(seed.schedule.expression).toBe('30 11 * * 4')
     expect(seed.instructions).toContain('/api/changelog?days=7&featureLimit=70&improvementLimit=10')
+    expect(seed.instructions).toContain('2-3 shipped Murph updates')
+    expect(seed.instructions).toContain('Selection budget: choose 2-3 items')
+    expect(seed.instructions).toContain('Do not pad with weak matches')
+    expect(seed.instructions).toContain('Drop anything that is merely generally new')
     expect(seed.instructions).toContain('scheduled announcement text-only')
+    expect(seed.instructions).not.toContain('Choose 3-7 items')
     expect(seed.instructions).not.toContain('murph.attach_response_media')
     expect(seed.instructions).not.toContain('visual digest')
     expect(seed.instructions).not.toContain('links.digestCardTemplate')
@@ -475,6 +483,9 @@ describe('applyMurphManagedAutomations', () => {
       status: 'active',
       title: 'Weekly health research scout',
     })
+    expect(researchScoutRecord?.assistantTargetOverride).toEqual({
+      reasoningEffort: 'high',
+    })
     expect(researchScoutRecord?.schedule).toEqual(EXPECTED_MANAGED_SPREAD_CRONS.researchScout)
     expect(researchScoutRecord?.tags).toContain('murph-managed:weekly-health-research-scout')
     expect(researchScoutRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
@@ -547,6 +558,11 @@ describe('applyMurphManagedAutomations', () => {
     expect(productUpdatesRecord?.tags).not.toContain(
       ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
     )
+    expect(productUpdatesRecord?.instructions).toContain('2-3 shipped Murph updates')
+    expect(productUpdatesRecord?.instructions).toContain('Selection budget: choose 2-3 items')
+    expect(productUpdatesRecord?.instructions).toContain('Do not pad with weak matches')
+    expect(productUpdatesRecord?.instructions).toContain('Drop anything that is merely generally new')
+    expect(productUpdatesRecord?.instructions).not.toContain('Choose 3-7 items')
     expect(productUpdatesRecord?.instructions).toContain(
       '{"kind":"skip","privateSummary":"Changelog feed unavailable or empty."}',
     )
