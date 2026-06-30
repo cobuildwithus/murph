@@ -250,6 +250,14 @@ async function sendHostedOpsOnboardingVoiceFirstNewChat(input: {
     prisma: input.prisma,
     request: input.request,
   });
+  const openIdempotencyKey = buildHostedOpsOnboardingIdempotencyKey({
+    requestId: input.request.requestId,
+    step: "open",
+    targetParts: [
+      input.request.linqFromPhoneNumber,
+      input.request.recipientPhoneNumber,
+    ],
+  });
   const attachment = await uploadHostedLinqAttachment({
     bytes: voiceMemo.bytes,
     contentType: voiceMemo.contentType,
@@ -259,14 +267,10 @@ async function sendHostedOpsOnboardingVoiceFirstNewChat(input: {
   const createdChat = await createHostedLinqMediaChat({
     attachmentId: attachment.attachmentId,
     from: input.request.linqFromPhoneNumber,
-    idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
-      requestId: input.request.requestId,
-      step: "open",
-      targetParts: [
-        input.request.linqFromPhoneNumber,
-        input.request.recipientPhoneNumber,
-      ],
-    }),
+    // Linq idempotency is on the chat message send. Attachment creation has no
+    // stable idempotency field, so retries may re-upload while this key restores
+    // the accepted chat/message and lets us restore the pending binding.
+    idempotencyKey: openIdempotencyKey,
     to: [input.request.recipientPhoneNumber],
   });
   const chatId = normalizeNullableString(createdChat.chatId);

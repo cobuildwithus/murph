@@ -431,6 +431,65 @@ describe("hosted ops onboarding invites", () => {
     expect(secondKey).not.toContain("+15559876543");
   });
 
+  it("restores the pending binding when the same new-chat audio request is retried after chat creation", async () => {
+    mocks.uploadHostedLinqAttachment
+      .mockResolvedValueOnce({ attachmentId: "attachment_first" })
+      .mockResolvedValueOnce({ attachmentId: "attachment_retry" });
+    mocks.createHostedLinqMediaChat.mockResolvedValue({
+      chatId: "chat_replayed",
+      messageId: "message_replayed",
+    });
+    mocks.upsertHostedMemberPendingLinqBindingTx.mockRejectedValueOnce(
+      new Error("database went away"),
+    );
+    const request = {
+      deliveryMode: "new_chat" as const,
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-retry-open",
+      voiceMemo: {
+        bytes: new Uint8Array([1]),
+        contentType: "audio/x-m4a" as const,
+        extension: "m4a" as const,
+        sizeBytes: 1,
+      },
+    };
+
+    await expect(service.sendHostedOpsOnboardingInvite(request)).rejects.toThrow(
+      "database went away",
+    );
+    const result = await service.sendHostedOpsOnboardingInvite(request);
+
+    const firstKey = readIdempotencyKey(mocks.createHostedLinqMediaChat, 0);
+    const secondKey = readIdempotencyKey(mocks.createHostedLinqMediaChat, 1);
+
+    expect(firstKey).toBe(secondKey);
+    expect(mocks.createHostedLinqMediaChat).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      attachmentId: "attachment_first",
+      idempotencyKey: firstKey,
+    }));
+    expect(mocks.createHostedLinqMediaChat).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      attachmentId: "attachment_retry",
+      idempotencyKey: firstKey,
+    }));
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(2);
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenLastCalledWith({
+      linqChatId: "chat_replayed",
+      memberId: "member_123",
+      prisma: tx,
+      recipientPhone: "+15557654321",
+    });
+    expect(result).toMatchObject({
+      chatId: "chat_replayed",
+      newChatCreated: true,
+      openerMessageId: "message_replayed",
+      textMessageSent: false,
+      voiceMemo: {
+        sent: true,
+      },
+    });
+  });
+
   it("changes the invite text idempotency key when a post-send failed retry targets a different chat", async () => {
     prisma.hostedInvite.updateMany.mockRejectedValueOnce(new Error("database went away"));
 

@@ -236,6 +236,13 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
+  const existingPendingLinqChatLookupCandidate = await lookupHostedMemberRoutingByPendingLinqChatId({
+    linqChatId: summary.chatId,
+    prisma: input.prisma,
+  });
+  const existingPendingLinqChatLookup = existingPendingLinqChatLookupCandidate?.core
+    ? existingPendingLinqChatLookupCandidate
+    : null;
   const existingMemberLookup = participantContact.kind === "phone"
     ? await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
         phoneNumber: participantContact.value,
@@ -249,12 +256,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
     ? null
     : await lookupHostedMemberRoutingByPendingLinqParticipantContact({
         contact: participantContact,
-        prisma: input.prisma,
-      });
-  const existingPendingLinqChatLookup = existingMemberLookup || existingPendingLinqContactLookup
-    ? null
-    : await lookupHostedMemberRoutingByPendingLinqChatId({
-        linqChatId: summary.chatId,
         prisma: input.prisma,
       });
   const existingHomeLinqChatLookup =
@@ -286,6 +287,28 @@ export async function planHostedOnboardingLinqWebhook(input: {
         prisma: input.prisma,
       })
     : false;
+
+  if (
+    hasHostedLinqPendingChatAuthorityMismatch({
+      candidateLookups: [
+        existingMemberLookup,
+        existingPendingLinqContactLookup,
+      ],
+      pendingChatLookup: existingPendingLinqChatLookup,
+    })
+  ) {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("pending-linq-chat-authority-mismatch"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: existingPendingLinqChatLookup
+          ? hasHostedMemberActiveAccess(existingPendingLinqChatLookup.core)
+          : false,
+        existingMemberMatch,
+        reason: "pending-linq-chat-authority-mismatch",
+        routeStage: "ignored-pending-linq-chat-authority-mismatch",
+      }),
+    );
+  }
 
   if (summary.isFromMe) {
     if (existingMember) {
@@ -1171,6 +1194,20 @@ function resolveHostedLinqExistingMemberMatch(input: {
   }
 
   return "none";
+}
+
+function hasHostedLinqPendingChatAuthorityMismatch(input: {
+  candidateLookups: Array<{ core: { id: string } } | null>;
+  pendingChatLookup: { core: { id: string } } | null;
+}): boolean {
+  const pendingMemberId = input.pendingChatLookup?.core.id ?? null;
+  if (!pendingMemberId) {
+    return false;
+  }
+
+  return input.candidateLookups.some((lookup) =>
+    lookup !== null && lookup.core.id !== pendingMemberId
+  );
 }
 
 function buildHostedLinqWebhookPlannerDetails(

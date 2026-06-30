@@ -2863,6 +2863,140 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
   });
 
+  it("fails closed when a pending Linq chat reply sender belongs to another member", async () => {
+    mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
+    const pendingChatLookupKey = createHostedLinqChatLookupKey("chat_123");
+    if (!pendingChatLookupKey) {
+      throw new Error("Expected test pending Linq chat lookup key.");
+    }
+    const pendingRoutingRecord = {
+      linqChatIdEncrypted: null,
+      linqRecipientPhoneEncrypted: null,
+      member: {
+        billingStatus: HostedBillingStatus.not_started,
+        createdAt: new Date("2026-03-25T00:00:00.000Z"),
+        id: "member_pending_chat",
+        suspendedAt: null,
+        updatedAt: new Date("2026-03-25T00:00:00.000Z"),
+      },
+      memberId: "member_pending_chat",
+      pendingLinqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.pending-linq-chat-id",
+        memberId: "member_pending_chat",
+        value: "chat_123",
+      }),
+      pendingLinqChatLookupKey: pendingChatLookupKey,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      pendingLinqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.pending-linq-recipient-phone",
+        memberId: "member_pending_chat",
+        value: "+15550000000",
+      }),
+      replyAliasLookupKey: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    };
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn(),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMemberEmailAuthorization: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            directPublicSenderAddressEncrypted: null,
+            directPublicSenderAuthorizedAt: null,
+            directPublicSenderLookupKey: null,
+            member: {
+              billingStatus: HostedBillingStatus.not_started,
+              createdAt: new Date("2026-03-24T00:00:00.000Z"),
+              id: "member_sender_identity",
+              suspendedAt: null,
+              updatedAt: new Date("2026-03-24T00:00:00.000Z"),
+            },
+            memberId: "member_sender_identity",
+            stripeCheckoutEmailAddressEncrypted: null,
+            stripeCheckoutEmailCollectedAt: null,
+            verifiedEmailAddressEncrypted: null,
+            verifiedEmailLookupKey: "hbidx:email:v1:sender",
+            verifiedEmailVerifiedAt: new Date("2026-03-24T00:00:00.000Z"),
+          },
+        ]),
+      },
+      hostedMemberRouting: {
+        findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+          const pendingChatLookupKeys =
+            (where.pendingLinqChatLookupKey as { in?: unknown[] } | undefined)?.in ?? [];
+          return pendingChatLookupKeys.includes(pendingChatLookupKey)
+            ? [pendingRoutingRecord]
+            : [];
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        upsert: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            {
+              attachment_id: "attachment_audio_123",
+              type: "media",
+            },
+          ],
+          sender_handle: {
+            handle: "alias@example.test",
+            id: "handle_sender_email",
+            service: "iMessage",
+          },
+        },
+        eventId: "evt_pending_chat_sender_mismatch",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "pending-linq-chat-authority-mismatch",
+    });
+    expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("sends first-contact signup links even when inbound Linq parts exceed mailbox limits", async () => {
     const invite = {
       channel: "linq",
@@ -6575,7 +6709,7 @@ async function readHostedMemberRoutingFromMockLookup(input: {
     where.pendingLinqParticipantContactLookupKey,
   );
 
-  return await input.findUnique({
+  const record = await input.findUnique({
     where: {
       ...(typeof linqChatLookupKey === "string" ? { linqChatLookupKey } : {}),
       ...(typeof pendingLinqChatLookupKey === "string"
@@ -6586,6 +6720,20 @@ async function readHostedMemberRoutingFromMockLookup(input: {
         : {}),
     },
   });
+
+  if (
+    typeof pendingLinqChatLookupKey === "string"
+    && (
+      !record
+      || typeof record !== "object"
+      || (record as { pendingLinqChatLookupKey?: unknown }).pendingLinqChatLookupKey
+        !== pendingLinqChatLookupKey
+    )
+  ) {
+    return null;
+  }
+
+  return record;
 }
 
 function readFirstLookupCandidate(value: unknown): string | null {

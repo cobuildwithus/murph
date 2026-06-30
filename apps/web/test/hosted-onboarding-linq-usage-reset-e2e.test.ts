@@ -83,6 +83,7 @@ const mocks = vi.hoisted(() => {
     incrementHostedLinqOutboundDailyState: vi.fn(),
     lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
     lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
+    lookupHostedMemberRoutingByPendingLinqChatId: vi.fn(),
     lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
     nudgeHostedRunnerUserBestEffortResult: vi.fn(async (
       input?: {
@@ -164,6 +165,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
 
   return {
     ...actual,
+    lookupHostedMemberRoutingByPendingLinqChatId:
+      mocks.lookupHostedMemberRoutingByPendingLinqChatId,
     lookupHostedMemberRoutingByPendingLinqParticipantContact:
       mocks.lookupHostedMemberRoutingByPendingLinqParticipantContact,
     readHostedMemberHomeLinqRoute: mocks.readHostedMemberHomeLinqRoute,
