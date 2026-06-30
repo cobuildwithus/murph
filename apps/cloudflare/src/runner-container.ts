@@ -434,19 +434,10 @@ export class RunnerContainer extends Container {
     }
 
     if (this.workspaceInvocationActiveOperationPreservedAfterTransportFailure) {
-      let activeInContainer = true;
-      try {
-        activeInContainer = await this.readWorkspaceInvocationActiveFromHealth();
-      } catch {
-        activeInContainer = true;
-      }
+      const activeInContainer =
+        await this.readPreservedWorkspaceInvocationActiveFromContainer();
       if (!activeInContainer) {
-        if (this.workspaceInvocationActiveOperation === active) {
-          this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
-          this.workspaceInvocationAbortEndpointReady = false;
-          this.workspaceInvocationActiveOperation = null;
-          this.workspaceInvocationAbortController = null;
-        }
+        this.clearPreservedWorkspaceInvocationActiveOperation(active);
         return { active: false, reason: "no_active_runtime" };
       }
     }
@@ -595,19 +586,10 @@ export class RunnerContainer extends Container {
     }
 
     if (active && this.workspaceInvocationActiveOperationPreservedAfterTransportFailure) {
-      let activeInContainer = true;
-      try {
-        activeInContainer = await this.readWorkspaceInvocationActiveFromHealth();
-      } catch {
-        activeInContainer = true;
-      }
+      const activeInContainer =
+        await this.readPreservedWorkspaceInvocationActiveFromContainer();
       if (!activeInContainer) {
-        if (this.workspaceInvocationActiveOperation === active) {
-          this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
-          this.workspaceInvocationAbortEndpointReady = false;
-          this.workspaceInvocationActiveOperation = null;
-          this.workspaceInvocationAbortController = null;
-        }
+        this.clearPreservedWorkspaceInvocationActiveOperation(active);
         return { kind: "not-wakeable", reason: "no-active-child" };
       }
     }
@@ -1271,6 +1253,30 @@ export class RunnerContainer extends Container {
       throw new Error("Hosted runner container health did not include a valid active job count.");
     }
     return payload.activeJobCount > 0;
+  }
+
+  private async readPreservedWorkspaceInvocationActiveFromContainer(): Promise<boolean> {
+    try {
+      return await this.readWorkspaceInvocationActiveFromHealth();
+    } catch (error) {
+      const status = await readRunnerContainerStatus(this);
+      if (isRunnerContainerStopped(status)) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  private clearPreservedWorkspaceInvocationActiveOperation(
+    active: RunnerActiveOperationRecord,
+  ): void {
+    if (this.workspaceInvocationActiveOperation !== active) {
+      return;
+    }
+    this.workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
+    this.workspaceInvocationAbortEndpointReady = false;
+    this.workspaceInvocationActiveOperation = null;
+    this.workspaceInvocationAbortController = null;
   }
 
   private async postWorkspaceInvocationAbort(input: {
