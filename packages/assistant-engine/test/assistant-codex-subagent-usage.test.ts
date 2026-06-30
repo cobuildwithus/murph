@@ -6,17 +6,19 @@ import {
 } from '../src/assistant/providers/helpers.ts'
 
 function tokenUsageEvent(input: {
+  method?: string
   threadId: string
   turnId: string
   total: Record<string, number>
   last: Record<string, number>
+  tokenUsageKey?: 'tokenUsage' | 'token_usage'
 }): Record<string, unknown> {
   return {
-    method: 'thread/tokenUsage/updated',
+    method: input.method ?? 'thread/tokenUsage/updated',
     params: {
       threadId: input.threadId,
       turnId: input.turnId,
-      tokenUsage: {
+      [input.tokenUsageKey ?? 'tokenUsage']: {
         total: input.total,
         last: input.last,
       },
@@ -219,6 +221,85 @@ describe('extractCodexSubagentUsageDrafts', () => {
     expect(JSON.stringify(drafts)).not.toContain('thread-child-ghost')
   })
 
+  it('tracks Codex v2 app-server spawn items and token usage notifications', () => {
+    const drafts = extractCodexSubagentUsageDrafts({
+      droppedThreadCount: 0,
+      modelProvider: 'openai',
+      ordinalStart: 2,
+      parentRawEvents: [
+        {
+          method: 'item/completed',
+          params: {
+            threadId: 'thread-parent-v2',
+            turnId: 'turn-parent-v2',
+            item: {
+              id: 'spawn-v2-1',
+              type: 'collabAgentToolCall',
+              tool: 'spawnAgent',
+              status: 'completed',
+              senderThreadId: 'thread-parent-v2',
+              receiverThreadIds: ['thread-child-v2'],
+              prompt: 'summarize private context',
+              model: 'gpt-5.2',
+              reasoningEffort: 'medium',
+              agentsStates: {
+                'thread-child-v2': 'completed',
+              },
+            },
+          },
+        },
+      ],
+      subagentTokenUsageByThread: new Map([
+        [
+          'thread-child-v2',
+          sampleFromEvents([
+            tokenUsageEvent({
+              threadId: 'thread-child-v2',
+              turnId: 'turn-child-v2',
+              total: {
+                totalTokens: 1_200,
+                inputTokens: 900,
+                cachedInputTokens: 300,
+                outputTokens: 300,
+                reasoningOutputTokens: 40,
+              },
+              last: {
+                totalTokens: 1_200,
+                inputTokens: 900,
+                cachedInputTokens: 300,
+                outputTokens: 300,
+                reasoningOutputTokens: 40,
+              },
+            }),
+          ]),
+        ],
+      ]),
+    })
+
+    expect(drafts).toHaveLength(1)
+    expect(drafts[0]).toMatchObject({
+      provider: 'codex-cli',
+      providerRequestOrdinal: 2,
+      providerRequestOutcome: 'succeeded',
+      usage: {
+        cachedInputTokens: 300,
+        inputTokens: 900,
+        outputTokens: 300,
+        providerName: 'openai',
+        reasoningTokens: 40,
+        requestedModel: 'gpt-5.2',
+        servedModel: 'gpt-5.2',
+        totalTokens: 1_200,
+        usageExtractionSourcePath: 'subagent.thread.tokenUsage.total.delta',
+      },
+    })
+    expect(drafts[0]?.usage.rawUsageJson).toMatchObject({
+      codexSubagentThreadId: 'thread-child-v2',
+      tokenUsageEventCount: 1,
+    })
+    expect(JSON.stringify(drafts)).not.toContain('summarize private context')
+  })
+
   it('authorizes billing via non-spawn collab items and keeps spawn-attributed models', () => {
     const usageFor = (threadId: string) =>
       sampleFromEvents([
@@ -340,8 +421,10 @@ describe('extractCodexSubagentUsageDrafts', () => {
   it('attributes one spawn model to every receiver thread and tolerates snake_case items', () => {
     const sample = sampleFromEvents([
       tokenUsageEvent({
+        method: 'thread/token_usage/updated',
         threadId: 'thread-child-snake',
         turnId: 'turn-child-snake',
+        tokenUsageKey: 'token_usage',
         total: {
           total_tokens: 50,
           input_tokens: 40,
