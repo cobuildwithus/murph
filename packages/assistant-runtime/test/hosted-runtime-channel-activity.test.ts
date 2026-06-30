@@ -176,6 +176,45 @@ test("hosted Linq typing can use recent inbound engagement without route authori
   );
 });
 
+test("hosted Linq typing falls back to target recent inbound when initial context is unavailable", async () => {
+  const assertRecentInbound = vi.fn(async () => undefined);
+  const typing = createHostedAssistantChannelTypingDependencies({
+    effectsPort: {
+      assertLinqRecentInboundEngagement: assertRecentInbound,
+    },
+    forwardedEnv: {
+      LINQ_API_TOKEN: "linq-token",
+    },
+    linqDeliveryContexts: [],
+    platformEnv: {},
+    providerFetch: vi.fn<typeof fetch>(),
+    userEnv: {},
+  });
+
+  await expect(typing.startLinqTyping?.({
+    target: "chat_123",
+  })).resolves.toBeUndefined();
+
+  expect(assertRecentInbound).toHaveBeenCalledWith({
+    directRecipientPhoneNumber: null,
+    engagementKind: "requires_recent_inbound",
+    fromPhoneNumber: null,
+    idempotencyKey: null,
+    intentId: null,
+    routeAuthority: null,
+    target: "chat_123",
+    targetKind: "thread",
+  }, {
+    signal: null,
+  });
+  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledWith(
+    {
+      target: "chat_123",
+    },
+    expect.any(Object),
+  );
+});
+
 test("hosted Linq typing no-ops when recent inbound engagement is rejected", async () => {
   const routeAuthority = buildLinqRouteAuthority("chat_123");
   const assertRecentInbound = vi.fn(async () => {
@@ -383,6 +422,39 @@ test("hosted Linq typing no-ops when the target is not the current inbound conte
     target: "different_linq_chat",
   })).resolves.toBeUndefined();
 
+  expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
+});
+
+test("hosted Linq typing does not use target fallback when another context is present", async () => {
+  const assertRecentInbound = vi.fn(async () => undefined);
+  const typing = createHostedAssistantChannelTypingDependencies({
+    effectsPort: {
+      assertLinqRecentInboundEngagement: assertRecentInbound,
+    },
+    forwardedEnv: {
+      LINQ_API_TOKEN: "linq-token",
+    },
+    linqDeliveryContexts: [
+      {
+        directRecipientPhoneNumber: "+15551234567",
+        fromPhoneNumber: null,
+        replyToMessageId: "msg_123",
+        routeAuthority: null,
+        service: null,
+        target: "current_linq_chat",
+        threadIsDirect: null,
+      },
+    ],
+    platformEnv: {},
+    providerFetch: vi.fn<typeof fetch>(),
+    userEnv: {},
+  });
+
+  await expect(typing.startLinqTyping?.({
+    target: "different_linq_chat",
+  })).resolves.toBeUndefined();
+
+  expect(assertRecentInbound).not.toHaveBeenCalled();
   expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
 });
 

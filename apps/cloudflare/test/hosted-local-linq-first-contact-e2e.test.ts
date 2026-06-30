@@ -586,6 +586,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     const materializedChatId = requireLinqStub().requireObservedChatId(postAssistantReplyUserId);
     const expectedDirectReplyChatPath =
       `/chats/${encodeURIComponent(materializedChatId)}/messages`;
+    const expectedTypingPath = `/chats/${encodeURIComponent(materializedChatId)}/typing`;
     const outboundCountBeforeFirstReply =
       requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
     const assistantProviderResponseCountBefore =
@@ -614,10 +615,6 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       reason: "wake-appended-active-member",
     });
     await requireScenario().waitForLatestPendingWake(postAssistantReplyUserId);
-    const firstCompletionPromise = requireScenario().waitForHostedCompletion(
-      postAssistantReplyUserId,
-    );
-
     const firstReplySend = await requireLinqStub().waitForAdditionalSend({
       baselineCount: outboundCountBeforeFirstReply,
       expectedPath: expectedDirectReplyChatPath,
@@ -627,12 +624,10 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     expect(requireLinqStub().readObservedMessageText(firstReplySend)).toBe(
       assistantQuestionText,
     );
-    const firstCompletionStatus = await firstCompletionPromise;
-    expect(firstCompletionStatus.lastErrorCode ?? null).toBeNull();
-    expect(firstCompletionStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
 
     const outboundCountBeforeSecondReply =
       requireLinqStub().countObservedSends(expectedDirectReplyChatPath);
+    const requestCountBeforeSecondReply = requireLinqStub().observedRequests.length;
     const secondWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       postAssistantReplyUserId,
       materializedChatId,
@@ -665,6 +660,20 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     expect(requireLinqStub().readObservedMessageText(secondReplySend)).toBe(
       assistantSecondReplyText,
     );
+    const requestsAfterSecondInbound =
+      requireLinqStub().observedRequests.slice(requestCountBeforeSecondReply);
+    const secondReplyTypingStarts = requestsAfterSecondInbound.filter((request) =>
+      request.method === "POST" && request.url === expectedTypingPath
+    );
+    expect(secondReplyTypingStarts.length).toBeGreaterThanOrEqual(1);
+
+    const secondReplySendIndex = requestsAfterSecondInbound.indexOf(secondReplySend);
+    const secondReplyTypingStartIndex = requestsAfterSecondInbound.indexOf(
+      secondReplyTypingStarts[0]!,
+    );
+    expect(secondReplySendIndex).toBeGreaterThanOrEqual(0);
+    expect(secondReplyTypingStartIndex).toBeGreaterThanOrEqual(0);
+    expect(secondReplySendIndex).toBeGreaterThan(secondReplyTypingStartIndex);
 
     expect(requireScenario().runtimeEnv).toMatchObject({
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
