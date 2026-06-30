@@ -104,6 +104,7 @@ export function StickyNav({
           authLabel="Dashboard"
           authenticated={authenticated}
           context="nav"
+          {...(scrolled ? { onDarkSurface: true } : {})}
           {...(preloadAuthPanel ? { preloadAuthPanel: true } : {})}
           splitUnauthenticated={splitUnauthenticatedAuth}
         />

@@ -1,5 +1,6 @@
 import Image from "next/image";
 
+import type { MurphHeadshotSrc } from "./murph-headshot-avatar";
 import {
   PhoneMock,
   type ExperimentResult,
@@ -160,7 +161,11 @@ const PERSONAS: ReadonlyArray<Persona> = [
   },
 ];
 
-export function PersonasSection() {
+export function PersonasSection({
+  murphHeadshotSrc,
+}: {
+  murphHeadshotSrc: MurphHeadshotSrc;
+}) {
   return (
     <section className="bg-[#f5f0e8] px-4 pb-16 sm:px-6 lg:px-8 lg:pb-24">
       <div className="mx-auto max-w-[1280px] overflow-hidden rounded-[2rem] bg-[#1f1c18] px-6 py-16 shadow-[0_30px_80px_-40px_rgba(31,28,24,0.55)] sm:rounded-[2.5rem] sm:px-10 sm:py-20 lg:px-16 lg:py-28">
@@ -208,6 +213,7 @@ export function PersonasSection() {
                 <PhoneMock
                   conversationHeight={470}
                   messages={p.messages}
+                  murphHeadshotSrc={murphHeadshotSrc}
                   priorMessages={p.priorMessages}
                   result={p.result}
                 />
