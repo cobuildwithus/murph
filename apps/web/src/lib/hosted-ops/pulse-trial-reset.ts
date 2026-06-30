@@ -1,35 +1,23 @@
-import { existsSync } from "node:fs";
-import path from "node:path";
-import process from "node:process";
-import { fileURLToPath } from "node:url";
-
 import { HostedBillingStatus, type HostedMemberBillingRef, type PrismaClient } from "@prisma/client";
-import Stripe from "stripe";
+import type Stripe from "stripe";
 
-import {
-  createPrismaClient,
-} from "../src/lib/prisma";
 import {
   HOSTED_PULSE_TRIAL_DAYS,
   HOSTED_PULSE_TRIAL_OFFER,
   HOSTED_PULSE_TRIAL_POLICY_VERSION,
   HOSTED_PULSE_TRIAL_STARTED_AT_OVERRIDE_METADATA_KEY,
   HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
-} from "../src/lib/hosted-onboarding/billing-plans";
+} from "../hosted-onboarding/billing-plans";
 import {
   projectHostedMemberStripeBillingRefSnapshot,
-} from "../src/lib/hosted-onboarding/hosted-member-billing-store";
+} from "../hosted-onboarding/hosted-member-billing-store";
+import { requireHostedStripeApi } from "../hosted-onboarding/runtime";
+import { getPrisma } from "../prisma";
 
-const CONFIG_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_BATCH_SIZE = 100;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export type HostedPulseTrialResetMode = "apply" | "dry-run";
-
-export interface HostedPulseTrialResetArgs {
-  batchSize: number;
-  mode: HostedPulseTrialResetMode;
-}
 
 export interface HostedPulseTrialResetWindow {
   trialEndsAt: Date;
@@ -97,53 +85,25 @@ export interface HostedPulseTrialResetSummary {
   wouldReset: number;
 }
 
-export function parseHostedPulseTrialResetArgs(argv: readonly string[]): HostedPulseTrialResetArgs {
-  let batchSize = DEFAULT_BATCH_SIZE;
-  let mode: HostedPulseTrialResetMode = "dry-run";
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === "--") {
-      continue;
-    }
-    if (arg === "--apply") {
-      mode = "apply";
-      continue;
-    }
-    if (arg === "--dry-run") {
-      mode = "dry-run";
-      continue;
-    }
-    if (arg === "--help" || arg === "-h") {
-      throw new Error(
-        [
-          "Usage: pnpm --dir apps/web pulse-trial:reset [--apply] [--batch-size <count>]",
-          "",
-          "Dry-run is the default. Use --apply to update eligible Stripe subscriptions and Postgres rows.",
-        ].join("\n"),
-      );
-    }
-    if (arg === "--batch-size") {
-      const value = argv[index + 1];
-      if (!value) {
-        throw new Error("--batch-size requires a positive integer.");
-      }
-      batchSize = parseHostedPulseTrialResetBatchSize(value);
-      index += 1;
-      continue;
-    }
-    if (arg.startsWith("--batch-size=")) {
-      batchSize = parseHostedPulseTrialResetBatchSize(arg.slice("--batch-size=".length));
-      continue;
-    }
-
-    throw new Error(`Unsupported argument: ${arg}`);
-  }
-
-  return {
-    batchSize,
-    mode,
+export interface HostedPulseTrialResetSerializedSummary {
+  candidates: number;
+  failures: Record<HostedPulseTrialResetFailureReason, number>;
+  mode: HostedPulseTrialResetMode;
+  reset: number;
+  resetWindow: {
+    trialEndsAt: string;
+    trialStartedAt: string;
   };
+  skipped: Record<HostedPulseTrialResetSkipReason, number>;
+  wouldReset: number;
+}
+
+export function parseHostedPulseTrialResetBatchSize(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > 500) {
+    throw new Error("--batch-size must be an integer from 1 to 500.");
+  }
+  return parsed;
 }
 
 export function buildHostedPulseTrialResetWindow(now = new Date()): HostedPulseTrialResetWindow {
@@ -280,6 +240,24 @@ export async function resetHostedPulseTrials(input: {
   }
 }
 
+export async function resetHostedPulseTrialsForOps(input: {
+  batchSize?: number;
+  mode: HostedPulseTrialResetMode;
+  now?: Date;
+  prisma?: PrismaClient;
+  stripe?: HostedPulseTrialResetStripeClient;
+}): Promise<HostedPulseTrialResetSummary> {
+  const prisma = input.prisma ?? getPrisma();
+
+  return resetHostedPulseTrials({
+    batchSize: input.batchSize,
+    candidateSource: createPrismaHostedPulseTrialResetCandidateSource(prisma),
+    mode: input.mode,
+    now: input.now,
+    stripe: input.stripe ?? createHostedPulseTrialResetStripeClient(),
+  });
+}
+
 export function buildHostedPulseTrialResetStripeUpdateParams(
   resetWindow: HostedPulseTrialResetWindow,
 ): HostedPulseTrialResetStripeUpdateParams {
@@ -296,97 +274,24 @@ export function buildHostedPulseTrialResetStripeUpdateParams(
   };
 }
 
-export function formatHostedPulseTrialResetSummary(summary: HostedPulseTrialResetSummary): string {
-  const lines = [
-    `Pulse Trial reset ${summary.mode}.`,
-    `Trial window: ${summary.resetWindow.trialStartedAt.toISOString()} to ${summary.resetWindow.trialEndsAt.toISOString()}.`,
-    `Candidates scanned: ${summary.candidates}.`,
-    `Would reset: ${summary.wouldReset}.`,
-    `Reset: ${summary.reset}.`,
-  ];
-
-  const skipped = formatCounts(summary.skipped);
-  if (skipped.length > 0) {
-    lines.push(`Skipped: ${skipped}.`);
-  }
-
-  const failures = formatCounts(summary.failures);
-  if (failures.length > 0) {
-    lines.push(`Failures: ${failures}.`);
-  }
-
-  if (summary.mode === "dry-run") {
-    lines.push("Run again with --apply to update eligible Stripe subscriptions and Postgres rows.");
-  }
-
-  return lines.join("\n");
-}
-
-function parseHostedPulseTrialResetBatchSize(value: string): number {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > 500) {
-    throw new Error("--batch-size must be an integer from 1 to 500.");
-  }
-  return parsed;
-}
-
-function buildEmptyHostedPulseTrialResetSummary(input: {
-  mode: HostedPulseTrialResetMode;
-  resetWindow: HostedPulseTrialResetWindow;
-}): HostedPulseTrialResetSummary {
+export function serializeHostedPulseTrialResetSummary(
+  summary: HostedPulseTrialResetSummary,
+): HostedPulseTrialResetSerializedSummary {
   return {
-    candidates: 0,
-    failures: {
-      db_update_failed: 0,
-      stripe_retrieve_failed: 0,
-      stripe_update_failed: 0,
+    candidates: summary.candidates,
+    failures: summary.failures,
+    mode: summary.mode,
+    reset: summary.reset,
+    resetWindow: {
+      trialEndsAt: summary.resetWindow.trialEndsAt.toISOString(),
+      trialStartedAt: summary.resetWindow.trialStartedAt.toISOString(),
     },
-    mode: input.mode,
-    reset: 0,
-    resetWindow: input.resetWindow,
-    skipped: {
-      missing_stripe_refs: 0,
-      stripe_checkout_offer_mismatch: 0,
-      stripe_customer_mismatch: 0,
-      stripe_subscription_not_trialing: 0,
-    },
-    wouldReset: 0,
+    skipped: summary.skipped,
+    wouldReset: summary.wouldReset,
   };
 }
 
-function coerceHostedPulseTrialResetStripeCustomerId(
-  value: HostedPulseTrialResetStripeSubscription["customer"],
-): string | null {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (value && typeof value === "object") {
-    const id = Reflect.get(value, "id");
-    return typeof id === "string" ? id : null;
-  }
-  return null;
-}
-
-function buildHostedPulseTrialResetIdempotencyKey(input: {
-  memberId: string;
-  resetWindow: HostedPulseTrialResetWindow;
-}): string {
-  return [
-    "hosted-pulse-trial-reset",
-    HOSTED_PULSE_TRIAL_POLICY_VERSION,
-    input.memberId,
-    Math.floor(input.resetWindow.trialStartedAt.getTime() / 1000).toString(),
-  ].join(":");
-}
-
-function formatCounts(counts: Record<string, number>): string {
-  return Object.entries(counts)
-    .filter(([, count]) => count > 0)
-    .map(([reason, count]) => `${reason}=${count}`)
-    .join(", ");
-}
-
-function createPrismaHostedPulseTrialResetCandidateSource(
+export function createPrismaHostedPulseTrialResetCandidateSource(
   prisma: PrismaClient,
 ): HostedPulseTrialResetCandidateSource {
   return {
@@ -441,6 +346,68 @@ function createPrismaHostedPulseTrialResetCandidateSource(
   };
 }
 
+export function createHostedPulseTrialResetStripeClient(
+  stripe: Pick<Stripe, "subscriptions"> = requireHostedStripeApi(),
+): HostedPulseTrialResetStripeClient {
+  return {
+    retrieveSubscription(subscriptionId) {
+      return stripe.subscriptions.retrieve(subscriptionId);
+    },
+    updateSubscription(subscriptionId, params, options) {
+      return stripe.subscriptions.update(subscriptionId, params, options);
+    },
+  };
+}
+
+function coerceHostedPulseTrialResetStripeCustomerId(
+  value: HostedPulseTrialResetStripeSubscription["customer"],
+): string | null {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value && typeof value === "object") {
+    const id = Reflect.get(value, "id");
+    return typeof id === "string" ? id : null;
+  }
+  return null;
+}
+
+function buildEmptyHostedPulseTrialResetSummary(input: {
+  mode: HostedPulseTrialResetMode;
+  resetWindow: HostedPulseTrialResetWindow;
+}): HostedPulseTrialResetSummary {
+  return {
+    candidates: 0,
+    failures: {
+      db_update_failed: 0,
+      stripe_retrieve_failed: 0,
+      stripe_update_failed: 0,
+    },
+    mode: input.mode,
+    reset: 0,
+    resetWindow: input.resetWindow,
+    skipped: {
+      missing_stripe_refs: 0,
+      stripe_checkout_offer_mismatch: 0,
+      stripe_customer_mismatch: 0,
+      stripe_subscription_not_trialing: 0,
+    },
+    wouldReset: 0,
+  };
+}
+
+function buildHostedPulseTrialResetIdempotencyKey(input: {
+  memberId: string;
+  resetWindow: HostedPulseTrialResetWindow;
+}): string {
+  return [
+    "hosted-pulse-trial-reset",
+    HOSTED_PULSE_TRIAL_POLICY_VERSION,
+    input.memberId,
+    Math.floor(input.resetWindow.trialStartedAt.getTime() / 1000).toString(),
+  ].join(":");
+}
+
 async function projectHostedPulseTrialResetCandidate(
   record: HostedMemberBillingRef,
   prisma: PrismaClient,
@@ -453,85 +420,4 @@ async function projectHostedPulseTrialResetCandidate(
     stripeCustomerId: snapshot.stripeCustomerId,
     stripeSubscriptionId: snapshot.stripeSubscriptionId,
   };
-}
-
-function createStripeHostedPulseTrialResetClient(): HostedPulseTrialResetStripeClient {
-  const stripe = new Stripe(resolveHostedPulseTrialResetStripeSecretKey());
-  return {
-    retrieveSubscription(subscriptionId) {
-      return stripe.subscriptions.retrieve(subscriptionId);
-    },
-    updateSubscription(subscriptionId, params, options) {
-      return stripe.subscriptions.update(subscriptionId, params, options);
-    },
-  };
-}
-
-function resolveHostedPulseTrialResetStripeSecretKey(): string {
-  const stripeSecretKey = nonEmptyEnv(process.env.STRIPE_SECRET_KEY);
-  if (stripeSecretKey) {
-    return stripeSecretKey;
-  }
-
-  throw new Error("STRIPE_SECRET_KEY is required to reset Pulse Trial Stripe subscriptions.");
-}
-
-function resolveHostedPulseTrialResetDatabaseUrl(): string {
-  const directDatabaseUrl = nonEmptyEnv(process.env.DIRECT_DATABASE_URL);
-  if (directDatabaseUrl) {
-    return directDatabaseUrl;
-  }
-
-  const databaseUrl = nonEmptyEnv(process.env.DATABASE_URL);
-  if (databaseUrl) {
-    return databaseUrl;
-  }
-
-  throw new Error("DATABASE_URL or DIRECT_DATABASE_URL is required to reset Pulse Trials.");
-}
-
-function nonEmptyEnv(value: string | undefined): string | null {
-  const trimmed = value?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : null;
-}
-
-function loadHostedWebEnvFiles(): void {
-  for (const envPath of [".env.local", ".env"]) {
-    const absoluteEnvPath = path.join(CONFIG_DIR, envPath);
-
-    if (existsSync(absoluteEnvPath)) {
-      process.loadEnvFile(absoluteEnvPath);
-    }
-  }
-}
-
-async function main(): Promise<void> {
-  loadHostedWebEnvFiles();
-  const args = parseHostedPulseTrialResetArgs(process.argv.slice(2));
-  const prisma = createPrismaClient({
-    databaseUrl: resolveHostedPulseTrialResetDatabaseUrl(),
-    poolMax: 2,
-  });
-
-  try {
-    const summary = await resetHostedPulseTrials({
-      batchSize: args.batchSize,
-      candidateSource: createPrismaHostedPulseTrialResetCandidateSource(prisma),
-      mode: args.mode,
-      stripe: createStripeHostedPulseTrialResetClient(),
-    });
-    console.log(formatHostedPulseTrialResetSummary(summary));
-    if (formatCounts(summary.failures).length > 0) {
-      process.exitCode = 1;
-    }
-  } finally {
-    await prisma.$disconnect();
-  }
-}
-
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  });
 }

@@ -5,34 +5,24 @@ import {
   buildHostedPulseTrialResetStripeUpdateParams,
   buildHostedPulseTrialResetWindow,
   classifyHostedPulseTrialResetSubscription,
-  parseHostedPulseTrialResetArgs,
+  parseHostedPulseTrialResetBatchSize,
   resetHostedPulseTrials,
   type HostedPulseTrialResetCandidate,
   type HostedPulseTrialResetCandidateSource,
   type HostedPulseTrialResetStripeClient,
   type HostedPulseTrialResetStripeSubscription,
   type HostedPulseTrialResetStripeUpdateParams,
-} from "../scripts/reset-pulse-trials";
+} from "../src/lib/hosted-ops/pulse-trial-reset";
 import {
   HOSTED_PULSE_TRIAL_STARTED_AT_OVERRIDE_METADATA_KEY,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 
-describe("Pulse Trial reset script", () => {
-  test("defaults to dry-run and parses explicit apply mode", () => {
-    assert.deepEqual(parseHostedPulseTrialResetArgs([]), {
-      batchSize: 100,
-      mode: "dry-run",
-    });
-    assert.deepEqual(parseHostedPulseTrialResetArgs(["--apply", "--batch-size", "25"]), {
-      batchSize: 25,
-      mode: "apply",
-    });
-    assert.deepEqual(parseHostedPulseTrialResetArgs(["--", "--dry-run"]), {
-      batchSize: 100,
-      mode: "dry-run",
-    });
+describe("Pulse Trial reset service", () => {
+  test("parses bounded batch sizes", () => {
+    assert.equal(parseHostedPulseTrialResetBatchSize("25"), 25);
+    assert.equal(parseHostedPulseTrialResetBatchSize("500"), 500);
     assert.throws(
-      () => parseHostedPulseTrialResetArgs(["--batch-size", "0"]),
+      () => parseHostedPulseTrialResetBatchSize("0"),
       /--batch-size must be an integer from 1 to 500/u,
     );
   });
