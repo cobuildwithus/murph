@@ -319,22 +319,10 @@ export async function runHostedWorkspaceAssistantPhase(
     const freshAssistantInputIds =
       input.initialMailboxImport.importResult.assistantInputIds ?? [];
     const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
-    const resolveAssistantLaneExecutionContext = async (options: {
-      includeDeviceSyncStatusPrompt: boolean;
-    }): Promise<{
-      deviceSyncStatusPromptAttached: boolean;
-      executionContext: AssistantExecutionContext;
-    }> => {
-      if (
-        !options.includeDeviceSyncStatusPrompt
-        || input.shouldYieldBackgroundMaintenance?.() === true
-      ) {
-        return {
-          deviceSyncStatusPromptAttached: false,
-          executionContext,
-        };
+    const buildBackgroundDeviceSyncStatusPrompt = async (): Promise<string | null> => {
+      if (input.shouldYieldBackgroundMaintenance?.() === true) {
+        return null;
       }
-
       const cancellation = createHostedIdleDeviceSyncMaintenanceCancellation({
         signal: channelAbortController.signal,
         shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
@@ -351,19 +339,10 @@ export async function runHostedWorkspaceAssistantPhase(
           input.shouldYieldBackgroundMaintenance?.() === true
           || !deviceSyncStatusPrompt
         ) {
-          return {
-            deviceSyncStatusPromptAttached: false,
-            executionContext,
-          };
+          return null;
         }
 
-        return {
-          deviceSyncStatusPromptAttached: true,
-          executionContext: withHostedAssistantDynamicContextPrompt({
-            executionContext,
-            prompt: deviceSyncStatusPrompt,
-          }),
-        };
+        return deviceSyncStatusPrompt;
       } finally {
         cancellation.dispose();
       }
@@ -383,16 +362,16 @@ export async function runHostedWorkspaceAssistantPhase(
           ? managedAutomationsResult
           : options.managedAutomationsResult;
       if (
-        candidateSystemMailboxMaintenance.continueAssistantLane
-        || candidateManagedAutomationsResult !== null
-      ) {
-        return true;
-      }
-      if (
         hasFreshConversationInput
         || candidateSystemMailboxMaintenance.pendingAssistantInputWakeAt !== null
       ) {
         return false;
+      }
+      if (
+        candidateSystemMailboxMaintenance.continueAssistantLane
+        || candidateManagedAutomationsResult !== null
+      ) {
+        return true;
       }
 
       return await hasDueHostedAssistantCronJob(input);
@@ -410,19 +389,19 @@ export async function runHostedWorkspaceAssistantPhase(
           operatorHomeRoot: input.restored.operatorHomeRoot,
         },
       );
-      const automationExecutionContext = await resolveAssistantLaneExecutionContext({
-        includeDeviceSyncStatusPrompt:
-          options.includeDeviceSyncStatusPrompt
-          && assistantRuntimeState.assistantConfigured,
-      });
+      const buildBackgroundDynamicContextPrompt =
+        options.includeDeviceSyncStatusPrompt
+        && assistantRuntimeState.assistantConfigured
+          ? buildBackgroundDeviceSyncStatusPrompt
+          : undefined;
       const assistantMetrics = await (async () => {
         try {
           return await runHostedAssistantAutomationLane({
             assistantRuntimeState,
-            ...(automationExecutionContext.deviceSyncStatusPromptAttached
-              ? { deferActiveTurnInput: true }
+            ...(buildBackgroundDynamicContextPrompt
+              ? { buildBackgroundDynamicContextPrompt }
               : {}),
-            executionContext: automationExecutionContext.executionContext,
+            executionContext,
             freshAssistantInputIds,
             requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
             runtime: {
@@ -470,31 +449,14 @@ export async function runHostedWorkspaceAssistantPhase(
       });
       return {
         ...assistantMetrics,
-        deviceSyncStatusPromptAttached:
-          automationExecutionContext.deviceSyncStatusPromptAttached,
         ...(assistantAutomationRedactedLogEntries.length === 0
           ? {}
           : { redactedLogEntries: [...assistantAutomationRedactedLogEntries] }),
       };
     };
-    const rerunWithoutDeviceSyncContextAfterActiveTurn = async (
-      metrics: Awaited<ReturnType<typeof runAutomationLane>>,
-    ): Promise<Awaited<ReturnType<typeof runAutomationLane>>> => {
-      if (
-        metrics.deviceSyncStatusPromptAttached !== true
-        || metrics.activeTurnInputIngested !== true
-      ) {
-        return metrics;
-      }
-
-      return await runAutomationLane({
-        includeDeviceSyncStatusPrompt: false,
-      });
-    };
     let assistantMetrics = await runAutomationLane({
       includeDeviceSyncStatusPrompt: await shouldIncludeDeviceSyncStatusPrompt(),
     });
-    assistantMetrics = await rerunWithoutDeviceSyncContextAfterActiveTurn(assistantMetrics);
     let currentTurnDeliveryIntentIds =
       assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
     let foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
@@ -536,7 +498,6 @@ export async function runHostedWorkspaceAssistantPhase(
           systemMailboxMaintenance: deferredPendingSystemMailboxMaintenance,
         }),
       });
-      assistantMetrics = await rerunWithoutDeviceSyncContextAfterActiveTurn(assistantMetrics);
       currentTurnDeliveryIntentIds =
         assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
       foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
@@ -4774,25 +4735,6 @@ function normalizeHostedDeviceSyncConnectTargetKey(
   const normalized = value?.trim().toLowerCase().replace(/[^a-z0-9_]+/gu, "_")
     .replace(/^_+|_+$/gu, "");
   return normalized ? normalized : null;
-}
-
-function withHostedAssistantDynamicContextPrompt(input: {
-  executionContext: AssistantExecutionContext;
-  prompt: string | null;
-}): AssistantExecutionContext {
-  if (!input.prompt || !input.executionContext.hosted) {
-    return input.executionContext;
-  }
-
-  return {
-    hosted: {
-      ...input.executionContext.hosted,
-      dynamicContextPrompts: [
-        ...(input.executionContext.hosted.dynamicContextPrompts ?? []),
-        input.prompt,
-      ],
-    },
-  };
 }
 
 async function hasDueHostedAssistantCronJob(

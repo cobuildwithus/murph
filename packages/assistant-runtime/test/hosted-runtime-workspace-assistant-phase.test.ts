@@ -3472,8 +3472,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
-    const dynamicContextPrompts =
-      assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts;
+    expect(fetchSnapshotRequests).toEqual([]);
+    const dynamicContextPrompt =
+      await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
     expect(fetchSnapshotRequests.map((request) => request?.sourceProviderSlug)).toEqual([
       "fitbit",
       "garmin",
@@ -3492,17 +3493,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       ]),
     );
     expect(assistantLaneCall?.signal).toBeUndefined();
-    expect(assistantLaneCall).not.toHaveProperty("deferActiveTurnInputRefresh");
     expect(assistantLaneCall).not.toHaveProperty("suppressActiveTurnInputRefresh");
-    expect(dynamicContextPrompts).toHaveLength(1);
-    expect(dynamicContextPrompts?.[0]).toContain("WHOOP currently needs reconnect");
-    expect(dynamicContextPrompts?.[0]).toContain("source `whoop_v2`");
-    expect(dynamicContextPrompts?.[0]).toContain("`TOKEN_REFRESH_FAILED`");
-    expect(dynamicContextPrompts?.[0]).toContain(
+    expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts)
+      .toBeUndefined();
+    expect(dynamicContextPrompt).toContain("WHOOP currently needs reconnect");
+    expect(dynamicContextPrompt).toContain("source `whoop_v2`");
+    expect(dynamicContextPrompt).toContain("`TOKEN_REFRESH_FAILED`");
+    expect(dynamicContextPrompt).toContain(
       "vault-cli device connect whoop --format json",
     );
-    expect(dynamicContextPrompts?.[0]).not.toContain("synthetic-external-account");
-    expect(dynamicContextPrompts?.[0]).not.toContain("refresh failed");
+    expect(dynamicContextPrompt).not.toContain("synthetic-external-account");
+    expect(dynamicContextPrompt).not.toContain("refresh failed");
   });
 
   it("omits Junction source commands when the public connect target resolves direct", async () => {
@@ -3605,7 +3606,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
     const prompt =
-      assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts?.[0] ?? "";
+      await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({}) ?? "";
 
     expect(prompt).toContain("Oura currently needs reconnect");
     expect(prompt).toContain("source `oura`");
@@ -3613,7 +3614,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(prompt).not.toContain("vault-cli device connect oura --format json");
   });
 
-  it("reruns without hosted device sync dynamic context after active-turn input is deferred", async () => {
+  it("omits hosted device sync dynamic context when mailbox maintenance discovers pending assistant input", async () => {
+    const fetchSnapshot = vi.fn(async () => ({
+      connections: [],
+      generatedAt: "2026-04-29T00:00:00.000Z",
+      userId: "member_synthetic_phase",
+    }));
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),
       async applyUpdates() {
@@ -3626,56 +3632,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       async createConnectLink() {
         throw new Error("createConnectLink should not be called.");
       },
-      async fetchSnapshot() {
-        return {
-          connections: [
-            {
-              connection: {
-                accessTokenExpiresAt: null,
-                connectedAt: "2026-04-29T00:00:00.000Z",
-                createdAt: "2026-04-29T00:00:00.000Z",
-                displayName: null,
-                externalAccountId: "synthetic-external-account",
-                id: "conn_synthetic_whoop",
-                metadata: {},
-                provider: "junction",
-                scopes: [],
-                status: "active",
-              },
-              credential: {
-                credentialMetadata: {},
-                kind: "provider_config",
-                providerConfigKey: "junction",
-              },
-              localState: {
-                lastErrorCode: null,
-                lastErrorMessage: null,
-                lastSyncCompletedAt: "2026-04-22T00:00:00.000Z",
-                lastSyncErrorAt: null,
-                lastSyncStartedAt: "2026-04-29T00:00:00.000Z",
-                lastWebhookAt: null,
-                nextReconcileAt: null,
-              },
-              sources: [
-                {
-                  displayName: null,
-                  firstSeenAt: "2026-04-22T00:00:00.000Z",
-                  lastErrorCode: "TOKEN_REFRESH_FAILED",
-                  lastErrorMessage: "refresh failed",
-                  lastSeenAt: "2026-04-29T00:00:00.000Z",
-                  resourceCount: 0,
-                  sourceProviderSlug: "whoop_v2",
-                  status: "error",
-                },
-              ],
-            },
-          ],
-          generatedAt: "2026-04-29T00:00:00.000Z",
-          userId: "member_synthetic_phase",
-        };
-      },
+      fetchSnapshot,
     } satisfies RuntimeDeviceSyncPort;
 
+    mocks.resolveHostedPendingAssistantInputWakeAt
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce("2026-04-29T00:00:00.000Z");
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_processed",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
     mocks.getAssistantCronStatus.mockResolvedValueOnce({
       dueJobs: 1,
       enabledJobs: 1,
@@ -3683,21 +3658,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runningJobs: 0,
       totalJobs: 1,
     });
-    mocks.runHostedAssistantAutomationLane
-      .mockResolvedValueOnce({
-        activeTurnInputIngested: true,
-        assistantAutomationCurrentTurnDeliveryIntentIds: [],
-        assistantAutomationProgressed: true,
-        nextWakeAt: null,
-        redactedLogEntries: [],
-      })
-      .mockResolvedValueOnce({
-        activeTurnInputIngested: true,
-        assistantAutomationCurrentTurnDeliveryIntentIds: ["foreground-intent"],
-        assistantAutomationProgressed: true,
-        nextWakeAt: null,
-        redactedLogEntries: [],
-      });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       resolvedDeviceSync: {
@@ -3714,26 +3674,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runtimeDeviceSyncPort: deviceSyncPort,
     }));
 
-    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(2);
-    const firstCall = mocks.runHostedAssistantAutomationLane.mock.calls[0]?.[0];
-    const secondCall = mocks.runHostedAssistantAutomationLane.mock.calls[1]?.[0];
-    expect(firstCall?.signal).toBeUndefined();
-    expect(firstCall?.deferActiveTurnInput).toBe(true);
-    expect(firstCall?.executionContext.hosted?.dynamicContextPrompts).toHaveLength(1);
-    expect(secondCall).not.toHaveProperty("deferActiveTurnInput");
-    expect(secondCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
-    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
-      expect.objectContaining({
-        includeBackgroundDueIntents: false,
-        preferredIntentIds: ["foreground-intent"],
-      }),
-    );
+    const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    expect(assistantLaneCall).not.toHaveProperty("buildBackgroundDynamicContextPrompt");
+    expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
+    expect(fetchSnapshot).not.toHaveBeenCalled();
   });
 
-  it("aborts in-flight hosted device sync status reads after foreground preemption", async () => {
+  it("skips lazy hosted device sync status reads after foreground preemption", async () => {
     let shouldYield = false;
-    let fetchSnapshotCalls = 0;
-    let fetchSnapshotAbortObserved = false;
     const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),
@@ -3747,33 +3695,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       async createConnectLink() {
         throw new Error("createConnectLink should not be called.");
       },
-      async fetchSnapshot(request) {
-        fetchSnapshotCalls += 1;
-        const signal = request?.signal;
-        expect(signal).toBeInstanceOf(AbortSignal);
-
-        const result = new Promise<Awaited<ReturnType<RuntimeDeviceSyncPort["fetchSnapshot"]>>>(
-          (resolve, reject) => {
-            const timeout = setTimeout(() => {
-              resolve({
-                connections: [],
-                generatedAt: "2026-04-29T00:00:00.000Z",
-                userId: "member_synthetic_phase",
-              });
-            }, 10_000);
-            timeout.unref?.();
-
-            signal?.addEventListener("abort", () => {
-              fetchSnapshotAbortObserved = true;
-              clearTimeout(timeout);
-              reject(signal.reason instanceof Error
-                ? signal.reason
-                : new DOMException("Aborted.", "AbortError"));
-            }, { once: true });
-          },
-        );
-        shouldYield = true;
-        return await result;
+      async fetchSnapshot() {
+        throw new Error("fetchSnapshot should not run after foreground preemption.");
       },
     } satisfies RuntimeDeviceSyncPort;
 
@@ -3802,14 +3725,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
-    expect(fetchSnapshotCalls).toBe(1);
-    expect(fetchSnapshotAbortObserved).toBe(true);
+    shouldYield = true;
+    const prompt = await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
+    expect(prompt).toBeNull();
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
   });
 
-  it("times out optional hosted device sync status reads before scheduled assistant work", async () => {
+  it("uses an abortable signal for optional hosted device sync status reads before scheduled assistant work", async () => {
     let fetchSnapshotCalls = 0;
-    let fetchSnapshotAbortObserved = false;
+    let fetchSnapshotSignal: AbortSignal | null | undefined;
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),
       async applyUpdates() {
@@ -3824,19 +3748,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       async fetchSnapshot(request) {
         fetchSnapshotCalls += 1;
-        const signal = request?.signal;
-        expect(signal).toBeInstanceOf(AbortSignal);
-
-        return await new Promise<Awaited<ReturnType<RuntimeDeviceSyncPort["fetchSnapshot"]>>>(
-          (_resolve, reject) => {
-            signal?.addEventListener("abort", () => {
-              fetchSnapshotAbortObserved = true;
-              reject(signal.reason instanceof Error
-                ? signal.reason
-                : new DOMException("Aborted.", "AbortError"));
-            }, { once: true });
-          },
-        );
+        fetchSnapshotSignal = request?.signal;
+        return {
+          connections: [],
+          generatedAt: "2026-04-29T00:00:00.000Z",
+          userId: "member_synthetic_phase",
+        };
       },
     } satisfies RuntimeDeviceSyncPort;
 
@@ -3864,8 +3781,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    const prompt = await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
     expect(fetchSnapshotCalls).toBe(1);
-    expect(fetchSnapshotAbortObserved).toBe(true);
+    expect(fetchSnapshotSignal).toBeInstanceOf(AbortSignal);
+    expect(prompt).toBeNull();
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
   });
 

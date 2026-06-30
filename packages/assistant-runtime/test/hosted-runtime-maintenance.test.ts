@@ -50,13 +50,6 @@ vi.mock("../src/device-sync-service.ts", () => ({
 }));
 
 vi.mock("@murphai/assistant-engine", () => ({
-  AssistantActiveTurnInputUnavailableError: class AssistantActiveTurnInputUnavailableError
-    extends Error {
-    constructor(message?: string) {
-      super(message);
-      this.name = "AssistantActiveTurnInputUnavailableError";
-    }
-  },
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT: 50,
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_SCHEMA:
     "murph.assistant-context-diagnostics.v1",
@@ -644,45 +637,24 @@ describe("runHostedAssistantAutomation", () => {
     expect(mocks.initInboxRuntime).not.toHaveBeenCalled();
   });
 
-  it("defers active-turn input before dynamic-context delivery can be committed", async () => {
-    const listNewConversationInputs = vi.fn(async (query) => ({
-      inputs: [
-        {
-          acceptedInput: {
-            id: "request-1",
-            source: "assistant-input",
-          },
-          event: {
-            inputId: "request-1",
-          },
-        },
-      ],
-      nextCursor: query.afterCursor ?? null,
-    }));
-    mocks.createHostedAssistantInputSource.mockReturnValueOnce({
-      listInputCandidates: vi.fn(async (query) => ({
-        inputs: [],
-        nextCursor: query.afterCursor ?? null,
-      })),
-      listNewConversationInputs,
-      refresh: vi.fn(async () => ({
-        progressed: true,
-        reason: "ingested_input",
-      })),
-    });
+  it("appends background dynamic context after input refresh keeps the pass background", async () => {
+    const buildBackgroundDynamicContextPrompt = vi.fn(async () =>
+      "Background wearable reconnect context."
+    );
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
-      await expect(input.inputSource?.listNewConversationInputs({
-        conversation: {
-          accountId: "acct_1",
-          actorId: "actor_1",
-          actorIsSelf: false,
-          source: "linq",
-          threadId: "thread_1",
-          threadIsDirect: true,
-        },
-      })).rejects.toMatchObject({
-        name: "AssistantActiveTurnInputUnavailableError",
-      });
+      const inputRefreshResult = await input.inputSource?.refresh({
+        signal: input.signal,
+      }) ?? null;
+      const resolvedExecutionContext =
+        await input.resolveExecutionContextAfterInputRefresh?.({
+          executionContext: input.executionContext ?? null,
+          inputRefreshResult,
+          signal: input.signal,
+        }) ?? input.executionContext;
+
+      expect(resolvedExecutionContext?.hosted?.dynamicContextPrompts).toEqual([
+        "Background wearable reconnect context.",
+      ]);
       return {
         currentTurnDeliveryIntentIds: [],
         nextWakeAt: "2026-04-23T00:00:30.000Z",
@@ -698,7 +670,7 @@ describe("runHostedAssistantAutomation", () => {
 
     const result = await runHostedAssistantAutomation(
       "/tmp/vault-root",
-      "req_dynamic_context_active_turn_input",
+      "req_background_dynamic_context",
       {
         hosted: {
           issueDeviceConnectLink: vi.fn(),
@@ -717,16 +689,19 @@ describe("runHostedAssistantAutomation", () => {
       undefined,
       undefined,
       {
-        deferActiveTurnInput: true,
+        buildBackgroundDynamicContextPrompt,
       },
     );
 
     expect(result.currentTurnDeliveryIntentIds).toEqual([]);
-    expect(result.timings?.activeTurnInputIngested).toBe(true);
-    expect(listNewConversationInputs).toHaveBeenCalledTimes(1);
+    expect(result.timings?.activeTurnInputIngested).toBe(false);
+    expect(buildBackgroundDynamicContextPrompt).toHaveBeenCalledTimes(1);
   });
 
-  it("defers refresh-ingested active-turn input before dynamic-context scanning", async () => {
+  it("skips background dynamic context when refresh ingests active-turn input", async () => {
+    const buildBackgroundDynamicContextPrompt = vi.fn(async () =>
+      "Background wearable reconnect context."
+    );
     const refresh = vi.fn(async () => ({
       progressed: true,
       reason: "ingested_input" as const,
@@ -743,10 +718,28 @@ describe("runHostedAssistantAutomation", () => {
       refresh,
     });
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
-      await input.inputSource?.refresh({
+      const inputRefreshResult = await input.inputSource?.refresh({
         signal: input.signal,
-      });
-      throw new Error("dynamic-context pass should stop during refresh.");
+      }) ?? null;
+      const resolvedExecutionContext =
+        await input.resolveExecutionContextAfterInputRefresh?.({
+          executionContext: input.executionContext ?? null,
+          inputRefreshResult,
+          signal: input.signal,
+        }) ?? input.executionContext;
+
+      expect(resolvedExecutionContext?.hosted?.dynamicContextPrompts).toBeUndefined();
+      return {
+        currentTurnDeliveryIntentIds: ["foreground-intent"],
+        nextWakeAt: null,
+        progressed: true,
+        replies: {
+          considered: 1,
+          failed: 0,
+          replied: 1,
+          skipped: 0,
+        },
+      };
     });
 
     const result = await runHostedAssistantAutomation(
@@ -770,14 +763,62 @@ describe("runHostedAssistantAutomation", () => {
       undefined,
       undefined,
       {
-        deferActiveTurnInput: true,
+        buildBackgroundDynamicContextPrompt,
       },
     );
 
-    expect(result.currentTurnDeliveryIntentIds).toEqual([]);
+    expect(result.currentTurnDeliveryIntentIds).toEqual(["foreground-intent"]);
     expect(result.progressed).toBe(true);
     expect(result.timings?.activeTurnInputIngested).toBe(true);
+    expect(buildBackgroundDynamicContextPrompt).not.toHaveBeenCalled();
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips background dynamic context when background selection already owns pending input", async () => {
+    const buildBackgroundDynamicContextPrompt = vi.fn(async () =>
+      "Background wearable reconnect context."
+    );
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      inputIds: ["pending-input-1"],
+      mode: "background",
+      pendingInputIds: ["pending-input-1"],
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      expect(input.resolveExecutionContextAfterInputRefresh).toBeUndefined();
+      return {
+        currentTurnDeliveryIntentIds: ["foreground-intent"],
+        nextWakeAt: null,
+        progressed: true,
+      };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_dynamic_context_existing_pending_input",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_dynamic_context_existing_pending_input",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      undefined,
+      undefined,
+      undefined,
+      {
+        buildBackgroundDynamicContextPrompt,
+      },
+    );
+
+    expect(result.currentTurnDeliveryIntentIds).toEqual(["foreground-intent"]);
+    expect(buildBackgroundDynamicContextPrompt).not.toHaveBeenCalled();
   });
 
   it("records metadata-only candidate query diagnostics for scanner misses", async () => {

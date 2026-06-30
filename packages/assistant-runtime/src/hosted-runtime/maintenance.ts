@@ -12,12 +12,12 @@ import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import { sanitizeHostedRuntimeErrorText } from "@murphai/device-syncd/hosted-runtime";
 import {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
-  AssistantActiveTurnInputUnavailableError,
   type AssistantExecutionContext,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
   type AssistantInputSource,
   type AssistantRunEvent,
+  type AssistantTurnInputRefreshResult,
   type AssistantTurnEnvironment,
   type AssistantTurnConversationInputQuery,
   readAssistantAutomationState,
@@ -105,6 +105,10 @@ const HOSTED_RUNTIME_JUNCTION_PLATFORM_ENV_KEYS = [
   "JUNCTION_REGION",
 ] as const;
 
+type HostedBackgroundDynamicContextPromptBuilder = (input: {
+  signal?: AbortSignal;
+}) => Promise<string | null>;
+
 interface HostedAssistantAutomationReadiness {
   activeProfileId: string | null;
   activeProfileManagedBy: "member" | "platform" | null;
@@ -182,7 +186,7 @@ export async function runHostedAssistantAutomationLane(input: {
   operatorHomeRoot?: string | null;
   runtimeAttemptId?: string | null;
   assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
-  deferActiveTurnInput?: boolean;
+  buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
   runtimeEnv?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
@@ -219,7 +223,8 @@ export async function runHostedAssistantAutomationLane(input: {
           vaultRoot: input.vaultRoot,
         }),
         {
-          deferActiveTurnInput: input.deferActiveTurnInput ?? false,
+          buildBackgroundDynamicContextPrompt:
+            input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
         },
@@ -269,7 +274,7 @@ export async function runHostedAssistantAutomation(
   signal?: AbortSignal,
   turnEnvironment?: AssistantTurnEnvironment | null,
   options?: {
-    deferActiveTurnInput?: boolean | null;
+    buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     runtimeAttemptId?: string | null;
   },
@@ -353,11 +358,6 @@ export async function runHostedAssistantAutomation(
       const result = await baseInputSource.listNewConversationInputs(query);
       if (result.inputs.length > 0) {
         activeTurnInputIngested = true;
-        if (options?.deferActiveTurnInput === true) {
-          throw new AssistantActiveTurnInputUnavailableError(
-            "same-conversation input arrived during a background dynamic-context turn; retry without dynamic context.",
-          );
-        }
       }
       if (redactedInputQueryLogCount < HOSTED_ASSISTANT_INPUT_QUERY_REDACTED_LOG_LIMIT) {
         redactedLogEntries.push(emitHostedRuntimeRedactedLog({
@@ -378,15 +378,11 @@ export async function runHostedAssistantAutomation(
     async refresh(refreshInput) {
       const result = await baseInputSource.refresh(refreshInput);
       if (
-        options?.deferActiveTurnInput === true
-        && selectedInputIds.mode === "background"
+        selectedInputIds.mode === "background"
         && result.progressed
         && result.reason === "ingested_input"
       ) {
         activeTurnInputIngested = true;
-        throw new AssistantActiveTurnInputUnavailableError(
-          "same-conversation input arrived during a background dynamic-context turn; retry without dynamic context.",
-        );
       }
 
       return result;
@@ -418,6 +414,34 @@ export async function runHostedAssistantAutomation(
     const maxPerScan = selectedInputIds.mode === "foreground"
       ? Math.max(1, selectedInputIds.inputIds.length)
       : HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT;
+    const buildBackgroundDynamicContextPrompt =
+      selectedInputIds.mode === "background"
+      && selectedInputIds.inputIds.length === 0
+        ? options?.buildBackgroundDynamicContextPrompt
+        : undefined;
+    const resolveExecutionContextAfterInputRefresh =
+      buildBackgroundDynamicContextPrompt
+        ? async (refreshContext: {
+          executionContext: AssistantExecutionContext | null;
+          inputRefreshResult: AssistantTurnInputRefreshResult | null;
+          signal?: AbortSignal;
+        }): Promise<AssistantExecutionContext | null> => {
+          if (
+            activeTurnInputIngested
+            || refreshContext.inputRefreshResult?.reason === "ingested_input"
+          ) {
+            return refreshContext.executionContext;
+          }
+
+          const prompt = await buildBackgroundDynamicContextPrompt({
+            signal: refreshContext.signal,
+          });
+          return withHostedAssistantDynamicContextPrompt({
+            executionContext: refreshContext.executionContext,
+            prompt,
+          });
+        }
+        : undefined;
     const result = await runAssistantAutomationPass({
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
@@ -486,6 +510,7 @@ export async function runHostedAssistantAutomation(
       requestId,
       signal,
       inputSource,
+      resolveExecutionContextAfterInputRefresh,
       turnEnvironment: turnEnvironment ?? null,
       vault: vaultRoot,
     });
@@ -564,28 +589,6 @@ export async function runHostedAssistantAutomation(
     };
   } catch (error) {
     if (
-      options?.deferActiveTurnInput === true
-      && isHostedAssistantActiveTurnInputUnavailableError(error)
-    ) {
-      return {
-        currentTurnDeliveryIntentIds: [],
-        nextWakeAt: null,
-        progressed: true,
-        redactedLogEntries,
-        replyFailed: 0,
-        timings: {
-          activeTurnInputIngested,
-          afterStateElapsedMs: 0,
-          beforeStateElapsedMs,
-          inputCandidateListed,
-          inputCandidateQueryCount,
-          passElapsedMs: passStartedAt === null ? 0 : elapsedSince(passStartedAt),
-          totalElapsedMs: elapsedSince(startedAt),
-        },
-      };
-    }
-
-    if (
       error
       && typeof error === "object"
       && "code" in error
@@ -627,11 +630,6 @@ export async function runHostedAssistantAutomation(
   }
 }
 
-function isHostedAssistantActiveTurnInputUnavailableError(error: unknown): boolean {
-  return error instanceof AssistantActiveTurnInputUnavailableError
-    || (error instanceof Error && error.name === "AssistantActiveTurnInputUnavailableError");
-}
-
 function attachHostedAssistantAutomationFailureLogEntries(
   error: unknown,
   redactedLogEntries: readonly HostedExecutionRedactedLogEntry[],
@@ -645,6 +643,25 @@ function attachHostedAssistantAutomationFailureLogEntries(
     enumerable: false,
     value: [...redactedLogEntries],
   });
+}
+
+function withHostedAssistantDynamicContextPrompt(input: {
+  executionContext: AssistantExecutionContext | null;
+  prompt: string | null;
+}): AssistantExecutionContext | null {
+  if (!input.prompt || !input.executionContext?.hosted) {
+    return input.executionContext;
+  }
+
+  return {
+    hosted: {
+      ...input.executionContext.hosted,
+      dynamicContextPrompts: [
+        ...(input.executionContext.hosted.dynamicContextPrompts ?? []),
+        input.prompt,
+      ],
+    },
+  };
 }
 
 function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {

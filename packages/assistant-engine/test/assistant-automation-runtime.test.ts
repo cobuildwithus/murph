@@ -5222,6 +5222,71 @@ describe('assistant auto-reply runtime', () => {
       )
   })
 
+  it('resolves execution context after input refresh and before scanning', async () => {
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+    const inputSource: AssistantInputSource = {
+      listInputCandidates: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      refresh: vi.fn(async () => ({
+        progressed: false,
+        reason: 'no_new_input' as const,
+      })),
+    }
+    const executionContext = {
+      hosted: {
+        memberId: 'member-1',
+        userEnvKeys: [],
+      },
+    }
+    const resolvedExecutionContext = {
+      hosted: {
+        ...executionContext.hosted,
+        dynamicContextPrompts: ['background context'],
+      },
+    }
+    const resolveExecutionContextAfterInputRefresh = vi.fn(
+      async () => resolvedExecutionContext,
+    )
+
+    await runLoop.runAssistantAutomationPass({
+      executionContext,
+      inputSource,
+      requestId: 'request-context-after-refresh',
+      resolveExecutionContextAfterInputRefresh,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(resolveExecutionContextAfterInputRefresh).toHaveBeenCalledWith({
+      executionContext,
+      inputRefreshResult: {
+        progressed: false,
+        reason: 'no_new_input',
+      },
+      signal: undefined,
+    })
+    expect(vi.mocked(inputSource.refresh).mock.invocationCallOrder[0]!)
+      .toBeLessThan(
+        resolveExecutionContextAfterInputRefresh.mock.invocationCallOrder[0]!,
+      )
+    expect(resolveExecutionContextAfterInputRefresh.mock.invocationCallOrder[0]!)
+      .toBeLessThan(
+        runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0]!,
+      )
+    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionContext: resolvedExecutionContext,
+      }),
+    )
+  })
+
   it('keeps fresh hosted queue-only replies on the scanner and outbox path', async () => {
     runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
       currentTurnDeliveryIntentIds: [],
