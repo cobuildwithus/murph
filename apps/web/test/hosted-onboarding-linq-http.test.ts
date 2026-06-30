@@ -4,6 +4,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingLinqConfig: () => ({
     apiBaseUrl: "https://linq.example.test/api/partner/v3",
     apiToken: "linq-token",
+    attachmentUploadAllowedHosts: ["uploads.linq.example.test"],
   }),
 }));
 
@@ -402,7 +403,7 @@ describe("hosted Linq attachment voice memo transport", () => {
     expect(new Headers(uploadInit.headers).get("authorization")).toBeNull();
   });
 
-  it("rejects unsafe attachment upload URLs before PUTing bytes", async () => {
+  it("rejects non-allowlisted attachment upload hosts before PUTing bytes", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       void _init;
       const url = input.toString();
@@ -415,7 +416,7 @@ describe("hosted Linq attachment voice memo transport", () => {
           required_headers: {
             "content-type": "audio/x-m4a",
           },
-          upload_url: "https://127.0.0.1/upload",
+          upload_url: "https://attacker.example/upload",
         }, 201);
       }
 
@@ -430,7 +431,7 @@ describe("hosted Linq attachment voice memo transport", () => {
       sizeBytes: 3,
     })).rejects.toMatchObject({
       code: "LINQ_SEND_FAILED",
-      message: "Linq attachment upload URL host is not safe.",
+      message: "Linq attachment upload URL host is not authorized.",
       retryable: false,
     });
 

@@ -190,6 +190,7 @@ export async function uploadHostedLinqAttachment(input: {
   signal?: AbortSignal;
   sizeBytes: number;
 }): Promise<{ attachmentId: string }> {
+  const linqConfig = requireHostedOnboardingLinqConfig();
   const body: AttachmentCreateParams = {
     content_type: input.contentType,
     filename: normalizeRequiredString(input.filename, "attachment filename"),
@@ -214,6 +215,9 @@ export async function uploadHostedLinqAttachment(input: {
 
   const attachment = parseHostedLinqAttachmentUploadResponse(
     (await response.json()) as AttachmentCreateResponse,
+    {
+      allowedUploadHosts: linqConfig.attachmentUploadAllowedHosts,
+    },
   );
   const uploadResponse = await fetchHostedLinqAttachmentUploadUrl({
     bytes: input.bytes,
@@ -459,7 +463,10 @@ function normalizeHostedLinqAttachmentSize(value: number): number {
   return value;
 }
 
-function normalizeHostedLinqAttachmentUploadUrl(value: unknown): string {
+function normalizeHostedLinqAttachmentUploadUrl(
+  value: unknown,
+  allowedUploadHosts: readonly string[],
+): string {
   let url: URL;
 
   try {
@@ -491,10 +498,10 @@ function normalizeHostedLinqAttachmentUploadUrl(value: unknown): string {
     });
   }
 
-  if (!isSafeHostedLinqAttachmentUploadHost(url.hostname)) {
+  if (!isAllowedHostedLinqAttachmentUploadHost(url.hostname, allowedUploadHosts)) {
     throw hostedOnboardingError({
       code: "LINQ_SEND_FAILED",
-      message: "Linq attachment upload URL host is not safe.",
+      message: "Linq attachment upload URL host is not authorized.",
       httpStatus: 502,
       retryable: false,
     });
@@ -505,6 +512,9 @@ function normalizeHostedLinqAttachmentUploadUrl(value: unknown): string {
 
 function parseHostedLinqAttachmentUploadResponse(
   value: AttachmentCreateResponse,
+  options: {
+    allowedUploadHosts: readonly string[];
+  },
 ): {
   attachmentId: string;
   requiredHeaders: Record<string, string>;
@@ -538,7 +548,10 @@ function parseHostedLinqAttachmentUploadResponse(
   return {
     attachmentId,
     requiredHeaders,
-    uploadUrl: normalizeHostedLinqAttachmentUploadUrl(uploadUrl),
+    uploadUrl: normalizeHostedLinqAttachmentUploadUrl(
+      uploadUrl,
+      options.allowedUploadHosts,
+    ),
   };
 }
 
@@ -590,7 +603,10 @@ function readStringRecord(value: unknown): Record<string, string> | null {
   return output;
 }
 
-function isSafeHostedLinqAttachmentUploadHost(hostname: string): boolean {
+function isAllowedHostedLinqAttachmentUploadHost(
+  hostname: string,
+  allowedUploadHosts: readonly string[],
+): boolean {
   const normalized = hostname.toLowerCase().replace(/\.$/u, "");
   if (
     !normalized
@@ -605,7 +621,7 @@ function isSafeHostedLinqAttachmentUploadHost(hostname: string): boolean {
     ? normalized.slice(1, -1)
     : normalized;
 
-  return isIP(ipLiteral) === 0;
+  return isIP(ipLiteral) === 0 && allowedUploadHosts.includes(normalized);
 }
 
 function isForbiddenHostedLinqAttachmentUploadHeader(name: string): boolean {
