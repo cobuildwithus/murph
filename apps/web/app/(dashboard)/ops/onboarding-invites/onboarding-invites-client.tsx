@@ -36,6 +36,11 @@ interface HostedOpsOnboardingInviteResult {
   recipientPhoneHint: string;
   sentAt: string;
   textMessageSent: true;
+  voiceMemo: {
+    error: string | null;
+    requested: boolean;
+    sent: boolean;
+  };
 }
 
 type PendingAction = "send" | null;
@@ -89,7 +94,8 @@ export function OnboardingInvitesClient() {
           {result ? (
             <Badge variant="secondary">
               <CheckCircle2Icon data-icon="inline-start" />
-              Link sent to {result.recipientPhoneHint}
+              {result.voiceMemo.sent ? "Link and voice sent" : "Link sent"} to{" "}
+              {result.recipientPhoneHint}
             </Badge>
           ) : null}
         </div>
@@ -112,7 +118,8 @@ export function OnboardingInvitesClient() {
               Send invite link
             </h2>
             <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Existing chats receive the link directly. New chats start with a short non-link note, then the setup link follows.
+              Existing chats receive the link directly. New chats start with a short non-link note,
+              then the setup link follows. Voice memos send after the link.
             </p>
           </div>
         </div>
@@ -204,6 +211,15 @@ export function OnboardingInvitesClient() {
             />
           </Field>
 
+          <Field label="Voice memo" htmlFor="ops-onboarding-voice-memo" optional>
+            <Input
+              accept={VOICE_MEMO_ACCEPT}
+              id="ops-onboarding-voice-memo"
+              name="voiceMemo"
+              type="file"
+            />
+          </Field>
+
           <div className="flex flex-col gap-3 lg:col-span-2 sm:flex-row sm:items-center sm:justify-between">
             <div aria-live="polite" className="min-h-5 text-sm text-muted-foreground">
               {pending === "send" ? "Sending hosted setup link." : ""}
@@ -229,6 +245,28 @@ export function OnboardingInvitesClient() {
     </div>
   );
 }
+
+const VOICE_MEMO_ACCEPT = [
+  "audio/aac",
+  "audio/aiff",
+  "audio/amr",
+  "audio/m4a",
+  "audio/mp4",
+  "audio/mpeg",
+  "audio/wav",
+  "audio/x-aiff",
+  "audio/x-caf",
+  "audio/x-m4a",
+  "audio/x-wav",
+  ".aac",
+  ".aif",
+  ".aiff",
+  ".amr",
+  ".caf",
+  ".m4a",
+  ".mp3",
+  ".wav",
+].join(",");
 
 function Field({
   children,
@@ -292,6 +330,16 @@ function InviteResultPanel({
           <div className="mt-1 text-sm text-foreground">
             Setup link sent to {result.recipientPhoneHint}
           </div>
+          {result.voiceMemo.requested ? (
+            <div className={cn(
+              "mt-1 text-sm",
+              result.voiceMemo.sent ? "text-muted-foreground" : "text-destructive",
+            )}>
+              {result.voiceMemo.sent
+                ? "Voice memo sent after the link."
+                : result.voiceMemo.error ?? "Voice memo delivery failed."}
+            </div>
+          ) : null}
         </div>
         <Badge variant={result.newChatCreated ? "secondary" : "outline"}>
           {result.newChatCreated ? "New chat" : "Existing chat"}

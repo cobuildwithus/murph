@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
+import type { SupportedContentType } from "@linqapp/sdk/resources";
 import { createHash } from "node:crypto";
 
 import { getPrisma } from "../prisma";
@@ -13,6 +14,8 @@ import {
 import {
   createHostedLinqChat,
   sendHostedLinqChatMessage,
+  sendHostedLinqVoiceMemo,
+  uploadHostedLinqAttachment,
 } from "../hosted-onboarding/linq-client";
 import {
   lookupHostedMemberRoutingByHomeLinqChatId,
@@ -28,6 +31,8 @@ import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/ho
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { getHostedOnboardingEnvironment } from "../hosted-onboarding/runtime";
 
+export const HOSTED_OPS_ONBOARDING_VOICE_MEMO_MAX_BYTES = 10 * 1024 * 1024;
+
 const HOSTED_OPS_ONBOARDING_INVITE_MESSAGE_MAX_LENGTH = 1_800;
 const HOSTED_OPS_ONBOARDING_NEW_CHAT_OPENER_MAX_LENGTH = 320;
 const HOSTED_OPS_ONBOARDING_REQUEST_ID_PATTERN = /^[A-Za-z0-9_.:-]{8,128}$/u;
@@ -41,6 +46,13 @@ const HOSTED_OPS_ONBOARDING_DEFAULT_NEW_CHAT_OPENER =
 
 type HostedOpsOnboardingInviteDeliveryMode = "existing_chat" | "new_chat";
 
+export interface HostedOpsOnboardingVoiceMemoInput {
+  bytes: Uint8Array;
+  contentType: SupportedContentType;
+  extension: string;
+  sizeBytes: number;
+}
+
 export interface HostedOpsOnboardingInviteInput {
   deliveryMode: string;
   inviteMessage?: string | null;
@@ -50,6 +62,7 @@ export interface HostedOpsOnboardingInviteInput {
   prisma?: PrismaClient;
   recipientPhoneNumber: string;
   requestId: string;
+  voiceMemo?: HostedOpsOnboardingVoiceMemoInput | null;
 }
 
 export interface HostedOpsOnboardingInviteResult {
@@ -65,7 +78,78 @@ export interface HostedOpsOnboardingInviteResult {
   recipientPhoneHint: string;
   sentAt: string;
   textMessageSent: true;
+  voiceMemo: {
+    error: string | null;
+    requested: boolean;
+    sent: boolean;
+  };
 }
+
+interface HostedOpsOnboardingVoiceMemoContentType {
+  contentType: SupportedContentType;
+  extension: string;
+}
+
+const AUDIO_AAC = {
+  contentType: "audio/aac",
+  extension: "aac",
+} satisfies HostedOpsOnboardingVoiceMemoContentType;
+const AUDIO_AIFF = {
+  contentType: "audio/x-aiff",
+  extension: "aiff",
+} satisfies HostedOpsOnboardingVoiceMemoContentType;
+const AUDIO_AMR = {
+  contentType: "audio/amr",
+  extension: "amr",
+} satisfies HostedOpsOnboardingVoiceMemoContentType;
+const AUDIO_CAF = {
+  contentType: "audio/x-caf",
+  extension: "caf",
+} satisfies HostedOpsOnboardingVoiceMemoContentType;
+const AUDIO_M4A = {
+  contentType: "audio/x-m4a",
+  extension: "m4a",
+} satisfies HostedOpsOnboardingVoiceMemoContentType;
+const AUDIO_MP3 = {
+  contentType: "audio/mpeg",
+  extension: "mp3",
+} satisfies HostedOpsOnboardingVoiceMemoContentType;
+const AUDIO_WAV = {
+  contentType: "audio/x-wav",
+  extension: "wav",
+} satisfies HostedOpsOnboardingVoiceMemoContentType;
+
+const HOSTED_OPS_ONBOARDING_VOICE_MEMO_MIME_TYPES = new Map<
+  string,
+  HostedOpsOnboardingVoiceMemoContentType
+>([
+  ["audio/aac", AUDIO_AAC],
+  ["audio/aiff", AUDIO_AIFF],
+  ["audio/amr", AUDIO_AMR],
+  ["audio/m4a", AUDIO_M4A],
+  ["audio/mp3", AUDIO_MP3],
+  ["audio/mp4", AUDIO_M4A],
+  ["audio/mpeg", AUDIO_MP3],
+  ["audio/wav", AUDIO_WAV],
+  ["audio/x-aiff", AUDIO_AIFF],
+  ["audio/x-caf", AUDIO_CAF],
+  ["audio/x-m4a", AUDIO_M4A],
+  ["audio/x-wav", AUDIO_WAV],
+]);
+
+const HOSTED_OPS_ONBOARDING_VOICE_MEMO_EXTENSIONS = new Map<
+  string,
+  HostedOpsOnboardingVoiceMemoContentType
+>([
+  ["aac", AUDIO_AAC],
+  ["aif", AUDIO_AIFF],
+  ["aiff", AUDIO_AIFF],
+  ["amr", AUDIO_AMR],
+  ["caf", AUDIO_CAF],
+  ["m4a", AUDIO_M4A],
+  ["mp3", AUDIO_MP3],
+  ["wav", AUDIO_WAV],
+]);
 
 export async function sendHostedOpsOnboardingInvite(
   input: HostedOpsOnboardingInviteInput,
@@ -104,6 +188,17 @@ export async function sendHostedOpsOnboardingInvite(
     },
   });
 
+  const voiceMemo = request.voiceMemo
+    ? await sendHostedOpsOnboardingVoiceMemoBestEffort({
+        chatId: delivery.chatId,
+        request,
+      })
+    : {
+        error: null,
+        requested: false,
+        sent: false,
+      };
+
   return {
     chatId: delivery.chatId,
     deliveryMode: request.deliveryMode,
@@ -119,6 +214,7 @@ export async function sendHostedOpsOnboardingInvite(
     recipientPhoneHint: readHostedPhoneHint(request.recipientPhoneNumber),
     sentAt: sentAt.toISOString(),
     textMessageSent: true,
+    voiceMemo,
   };
 }
 
@@ -151,6 +247,53 @@ async function issueHostedOpsOnboardingInviteForRequest(input: {
       memberId,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+export function resolveHostedOpsOnboardingVoiceMemoContentType(input: {
+  declaredContentType: string | null | undefined;
+  filename: string | null | undefined;
+}): HostedOpsOnboardingVoiceMemoContentType {
+  const declaredContentType = normalizeNullableString(input.declaredContentType)?.toLowerCase();
+  const fromMimeType = declaredContentType
+    ? HOSTED_OPS_ONBOARDING_VOICE_MEMO_MIME_TYPES.get(declaredContentType)
+    : undefined;
+
+  if (fromMimeType) {
+    return fromMimeType;
+  }
+
+  const extension = normalizeNullableString(input.filename)
+    ?.toLowerCase()
+    .match(/\.([a-z0-9]+)$/u)?.[1];
+  const fromExtension = extension
+    ? HOSTED_OPS_ONBOARDING_VOICE_MEMO_EXTENSIONS.get(extension)
+    : undefined;
+
+  if (fromExtension) {
+    return fromExtension;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_OPS_ONBOARDING_VOICE_MEMO_TYPE_UNSUPPORTED",
+    httpStatus: 400,
+    message: "Voice memo must be an MP3, M4A, AAC, CAF, WAV, AIFF, or AMR audio file.",
+    retryable: false,
+  });
+}
+
+export function buildHostedOpsOnboardingVoiceMemoFilename(extension: string): string {
+  const normalizedExtension = normalizeNullableString(extension)?.toLowerCase();
+
+  if (!normalizedExtension || !/^[a-z0-9]{2,8}$/u.test(normalizedExtension)) {
+    throw hostedOnboardingError({
+      code: "HOSTED_OPS_ONBOARDING_VOICE_MEMO_TYPE_UNSUPPORTED",
+      httpStatus: 400,
+      message: "Voice memo file type is not supported.",
+      retryable: false,
+    });
+  }
+
+  return `murph-ops-voice-memo.${normalizedExtension}`;
 }
 
 async function resolveHostedOpsOnboardingInviteDelivery(input: {
@@ -234,6 +377,47 @@ async function resolveHostedOpsOnboardingInviteDelivery(input: {
     chatId,
     newChatCreated: true,
     openerMessageId: normalizeNullableString(createdChat.messageId),
+  };
+}
+
+async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
+  chatId: string;
+  request: NormalizedHostedOpsOnboardingInviteInput;
+}): Promise<HostedOpsOnboardingInviteResult["voiceMemo"]> {
+  if (!input.request.voiceMemo) {
+    return {
+      error: null,
+      requested: false,
+      sent: false,
+    };
+  }
+
+  try {
+    const attachment = await uploadHostedLinqAttachment({
+      bytes: input.request.voiceMemo.bytes,
+      contentType: input.request.voiceMemo.contentType,
+      filename: buildHostedOpsOnboardingVoiceMemoFilename(
+        input.request.voiceMemo.extension,
+      ),
+      sizeBytes: input.request.voiceMemo.sizeBytes,
+    });
+
+    await sendHostedLinqVoiceMemo({
+      attachmentId: attachment.attachmentId,
+      chatId: input.chatId,
+    });
+  } catch {
+    return {
+      error: "Voice memo delivery failed after the setup link was sent.",
+      requested: true,
+      sent: false,
+    };
+  }
+
+  return {
+    error: null,
+    requested: true,
+    sent: true,
   };
 }
 
@@ -331,6 +515,7 @@ interface NormalizedHostedOpsOnboardingInviteInput {
   newChatOpeningMessage: string;
   recipientPhoneNumber: string;
   requestId: string;
+  voiceMemo: HostedOpsOnboardingVoiceMemoInput | null;
 }
 
 function normalizeHostedOpsOnboardingInviteInput(
@@ -349,6 +534,7 @@ function normalizeHostedOpsOnboardingInviteInput(
     "HOSTED_OPS_ONBOARDING_INVITE_MESSAGE_TOO_LONG",
     "Invite message is too long.",
   );
+  const voiceMemo = normalizeHostedOpsOnboardingVoiceMemo(input.voiceMemo);
   if (deliveryMode === "existing_chat") {
     return {
       deliveryMode,
@@ -358,6 +544,7 @@ function normalizeHostedOpsOnboardingInviteInput(
       newChatOpeningMessage: "",
       recipientPhoneNumber,
       requestId,
+      voiceMemo,
     };
   }
 
@@ -375,6 +562,7 @@ function normalizeHostedOpsOnboardingInviteInput(
     ),
     recipientPhoneNumber,
     requestId,
+    voiceMemo,
   };
 }
 
@@ -488,6 +676,34 @@ function normalizeHostedOpsOnboardingNewChatOpener(
   return normalized;
 }
 
+function normalizeHostedOpsOnboardingVoiceMemo(
+  value: HostedOpsOnboardingVoiceMemoInput | null | undefined,
+): HostedOpsOnboardingVoiceMemoInput | null {
+  if (!value) {
+    return null;
+  }
+
+  if (value.sizeBytes !== value.bytes.byteLength) {
+    throw hostedOnboardingError({
+      code: "HOSTED_OPS_ONBOARDING_VOICE_MEMO_INVALID",
+      httpStatus: 400,
+      message: "Voice memo upload is invalid.",
+      retryable: false,
+    });
+  }
+
+  if (value.sizeBytes <= 0 || value.sizeBytes > HOSTED_OPS_ONBOARDING_VOICE_MEMO_MAX_BYTES) {
+    throw hostedOnboardingError({
+      code: "HOSTED_OPS_ONBOARDING_VOICE_MEMO_TOO_LARGE",
+      httpStatus: 413,
+      message: "Voice memo upload is too large.",
+      retryable: false,
+    });
+  }
+
+  return value;
+}
+
 function buildHostedOpsOnboardingInviteMessage(input: {
   inviteMessage: string | null;
   inviteUrl: string;
@@ -511,7 +727,7 @@ function buildHostedOpsOnboardingInviteMessage(input: {
 
 function buildHostedOpsOnboardingIdempotencyKey(input: {
   requestId: string;
-  step: "invite" | "open" | "voice";
+  step: "invite" | "open";
   targetParts: readonly string[];
 }): string {
   const digest = createHash("sha256");
