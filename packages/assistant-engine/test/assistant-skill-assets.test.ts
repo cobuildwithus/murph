@@ -689,9 +689,18 @@ describe('assistant skill assets', () => {
       'Treat a delegated save as unresolved until the child completion or a direct vault read confirms the canonical records are present',
     )
     expect(raw).toContain(
-      'When their supplement answer requires ingredient lookup and canonical save work',
+      'When the user shares current supplements during onboarding, always use the delegated-save path above whenever a V2 spawn tool is available',
     )
     expect(raw).toContain(
+      'supplement ingestion is never reply-critical at this step, including small lists of two to four products where direct lookup might feel fast',
+    )
+    expect(raw).toContain(
+      'Do not weigh how many products, how clean the names look, or how quick the label match might be',
+    )
+    expect(raw).toContain(
+      'The only fallbacks to a synchronous save are when no V2 spawn tool is available or the user explicitly asks Murph to finish the supplement save before continuing',
+    )
+    expect(raw).not.toContain(
       'prefer the delegated-save path above if the result is not needed for the current visible reply',
     )
     expect(raw).toContain(
@@ -707,7 +716,7 @@ describe('assistant skill assets', () => {
       'fall back to web search for products or ingredients it misses',
     )
     expect(raw).toContain(
-      'If running synchronously instead of delegating, use at most one `send_progress_update` before the first lookup',
+      'If running synchronously under one of the fallbacks above, use at most one `send_progress_update` before the first lookup',
     )
     expect(raw).toContain(
       'do not use a progress update for a quick memory save or a single follow-up question',
