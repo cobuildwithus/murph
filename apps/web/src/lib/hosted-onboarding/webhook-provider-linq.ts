@@ -29,6 +29,7 @@ import {
 } from "./hosted-member-store";
 import {
   lookupHostedMemberRoutingByHomeLinqChatId,
+  lookupHostedMemberRoutingByPendingLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
   readHostedMemberHomeLinqRoute,
 } from "./hosted-member-routing-store";
@@ -116,6 +117,7 @@ const HOSTED_LINQ_STAGING_NOTE_PART_TYPE = "text";
 type HostedLinqExistingMemberMatch =
   | "home-linq-chat"
   | "none"
+  | "pending-linq-chat"
   | "pending-contact"
   | "phone-identity"
   | "verified-email";
@@ -249,7 +251,14 @@ export async function planHostedOnboardingLinqWebhook(input: {
         contact: participantContact,
         prisma: input.prisma,
       });
-  const existingHomeLinqChatLookup = existingMemberLookup || existingPendingLinqContactLookup
+  const existingPendingLinqChatLookup = existingMemberLookup || existingPendingLinqContactLookup
+    ? null
+    : await lookupHostedMemberRoutingByPendingLinqChatId({
+        linqChatId: summary.chatId,
+        prisma: input.prisma,
+      });
+  const existingHomeLinqChatLookup =
+    existingMemberLookup || existingPendingLinqContactLookup || existingPendingLinqChatLookup
     ? null
     : await lookupHostedMemberRoutingByHomeLinqChatId({
         linqChatId: summary.chatId,
@@ -258,11 +267,13 @@ export async function planHostedOnboardingLinqWebhook(input: {
   const existingMember =
     existingMemberLookup?.core
     ?? existingPendingLinqContactLookup?.core
+    ?? existingPendingLinqChatLookup?.core
     ?? existingHomeLinqChatLookup?.core
     ?? null;
   const existingMemberMatch = resolveHostedLinqExistingMemberMatch({
     existingHomeLinqChatLookupPresent: Boolean(existingHomeLinqChatLookup),
     existingMemberLookupPresent: Boolean(existingMemberLookup),
+    existingPendingLinqChatLookupPresent: Boolean(existingPendingLinqChatLookup),
     existingPendingLinqContactLookupPresent: Boolean(existingPendingLinqContactLookup),
     participantContactKind: participantContact.kind,
   });
@@ -1139,6 +1150,7 @@ function buildHostedLinqThreadRouteEgressAuthority(input: {
 function resolveHostedLinqExistingMemberMatch(input: {
   existingHomeLinqChatLookupPresent: boolean;
   existingMemberLookupPresent: boolean;
+  existingPendingLinqChatLookupPresent: boolean;
   existingPendingLinqContactLookupPresent: boolean;
   participantContactKind: HostedLinqParticipantContact["kind"];
 }): HostedLinqExistingMemberMatch {
@@ -1148,6 +1160,10 @@ function resolveHostedLinqExistingMemberMatch(input: {
 
   if (input.existingPendingLinqContactLookupPresent) {
     return "pending-contact";
+  }
+
+  if (input.existingPendingLinqChatLookupPresent) {
+    return "pending-linq-chat";
   }
 
   if (input.existingHomeLinqChatLookupPresent) {

@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
+  lookupHostedMemberRoutingByPendingLinqChatId: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
@@ -96,6 +97,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   lookupHostedMemberRoutingByHomeLinqChatId: mocks.lookupHostedMemberRoutingByHomeLinqChatId,
+  lookupHostedMemberRoutingByPendingLinqChatId: mocks.lookupHostedMemberRoutingByPendingLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContact:
     mocks.lookupHostedMemberRoutingByPendingLinqParticipantContact,
   readHostedMemberHomeLinqRoute: mocks.readHostedMemberHomeLinqRoute,
@@ -234,6 +236,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     });
+    mocks.lookupHostedMemberRoutingByPendingLinqChatId.mockResolvedValue(null);
     mocks.lookupHostedMemberRoutingByPendingLinqParticipantContact.mockResolvedValue(null);
     mocks.readHostedMemberHomeLinqRoute.mockResolvedValue(null);
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
