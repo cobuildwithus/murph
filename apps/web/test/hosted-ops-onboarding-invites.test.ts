@@ -315,6 +315,7 @@ describe("hosted ops onboarding invites", () => {
     expect(openIdempotencyKey).not.toContain("+15557654321");
     expect(openIdempotencyKey).not.toContain("+15551234567");
     expect(mocks.reserveHostedMemberPendingLinqNewChatTx).toHaveBeenCalledWith({
+      linePhoneNumber: "+15557654321",
       memberId: "member_123",
       prisma: tx,
       reservationKey: openIdempotencyKey,

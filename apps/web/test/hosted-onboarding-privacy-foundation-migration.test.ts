@@ -86,6 +86,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'pendingLinqParticipantContactEncrypted String? @map("pending_linq_participant_contact_encrypted")',
     'pendingLinqParticipantContactObservedAt DateTime? @map("pending_linq_participant_contact_observed_at")',
     'pendingLinqNewChatReservationKey String? @unique @map("pending_linq_new_chat_reservation_key")',
+    'pendingLinqNewChatLinePhoneLookupKey String? @unique @map("pending_linq_new_chat_line_phone_lookup_key")',
     'pendingLinqNewChatReservedAt DateTime? @map("pending_linq_new_chat_reserved_at")',
     'pendingLinqRecipientPhoneLookupKey String? @map("pending_linq_recipient_phone_lookup_key")',
     'pendingLinqRecipientPhoneEncrypted String? @map("pending_linq_recipient_phone_encrypted")',
@@ -1042,10 +1043,16 @@ describe("hosted Prisma baseline migration", () => {
       'ADD COLUMN "pending_linq_new_chat_reservation_key" TEXT',
     );
     expect(linqPendingNewChatReservationMigrationSql).toContain(
+      'ADD COLUMN "pending_linq_new_chat_line_phone_lookup_key" TEXT',
+    );
+    expect(linqPendingNewChatReservationMigrationSql).toContain(
       'ADD COLUMN "pending_linq_new_chat_reserved_at" TIMESTAMP(3)',
     );
     expect(linqPendingNewChatReservationMigrationSql).toContain(
       'CREATE UNIQUE INDEX "hosted_member_routing_pending_linq_new_chat_reservation_key_key"',
+    );
+    expect(linqPendingNewChatReservationMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_member_routing_pending_linq_new_chat_line_phone_lookup_key_key"',
     );
     expect(baselineMigrationSql).toContain('"feature_key" TEXT');
     expect(baselineMigrationSql).toContain('"surface" TEXT');

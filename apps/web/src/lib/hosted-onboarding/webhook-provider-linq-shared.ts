@@ -358,6 +358,7 @@ function requireHostedLinqTrialConversionNoticeCode(
 
 export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
   chatId: string;
+  expectedNewChatReservationKey?: string | null;
   memberId: string;
   occurredAt: string;
   participantContact?: HostedLinqParticipantContact | null;
@@ -365,6 +366,7 @@ export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
   recipientPhone: string | null;
 }) {
   await upsertHostedMemberPendingLinqBindingTx({
+    expectedNewChatReservationKey: input.expectedNewChatReservationKey ?? null,
     linqChatId: input.chatId,
     memberId: input.memberId,
     participantContact: input.participantContact ?? null,

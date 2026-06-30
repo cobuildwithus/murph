@@ -30,6 +30,7 @@ import {
 import {
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqChatId,
+  lookupHostedMemberRoutingByPendingLinqNewChatLinePhone,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
   readHostedMemberHomeLinqRoute,
 } from "./hosted-member-routing-store";
@@ -117,6 +118,7 @@ const HOSTED_LINQ_STAGING_NOTE_PART_TYPE = "text";
 type HostedLinqExistingMemberMatch =
   | "home-linq-chat"
   | "none"
+  | "pending-linq-new-chat-line"
   | "pending-linq-chat"
   | "pending-contact"
   | "phone-identity"
@@ -243,6 +245,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
   const existingPendingLinqChatLookup = existingPendingLinqChatLookupCandidate?.core
     ? existingPendingLinqChatLookupCandidate
     : null;
+  const existingPendingLinqNewChatLineLookup = existingPendingLinqChatLookup
+    ? null
+    : await lookupHostedMemberRoutingByPendingLinqNewChatLinePhone({
+        linePhoneNumber: recipientPhoneNumber,
+        prisma: input.prisma,
+      });
   const existingMemberLookup = participantContact.kind === "phone"
     ? await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
         phoneNumber: participantContact.value,
@@ -259,7 +267,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
         prisma: input.prisma,
       });
   const existingHomeLinqChatLookup =
-    existingMemberLookup || existingPendingLinqContactLookup || existingPendingLinqChatLookup
+    existingMemberLookup
+      || existingPendingLinqContactLookup
+      || existingPendingLinqChatLookup
+      || existingPendingLinqNewChatLineLookup
     ? null
     : await lookupHostedMemberRoutingByHomeLinqChatId({
         linqChatId: summary.chatId,
@@ -269,6 +280,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     existingMemberLookup?.core
     ?? existingPendingLinqContactLookup?.core
     ?? existingPendingLinqChatLookup?.core
+    ?? existingPendingLinqNewChatLineLookup?.core
     ?? existingHomeLinqChatLookup?.core
     ?? null;
   const existingMemberMatch = resolveHostedLinqExistingMemberMatch({
@@ -276,6 +288,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     existingMemberLookupPresent: Boolean(existingMemberLookup),
     existingPendingLinqChatLookupPresent: Boolean(existingPendingLinqChatLookup),
     existingPendingLinqContactLookupPresent: Boolean(existingPendingLinqContactLookup),
+    existingPendingLinqNewChatLineLookupPresent: Boolean(existingPendingLinqNewChatLineLookup),
     participantContactKind: participantContact.kind,
   });
   const existingMemberSuspended = existingMember
@@ -306,6 +319,27 @@ export async function planHostedOnboardingLinqWebhook(input: {
         existingMemberMatch,
         reason: "pending-linq-chat-authority-mismatch",
         routeStage: "ignored-pending-linq-chat-authority-mismatch",
+      }),
+    );
+  }
+  if (
+    hasHostedLinqPendingChatAuthorityMismatch({
+      candidateLookups: [
+        existingMemberLookup,
+        existingPendingLinqContactLookup,
+      ],
+      pendingChatLookup: existingPendingLinqNewChatLineLookup,
+    })
+  ) {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("pending-linq-new-chat-line-authority-mismatch"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: existingPendingLinqNewChatLineLookup
+          ? hasHostedMemberActiveAccess(existingPendingLinqNewChatLineLookup.core)
+          : false,
+        existingMemberMatch,
+        reason: "pending-linq-new-chat-line-authority-mismatch",
+        routeStage: "ignored-pending-linq-new-chat-line-authority-mismatch",
       }),
     );
   }
@@ -679,6 +713,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
 
   const dailyState = await bindHostedMemberPendingLinqChatAndTrackInbound({
     chatId: summary.chatId,
+    expectedNewChatReservationKey: existingPendingLinqNewChatLineLookup?.reservationKey ?? null,
     memberId: member.id,
     occurredAt,
     participantContact: participantContact.kind === "email" ? participantContact : null,
@@ -1175,6 +1210,7 @@ function resolveHostedLinqExistingMemberMatch(input: {
   existingMemberLookupPresent: boolean;
   existingPendingLinqChatLookupPresent: boolean;
   existingPendingLinqContactLookupPresent: boolean;
+  existingPendingLinqNewChatLineLookupPresent: boolean;
   participantContactKind: HostedLinqParticipantContact["kind"];
 }): HostedLinqExistingMemberMatch {
   if (input.existingMemberLookupPresent) {
@@ -1187,6 +1223,10 @@ function resolveHostedLinqExistingMemberMatch(input: {
 
   if (input.existingPendingLinqChatLookupPresent) {
     return "pending-linq-chat";
+  }
+
+  if (input.existingPendingLinqNewChatLineLookupPresent) {
+    return "pending-linq-new-chat-line";
   }
 
   if (input.existingHomeLinqChatLookupPresent) {

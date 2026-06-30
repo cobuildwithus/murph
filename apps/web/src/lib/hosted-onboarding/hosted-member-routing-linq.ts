@@ -52,14 +52,20 @@ export async function upsertHostedMemberPendingLinqBindingTx(input: {
 }
 
 export async function reserveHostedMemberPendingLinqNewChatTx(input: {
+  linePhoneNumber: string;
   memberId: string;
   prisma: Prisma.TransactionClient;
   reservationKey: string;
   reservedAt: Date;
 }): Promise<HostedMemberPendingLinqNewChatReservationOutcome> {
   const reservationKey = normalizeHostedOpaqueInput(input.reservationKey);
+  const linePhoneNumber = normalizePhoneNumber(input.linePhoneNumber);
+  const linePhoneLookupKey = createHostedPhoneLookupKey(linePhoneNumber);
   if (!reservationKey) {
     throw new TypeError("Hosted Linq new-chat reservation requires a non-empty key.");
+  }
+  if (!linePhoneNumber || !linePhoneLookupKey) {
+    throw new TypeError("Hosted Linq new-chat reservation requires a valid hosted line phone.");
   }
   if (Number.isNaN(input.reservedAt.getTime())) {
     throw new TypeError("Hosted Linq new-chat reservation timestamp must be valid.");
@@ -70,6 +76,11 @@ export async function reserveHostedMemberPendingLinqNewChatTx(input: {
     namespace: "member",
     tx: input.prisma,
   });
+  await acquireHostedLinqRoutingWriteLockTx({
+    lockValue: linePhoneLookupKey,
+    namespace: "new-chat-line",
+    tx: input.prisma,
+  });
 
   const existingRouting = await input.prisma.hostedMemberRouting.findUnique({
     where: {
@@ -78,6 +89,16 @@ export async function reserveHostedMemberPendingLinqNewChatTx(input: {
     select: {
       linqChatLookupKey: true,
       pendingLinqChatLookupKey: true,
+      pendingLinqNewChatLinePhoneLookupKey: true,
+      pendingLinqNewChatReservationKey: true,
+    },
+  });
+  const existingLineRouting = await input.prisma.hostedMemberRouting.findUnique({
+    where: {
+      pendingLinqNewChatLinePhoneLookupKey: linePhoneLookupKey,
+    },
+    select: {
+      memberId: true,
       pendingLinqNewChatReservationKey: true,
     },
   });
@@ -89,9 +110,28 @@ export async function reserveHostedMemberPendingLinqNewChatTx(input: {
     return "pending_chat_exists";
   }
   if (existingRouting?.pendingLinqNewChatReservationKey) {
-    return existingRouting.pendingLinqNewChatReservationKey === reservationKey
-      ? "already_reserved"
-      : "reservation_conflict";
+    if (existingRouting.pendingLinqNewChatReservationKey !== reservationKey) {
+      return "reservation_conflict";
+    }
+    if (
+      existingLineRouting
+      && (
+        existingLineRouting.memberId !== input.memberId
+        || existingLineRouting.pendingLinqNewChatReservationKey !== reservationKey
+      )
+    ) {
+      return "reservation_conflict";
+    }
+    return "already_reserved";
+  }
+  if (
+    existingLineRouting
+    && (
+      existingLineRouting.memberId !== input.memberId
+      || existingLineRouting.pendingLinqNewChatReservationKey !== reservationKey
+    )
+  ) {
+    return "reservation_conflict";
   }
 
   await input.prisma.hostedMemberRouting.upsert({
@@ -106,6 +146,7 @@ export async function reserveHostedMemberPendingLinqNewChatTx(input: {
       memberId: input.memberId,
       pendingLinqChatIdEncrypted: null,
       pendingLinqChatLookupKey: null,
+      pendingLinqNewChatLinePhoneLookupKey: linePhoneLookupKey,
       pendingLinqNewChatReservationKey: reservationKey,
       pendingLinqNewChatReservedAt: input.reservedAt,
       pendingLinqParticipantContactEncrypted: null,
@@ -118,6 +159,7 @@ export async function reserveHostedMemberPendingLinqNewChatTx(input: {
       telegramUserLookupKey: null,
     },
     update: {
+      pendingLinqNewChatLinePhoneLookupKey: linePhoneLookupKey,
       pendingLinqNewChatReservationKey: reservationKey,
       pendingLinqNewChatReservedAt: input.reservedAt,
     },
@@ -148,6 +190,7 @@ export async function clearHostedMemberPendingLinqNewChatReservationTx(input: {
       pendingLinqNewChatReservationKey: reservationKey,
     },
     data: {
+      pendingLinqNewChatLinePhoneLookupKey: null,
       pendingLinqNewChatReservationKey: null,
       pendingLinqNewChatReservedAt: null,
     },
@@ -350,6 +393,7 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
       memberId: input.memberId,
       pendingLinqChatIdEncrypted: null,
       pendingLinqChatLookupKey: null,
+      pendingLinqNewChatLinePhoneLookupKey: null,
       pendingLinqNewChatReservationKey: null,
       pendingLinqNewChatReservedAt: null,
       pendingLinqParticipantContactEncrypted: null,
@@ -371,6 +415,7 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
             linqLastInboundAt: promotedLinqLastInboundAt,
             pendingLinqChatIdEncrypted: null,
             pendingLinqChatLookupKey: null,
+            pendingLinqNewChatLinePhoneLookupKey: null,
             pendingLinqNewChatReservationKey: null,
             pendingLinqNewChatReservedAt: null,
             pendingLinqParticipantContactEncrypted: null,
@@ -475,7 +520,10 @@ async function writeHostedMemberLinqBindingTx(input: {
     throw new TypeError("Hosted Linq routing requires a non-empty reservation key.");
   }
 
-  if (input.kind === "pending" && input.existingChatPolicy === "fail") {
+  if (
+    input.kind === "pending"
+    && (input.existingChatPolicy === "fail" || expectedNewChatReservationKey)
+  ) {
     await acquireHostedLinqRoutingWriteLockTx({
       lockValue: input.memberId,
       namespace: "member",
@@ -635,6 +683,7 @@ function buildHostedMemberLinqBindingCreateData(input: {
       ? input.routingPrivateColumns.pendingLinqChatIdEncrypted
       : null,
     pendingLinqChatLookupKey: input.kind === "pending" ? input.linqChatLookupKey : null,
+    pendingLinqNewChatLinePhoneLookupKey: null,
     pendingLinqNewChatReservationKey: null,
     pendingLinqNewChatReservedAt: null,
     pendingLinqParticipantContactEncrypted: input.kind === "pending"
@@ -682,6 +731,7 @@ function buildHostedMemberLinqBindingUpdateData(input: {
             linqLastInboundAt: input.promotedLinqLastInboundAt,
             pendingLinqChatIdEncrypted: null,
             pendingLinqChatLookupKey: null,
+            pendingLinqNewChatLinePhoneLookupKey: null,
             pendingLinqNewChatReservationKey: null,
             pendingLinqNewChatReservedAt: null,
             pendingLinqParticipantContactEncrypted: null,
@@ -699,6 +749,7 @@ function buildHostedMemberLinqBindingUpdateData(input: {
   return {
     pendingLinqChatIdEncrypted: input.routingPrivateColumns.pendingLinqChatIdEncrypted,
     pendingLinqChatLookupKey: input.linqChatLookupKey,
+    pendingLinqNewChatLinePhoneLookupKey: null,
     pendingLinqNewChatReservationKey: null,
     pendingLinqNewChatReservedAt: null,
     ...(input.participantContact
@@ -907,7 +958,12 @@ function buildHostedRecipientPhoneLookupEntries(
 
 async function acquireHostedLinqRoutingWriteLockTx(input: {
   lockValue: string | null;
-  namespace: "chat" | "member" | "participant-contact" | "recipient-assignment";
+  namespace:
+    | "chat"
+    | "member"
+    | "new-chat-line"
+    | "participant-contact"
+    | "recipient-assignment";
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const lockValue = input.lockValue?.trim() ?? "";

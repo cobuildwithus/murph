@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
-import { createHostedLinqChatLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  createHostedLinqChatLookupKey,
+  createHostedPhoneLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import * as barrel from "@/src/lib/hosted-onboarding/member-service";
 import {
   completeHostedPrivyVerification,
@@ -756,6 +759,7 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
         memberId: "member_123",
         pendingLinqChatIdEncrypted: null,
         pendingLinqChatLookupKey: null,
+        pendingLinqNewChatLinePhoneLookupKey: null,
         pendingLinqNewChatReservationKey: null,
         pendingLinqNewChatReservedAt: null,
         pendingLinqParticipantContactEncrypted: null,
@@ -815,30 +819,43 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     });
 
     await expect(reserveHostedMemberPendingLinqNewChatTx({
+      linePhoneNumber: "+15550100001",
       memberId: "member_123",
       prisma: prisma as never,
       reservationKey,
       reservedAt,
     })).resolves.toBe("reserved");
 
-    expect(executeRaw).toHaveBeenCalledTimes(1);
-    expect(findUnique).toHaveBeenCalledWith({
+    expect(executeRaw).toHaveBeenCalledTimes(2);
+    expect(findUnique).toHaveBeenNthCalledWith(1, {
       select: {
         linqChatLookupKey: true,
         pendingLinqChatLookupKey: true,
+        pendingLinqNewChatLinePhoneLookupKey: true,
         pendingLinqNewChatReservationKey: true,
       },
       where: {
         memberId: "member_123",
       },
     });
+    expect(findUnique).toHaveBeenNthCalledWith(2, {
+      select: {
+        memberId: true,
+        pendingLinqNewChatReservationKey: true,
+      },
+      where: {
+        pendingLinqNewChatLinePhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
+      },
+    });
     expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({
         memberId: "member_123",
+        pendingLinqNewChatLinePhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         pendingLinqNewChatReservationKey: reservationKey,
         pendingLinqNewChatReservedAt: reservedAt,
       }),
       update: {
+        pendingLinqNewChatLinePhoneLookupKey: expect.stringMatching(/^hbidx:phone:v1:/u),
         pendingLinqNewChatReservationKey: reservationKey,
         pendingLinqNewChatReservedAt: reservedAt,
       },
@@ -850,12 +867,22 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
 
   it("treats an existing matching pending Linq new-chat reservation as owned", async () => {
     const reservationKey = "ops-onboarding-invite:open:reservation";
+    const linePhoneLookupKey = createHostedPhoneLookupKey("+15550100001");
+    if (!linePhoneLookupKey) {
+      throw new Error("Expected test line phone to produce a lookup key.");
+    }
     const executeRaw = vi.fn().mockResolvedValue(0);
-    const findUnique = vi.fn().mockResolvedValue({
-      linqChatLookupKey: null,
-      pendingLinqChatLookupKey: null,
-      pendingLinqNewChatReservationKey: reservationKey,
-    });
+    const findUnique = vi.fn()
+      .mockResolvedValueOnce({
+        linqChatLookupKey: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqNewChatLinePhoneLookupKey: linePhoneLookupKey,
+        pendingLinqNewChatReservationKey: reservationKey,
+      })
+      .mockResolvedValueOnce({
+        memberId: "member_123",
+        pendingLinqNewChatReservationKey: reservationKey,
+      });
     const upsert = vi.fn();
     const prisma = asRootPrisma({
       $executeRaw: executeRaw,
@@ -866,13 +893,14 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     });
 
     await expect(reserveHostedMemberPendingLinqNewChatTx({
+      linePhoneNumber: "+15550100001",
       memberId: "member_123",
       prisma: prisma as never,
       reservationKey,
       reservedAt: new Date("2026-06-30T12:00:00.000Z"),
     })).resolves.toBe("already_reserved");
 
-    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw).toHaveBeenCalledTimes(2);
     expect(upsert).not.toHaveBeenCalled();
   });
 
@@ -893,13 +921,14 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     });
 
     await expect(reserveHostedMemberPendingLinqNewChatTx({
+      linePhoneNumber: "+15550100001",
       memberId: "member_123",
       prisma: prisma as never,
       reservationKey: "ops-onboarding-invite:open:reservation",
       reservedAt: new Date("2026-06-30T12:00:00.000Z"),
     })).resolves.toBe("reservation_conflict");
 
-    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(executeRaw).toHaveBeenCalledTimes(2);
     expect(upsert).not.toHaveBeenCalled();
   });
 
@@ -922,6 +951,7 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(updateMany).toHaveBeenCalledWith({
       data: {
+        pendingLinqNewChatLinePhoneLookupKey: null,
         pendingLinqNewChatReservationKey: null,
         pendingLinqNewChatReservedAt: null,
       },
@@ -965,6 +995,7 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
       update: expect.objectContaining({
         pendingLinqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        pendingLinqNewChatLinePhoneLookupKey: null,
         pendingLinqNewChatReservationKey: null,
         pendingLinqNewChatReservedAt: null,
       }),

@@ -101,6 +101,7 @@ export interface HostedMemberHomeLinqRouteSnapshot {
 export type HostedMemberRoutingLookupMatch =
   | "linqChatLookupKey"
   | "pendingLinqChatLookupKey"
+  | "pendingLinqNewChatLinePhoneLookupKey"
   | "pendingLinqParticipantContactLookupKey"
   | "telegramUserLookupKey"
   | "telegramUserId";
