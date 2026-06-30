@@ -331,6 +331,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       userId: plan.wakeUserId,
     });
     const sendReadReceipt = () => maybeSendHostedLinqIngressReadReceipt({
+      currentInboundReply,
       plan,
       prisma,
       signal: input.signal,
@@ -366,6 +367,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 }
 
 async function maybeSendHostedLinqIngressReadReceipt(input: {
+  currentInboundReply: HostedLinqCurrentInboundReplyProof | null;
   plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
   prisma: PrismaClient;
   signal?: AbortSignal;
@@ -404,25 +406,28 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
   }
 
   const routeAuthority = input.plan.linqReadReceiptRouteAuthority ?? null;
-  if (!routeAuthority) {
-    finishHostedOnboardingTiming(readReceiptTiming, "skipped-missing-route-authority", {
-      responseReason,
-      signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
-      wakeHandoffReason,
-      wakeHandoffStarted,
-      wakeHandoffSignalAccepted,
-    });
-    return;
-  }
-
+  const currentInboundChatMatches =
+    normalizeHostedLinqReadReceiptChatId(chatId)
+      === normalizeHostedLinqReadReceiptChatId(input.currentInboundReply?.chatId);
   try {
-    await assertHostedThreadRouteEgressAuthority({
-      authority: assertHostedLinqRouteAuthorityMatchesTarget({
-        chatId,
-        routeAuthority,
-      }),
-      prisma: input.prisma,
-    });
+    if (routeAuthority) {
+      await assertHostedThreadRouteEgressAuthority({
+        authority: assertHostedLinqRouteAuthorityMatchesTarget({
+          chatId,
+          routeAuthority,
+        }),
+        prisma: input.prisma,
+      });
+    } else if (!currentInboundChatMatches) {
+      finishHostedOnboardingTiming(readReceiptTiming, "skipped-missing-read-receipt-authority", {
+        responseReason,
+        signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
+        wakeHandoffReason,
+        wakeHandoffStarted,
+        wakeHandoffSignalAccepted,
+      });
+      return;
+    }
 
     const result = await sendHostedLinqReadReceipt({
       chatId,
@@ -447,6 +452,11 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
       wakeHandoffSignalAccepted,
     });
   }
+}
+
+function normalizeHostedLinqReadReceiptChatId(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
 }
 
 function buildHostedLinqCurrentInboundReplyProof(

@@ -126,6 +126,13 @@ const mocks = vi.hoisted(() => {
   return state;
 });
 
+function expectHostedLinqReadReceiptSent(chatId = CHAT_ID): void {
+  expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+    chatId,
+    signal: undefined,
+  });
+}
+
 vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-mailbox/store")>(
     "@/src/lib/hosted-mailbox/store",
@@ -516,7 +523,7 @@ describe("hosted Linq usage reset e2e", () => {
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_evt_after_reset",
     });
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expectHostedLinqReadReceiptSent();
   });
 
   it("suppresses the usage-limit reply when the exhausted period notice was already claimed", async () => {

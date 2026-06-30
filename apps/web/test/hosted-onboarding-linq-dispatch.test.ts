@@ -194,6 +194,13 @@ function expectHostedLinqPointerSignalAccepted(eventId = "evt_123", userId = "me
   });
 }
 
+function expectHostedLinqReadReceiptSent(chatId = "chat_123"): void {
+  expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+    chatId,
+    signal: undefined,
+  });
+}
+
 vi.mock("@/src/lib/hosted-mailbox/store", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-mailbox/store")>(
     "@/src/lib/hosted-mailbox/store",
@@ -662,7 +669,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(readHostedWebhookReceiptUpdateManyMock(prisma)).not.toHaveBeenCalled();
       expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
       expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-      expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+      expectHostedLinqReadReceiptSent();
       expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
         memberId: "member_123",
         occurredAt: "2026-03-26T12:00:00.000Z",
@@ -1055,7 +1062,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(serializedEnvelope).not.toContain("LINQ_MESSAGE_PARTS_TOO_MANY");
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expectHostedLinqReadReceiptSent();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expectHostedLinqPointerSignalAccepted();
   });
@@ -1134,7 +1141,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(serializedEnvelope).not.toContain("file-32.jpg");
     expect(serializedEnvelope).not.toContain("cdn.linq.example.test");
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expectHostedLinqReadReceiptSent();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expectHostedLinqPointerSignalAccepted("evt_attachments_before_text");
   });
@@ -1203,7 +1210,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }));
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expectHostedLinqReadReceiptSent();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expectHostedLinqPointerSignalAccepted("evt_oversized_parts");
   });
@@ -1280,7 +1287,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     }));
     expect(serializedEnvelope).toContain("some content truncated");
     expect(serializedEnvelope).not.toContain("cdn.example.test");
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expectHostedLinqReadReceiptSent();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expectHostedLinqPointerSignalAccepted("evt_link_compaction");
   });
@@ -1391,7 +1398,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expectHostedLinqPointerSignalAccepted("evt_required_nudge_failed");
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expectHostedLinqReadReceiptSent();
     expect(mocks.startHostedLinqTypingIndicator).not.toHaveBeenCalled();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1404,7 +1411,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
   });
 
-  it("skips active-member Linq read receipts without durable route authority", async () => {
+  it("sends active-member Linq read receipts without durable thread-route authority", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -1440,14 +1447,18 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "wake-appended-active-member",
     });
 
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      signal: undefined,
+    });
     expectHostedLinqPointerSignalAccepted("evt_read_receipt_failure");
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
         step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
       }),
-      "skipped-missing-route-authority",
+      "sent",
       expect.objectContaining({
+        httpStatus: 204,
         responseReason: "wake-appended-active-member",
         wakeHandoffStarted: true,
         wakeHandoffSignalAccepted: true,
@@ -1500,13 +1511,17 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     await scheduledTasks[2]?.();
 
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      signal: undefined,
+    });
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
         step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
       }),
-      "skipped-missing-route-authority",
+      "sent",
       expect.objectContaining({
+        httpStatus: 204,
         responseReason: "wake-appended-active-member",
         wakeHandoffStarted: true,
         wakeHandoffSignalAccepted: true,
@@ -1805,7 +1820,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(transactionReceiptUpdateMany).not.toHaveBeenCalled();
     expect(readHostedWebhookSideEffectUpsertCalls(transactionClient)).toEqual([]);
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expectHostedLinqReadReceiptSent();
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expectHostedLinqPointerSignalAccepted();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
@@ -3524,7 +3539,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expectHostedLinqReadReceiptSent();
   });
 
   it.each(["sms", "RCS"] as const)(
