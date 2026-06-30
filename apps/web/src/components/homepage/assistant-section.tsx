@@ -32,10 +32,10 @@ export function AssistantSection({
             <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#c4a882]">
               Your daily assistant
             </span>
-            <h2 className="mt-5 max-w-[20ch] font-serif text-[clamp(1.5rem,2.8vw,2rem)] font-semibold leading-[1.12] tracking-[-0.02em] text-[#f5f0e8]">
+            <h2 className="mt-5 max-w-[18ch] font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.05] tracking-[-0.03em] text-[#f5f0e8]">
               Like texting a friend who reads the research.
             </h2>
-            <p className="mt-4 max-w-[36ch] text-base leading-[1.7] text-pretty text-[#f5f0e8]/50">
+            <p className="mt-5 max-w-[36ch] text-[0.9375rem] leading-[1.75] text-pretty text-[#f5f0e8]/55 sm:text-base">
               Murph reaches out when it matters and stays
               quiet when it doesn&apos;t. No app to open.
             </p>

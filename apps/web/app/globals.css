@@ -151,6 +151,32 @@
   }
 }
 
+@keyframes murph-heartbeat {
+  0%, 35%, 100% {
+    transform: scale(1);
+  }
+  8% {
+    transform: scale(1.07);
+  }
+  16% {
+    transform: scale(1);
+  }
+  24% {
+    transform: scale(1.07);
+  }
+}
+
+@utility animate-murph-heartbeat {
+  animation: murph-heartbeat 1.6s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-murph-heartbeat {
+    animation: none;
+  }
+}
+
 @theme inline {
   --font-sans: var(--font-sans);
   --font-serif: var(--font-serif);

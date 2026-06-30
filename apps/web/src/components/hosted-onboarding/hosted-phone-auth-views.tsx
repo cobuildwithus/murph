@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
-import { MurphPulseMark } from "@/src/components/ui/murph-pulse-mark";
+import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 
 import {
   HostedCodeEntryStep,
@@ -158,7 +158,7 @@ export function HostedAuthenticatedPhoneAuthState({
         role="status"
         className="flex items-center gap-4 rounded-xl bg-[#1A1F16]/[0.035] px-4 py-3.5"
       >
-        <MurphPulseMark className="h-9 w-auto shrink-0" />
+        <MurphPulseLoader className="h-9 w-auto shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="font-serif text-[15px] font-medium leading-tight text-[#1A1F16]">
             {title}

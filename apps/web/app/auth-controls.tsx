@@ -88,13 +88,17 @@ function handleLandingAuthCompleted(
   );
 }
 
-function getLandingAuthClasses(context: LandingAuthContext) {
+function getLandingAuthClasses(
+  context: LandingAuthContext,
+  onDarkSurface: boolean,
+) {
   switch (context) {
     case "nav":
       return {
         container: "flex items-center gap-2 sm:gap-3",
-        login:
-          "inline-flex items-center justify-center rounded-lg border border-[#2d3436]/20 bg-transparent px-4 py-2.5 text-sm font-semibold text-[#2d3436] transition-colors hover:border-[#2d3436]/40 hover:bg-[#2d3436]/[0.06] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2d3436]/40",
+        login: onDarkSurface
+          ? "inline-flex items-center justify-center rounded-lg border border-white/25 bg-transparent px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:border-white/45 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
+          : "inline-flex items-center justify-center rounded-lg border border-[#2d3436]/20 bg-transparent px-4 py-2.5 text-sm font-semibold text-[#2d3436] transition-colors hover:border-[#2d3436]/40 hover:bg-[#2d3436]/[0.06] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2d3436]/40",
         settings:
           "inline-flex items-center rounded-lg bg-[#5a6e32] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#4d5f2a]",
         signup:
@@ -129,6 +133,7 @@ export function LandingAuthActions({
   context,
   leadingIcon,
   loginLabel = "Log in",
+  onDarkSurface = false,
   preloadAuthPanel = false,
   splitUnauthenticated = false,
   signupLabel = "Signup",
@@ -138,11 +143,12 @@ export function LandingAuthActions({
   context: LandingAuthContext;
   leadingIcon?: ReactNode;
   loginLabel?: string;
+  onDarkSurface?: boolean;
   preloadAuthPanel?: boolean;
   splitUnauthenticated?: boolean;
   signupLabel?: string;
 }) {
-  const styles = getLandingAuthClasses(context);
+  const styles = getLandingAuthClasses(context, onDarkSurface);
 
   useHostedAuthPanelIslandIdlePreload(preloadAuthPanel && !authenticated);
 
