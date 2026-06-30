@@ -157,6 +157,7 @@ const HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS = 30_000;
 const HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEFERRED_PENDING_ASSISTANT_INPUT_RETRY_DELAY_MS = 30_000;
 const HOSTED_IDLE_DEVICE_SYNC_PREEMPTION_POLL_MS = 25;
+const HOSTED_DEVICE_SYNC_STATUS_PROMPT_TIMEOUT_MS = 1_000;
 const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-update"] as const;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
@@ -335,7 +336,7 @@ export async function runHostedWorkspaceAssistantPhase(
       const cancellation = createHostedIdleDeviceSyncMaintenanceCancellation({
         signal: channelAbortController.signal,
         shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
-        timeoutMs: null,
+        timeoutMs: HOSTED_DEVICE_SYNC_STATUS_PROMPT_TIMEOUT_MS,
       });
 
       try {

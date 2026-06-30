@@ -3579,6 +3579,68 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
   });
 
+  it("times out optional hosted device sync status reads before scheduled assistant work", async () => {
+    let fetchSnapshotCalls = 0;
+    let fetchSnapshotAbortObserved = false;
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      async fetchSnapshot(request) {
+        fetchSnapshotCalls += 1;
+        const signal = request?.signal;
+        expect(signal).toBeInstanceOf(AbortSignal);
+
+        return await new Promise<Awaited<ReturnType<RuntimeDeviceSyncPort["fetchSnapshot"]>>>(
+          (_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              fetchSnapshotAbortObserved = true;
+              reject(signal.reason instanceof Error
+                ? signal.reason
+                : new DOMException("Aborted.", "AbortError"));
+            }, { once: true });
+          },
+        );
+      },
+    } satisfies RuntimeDeviceSyncPort;
+
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: null,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["whoop_v2"],
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
+    }));
+
+    const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    expect(fetchSnapshotCalls).toBe(1);
+    expect(fetchSnapshotAbortObserved).toBe(true);
+    expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
+  });
+
   it("logs hosted device connect helper failures without leaking response details", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const deviceSyncPort = {
