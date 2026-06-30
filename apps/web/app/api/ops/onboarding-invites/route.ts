@@ -38,7 +38,6 @@ export const POST = withJsonError(async (request: Request) => {
     inviteMessage: readOptionalFormString(formData, "inviteMessage"),
     linqChatId: readOptionalFormString(formData, "linqChatId"),
     linqFromPhoneNumber: readOptionalFormString(formData, "linqFromPhoneNumber"),
-    newChatOpeningMessage: readOptionalFormString(formData, "newChatOpeningMessage"),
     recipientPhoneNumber: readRequiredFormString(
       formData,
       "recipientPhoneNumber",

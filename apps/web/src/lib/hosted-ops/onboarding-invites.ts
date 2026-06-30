@@ -12,7 +12,7 @@ import {
   issueHostedInviteTx,
 } from "../hosted-onboarding/invite-service";
 import {
-  createHostedLinqChat,
+  createHostedLinqMediaChat,
   sendHostedLinqChatMessage,
   sendHostedLinqVoiceMemo,
   uploadHostedLinqAttachment,
@@ -34,15 +34,10 @@ import { getHostedOnboardingEnvironment } from "../hosted-onboarding/runtime";
 export const HOSTED_OPS_ONBOARDING_VOICE_MEMO_MAX_BYTES = 10 * 1024 * 1024;
 
 const HOSTED_OPS_ONBOARDING_INVITE_MESSAGE_MAX_LENGTH = 1_800;
-const HOSTED_OPS_ONBOARDING_NEW_CHAT_OPENER_MAX_LENGTH = 320;
 const HOSTED_OPS_ONBOARDING_REQUEST_ID_PATTERN = /^[A-Za-z0-9_.:-]{8,128}$/u;
 const HOSTED_OPS_ONBOARDING_LINQ_CHAT_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,256}$/u;
-const HOSTED_OPS_ONBOARDING_URLISH_PATTERN =
-  /\b(?:https?:\/\/|www\.|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-z]{2,})(?:[^\s]*)?/iu;
 const HOSTED_OPS_ONBOARDING_DEFAULT_INVITE_MESSAGE =
   "Murph setup link:\n{{inviteUrl}}\n\nReply here when you are in.";
-const HOSTED_OPS_ONBOARDING_DEFAULT_NEW_CHAT_OPENER =
-  "Hey, I am sending the Murph setup link next.";
 
 type HostedOpsOnboardingInviteDeliveryMode = "existing_chat" | "new_chat";
 
@@ -58,7 +53,6 @@ export interface HostedOpsOnboardingInviteInput {
   inviteMessage?: string | null;
   linqChatId?: string | null;
   linqFromPhoneNumber?: string | null;
-  newChatOpeningMessage?: string | null;
   prisma?: PrismaClient;
   recipientPhoneNumber: string;
   requestId: string;
@@ -68,8 +62,8 @@ export interface HostedOpsOnboardingInviteInput {
 export interface HostedOpsOnboardingInviteResult {
   chatId: string;
   deliveryMode: HostedOpsOnboardingInviteDeliveryMode;
-  inviteExpiresAt: string;
-  inviteId: string;
+  inviteExpiresAt: string | null;
+  inviteId: string | null;
   invitePreviouslyMarkedSent: boolean;
   linqFromPhoneHint: string | null;
   memberId: string;
@@ -77,7 +71,7 @@ export interface HostedOpsOnboardingInviteResult {
   openerMessageId: string | null;
   recipientPhoneHint: string;
   sentAt: string;
-  textMessageSent: true;
+  textMessageSent: boolean;
   voiceMemo: {
     error: string | null;
     requested: boolean;
@@ -159,9 +153,13 @@ export async function sendHostedOpsOnboardingInvite(
 
   if (request.deliveryMode === "new_chat") {
     assertHostedOpsOnboardingAuthorizedLinqSenderPhone(request.linqFromPhoneNumber);
+    return sendHostedOpsOnboardingVoiceFirstNewChat({
+      prisma,
+      request,
+    });
   }
 
-  const issued = await issueHostedOpsOnboardingInviteForRequest({
+  const issued = await issueHostedOpsOnboardingExistingChatInvite({
     prisma,
     request,
   });
@@ -173,7 +171,6 @@ export async function sendHostedOpsOnboardingInvite(
   const delivery = await resolveHostedOpsOnboardingInviteDelivery({
     inviteMessage,
     memberId: issued.memberId,
-    prisma,
     request,
   });
   const sentAt = new Date();
@@ -201,7 +198,7 @@ export async function sendHostedOpsOnboardingInvite(
 
   return {
     chatId: delivery.chatId,
-    deliveryMode: request.deliveryMode,
+    deliveryMode: "existing_chat",
     inviteExpiresAt: issued.invite.expiresAt.toISOString(),
     inviteId: issued.invite.id,
     invitePreviouslyMarkedSent: issued.invite.sentAt !== null,
@@ -218,24 +215,19 @@ export async function sendHostedOpsOnboardingInvite(
   };
 }
 
-async function issueHostedOpsOnboardingInviteForRequest(input: {
+async function issueHostedOpsOnboardingExistingChatInvite(input: {
   prisma: PrismaClient;
-  request: NormalizedHostedOpsOnboardingInviteInput;
+  request: NormalizedHostedOpsOnboardingExistingChatInviteInput;
 }): Promise<{
   invite: Awaited<ReturnType<typeof issueHostedInviteTx>>;
   memberId: string;
 }> {
   return input.prisma.$transaction(async (tx) => {
-    const memberId = input.request.deliveryMode === "existing_chat"
-      ? await resolveHostedOpsOnboardingExistingChatMemberId({
-          linqChatId: input.request.linqChatId,
-          prisma: tx,
-          recipientPhoneNumber: input.request.recipientPhoneNumber,
-        })
-      : (await ensureHostedMemberForPhoneTx({
-          phoneNumber: input.request.recipientPhoneNumber,
-          prisma: tx,
-        })).id;
+    const memberId = await resolveHostedOpsOnboardingExistingChatMemberId({
+      linqChatId: input.request.linqChatId,
+      prisma: tx,
+      recipientPhoneNumber: input.request.recipientPhoneNumber,
+    });
     const invite = await issueHostedInviteTx({
       channel: "linq",
       memberId,
@@ -247,6 +239,87 @@ async function issueHostedOpsOnboardingInviteForRequest(input: {
       memberId,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function sendHostedOpsOnboardingVoiceFirstNewChat(input: {
+  prisma: PrismaClient;
+  request: NormalizedHostedOpsOnboardingNewChatInviteInput;
+}): Promise<HostedOpsOnboardingInviteResult> {
+  const voiceMemo = input.request.voiceMemo;
+  const memberId = await ensureHostedOpsOnboardingNewChatMemberId({
+    prisma: input.prisma,
+    request: input.request,
+  });
+  const attachment = await uploadHostedLinqAttachment({
+    bytes: voiceMemo.bytes,
+    contentType: voiceMemo.contentType,
+    filename: buildHostedOpsOnboardingVoiceMemoFilename(voiceMemo.extension),
+    sizeBytes: voiceMemo.sizeBytes,
+  });
+  const createdChat = await createHostedLinqMediaChat({
+    attachmentId: attachment.attachmentId,
+    from: input.request.linqFromPhoneNumber,
+    idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
+      requestId: input.request.requestId,
+      step: "open",
+      targetParts: [
+        input.request.linqFromPhoneNumber,
+        input.request.recipientPhoneNumber,
+      ],
+    }),
+    to: [input.request.recipientPhoneNumber],
+  });
+  const chatId = normalizeNullableString(createdChat.chatId);
+
+  if (!chatId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_OPS_ONBOARDING_CHAT_CREATE_FAILED",
+      httpStatus: 502,
+      message: "Linq did not return a chat id for the onboarding voice memo.",
+      retryable: true,
+    });
+  }
+
+  await input.prisma.$transaction(async (tx) => {
+    await upsertHostedMemberPendingLinqBindingTx({
+      linqChatId: chatId,
+      memberId,
+      prisma: tx,
+      recipientPhone: input.request.linqFromPhoneNumber,
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  return {
+    chatId,
+    deliveryMode: "new_chat",
+    inviteExpiresAt: null,
+    inviteId: null,
+    invitePreviouslyMarkedSent: false,
+    linqFromPhoneHint: readHostedPhoneHint(input.request.linqFromPhoneNumber),
+    memberId,
+    newChatCreated: true,
+    openerMessageId: normalizeNullableString(createdChat.messageId),
+    recipientPhoneHint: readHostedPhoneHint(input.request.recipientPhoneNumber),
+    sentAt: new Date().toISOString(),
+    textMessageSent: false,
+    voiceMemo: {
+      error: null,
+      requested: true,
+      sent: true,
+    },
+  };
+}
+
+async function ensureHostedOpsOnboardingNewChatMemberId(input: {
+  prisma: PrismaClient;
+  request: NormalizedHostedOpsOnboardingNewChatInviteInput;
+}): Promise<string> {
+  return input.prisma.$transaction(async (tx) => (
+    await ensureHostedMemberForPhoneTx({
+      phoneNumber: input.request.recipientPhoneNumber,
+      prisma: tx,
+    })
+  ).id, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export function resolveHostedOpsOnboardingVoiceMemoContentType(input: {
@@ -299,84 +372,29 @@ export function buildHostedOpsOnboardingVoiceMemoFilename(extension: string): st
 async function resolveHostedOpsOnboardingInviteDelivery(input: {
   inviteMessage: string;
   memberId: string;
-  prisma: PrismaClient;
-  request: NormalizedHostedOpsOnboardingInviteInput;
+  request: NormalizedHostedOpsOnboardingExistingChatInviteInput;
 }): Promise<{
   chatId: string;
   newChatCreated: boolean;
   openerMessageId: string | null;
 }> {
-  if (input.request.deliveryMode === "existing_chat") {
-    await sendHostedLinqChatMessage({
-      chatId: input.request.linqChatId,
-      idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
-        requestId: input.request.requestId,
-        step: "invite",
-        targetParts: [
-          input.memberId,
-          input.request.linqChatId,
-        ],
-      }),
-      message: input.inviteMessage,
-    });
-
-    return {
-      chatId: input.request.linqChatId,
-      newChatCreated: false,
-      openerMessageId: null,
-    };
-  }
-
-  const createdChat = await createHostedLinqChat({
-    from: input.request.linqFromPhoneNumber,
-    idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
-      requestId: input.request.requestId,
-      step: "open",
-      targetParts: [
-        input.request.linqFromPhoneNumber,
-        input.request.recipientPhoneNumber,
-      ],
-    }),
-    message: input.request.newChatOpeningMessage,
-    to: [input.request.recipientPhoneNumber],
-  });
-  const chatId = normalizeNullableString(createdChat.chatId);
-
-  if (!chatId) {
-    throw hostedOnboardingError({
-      code: "HOSTED_OPS_ONBOARDING_CHAT_CREATE_FAILED",
-      httpStatus: 502,
-      message: "Linq did not return a chat id for the onboarding invite.",
-      retryable: true,
-    });
-  }
-
-  await input.prisma.$transaction(async (tx) => {
-    await upsertHostedMemberPendingLinqBindingTx({
-      linqChatId: chatId,
-      memberId: input.memberId,
-      prisma: tx,
-      recipientPhone: input.request.linqFromPhoneNumber,
-    });
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-
   await sendHostedLinqChatMessage({
-    chatId,
+    chatId: input.request.linqChatId,
     idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
       requestId: input.request.requestId,
       step: "invite",
       targetParts: [
         input.memberId,
-        chatId,
+        input.request.linqChatId,
       ],
     }),
     message: input.inviteMessage,
   });
 
   return {
-    chatId,
-    newChatCreated: true,
-    openerMessageId: normalizeNullableString(createdChat.messageId),
+    chatId: input.request.linqChatId,
+    newChatCreated: false,
+    openerMessageId: null,
   };
 }
 
@@ -507,15 +525,28 @@ function assertHostedOpsOnboardingAuthorizedLinqSenderPhone(senderPhone: string)
   }
 }
 
-interface NormalizedHostedOpsOnboardingInviteInput {
-  deliveryMode: HostedOpsOnboardingInviteDeliveryMode;
+type NormalizedHostedOpsOnboardingInviteInput =
+  | NormalizedHostedOpsOnboardingExistingChatInviteInput
+  | NormalizedHostedOpsOnboardingNewChatInviteInput;
+
+interface NormalizedHostedOpsOnboardingExistingChatInviteInput {
+  deliveryMode: "existing_chat";
   inviteMessage: string | null;
   linqChatId: string;
   linqFromPhoneNumber: string;
-  newChatOpeningMessage: string;
   recipientPhoneNumber: string;
   requestId: string;
   voiceMemo: HostedOpsOnboardingVoiceMemoInput | null;
+}
+
+interface NormalizedHostedOpsOnboardingNewChatInviteInput {
+  deliveryMode: "new_chat";
+  inviteMessage: string | null;
+  linqChatId: string;
+  linqFromPhoneNumber: string;
+  recipientPhoneNumber: string;
+  requestId: string;
+  voiceMemo: HostedOpsOnboardingVoiceMemoInput;
 }
 
 function normalizeHostedOpsOnboardingInviteInput(
@@ -541,7 +572,6 @@ function normalizeHostedOpsOnboardingInviteInput(
       inviteMessage,
       linqChatId: normalizeHostedOpsOnboardingLinqChatId(input.linqChatId),
       linqFromPhoneNumber: "",
-      newChatOpeningMessage: "",
       recipientPhoneNumber,
       requestId,
       voiceMemo,
@@ -557,12 +587,9 @@ function normalizeHostedOpsOnboardingInviteInput(
       "HOSTED_OPS_ONBOARDING_FROM_PHONE_INVALID",
       "A valid Linq sender phone number is required for a new chat.",
     ),
-    newChatOpeningMessage: normalizeHostedOpsOnboardingNewChatOpener(
-      input.newChatOpeningMessage,
-    ),
     recipientPhoneNumber,
     requestId,
-    voiceMemo,
+    voiceMemo: requireHostedOpsOnboardingVoiceMemoForNewChat(voiceMemo),
   };
 }
 
@@ -654,28 +681,6 @@ function normalizeHostedOpsOnboardingMessage(
   return normalized;
 }
 
-function normalizeHostedOpsOnboardingNewChatOpener(
-  value: string | null | undefined,
-): string {
-  const normalized = normalizeHostedOpsOnboardingMessage(
-    value,
-    HOSTED_OPS_ONBOARDING_NEW_CHAT_OPENER_MAX_LENGTH,
-    "HOSTED_OPS_ONBOARDING_NEW_CHAT_OPENER_TOO_LONG",
-    "New chat opening note is too long.",
-  ) ?? HOSTED_OPS_ONBOARDING_DEFAULT_NEW_CHAT_OPENER;
-
-  if (HOSTED_OPS_ONBOARDING_URLISH_PATTERN.test(normalized)) {
-    throw hostedOnboardingError({
-      code: "HOSTED_OPS_ONBOARDING_NEW_CHAT_OPENER_HAS_LINK",
-      httpStatus: 400,
-      message: "New chat opening note cannot include a URL.",
-      retryable: false,
-    });
-  }
-
-  return normalized;
-}
-
 function normalizeHostedOpsOnboardingVoiceMemo(
   value: HostedOpsOnboardingVoiceMemoInput | null | undefined,
 ): HostedOpsOnboardingVoiceMemoInput | null {
@@ -702,6 +707,21 @@ function normalizeHostedOpsOnboardingVoiceMemo(
   }
 
   return value;
+}
+
+function requireHostedOpsOnboardingVoiceMemoForNewChat(
+  value: HostedOpsOnboardingVoiceMemoInput | null,
+): HostedOpsOnboardingVoiceMemoInput {
+  if (value) {
+    return value;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_OPS_ONBOARDING_VOICE_MEMO_REQUIRED",
+    httpStatus: 400,
+    message: "Attach a voice memo before creating a new chat.",
+    retryable: false,
+  });
 }
 
 function buildHostedOpsOnboardingInviteMessage(input: {

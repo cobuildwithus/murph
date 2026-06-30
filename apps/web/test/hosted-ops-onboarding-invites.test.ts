@@ -3,8 +3,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
-  createHostedLinqChat: vi.fn(),
   createHostedLinqChatLookupKey: vi.fn(),
+  createHostedLinqMediaChat: vi.fn(),
   ensureHostedMemberForPhoneTx: vi.fn(),
   getPrisma: vi.fn(),
   getHostedOnboardingEnvironment: vi.fn(),
@@ -43,7 +43,7 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
-  createHostedLinqChat: mocks.createHostedLinqChat,
+  createHostedLinqMediaChat: mocks.createHostedLinqMediaChat,
   sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
   sendHostedLinqVoiceMemo: mocks.sendHostedLinqVoiceMemo,
   uploadHostedLinqAttachment: mocks.uploadHostedLinqAttachment,
@@ -130,9 +130,9 @@ describe("hosted ops onboarding invites", () => {
     });
     mocks.lookupHostedMemberRoutingByPendingLinqChatId.mockResolvedValue(null);
     mocks.sendHostedLinqChatMessage.mockResolvedValue(undefined);
-    mocks.createHostedLinqChat.mockResolvedValue({
+    mocks.createHostedLinqMediaChat.mockResolvedValue({
       chatId: "chat_created",
-      messageId: "message_open",
+      messageId: "message_audio",
     });
     mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
     mocks.uploadHostedLinqAttachment.mockResolvedValue({ attachmentId: "attachment_123" });
@@ -181,7 +181,7 @@ describe("hosted ops onboarding invites", () => {
     const idempotencyKey = readIdempotencyKey(mocks.sendHostedLinqChatMessage);
     expect(idempotencyKey).not.toContain("chat_existing");
     expect(idempotencyKey).not.toContain("+15551234567");
-    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.createHostedLinqMediaChat).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.updateMany).toHaveBeenCalledWith({
       data: {
         sentAt: expect.any(Date),
@@ -250,7 +250,7 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
     expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.createHostedLinqMediaChat).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
   });
 
@@ -272,35 +272,41 @@ describe("hosted ops onboarding invites", () => {
     expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
   });
 
-  it("creates a new Linq chat with a non-link opener before sending the invite link", async () => {
+  it("creates a new Linq chat with audio only and waits for a reply before issuing an invite", async () => {
     const result = await service.sendHostedOpsOnboardingInvite({
       deliveryMode: "new_chat",
       linqFromPhoneNumber: "+15557654321",
-      newChatOpeningMessage: "Hey, I am sending the Murph setup link next.",
       recipientPhoneNumber: "+15551234567",
       requestId: "request-456",
+      voiceMemo: {
+        bytes: new Uint8Array([1, 2, 3]),
+        contentType: "audio/x-m4a",
+        extension: "m4a",
+        sizeBytes: 3,
+      },
     });
 
-    expect(mocks.createHostedLinqChat).toHaveBeenCalledWith({
+    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledWith({
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "audio/x-m4a",
+      filename: "murph-ops-voice-memo.m4a",
+      sizeBytes: 3,
+    });
+    expect(mocks.createHostedLinqMediaChat).toHaveBeenCalledWith({
+      attachmentId: "attachment_123",
       from: "+15557654321",
       idempotencyKey: expect.stringMatching(
         /^ops-onboarding-invite:open:[a-f0-9]{64}$/u,
       ),
-      message: "Hey, I am sending the Murph setup link next.",
       to: ["+15551234567"],
     });
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
-      chatId: "chat_created",
-      idempotencyKey: expect.stringMatching(
-        /^ops-onboarding-invite:invite:[a-f0-9]{64}$/u,
-      ),
-      message: "Murph setup link:\nhttps://join.example.test/invite_code\n\nReply here when you are in.",
-    });
-    const openIdempotencyKey = readIdempotencyKey(mocks.createHostedLinqChat);
-    const inviteIdempotencyKey = readIdempotencyKey(mocks.sendHostedLinqChatMessage);
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqVoiceMemo).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
+    const openIdempotencyKey = readIdempotencyKey(mocks.createHostedLinqMediaChat);
     expect(openIdempotencyKey).not.toContain("+15557654321");
     expect(openIdempotencyKey).not.toContain("+15551234567");
-    expect(inviteIdempotencyKey).not.toContain("chat_created");
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledWith({
       linqChatId: "chat_created",
       memberId: "member_123",
@@ -308,19 +314,50 @@ describe("hosted ops onboarding invites", () => {
       recipientPhone: "+15557654321",
     });
     expect(
-      mocks.upsertHostedMemberPendingLinqBindingTx.mock.invocationCallOrder[0],
+      mocks.uploadHostedLinqAttachment.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
+      mocks.createHostedLinqMediaChat.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(
+      mocks.createHostedLinqMediaChat.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.upsertHostedMemberPendingLinqBindingTx.mock.invocationCallOrder[0] ?? 0,
     );
     expect(result).toMatchObject({
       chatId: "chat_created",
       deliveryMode: "new_chat",
+      inviteExpiresAt: null,
+      inviteId: null,
+      invitePreviouslyMarkedSent: false,
       linqFromPhoneHint: "*** 4321",
       newChatCreated: true,
-      openerMessageId: "message_open",
+      openerMessageId: "message_audio",
       recipientPhoneHint: "*** 4567",
+      textMessageSent: false,
+      voiceMemo: {
+        error: null,
+        requested: true,
+        sent: true,
+      },
     });
     expect(JSON.stringify(result)).not.toContain("+15557654321");
+  });
+
+  it("rejects a new chat without a voice memo before creating remote side effects", async () => {
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-no-voice",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_VOICE_MEMO_REQUIRED",
+    });
+
+    expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.uploadHostedLinqAttachment).not.toHaveBeenCalled();
+    expect(mocks.createHostedLinqMediaChat).not.toHaveBeenCalled();
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("rejects a new chat sender that is not a configured hosted Linq conversation phone", async () => {
@@ -333,38 +370,29 @@ describe("hosted ops onboarding invites", () => {
       linqFromPhoneNumber: "+15557654321",
       recipientPhoneNumber: "+15551234567",
       requestId: "request-unauthorized-from",
+      voiceMemo: {
+        bytes: new Uint8Array([1]),
+        contentType: "audio/x-m4a",
+        extension: "m4a",
+        sizeBytes: 1,
+      },
     })).rejects.toMatchObject({
       code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_UNAUTHORIZED",
     });
 
     expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
     expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
-    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.createHostedLinqMediaChat).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("rejects a new chat opener that includes a URL before issuing an invite", async () => {
-    await expect(service.sendHostedOpsOnboardingInvite({
-      deliveryMode: "new_chat",
-      linqFromPhoneNumber: "+15557654321",
-      newChatOpeningMessage: "Go to https://example.test first",
-      recipientPhoneNumber: "+15551234567",
-      requestId: "request-789",
-    })).rejects.toMatchObject({
-      code: "HOSTED_OPS_ONBOARDING_NEW_CHAT_OPENER_HAS_LINK",
-    });
-
-    expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
-    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
-  });
-
-  it("changes the new-chat opener idempotency key when a failed retry targets a different recipient", async () => {
-    mocks.createHostedLinqChat
+  it("changes the new-chat audio idempotency key when a failed retry targets a different recipient", async () => {
+    mocks.createHostedLinqMediaChat
       .mockRejectedValueOnce(new Error("provider timed out after creating chat"))
       .mockResolvedValueOnce({
         chatId: "chat_created_b",
-        messageId: "message_open_b",
+        messageId: "message_audio_b",
       });
 
     await expect(service.sendHostedOpsOnboardingInvite({
@@ -372,6 +400,12 @@ describe("hosted ops onboarding invites", () => {
       linqFromPhoneNumber: "+15557654321",
       recipientPhoneNumber: "+15551234567",
       requestId: "request-retry-open",
+      voiceMemo: {
+        bytes: new Uint8Array([1]),
+        contentType: "audio/x-m4a",
+        extension: "m4a",
+        sizeBytes: 1,
+      },
     })).rejects.toThrow("provider timed out after creating chat");
 
     await service.sendHostedOpsOnboardingInvite({
@@ -379,10 +413,16 @@ describe("hosted ops onboarding invites", () => {
       linqFromPhoneNumber: "+15557654321",
       recipientPhoneNumber: "+15559876543",
       requestId: "request-retry-open",
+      voiceMemo: {
+        bytes: new Uint8Array([2]),
+        contentType: "audio/x-m4a",
+        extension: "m4a",
+        sizeBytes: 1,
+      },
     });
 
-    const firstKey = readIdempotencyKey(mocks.createHostedLinqChat, 0);
-    const secondKey = readIdempotencyKey(mocks.createHostedLinqChat, 1);
+    const firstKey = readIdempotencyKey(mocks.createHostedLinqMediaChat, 0);
+    const secondKey = readIdempotencyKey(mocks.createHostedLinqMediaChat, 1);
 
     expect(firstKey).toMatch(/^ops-onboarding-invite:open:[a-f0-9]{64}$/u);
     expect(secondKey).toMatch(/^ops-onboarding-invite:open:[a-f0-9]{64}$/u);
@@ -488,7 +528,7 @@ describe("hosted ops onboarding invites", () => {
     formData.set("requestId", "request-route");
     formData.set(
       "voiceMemo",
-      new File([new Uint8Array([4, 5])], "local-personal-recording.m4a", {
+      new File([new Uint8Array([4, 5])], "operator-recording.m4a", {
         type: "audio/mp4",
       }),
     );
@@ -510,7 +550,42 @@ describe("hosted ops onboarding invites", () => {
       filename: "murph-ops-voice-memo.m4a",
       sizeBytes: 2,
     });
-    expect(JSON.stringify(payload)).not.toContain("local-personal-recording");
+    expect(JSON.stringify(payload)).not.toContain("operator-recording");
+  });
+
+  it("creates new chats from route uploads without sending an invite link", async () => {
+    const formData = new FormData();
+    formData.set("deliveryMode", "new_chat");
+    formData.set("linqFromPhoneNumber", "+15557654321");
+    formData.set("recipientPhoneNumber", "+15551234567");
+    formData.set("requestId", "request-route-new");
+    formData.set(
+      "voiceMemo",
+      new File([new Uint8Array([6, 7])], "voice-check.m4a", {
+        type: "audio/mp4",
+      }),
+    );
+
+    const response = await route.POST(new Request("https://app.example.test/api/ops/onboarding-invites", {
+      body: formData,
+      method: "POST",
+    }));
+    const payload = await response.json() as {
+      inviteId?: string | null;
+      textMessageSent?: boolean;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.inviteId).toBeNull();
+    expect(payload.textMessageSent).toBe(false);
+    expect(mocks.createHostedLinqMediaChat).toHaveBeenCalledWith(expect.objectContaining({
+      attachmentId: "attachment_123",
+      from: "+15557654321",
+      to: ["+15551234567"],
+    }));
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(JSON.stringify(payload)).not.toContain("voice-check");
   });
 
   it("rejects declared oversized onboarding invite forms before parsing multipart data", async () => {
@@ -526,7 +601,7 @@ describe("hosted ops onboarding invites", () => {
 
     expect(response.status).toBe(413);
     expect(payload.error?.code).toBe("HOSTED_OPS_ONBOARDING_FORM_TOO_LARGE");
-    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.createHostedLinqMediaChat).not.toHaveBeenCalled();
   });
 
   it("rejects streamed oversized onboarding invite forms before parsing multipart data", async () => {
@@ -542,7 +617,7 @@ describe("hosted ops onboarding invites", () => {
 
     expect(response.status).toBe(413);
     expect(payload.error?.code).toBe("HOSTED_OPS_ONBOARDING_FORM_TOO_LARGE");
-    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.createHostedLinqMediaChat).not.toHaveBeenCalled();
   });
 });
 

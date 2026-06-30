@@ -4,6 +4,7 @@ import type {
   ChatCreateParams,
   ChatCreateResponse,
   ChatSendVoicememoParams,
+  MediaPart,
   SupportedContentType,
   TextPart,
   WebhookEventType,
@@ -206,6 +207,46 @@ export async function createHostedLinqChat(input: {
   if (!response.ok) {
     throw buildHostedLinqRequestFailedError({
       operation: "outbound chat creation",
+      retryable: isRetryableHostedLinqStatus(response.status),
+      status: response.status,
+    });
+  }
+
+  const payload = (await response.json()) as ChatCreateResponse;
+  return {
+    chatId: normalizeNullableString(payload.chat?.id),
+    messageId: normalizeNullableString(payload.chat?.message?.id),
+  };
+}
+
+export async function createHostedLinqMediaChat(input: {
+  attachmentId: string;
+  from: string;
+  idempotencyKey?: string | null;
+  signal?: AbortSignal;
+  to: string[];
+}): Promise<{ chatId: string | null; messageId: string | null }> {
+  const body: ChatCreateParams = {
+    from: normalizeRequiredString(input.from, "from"),
+    message: buildHostedLinqMediaMessageBody({
+      attachmentId: input.attachmentId,
+      idempotencyKey: input.idempotencyKey,
+    }).message,
+    to: normalizeHostedLinqRecipients(input.to),
+  };
+
+  const response = await fetchHostedLinqApiOrThrow({
+    body: JSON.stringify(body),
+    method: "POST",
+    operation: "outbound media chat creation",
+    path: "chats",
+    signal: input.signal,
+    timeoutMessage: "Linq outbound media chat creation timed out.",
+  });
+
+  if (!response.ok) {
+    throw buildHostedLinqRequestFailedError({
+      operation: "outbound media chat creation",
       retryable: isRetryableHostedLinqStatus(response.status),
       status: response.status,
     });
@@ -706,6 +747,30 @@ function buildHostedLinqTextMessageBody(input: {
             reply_to: {
               message_id: replyToMessageId,
             },
+          }
+        : {}),
+    },
+  };
+}
+
+function buildHostedLinqMediaMessageBody(input: {
+  attachmentId: string;
+  idempotencyKey?: string | null;
+}): MessageSendParams {
+  const idempotencyKey = normalizeNullableString(input.idempotencyKey);
+  const mediaPart: MediaPart = {
+    attachment_id: normalizeRequiredString(input.attachmentId, "attachment id"),
+    type: "media",
+  };
+
+  return {
+    message: {
+      parts: [
+        mediaPart,
+      ],
+      ...(idempotencyKey
+        ? {
+            idempotency_key: idempotencyKey,
           }
         : {}),
     },

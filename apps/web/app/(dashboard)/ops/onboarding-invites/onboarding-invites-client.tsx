@@ -26,8 +26,8 @@ type DeliveryMode = "existing_chat" | "new_chat";
 interface HostedOpsOnboardingInviteResult {
   chatId: string;
   deliveryMode: DeliveryMode;
-  inviteExpiresAt: string;
-  inviteId: string;
+  inviteExpiresAt: string | null;
+  inviteId: string | null;
   invitePreviouslyMarkedSent: boolean;
   linqFromPhoneHint: string | null;
   memberId: string;
@@ -35,7 +35,7 @@ interface HostedOpsOnboardingInviteResult {
   openerMessageId: string | null;
   recipientPhoneHint: string;
   sentAt: string;
-  textMessageSent: true;
+  textMessageSent: boolean;
   voiceMemo: {
     error: string | null;
     requested: boolean;
@@ -88,13 +88,17 @@ export function OnboardingInvitesClient() {
               Onboarding invites
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Issue a hosted setup link for a phone number and deliver it through Linq.
+              Send setup links to existing chats, or start new chats with voice only.
             </p>
           </div>
           {result ? (
             <Badge variant="secondary">
               <CheckCircle2Icon data-icon="inline-start" />
-              {result.voiceMemo.sent ? "Link and voice sent" : "Link sent"} to{" "}
+              {result.deliveryMode === "new_chat"
+                ? "Voice sent"
+                : result.voiceMemo.sent
+                  ? "Link and voice sent"
+                  : "Link sent"} to{" "}
               {result.recipientPhoneHint}
             </Badge>
           ) : null}
@@ -118,8 +122,8 @@ export function OnboardingInvitesClient() {
               Send invite link
             </h2>
             <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Existing chats receive the link directly. New chats start with a short non-link note,
-              then the setup link follows. Voice memos send after the link.
+              Existing chats receive the setup link directly. New chats send only the voice memo.
+              No setup link is generated for a new chat unless the recipient replies.
             </p>
           </div>
         </div>
@@ -189,44 +193,50 @@ export function OnboardingInvitesClient() {
                   spellCheck={false}
                 />
               </Field>
-              <Field label="Opening note" htmlFor="ops-onboarding-new-chat-opener" optional>
-                <Textarea
-                  id="ops-onboarding-new-chat-opener"
-                  maxLength={320}
-                  name="newChatOpeningMessage"
-                  placeholder="Hey, I am sending the Murph setup link next."
-                  rows={3}
-                />
-              </Field>
             </>
           )}
 
-          <Field label="Link message" htmlFor="ops-onboarding-invite-message" optional>
-            <Textarea
-              id="ops-onboarding-invite-message"
-              maxLength={1800}
-              name="inviteMessage"
-              placeholder={"Murph setup link:\n{{inviteUrl}}\n\nReply here when you are in."}
-              rows={5}
-            />
-          </Field>
+          {deliveryMode === "existing_chat" ? (
+            <Field label="Link message" htmlFor="ops-onboarding-invite-message" optional>
+              <Textarea
+                id="ops-onboarding-invite-message"
+                maxLength={1800}
+                name="inviteMessage"
+                placeholder={"Murph setup link:\n{{inviteUrl}}\n\nReply here when you are in."}
+                rows={5}
+              />
+            </Field>
+          ) : null}
 
-          <Field label="Voice memo" htmlFor="ops-onboarding-voice-memo" optional>
+          <Field
+            label="Voice memo"
+            htmlFor="ops-onboarding-voice-memo"
+            optional={deliveryMode === "existing_chat"}
+          >
             <Input
               accept={VOICE_MEMO_ACCEPT}
               id="ops-onboarding-voice-memo"
               name="voiceMemo"
+              required={deliveryMode === "new_chat"}
               type="file"
             />
           </Field>
 
           <div className="flex flex-col gap-3 lg:col-span-2 sm:flex-row sm:items-center sm:justify-between">
             <div aria-live="polite" className="min-h-5 text-sm text-muted-foreground">
-              {pending === "send" ? "Sending hosted setup link." : ""}
+              {pending === "send"
+                ? deliveryMode === "new_chat"
+                  ? "Sending voice memo."
+                  : "Sending hosted setup link."
+                : ""}
             </div>
             <Button disabled={pending !== null} type="submit">
               <SendIcon data-icon="inline-start" />
-              {pending === "send" ? "Sending..." : "Send invite"}
+              {pending === "send"
+                ? "Sending..."
+                : deliveryMode === "new_chat"
+                  ? "Send voice memo"
+                  : "Send invite"}
             </Button>
           </div>
         </form>
@@ -328,16 +338,20 @@ function InviteResultPanel({
             Delivery
           </div>
           <div className="mt-1 text-sm text-foreground">
-            Setup link sent to {result.recipientPhoneHint}
+            {result.deliveryMode === "new_chat"
+              ? `Voice memo sent to ${result.recipientPhoneHint}. No setup link was generated; the reply flow takes over if they respond.`
+              : `Setup link sent to ${result.recipientPhoneHint}`}
           </div>
           {result.voiceMemo.requested ? (
             <div className={cn(
               "mt-1 text-sm",
               result.voiceMemo.sent ? "text-muted-foreground" : "text-destructive",
             )}>
-              {result.voiceMemo.sent
-                ? "Voice memo sent after the link."
-                : result.voiceMemo.error ?? "Voice memo delivery failed."}
+              {result.voiceMemo.sent && result.deliveryMode === "new_chat"
+                ? "Voice memo sent as the first message."
+                : result.voiceMemo.sent
+                  ? "Voice memo sent after the link."
+                  : result.voiceMemo.error ?? "Voice memo delivery failed."}
             </div>
           ) : null}
         </div>
@@ -348,20 +362,26 @@ function InviteResultPanel({
 
       <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-3">
         <ResultValue label="Member" value={result.memberId} />
-        <ResultValue label="Invite" value={result.inviteId} />
+        {result.inviteId ? (
+          <ResultValue label="Invite" value={result.inviteId} />
+        ) : null}
         <ResultValue label="Chat" value={result.chatId} />
         <ResultValue label="Sent" value={formatDateTime(result.sentAt)} />
-        <ResultValue label="Expires" value={formatDateTime(result.inviteExpiresAt)} />
+        {result.inviteExpiresAt ? (
+          <ResultValue label="Expires" value={formatDateTime(result.inviteExpiresAt)} />
+        ) : null}
         {result.linqFromPhoneHint ? (
           <ResultValue label="Sender line" value={result.linqFromPhoneHint} />
         ) : null}
         {result.openerMessageId ? (
-          <ResultValue label="Opening message" value={result.openerMessageId} />
+          <ResultValue label="First message" value={result.openerMessageId} />
         ) : null}
-        <ResultValue
-          label="Prior sent marker"
-          value={result.invitePreviouslyMarkedSent ? "Already marked" : "New marker"}
-        />
+        {result.inviteId ? (
+          <ResultValue
+            label="Prior sent marker"
+            value={result.invitePreviouslyMarkedSent ? "Already marked" : "New marker"}
+          />
+        ) : null}
       </div>
     </div>
   );

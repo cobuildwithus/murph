@@ -10,6 +10,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 
 import {
   createHostedLinqChat,
+  createHostedLinqMediaChat,
   createHostedLinqWebhookSubscription,
   sendHostedLinqChatMessage,
   sendHostedLinqReadReceipt,
@@ -376,6 +377,66 @@ describe("createHostedLinqChat", () => {
           {
             type: "text",
             value: "hello",
+          },
+        ],
+      },
+      to: ["+15551234567"],
+    });
+  });
+});
+
+describe("createHostedLinqMediaChat", () => {
+  afterEach(() => {
+    if (originalFetch) {
+      vi.stubGlobal("fetch", originalFetch);
+      return;
+    }
+
+    Reflect.deleteProperty(globalThis, "fetch");
+  });
+
+  it("creates a first-contact chat with a media-only message", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input;
+      void _init;
+      return createJsonResponse({
+        chat: {
+          id: "chat_123",
+          message: {
+            id: "msg_123",
+          },
+        },
+      }, 201);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createHostedLinqMediaChat({
+      attachmentId: "attachment_123",
+      from: "+15550000000",
+      idempotencyKey: "chat-create:evt_123",
+      to: ["+15551234567"],
+    });
+
+    expect(result).toEqual({
+      chatId: "chat_123",
+      messageId: "msg_123",
+    });
+    const firstCall = fetchMock.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    if (!firstCall) {
+      throw new Error("Expected fetch to be called");
+    }
+    const [url, init] = firstCall as [RequestInfo | URL, RequestInit?];
+    expect(url).toEqual(new URL("chats", "https://linq.example.test/api/partner/v3/"));
+    expect(expectRequestInit(init).method).toBe("POST");
+    expect(readJsonRequestBody(init)).toEqual({
+      from: "+15550000000",
+      message: {
+        idempotency_key: "chat-create:evt_123",
+        parts: [
+          {
+            attachment_id: "attachment_123",
+            type: "media",
           },
         ],
       },
