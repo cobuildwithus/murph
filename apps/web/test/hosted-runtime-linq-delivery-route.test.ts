@@ -1,5 +1,9 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  createHostedLinqChatLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
+
 const mocks = vi.hoisted(() => ({
   assertHostedThreadRouteEgressAuthority: vi.fn(),
   getPrisma: vi.fn(),
@@ -28,6 +32,11 @@ type RouteModule = typeof import(
 );
 
 let route: RouteModule;
+let prisma: {
+  hostedMemberRouting: {
+    findUnique: ReturnType<typeof vi.fn>;
+  };
+};
 
 describe("hosted runtime Linq delivery route", () => {
   beforeAll(async () => {
@@ -38,8 +47,13 @@ describe("hosted runtime Linq delivery route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    prisma = {
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    };
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
-    mocks.getPrisma.mockReturnValue({ prisma: "test" });
+    mocks.getPrisma.mockReturnValue(prisma);
     mocks.recordHostedLinqRuntimeDeliveryOutcomeTx.mockResolvedValue({
       deliveryId: "hld_123",
       recorded: true,
@@ -85,6 +99,48 @@ describe("hosted runtime Linq delivery route", () => {
     });
   });
 
+  it("derives the active member Linq line from durable home routing for chat sends without route authority", async () => {
+    const chatLookupKey = createHostedLinqChatLookupKey("linq_chat_123");
+    if (!chatLookupKey) {
+      throw new Error("Expected test Linq chat lookup key.");
+    }
+    prisma.hostedMemberRouting.findUnique.mockResolvedValueOnce({
+      linqChatLookupKey: chatLookupKey,
+      linqRecipientPhoneLookupKey: "hbidx:phone:v1:home-line",
+      pendingLinqChatLookupKey: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+    });
+
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123",
+      intentId: "intent_123",
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "explicit",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(prisma.hostedMemberRouting.findUnique).toHaveBeenCalledWith({
+      where: { memberId: "member_123" },
+      select: {
+        linqChatLookupKey: true,
+        linqRecipientPhoneLookupKey: true,
+        pendingLinqChatLookupKey: true,
+        pendingLinqRecipientPhoneLookupKey: true,
+      },
+    });
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        linqChatId: "linq_chat_123",
+        phoneNumber: null,
+        phoneNumberLookupKey: "hbidx:phone:v1:home-line",
+      }),
+    );
+  });
+
   it("uses route authority for routed sends and rejects authority for a different user", async () => {
     const routeAuthority = {
       accountLookupKey: "hbidx:phone:v1:account",
@@ -110,7 +166,7 @@ describe("hosted runtime Linq delivery route", () => {
     expect(response.status).toBe(200);
     expect(mocks.assertHostedThreadRouteEgressAuthority).toHaveBeenCalledWith({
       authority: routeAuthority,
-      prisma: { prisma: "test" },
+      prisma,
     });
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
       expect.objectContaining({

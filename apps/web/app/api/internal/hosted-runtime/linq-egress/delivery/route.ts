@@ -9,6 +9,9 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
+  createHostedLinqChatLookupKeyReadCandidates,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
   recordHostedLinqRuntimeDeliveryOutcomeTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
@@ -67,6 +70,7 @@ export const POST = withJsonError(async (request: Request) => {
   const providerTarget = readOptionalBodyString(body.providerTarget);
   const providerThreadId = readOptionalBodyString(body.providerThreadId);
   const target = readOptionalBodyString(body.target);
+  const fromPhoneNumber = readOptionalBodyString(body.fromPhoneNumber);
   const linqChatId = providerThreadId
     ?? (targetKind === "participant" ? null : providerTarget ?? target);
   const validatedRouteAuthority = routeAuthority
@@ -76,13 +80,20 @@ export const POST = withJsonError(async (request: Request) => {
         routeAuthority,
       })
     : null;
-  const routeLineLookupKey = validatedRouteAuthority
-    ? await readHostedLinqDeliveryRouteLineLookupKey({
-        memberId: userId,
-        prisma,
-        routeAuthority: validatedRouteAuthority,
-      })
-    : null;
+  let routeLineLookupKey: string | null = null;
+  if (validatedRouteAuthority) {
+    routeLineLookupKey = await readHostedLinqDeliveryRouteLineLookupKey({
+      memberId: userId,
+      prisma,
+      routeAuthority: validatedRouteAuthority,
+    });
+  } else if (!fromPhoneNumber) {
+    routeLineLookupKey = await readHostedLinqDeliveryMemberRouteLineLookupKey({
+      linqChatId,
+      memberId: userId,
+      prisma,
+    });
+  }
   const result = await recordHostedLinqRuntimeDeliveryOutcomeTx({
     acceptedAt,
     attemptedAt,
@@ -92,7 +103,7 @@ export const POST = withJsonError(async (request: Request) => {
     idempotencyKey: readOptionalBodyString(body.idempotencyKey),
     linqChatId,
     messageId: readOptionalBodyString(body.providerMessageId),
-    phoneNumber: routeLineLookupKey ? null : readOptionalBodyString(body.fromPhoneNumber),
+    phoneNumber: routeLineLookupKey ? null : fromPhoneNumber,
     phoneNumberLookupKey: routeLineLookupKey,
     prisma,
     sourceRef: readOptionalBodyString(body.intentId)
@@ -125,6 +136,46 @@ async function readHostedLinqDeliveryRouteLineLookupKey(input: {
     prisma: input.prisma,
   });
   return route.accountLookupKey;
+}
+
+async function readHostedLinqDeliveryMemberRouteLineLookupKey(input: {
+  linqChatId: string | null;
+  memberId: string;
+  prisma: ReturnType<typeof getPrisma>;
+}): Promise<string | null> {
+  const chatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.linqChatId);
+  if (chatLookupKeys.length === 0) {
+    return null;
+  }
+
+  const routing = await input.prisma.hostedMemberRouting.findUnique({
+    where: { memberId: input.memberId },
+    select: {
+      linqChatLookupKey: true,
+      linqRecipientPhoneLookupKey: true,
+      pendingLinqChatLookupKey: true,
+      pendingLinqRecipientPhoneLookupKey: true,
+    },
+  });
+  if (!routing) {
+    return null;
+  }
+
+  if (
+    routing.linqChatLookupKey
+    && chatLookupKeys.includes(routing.linqChatLookupKey)
+  ) {
+    return routing.linqRecipientPhoneLookupKey ?? null;
+  }
+
+  if (
+    routing.pendingLinqChatLookupKey
+    && chatLookupKeys.includes(routing.pendingLinqChatLookupKey)
+  ) {
+    return routing.pendingLinqRecipientPhoneLookupKey ?? null;
+  }
+
+  return null;
 }
 
 function parseHostedLinqDeliveryRouteAuthority(
