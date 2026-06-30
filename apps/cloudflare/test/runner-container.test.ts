@@ -3646,6 +3646,24 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it("reports inactive liveness from a missing local pointer when the container is already gone", async () => {
+    const containerFetch = vi.fn(async () => {
+      throw new Error("health should not be probed for missing containers");
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      getState: vi.fn(async () => {
+        throw new Error("No such container");
+      }),
+    });
+
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: false,
+      reason: "no_active_runtime",
+    });
+    expect(containerFetch).not.toHaveBeenCalled();
+  });
+
   it("destroys and clears preserved liveness when explicit abort is not delivered", async () => {
     let runnerResponseLost = false;
     const containerFetch = vi.fn(async (url: string) => {
