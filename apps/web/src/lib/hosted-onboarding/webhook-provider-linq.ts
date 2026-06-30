@@ -649,6 +649,18 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
+  if (existingMember === null && participantContact.kind === "email") {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("unknown-email-first-contact"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: false,
+        existingMemberMatch,
+        reason: "unknown-email-first-contact",
+        routeStage: "ignored-unknown-email-first-contact",
+      }),
+    );
+  }
+
   const member = existingMember
     ?? (participantContact.kind === "phone"
       ? await ensureHostedMemberForPhoneTx({

@@ -2597,7 +2597,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("stores iMessage email handles as pending Linq contact claims instead of verified emails", async () => {
+  it("fails closed for unknown iMessage email handles without pending route authority", async () => {
     const invite = {
       channel: "linq",
       id: "invite_email_handle",
@@ -2676,40 +2676,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(response).toMatchObject({
-      inviteCode: "code_email_handle",
-      joinUrl: "https://join.example.test/join/code_email_handle",
+      ignored: true,
       ok: true,
-      reason: "sent-signup-link",
+      reason: "unknown-email-first-contact",
     });
     expect(prismaMocks.hostedMemberEmailAuthorization.findMany).toHaveBeenCalledTimes(1);
-    expect(prismaMocks.hostedMemberIdentity.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        create: expect.objectContaining({
-          phoneLookupKey: null,
-          phoneNumberEncrypted: null,
-        }),
-      }),
-    );
-    expect(prismaMocks.hostedMemberRouting.upsert).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        create: expect.objectContaining({
-          pendingLinqParticipantContactKind: "email",
-          pendingLinqParticipantContactLookupKey: expect.stringMatching(/^hbidx:email:v1:/u),
-        }),
-        update: expect.objectContaining({
-          pendingLinqParticipantContactKind: "email",
-          pendingLinqParticipantContactLookupKey: expect.stringMatching(/^hbidx:email:v1:/u),
-        }),
-      }),
-    );
-    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        chatId: "chat_123",
-        message: expect.stringContaining("https://join.example.test/join/code_email_handle"),
-        replyToMessageId: "msg_123",
-      }),
-    );
+    expect(prismaMocks.hostedMemberIdentity.upsert).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("uses pending Linq chat bindings for email-handle media replies before first-contact admission", async () => {
