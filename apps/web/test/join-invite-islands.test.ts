@@ -176,7 +176,7 @@ test("JoinInviteCheckoutPlanButtonIsland sends Pulse Trial checkout offer to che
     createElement(JoinInviteCheckoutPlanButtonIsland, {
       billingReady: true,
       checkoutOffer: "pulse_trial_7d",
-      idleLabel: "Start 7-day trial",
+      idleLabel: "Start 10-day trial",
       inviteCode: "invite-code",
       planCode: "launch_monthly",
     }),
@@ -201,7 +201,7 @@ test("JoinInviteCheckoutPlanButtonIsland uses the disabled label when trial chec
       billingReady: false,
       checkoutOffer: "pulse_trial_7d",
       disabledLabel: "Trial unavailable",
-      idleLabel: "Start 7-day trial",
+      idleLabel: "Start 10-day trial",
       inviteCode: "invite-code",
       planCode: "launch_monthly",
     }),

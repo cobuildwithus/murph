@@ -1,6 +1,8 @@
+import { cn } from "@/src/lib/utils";
+
 import { VoiceMemoPlayer } from "./voice-memo-player";
 
-type Tint = "sage" | "gold" | "peach" | "bronze" | "mauve" | "khaki";
+type Tint = "sage" | "gold" | "bronze";
 
 const TINTS: Record<
   Tint,
@@ -25,13 +27,6 @@ const TINTS: Record<
     bubble: "bg-[#b27a1e]",
     glow: "shadow-[0_30px_80px_-35px_rgba(138,100,40,0.45)]",
   },
-  peach: {
-    eyebrow: "text-[#a04f30]",
-    panel:
-      "bg-[linear-gradient(135deg,#f7ddca_0%,#eec4a8_55%,#e3ad8a_100%)]",
-    bubble: "bg-[#c25a32]",
-    glow: "shadow-[0_30px_80px_-35px_rgba(160,79,48,0.45)]",
-  },
   bronze: {
     eyebrow: "text-[#7d4a1a]",
     panel:
@@ -39,72 +34,114 @@ const TINTS: Record<
     bubble: "bg-[#94591f]",
     glow: "shadow-[0_30px_80px_-35px_rgba(125,74,26,0.45)]",
   },
-  mauve: {
-    eyebrow: "text-[#7d4858]",
-    panel:
-      "bg-[linear-gradient(135deg,#eedce0_0%,#dbb8c0_55%,#c79da6_100%)]",
-    bubble: "bg-[#a05368]",
-    glow: "shadow-[0_30px_80px_-35px_rgba(125,72,88,0.45)]",
-  },
-  khaki: {
-    eyebrow: "text-[#5e5530]",
-    panel:
-      "bg-[linear-gradient(135deg,#e8e5d0_0%,#d0c9a8_55%,#b6ad85_100%)]",
-    bubble: "bg-[#7a6e3a]",
-    glow: "shadow-[0_30px_80px_-35px_rgba(94,85,48,0.45)]",
-  },
 };
 
-function FeatureCard({
-  artifact,
+function WideFeature({
+  artifactSide,
   body,
   bubble,
   eyebrow,
   headline,
   tint,
+  artifact,
 }: {
-  artifact: React.ReactNode;
+  artifactSide: "left" | "right";
   body: string;
   bubble: string;
   eyebrow: string;
   headline: string;
   tint: Tint;
+  artifact: React.ReactNode;
 }) {
   const t = TINTS[tint];
+  const copy = (
+    <div className="flex flex-col justify-center gap-5 px-7 pt-10 pb-2 sm:px-10 sm:pt-12 lg:col-span-5 lg:py-16 lg:px-12">
+      <span
+        className={cn(
+          "font-mono text-[10px] font-semibold uppercase tracking-[0.2em]",
+          t.eyebrow,
+        )}
+      >
+        {eyebrow}
+      </span>
+      <h3 className="font-serif text-[clamp(1.75rem,2.8vw,2.625rem)] font-semibold leading-[1.02] tracking-[-0.035em] text-balance text-[#1f1c18]">
+        {headline}
+      </h3>
+      <p className="text-[0.9375rem] leading-[1.65] text-pretty text-[#635a48] lg:max-w-[34ch]">
+        {body}
+      </p>
+    </div>
+  );
+
+  const panel = (
+    <div className="p-3 sm:p-4 lg:col-span-7 lg:p-5">
+      <div
+        className={cn(
+          "relative overflow-hidden rounded-[1.5rem] min-h-[380px] sm:min-h-[440px] lg:min-h-[480px]",
+          t.panel,
+          t.glow,
+        )}
+      >
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_80%_at_20%_-10%,rgba(255,255,255,0.55)_0%,rgba(255,255,255,0)_55%)]" />
+        <div
+          className={cn(
+            "absolute z-20 top-6 sm:top-8",
+            artifactSide === "left" ? "left-5 sm:left-7" : "right-5 sm:right-7",
+          )}
+        >
+          <div
+            className={cn(
+              "max-w-[280px] px-4 py-2.5 text-[0.9375rem] leading-[1.4] text-white shadow-[0_8px_24px_-6px_rgba(60,40,20,0.3)]",
+              t.bubble,
+              artifactSide === "left"
+                ? "rounded-2xl rounded-tl-[6px]"
+                : "rounded-2xl rounded-tr-[6px]",
+            )}
+          >
+            {bubble}
+          </div>
+        </div>
+        <div className="relative z-10 flex h-full items-end justify-center px-5 pb-6 pt-24 sm:px-8 sm:pb-8 sm:pt-28 lg:pt-32">
+          <div className="w-full max-w-[440px]">{artifact}</div>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <article className="overflow-hidden rounded-[2rem] bg-[#fffcf6] ring-1 ring-black/[0.04] shadow-[0_1px_2px_rgba(45,52,54,0.04),0_20px_60px_-30px_rgba(45,52,54,0.12)] lg:grid lg:grid-cols-12 lg:items-stretch">
-      <div className="flex flex-col justify-center gap-5 px-7 pt-10 pb-2 sm:px-10 sm:pt-12 lg:col-span-5 lg:px-12 lg:py-16 lg:pr-0">
-        <span
-          className={`font-mono text-[10px] font-semibold uppercase tracking-[0.2em] ${t.eyebrow}`}
-        >
+      {artifactSide === "right" ? copy : panel}
+      {artifactSide === "right" ? panel : copy}
+    </article>
+  );
+}
+
+function CompactCard({
+  body,
+  eyebrow,
+  headline,
+  artifact,
+}: {
+  body: string;
+  eyebrow: string;
+  headline: string;
+  artifact: React.ReactNode;
+}) {
+  return (
+    <article className="flex flex-col gap-6 rounded-[1.75rem] bg-[#fffcf6] p-7 ring-1 ring-black/[0.04] shadow-[0_1px_2px_rgba(45,52,54,0.04),0_16px_50px_-30px_rgba(45,52,54,0.1)] sm:p-9">
+      <div className="flex flex-col gap-3">
+        <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-[#736a58]">
           {eyebrow}
         </span>
-        <h3 className="font-serif text-[clamp(1.625rem,2.6vw,2.375rem)] font-semibold leading-[1.05] tracking-[-0.035em] text-balance text-[#1f1c18]">
+        <h3 className="font-serif text-[clamp(1.375rem,2vw,1.75rem)] font-semibold leading-[1.05] tracking-[-0.03em] text-balance text-[#1f1c18]">
           {headline}
         </h3>
-        <p className="text-[0.9375rem] leading-[1.65] text-pretty text-[#635a48] lg:max-w-[34ch]">
+        <p className="text-[0.875rem] leading-[1.6] text-pretty text-[#635a48]">
           {body}
         </p>
       </div>
-
-      <div className="p-3 sm:p-4 lg:col-span-7 lg:p-5">
-        <div
-          className={`relative overflow-hidden rounded-[1.5rem] ${t.panel} ${t.glow} min-h-[340px] sm:min-h-[400px] lg:min-h-[440px]`}
-        >
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_80%_at_20%_-10%,rgba(255,255,255,0.55)_0%,rgba(255,255,255,0)_55%)]" />
-
-          <div className="absolute right-5 top-6 z-20 sm:right-7 sm:top-8">
-            <div
-              className={`max-w-[260px] rounded-2xl rounded-tr-[6px] px-4 py-2.5 text-[0.9375rem] leading-[1.4] text-white shadow-[0_8px_24px_-6px_rgba(0,0,0,0.25)] ${t.bubble}`}
-            >
-              {bubble}
-            </div>
-          </div>
-
-          <div className="relative z-10 flex h-full items-end justify-center px-5 pb-5 pt-24 sm:px-8 sm:pb-8 sm:pt-28 lg:pt-32">
-            <div className="w-full max-w-[420px]">{artifact}</div>
-          </div>
-        </div>
+      <div className="mt-auto rounded-[1.25rem] bg-[#f5f0e8]/60 p-3 ring-1 ring-black/[0.03]">
+        {artifact}
       </div>
     </article>
   );
@@ -446,54 +483,55 @@ export function AsksGridSection() {
     <section className="bg-[#f5f0e8] px-4 py-20 sm:px-8 lg:px-16 lg:py-28">
       <div className="mx-auto max-w-[1200px]">
         <div className="space-y-5 sm:space-y-6">
-          <FeatureCard
+          <WideFeature
             tint="gold"
+            artifactSide="right"
             eyebrow="Self-experiments"
             headline="I run experiments so you know what actually works for you."
             body="Pick a protocol. Murph baselines you for a week, runs the active phase, then texts the before-and-after. No more guessing whether anything moved."
             bubble="Did the magnesium actually work?"
             artifact={<ExperimentArtifact />}
           />
-          <FeatureCard
+
+          <div className="grid gap-5 sm:gap-6 lg:grid-cols-2">
+            <CompactCard
+              eyebrow="Labs"
+              headline="I find insights in your bloodwork over time."
+              body="Drop in your latest panel. Murph flags what crept up or down and turns it into the questions worth asking your doctor."
+              artifact={<BloodworkArtifact />}
+            />
+            <CompactCard
+              eyebrow="Habits"
+              headline="I make it easy to build healthy habits."
+              body="A version small enough for bad days, anchored to something you already do. Reminders ease off as it takes hold."
+              artifact={<HabitArtifact />}
+            />
+          </div>
+
+          <WideFeature
             tint="bronze"
+            artifactSide="left"
             eyebrow="Closes the loop"
             headline="I order the supplements and book the scans."
             body="Murph finds the DEXA scan nearby, drafts the supplement re-up, and queues the doctor recap on your calendar. You give the final tap. The errands stop slipping."
             bubble="Order me Omega-3, find me a DEXA scan, and confirm my doctor's appointment."
             artifact={<ErrandsArtifact />}
           />
-          <FeatureCard
-            tint="peach"
-            eyebrow="Labs"
-            headline="I find insights in your bloodwork over time."
-            body="Drop in your latest panel. Murph compares it marker by marker, flags what crept up or down, and turns it into the questions worth asking your doctor."
-            bubble="Did my LDL get worse?"
-            artifact={<BloodworkArtifact />}
-          />
-          <FeatureCard
-            tint="mauve"
-            eyebrow="Phone calls"
-            headline="I call the dentist and book the appointment."
-            body="Dentist, dermatologist, vet, hair, mechanic. Murph dials the number, waits on hold, picks a slot that fits your week, and sends you the confirmation."
-            bubble="Call my dentist and book a cleaning."
-            artifact={<CallArtifact />}
-          />
-          <FeatureCard
-            tint="khaki"
-            eyebrow="Habits"
-            headline="I make it easy to build healthy habits."
-            body="Murph picks a version small enough for bad days, anchors it to something you already do, and eases off the reminders as it takes hold. No streaks, no shame, no spam."
-            bubble="Help me actually run every morning."
-            artifact={<HabitArtifact />}
-          />
-          <FeatureCard
-            tint="sage"
-            eyebrow="Daily readout"
-            headline="I read your wearables and tell you what actually matters."
-            body="Murph pulls Oura, WHOOP, Garmin, or Apple Health overnight. Wake up to a one-line readout instead of three apps competing for your attention."
-            bubble="How'd I recover?"
-            artifact={<RecoveryArtifact />}
-          />
+
+          <div className="grid gap-5 sm:gap-6 lg:grid-cols-2">
+            <CompactCard
+              eyebrow="Phone calls"
+              headline="I call the dentist and book the appointment."
+              body="Dentist, dermatologist, vet, mechanic. Murph dials, waits on hold, picks a slot that fits your week."
+              artifact={<CallArtifact />}
+            />
+            <CompactCard
+              eyebrow="Daily readout"
+              headline="I read your wearables and tell you what actually matters."
+              body="Murph pulls Oura, WHOOP, Garmin, or Apple Health overnight. Wake up to a one-line readout."
+              artifact={<RecoveryArtifact />}
+            />
+          </div>
         </div>
       </div>
     </section>

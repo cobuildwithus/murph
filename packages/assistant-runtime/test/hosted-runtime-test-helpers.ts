@@ -144,7 +144,8 @@ export function createHostedRuntimeEffectsPortStub(
     async readAssistantDeliveryRecord(): Promise<HostedAssistantDeliveryRecord | null> {
       return null;
     },
-    async assertLinqThreadRouteAuthority() {},
+    async assertLinqRecentInboundEngagement() {},
+    async recordLinqDeliveryOutcome() {},
     async sendEmail() {},
     async writeAssistantDeliveryRecord(
       record: HostedAssistantDeliveryRecord,

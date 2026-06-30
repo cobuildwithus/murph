@@ -14,6 +14,7 @@ export type HostedBlindIndexKind =
   | "external-thread"
   | "external-thread-identity"
   | "linq-chat"
+  | "linq-message"
   | "phone"
   | "privy-user"
   | "stripe-billing-event"
@@ -118,6 +119,16 @@ export function createHostedLinqChatLookupKeyReadCandidates(
   value: string | number | null | undefined,
 ): string[] {
   return createHostedLookupKeyReadCandidates("linq-chat", normalizeHostedOpaqueInput(value));
+}
+
+export function createHostedLinqMessageLookupKey(value: string | number | null | undefined): string | null {
+  return createHostedLookupKey("linq-message", normalizeHostedOpaqueInput(value));
+}
+
+export function createHostedLinqMessageLookupKeyReadCandidates(
+  value: string | number | null | undefined,
+): string[] {
+  return createHostedLookupKeyReadCandidates("linq-message", normalizeHostedOpaqueInput(value));
 }
 
 export const HOSTED_EXTERNAL_THREAD_CHANNELS = [

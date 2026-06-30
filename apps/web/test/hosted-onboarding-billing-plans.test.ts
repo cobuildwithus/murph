@@ -72,6 +72,10 @@ describe("hosted billing launch plan Stripe configuration", () => {
     expect(parseHostedBillingCheckoutOffer("pulse_trial_7d")).toBe("pulse_trial_7d");
     expect(parseHostedBillingPhase("trial")).toBe("trial");
     expect(parseHostedBillingPhase("paid")).toBe("paid");
+    expect(requireHostedPulseTrialPolicy("pulse-trial-2026-06-30-v2")).toEqual({
+      durationDays: 10,
+      usageLimitUsdMicros: 4_500_000n,
+    });
     expect(requireHostedPulseTrialPolicy("pulse-trial-2026-05-05-v1")).toEqual({
       durationDays: 7,
       usageLimitUsdMicros: 4_500_000n,

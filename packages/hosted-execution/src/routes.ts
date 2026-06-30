@@ -31,8 +31,10 @@ export const HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH =
   "/api/internal/hosted-runtime/action-approvals/consume";
 export const HOSTED_RUNTIME_ISSUE_RECORD_PATH =
   "/api/internal/hosted-execution/issues/record";
-export const HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH =
-  "/api/internal/hosted-runtime/thread-route/egress-authority";
+export const HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH =
+  "/api/internal/hosted-runtime/linq-egress/engagement";
+export const HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH =
+  "/api/internal/hosted-runtime/linq-egress/delivery";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH =
   "/api/internal/device-sync/recovery-sweep";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID =

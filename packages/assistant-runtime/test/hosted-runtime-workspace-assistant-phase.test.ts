@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type {
+  HostedRuntimeLatencyTraceRequest,
   HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -2271,7 +2272,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("continues the assistant lane when foreground input arrives during system mailbox preparation", async () => {
     let shouldYield = false;
+    let fetchSnapshotCalls = 0;
     const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      async fetchSnapshot() {
+        fetchSnapshotCalls += 1;
+        throw new Error("fetchSnapshot should not run after foreground preemption.");
+      },
+    } satisfies RuntimeDeviceSyncPort;
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(async () => {
       shouldYield = true;
       return {
@@ -2289,11 +2308,28 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["whoop_v2"],
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
       shouldYieldBackgroundMaintenance,
     }));
 
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(fetchSnapshotCalls).toBe(0);
     expectAssistantLaneCallWithoutDeviceSyncOptions();
+    expect(
+      mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0]
+        .executionContext.hosted?.dynamicContextPrompts,
+    ).toBeUndefined();
 
     await result.afterCheckpoint?.();
 
@@ -3340,6 +3376,419 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("synthetic-whoop-secret");
   });
 
+  it("injects reconnect-required hosted device sync status as dynamic context for due cron lanes", async () => {
+    const fetchSnapshotRequests: Array<Parameters<RuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      async fetchSnapshot(request) {
+        fetchSnapshotRequests.push(request);
+        if (request?.sourceProviderSlug !== "whoop_v2") {
+          return {
+            connections: [],
+            generatedAt: "2026-04-29T00:00:00.000Z",
+            userId: "member_synthetic_phase",
+          };
+        }
+
+        return {
+          connections: [
+            {
+              connection: {
+                accessTokenExpiresAt: null,
+                connectedAt: "2026-04-29T00:00:00.000Z",
+                createdAt: "2026-04-29T00:00:00.000Z",
+                displayName: null,
+                externalAccountId: "synthetic-external-account",
+                id: "conn_synthetic_whoop",
+                metadata: {},
+                provider: "junction",
+                scopes: [],
+                status: "active",
+              },
+              credential: {
+                credentialMetadata: {},
+                kind: "provider_config",
+                providerConfigKey: "junction",
+              },
+              localState: {
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSyncCompletedAt: "2026-04-22T00:00:00.000Z",
+                lastSyncErrorAt: null,
+                lastSyncStartedAt: "2026-04-29T00:00:00.000Z",
+                lastWebhookAt: null,
+                nextReconcileAt: null,
+              },
+              sources: [
+                {
+                  displayName: null,
+                  firstSeenAt: "2026-04-22T00:00:00.000Z",
+                  lastErrorCode: "TOKEN_REFRESH_FAILED",
+                  lastErrorMessage: "refresh failed",
+                  lastSeenAt: "2026-04-29T00:00:00.000Z",
+                  resourceCount: 0,
+                  sourceProviderSlug: "whoop_v2",
+                  status: "error",
+                },
+              ],
+            },
+          ],
+          generatedAt: "2026-04-29T00:00:00.000Z",
+          userId: "member_synthetic_phase",
+        };
+      },
+    } satisfies RuntimeDeviceSyncPort;
+
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: null,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["fitbit", "garmin", "oura", "withings", "whoop_v2"],
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
+    }));
+
+    const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    expect(fetchSnapshotRequests).toEqual([]);
+    const dynamicContextPrompt =
+      await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
+    expect(fetchSnapshotRequests.map((request) => request?.sourceProviderSlug)).toEqual([
+      "fitbit",
+      "garmin",
+      "oura",
+      "withings",
+      "whoop_v2",
+    ]);
+    expect(fetchSnapshotRequests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          includeCredentialMaterial: false,
+          limit: 4,
+          signal: expect.any(AbortSignal),
+          sourceProviderSlug: "whoop_v2",
+        }),
+      ]),
+    );
+    expect(assistantLaneCall?.signal).toBeUndefined();
+    expect(assistantLaneCall).not.toHaveProperty("suppressActiveTurnInputRefresh");
+    expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts)
+      .toBeUndefined();
+    expect(dynamicContextPrompt).toContain("WHOOP currently needs reconnect");
+    expect(dynamicContextPrompt).toContain("source `whoop_v2`");
+    expect(dynamicContextPrompt).toContain("`TOKEN_REFRESH_FAILED`");
+    expect(dynamicContextPrompt).toContain(
+      "vault-cli device connect whoop --format json",
+    );
+    expect(dynamicContextPrompt).not.toContain("synthetic-external-account");
+    expect(dynamicContextPrompt).not.toContain("refresh failed");
+  });
+
+  it("omits Junction source commands when the public connect target resolves direct", async () => {
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      async fetchSnapshot(request) {
+        if (request?.sourceProviderSlug !== "oura") {
+          return {
+            connections: [],
+            generatedAt: "2026-04-29T00:00:00.000Z",
+            userId: "member_synthetic_phase",
+          };
+        }
+
+        return {
+          connections: [
+            {
+              connection: {
+                accessTokenExpiresAt: null,
+                connectedAt: "2026-04-29T00:00:00.000Z",
+                createdAt: "2026-04-29T00:00:00.000Z",
+                displayName: null,
+                externalAccountId: "synthetic-external-account",
+                id: "conn_synthetic_oura_junction",
+                metadata: {},
+                provider: "junction",
+                scopes: [],
+                status: "active",
+              },
+              credential: {
+                credentialMetadata: {},
+                kind: "provider_config",
+                providerConfigKey: "junction",
+              },
+              localState: {
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSyncCompletedAt: "2026-04-22T00:00:00.000Z",
+                lastSyncErrorAt: null,
+                lastSyncStartedAt: "2026-04-29T00:00:00.000Z",
+                lastWebhookAt: null,
+                nextReconcileAt: null,
+              },
+              sources: [
+                {
+                  displayName: null,
+                  firstSeenAt: "2026-04-22T00:00:00.000Z",
+                  lastErrorCode: "TOKEN_REFRESH_FAILED",
+                  lastErrorMessage: "refresh failed",
+                  lastSeenAt: "2026-04-29T00:00:00.000Z",
+                  resourceCount: 0,
+                  sourceProviderSlug: "oura",
+                  status: "error",
+                },
+              ],
+            },
+          ],
+          generatedAt: "2026-04-29T00:00:00.000Z",
+          userId: "member_synthetic_phase",
+        };
+      },
+    } satisfies RuntimeDeviceSyncPort;
+
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: null,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["oura"],
+            region: "us",
+          },
+          oura: {
+            clientId: "synthetic-oura-client",
+            clientSecret: "synthetic-oura-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
+    }));
+
+    const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    const prompt =
+      await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({}) ?? "";
+
+    expect(prompt).toContain("Oura currently needs reconnect");
+    expect(prompt).toContain("source `oura`");
+    expect(prompt).toContain("generic device-connect command is ambiguous");
+    expect(prompt).not.toContain("vault-cli device connect oura --format json");
+  });
+
+  it("leaves pending-input device context suppression to the automation lane", async () => {
+    const fetchSnapshot = vi.fn(async () => ({
+      connections: [],
+      generatedAt: "2026-04-29T00:00:00.000Z",
+      userId: "member_synthetic_phase",
+    }));
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      fetchSnapshot,
+    } satisfies RuntimeDeviceSyncPort;
+
+    mocks.resolveHostedPendingAssistantInputWakeAt
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce("2026-04-29T00:00:00.000Z");
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_processed",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: null,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["whoop_v2"],
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
+    }));
+
+    const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    expect(assistantLaneCall).toHaveProperty("buildBackgroundDynamicContextPrompt");
+    expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
+    expect(fetchSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("skips lazy hosted device sync status reads after foreground preemption", async () => {
+    let shouldYield = false;
+    const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      async fetchSnapshot() {
+        throw new Error("fetchSnapshot should not run after foreground preemption.");
+      },
+    } satisfies RuntimeDeviceSyncPort;
+
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: null,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["whoop_v2"],
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
+      shouldYieldBackgroundMaintenance,
+    }));
+
+    const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    shouldYield = true;
+    const prompt = await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
+    expect(prompt).toBeNull();
+    expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
+  });
+
+  it("uses an abortable signal for optional hosted device sync status reads before scheduled assistant work", async () => {
+    let fetchSnapshotCalls = 0;
+    let fetchSnapshotSignal: AbortSignal | null | undefined;
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      async fetchSnapshot(request) {
+        fetchSnapshotCalls += 1;
+        fetchSnapshotSignal = request?.signal;
+        return {
+          connections: [],
+          generatedAt: "2026-04-29T00:00:00.000Z",
+          userId: "member_synthetic_phase",
+        };
+      },
+    } satisfies RuntimeDeviceSyncPort;
+
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: null,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["whoop_v2"],
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
+    }));
+
+    const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    const prompt = await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
+    expect(fetchSnapshotCalls).toBe(1);
+    expect(fetchSnapshotSignal).toBeInstanceOf(AbortSignal);
+    expect(prompt).toBeNull();
+    expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
+  });
+
   it("logs hosted device connect helper failures without leaking response details", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const deviceSyncPort = {
@@ -4383,6 +4832,273 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         nextWakeAt: dueAt,
       }),
     }));
+  });
+
+  it("drops the consumed assistant cron wake after clean post-checkpoint delivery", async () => {
+    vi.useFakeTimers();
+    try {
+      const consumedWakeAt = "2026-05-08T16:00:00.000Z";
+      vi.setSystemTime(new Date("2026-05-08T16:00:00.100Z"));
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationCronProcessed: 1,
+        assistantAutomationProgressed: true,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: consumedWakeAt,
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      });
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+        createDeliveryEffect(),
+      ]);
+      mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+        vi.setSystemTime(new Date("2026-05-08T16:00:01.000Z"));
+        return [createSentDeliveryOutcome()];
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 0,
+        workspace: {
+          checkpointedAt: "2026-05-08T15:59:50.000Z",
+          createdAt: "2026-05-08T15:00:00.000Z",
+          nextWakeAt: consumedWakeAt,
+          nextWakeReason: "assistant",
+          redactedStatus: null,
+          snapshotRef: null,
+          updatedAt: "2026-05-08T15:59:50.000Z",
+          userId: "member_synthetic_phase",
+          version: "8",
+        },
+      }));
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_sending",
+        nextWakeAt: null,
+        progressed: true,
+        redactedStatus: expect.objectContaining({
+          hostedOutboxPendingDeliveryEffects: 1,
+        }),
+      }));
+
+      const postCheckpoint = await result.afterCheckpoint?.();
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+        nextWakeAt: null,
+        redactedStatus: expect.objectContaining({
+          hostedOutboxDeliveryAttempted: 1,
+          hostedOutboxDeliverySent: 1,
+          hostedOutboxPendingDeliveryEffects: 0,
+          nextWakeAt: null,
+        }),
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops an available post-delivery cron wake when it is the consumed workspace wake", async () => {
+    vi.useFakeTimers();
+    try {
+      const consumedWakeAt = "2026-05-08T16:00:00.000Z";
+      vi.setSystemTime(new Date("2026-05-08T16:00:00.100Z"));
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationCronProcessed: 1,
+        assistantAutomationProgressed: true,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: consumedWakeAt,
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      });
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+        createDeliveryEffect(),
+      ]);
+      mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+        vi.setSystemTime(new Date("2026-05-08T16:00:01.000Z"));
+        mocks.getAssistantCronStatus.mockResolvedValueOnce({
+          dueJobs: 1,
+          enabledJobs: 1,
+          nextRunAt: consumedWakeAt,
+          runningJobs: 0,
+          totalJobs: 1,
+        });
+        return [createSentDeliveryOutcome()];
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 0,
+        now: () => consumedWakeAt,
+        workspace: {
+          checkpointedAt: "2026-05-08T15:59:50.000Z",
+          createdAt: "2026-05-08T15:00:00.000Z",
+          nextWakeAt: consumedWakeAt,
+          nextWakeReason: "assistant",
+          redactedStatus: null,
+          snapshotRef: null,
+          updatedAt: "2026-05-08T15:59:50.000Z",
+          userId: "member_synthetic_phase",
+          version: "8",
+        },
+      }));
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_sending",
+        nextWakeAt: null,
+        progressed: true,
+      }));
+
+      const postCheckpoint = await result.afterCheckpoint?.();
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+        nextWakeAt: null,
+        redactedStatus: expect.objectContaining({
+          hostedAssistantNextWakeAt: null,
+          hostedOutboxDeliveryAttempted: 1,
+          hostedOutboxDeliverySent: 1,
+          hostedOutboxPendingDeliveryEffects: 0,
+          nextWakeAt: null,
+        }),
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops the consumed assistant cron wake when system mailbox work is imported in the same pass", async () => {
+    vi.useFakeTimers();
+    try {
+      const consumedWakeAt = "2026-05-08T16:00:00.000Z";
+      vi.setSystemTime(new Date("2026-05-08T16:00:00.100Z"));
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationCronProcessed: 1,
+        assistantAutomationProgressed: true,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: consumedWakeAt,
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      });
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+        createDeliveryEffect(),
+      ]);
+      mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+        vi.setSystemTime(new Date("2026-05-08T16:00:01.000Z"));
+        return [createSentDeliveryOutcome()];
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [],
+        conversationImportedCount: 0,
+        importedCount: 1,
+        workspace: {
+          checkpointedAt: "2026-05-08T15:59:50.000Z",
+          createdAt: "2026-05-08T15:00:00.000Z",
+          nextWakeAt: consumedWakeAt,
+          nextWakeReason: "assistant",
+          redactedStatus: null,
+          snapshotRef: null,
+          updatedAt: "2026-05-08T15:59:50.000Z",
+          userId: "member_synthetic_phase",
+          version: "8",
+        },
+      }));
+
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+        nextWakeAt: null,
+        progressed: true,
+        redactedStatus: expect.objectContaining({
+          hostedAssistantNextWakeAt: null,
+          hostedOutboxDeliveryAttempted: 1,
+          hostedOutboxDeliverySent: 1,
+          hostedOutboxPendingDeliveryEffects: 0,
+          nextWakeAt: null,
+        }),
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a retry wake when post-delivery assistant cron status cannot be read", async () => {
+    vi.useFakeTimers();
+    try {
+      const consumedWakeAt = "2026-05-08T16:00:00.000Z";
+      const retryWakeAt = "2026-05-08T16:00:31.000Z";
+      vi.setSystemTime(new Date("2026-05-08T16:00:00.100Z"));
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationCronProcessed: 1,
+        assistantAutomationProgressed: true,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: consumedWakeAt,
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      });
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+        createDeliveryEffect(),
+      ]);
+      mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+        vi.setSystemTime(new Date("2026-05-08T16:00:01.000Z"));
+        return [createSentDeliveryOutcome()];
+      });
+      mocks.getAssistantCronStatus
+        .mockResolvedValueOnce({
+          dueJobs: 0,
+          enabledJobs: 0,
+          nextRunAt: null,
+          runningJobs: 0,
+          totalJobs: 0,
+        })
+        .mockResolvedValueOnce({
+          dueJobs: 0,
+          enabledJobs: 0,
+          nextRunAt: null,
+          runningJobs: 0,
+          totalJobs: 0,
+        })
+        .mockRejectedValueOnce(new Error("cron status unavailable"));
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 0,
+        workspace: {
+          checkpointedAt: "2026-05-08T15:59:50.000Z",
+          createdAt: "2026-05-08T15:00:00.000Z",
+          nextWakeAt: consumedWakeAt,
+          nextWakeReason: "assistant",
+          redactedStatus: null,
+          snapshotRef: null,
+          updatedAt: "2026-05-08T15:59:50.000Z",
+          userId: "member_synthetic_phase",
+          version: "8",
+        },
+      }));
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_sending",
+        nextWakeAt: null,
+        progressed: true,
+      }));
+
+      const postCheckpoint = await result.afterCheckpoint?.();
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+        nextWakeAt: retryWakeAt,
+        redactedStatus: expect.objectContaining({
+          hostedOutboxDeliveryAttempted: 1,
+          hostedOutboxDeliverySent: 1,
+          hostedOutboxPendingDeliveryEffects: 0,
+          nextWakeAt: retryWakeAt,
+        }),
+      }));
+      expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("preserves the assistant wake after clean fast dispatch", async () => {
@@ -6050,8 +6766,72 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.createHostedAssistantProgressDeliveryDependencies).toHaveBeenCalledWith(
       expect.objectContaining({
-        linqDeliveryContext,
+        linqDeliveryContexts: [linqDeliveryContext],
         signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(mocks.createHostedAssistantChannelTypingDependencies).toHaveBeenCalledWith(
+      expect.objectContaining({
+        linqDeliveryContexts: [linqDeliveryContext],
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it("passes foreground Linq delivery context into hosted outbox delivery", async () => {
+    const linqDeliveryContext = {
+      directRecipientPhoneNumber: "+15550000001",
+      fromPhoneNumber: "+15550000002",
+      replyToMessageId: "linq-message-1",
+      routeAuthority: null,
+      target: "linq-thread-1",
+    };
+    const effect = createDeliveryEffect();
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([effect]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      linqDeliveryContext,
+    }));
+    await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryEffects: [effect],
+        linqDeliveryContexts: [linqDeliveryContext],
+      }),
+    );
+  });
+
+  it("passes foreground Linq egress latency trace into hosted delivery dependencies", async () => {
+    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
+    const effect = createDeliveryEffect();
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([effect]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      runtimeLatencyTraceRequests: latencyTraceRequests,
+    }));
+    await result.afterCheckpoint?.();
+
+    const expectedTrace = expect.objectContaining({
+      assistantInputIds: ["ain_00000000000000000000000000000001"],
+      latencyTracePort: expect.objectContaining({
+        record: expect.any(Function),
+      }),
+      runtimeAttemptId: "attempt_synthetic_phase",
+    });
+    expect(mocks.createHostedAssistantProgressDeliveryDependencies).toHaveBeenCalledWith(
+      expect.objectContaining({
+        linqEgressLatencyTrace: expectedTrace,
+      }),
+    );
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryEffects: [effect],
+        linqEgressLatencyTrace: expectedTrace,
       }),
     );
   });
@@ -7701,6 +8481,7 @@ function createPhaseInput(input: {
   resolvedDeviceSync?: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["resolvedConfig"]["deviceSync"];
   runtimeDeviceSyncPort?: RuntimeDeviceSyncPort;
   runtimeForwardedEnv?: Record<string, string>;
+  runtimeLatencyTraceRequests?: HostedRuntimeLatencyTraceRequest[];
   runtimeEnv?: Record<string, string>;
   operatorHomeRoot?: string;
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
@@ -7732,6 +8513,7 @@ function createPhaseInput(input: {
         fetchedCount: input.importedCount ?? 0,
         importedCount: input.importedCount ?? 0,
         ...(input.linqDeliveryContext ? { latestLinqDeliveryContext: input.linqDeliveryContext } : {}),
+        ...(input.linqDeliveryContext ? { linqDeliveryContexts: [input.linqDeliveryContext] } : {}),
         state: {
           recentStatuses: [],
           watermarks: {
@@ -7821,6 +8603,20 @@ function createPhaseInput(input: {
           ? { actionApprovalPort: input.runtimeActionApprovalPort }
           : {}),
         ...(input.runtimeUsageRecordPort ? { usageRecordPort: input.runtimeUsageRecordPort } : {}),
+        ...(input.runtimeLatencyTraceRequests
+          ? {
+              latencyTracePort: {
+                async record(request: HostedRuntimeLatencyTraceRequest) {
+                  input.runtimeLatencyTraceRequests?.push(request);
+                  return {
+                    matchedCount: 1,
+                    recorded: true,
+                    unmatchedCount: 0,
+                  };
+                },
+              },
+            }
+          : {}),
       },
       platformEnv: {},
       resolvedConfig: {
@@ -7968,6 +8764,27 @@ function createFailedDeliveryOutcome(input: {
     providerMessageIds: [],
     providerThreadId: null,
     retryable: true,
+    target: null,
+    targetKind: null,
+  };
+}
+
+function createSentDeliveryOutcome(): HostedAssistantDeliveryOutcome {
+  return {
+    cleanupMessages: [],
+    cleanupTargetAliases: [],
+    deliveryChannel: "telegram",
+    deliveryErrorCode: null,
+    deliveryErrorMessage: null,
+    deliveryStatus: "sent",
+    effectFingerprint: "fingerprint_synthetic",
+    effectId: "effect_synthetic",
+    journalMethod: "PUT",
+    journalStatus: "200",
+    providerMessageId: null,
+    providerMessageIds: [],
+    providerThreadId: "thread_synthetic",
+    retryable: false,
     target: null,
     targetKind: null,
   };

@@ -27,6 +27,7 @@ import {
 export interface AssistantSystemPromptInput {
   assistantCliContract: string | null;
   assistantContextSnapshotPrompt?: string | null;
+  assistantDynamicContextPrompts?: readonly string[] | null;
   assistantHostedDeviceConnectAvailable?: boolean;
   assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
   assistantKnowledgeToolsAvailable?: boolean;
@@ -50,6 +51,7 @@ export interface AssistantSupportedExperimentProtocol {
 
 export interface AssistantNotificationDecisionSystemPromptInput {
   assistantContextSnapshotPrompt?: string | null;
+  assistantDynamicContextPrompts?: readonly string[] | null;
   assistantHostedDeviceConnectAvailable?: boolean;
   assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
@@ -101,6 +103,14 @@ function joinPromptSections(
 
 function code(value: string): string {
   return `\`${value}\``;
+}
+
+function normalizeAssistantDynamicContextPrompts(
+  prompts: readonly string[] | null | undefined
+): string[] {
+  return (prompts ?? [])
+    .map((prompt) => prompt.trim())
+    .filter((prompt) => prompt.length > 0);
 }
 
 function renderAssistantToolNameAliases(
@@ -312,6 +322,9 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
 function buildDynamicTurnContextPrompt(input: AssistantSystemPromptInput): string {
   return joinPromptSections(
     buildAssistantCurrentDateLineText(input.currentLocalDate),
+    ...normalizeAssistantDynamicContextPrompts(
+      input.assistantDynamicContextPrompts
+    ),
     input.assistantContextSnapshotPrompt ?? null,
     buildAssistantExecutionContextText({
       turnTrigger: input.turnTrigger ?? null,
@@ -361,6 +374,9 @@ export function buildAssistantNotificationDecisionSystemPromptLayers(
         currentMurphProductBaseUrl: null,
         currentTimeZone: input.currentTimeZone,
       }),
+      ...normalizeAssistantDynamicContextPrompts(
+        input.assistantDynamicContextPrompts
+      ),
       input.assistantContextSnapshotPrompt ?? null,
       buildAssistantNotificationDecisionGuidanceText(input.channel),
       buildAssistantUserFacingLinkSelfCheckText()

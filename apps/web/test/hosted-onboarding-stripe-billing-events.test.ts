@@ -787,6 +787,50 @@ describe("hosted onboarding stripe billing events", () => {
     );
   });
 
+  it("uses the reset trial-start metadata override on Pulse Trial subscription updates", async () => {
+    mocks.findMemberForStripeSubscription.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        pulseTrialRedeemedAt: new Date("2026-06-30T12:00:00.000Z"),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    }));
+
+    await applyStripeSubscriptionUpdated(
+      makeStripeSubscription({
+        currentPeriodEnd: 1_783_684_800,
+        currentPeriodStart: 1_744_416_000,
+        metadata: {
+          checkoutOffer: "pulse_trial_7d",
+          trialStartedAtOverride: "2026-06-30T12:00:00.000Z",
+        },
+        status: "trialing",
+        trialEnd: 1_783_684_800,
+        trialStart: 1_744_416_000,
+      }),
+      {
+        eventCreatedAt: new Date("2026-06-30T12:00:00.000Z"),
+        occurredAt: "2026-06-30T12:00:00.000Z",
+        sourceEventId: "evt_trial_reset",
+        sourceType: "stripe.customer.subscription.updated",
+      },
+      {} as never,
+    );
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentBillingPhase: "trial",
+        currentCheckoutOffer: "pulse_trial_7d",
+        currentTrialEndsAt: new Date("2026-07-10T12:00:00.000Z"),
+        currentTrialStartedAt: new Date("2026-06-30T12:00:00.000Z"),
+      }),
+    );
+  });
+
   it("keeps resumed active Pulse Trial subscriptions trial-gated until invoice confirmation", async () => {
     mocks.findMemberForStripeSubscription.mockResolvedValueOnce(makeMemberSnapshot({
       billingStatus: HostedBillingStatus.paused,

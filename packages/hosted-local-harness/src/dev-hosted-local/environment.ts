@@ -687,9 +687,7 @@ export function buildHostedLocalDevOverrides(
   cloudflareDevVars: Record<string, string>,
 ): NodeJS.ProcessEnv {
   const webOrigin = `http://${config.webHost}:${config.webPort}`;
-  const hostedOnboardingPublicBaseUrl =
-    normalizeOptionalString(cloudflareDevVars.HOSTED_ONBOARDING_PUBLIC_BASE_URL)
-    ?? webOrigin;
+  const deviceSyncPublicBaseUrl = `${webOrigin}/api/device-sync`;
   const workerBaseUrl =
     `${config.workerProtocol}://${resolveHostedLocalClientWorkerHost(config.workerHost)}:${config.workerPort}`;
   const callbackPrivateJwkJson = cloudflareDevVars.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK;
@@ -718,9 +716,10 @@ export function buildHostedLocalDevOverrides(
       : null;
 
   return {
+    DEVICE_SYNC_PUBLIC_BASE_URL: deviceSyncPublicBaseUrl,
     HOSTED_EXECUTION_CONTROL_URL: workerBaseUrl,
     HOSTED_EXECUTION_DISPATCH_URL: workerBaseUrl,
-    HOSTED_ONBOARDING_PUBLIC_BASE_URL: hostedOnboardingPublicBaseUrl,
+    HOSTED_ONBOARDING_PUBLIC_BASE_URL: webOrigin,
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK"),

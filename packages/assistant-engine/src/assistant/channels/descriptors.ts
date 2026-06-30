@@ -26,6 +26,7 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   createAssistantChannelAdapter,
+  inferBindingDeliveryForChannel,
   readDeliveredCleanupMessages,
   readDeliveredCleanupTargetAliases,
   readDeliveredProviderMessageId,
@@ -389,6 +390,14 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   resolveDeliveryTransportIdempotent({ media }) {
     return !hasVoiceMemoMedia(media)
   },
+  inferBindingDelivery(input) {
+    return inferBindingDeliveryForChannel({
+      channel: 'linq',
+      conversation: input.conversation,
+      deliveryKind: input.deliveryKind ?? null,
+      deliveryTarget: input.deliveryTarget ?? null,
+    })
+  },
   supportedResponseMediaKinds: ['image', 'voice_memo', 'vault_file'],
   targetRequiredMessage:
     'iMessage delivery requires an explicit chat id or a stored thread binding.',
@@ -455,15 +464,6 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
 
     const deliveredTarget = readDeliveredTarget(delivered)
     const providerThreadId = readDeliveredProviderThreadId(delivered)
-    if (candidate.kind === 'participant' && !deliveredTarget && !providerThreadId) {
-      throw createAssistantDeliveryConfirmationPendingError(
-        new VaultCliError(
-          'ASSISTANT_LINQ_CHAT_ID_REQUIRED',
-          'Materialized iMessage participant delivery did not return a chat id.',
-        ),
-      )
-    }
-
     return {
       target: deliveredTarget ?? providerThreadId ?? candidate.target,
       targetKind: inferDeliveredLinqTargetKind(candidate.kind, delivered),

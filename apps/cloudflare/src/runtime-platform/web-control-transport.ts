@@ -42,6 +42,38 @@ export type HostedWebControlTransport =
   | {
     mode: "proxy";
   };
+export class HostedWebControlPlaneResponseError extends Error {
+  readonly code: string | undefined;
+  readonly context: {
+    retryable?: boolean;
+    status: number;
+    statusCode: number;
+  };
+  readonly retryable: boolean | undefined;
+  readonly status: number;
+  readonly statusCode: number;
+
+  constructor(input: {
+    code?: string | undefined;
+    description: string;
+    message?: string | undefined;
+    retryable?: boolean | undefined;
+    status: number;
+  }) {
+    super(formatHostedWebControlPlaneResponseErrorMessage(input));
+    this.name = "HostedWebControlPlaneResponseError";
+    this.code = input.code;
+    this.retryable = input.retryable;
+    this.status = input.status;
+    this.statusCode = input.status;
+    this.context = {
+      ...(typeof input.retryable === "boolean" ? { retryable: input.retryable } : {}),
+      status: input.status,
+      statusCode: input.status,
+    };
+  }
+}
+
 export function resolveHostedWebControlTransport(input: {
   webCallbackSigning: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl: string | null;
@@ -255,16 +287,11 @@ export async function fetchHostedWebControlPlaneJson(input: {
   const acceptedStatus = input.acceptedStatuses?.includes(response.status) ?? false;
   if (!response.ok && !acceptedStatus) {
     const detail = (await response.text()).trim();
-    const error = new Error(
-      detail.length > 0
-        ? `${input.description} failed with HTTP ${response.status}. ${detail}`
-        : `${input.description} failed with HTTP ${response.status}.`,
-    ) as Error & {
-      status: number;
-      statusCode: number;
-    };
-    error.status = response.status;
-    error.statusCode = response.status;
+    const error = createHostedWebControlPlaneResponseError({
+      description: input.description,
+      detail,
+      status: response.status,
+    });
     emitHostedExecutionStructuredLog({
       component: "assistant-delivery",
       details: {
@@ -314,6 +341,89 @@ export async function fetchHostedWebControlPlaneJson(input: {
     throw new Error(`${input.description} returned invalid JSON.`, { cause: error });
   }
 }
+
+function createHostedWebControlPlaneResponseError(input: {
+  description: string;
+  detail: string;
+  status: number;
+}): HostedWebControlPlaneResponseError {
+  const structured = parseHostedWebControlPlaneJsonError(input.detail);
+  if (structured) {
+    return new HostedWebControlPlaneResponseError({
+      code: structured.code,
+      description: input.description,
+      message: structured.message,
+      retryable: structured.retryable,
+      status: input.status,
+    });
+  }
+
+  return new HostedWebControlPlaneResponseError({
+    description: input.description,
+    message: input.detail,
+    status: input.status,
+  });
+}
+
+function formatHostedWebControlPlaneResponseErrorMessage(input: {
+  description: string;
+  message?: string | undefined;
+  status: number;
+}): string {
+  const detail = input.message?.trim() ?? "";
+  return detail.length > 0
+    ? `${input.description} failed with HTTP ${input.status}. ${detail}`
+    : `${input.description} failed with HTTP ${input.status}.`;
+}
+
+function parseHostedWebControlPlaneJsonError(detail: string): {
+  code?: string | undefined;
+  message?: string | undefined;
+  retryable?: boolean | undefined;
+} | null {
+  if (!detail.startsWith("{")) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(detail);
+  } catch {
+    return null;
+  }
+
+  const record = readHostedWebControlPlaneRecord(parsed);
+  const error = readHostedWebControlPlaneRecord(record?.error);
+  if (!error) {
+    return null;
+  }
+
+  const code = readHostedWebControlPlaneString(error.code);
+  const message = readHostedWebControlPlaneString(error.message);
+  const retryable = typeof error.retryable === "boolean" ? error.retryable : undefined;
+  if (!code && !message && retryable === undefined) {
+    return null;
+  }
+
+  return {
+    ...(code ? { code } : {}),
+    ...(message ? { message } : {}),
+    ...(retryable === undefined ? {} : { retryable }),
+  };
+}
+
+function readHostedWebControlPlaneRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readHostedWebControlPlaneString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
 async function createHostedWebControlDirectHeaders(input: {
   description: string;
   headers?: Headers;

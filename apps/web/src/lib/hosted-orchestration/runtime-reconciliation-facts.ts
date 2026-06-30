@@ -403,6 +403,7 @@ async function sendHostedRuntimeAiUsageLimitNoticeForPendingConversation(input: 
       messageId: wake.message.linqMessage.messageId,
       noticeCode: decision.userNotice.code,
       occurredAt: wake.occurredAt,
+      routeAuthority: wake.message.routeAuthority ?? null,
       sourceEventId: wake.eventId,
     }).desiredSideEffects,
   });

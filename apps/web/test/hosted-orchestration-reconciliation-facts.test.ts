@@ -504,7 +504,15 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedMailboxFirstPendingConversationItem.mockResolvedValue(
       buildPendingConversationItem(),
     );
-    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildLinqConversationWake());
+    const routeAuthority = {
+      accountLookupKey: "hbidx:phone:v1:line_runtime_denied",
+      channel: "linq" as const,
+      containerMemberId: MEMBER_ID,
+      threadId: "chat_runtime_denied",
+    };
+    mocks.decodeHostedMailboxStoredPayload.mockResolvedValue(buildLinqConversationWake({
+      routeAuthority,
+    }));
     mocks.claimHostedAiUsageLimitNotice.mockResolvedValue(true);
 
     const response = await reconciliationRoute.GET(
@@ -538,11 +546,14 @@ describe("hosted orchestration reconciliation facts", () => {
             message: deniedDecision.userNotice.message,
             noticeCode: deniedDecision.userNotice.code,
             replyToMessageId: "msg_runtime_denied",
+            routeAuthority,
             template: "ai_usage_quota",
           }),
         }),
       ],
     });
+    const linqDrainInput = mocks.drainHostedLinqSideEffectsDirect.mock.calls[0]?.[0];
+    expect(linqDrainInput).not.toHaveProperty("currentInboundReply");
   });
 
   it("sends the current-chat Telegram usage-limit notice when pending conversation work is runtime-denied", async () => {
@@ -1004,7 +1015,14 @@ function buildPendingConversationItem(overrides: Partial<{
   };
 }
 
-function buildLinqConversationWake() {
+function buildLinqConversationWake(overrides: Partial<{
+  routeAuthority: {
+    accountLookupKey: string;
+    channel: "linq";
+    containerMemberId: string;
+    threadId: string;
+  } | null;
+}> = {}) {
   return {
     eventId: "linq_event_runtime_denied",
     kind: "conversation.message",
@@ -1025,6 +1043,9 @@ function buildLinqConversationWake() {
         ],
       },
       phoneLookupKey: "contact_lookup",
+      ...(overrides.routeAuthority === undefined
+        ? {}
+        : { routeAuthority: overrides.routeAuthority }),
     },
     occurredAt: FIXED_NOW,
     userId: MEMBER_ID,

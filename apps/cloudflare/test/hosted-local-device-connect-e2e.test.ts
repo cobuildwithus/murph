@@ -69,6 +69,9 @@ describe("hosted local device connect e2e", () => {
       forwardedEnv: buildHostedRunnerContainerEnv(requireScenario().runtimeEnv),
       runnerSecrets: {},
     });
+    const localDeviceSyncPublicBaseUrl =
+      `${requireScenario().harness.webBaseUrl}/api/device-sync`;
+    expect(localDeviceSyncPublicBaseUrl).not.toBe(deviceSyncPublicBaseUrl);
 
     expect(runnerRuntime.resolvedConfig?.deviceSync).toMatchObject({
       providerConfigs: {
@@ -78,7 +81,7 @@ describe("hosted local device connect e2e", () => {
           clientSecret: whoopClientSecret,
         },
       },
-      publicBaseUrl: deviceSyncPublicBaseUrl,
+      publicBaseUrl: localDeviceSyncPublicBaseUrl,
       secret: "synthetic-device-sync-runtime-secret",
     });
     const forwardedEnv = runnerRuntime.forwardedEnv ?? {};

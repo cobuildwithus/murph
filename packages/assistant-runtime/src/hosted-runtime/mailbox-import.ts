@@ -80,6 +80,7 @@ export interface HostedMailboxImportLoopResult {
   importedCount: number;
   importedSystemMailboxItemIds?: string[];
   latestLinqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
+  linqDeliveryContexts?: HostedAssistantLinqDeliveryContext[];
   nextRetryAt?: string | null;
   state: HostedMailboxImportState;
 }
@@ -191,6 +192,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   const importedSystemMailboxItemIds: string[] = [];
   const blocked: HostedMailboxImportLoopBlockedItem[] = [];
   let latestLinqDeliveryContext: HostedAssistantLinqDeliveryContext | null = null;
+  const linqDeliveryContexts: HostedAssistantLinqDeliveryContext[] = [];
   let nextRetryAt: string | null = null;
   const stoppedLanes = new Set<HostedMailboxLane>();
   const expectedSeqByLane = resolveHostedMailboxExpectedSeqByLane({
@@ -447,6 +449,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     }
     if ((outcome.status === "imported" || outcome.status === "skipped") && outcome.linqDeliveryContext) {
       latestLinqDeliveryContext = outcome.linqDeliveryContext;
+      linqDeliveryContexts.push(outcome.linqDeliveryContext);
     }
     expectedSeqByLane[lane] += 1n;
   }
@@ -470,6 +473,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     importedCount,
     ...(importedSystemMailboxItemIds.length > 0 ? { importedSystemMailboxItemIds } : {}),
     ...(latestLinqDeliveryContext ? { latestLinqDeliveryContext } : {}),
+    ...(linqDeliveryContexts.length > 0 ? { linqDeliveryContexts } : {}),
     ...(nextRetryAt ? { nextRetryAt } : {}),
     state: nextState,
   };

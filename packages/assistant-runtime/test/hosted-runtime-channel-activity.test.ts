@@ -7,7 +7,6 @@ import {
 } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
-  markLinqChatRead: vi.fn(),
   sendEmail: vi.fn(),
   sendHostedProviderLinqMessage: vi.fn(),
   startLinqTypingIndicator: vi.fn(),
@@ -25,10 +24,6 @@ vi.mock("@murphai/assistant-engine/assistant-channel-adapters", async (importOri
   };
 });
 
-vi.mock("@murphai/operator-config/linq-runtime", () => ({
-  markLinqChatRead: mocks.markLinqChatRead,
-}));
-
 vi.mock("../src/hosted-provider-effects.ts", () => ({
   sendHostedProviderLinqMessage: mocks.sendHostedProviderLinqMessage,
 }));
@@ -40,12 +35,10 @@ import {
   buildHostedLinqChannelEnv,
   buildHostedTelegramChannelEnv,
   createHostedAssistantChannelTypingDependencies,
-  markHostedConversationReadBestEffort,
 } from "../src/hosted-runtime/channel-activity.ts";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.markLinqChatRead.mockResolvedValue(undefined);
   mocks.sendEmail.mockResolvedValue({
     providerMessageId: "email-message",
     providerThreadId: "email-thread",
@@ -61,7 +54,16 @@ beforeEach(() => {
   mocks.startTelegramTypingIndicator.mockResolvedValue(undefined);
 });
 
-test("hosted Linq read and typing share the same forwarded plus user env", async () => {
+function buildLinqRouteAuthority(threadId: string) {
+  return {
+    accountLookupKey: "hbidx:phone:v1:account",
+    channel: "linq" as const,
+    containerMemberId: "member_123",
+    threadId,
+  };
+}
+
+test("hosted Linq typing uses the hosted env after recent inbound assertion", async () => {
   const forwardedEnv = {
     LINQ_API_BASE_URL: "https://api.linq.example",
     LINQ_API_TOKEN: "platform-linq-token",
@@ -80,8 +82,22 @@ test("hosted Linq read and typing share the same forwarded plus user env", async
     LINQ_API_TOKEN: "user-linq-token",
   });
 
+  const routeAuthority = buildLinqRouteAuthority("chat_123");
+  const assertRecentInbound = vi.fn(async () => undefined);
   const typing = createHostedAssistantChannelTypingDependencies({
+    effectsPort: {
+      assertLinqRecentInboundEngagement: assertRecentInbound,
+    },
     forwardedEnv,
+    linqDeliveryContexts: [
+      {
+        directRecipientPhoneNumber: "+15551234567",
+        fromPhoneNumber: null,
+        replyToMessageId: "msg_123",
+        routeAuthority,
+        target: "chat_123",
+      },
+    ],
     platformEnv: {
       TELEGRAM_BOT_TOKEN: "telegram-token",
     },
@@ -89,30 +105,140 @@ test("hosted Linq read and typing share the same forwarded plus user env", async
     userEnv,
   });
 
-  await typing.startLinqTyping?.({
+  await expect(typing.startLinqTyping?.({
+    target: "chat_123",
+  })).resolves.toBeUndefined();
+
+  assert.deepEqual(mocks.startLinqTypingIndicator.mock.calls[0]?.[0], {
     target: "chat_123",
   });
-  await markHostedConversationReadBestEffort({
-    forwardedEnv,
-    providerFetch: vi.fn<typeof fetch>(),
-    userEnv,
-    wake: buildHostedExecutionLinqConversationMessageWake({
-      eventId: "evt_linq",
-      linqMessage: {
-        chatId: "chat_123",
-        from: "+15551234567",
-        isFromMe: false,
-        messageId: "msg_123",
-        parts: [],
+  expect(assertRecentInbound).toHaveBeenCalledWith({
+    directRecipientPhoneNumber: "+15551234567",
+    engagementKind: "requires_recent_inbound",
+    fromPhoneNumber: null,
+    idempotencyKey: null,
+    intentId: null,
+    routeAuthority,
+    target: "chat_123",
+    targetKind: "thread",
+  }, {
+    signal: null,
+  });
+  assert.deepEqual(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.env, linqEnv);
+});
+
+test("hosted Linq typing can use recent inbound engagement without route authority", async () => {
+  const assertRecentInbound = vi.fn(async () => undefined);
+  const typing = createHostedAssistantChannelTypingDependencies({
+    effectsPort: {
+      assertLinqRecentInboundEngagement: assertRecentInbound,
+    },
+    forwardedEnv: {
+      LINQ_API_TOKEN: "linq-token",
+    },
+    linqDeliveryContexts: [
+      {
+        directRecipientPhoneNumber: "+15551234567",
+        fromPhoneNumber: null,
+        replyToMessageId: "msg_123",
+        routeAuthority: null,
+        target: "chat_123",
       },
-      occurredAt: "2026-04-08T00:00:00.000Z",
-      phoneLookupKey: "phone_lookup",
-      userId: "member_123",
-    }),
+    ],
+    platformEnv: {},
+    providerFetch: vi.fn<typeof fetch>(),
+    userEnv: {},
   });
 
-  assert.deepEqual(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.env, linqEnv);
-  assert.deepEqual(mocks.markLinqChatRead.mock.calls[0]?.[1]?.env, linqEnv);
+  await expect(typing.startLinqTyping?.({
+    target: "chat_123",
+  })).resolves.toBeUndefined();
+
+  expect(assertRecentInbound).toHaveBeenCalledWith(
+    expect.objectContaining({
+      routeAuthority: null,
+      target: "chat_123",
+      targetKind: "thread",
+    }),
+    {
+      signal: null,
+    },
+  );
+  expect(mocks.startLinqTypingIndicator).toHaveBeenCalledWith(
+    {
+      target: "chat_123",
+    },
+    expect.any(Object),
+  );
+});
+
+test("hosted Linq typing no-ops when recent inbound engagement is rejected", async () => {
+  const routeAuthority = buildLinqRouteAuthority("chat_123");
+  const assertRecentInbound = vi.fn(async () => {
+    throw new Error("recent inbound required");
+  });
+  const typing = createHostedAssistantChannelTypingDependencies({
+    effectsPort: {
+      assertLinqRecentInboundEngagement: assertRecentInbound,
+    },
+    forwardedEnv: {
+      LINQ_API_TOKEN: "linq-token",
+    },
+    linqDeliveryContexts: [
+      {
+        directRecipientPhoneNumber: "+15551234567",
+        fromPhoneNumber: null,
+        replyToMessageId: "msg_123",
+        routeAuthority,
+        target: "chat_123",
+      },
+    ],
+    platformEnv: {},
+    providerFetch: vi.fn<typeof fetch>(),
+    userEnv: {},
+  });
+
+  await expect(typing.startLinqTyping?.({
+    target: "chat_123",
+  })).resolves.toBeUndefined();
+
+  expect(assertRecentInbound).toHaveBeenCalledWith(
+    expect.objectContaining({
+      routeAuthority,
+      target: "chat_123",
+      targetKind: "thread",
+    }),
+    {
+      signal: null,
+    },
+  );
+  expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
+});
+
+test("hosted Linq typing no-ops when recent inbound assertion is unavailable", async () => {
+  const typing = createHostedAssistantChannelTypingDependencies({
+    forwardedEnv: {
+      LINQ_API_TOKEN: "linq-token",
+    },
+    linqDeliveryContexts: [
+      {
+        directRecipientPhoneNumber: "+15551234567",
+        fromPhoneNumber: null,
+        replyToMessageId: "msg_123",
+        routeAuthority: null,
+        target: "chat_123",
+      },
+    ],
+    platformEnv: {},
+    providerFetch: vi.fn<typeof fetch>(),
+    userEnv: {},
+  });
+
+  await expect(typing.startLinqTyping?.({
+    target: "chat_123",
+  })).resolves.toBeUndefined();
+
+  expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
 });
 
 test("hosted Linq channel env does not mix a forwarded token with a user base URL", () => {
@@ -191,76 +317,84 @@ test("hosted Telegram typing uses a Telegram-only platform channel env", async (
 
 test("hosted channel activity uses provider fetch instead of effects-port provider tunnels", async () => {
   const providerFetch = vi.fn<typeof fetch>();
+  const routeAuthority = buildLinqRouteAuthority("linq_chat_123");
   const typing = createHostedAssistantChannelTypingDependencies({
+    effectsPort: {
+      async assertLinqRecentInboundEngagement() {},
+    },
     forwardedEnv: {},
+    linqDeliveryContexts: [
+      {
+        directRecipientPhoneNumber: "+15551234567",
+        fromPhoneNumber: null,
+        replyToMessageId: "msg_123",
+        routeAuthority,
+        target: "linq_chat_123",
+      },
+    ],
     platformEnv: {},
     providerFetch,
     userEnv: {},
   });
 
-  await typing.startLinqTyping?.({
+  await expect(typing.startLinqTyping?.({
     target: "linq_chat_123",
-  });
+  })).resolves.toBeUndefined();
   await typing.startTelegramTyping?.({
     target: "telegram_chat_123",
   });
 
-  await markHostedConversationReadBestEffort({
-    forwardedEnv: {},
-    providerFetch,
-    userEnv: {},
-    wake: buildHostedExecutionLinqConversationMessageWake({
-      eventId: "evt_linq",
-      linqMessage: {
-        chatId: "chat_123",
-        from: "+15551234567",
-        isFromMe: false,
-        messageId: "msg_123",
-        parts: [],
-      },
-      occurredAt: "2026-04-08T00:00:00.000Z",
-      phoneLookupKey: "phone_lookup",
-      userId: "member_123",
-    }),
-  });
-
   assert.equal(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.fetchImplementation, providerFetch);
   assert.equal(mocks.startTelegramTypingIndicator.mock.calls[0]?.[1]?.fetchImplementation, providerFetch);
-  assert.equal(mocks.markLinqChatRead.mock.calls[0]?.[1]?.fetchImplementation, providerFetch);
+});
+
+test("hosted Linq typing no-ops when the target is not the current inbound context", async () => {
+  const typing = createHostedAssistantChannelTypingDependencies({
+    forwardedEnv: {
+      LINQ_API_TOKEN: "linq-token",
+    },
+    linqDeliveryContexts: [
+      {
+        directRecipientPhoneNumber: "+15551234567",
+        fromPhoneNumber: null,
+        replyToMessageId: "msg_123",
+        routeAuthority: null,
+        target: "current_linq_chat",
+      },
+    ],
+    platformEnv: {},
+    providerFetch: vi.fn<typeof fetch>(),
+    userEnv: {},
+  });
+
+  await expect(typing.startLinqTyping?.({
+    target: "different_linq_chat",
+  })).resolves.toBeUndefined();
+
+  expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
 });
 
 test("hosted channel activity does not use ambient fetch when provider fetch is missing", async () => {
   const typing = createHostedAssistantChannelTypingDependencies({
     forwardedEnv: {},
+    linqDeliveryContexts: [
+      {
+        directRecipientPhoneNumber: "+15551234567",
+        fromPhoneNumber: null,
+        replyToMessageId: "msg_123",
+        routeAuthority: null,
+        target: "linq_chat_123",
+      },
+    ],
     platformEnv: {},
     userEnv: {},
   });
 
   await expect(typing.startLinqTyping?.({
     target: "linq_chat_123",
-  })).rejects.toMatchObject({
-    code: "HOSTED_PROVIDER_FETCH_UNAVAILABLE",
-  });
-  await markHostedConversationReadBestEffort({
-    forwardedEnv: {},
-    userEnv: {},
-    wake: buildHostedExecutionLinqConversationMessageWake({
-      eventId: "evt_linq",
-      linqMessage: {
-        chatId: "chat_123",
-        from: "+15551234567",
-        isFromMe: false,
-        messageId: "msg_123",
-        parts: [],
-      },
-      occurredAt: "2026-04-08T00:00:00.000Z",
-      phoneLookupKey: "phone_lookup",
-      userId: "member_123",
-    }),
-  });
+  })).resolves.toBeUndefined();
 
   expect(mocks.startLinqTypingIndicator).not.toHaveBeenCalled();
-  expect(mocks.markLinqChatRead).not.toHaveBeenCalled();
 });
 
 test("hosted progress delivery dependencies use the hosted Linq provider effect", async () => {
@@ -276,6 +410,7 @@ test("hosted progress delivery dependencies use the hosted Linq provider effect"
   const signal = new AbortController().signal;
   const delivery = createHostedAssistantProgressDeliveryDependencies({
     effectsPort: {
+      async assertLinqRecentInboundEngagement() {},
       sendEmail: mocks.sendEmail,
     },
     forwardedEnv: {
@@ -414,6 +549,10 @@ test("hosted progress Linq delivery aborts provider send when request signal abo
     });
   });
   const delivery = createHostedAssistantProgressDeliveryDependencies({
+    effectsPort: {
+      async assertLinqRecentInboundEngagement() {},
+      sendEmail: mocks.sendEmail,
+    },
     forwardedEnv: {
       LINQ_API_BASE_URL: "https://api.linq.example",
       LINQ_API_TOKEN: "platform-linq-token",
@@ -453,6 +592,10 @@ test("hosted progress Linq delivery recovers same-wake direct recipient only", a
     userId: "member_123",
   });
   const delivery = createHostedAssistantProgressDeliveryDependencies({
+    effectsPort: {
+      async assertLinqRecentInboundEngagement() {},
+      sendEmail: mocks.sendEmail,
+    },
     forwardedEnv: {
       LINQ_API_BASE_URL: "https://api.linq.example",
       LINQ_API_TOKEN: "platform-linq-token",
@@ -480,6 +623,119 @@ test("hosted progress Linq delivery recovers same-wake direct recipient only", a
     message: "Checking the current thread.",
     replyToMessageId: null,
     target: "linq-thread",
+    targetKind: "thread",
+  });
+});
+
+test("hosted progress Linq delivery sends recovered same-wake chat when request target is blinded", async () => {
+  const wake = buildHostedExecutionLinqConversationMessageWake({
+    eventId: "evt_linq_progress_blinded_target",
+    linqMessage: {
+      chatId: "linq_chat_current",
+      from: "+15550000001",
+      isFromMe: false,
+      messageId: "linq_message_current",
+      parts: [],
+    },
+    occurredAt: "2026-04-08T00:00:00.000Z",
+    phoneLookupKey: "+15550000002",
+    userId: "member_123",
+  });
+  const delivery = createHostedAssistantProgressDeliveryDependencies({
+    effectsPort: {
+      async assertLinqRecentInboundEngagement() {},
+      sendEmail: mocks.sendEmail,
+    },
+    forwardedEnv: {
+      LINQ_API_BASE_URL: "https://api.linq.example",
+      LINQ_API_TOKEN: "platform-linq-token",
+    },
+    providerFetch: vi.fn<typeof fetch>(),
+    userEnv: {},
+    wake,
+  });
+
+  await delivery.sendLinq?.({
+    directRecipientPhoneNumber: null,
+    fromPhoneNumber: null,
+    idempotencyKey: "progress-key",
+    message: "Checking the current thread.",
+    replyToMessageId: "linq_message_current",
+    target: "hbid:linq-chat:v1:redacted",
+    targetKind: "thread",
+  });
+
+  assert.deepEqual(mocks.sendHostedProviderLinqMessage.mock.calls[0]?.[0], {
+    directRecipientPhoneNumber: "+15550000001",
+    fromPhoneNumber: null,
+    idempotencyKey: "progress-key",
+    media: null,
+    message: "Checking the current thread.",
+    replyToMessageId: "linq_message_current",
+    target: "linq_chat_current",
+    targetKind: "thread",
+  });
+});
+
+test("hosted progress Linq delivery recovers redacted routed same-wake chat through engagement assertion", async () => {
+  const routeAuthority = buildLinqRouteAuthority("linq_chat_current");
+  const wake = buildHostedExecutionLinqConversationMessageWake({
+    eventId: "evt_linq_progress_blinded_routed_target",
+    linqMessage: {
+      chatId: "linq_chat_current",
+      from: "+15550000001",
+      isFromMe: false,
+      messageId: "linq_message_current",
+      parts: [],
+    },
+    occurredAt: "2026-04-08T00:00:00.000Z",
+    phoneLookupKey: "+15550000002",
+    routeAuthority,
+    userId: "member_123",
+  });
+  const assertRecentInbound = vi.fn(async () => undefined);
+  const delivery = createHostedAssistantProgressDeliveryDependencies({
+    effectsPort: {
+      assertLinqRecentInboundEngagement: assertRecentInbound,
+      sendEmail: mocks.sendEmail,
+    },
+    forwardedEnv: {
+      LINQ_API_BASE_URL: "https://api.linq.example",
+      LINQ_API_TOKEN: "platform-linq-token",
+    },
+    providerFetch: vi.fn<typeof fetch>(),
+    userEnv: {},
+    wake,
+  });
+
+  await delivery.sendLinq?.({
+    directRecipientPhoneNumber: null,
+    fromPhoneNumber: null,
+    idempotencyKey: "progress-key",
+    message: "Checking the current thread.",
+    replyToMessageId: "linq_message_current",
+    target: "hbid:linq-chat:v1:redacted",
+    targetKind: "thread",
+  });
+
+  expect(assertRecentInbound).toHaveBeenCalledWith(
+    expect.objectContaining({
+      routeAuthority,
+      target: "linq_chat_current",
+      targetKind: "thread",
+    }),
+    {
+      signal: null,
+    },
+  );
+  assert.deepEqual(mocks.sendHostedProviderLinqMessage.mock.calls[0]?.[0], {
+    directRecipientPhoneNumber: "+15550000001",
+    fromPhoneNumber: null,
+    idempotencyKey: "progress-key",
+    media: null,
+    message: "Checking the current thread.",
+    replyToMessageId: "linq_message_current",
+    target: "linq_chat_current",
     targetKind: "thread",
   });
 });

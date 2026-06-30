@@ -13,6 +13,8 @@ export {
   isHostedExternalThreadChannel,
   createHostedLinqChatLookupKey,
   createHostedLinqChatLookupKeyReadCandidates,
+  createHostedLinqMessageLookupKey,
+  createHostedLinqMessageLookupKeyReadCandidates,
   createHostedOpaqueIdentifier,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,

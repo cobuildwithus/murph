@@ -26,6 +26,8 @@ import {
 } from "@murphai/assistant-runtime/hosted-checkpoint-bridge";
 import {
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
+  HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
+  HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
 } from "@murphai/hosted-execution/routes";
 
 const mocks = vi.hoisted(() => ({
@@ -58,6 +60,7 @@ import {
 } from "../src/runtime-platform.ts";
 import {
   fetchHostedWebControlPlaneJson,
+  HostedWebControlPlaneResponseError,
 } from "../src/runtime-platform/web-control-transport.ts";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
@@ -2475,6 +2478,52 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
   });
 
+  it("preserves structured non-retryable web-control errors without raw JSON in the message", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
+        message: "Recent recipient reply required before iMessage delivery.",
+        retryable: false,
+      },
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 403,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: {
+        keyId: "v1",
+        privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    try {
+      await platform.workspacePort!.read!();
+      throw new Error("Expected web-control read to fail.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(HostedWebControlPlaneResponseError);
+      expect(error).toMatchObject({
+        code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
+        context: {
+          retryable: false,
+          status: 403,
+          statusCode: 403,
+        },
+        retryable: false,
+        status: 403,
+        statusCode: 403,
+      });
+      expect(error instanceof Error ? error.message : String(error))
+        .toContain("Recent recipient reply required before iMessage delivery.");
+      expect(error instanceof Error ? error.message : String(error))
+        .not.toContain("\"retryable\":false");
+    }
+  });
+
   it("logs direct control-plane fetch failures with raw redacted error detail", async () => {
     const fetchMock = vi.fn(async () => {
       throw new TypeError("network failure with hidden request detail");
@@ -3734,6 +3783,97 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it("write-fences Linq engagement assertions through direct web-control", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe(HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH);
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    const assertLinqRecentInboundEngagement =
+      platform.effectsPort.assertLinqRecentInboundEngagement;
+    if (!assertLinqRecentInboundEngagement) {
+      throw new Error("Expected hosted Linq engagement assertion effect.");
+    }
+
+    await assertLinqRecentInboundEngagement({
+      engagementKind: "requires_recent_inbound",
+      target: "chat_123",
+      targetKind: "thread",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "direct Linq engagement request");
+    expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}`);
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("write-fences Linq delivery outcomes through direct web-control", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe(HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH);
+      return new Response(JSON.stringify({ ok: true, recorded: true }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    const recordLinqDeliveryOutcome = platform.effectsPort.recordLinqDeliveryOutcome;
+    if (!recordLinqDeliveryOutcome) {
+      throw new Error("Expected hosted Linq delivery outcome effect.");
+    }
+
+    await recordLinqDeliveryOutcome({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      fromPhoneNumber: "+15550100099",
+      idempotencyKey: "assistant-outbox:intent_123",
+      intentId: "intent_123",
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "direct Linq delivery request");
+    expect(request.url).toBe(`https://web.example.test${HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH}`);
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(request.headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
+    await expect(request.clone().json()).resolves.toEqual(
+      expect.objectContaining({
+        acceptedAt: "2026-04-26T00:00:04.000Z",
+        attemptedAt: "2026-04-26T00:00:03.000Z",
+        idempotencyKey: "assistant-outbox:intent_123",
+        providerMessageId: "linq_message_sent",
+      }),
+    );
+  });
+
   it("fails closed before direct web-control fetches with incomplete write-fence headers", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     const headers = new Headers({
@@ -4411,7 +4551,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("content-type")).toBe("application/json");
     await expect(request.json()).resolves.toEqual({
       connectionId: "conn_123",
-      includeCredentialMaterial: false,
       userId: "member_123",
     });
   });
@@ -4961,6 +5100,159 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(artifactRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(artifactRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(artifactRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
+  });
+
+  it("uses the advanced checkpoint version for direct-R2 snapshot start and complete", async () => {
+    const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
+      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    );
+    let currentLease = {
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      userId: "member_123",
+      workspaceVersion: "4",
+    };
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "checkpointed snapshot fetch");
+      if (request.url === "http://web-control.worker/api/internal/hosted-workspace/checkpoint") {
+        return new Response(JSON.stringify({
+          checkpointed: true,
+          workspace: {
+            checkpointedAt: "2026-04-26T00:00:04.000Z",
+            createdAt: "2026-04-26T00:00:00.000Z",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            redactedStatus: {},
+            snapshotRef: null,
+            updatedAt: "2026-04-26T00:00:04.000Z",
+            userId: "member_123",
+            version: "5",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      if (request.url.includes("/workspace-snapshots/start")) {
+        return new Response(
+          JSON.stringify({
+            encryption: {
+              aad: buildHostedWorkspaceSnapshotV2Aad({
+                objectKey: ref.objectKey,
+                snapshotId: ref.snapshotId,
+                userId: "member_123",
+              }),
+              dataKeyBase64,
+              ivBase64: ref.encryption.ivBase64,
+              rootKeyId: ref.encryption.rootKeyId,
+              scheme: HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
+              wrappedDataKey: ref.encryption.wrappedDataKey,
+            },
+            limits: {
+              maxSinglePartEncryptedBytes: HOSTED_WORKSPACE_SNAPSHOT_MAX_SINGLE_PART_BYTES,
+              warnEncryptedBytes: 128 * 1024 * 1024,
+            },
+            objectKey: ref.objectKey,
+            snapshotId: ref.snapshotId,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
+        return new Response(
+          JSON.stringify({
+            checkpoint: {
+              checkpointed: true,
+              workspace: {
+                checkpointedAt: "2026-04-26T00:00:05.000Z",
+                createdAt: "2026-04-26T00:00:00.000Z",
+                nextWakeAt: null,
+                nextWakeReason: null,
+                redactedStatus: null,
+                snapshotRef: ref,
+                updatedAt: "2026-04-26T00:00:05.000Z",
+                userId: "member_123",
+                version: "6",
+              },
+            },
+            ok: true,
+            snapshotRef: ref,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => currentLease,
+        recordCheckpoint: ({ workspaceVersion }) => {
+          currentLease = {
+            ...currentLease,
+            workspaceVersion,
+          };
+        },
+      },
+    });
+
+    await platform.workspacePort!.checkpoint({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      leaseGeneration: "9",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "import",
+      redactedStatus: {},
+      snapshotRef: null,
+    });
+    await platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "5",
+      reason: "idle_shutdown",
+    });
+    await platform.workspaceSnapshotPort!.completeSnapshotSession({
+      checkpointRequest: {
+        attemptId: "attempt_1",
+        expectedWorkspaceVersion: "5",
+        leaseGeneration: "9",
+        reason: "idle_shutdown",
+        snapshotRef: ref,
+      },
+      ref,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const startRequest = requireFetchRequest(fetchMock.mock.calls[1], "advanced snapshot start");
+    expect(startRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(startRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(startRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
+    await expect(startRequest.json()).resolves.toEqual(expect.objectContaining({
+      expectedWorkspaceVersion: "5",
+      reason: "idle_shutdown",
+    }));
+    const completeRequest = requireFetchRequest(fetchMock.mock.calls[2], "advanced snapshot complete");
+    expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
+    expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
+    expect(completeRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
+    await expect(completeRequest.json()).resolves.toEqual(expect.objectContaining({
+      checkpointRequest: expect.objectContaining({
+        expectedWorkspaceVersion: "5",
+      }),
+    }));
   });
 
   it("uses locally prepared artifact upload write-fence headers without transport restamping", async () => {

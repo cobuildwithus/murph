@@ -1514,7 +1514,7 @@ test("parseLinqMessageReceivedEvent rejects invalid timestamps", () => {
           eventId: "evt_bad_timestamp",
         }),
       }),
-    /Invalid ISO timestamp: (not-a-date|also-not-a-date)/u,
+    /Invalid ISO timestamp: (not-a-date|also-not-a-date) \(missing time zone\)/u,
   );
 });
 

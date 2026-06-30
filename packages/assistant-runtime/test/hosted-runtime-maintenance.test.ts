@@ -637,6 +637,106 @@ describe("runHostedAssistantAutomation", () => {
     expect(mocks.initInboxRuntime).not.toHaveBeenCalled();
   });
 
+  it("passes a lazy background dynamic context builder for background-only passes", async () => {
+    const buildBackgroundDynamicContextPrompt = vi.fn(async () =>
+      "Background wearable reconnect context."
+    );
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      expect(input.buildDynamicContextPrompt).toBe(buildBackgroundDynamicContextPrompt);
+      expect(input).not.toHaveProperty("inputSourceAlreadyRefreshed");
+      expect(input.executionContext?.hosted?.dynamicContextPrompts).toBeUndefined();
+      return {
+        currentTurnDeliveryIntentIds: [],
+        nextWakeAt: "2026-04-23T00:00:30.000Z",
+        progressed: true,
+        replies: {
+          considered: 1,
+          failed: 0,
+          replied: 0,
+          skipped: 1,
+        },
+      };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_background_dynamic_context",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_dynamic_context_active_turn_input",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      undefined,
+      undefined,
+      undefined,
+      {
+        buildBackgroundDynamicContextPrompt,
+      },
+    );
+
+    expect(result.currentTurnDeliveryIntentIds).toEqual([]);
+    expect(result.timings?.activeTurnInputIngested).toBe(false);
+    expect(buildBackgroundDynamicContextPrompt).not.toHaveBeenCalled();
+  });
+
+  it("skips background dynamic context when background selection already owns pending input", async () => {
+    const buildBackgroundDynamicContextPrompt = vi.fn(async () =>
+      "Background wearable reconnect context."
+    );
+    mocks.selectHostedAssistantInputIds.mockResolvedValueOnce({
+      inputIds: ["pending-input-1"],
+      mode: "background",
+      pendingInputIds: ["pending-input-1"],
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      expect(input).not.toHaveProperty("buildDynamicContextPrompt");
+      expect(input).not.toHaveProperty("inputSourceAlreadyRefreshed");
+      expect(input.executionContext?.hosted?.dynamicContextPrompts).toBeUndefined();
+      return {
+        currentTurnDeliveryIntentIds: ["foreground-intent"],
+        nextWakeAt: null,
+        progressed: true,
+      };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_dynamic_context_existing_pending_input",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_dynamic_context_existing_pending_input",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      undefined,
+      undefined,
+      undefined,
+      {
+        buildBackgroundDynamicContextPrompt,
+      },
+    );
+
+    expect(result.currentTurnDeliveryIntentIds).toEqual(["foreground-intent"]);
+    expect(buildBackgroundDynamicContextPrompt).not.toHaveBeenCalled();
+  });
+
   it("records metadata-only candidate query diagnostics for scanner misses", async () => {
     const candidate = {
       acceptedInput: {

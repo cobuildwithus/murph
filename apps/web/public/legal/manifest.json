@@ -120,7 +120,7 @@
       "latest": {
         "bytes": 4093,
         "path": "/legal/legal-documents.pdf",
-        "sha256": "86c4ea62a0bbb37f89ed4ab8b92369a45422e7d1a45d3346116328f13902b42a"
+        "sha256": "eece6091d11053e9737b7b0bc397c8e598989568a5c876a7ac018b2dcf98b54f"
       },
       "lastUpdated": "2026-04-29",
       "source": "apps/web/legal/legal-documents.md",
@@ -130,7 +130,7 @@
         {
           "bytes": 4093,
           "path": "/legal/legal-documents-2026-04-29.pdf",
-          "sha256": "86c4ea62a0bbb37f89ed4ab8b92369a45422e7d1a45d3346116328f13902b42a"
+          "sha256": "eece6091d11053e9737b7b0bc397c8e598989568a5c876a7ac018b2dcf98b54f"
         }
       ]
     }

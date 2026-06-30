@@ -34,6 +34,7 @@ export interface HostedThreadRouteSnapshot {
   channel: HostedThreadRouteChannel;
   container: HostedMemberCoreState;
   containerMemberId: string;
+  lastInboundAt: Date | null;
   owner: HostedMemberCoreState;
 }
 
@@ -96,6 +97,7 @@ export async function readHostedThreadRouteByExternalThread(input: {
         },
       },
       containerMemberId: true,
+      lastInboundAt: true,
       threadLookupKey: true,
     },
     where: {
@@ -149,6 +151,7 @@ export async function readHostedThreadRouteByExternalThread(input: {
     channel: row.channel,
     container: row.container.member,
     containerMemberId: row.containerMemberId,
+    lastInboundAt: row.lastInboundAt,
     owner: row.container.owner,
   };
 }
@@ -243,7 +246,7 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
 export async function assertHostedThreadRouteEgressAuthority(input: {
   authority: HostedThreadRouteEgressAuthority;
   prisma: HostedOnboardingReadClient;
-}): Promise<void> {
+}): Promise<HostedThreadRouteSnapshot> {
   const route = await readHostedThreadRouteByExternalThread({
     accountLookupKey: input.authority.accountLookupKey,
     channel: input.authority.channel,
@@ -257,7 +260,7 @@ export async function assertHostedThreadRouteEgressAuthority(input: {
     && hasHostedMemberActiveAccess(route.container)
     && hasHostedMemberActiveAccess(route.owner)
   ) {
-    return;
+    return route;
   }
 
   throw hostedOnboardingError({

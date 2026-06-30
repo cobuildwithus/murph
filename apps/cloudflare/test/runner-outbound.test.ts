@@ -70,8 +70,9 @@ import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
+  HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
+  HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
-  HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
@@ -222,6 +223,28 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
+      engagementKind: "requires_recent_inbound",
+      target: "chat_123",
+      targetKind: "thread",
+    },
+    name: "hosted Linq egress engagement",
+    path: HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
+  },
+  {
+    body: {
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123",
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread",
+    },
+    name: "hosted Linq delivery outcome",
+    path: HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
+  },
+  {
+    body: {
       lanes: [
         {
           importedSeq: "0",
@@ -309,18 +332,6 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "hosted issue recording",
     path: "/api/internal/hosted-execution/issues/record",
-  },
-  {
-    body: {
-      authority: {
-        accountLookupKey: "hbidx:phone:v1:account",
-        channel: "linq",
-        containerMemberId: "member_123",
-        threadId: "linq_chat_123",
-      },
-    },
-    name: "hosted thread-route egress authority assertion",
-    path: HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
   },
   {
     body: {
@@ -627,6 +638,8 @@ describe("handleRunnerOutboundRequest", () => {
                   ...(path === "/api/internal/hosted-workspace/checkpoint"
                     || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
                     || path === HOSTED_RUNTIME_LATENCY_TRACE_PATH
+                    || path === HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH
+                    || path === HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH
                     || path === HOSTED_RUNTIME_CODEX_AUTH_PATH
                     || isHostedComputerWebControlRequest({ method: "POST", path })
                     ? {
@@ -667,10 +680,23 @@ describe("handleRunnerOutboundRequest", () => {
       const [url, init] = firstCall;
       expect(String(url)).toBe(`https://web.example.test${path}`);
       expect(init?.method).toBe("POST");
+      const snapshotIncludeCredentialMaterial = (() => {
+        if (
+          !body
+          || typeof body !== "object"
+          || !("includeCredentialMaterial" in body)
+        ) {
+          return true;
+        }
+
+        return typeof body.includeCredentialMaterial === "boolean"
+          ? body.includeCredentialMaterial
+          : true;
+      })();
       const expectedForwardedBody = path === "/api/internal/device-sync/runtime/snapshot"
         ? JSON.stringify({
             ...body,
-            includeCredentialMaterial: true,
+            includeCredentialMaterial: snapshotIncludeCredentialMaterial,
           })
         : body === undefined ? undefined : JSON.stringify(body);
       expect(init?.body).toBe(expectedForwardedBody);
@@ -737,6 +763,80 @@ describe("handleRunnerOutboundRequest", () => {
             source: "linq",
             type: "assistant_input_staged",
           },
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects Linq egress engagement assertions without the active runtime fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH}`, {
+        body: JSON.stringify({
+          engagementKind: "requires_recent_inbound",
+          target: "chat_123",
+          targetKind: "thread",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects Linq delivery outcomes without the active runtime fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH}`, {
+        body: JSON.stringify({
+          acceptedAt: "2026-04-26T00:00:04.000Z",
+          attemptedAt: "2026-04-26T00:00:03.000Z",
+          idempotencyKey: "assistant-outbox:intent_123",
+          providerMessageId: "linq_message_sent",
+          providerThreadId: "linq_chat_123",
+          target: "linq_chat_123",
+          targetKind: "thread",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
@@ -1153,7 +1253,7 @@ describe("handleRunnerOutboundRequest", () => {
     const requestInit = fetchMock.mock.calls[0]?.[1];
     expect(requestInit?.body).toBe(JSON.stringify({
       connectionId: "conn_123",
-      includeCredentialMaterial: true,
+      includeCredentialMaterial: false,
       userId: "member_123",
     }));
     const headers = new Headers(requestInit?.headers);
@@ -3886,7 +3986,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(serializedNoFingerprintDiagnostic).not.toContain(wrappedDataKey);
   });
 
-  it("rejects workspace snapshot data-key unwrap without a fresh workspace version fence", async () => {
+  it("rejects workspace snapshot data-key unwrap without a workspace version header", async () => {
     const missingVersionRunner = createWorkspaceVersionAwareUserRunner();
     const missingVersionResponse = await handleRunnerOutboundRequest(
       new Request("http://workspace-snapshots.worker/workspace-snapshots/snapshot_missing/data-key/unwrap", {
@@ -3907,37 +4007,6 @@ describe("handleRunnerOutboundRequest", () => {
     );
     expect(missingVersionResponse.status).toBe(401);
     expect(missingVersionRunner.validateRuntimeWriteFence).not.toHaveBeenCalled();
-
-    const runner = createWorkspaceVersionAwareUserRunner({
-      workspaceVersion: "5",
-    });
-    const env = createRunnerOutboundEnv({
-      USER_RUNNER: {
-        getByName: runner.getByName,
-      },
-    });
-    const response = await handleRunnerOutboundRequest(
-      new Request("http://workspace-snapshots.worker/workspace-snapshots/snapshot_stale/data-key/unwrap", {
-        body: JSON.stringify({}),
-        headers: createRunnerProxyHeaders({
-          "content-type": "application/json; charset=utf-8",
-          "x-hosted-runtime-attempt-id": "attempt_1",
-          "x-hosted-runtime-lease-generation": "9",
-          "x-hosted-runtime-workspace-version": "4",
-        }),
-        method: "POST",
-      }),
-      env,
-      "member_123",
-    );
-
-    expect(response.status).toBe(401);
-    expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: "attempt_1",
-      generation: "9",
-      userId: "member_123",
-      workspaceVersion: "4",
-    });
   });
 
   it("presigns direct-R2 workspace snapshot GET URLs instead of streaming bodies through the Worker", async () => {
@@ -4196,7 +4265,7 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
-  it("rejects direct-R2 workspace snapshot GET presigns without a fresh workspace version fence", async () => {
+  it("rejects direct-R2 workspace snapshot GET presigns without a workspace version header", async () => {
     const snapshotId = "snapshot_read_stale";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({
       snapshotId,
@@ -4226,31 +4295,27 @@ describe("handleRunnerOutboundRequest", () => {
     );
     expect(missingVersionResponse.status).toBe(401);
     expect(missingVersionRunner.validateRuntimeWriteFence).not.toHaveBeenCalled();
+  });
 
-    const staleVersionRunner = createWorkspaceVersionAwareUserRunner({
-      workspaceVersion: "5",
-    });
-    const staleVersionResponse = await handleRunnerOutboundRequest(
-      createWorkspaceSnapshotPresignGetRequest({
-        objectKey,
-        snapshotId,
-        workspaceVersion: "4",
+  it("rejects workspace snapshot starts with malformed workspace versions before session creation", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotStartRequest({
+        expectedWorkspaceVersion: "not-a-version",
+        workspaceVersion: "not-a-version",
       }),
       createRunnerOutboundEnv({
         USER_RUNNER: {
-          getByName: staleVersionRunner.getByName,
+          getByName: runner.getByName,
         },
       }),
       "member_123",
     );
 
-    expect(staleVersionResponse.status).toBe(401);
-    expect(staleVersionRunner.validateRuntimeWriteFence).toHaveBeenCalledWith({
-      attemptId: "attempt_1",
-      generation: "9",
-      userId: "member_123",
-      workspaceVersion: "4",
-    });
+    expect(response.status).toBe(401);
+    expect(runner.validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(runner.createHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.size).toBe(0);
   });
 
   it("does not expose a test-gated Worker body upload route for workspace snapshots", async () => {
@@ -4316,35 +4381,38 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.ownsActiveInvocationLease).not.toHaveBeenCalled();
   });
 
-  it("rejects workspace snapshot start when the write fence workspace version is stale", async () => {
+  it("starts a workspace snapshot with the request workspace version", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
-    const runner = createWorkspaceVersionAwareUserRunner({
-      workspaceVersion: "5",
-    });
+    const runner = createWorkspaceVersionAwareUserRunner();
     const env = createRunnerOutboundEnv({
       ...fixture.env,
       USER_RUNNER: {
         getByName: runner.getByName,
       },
     });
+    vi.stubGlobal("fetch", fixture.fetchMock);
 
     const response = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotStartRequest({
-        expectedWorkspaceVersion: "4",
-        workspaceVersion: "4",
+        expectedWorkspaceVersion: "5",
+        workspaceVersion: "5",
       }),
       env,
       "member_123" ,
     );
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(200);
     expect(runner.validateRuntimeWriteFence).toHaveBeenCalledWith({
       attemptId: "attempt_1",
       generation: "9",
       userId: "member_123",
-      workspaceVersion: "4",
     });
-    expect(runner.createHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.createHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "member_123",
+        workspaceVersion: "5",
+      }),
+    );
   });
 
   it("completes workspace snapshot refs only after matching object size is present", async () => {
@@ -4363,7 +4431,10 @@ describe("handleRunnerOutboundRequest", () => {
       snapshotId,
       userId: "member_123",
     });
-    runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+    runner.workspaceSnapshotUploadSessions.set(
+      snapshotId,
+      createWorkspaceSnapshotUploadSession(snapshotRef, { workspaceVersion: "5" }),
+    );
     const head = vi.fn(async (key: string) => ({
       key,
       size: bytes.byteLength,
@@ -4409,7 +4480,7 @@ describe("handleRunnerOutboundRequest", () => {
       createWorkspaceSnapshotCompleteRequest({
         snapshotId,
         snapshotRef,
-        workspaceVersion: "4",
+        workspaceVersion: "5",
       }),
       env,
       "member_123",
@@ -4440,7 +4511,7 @@ describe("handleRunnerOutboundRequest", () => {
     const checkpointInit = fetchMock.mock.calls[1]?.[1] as RequestInit | undefined;
     expect(JSON.parse(String(checkpointInit?.body))).toEqual(expect.objectContaining({
       attemptId: "attempt_1",
-      expectedWorkspaceVersion: "4",
+      expectedWorkspaceVersion: "5",
       leaseGeneration: "9",
       reason: "idle_shutdown",
       snapshotRef: expect.objectContaining({
@@ -5583,7 +5654,6 @@ describe("handleRunnerOutboundRequest", () => {
   it("lets a stale invocation abort its own active workspace snapshot upload session", async () => {
     const runner = createWorkspaceVersionAwareUserRunner({
       leaseGeneration: "10",
-      workspaceVersion: "8",
     });
     const snapshotId = "snapshot_abort_after_lease_change";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({
@@ -5935,7 +6005,6 @@ describe("handleRunnerOutboundRequest", () => {
   it("retires workspace snapshot upload sessions when complete sees a replaced active write fence", async () => {
     const runner = createWorkspaceVersionAwareUserRunner({
       leaseGeneration: "10",
-      workspaceVersion: "8",
     });
     const snapshotId = "snapshot_complete_replaced_write_fence";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({
@@ -5987,7 +6056,6 @@ describe("handleRunnerOutboundRequest", () => {
       attemptId: "attempt_1",
       generation: "9",
       userId: "member_123",
-      workspaceVersion: "4",
     });
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
@@ -6349,12 +6417,13 @@ describe("handleRunnerOutboundRequest", () => {
         getByName: runner.getByName,
       },
     });
-    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
-      onCheckpoint: () => new Response(
-        JSON.stringify({
-          ...createHostedWorkspaceCheckpointResponse("4", null),
-          checkpointed: false,
-        }),
+	const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+		onCheckpoint: () => new Response(
+			JSON.stringify({
+				...createHostedWorkspaceCheckpointResponse("5", null),
+				checkpointConflictReason: "workspace_version",
+				checkpointed: false,
+			}),
         {
           headers: {
             "content-type": "application/json; charset=utf-8",
@@ -6379,6 +6448,29 @@ describe("handleRunnerOutboundRequest", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Hosted workspace snapshot checkpoint CAS failed.",
     });
+    const diagnosticLog = hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)
+      .find((input) =>
+        input.message === "Hosted workspace snapshot checkpoint CAS conflict."
+      );
+    expect(diagnosticLog).toEqual(expect.objectContaining({
+      component: "runner",
+		details: expect.objectContaining({
+			checkpointConflictReason: "workspace_version",
+			checkpointWorkspaceVersion: "5",
+			expectedWorkspaceVersion: "4",
+			method: "POST",
+			operation: "workspace_snapshot_complete",
+      }),
+      level: "warn",
+      phase: "wake.running",
+    }));
+    const serializedLogs = JSON.stringify(
+      hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls,
+    );
+    expect(serializedLogs).not.toContain("member_123");
+    expect(serializedLogs).not.toContain(snapshotId);
+    expect(serializedLogs).not.toContain(objectKey);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(runner.deleteHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
@@ -6388,12 +6480,106 @@ describe("handleRunnerOutboundRequest", () => {
       snapshotId,
       userId: "member_123",
     }));
-    expect(deleteObject).not.toHaveBeenCalled();
-  });
+	expect(deleteObject).not.toHaveBeenCalled();
+});
 
-  it("returns foreground-pending checkpoint responses from snapshot completion without failing the invocation", async () => {
-    const runner = createWorkspaceVersionAwareUserRunner();
-    const snapshotId = "snapshot_complete_foreground_pending";
+it("logs checkpoint CAS conflicts before ambiguous cleanup failures", async () => {
+	const runner = createWorkspaceVersionAwareUserRunner();
+	const snapshotId = "snapshot_complete_checkpoint_false_cleanup_fails";
+	const objectKey = await hostedWorkspaceSnapshotObjectKey({
+		snapshotId,
+		userId: "member_123",
+	});
+	const snapshotRef = createWorkspaceSnapshotV2Ref({
+		encryptedByteSize: 4,
+		encryptedObjectSha256: "a".repeat(64),
+		objectKey,
+		snapshotId,
+		userId: "member_123",
+	});
+	runner.recordHostedWorkspaceSnapshotOrphanCandidate.mockImplementationOnce(async () => {
+		throw new Error("orphan recording failed");
+	});
+	runner.workspaceSnapshotUploadSessions.set(snapshotId, createWorkspaceSnapshotUploadSession(snapshotRef));
+	const deleteObject = vi.fn(async () => {});
+	const env = createRunnerOutboundEnv({
+		BUNDLES: createWorkspaceSnapshotBucket(
+			async (key) => ({ key, size: 4 }),
+			async (key) => ({
+				checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+				customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+				key,
+				size: 4,
+			}),
+			deleteObject,
+		),
+		USER_RUNNER: {
+			getByName: runner.getByName,
+		},
+	});
+	const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+		onCheckpoint: () => new Response(
+			JSON.stringify({
+				...createHostedWorkspaceCheckpointResponse("5", null),
+				checkpointConflictReason: "workspace_version",
+				checkpointed: false,
+			}),
+			{
+				headers: {
+					"content-type": "application/json; charset=utf-8",
+				},
+				status: 200,
+			},
+		),
+	});
+	vi.stubGlobal("fetch", fetchMock);
+
+	const response = await handleRunnerOutboundRequest(
+		createWorkspaceSnapshotCompleteRequest({
+			snapshotId,
+			snapshotRef,
+			workspaceVersion: "4",
+		}),
+		env,
+		"member_123",
+	);
+
+	expect(response.status).toBe(503);
+	await expect(response.json()).resolves.toEqual({
+		error: "Hosted workspace snapshot cleanup state is unavailable.",
+	});
+	const diagnosticLog = hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
+		.map(([input]) => input)
+		.find((input) =>
+			input.message === "Hosted workspace snapshot checkpoint CAS conflict."
+		);
+	expect(diagnosticLog).toEqual(expect.objectContaining({
+		component: "runner",
+		details: expect.objectContaining({
+			checkpointConflictReason: "workspace_version",
+			checkpointWorkspaceVersion: "5",
+			expectedWorkspaceVersion: "4",
+			method: "POST",
+			operation: "workspace_snapshot_complete",
+		}),
+		level: "warn",
+		phase: "wake.running",
+	}));
+	const serializedLogs = JSON.stringify(
+		hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls,
+	);
+	expect(serializedLogs).not.toContain("member_123");
+	expect(serializedLogs).not.toContain(snapshotId);
+	expect(serializedLogs).not.toContain(objectKey);
+	expect(fetchMock).toHaveBeenCalledTimes(2);
+	expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+	expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
+	expect(deleteObject).not.toHaveBeenCalled();
+});
+
+it("returns foreground-pending checkpoint responses from snapshot completion without failing the invocation", async () => {
+	const runner = createWorkspaceVersionAwareUserRunner();
+	const snapshotId = "snapshot_complete_foreground_pending";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({
       snapshotId,
       userId: "member_123",
@@ -7860,13 +8046,15 @@ function createWorkspaceSnapshotUploadSession(
   input: {
     expiresAt?: string;
     replacedSnapshotRef?: HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"];
+    workspaceVersion?: string;
   } = {},
 ): HostedWorkspaceSnapshotUploadSession {
+  const workspaceVersion = input.workspaceVersion ?? "4";
   const session = {
     attemptId: "attempt_1",
     createdAt: "2026-05-01T00:00:00.000Z",
     encryption: snapshotRef.encryption,
-    expectedWorkspaceVersion: "4",
+    expectedWorkspaceVersion: workspaceVersion,
     expiresAt: input.expiresAt ?? "9999-01-01T00:00:00.000Z",
     leaseGeneration: "9",
     objectKey: snapshotRef.objectKey,
@@ -7874,7 +8062,7 @@ function createWorkspaceSnapshotUploadSession(
     schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
     snapshotId: snapshotRef.snapshotId,
     userId: snapshotRef.userId,
-    workspaceVersion: "4",
+    workspaceVersion,
   } satisfies HostedWorkspaceSnapshotUploadSession;
   return session;
 }
@@ -8040,12 +8228,10 @@ function createWorkspaceVersionAwareUserRunner(input: {
   attemptId?: string;
   leaseGeneration?: string;
   userId?: string;
-  workspaceVersion?: string;
 } = {}) {
   const attemptId = input.attemptId ?? "attempt_1";
   const leaseGeneration = input.leaseGeneration ?? "9";
   const userId = input.userId ?? "member_123";
-  const workspaceVersion = input.workspaceVersion ?? "4";
   const workspaceSnapshotUploadSessions = new Map<string, HostedWorkspaceSnapshotUploadSession>();
   const workspaceSnapshotOrphanCandidates = new Map<string, HostedWorkspaceSnapshotOrphanCandidate>();
   let currentWorkspaceSnapshotUploadSessionId: string | null = null;
@@ -8102,19 +8288,13 @@ function createWorkspaceVersionAwareUserRunner(input: {
     attemptId: string;
     generation: string;
     userId: string;
-    workspaceVersion?: string | null;
   }) => {
     const owns = await ownsActiveInvocationLease({
       attemptId: fence.attemptId,
       leaseGeneration: fence.generation,
       userId: fence.userId,
     });
-    return owns
-      && (
-        fence.workspaceVersion === undefined
-        || fence.workspaceVersion === null
-        || fence.workspaceVersion === workspaceVersion
-      );
+    return owns;
   });
 
   return {

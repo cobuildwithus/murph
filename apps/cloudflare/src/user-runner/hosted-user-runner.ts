@@ -196,7 +196,6 @@ export class HostedUserRunner {
     attemptId: string;
     generation: string;
     userId: string;
-    workspaceVersion?: string | null;
   }): Promise<boolean> {
     const validation = await this.stateStore.validateWriteFenceToken(input);
     if (!validation.owns) {
@@ -207,7 +206,6 @@ export class HostedUserRunner {
           generation: input.generation,
           record: validation.record,
           userId: input.userId,
-          workspaceVersion: input.workspaceVersion ?? null,
         }),
         level: "warn",
         message: "Hosted runner runtime write fence validation rejected.",

@@ -8,6 +8,9 @@ import {
   incrementHostedLinqInboundDailyState,
 } from "./linq-daily-state";
 import {
+  recordHostedMemberLinqInboundEngagementTx,
+} from "./linq-egress-engagement";
+import {
   type HostedLinqWebhookEvent,
   requireHostedLinqMessageReceivedEvent,
   resolveHostedLinqOccurredAt,
@@ -298,6 +301,14 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
     recipientPhone: input.recipientPhone,
   });
 
+  await recordHostedMemberLinqInboundEngagementTx({
+    chatId: input.chatId,
+    linePhoneNumber: input.recipientPhone,
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    prisma: input.prisma,
+  });
+
   return incrementHostedLinqInboundDailyState({
     memberId: input.memberId,
     occurredAt: input.occurredAt,
@@ -344,6 +355,14 @@ export async function bindHostedMemberPendingLinqChatAndTrackInbound(input: {
     participantContactObservedAt: new Date(input.occurredAt),
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
+  });
+
+  await recordHostedMemberLinqInboundEngagementTx({
+    chatId: input.chatId,
+    linePhoneNumber: input.recipientPhone,
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    prisma: input.prisma,
   });
 
   return incrementHostedLinqInboundDailyState({

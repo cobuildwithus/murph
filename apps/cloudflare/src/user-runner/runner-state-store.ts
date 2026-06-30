@@ -425,7 +425,6 @@ export class RunnerStateStore {
     attemptId: string;
     generation: string;
     userId: string;
-    workspaceVersion?: string | null;
   }): Promise<RunnerWriteFenceValidationResult> {
     const meta = this.selectMetaRowSync();
     if (!meta) {
@@ -442,11 +441,6 @@ export class RunnerStateStore {
       || token.attemptId !== input.attemptId
       || token.generation !== input.generation
       || token.userId !== input.userId
-      || (
-        input.workspaceVersion !== undefined
-        && input.workspaceVersion !== null
-        && token.workspaceVersion !== input.workspaceVersion
-      )
     ) {
       return {
         owns: false,

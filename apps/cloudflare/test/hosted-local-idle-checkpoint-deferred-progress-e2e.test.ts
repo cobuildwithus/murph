@@ -87,6 +87,7 @@ describe("hosted local idle checkpoint deferred progress e2e", () => {
     await requireScenario().bindActiveHostedLinqHomeChat({
       chatId,
       memberId: userId,
+      recentInboundAt: new Date(),
       recipientPhone: memberPhone,
     });
 

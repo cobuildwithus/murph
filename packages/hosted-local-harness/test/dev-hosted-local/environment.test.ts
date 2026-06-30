@@ -1001,6 +1001,7 @@ describe("buildHostedLocalDevOverrides", () => {
     });
 
     expect(overrides).toMatchObject({
+      DEVICE_SYNC_PUBLIC_BASE_URL: "http://localhost:3000/api/device-sync",
       HOSTED_EXECUTION_CONTROL_URL: "http://127.0.0.1:8787",
       HOSTED_EXECUTION_DISPATCH_URL: "http://127.0.0.1:8787",
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://localhost:3000",
@@ -1083,14 +1084,29 @@ describe("buildHostedLocalDevOverrides", () => {
     );
   });
 
-  it("preserves an explicit hosted onboarding public base URL for web links", () => {
+  it("overwrites inherited hosted onboarding public URLs with the local web origin", () => {
     const overrides = buildHostedLocalDevOverrides(localConfig, {
       HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://local.withmurph.ai:3443",
     });
 
-    expect(overrides.HOSTED_ONBOARDING_PUBLIC_BASE_URL).toBe("https://local.withmurph.ai:3443");
+    expect(overrides.HOSTED_ONBOARDING_PUBLIC_BASE_URL).toBe("http://localhost:3000");
     expect(overrides.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
     expect(overrides.HOSTED_EXECUTION_CONTROL_URL).toBe("http://127.0.0.1:8787");
+    expect(overrides.DEVICE_SYNC_PUBLIC_BASE_URL).toBe("http://localhost:3000/api/device-sync");
+  });
+
+  it("derives hosted onboarding links from worktree web ports", () => {
+    const overrides = buildHostedLocalDevOverrides({
+      ...localConfig,
+      webHost: "127.0.0.1",
+      webPort: 3205,
+    }, {
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://local.withmurph.ai:3443",
+    });
+
+    expect(overrides.HOSTED_ONBOARDING_PUBLIC_BASE_URL).toBe("http://127.0.0.1:3205");
+    expect(overrides.HOSTED_WEB_BASE_URL).toBe("http://127.0.0.1:3205");
+    expect(overrides.DEVICE_SYNC_PUBLIC_BASE_URL).toBe("http://127.0.0.1:3205/api/device-sync");
   });
 
   it("preserves an explicit wake fetch proof key override", () => {

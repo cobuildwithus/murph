@@ -87,6 +87,7 @@ interface HostedActiveLinqMemberSeedArgs extends HostedActiveMemberSeedArgs {
   homePhone: string;
   memberPhone: string;
   privyUserId?: string | null;
+  recentInboundAt?: Date | string | null;
   walletAddress?: string | null;
 }
 
@@ -107,6 +108,7 @@ export interface HostedLocalFullStackScenario {
   bindActiveHostedLinqHomeChat(input: {
     chatId: string;
     memberId: string;
+    recentInboundAt?: Date | string | null;
     recipientPhone: string;
   }): Promise<void>;
   bindActiveHostedTelegramMember(input: {
@@ -327,6 +329,7 @@ export async function startHostedLocalFullStackScenario(input: {
           chatId: bindingInput.chatId,
           environment: buildScenarioSeedEnvironment(),
           memberId: bindingInput.memberId,
+          recentInboundAt: bindingInput.recentInboundAt,
           recipientPhone: bindingInput.recipientPhone,
         });
       },
@@ -414,6 +417,9 @@ export async function startHostedLocalFullStackScenario(input: {
           memberId: seedInput.memberId,
           memberPhone: seedInput.memberPhone,
           privyUserId: seedInput.privyUserId,
+          recentInboundAt: seedInput.recentInboundAt === undefined
+            ? new Date().toISOString()
+            : seedInput.recentInboundAt,
           stripeCustomerId: seedInput.stripeCustomerId,
           stripeSubscriptionId: seedInput.stripeSubscriptionId,
           walletAddress: seedInput.walletAddress,

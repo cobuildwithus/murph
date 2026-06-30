@@ -68,6 +68,8 @@ export function createHostedWebDeviceSyncPort(input: {
     },
     async fetchSnapshot(runtimeInput: {
       connectionId?: string | null;
+      includeCredentialMaterial?: boolean | null;
+      limit?: number | null;
       provider?: string | null;
       signal?: AbortSignal | null;
       sourceProviderSlug?: string | null;
@@ -75,7 +77,14 @@ export function createHostedWebDeviceSyncPort(input: {
       const payload = await fetchHostedWebControlPlaneJson({
         body: {
           ...(runtimeInput.connectionId ? { connectionId: runtimeInput.connectionId } : {}),
-          includeCredentialMaterial: input.transport.mode === "direct",
+          ...(runtimeInput.includeCredentialMaterial == null
+            ? (
+                input.transport.mode === "direct"
+                  ? { includeCredentialMaterial: true }
+                  : {}
+              )
+            : { includeCredentialMaterial: runtimeInput.includeCredentialMaterial }),
+          ...(runtimeInput.limit === undefined ? {} : { limit: runtimeInput.limit }),
           ...(runtimeInput.provider ? { provider: runtimeInput.provider } : {}),
           ...(runtimeInput.sourceProviderSlug ? { sourceProviderSlug: runtimeInput.sourceProviderSlug } : {}),
           userId: input.boundUserId,
