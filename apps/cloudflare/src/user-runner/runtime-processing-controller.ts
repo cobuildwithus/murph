@@ -240,16 +240,24 @@ export class RuntimeProcessingController {
           commandBudget: input.commandBudget,
           record,
         });
-      if (activeRuntimeState !== "inactive") {
-        await this.syncRunnerAlarm(record);
-        return {
-          action: "already_running",
-          kind: "runtime_processing_accepted",
-          recommendedRecheckAt:
-            this.computeRuntimeProcessingOwnerRecheckAt(),
-          runtimeAttemptId: activeFence.attemptId,
-        };
+      if (activeRuntimeState === "inactive") {
+        return await this.replaceStartRequiredRuntimeFence({
+          activeFence,
+          commandBudget: input.commandBudget,
+          input: input.input,
+          record,
+          runtimeWakeStartedAt: input.runtimeWakeStartedAt,
+        });
       }
+
+      await this.syncRunnerAlarm(record);
+      return {
+        action: "already_running",
+        kind: "runtime_processing_accepted",
+        recommendedRecheckAt:
+          this.computeRuntimeProcessingOwnerRecheckAt(),
+        runtimeAttemptId: activeFence.attemptId,
+      };
     }
 
     const activeWakeStartedAtEpochMs = Date.now();

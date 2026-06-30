@@ -1938,19 +1938,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
-    expect(ensureProcessing).toHaveBeenCalledWith({
-      activeRuntime: {
-        attemptId: token.attemptId,
-        leaseGeneration: String(token.generation),
-        orchestration: {
-          activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:31.000Z"),
-          userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:31.000Z"),
-        },
-        processingMode: "inbox_media_retention",
-        userId: TEST_USER_ID,
-      },
-      userId: TEST_USER_ID,
-    });
+    expect(ensureProcessing).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token.attemptId),
@@ -1968,6 +1956,65 @@ describe("HostedUserRunner execution coordination", () => {
         last_invocation_at: expect.any(String),
       })
     );
+  });
+
+  it("clears a stale retention fence when inactive proof is followed by exhausted recovery budget", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20_000));
+        return {
+          kind: "start-required" as const,
+          reason: "no-active-child" as const,
+        };
+      },
+    );
+    const readActiveRuntimeUserFence = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+    >(async () => ({
+      active: false,
+      reason: "no_active_runtime",
+    }));
+    const onStatusRead = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20_000));
+    });
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      mailboxLag: [createMailboxLag({ lag: "0" })],
+      onStatusRead,
+      readActiveRuntimeUserFence,
+      workspace: createWorkspaceState({ version: "8" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    writeRuntimeFenceForTest(sql, {
+      processingMode: "inbox_media_retention",
+      runnerContainerName: TEST_USER_ID,
+      startedAt: "2026-04-27T00:00:00.000Z",
+      workspaceVersion: "7",
+    });
+    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
+
+    const response = runner.ensureRuntimeProcessingForUser({
+      commandTimeoutMs: 5_000,
+      orchestrationAttemptId: "test-orchestration-attempt-retention-inactive-budget",
+      processingMode: "inbox_media_retention",
+      userId: TEST_USER_ID,
+    });
+    await vi.waitFor(() => expect(onStatusRead).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    await expect(response).resolves.toMatchObject({
+      kind: "retry_later",
+    });
+    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(ensureProcessing).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      active_expires_at: null,
+      wake_at: null,
+    });
   });
 
   it("probes workspace wakes behind an active runtime write fence", async () => {
