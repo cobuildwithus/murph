@@ -110,6 +110,47 @@ describe("hosted device sync status prompt", () => {
     expect(prompt).toContain("`TOKEN_REFRESH_FAILED`");
   });
 
+  it("maps Junction account reauthorization through configured source reconnect targets", () => {
+    const snapshot = buildSnapshot();
+    const entry = snapshot.connections[0]!;
+    const source = entry.sources![0]!;
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [
+        {
+          label: "WHOOP",
+          provider: "whoop",
+          sourceProviderSlug: "whoop_v2",
+        },
+      ],
+      snapshot: {
+        ...snapshot,
+        connections: [
+          {
+            ...entry,
+            connection: {
+              ...entry.connection,
+              provider: "junction",
+              status: "reauthorization_required",
+            },
+            sources: [
+              {
+                ...source,
+                lastErrorCode: null,
+                status: "connected",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(prompt).toContain("WHOOP currently needs reconnect");
+    expect(prompt).toContain("account is in error state `REAUTHORIZATION_REQUIRED`");
+    expect(prompt).toContain("vault-cli device connect whoop --format json");
+    expect(prompt).not.toContain("Junction currently needs reconnect");
+    expect(prompt).not.toContain("No hosted reconnect target");
+  });
+
   it("does not render when sources are connected", () => {
     const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
       reconnectTargets: [

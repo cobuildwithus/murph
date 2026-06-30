@@ -3356,7 +3356,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       async fetchSnapshot(request) {
         fetchSnapshotCalls += 1;
-        expect(request).toEqual({ signal: expect.any(AbortSignal) });
+        expect(request).toEqual({
+          includeCredentialMaterial: false,
+          limit: 4,
+          signal: expect.any(AbortSignal),
+          sourceProviderSlug: "whoop_v2",
+        });
         return {
           connections: [
             {

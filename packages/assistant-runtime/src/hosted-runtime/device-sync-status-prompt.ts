@@ -32,6 +32,7 @@ const HOSTED_DEVICE_SYNC_RECONNECT_REQUIRED_SOURCE_ERROR_CODES = new Set([
   "TOKEN_REFRESH_FAILED",
 ]);
 const HOSTED_DEVICE_SYNC_RECONNECT_NOTICE_LIMIT = 4;
+const HOSTED_DEVICE_SYNC_RECONNECT_QUERY_TARGET_LIMIT = 4;
 
 export async function buildHostedDeviceSyncStatusPrompt(input: {
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined;
@@ -42,9 +43,11 @@ export async function buildHostedDeviceSyncStatusPrompt(input: {
     return null;
   }
 
-  const snapshot = await input.deviceSyncPort.fetchSnapshot({
+  const snapshot = await fetchHostedDeviceSyncReconnectStatusSnapshot({
+    deviceSyncPort: input.deviceSyncPort,
+    reconnectTargets: input.reconnectTargets,
     signal: input.signal ?? null,
-  }).catch(() => null);
+  });
   if (!snapshot) {
     return null;
   }
@@ -53,6 +56,66 @@ export async function buildHostedDeviceSyncStatusPrompt(input: {
     reconnectTargets: input.reconnectTargets,
     snapshot,
   });
+}
+
+async function fetchHostedDeviceSyncReconnectStatusSnapshot(input: {
+  deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
+  signal: AbortSignal | null;
+}): Promise<HostedDeviceSyncRuntimeSnapshot | null> {
+  const reconnectTargets = input.reconnectTargets
+    .slice(0, HOSTED_DEVICE_SYNC_RECONNECT_QUERY_TARGET_LIMIT);
+  if (reconnectTargets.length === 0) {
+    return null;
+  }
+
+  const snapshots = await Promise.all(
+    reconnectTargets.map(async (target) => {
+      const sourceProviderSlug = normalizeHostedDeviceSyncKey(target.sourceProviderSlug);
+      const provider = normalizeHostedDeviceSyncKey(target.provider);
+      if (!sourceProviderSlug && !provider) {
+        return null;
+      }
+
+      return await input.deviceSyncPort.fetchSnapshot({
+        includeCredentialMaterial: false,
+        limit: HOSTED_DEVICE_SYNC_RECONNECT_NOTICE_LIMIT,
+        ...(sourceProviderSlug ? { sourceProviderSlug } : { provider }),
+        signal: input.signal,
+      }).catch(() => null);
+    }),
+  );
+
+  return mergeHostedDeviceSyncStatusSnapshots(snapshots);
+}
+
+function mergeHostedDeviceSyncStatusSnapshots(
+  snapshots: readonly (HostedDeviceSyncRuntimeSnapshot | null)[],
+): HostedDeviceSyncRuntimeSnapshot | null {
+  const connections = new Map<string, HostedDeviceSyncRuntimeConnectionSnapshot>();
+  let generatedAt: string | null = null;
+  let userId: string | null = null;
+
+  for (const snapshot of snapshots) {
+    if (!snapshot) {
+      continue;
+    }
+    generatedAt ??= snapshot.generatedAt;
+    userId ??= snapshot.userId;
+    for (const entry of snapshot.connections) {
+      connections.set(entry.connection.id, entry);
+    }
+  }
+
+  if (connections.size === 0 || !generatedAt || !userId) {
+    return null;
+  }
+
+  return {
+    connections: [...connections.values()],
+    generatedAt,
+    userId,
+  };
 }
 
 export function buildHostedDeviceSyncStatusPromptFromSnapshot(input: {
@@ -160,6 +223,9 @@ function buildHostedDeviceSyncAccountReconnectNotice(input: {
   const reconnectTarget = resolveHostedDeviceSyncReconnectTargetForProvider({
     provider,
     reconnectTargets: input.reconnectTargets,
+  }) ?? resolveHostedDeviceSyncReconnectTargetForConnectionSources({
+    connection: input.connection,
+    reconnectTargets: input.reconnectTargets,
   });
   const errorCode = normalizeHostedDeviceSyncErrorCode(
     input.connection.localState.lastErrorCode,
@@ -221,6 +287,26 @@ function resolveHostedDeviceSyncReconnectTargetForSource(input: {
   ) ?? input.reconnectTargets.find((target) =>
     normalizeHostedDeviceSyncKey(target.provider) === sourceProviderSlug
   ) ?? null;
+}
+
+function resolveHostedDeviceSyncReconnectTargetForConnectionSources(input: {
+  connection: HostedDeviceSyncRuntimeConnectionSnapshot;
+  reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
+}): HostedDeviceSyncStatusPromptReconnectTarget | null {
+  for (const source of input.connection.sources ?? []) {
+    if (source.status === "disconnected") {
+      continue;
+    }
+    const reconnectTarget = resolveHostedDeviceSyncReconnectTargetForSource({
+      reconnectTargets: input.reconnectTargets,
+      sourceProviderSlug: source.sourceProviderSlug,
+    });
+    if (reconnectTarget) {
+      return reconnectTarget;
+    }
+  }
+
+  return null;
 }
 
 function resolveHostedDeviceSyncReconnectTargetForProvider(input: {

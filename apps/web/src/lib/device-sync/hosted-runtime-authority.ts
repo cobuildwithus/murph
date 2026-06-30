@@ -119,6 +119,7 @@ export async function readHostedDeviceSyncRuntimeState(input: {
         : {}),
     },
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    ...(parsed.limit ? { take: parsed.limit } : {}),
     ...hostedConnectionRecordArgs,
   });
 

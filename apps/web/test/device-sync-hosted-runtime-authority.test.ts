@@ -1277,6 +1277,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     await readHostedDeviceSyncRuntimeState({
       request: new Request("https://example.test/device-sync/runtime/snapshot", {
         body: JSON.stringify({
+          limit: 4,
           provider: "whoop",
           sourceProviderSlug: "fitbit",
           userId: "user_123",
@@ -1288,6 +1289,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
     expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        take: 4,
         where: expect.objectContaining({
           OR: [
             { provider: { in: ["whoop", "whoop_v2", "whoop-v2"] } },
