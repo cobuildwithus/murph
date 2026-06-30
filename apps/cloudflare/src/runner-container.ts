@@ -423,6 +423,13 @@ export class RunnerContainer extends Container {
   async readActiveRuntimeUserFence(): Promise<WorkerActiveRuntimeUserFenceResult> {
     const active = this.workspaceInvocationActiveOperation;
     if (!active) {
+      const status = readContainerStatus(await this.getState());
+      if (!isRunnerContainerStopped(status)) {
+        const activeInContainer = await this.readWorkspaceInvocationActiveFromHealth();
+        if (activeInContainer) {
+          throw new Error("Hosted runner container health still reports active workspace work.");
+        }
+      }
       return { active: false, reason: "no_active_runtime" };
     }
 

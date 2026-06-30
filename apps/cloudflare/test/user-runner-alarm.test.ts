@@ -2420,6 +2420,54 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
+  it("preserves a wake-unconfirmed runtime fence when liveness cannot prove the child is inactive", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "wake-unconfirmed" as const,
+        reason: "active-child-rejected" as const,
+      }),
+    );
+    const readActiveRuntimeUserFence = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+    >(async () => {
+      throw new Error("container health still active");
+    });
+    const onStatusRead = vi.fn();
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      mailboxLag: [createMailboxLag({ lag: "0" })],
+      onStatusRead,
+      readActiveRuntimeUserFence,
+      workspace: createWorkspaceState({ version: "8" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      runnerContainerName: TEST_USER_ID,
+      startedAt: "2026-04-27T00:00:00.000Z",
+      workspaceVersion: "7",
+    });
+    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-recover-liveness-indeterminate",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:46.000Z",
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(onStatusRead).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      wake_at: null,
+    });
+  });
+
   it("recovers a wake-unconfirmed runtime fence only after liveness confirms no active child", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

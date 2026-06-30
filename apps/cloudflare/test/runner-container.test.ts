@@ -3595,6 +3595,57 @@ describe("RunnerContainer", () => {
     });
   });
 
+  it("does not report inactive liveness from a missing local pointer while health reports active work", async () => {
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({
+          ...createRunnerHealthResult(),
+          activeJobCount: 1,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    await expect(container.readActiveRuntimeUserFence()).rejects.toThrow(
+      "Hosted runner container health still reports active workspace work.",
+    );
+  });
+
+  it("reports inactive liveness from a missing local pointer only after running health is idle", async () => {
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({
+          ...createRunnerHealthResult(),
+          activeJobCount: 0,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: false,
+      reason: "no_active_runtime",
+    });
+  });
+
   it("destroys and clears preserved liveness when explicit abort is not delivered", async () => {
     let runnerResponseLost = false;
     const containerFetch = vi.fn(async (url: string) => {
