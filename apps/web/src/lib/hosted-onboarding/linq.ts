@@ -21,6 +21,8 @@ export {
   startHostedLinqTypingIndicator,
   sendHostedLinqReadReceipt,
   sendHostedLinqChatMessage,
+  sendHostedLinqVoiceMemo,
+  uploadHostedLinqAttachment,
 } from "./linq-client";
 export type { HostedLinqWebhookSubscription } from "./linq-client";
 
