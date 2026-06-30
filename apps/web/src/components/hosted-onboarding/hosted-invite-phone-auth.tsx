@@ -7,6 +7,7 @@ import type {
   HostedPrivyCompletionPayload,
 } from "@/src/lib/hosted-onboarding/types";
 import { maskPhoneNumber } from "@/src/lib/hosted-onboarding/phone";
+import { ConsentSkeleton } from "@/src/components/legal/hosted-legal-consent-card";
 import { useHostedPhoneAuthController } from "./hosted-phone-auth-controller";
 import { HostedOnboardingApiError, requestHostedOnboardingJson } from "./client-api";
 import {
@@ -204,6 +205,14 @@ export function HostedInvitePhoneAuth({
     setQueuedInvitePhoneCodeSend(null);
     controller.resetPhoneAuthFlow();
     setManualEntryVisible(true);
+  }
+
+  if (controller.authenticatedView === "loading") {
+    return (
+      <div aria-busy="true" aria-live="polite" role="status">
+        <ConsentSkeleton />
+      </div>
+    );
   }
 
   return (
