@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  headers: vi.fn(async () => new Headers()),
   getMurphGithubStarCount: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
   LandingAuthActions: vi.fn(
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
       authenticated: boolean;
       context: "nav" | "hero" | "footer";
       authLabel: string;
+      leadingIcon?: React.ReactNode;
       signupLabel?: string;
       splitUnauthenticated?: boolean;
       preloadAuthPanel?: boolean;
@@ -36,6 +38,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
+
+vi.mock("next/headers", () => ({
+  headers: mocks.headers,
+}));
 
 vi.mock("next/image", () => ({
   default: (props: {
@@ -121,6 +127,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "hero",
       authLabel: "Meet Murph",
+      leadingIcon: expect.anything(),
       preloadAuthPanel: true,
     },
     undefined
@@ -131,6 +138,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "hero",
       authLabel: "Meet Murph",
+      leadingIcon: expect.anything(),
     },
     undefined
   );
