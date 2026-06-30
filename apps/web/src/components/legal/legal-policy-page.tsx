@@ -30,11 +30,22 @@ interface TableBlock {
 }
 
 export interface LegalPolicyPageProps {
-  markdownFileName: string;
+  markdownFileName: LegalPolicyMarkdownFileName;
   pdfHref: string;
 }
 
 type MarkdownBlock = HeadingBlock | ListBlock | ParagraphBlock | TableBlock;
+type LegalPolicyMarkdownFileName = keyof typeof LEGAL_POLICY_MARKDOWN_FILES;
+
+const LEGAL_POLICY_MARKDOWN_FILES = {
+  "consumer-health-data-notice.md": "consumer-health-data-notice.md",
+  "consumer-health-data-privacy-policy.md": "consumer-health-data-privacy-policy.md",
+  "health-ai-safety-disclosure.md": "health-ai-safety-disclosure.md",
+  "legal-documents.md": "legal-documents.md",
+  "privacy-policy.md": "privacy-policy.md",
+  "subprocessors.md": "subprocessors.md",
+  "terms-of-service.md": "terms-of-service.md",
+} as const;
 
 export async function LegalPolicyPage({
   markdownFileName,
@@ -197,26 +208,34 @@ export function parseLegalPolicyMarkdown(markdown: string): MarkdownBlock[] {
   return blocks;
 }
 
-async function readLegalMarkdown(fileName: string): Promise<string> {
-  const candidates = [
-    path.resolve(process.cwd(), "apps/web/legal", fileName),
-    path.resolve(process.cwd(), "legal", fileName),
-  ];
-  let lastError: unknown;
+async function readLegalMarkdown(fileName: LegalPolicyMarkdownFileName): Promise<string> {
+  const knownFileName = LEGAL_POLICY_MARKDOWN_FILES[fileName];
+  const packageLocalPath = path.join(
+    /* turbopackIgnore: true */ process.cwd(),
+    "legal",
+    knownFileName,
+  );
 
-  for (const candidate of candidates) {
-    try {
-      return await fs.readFile(candidate, "utf8");
-    } catch (error) {
-      lastError = error;
+  try {
+    return await fs.readFile(packageLocalPath, "utf8");
+  } catch (error) {
+    if (!isFileNotFoundError(error)) {
+      throw error;
     }
   }
 
-  if (lastError instanceof Error) {
-    throw lastError;
-  }
+  return await fs.readFile(
+    path.join(
+      /* turbopackIgnore: true */ process.cwd(),
+      "apps/web/legal",
+      knownFileName,
+    ),
+    "utf8",
+  );
+}
 
-  throw new Error(`Unable to read legal policy markdown: ${fileName}`);
+function isFileNotFoundError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 function isTableLine(line: string): boolean {

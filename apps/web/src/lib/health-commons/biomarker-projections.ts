@@ -1,4 +1,3 @@
-import { getGeneratedHealthCommonsWebBiomarkerIndex } from "@murphai/health-commons/runtime";
 import type {
   HealthCommonsWebBiomarkerOverview,
   HealthCommonsWebBiomarkerResearch,
@@ -12,6 +11,7 @@ import {
 } from "./user-facing-copy";
 export { resolveBiomarkerDesiredDirection } from "./biomarker-desired-direction";
 import {
+  getGeneratedBiomarkerIndex,
   loadGeneratedBiomarkerOverview,
   loadGeneratedBiomarkerResearch,
   loadGeneratedBiomarkerShell,
@@ -27,7 +27,7 @@ export type BiomarkerSourceModel = HealthCommonsWebBiomarkerResearch["sourceHigh
 export type BiomarkerClaimModel = HealthCommonsWebBiomarkerResearch["claims"][number];
 
 export function listHealthCommonsBiomarkerRoutes(): string[] {
-  return getGeneratedHealthCommonsWebBiomarkerIndex()
+  return getGeneratedBiomarkerIndex()
     .biomarkers
     .filter((entry) => entry.published && !entry.hidden)
     .map((entry) => entry.routeId)

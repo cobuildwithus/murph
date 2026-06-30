@@ -8,13 +8,13 @@ import {
   HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES,
 } from "../../config/workspace-source-resolution";
 import {
+  KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES,
+  KERNEL_COMPUTER_LIVE_VIEW_FRAME_SOURCES,
+} from "./kernel-live-view-origin";
+import {
   isHostedWebDevFileSystemCacheEnabled,
   resolveHostedWebDistDir,
 } from "./next-artifacts";
-import {
-  KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES,
-  KERNEL_COMPUTER_LIVE_VIEW_FRAME_SOURCES,
-} from "./src/lib/computer-use/live-view-origin";
 
 interface StaticHeader {
   key: string;

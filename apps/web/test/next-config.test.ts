@@ -67,6 +67,12 @@ test("next.config transpiles hosted workspace source packages instead of pinning
   assert.deepEqual(productionNextConfig.transpilePackages, [...WORKSPACE_SOURCE_PACKAGE_NAMES]);
 });
 
+test("next.config stays out of hosted web runtime source modules", () => {
+  const source = readFileSync(path.join(repoRoot, "apps/web/next.config.ts"), "utf8");
+
+  assert.doesNotMatch(source, /from ["']\.\/src\//u);
+});
+
 test("next.config exposes the non-secret Telegram username override to client bundles", () => {
   assert.deepEqual(
     buildHostedWebClientEnv(createProcessEnv({

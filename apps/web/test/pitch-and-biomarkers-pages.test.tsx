@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  getGeneratedHealthCommonsWebBiomarkerIndex: vi.fn(),
+  getGeneratedBiomarkerIndex: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
   shouldShowHomeDeviceSyncStep: vi.fn(),
   useBrowserVault: vi.fn(),
@@ -35,9 +35,8 @@ vi.mock("@/src/lib/browser-vault/context", () => ({
   useBrowserVault: mocks.useBrowserVault,
 }));
 
-vi.mock("@murphai/health-commons/runtime", () => ({
-  getGeneratedHealthCommonsWebBiomarkerIndex:
-    mocks.getGeneratedHealthCommonsWebBiomarkerIndex,
+vi.mock("@/src/lib/health-commons/generated-biomarker-artifacts", () => ({
+  getGeneratedBiomarkerIndex: mocks.getGeneratedBiomarkerIndex,
 }));
 
 vi.mock("@/src/lib/device-sync/home-onboarding", () => ({
@@ -68,7 +67,7 @@ beforeEach(() => {
     session: null,
   });
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(false);
-  mocks.getGeneratedHealthCommonsWebBiomarkerIndex.mockReturnValue({
+  mocks.getGeneratedBiomarkerIndex.mockReturnValue({
     biomarkers: [
       {
         aliases: ["Glycated hemoglobin"],

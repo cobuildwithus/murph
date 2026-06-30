@@ -12,11 +12,11 @@ import type {
 } from "@murphai/contracts";
 import {
   createHealthCommonsRouteBundleReader,
-  getGeneratedHealthCommonsWebBiomarkerIndex,
   loadGeneratedHealthCommonsWebRouteBundle,
   type HealthCommonsCatalogReader,
   type HealthCommonsEntity,
 } from "@murphai/health-commons/runtime";
+import { getGeneratedBiomarkerIndex } from "./generated-biomarker-artifacts";
 import {
   cleanHealthCommonsUserFacingCopy,
   cleanHealthCommonsUserFacingCopyList,
@@ -155,7 +155,7 @@ export function listHealthCommonsBiomarkerRoutes(
   catalog?: HealthCommonsCatalogReader,
 ): string[] {
   if (!catalog) {
-    return getGeneratedHealthCommonsWebBiomarkerIndex()
+    return getGeneratedBiomarkerIndex()
       .biomarkers
       .filter((entry) => entry.published)
       .map((entry) => entry.routeId)
