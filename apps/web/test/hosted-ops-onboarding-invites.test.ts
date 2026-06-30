@@ -431,12 +431,16 @@ describe("hosted ops onboarding invites", () => {
     });
   });
 
-  it("does not resend a native voice memo when the same request id is submitted again", async () => {
+  it("does not resend a native voice memo while the same request id is still in flight", async () => {
     prisma.hostedOpsOnboardingVoiceMemoSend.createMany
       .mockResolvedValueOnce({ count: 1 })
       .mockResolvedValueOnce({ count: 0 });
     prisma.hostedOpsOnboardingVoiceMemoSend.findFirst.mockResolvedValueOnce({
+      failedAt: null,
+      id: "voice_claim_123",
+      sendAttemptedAt: null,
       sentAt: null,
+      updatedAt: new Date(),
     });
 
     const voiceMemo = {
@@ -464,7 +468,11 @@ describe("hosted ops onboarding invites", () => {
     expect(prisma.hostedOpsOnboardingVoiceMemoSend.createMany).toHaveBeenCalledTimes(2);
     expect(prisma.hostedOpsOnboardingVoiceMemoSend.findFirst).toHaveBeenCalledWith({
       select: {
+        failedAt: true,
+        id: true,
+        sendAttemptedAt: true,
         sentAt: true,
+        updatedAt: true,
       },
       where: {
         linqChatLookupKey: "lookup:chat_existing",
@@ -475,6 +483,216 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(1);
     expect(replay.voiceMemo).toEqual({
+      error: "Voice memo delivery is already pending for this setup link request.",
+      requested: true,
+      sent: false,
+    });
+  });
+
+  it("retries a native voice memo after a pre-send upload failure", async () => {
+    prisma.hostedOpsOnboardingVoiceMemoSend.createMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    prisma.hostedOpsOnboardingVoiceMemoSend.findFirst.mockResolvedValueOnce({
+      failedAt: new Date("2026-06-29T10:00:00.000Z"),
+      id: "voice_claim_123",
+      sendAttemptedAt: null,
+      sentAt: null,
+      updatedAt: new Date("2026-06-29T10:00:00.000Z"),
+    });
+    mocks.uploadHostedLinqAttachment.mockRejectedValueOnce(
+      new Error("provider rejected upload"),
+    );
+
+    const voiceMemo = {
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "audio/x-m4a" as const,
+      extension: "m4a",
+      sizeBytes: 3,
+    };
+
+    const first = await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_existing",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-voice-upload-retry",
+      voiceMemo,
+    });
+    const retry = await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_existing",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-voice-upload-retry",
+      voiceMemo,
+    });
+
+    expect(first.voiceMemo).toEqual({
+      error: "Voice memo delivery failed after the setup link was sent.",
+      requested: true,
+      sent: false,
+    });
+    expect(prisma.hostedOpsOnboardingVoiceMemoSend.updateMany).toHaveBeenCalledWith({
+      data: {
+        failedAt: expect.any(Date),
+      },
+      where: {
+        id: expect.any(String),
+        sendAttemptedAt: null,
+        sentAt: null,
+      },
+    });
+    expect(prisma.hostedOpsOnboardingVoiceMemoSend.updateMany).toHaveBeenCalledWith({
+      data: {
+        failedAt: null,
+        updatedAt: expect.any(Date),
+      },
+      where: expect.objectContaining({
+        id: "voice_claim_123",
+        sendAttemptedAt: null,
+        sentAt: null,
+      }),
+    });
+    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(2);
+    expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(1);
+    expect(retry.voiceMemo).toEqual({
+      error: null,
+      requested: true,
+      sent: true,
+    });
+  });
+
+  it("reclaims stale pre-send voice memo claims without duplicating fresh claims", async () => {
+    prisma.hostedOpsOnboardingVoiceMemoSend.createMany.mockResolvedValueOnce({ count: 0 });
+    prisma.hostedOpsOnboardingVoiceMemoSend.findFirst.mockResolvedValueOnce({
+      failedAt: null,
+      id: "voice_claim_stale",
+      sendAttemptedAt: null,
+      sentAt: null,
+      updatedAt: new Date("2026-06-29T10:00:00.000Z"),
+    });
+
+    const result = await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_existing",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-voice-stale",
+      voiceMemo: {
+        bytes: new Uint8Array([1, 2, 3]),
+        contentType: "audio/x-m4a",
+        extension: "m4a",
+        sizeBytes: 3,
+      },
+    });
+
+    expect(prisma.hostedOpsOnboardingVoiceMemoSend.updateMany).toHaveBeenCalledWith({
+      data: {
+        failedAt: null,
+        updatedAt: expect.any(Date),
+      },
+      where: expect.objectContaining({
+        id: "voice_claim_stale",
+        sendAttemptedAt: null,
+        sentAt: null,
+      }),
+    });
+    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(1);
+    expect(result.voiceMemo).toEqual({
+      error: null,
+      requested: true,
+      sent: true,
+    });
+  });
+
+  it("does not resend a confirmed native voice memo replay", async () => {
+    prisma.hostedOpsOnboardingVoiceMemoSend.createMany.mockResolvedValueOnce({ count: 0 });
+    prisma.hostedOpsOnboardingVoiceMemoSend.findFirst.mockResolvedValueOnce({
+      failedAt: null,
+      id: "voice_claim_sent",
+      sendAttemptedAt: new Date("2026-06-29T10:00:00.000Z"),
+      sentAt: new Date("2026-06-29T10:00:01.000Z"),
+      updatedAt: new Date("2026-06-29T10:00:01.000Z"),
+    });
+
+    const result = await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_existing",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-voice-sent",
+      voiceMemo: {
+        bytes: new Uint8Array([1, 2, 3]),
+        contentType: "audio/x-m4a",
+        extension: "m4a",
+        sizeBytes: 3,
+      },
+    });
+
+    expect(mocks.uploadHostedLinqAttachment).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqVoiceMemo).not.toHaveBeenCalled();
+    expect(result.voiceMemo).toEqual({
+      error: null,
+      requested: true,
+      sent: true,
+    });
+  });
+
+  it("does not retry a native voice memo after the provider send boundary was reached", async () => {
+    prisma.hostedOpsOnboardingVoiceMemoSend.createMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    prisma.hostedOpsOnboardingVoiceMemoSend.findFirst.mockResolvedValueOnce({
+      failedAt: new Date("2026-06-29T10:00:01.000Z"),
+      id: "voice_claim_send_attempted",
+      sendAttemptedAt: new Date("2026-06-29T10:00:00.000Z"),
+      sentAt: null,
+      updatedAt: new Date("2026-06-29T10:00:01.000Z"),
+    });
+    mocks.sendHostedLinqVoiceMemo.mockRejectedValueOnce(
+      new Error("provider timed out after send request"),
+    );
+
+    const voiceMemo = {
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "audio/x-m4a" as const,
+      extension: "m4a",
+      sizeBytes: 3,
+    };
+
+    const first = await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_existing",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-voice-send-attempted",
+      voiceMemo,
+    });
+    const retry = await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_existing",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-voice-send-attempted",
+      voiceMemo,
+    });
+
+    expect(first.voiceMemo).toEqual({
+      error: "Voice memo delivery failed after the setup link was sent.",
+      requested: true,
+      sent: false,
+    });
+    expect(prisma.hostedOpsOnboardingVoiceMemoSend.updateMany).toHaveBeenCalledWith({
+      data: {
+        failedAt: expect.any(Date),
+      },
+      where: {
+        id: expect.any(String),
+        sendAttemptedAt: {
+          not: null,
+        },
+        sentAt: null,
+      },
+    });
+    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(1);
+    expect(retry.voiceMemo).toEqual({
       error: "Voice memo delivery is already pending for this setup link request.",
       requested: true,
       sent: false,
@@ -505,6 +723,7 @@ describe("hosted ops onboarding invites", () => {
       },
       where: {
         id: expect.any(String),
+        sendAttemptedAt: null,
         sentAt: null,
       },
     });

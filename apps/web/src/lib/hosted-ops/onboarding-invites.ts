@@ -37,6 +37,7 @@ export const HOSTED_OPS_ONBOARDING_VOICE_MEMO_MAX_BYTES = 10 * 1024 * 1024;
 
 const HOSTED_OPS_ONBOARDING_INVITE_MESSAGE_MAX_LENGTH = 1_800;
 const HOSTED_OPS_ONBOARDING_NEW_CHAT_OPENER_MAX_LENGTH = 320;
+const HOSTED_OPS_ONBOARDING_VOICE_MEMO_STALE_CLAIM_MS = 2 * 60_000;
 const HOSTED_OPS_ONBOARDING_REQUEST_ID_PATTERN = /^[A-Za-z0-9_.:-]{8,128}$/u;
 const HOSTED_OPS_ONBOARDING_LINQ_CHAT_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,256}$/u;
 const HOSTED_OPS_ONBOARDING_URLISH_PATTERN =
@@ -379,6 +380,8 @@ async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
         };
   }
 
+  let sendAttempted = false;
+
   try {
     const attachment = await uploadHostedLinqAttachment({
       bytes: input.request.voiceMemo.bytes,
@@ -388,6 +391,17 @@ async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
       ),
       sizeBytes: input.request.voiceMemo.sizeBytes,
     });
+
+    await input.prisma.hostedOpsOnboardingVoiceMemoSend.update({
+      data: {
+        failedAt: null,
+        sendAttemptedAt: new Date(),
+      },
+      where: {
+        id: claim.id,
+      },
+    });
+    sendAttempted = true;
 
     await sendHostedLinqVoiceMemo({
       attachmentId: attachment.attachmentId,
@@ -416,6 +430,15 @@ async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
       },
       where: {
         id: claim.id,
+        ...(sendAttempted
+          ? {
+              sendAttemptedAt: {
+                not: null,
+              },
+            }
+          : {
+              sendAttemptedAt: null,
+            }),
         sentAt: null,
       },
     });
@@ -474,7 +497,11 @@ async function claimHostedOpsOnboardingVoiceMemoSend(input: {
 
   const existing = await input.prisma.hostedOpsOnboardingVoiceMemoSend.findFirst({
     select: {
+      failedAt: true,
+      id: true,
+      sendAttemptedAt: true,
       sentAt: true,
+      updatedAt: true,
     },
     where: {
       linqChatLookupKey,
@@ -483,8 +510,62 @@ async function claimHostedOpsOnboardingVoiceMemoSend(input: {
     },
   });
 
+  if (!existing) {
+    return {
+      status: "already_claimed",
+    };
+  }
+
+  if (existing.sentAt) {
+    return {
+      status: "already_sent",
+    };
+  }
+
+  if (existing.sendAttemptedAt) {
+    return {
+      status: "already_claimed",
+    };
+  }
+
+  const staleBefore = new Date(Date.now() - HOSTED_OPS_ONBOARDING_VOICE_MEMO_STALE_CLAIM_MS);
+  const canReclaim = Boolean(existing.failedAt) || existing.updatedAt < staleBefore;
+
+  if (canReclaim) {
+    const reclaimed = await input.prisma.hostedOpsOnboardingVoiceMemoSend.updateMany({
+      data: {
+        failedAt: null,
+        updatedAt: new Date(),
+      },
+      where: {
+        id: existing.id,
+        sendAttemptedAt: null,
+        sentAt: null,
+        OR: [
+          {
+            failedAt: {
+              not: null,
+            },
+          },
+          {
+            updatedAt: {
+              lt: staleBefore,
+            },
+          },
+        ],
+      },
+    });
+
+    if (reclaimed.count === 1) {
+      return {
+        id: existing.id,
+        status: "claimed",
+      };
+    }
+  }
+
   return {
-    status: existing?.sentAt ? "already_sent" : "already_claimed",
+    status: "already_claimed",
   };
 }
 

@@ -846,6 +846,7 @@ model HostedOpsOnboardingVoiceMemoSend {
   linqChatLookupKey String       @map("linq_chat_lookup_key")
   requestId         String       @map("request_id")
   sentAt            DateTime?    @map("sent_at")
+  sendAttemptedAt   DateTime?    @map("send_attempted_at")
   failedAt          DateTime?    @map("failed_at")
   createdAt         DateTime     @default(now()) @map("created_at")
   updatedAt         DateTime     @updatedAt @map("updated_at")

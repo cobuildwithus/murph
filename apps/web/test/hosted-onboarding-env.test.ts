@@ -21,6 +21,7 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.privyVerificationKey).toBe("privy-verification-key");
     expect(environment.inviteTtlHours).toBe(24 * 7);
     expect(environment.linqMaxActiveMembersPerConversationPhone).toBe(1000);
+    expect(environment.linqAttachmentUploadAllowedHosts).toEqual([]);
     expect(environment.linqFirstContactAdmissionMode).toBe("off");
     expect(environment.linqFirstContactAdmissionModel).toBe("gpt-5.5");
     expect(environment.linqFirstContactAdmissionOpenAiApiKey).toBeNull();
@@ -37,6 +38,8 @@ describe("readHostedOnboardingEnvironment", () => {
       HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS: "+15550000001, +1 (555) 000-0002",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         "+1 (555) 000-0003, +15550000003",
+      HOSTED_ONBOARDING_LINQ_ATTACHMENT_UPLOAD_ALLOWED_HOSTS:
+        "uploads.linq.example.test, uploads2.linq.example.test.",
       HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER: "250",
       HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE: "enforce",
       HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODEL: "gpt-5.4-mini",
@@ -54,6 +57,10 @@ describe("readHostedOnboardingEnvironment", () => {
     ]);
     expect(environment.linqLocalAllowedInboundPhoneNumbers).toEqual([
       "+15550000003",
+    ]);
+    expect(environment.linqAttachmentUploadAllowedHosts).toEqual([
+      "uploads.linq.example.test",
+      "uploads2.linq.example.test",
     ]);
     expect(environment.linqMaxActiveMembersPerConversationPhone).toBe(250);
     expect(environment.linqFirstContactAdmissionMode).toBe("enforce");
@@ -130,6 +137,14 @@ describe("readHostedOnboardingEnvironment", () => {
         HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE: "shadow",
       })),
     ).toThrow(/FIRST_CONTACT_ADMISSION_MODE/u);
+  });
+
+  it("rejects IP literal Linq attachment upload hosts", () => {
+    expect(() =>
+      readHostedOnboardingEnvironment(createProcessEnv({
+        HOSTED_ONBOARDING_LINQ_ATTACHMENT_UPLOAD_ALLOWED_HOSTS: "169.254.169.254",
+      })),
+    ).toThrow(/bare public hostnames/u);
   });
 
   it("falls back to OPENAI_API_KEY for Linq first-contact admission", () => {
