@@ -426,6 +426,9 @@ export async function runHostedWorkspaceAssistantPhase(
         try {
           return await runHostedAssistantAutomationLane({
             assistantRuntimeState,
+            ...(automationExecutionContext.deviceSyncStatusPromptAttached
+              ? { deferActiveTurnInput: true }
+              : {}),
             executionContext: automationExecutionContext.executionContext,
             freshAssistantInputIds,
             requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
@@ -483,24 +486,9 @@ export async function runHostedWorkspaceAssistantPhase(
           : { redactedLogEntries: [...assistantAutomationRedactedLogEntries] }),
       };
     };
-    const rerunWithoutDeviceSyncContextAfterActiveTurn = async (
-      metrics: Awaited<ReturnType<typeof runAutomationLane>>,
-    ): Promise<Awaited<ReturnType<typeof runAutomationLane>>> => {
-      if (
-        metrics.deviceSyncStatusPromptAttached !== true
-        || metrics.activeTurnInputIngested !== true
-      ) {
-        return metrics;
-      }
-
-      return await runAutomationLane({
-        includeDeviceSyncStatusPrompt: false,
-      });
-    };
     let assistantMetrics = await runAutomationLane({
       includeDeviceSyncStatusPrompt: await shouldIncludeDeviceSyncStatusPrompt(),
     });
-    assistantMetrics = await rerunWithoutDeviceSyncContextAfterActiveTurn(assistantMetrics);
     let currentTurnDeliveryIntentIds =
       assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
     let foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
@@ -542,7 +530,6 @@ export async function runHostedWorkspaceAssistantPhase(
           systemMailboxMaintenance: deferredPendingSystemMailboxMaintenance,
         }),
       });
-      assistantMetrics = await rerunWithoutDeviceSyncContextAfterActiveTurn(assistantMetrics);
       currentTurnDeliveryIntentIds =
         assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
       foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({

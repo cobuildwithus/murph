@@ -50,6 +50,13 @@ vi.mock("../src/device-sync-service.ts", () => ({
 }));
 
 vi.mock("@murphai/assistant-engine", () => ({
+  AssistantActiveTurnInputUnavailableError: class AssistantActiveTurnInputUnavailableError
+    extends Error {
+    constructor(message?: string) {
+      super(message);
+      this.name = "AssistantActiveTurnInputUnavailableError";
+    }
+  },
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT: 50,
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_SCHEMA:
     "murph.assistant-context-diagnostics.v1",
@@ -635,6 +642,88 @@ describe("runHostedAssistantAutomation", () => {
       }),
     );
     expect(mocks.initInboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("defers active-turn input before dynamic-context delivery can be committed", async () => {
+    const listNewConversationInputs = vi.fn(async (query) => ({
+      inputs: [
+        {
+          acceptedInput: {
+            id: "request-1",
+            source: "assistant-input",
+          },
+          event: {
+            inputId: "request-1",
+          },
+        },
+      ],
+      nextCursor: query.afterCursor ?? null,
+    }));
+    mocks.createHostedAssistantInputSource.mockReturnValueOnce({
+      listInputCandidates: vi.fn(async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      })),
+      listNewConversationInputs,
+      refresh: vi.fn(async () => ({
+        progressed: true,
+        reason: "ingested_input",
+      })),
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await expect(input.inputSource?.listNewConversationInputs({
+        conversation: {
+          accountId: "acct_1",
+          actorId: "actor_1",
+          actorIsSelf: false,
+          source: "linq",
+          threadId: "thread_1",
+          threadIsDirect: true,
+        },
+      })).rejects.toMatchObject({
+        name: "AssistantActiveTurnInputUnavailableError",
+      });
+      return {
+        currentTurnDeliveryIntentIds: [],
+        nextWakeAt: "2026-04-23T00:00:30.000Z",
+        progressed: true,
+        replies: {
+          considered: 1,
+          failed: 0,
+          replied: 0,
+          skipped: 1,
+        },
+      };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_dynamic_context_active_turn_input",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_dynamic_context_active_turn_input",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      undefined,
+      undefined,
+      undefined,
+      {
+        deferActiveTurnInput: true,
+      },
+    );
+
+    expect(result.currentTurnDeliveryIntentIds).toEqual([]);
+    expect(result.timings?.activeTurnInputIngested).toBe(true);
+    expect(listNewConversationInputs).toHaveBeenCalledTimes(1);
   });
 
   it("records metadata-only candidate query diagnostics for scanner misses", async () => {

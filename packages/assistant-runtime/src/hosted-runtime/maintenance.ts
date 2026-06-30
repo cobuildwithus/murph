@@ -12,6 +12,7 @@ import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import { sanitizeHostedRuntimeErrorText } from "@murphai/device-syncd/hosted-runtime";
 import {
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+  AssistantActiveTurnInputUnavailableError,
   type AssistantExecutionContext,
   type AssistantInputCandidateBatch,
   type AssistantInputCandidateQuery,
@@ -181,6 +182,7 @@ export async function runHostedAssistantAutomationLane(input: {
   operatorHomeRoot?: string | null;
   runtimeAttemptId?: string | null;
   assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
+  deferActiveTurnInput?: boolean;
   runtimeEnv?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
@@ -217,6 +219,7 @@ export async function runHostedAssistantAutomationLane(input: {
           vaultRoot: input.vaultRoot,
         }),
         {
+          deferActiveTurnInput: input.deferActiveTurnInput ?? false,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
         },
@@ -266,6 +269,7 @@ export async function runHostedAssistantAutomation(
   signal?: AbortSignal,
   turnEnvironment?: AssistantTurnEnvironment | null,
   options?: {
+    deferActiveTurnInput?: boolean | null;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     runtimeAttemptId?: string | null;
   },
@@ -349,6 +353,11 @@ export async function runHostedAssistantAutomation(
       const result = await baseInputSource.listNewConversationInputs(query);
       if (result.inputs.length > 0) {
         activeTurnInputIngested = true;
+        if (options?.deferActiveTurnInput === true) {
+          throw new AssistantActiveTurnInputUnavailableError(
+            "same-conversation input arrived during a background dynamic-context turn; retry without dynamic context.",
+          );
+        }
       }
       if (redactedInputQueryLogCount < HOSTED_ASSISTANT_INPUT_QUERY_REDACTED_LOG_LIMIT) {
         redactedLogEntries.push(emitHostedRuntimeRedactedLog({
