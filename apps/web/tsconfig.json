@@ -244,6 +244,9 @@
       "@murphai/device-syncd/provider-match": [
         "packages/device-syncd/src/provider-match.ts"
       ],
+      "@murphai/device-syncd/public-account": [
+        "packages/device-syncd/src/public-account.ts"
+      ],
       "@murphai/device-syncd/providers/junction-client": [
         "packages/device-syncd/src/providers/junction-client.ts"
       ],
