@@ -239,7 +239,12 @@ const resolveHostedLocalLinqWebhookSetup = vi.fn<
     env: NodeJS.ProcessEnv;
   }) => Promise<HostedLocalLinqWebhookSetup | null>
 >(async () => null);
-const registerHostedLocalLinqWebhookSubscription = vi.fn(async () => {});
+const registerHostedLocalLinqWebhookSubscription = vi.fn(
+  async (input: { env: NodeJS.ProcessEnv }) => ({
+    webhookSecret: input.env.LINQ_WEBHOOK_SECRET ?? "linq-webhook-secret",
+    webhookSecretSource: "configured" as const,
+  }),
+);
 const STUB_ID_TOKEN = buildFakeJwtPayload({ iss: "https://auth.openai.com", sub: "user-1" });
 const STUB_CODEX_SUBSCRIPTION_AUTH_JSON = Buffer.from(
   JSON.stringify({
@@ -2290,6 +2295,10 @@ describe("hosted local dev stack", () => {
       throw new Error("Linq webhook target readiness GET should not run.");
     });
     vi.stubGlobal("fetch", fetchMock);
+    registerHostedLocalLinqWebhookSubscription.mockResolvedValueOnce({
+      webhookSecret: "linq-provider-secret",
+      webhookSecretSource: "created",
+    });
 
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
@@ -2325,10 +2334,19 @@ describe("hosted local dev stack", () => {
       }),
       expect.any(Object),
     );
+    expect(spawnChildProcess).toHaveBeenCalledWith(
+      "web",
+      "pnpm",
+      expect.any(Array),
+      expect.objectContaining({
+        LINQ_WEBHOOK_SECRET: "linq-provider-secret",
+      }),
+      expect.any(Object),
+    );
     expect(registerHostedLocalLinqWebhookSubscription).toHaveBeenCalledWith({
       env: expect.objectContaining({
         LINQ_API_TOKEN: "linq-token",
-        LINQ_WEBHOOK_SECRET: "linq-webhook-secret",
+        LINQ_WEBHOOK_SECRET: "linq-provider-secret",
       }),
       registrationCachePath: ".tmp/linq-webhook-registration.json",
       setup: expect.objectContaining({
@@ -2345,9 +2363,10 @@ describe("hosted local dev stack", () => {
       args[2] === "cloudflare-dev/runnercontainer:be003199"
     );
     expect(runnerImageInspectCallIndex).toBeGreaterThanOrEqual(0);
-    expect(
-      spawnSync.mock.invocationCallOrder[runnerImageInspectCallIndex] ?? Number.POSITIVE_INFINITY,
-    ).toBeLessThan(registerHostedLocalLinqWebhookSubscription.mock.invocationCallOrder[0]);
+    const webSpawnCallIndex = spawnChildProcess.mock.calls.findIndex(([name]) => name === "web");
+    expect(webSpawnCallIndex).toBeGreaterThanOrEqual(0);
+    expect(registerHostedLocalLinqWebhookSubscription.mock.invocationCallOrder[0])
+      .toBeLessThan(spawnChildProcess.mock.invocationCallOrder[webSpawnCallIndex] ?? 0);
     expect(stack.processes.linqTunnel?.name).toBe("linq-tunnel");
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(3);
   });
