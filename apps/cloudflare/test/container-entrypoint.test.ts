@@ -2869,6 +2869,16 @@ describe("startHostedContainerEntrypoint", () => {
     expect(consumeCliBridgeOffInvocationViolation).toHaveBeenCalledTimes(2);
     expect(stopWarmCodex).toHaveBeenCalledTimes(1);
     expect(stopWarmCodex).toHaveBeenCalledWith("cli-bridge-off-invocation-request");
+    expect(mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)).toContainEqual(expect.objectContaining({
+        details: expect.objectContaining({
+          warmCodexExpectedRootPresentBeforeStop: false,
+          warmCodexExpectedRootSnapshotStatus: "available",
+          warmCodexStopReason: "cli-bridge-off-invocation-request",
+          warmCodexStopStatus: "completed",
+        }),
+        message: "Hosted container warm Codex stop completed.",
+      }));
     const stopCallOrder = stopWarmCodex.mock.invocationCallOrder.at(0);
     const runnerCallOrder = runnerSpy.mock.invocationCallOrder.at(0);
     if (stopCallOrder === undefined || runnerCallOrder === undefined) {
@@ -2919,12 +2929,84 @@ describe("startHostedContainerEntrypoint", () => {
     expect(consumeCliBridgeOffInvocationViolation).toHaveBeenCalledTimes(2);
     expect(stopWarmCodex).toHaveBeenCalledTimes(1);
     expect(stopWarmCodex).toHaveBeenCalledWith("cli-bridge-off-invocation-request");
+    expect(mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)).toContainEqual(expect.objectContaining({
+        details: expect.objectContaining({
+          warmCodexExpectedRootPresentBeforeStop: false,
+          warmCodexExpectedRootSnapshotStatus: "available",
+          warmCodexStopReason: "cli-bridge-off-invocation-request",
+          warmCodexStopStatus: "completed",
+        }),
+        message: "Hosted container warm Codex stop completed.",
+      }));
     const runnerCallOrder = runnerSpy.mock.invocationCallOrder.at(0);
     const stopCallOrder = stopWarmCodex.mock.invocationCallOrder.at(0);
     if (runnerCallOrder === undefined || stopCallOrder === undefined) {
       throw new Error("Expected runner invocation and warm Codex stop call order.");
     }
     expect(runnerCallOrder).toBeLessThan(stopCallOrder);
+  });
+
+  it("logs warm Codex stop failures without raw process details", async () => {
+    const consumeCliBridgeOffInvocationViolation = vi.fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const stopWarmCodex = vi.fn(async () => {
+      throw new Error("warm stop failed");
+    });
+    const snapshotExpectedCodexRootProcess = vi.fn(async () => {
+      throw new Error("snapshot unavailable");
+    });
+    const exitScheduler = vi.fn();
+    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(
+      buildWorkspaceRunnerResult(),
+    );
+
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        consumeCliBridgeOffInvocationViolation,
+        exitScheduler,
+        snapshotExpectedCodexRootProcess,
+        stopWarmCodex,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_cli_bridge_stop_failure",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(500);
+    expect(exitScheduler).toHaveBeenCalledTimes(1);
+    expect(runnerSpy).not.toHaveBeenCalled();
+    expect(stopWarmCodex).toHaveBeenCalledWith("cli-bridge-off-invocation-request");
+    expect(mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)).toContainEqual(expect.objectContaining({
+        details: expect.objectContaining({
+          errorName: "Error",
+          warmCodexExpectedRootPresentBeforeStop: null,
+          warmCodexExpectedRootSnapshotStatus: "failed",
+          warmCodexStopReason: "cli-bridge-off-invocation-request",
+          warmCodexStopStatus: "failed",
+        }),
+        message: "Hosted container failed to stop warm Codex after an off-invocation CLI bridge request.",
+      }));
   });
 
   it("allows only the verified warm Codex root process during cleanup", async () => {
@@ -3030,6 +3112,17 @@ describe("startHostedContainerEntrypoint", () => {
     expect(kill).not.toHaveBeenCalledWith(codexPid, "SIGKILL");
     expect(kill).toHaveBeenCalledWith(codexChildPid, "SIGKILL");
     expect(readdir).toHaveBeenCalledTimes(3);
+    expect(mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input)).toContainEqual(expect.objectContaining({
+        details: expect.objectContaining({
+          processIsolationCleanupStatus: "passed",
+          processIsolationExpectedCodexRootPresent: true,
+          processIsolationExpectedCodexRootSnapshotStatus: "available",
+          processIsolationKilledExpectedCodexRoot: false,
+          processIsolationKilledProcessCount: 1,
+        }),
+        message: "Hosted container process isolation cleanup completed.",
+      }));
   });
 
   it("rejects an expected warm Codex root when the live command line changes", async () => {
@@ -3122,6 +3215,104 @@ describe("startHostedContainerEntrypoint", () => {
     expect(kill).toHaveBeenCalledWith(codexPid, "SIGKILL");
     expect(stopWarmCodex).toHaveBeenCalledTimes(1);
     expect(stopWarmCodex).toHaveBeenCalledWith("expected-root-rejected");
+    const logInputs = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input);
+    expect(logInputs).toContainEqual(expect.objectContaining({
+      details: expect.objectContaining({
+        processIsolationCleanupStatus: "passed",
+        processIsolationExpectedCodexRootPresent: true,
+        processIsolationExpectedCodexRootSnapshotStatus: "available",
+        processIsolationKilledExpectedCodexRoot: true,
+        processIsolationKilledProcessCount: 1,
+      }),
+      message: "Hosted container process isolation cleanup completed.",
+    }));
+    expect(logInputs).toContainEqual(expect.objectContaining({
+      details: expect.objectContaining({
+        warmCodexExpectedRootSnapshotStatus: "available",
+        warmCodexStopReason: "expected-root-rejected",
+        warmCodexStopStatus: "completed",
+      }),
+      message: "Hosted container warm Codex stop completed.",
+    }));
+  });
+
+  it("logs process-isolation snapshot failures without process details", async () => {
+    const readFile = vi.fn(async (filePath: string) => {
+      if (String(filePath).endsWith(`/${process.pid}/stat`)) {
+        return `${process.pid} (node) S 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 999 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      if (String(filePath).endsWith(`/${process.pid}/status`)) {
+        return "Name:\tnode\nUid:\t1000\t1000\t1000\t1000\n";
+      }
+
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    });
+    const readdir = vi.fn(async () => [
+      { isDirectory: () => true, name: String(process.pid) },
+    ]);
+    const snapshotExpectedCodexRootProcess = vi.fn(async () => {
+      throw new Error("snapshot unavailable");
+    });
+    const stopWarmCodex = vi.fn(async () => undefined);
+    vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockResolvedValue(
+      buildWorkspaceRunnerResult(),
+    );
+
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        processApi: { kill: vi.fn(), readFile, readdir },
+        processIsolation: true,
+        snapshotExpectedCodexRootProcess,
+        stopWarmCodex,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify(buildJobBody({
+        wake: {
+          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
+          eventId: "evt_process_isolation_snapshot_failure",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      })),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(500);
+    expect(stopWarmCodex).toHaveBeenCalledWith("process-isolation-failed");
+    const logInputs = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([input]) => input);
+    expect(logInputs).toContainEqual(expect.objectContaining({
+      details: expect.objectContaining({
+        processIsolationCleanupStatus: "failed",
+        processIsolationExpectedCodexRootPresent: false,
+        processIsolationExpectedCodexRootSnapshotStatus: "failed",
+        processIsolationKilledExpectedCodexRoot: false,
+        processIsolationKilledProcessCount: 0,
+      }),
+      message: "Hosted container process isolation cleanup completed.",
+    }));
+    expect(logInputs).toContainEqual(expect.objectContaining({
+      details: expect.objectContaining({
+        warmCodexExpectedRootPresentBeforeStop: null,
+        warmCodexExpectedRootSnapshotStatus: "failed",
+        warmCodexStopReason: "process-isolation-failed",
+        warmCodexStopStatus: "completed",
+      }),
+      message: "Hosted container warm Codex stop completed.",
+    }));
   });
 
   it("runs warm-container cleanup after a failed runner job", async () => {

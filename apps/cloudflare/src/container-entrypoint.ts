@@ -325,6 +325,12 @@ interface HostedContainerProcessIsolationResult {
   killedPids: number[];
 }
 
+type HostedWarmCodexStopReason =
+  | "cli-bridge-off-invocation-request"
+  | "container-server-close"
+  | "expected-root-rejected"
+  | "process-isolation-failed";
+
 interface HostedContainerRuntimeWakeRequest {
   attemptId: string;
   leaseGeneration: string;
@@ -1035,16 +1041,10 @@ export async function startHostedContainerEntrypoint(input: {
         userId: null,
       });
     });
-    void runtime.stopWarmCodex("container-server-close").catch((error) => {
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: buildHostedContainerRunnerJobErrorMetadata(error),
-        level: "warn",
-        message: "Hosted container entrypoint failed to stop warm Codex on server close.",
-        phase: "failed",
-        userId: null,
-      });
-    });
+    void stopWarmCodexWithLifecycleLog(runtime, {
+      failureMessage: "Hosted container entrypoint failed to stop warm Codex on server close.",
+      reason: "container-server-close",
+    }).catch(() => undefined);
   });
 
   let containerShutdownExitStarted = false;
@@ -3099,23 +3099,120 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
   } finally {
     await stopWarmCodexAfterCliBridgeOffInvocationViolation(runtime, options);
     if (processBaseline) {
+      let expectedCodexRoot: HostedExpectedCodexRootProcess | null = null;
+      let expectedCodexRootSnapshotStatus: "available" | "failed" = "available";
+      let expectedCodexRootSnapshotCompleted = false;
       try {
-        const expectedCodexRoot = await runtime.snapshotExpectedCodexRootProcess();
+        expectedCodexRoot = await runtime.snapshotExpectedCodexRootProcess();
+        expectedCodexRootSnapshotCompleted = true;
         const cleanupResult = await enforceHostedContainerProcessIsolation(
           runtime.processApi,
           processBaseline,
           expectedCodexRoot,
         );
+        logHostedProcessIsolationCleanup({
+          killedExpectedCodexRoot: cleanupResult.killedExpectedCodexRoot,
+          killedProcessCount: cleanupResult.killedPids.length,
+          expectedCodexRootPresent: expectedCodexRoot !== null,
+          expectedCodexRootSnapshotStatus,
+          status: "passed",
+        });
         if (cleanupResult.killedExpectedCodexRoot) {
-          await runtime.stopWarmCodex("expected-root-rejected").catch(() => undefined);
+          await stopWarmCodexWithLifecycleLog(runtime, {
+            reason: "expected-root-rejected",
+          }).catch(() => undefined);
         }
         options?.onCleanupStatus?.("passed");
       } catch (error) {
-        await runtime.stopWarmCodex("process-isolation-failed").catch(() => undefined);
+        if (!expectedCodexRootSnapshotCompleted) {
+          expectedCodexRootSnapshotStatus = "failed";
+        }
+        logHostedProcessIsolationCleanup({
+          killedExpectedCodexRoot: false,
+          killedProcessCount: 0,
+          expectedCodexRootPresent: expectedCodexRoot !== null,
+          expectedCodexRootSnapshotStatus,
+          status: "failed",
+        });
+        await stopWarmCodexWithLifecycleLog(runtime, {
+          reason: "process-isolation-failed",
+        }).catch(() => undefined);
         options?.onCleanupStatus?.("failed");
         throw error;
       }
     }
+  }
+}
+
+function logHostedProcessIsolationCleanup(input: {
+  expectedCodexRootPresent: boolean;
+  expectedCodexRootSnapshotStatus: "available" | "failed";
+  killedExpectedCodexRoot: boolean;
+  killedProcessCount: number;
+  status: "failed" | "passed";
+}): void {
+  emitHostedExecutionStructuredLog({
+    component: "container",
+    details: {
+      processIsolationCleanupStatus: input.status,
+      processIsolationExpectedCodexRootPresent: input.expectedCodexRootPresent,
+      processIsolationExpectedCodexRootSnapshotStatus: input.expectedCodexRootSnapshotStatus,
+      processIsolationKilledExpectedCodexRoot: input.killedExpectedCodexRoot,
+      processIsolationKilledProcessCount: input.killedProcessCount,
+    },
+    level: input.status === "passed" ? "info" : "warn",
+    message: "Hosted container process isolation cleanup completed.",
+    phase: input.status === "passed" ? "wake.running" : "failed",
+    userId: null,
+  });
+}
+
+async function stopWarmCodexWithLifecycleLog(
+  runtime: HostedContainerRuntimeDependencies,
+  input: {
+    failureMessage?: string;
+    reason: HostedWarmCodexStopReason;
+  },
+): Promise<void> {
+  let expectedCodexRootPresent: boolean | null = null;
+  let expectedCodexRootSnapshotStatus: "available" | "failed" = "available";
+  try {
+    expectedCodexRootPresent = (await runtime.snapshotExpectedCodexRootProcess()) !== null;
+  } catch {
+    expectedCodexRootSnapshotStatus = "failed";
+  }
+
+  try {
+    await runtime.stopWarmCodex(input.reason);
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      details: {
+        warmCodexExpectedRootPresentBeforeStop: expectedCodexRootPresent,
+        warmCodexExpectedRootSnapshotStatus: expectedCodexRootSnapshotStatus,
+        warmCodexStopReason: input.reason,
+        warmCodexStopStatus: "completed",
+      },
+      level: "info",
+      message: "Hosted container warm Codex stop completed.",
+      phase: "wake.running",
+      userId: null,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      details: {
+        ...buildHostedContainerRunnerJobErrorMetadata(error),
+        warmCodexExpectedRootPresentBeforeStop: expectedCodexRootPresent,
+        warmCodexExpectedRootSnapshotStatus: expectedCodexRootSnapshotStatus,
+        warmCodexStopReason: input.reason,
+        warmCodexStopStatus: "failed",
+      },
+      level: "warn",
+      message: input.failureMessage ?? "Hosted container failed to stop warm Codex.",
+      phase: "failed",
+      userId: null,
+    });
+    throw error;
   }
 }
 
@@ -3131,7 +3228,11 @@ async function stopWarmCodexAfterCliBridgeOffInvocationViolation(
   }
 
   try {
-    await runtime.stopWarmCodex("cli-bridge-off-invocation-request");
+    await stopWarmCodexWithLifecycleLog(runtime, {
+      failureMessage:
+        "Hosted container failed to stop warm Codex after an off-invocation CLI bridge request.",
+      reason: "cli-bridge-off-invocation-request",
+    });
   } catch (error) {
     options?.onCleanupStatus?.("failed");
     throw new HostedRunnerShellIsolationError(
