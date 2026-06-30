@@ -2981,13 +2981,13 @@ async function runProviderCleanupPhase(input: {
     : input.initialProviderCleanupCheckpoint;
   const providerCleanupDue = !input.foregroundAssistantPass
     && isHostedProviderCleanupCheckpointDue(providerCleanupCheckpoint, input.input);
-  const deferredProviderCleanupWakeAt = input.foregroundAssistantPass
-    ? resolveHostedForegroundDeferredProviderCleanupWakeAt({
-        checkpoint: providerCleanupCheckpoint,
-        input: input.input,
-        terminalLinqCleanupPending: input.terminalLinqCleanup.linqMessageIds.length > 0,
-      })
-    : null;
+  const deferredProviderCleanupWakeAt = resolveHostedProviderCleanupPhaseWakeAt({
+    checkpoint: providerCleanupCheckpoint,
+    foregroundAssistantPass: input.foregroundAssistantPass,
+    input: input.input,
+    providerCleanupDue,
+    terminalLinqCleanupPending: input.terminalLinqCleanup.linqMessageIds.length > 0,
+  });
   return {
     deferredProviderCleanupWakeAt,
     providerCleanupCheckpoint,
@@ -5173,17 +5173,24 @@ function resolveHostedFastDispatchBaseNextWake(input: {
   ]);
 }
 
-function resolveHostedForegroundDeferredProviderCleanupWakeAt(input: {
+function resolveHostedProviderCleanupPhaseWakeAt(input: {
   checkpoint: HostedProviderCleanupCheckpoint | null;
+  foregroundAssistantPass: boolean;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  providerCleanupDue: boolean;
   terminalLinqCleanupPending: boolean;
 }): string | null {
+  if (input.providerCleanupDue) {
+    return null;
+  }
+
   const nowMs = resolveHostedAssistantPhaseNowMs(input.input);
-  const terminalCleanupWakeAt = input.terminalLinqCleanupPending
+  const terminalCleanupWakeAt = input.foregroundAssistantPass && input.terminalLinqCleanupPending
     ? resolveHostedProviderCleanupDeferredWakeAt({ nowMs })
     : null;
-  const checkpointWakeAt = resolveHostedForegroundProviderCleanupCheckpointWakeAt({
+  const checkpointWakeAt = resolveHostedProviderCleanupCheckpointWakeAt({
     checkpoint: input.checkpoint,
+    deferDueOrInvalid: input.foregroundAssistantPass,
     nowMs,
   });
   return selectHostedRuntimeWakeCandidate([
@@ -5192,8 +5199,9 @@ function resolveHostedForegroundDeferredProviderCleanupWakeAt(input: {
   ]).at;
 }
 
-function resolveHostedForegroundProviderCleanupCheckpointWakeAt(input: {
+function resolveHostedProviderCleanupCheckpointWakeAt(input: {
   checkpoint: HostedProviderCleanupCheckpoint | null;
+  deferDueOrInvalid: boolean;
   nowMs: number;
 }): string | null {
   if (!input.checkpoint) {
@@ -5203,9 +5211,11 @@ function resolveHostedForegroundProviderCleanupCheckpointWakeAt(input: {
   const checkpointWakeAt = input.checkpoint.nextWakeAt ?? null;
   const checkpointWakeMs = Date.parse(checkpointWakeAt ?? "");
   if (!Number.isFinite(checkpointWakeMs) || checkpointWakeMs <= input.nowMs) {
-    return resolveHostedProviderCleanupDeferredWakeAt({
-      nowMs: input.nowMs,
-    });
+    return input.deferDueOrInvalid
+      ? resolveHostedProviderCleanupDeferredWakeAt({
+          nowMs: input.nowMs,
+        })
+      : null;
   }
 
   return checkpointWakeAt;

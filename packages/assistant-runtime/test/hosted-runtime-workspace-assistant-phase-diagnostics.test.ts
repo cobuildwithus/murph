@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
+  resolveHostedProviderCleanupDeferredWakeAt: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
   resolveHostedSystemMailboxNextWakeCandidate: vi.fn(),
   resolveHostedSystemMailboxNextWakeAt: vi.fn(),
@@ -87,6 +88,8 @@ vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
   drainHostedProviderCleanupAfterCommit: mocks.drainHostedProviderCleanupAfterCommit,
   recordHostedProviderCleanupBeforeCommit: mocks.recordHostedProviderCleanupBeforeCommit,
   readHostedProviderCleanupCheckpoint: mocks.readHostedProviderCleanupCheckpoint,
+  resolveHostedProviderCleanupDeferredWakeAt:
+    mocks.resolveHostedProviderCleanupDeferredWakeAt,
 }));
 
 vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
@@ -150,6 +153,13 @@ beforeEach(() => {
     recorded: 1,
   });
   mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue(null);
+  mocks.resolveHostedProviderCleanupDeferredWakeAt.mockImplementation((input = {}) => {
+    const record = input as { nowMs?: number | null };
+    const nowMs = Number.isFinite(record.nowMs)
+      ? Number(record.nowMs)
+      : Date.parse("2026-04-27T00:00:00.000Z");
+    return new Date(nowMs + 5 * 60_000).toISOString();
+  });
   mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(null);
   mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(null);
   mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(async () => {

@@ -60,6 +60,35 @@ test("hosted provider cleanup records checkpoint state and unique Linq ids in ru
   }
 });
 
+test("hosted provider cleanup preserves an earlier existing checkpoint when appending ids", async () => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+
+  try {
+    await recordHostedProviderCleanupBeforeCommit({
+      linqMessageIds: ["linq_inbound_1"],
+      checkpoint: {
+        nextWakeAt: "2026-07-01T00:10:00.000Z",
+      },
+      vaultRoot,
+    });
+    await recordHostedProviderCleanupBeforeCommit({
+      linqMessageIds: ["linq_inbound_2"],
+      checkpoint: {
+        nextWakeAt: "2026-07-01T00:30:00.000Z",
+      },
+      vaultRoot,
+    });
+
+    assert.deepEqual(await readHostedProviderCleanupCheckpoint(vaultRoot), {
+      nextWakeAt: "2026-07-01T00:10:00.000Z",
+    });
+    const raw = await readHostedProviderCleanupFile(vaultRoot);
+    assert.deepEqual(raw.linqMessageIds, ["linq_inbound_1", "linq_inbound_2"]);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("hosted provider cleanup deletes persisted and delivered Linq ids after commit", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
 
