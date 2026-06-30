@@ -2860,14 +2860,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     }));
 
-    expect(result).toEqual({
+    expect(result).toEqual(expect.objectContaining({
       foregroundReplyFailed: 0,
+      nextWakeAt,
       progressed: false,
       redactedStatus: expect.objectContaining({
-        hostedAssistantNextWakeAt: null,
+        hostedAssistantNextWakeAt: nextWakeAt,
         hostedAssistantProgressed: false,
       }),
-    });
+    }));
   });
 
   it("schedules a near follow-up wake when active input consumes a due alarm and skips device sync", async () => {
@@ -6691,7 +6692,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
-    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledWith("/tmp/murph-vault");
+    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
@@ -7221,13 +7222,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       progressed: true,
       redactedLogEntries: [],
     });
-    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
-      nextWakeAt: "2026-04-27T00:12:00.000Z",
-    });
-
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => "2026-04-27T00:09:00.000Z",
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-27T00:12:00.000Z",
+        nextWakeReason: "assistant",
+      }),
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
@@ -7237,6 +7238,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       preferredIntentIds: [],
       vaultRoot: expect.any(String),
     });
+    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({

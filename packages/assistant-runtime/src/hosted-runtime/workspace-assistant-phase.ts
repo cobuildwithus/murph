@@ -592,6 +592,7 @@ export async function runHostedWorkspaceAssistantPhase(
         assistantMetrics,
         currentTurnDeliveryIntentIds,
         deferredProviderCleanupWakeAt: providerCleanupPhase.deferredProviderCleanupWakeAt,
+        foregroundWorkspaceWake: createFutureExistingHostedAssistantWorkspaceWakeCandidate(input),
         input,
         linqDeliveryContexts: initialLinqDeliveryContexts,
         skippedDeviceSyncWake: deviceSyncFollowUpWake,
@@ -1734,6 +1735,19 @@ function createExistingHostedAssistantWorkspaceWakeCandidate(
   }
 
   return createHostedRuntimeWakeCandidate(wakeAt, HOSTED_ASSISTANT_WAKE_REASON);
+}
+
+function createFutureExistingHostedAssistantWorkspaceWakeCandidate(
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput,
+): HostedRuntimeWakeCandidate | null {
+  const candidate = createExistingHostedAssistantWorkspaceWakeCandidate(phaseInput);
+  return createHostedRuntimeWakeCandidate(
+    normalizeHostedFutureWakeAt(
+      candidate?.at ?? null,
+      resolveHostedAssistantPhaseNowMs(phaseInput),
+    ),
+    candidate?.reason ?? HOSTED_ASSISTANT_WAKE_REASON,
+  );
 }
 
 function withHostedAssistantCronWakeCandidate(input: {
@@ -2975,10 +2989,12 @@ async function runProviderCleanupPhase(input: {
     });
   }
 
-  const providerCleanupCheckpoint = input.initialProviderCleanupCheckpoint
-    ?? (terminalLinqCleanupDue
-      ? { nextWakeAt: null }
-      : await readHostedProviderCleanupCheckpoint(input.input.restored.vaultRoot));
+  const providerCleanupCheckpoint = input.foregroundAssistantPass
+    ? null
+    : input.initialProviderCleanupCheckpoint
+      ?? (terminalLinqCleanupDue
+        ? { nextWakeAt: null }
+        : await readHostedProviderCleanupCheckpoint(input.input.restored.vaultRoot));
   const providerCleanupDue = !input.foregroundAssistantPass
     && isHostedProviderCleanupCheckpointDue(providerCleanupCheckpoint, input.input);
   const deferredProviderCleanupWakeAt = resolveHostedProviderCleanupPhaseWakeAt({
@@ -3027,6 +3043,7 @@ async function runForegroundAssistantReplyPhase(input: {
   assistantMetrics: HostedAssistantMetrics;
   currentTurnDeliveryIntentIds: readonly string[];
   deferredProviderCleanupWakeAt: string | null;
+  foregroundWorkspaceWake: HostedRuntimeWakeCandidate | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   skippedDeviceSyncWake: HostedRuntimeWakeCandidate | null;
   systemMailboxWake: HostedRuntimeWakeCandidate | null;
@@ -3054,6 +3071,7 @@ async function runForegroundAssistantReplyPhase(input: {
     const fastDispatchBaseNextWake = resolveHostedFastDispatchBaseNextWake({
       assistantMetrics: input.assistantMetrics,
       deferredProviderCleanupWakeAt: input.deferredProviderCleanupWakeAt,
+      foregroundWorkspaceWake: input.foregroundWorkspaceWake,
       input: input.input,
       skippedDeviceSyncWake: input.skippedDeviceSyncWake,
       systemMailboxWake: input.systemMailboxWake,
@@ -3144,6 +3162,7 @@ async function runForegroundAssistantReplyPhase(input: {
   });
   const nextWake = selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
+    input.foregroundWorkspaceWake,
     input.skippedDeviceSyncWake,
     createHostedRuntimeWakeCandidate(outboxWakeAt, "assistant"),
     input.systemMailboxWake,
@@ -3202,6 +3221,7 @@ async function runForegroundAssistantReplyPhase(input: {
             assertHostedAssistantPhaseLiveness(input.input.signal);
             const baseNextWake = selectHostedRuntimeWakeCandidate([
               createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
+              input.foregroundWorkspaceWake,
               input.skippedDeviceSyncWake,
               input.systemMailboxWake,
               createHostedRuntimeWakeCandidate(input.deferredProviderCleanupWakeAt, "assistant"),
@@ -5150,6 +5170,7 @@ function shouldFastDispatchAssistantDeliveryEffects(input: {
 function resolveHostedFastDispatchBaseNextWake(input: {
   assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantAutomationLane>>;
   deferredProviderCleanupWakeAt: string | null;
+  foregroundWorkspaceWake?: HostedRuntimeWakeCandidate | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   skippedDeviceSyncWake: HostedRuntimeWakeCandidate | null;
   systemMailboxWake: HostedRuntimeWakeCandidate | null;
@@ -5167,6 +5188,7 @@ function resolveHostedFastDispatchBaseNextWake(input: {
   });
   return selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
+    input.foregroundWorkspaceWake ?? null,
     skippedDeviceSyncWake,
     input.systemMailboxWake,
     createHostedRuntimeWakeCandidate(input.deferredProviderCleanupWakeAt, "assistant"),
