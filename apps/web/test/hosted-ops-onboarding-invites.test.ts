@@ -152,9 +152,14 @@ describe("hosted ops onboarding invites", () => {
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
       chatId: "chat_existing",
-      idempotencyKey: "ops-onboarding-invite:request-123:invite",
+      idempotencyKey: expect.stringMatching(
+        /^ops-onboarding-invite:invite:[a-f0-9]{64}$/u,
+      ),
       message: "Murph setup link:\nhttps://join.example.test/invite_code\n\nReply here when you are in.",
     });
+    const idempotencyKey = readIdempotencyKey(mocks.sendHostedLinqChatMessage);
+    expect(idempotencyKey).not.toContain("chat_existing");
+    expect(idempotencyKey).not.toContain("+15551234567");
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.updateMany).toHaveBeenCalledWith({
       data: {
@@ -237,15 +242,24 @@ describe("hosted ops onboarding invites", () => {
 
     expect(mocks.createHostedLinqChat).toHaveBeenCalledWith({
       from: "+15557654321",
-      idempotencyKey: "ops-onboarding-invite:request-456:open",
+      idempotencyKey: expect.stringMatching(
+        /^ops-onboarding-invite:open:[a-f0-9]{64}$/u,
+      ),
       message: "Hey, I am sending the Murph setup link next.",
       to: ["+15551234567"],
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
       chatId: "chat_created",
-      idempotencyKey: "ops-onboarding-invite:request-456:invite",
+      idempotencyKey: expect.stringMatching(
+        /^ops-onboarding-invite:invite:[a-f0-9]{64}$/u,
+      ),
       message: "Murph setup link:\nhttps://join.example.test/invite_code\n\nReply here when you are in.",
     });
+    const openIdempotencyKey = readIdempotencyKey(mocks.createHostedLinqChat);
+    const inviteIdempotencyKey = readIdempotencyKey(mocks.sendHostedLinqChatMessage);
+    expect(openIdempotencyKey).not.toContain("+15557654321");
+    expect(openIdempotencyKey).not.toContain("+15551234567");
+    expect(inviteIdempotencyKey).not.toContain("chat_created");
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledWith({
       linqChatId: "chat_created",
       memberId: "member_123",
@@ -302,6 +316,70 @@ describe("hosted ops onboarding invites", () => {
 
     expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+  });
+
+  it("changes the new-chat opener idempotency key when a failed retry targets a different recipient", async () => {
+    mocks.createHostedLinqChat
+      .mockRejectedValueOnce(new Error("provider timed out after creating chat"))
+      .mockResolvedValueOnce({
+        chatId: "chat_created_b",
+        messageId: "message_open_b",
+      });
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-retry-open",
+    })).rejects.toThrow("provider timed out after creating chat");
+
+    await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15559876543",
+      requestId: "request-retry-open",
+    });
+
+    const firstKey = readIdempotencyKey(mocks.createHostedLinqChat, 0);
+    const secondKey = readIdempotencyKey(mocks.createHostedLinqChat, 1);
+
+    expect(firstKey).toMatch(/^ops-onboarding-invite:open:[a-f0-9]{64}$/u);
+    expect(secondKey).toMatch(/^ops-onboarding-invite:open:[a-f0-9]{64}$/u);
+    expect(secondKey).not.toBe(firstKey);
+    expect(firstKey).not.toContain("+15551234567");
+    expect(secondKey).not.toContain("+15559876543");
+  });
+
+  it("changes the invite text idempotency key when a post-send failed retry targets a different chat", async () => {
+    prisma.hostedInvite.updateMany.mockRejectedValueOnce(new Error("database went away"));
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_existing",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-retry-invite",
+    })).rejects.toThrow("database went away");
+
+    await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_other",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-retry-invite",
+    });
+
+    const firstKey = readIdempotencyKey(mocks.sendHostedLinqChatMessage, 0);
+    const secondKey = readIdempotencyKey(mocks.sendHostedLinqChatMessage, 1);
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenNthCalledWith(2, {
+      chatId: "chat_other",
+      idempotencyKey: expect.stringMatching(
+        /^ops-onboarding-invite:invite:[a-f0-9]{64}$/u,
+      ),
+      message: "Murph setup link:\nhttps://join.example.test/invite_code\n\nReply here when you are in.",
+    });
+    expect(secondKey).not.toBe(firstKey);
+    expect(firstKey).not.toContain("chat_existing");
+    expect(secondKey).not.toContain("chat_other");
   });
 
   it("sends an optional voice memo after the setup link is sent", async () => {
@@ -526,4 +604,19 @@ function createBodyStream(byteLength: number): ReadableStream<Uint8Array> {
       controller.close();
     },
   });
+}
+
+function readIdempotencyKey(
+  mock: { mock: { calls: Array<Array<unknown>> } },
+  callIndex = 0,
+): string {
+  const input = mock.mock.calls[callIndex]?.[0] as {
+    idempotencyKey?: unknown;
+  } | undefined;
+
+  if (typeof input?.idempotencyKey !== "string") {
+    throw new Error("Expected mocked call to include an idempotency key.");
+  }
+
+  return input.idempotencyKey;
 }

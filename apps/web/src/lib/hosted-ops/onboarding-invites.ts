@@ -2,7 +2,7 @@ import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
 import type { SupportedContentType } from "@linqapp/sdk/resources";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { getPrisma } from "../prisma";
 import {
@@ -273,7 +273,14 @@ async function resolveHostedOpsOnboardingInviteDelivery(input: {
 
     await sendHostedLinqChatMessage({
       chatId: input.request.linqChatId,
-      idempotencyKey: buildHostedOpsOnboardingIdempotencyKey(input.request.requestId, "invite"),
+      idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
+        requestId: input.request.requestId,
+        step: "invite",
+        targetParts: [
+          input.memberId,
+          input.request.linqChatId,
+        ],
+      }),
       message: input.inviteMessage,
     });
 
@@ -286,7 +293,14 @@ async function resolveHostedOpsOnboardingInviteDelivery(input: {
 
   const createdChat = await createHostedLinqChat({
     from: input.request.linqFromPhoneNumber,
-    idempotencyKey: buildHostedOpsOnboardingIdempotencyKey(input.request.requestId, "open"),
+    idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
+      requestId: input.request.requestId,
+      step: "open",
+      targetParts: [
+        input.request.linqFromPhoneNumber,
+        input.request.recipientPhoneNumber,
+      ],
+    }),
     message: input.request.newChatOpeningMessage,
     to: [input.request.recipientPhoneNumber],
   });
@@ -312,7 +326,14 @@ async function resolveHostedOpsOnboardingInviteDelivery(input: {
 
   await sendHostedLinqChatMessage({
     chatId,
-    idempotencyKey: buildHostedOpsOnboardingIdempotencyKey(input.request.requestId, "invite"),
+    idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
+      requestId: input.request.requestId,
+      step: "invite",
+      targetParts: [
+        input.memberId,
+        chatId,
+      ],
+    }),
     message: input.inviteMessage,
   });
 
@@ -747,9 +768,18 @@ function buildHostedOpsOnboardingInviteMessage(input: {
   return rendered;
 }
 
-function buildHostedOpsOnboardingIdempotencyKey(
-  requestId: string,
-  step: "invite" | "open",
-): string {
-  return `ops-onboarding-invite:${requestId}:${step}`;
+function buildHostedOpsOnboardingIdempotencyKey(input: {
+  requestId: string;
+  step: "invite" | "open";
+  targetParts: readonly string[];
+}): string {
+  const digest = createHash("sha256");
+
+  for (const part of [input.requestId, ...input.targetParts]) {
+    digest.update(`${part.length}:`, "utf8");
+    digest.update(part, "utf8");
+    digest.update("\n", "utf8");
+  }
+
+  return `ops-onboarding-invite:${input.step}:${digest.digest("hex")}`;
 }
