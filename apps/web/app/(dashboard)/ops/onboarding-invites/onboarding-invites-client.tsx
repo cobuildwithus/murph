@@ -3,7 +3,6 @@
 import {
   AlertCircleIcon,
   CheckCircle2Icon,
-  MicIcon,
   SendIcon,
 } from "lucide-react";
 import { useState, type ReactNode, type TextareaHTMLAttributes } from "react";
@@ -37,11 +36,6 @@ interface HostedOpsOnboardingInviteResult {
   recipientPhoneHint: string;
   sentAt: string;
   textMessageSent: true;
-  voiceMemo: {
-    error: string | null;
-    requested: boolean;
-    sent: boolean;
-  };
 }
 
 type PendingAction = "send" | null;
@@ -89,11 +83,11 @@ export function OnboardingInvitesClient() {
               Onboarding invites
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Issue a hosted setup link for a phone number and deliver it through Linq, with an optional voice memo on the same send.
+              Issue a hosted setup link for a phone number and deliver it through Linq.
             </p>
           </div>
           {result ? (
-            <Badge variant={result.voiceMemo.requested && !result.voiceMemo.sent ? "outline" : "secondary"}>
+            <Badge variant="secondary">
               <CheckCircle2Icon data-icon="inline-start" />
               Link sent to {result.recipientPhoneHint}
             </Badge>
@@ -121,10 +115,6 @@ export function OnboardingInvitesClient() {
               Existing chats receive the link directly. New chats start with a short non-link note, then the setup link follows.
             </p>
           </div>
-          <Badge variant="outline">
-            <MicIcon data-icon="inline-start" />
-            Voice optional
-          </Badge>
         </div>
 
         <form
@@ -211,15 +201,6 @@ export function OnboardingInvitesClient() {
               name="inviteMessage"
               placeholder={"Murph setup link:\n{{inviteUrl}}\n\nReply here when you are in."}
               rows={5}
-            />
-          </Field>
-
-          <Field label="Voice memo" htmlFor="ops-onboarding-voice-memo" optional>
-            <Input
-              accept=".m4a,.mp3,.wav,.aac,.caf,.aiff,.aif,.amr,audio/aac,audio/aiff,audio/amr,audio/m4a,audio/mp4,audio/mpeg,audio/wav,audio/x-aiff,audio/x-caf,audio/x-m4a,audio/x-wav"
-              id="ops-onboarding-voice-memo"
-              name="voiceMemo"
-              type="file"
             />
           </Field>
 
@@ -317,29 +298,12 @@ function InviteResultPanel({
         </Badge>
       </div>
 
-      {result.voiceMemo.requested && !result.voiceMemo.sent ? (
-        <Alert variant="default">
-          <AlertCircleIcon data-icon="inline-start" />
-          <AlertDescription className="min-w-0 break-words">
-            {result.voiceMemo.error ?? "Voice memo was not sent."}
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
       <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-3">
         <ResultValue label="Member" value={result.memberId} />
         <ResultValue label="Invite" value={result.inviteId} />
         <ResultValue label="Chat" value={result.chatId} />
         <ResultValue label="Sent" value={formatDateTime(result.sentAt)} />
         <ResultValue label="Expires" value={formatDateTime(result.inviteExpiresAt)} />
-        <ResultValue
-          label="Voice"
-          value={
-            result.voiceMemo.requested
-              ? result.voiceMemo.sent ? "Sent" : "Failed"
-              : "None"
-          }
-        />
         {result.linqFromPhoneHint ? (
           <ResultValue label="Sender line" value={result.linqFromPhoneHint} />
         ) : null}

@@ -14,9 +14,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberRoutingByPendingLinqChatId: vi.fn(),
   requireHostedOpsRequestAccess: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
-  sendHostedLinqVoiceMemo: vi.fn(),
   upsertHostedMemberPendingLinqBindingTx: vi.fn(),
-  uploadHostedLinqAttachment: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -45,8 +43,6 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   createHostedLinqChat: mocks.createHostedLinqChat,
   sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
-  sendHostedLinqVoiceMemo: mocks.sendHostedLinqVoiceMemo,
-  uploadHostedLinqAttachment: mocks.uploadHostedLinqAttachment,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
@@ -135,8 +131,6 @@ describe("hosted ops onboarding invites", () => {
       messageId: "message_open",
     });
     mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
-    mocks.uploadHostedLinqAttachment.mockResolvedValue({ attachmentId: "attachment_123" });
-    mocks.sendHostedLinqVoiceMemo.mockResolvedValue(undefined);
   });
 
   it("sends an invite link to an existing Linq chat and returns masked phone hints", async () => {
@@ -199,10 +193,6 @@ describe("hosted ops onboarding invites", () => {
       newChatCreated: false,
       recipientPhoneHint: "*** 4567",
       textMessageSent: true,
-      voiceMemo: {
-        requested: false,
-        sent: false,
-      },
     });
     expect(JSON.stringify(result)).not.toContain("+15551234567");
   });
@@ -427,186 +417,7 @@ describe("hosted ops onboarding invites", () => {
     expect(secondKey).not.toContain("chat_other");
   });
 
-  it("sends an optional voice memo after the setup link is sent", async () => {
-    const result = await service.sendHostedOpsOnboardingInvite({
-      deliveryMode: "existing_chat",
-      linqChatId: "chat_existing",
-      recipientPhoneNumber: "+15551234567",
-      requestId: "request-voice",
-      voiceMemo: {
-        bytes: new Uint8Array([1, 2, 3]),
-        contentType: "audio/x-m4a",
-        extension: "m4a",
-        sizeBytes: 3,
-      },
-    });
-
-    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledWith({
-      bytes: new Uint8Array([1, 2, 3]),
-      contentType: "audio/x-m4a",
-      filename: "murph-ops-voice-memo.m4a",
-      sizeBytes: 3,
-    });
-    expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledWith({
-      attachmentId: "attachment_123",
-      chatId: "chat_existing",
-    });
-    expect(result.voiceMemo).toEqual({
-      error: null,
-      requested: true,
-      sent: true,
-    });
-  });
-
-  it("keeps text idempotent while passing voice memo retries through to Linq", async () => {
-    const voiceMemo = {
-      bytes: new Uint8Array([1, 2, 3]),
-      contentType: "audio/x-m4a" as const,
-      extension: "m4a",
-      sizeBytes: 3,
-    };
-
-    await service.sendHostedOpsOnboardingInvite({
-      deliveryMode: "existing_chat",
-      linqChatId: "chat_existing",
-      recipientPhoneNumber: "+15551234567",
-      requestId: "request-voice-repeat",
-      voiceMemo,
-    });
-    await service.sendHostedOpsOnboardingInvite({
-      deliveryMode: "existing_chat",
-      linqChatId: "chat_existing",
-      recipientPhoneNumber: "+15551234567",
-      requestId: "request-voice-repeat",
-      voiceMemo,
-    });
-    await service.sendHostedOpsOnboardingInvite({
-      deliveryMode: "existing_chat",
-      linqChatId: "chat_existing",
-      recipientPhoneNumber: "+15551234567",
-      requestId: "request-voice-repeat-2",
-      voiceMemo,
-    });
-
-    expect(readIdempotencyKey(mocks.sendHostedLinqChatMessage, 1))
-      .toBe(readIdempotencyKey(mocks.sendHostedLinqChatMessage, 0));
-    expect(readIdempotencyKey(mocks.sendHostedLinqChatMessage, 2))
-      .not.toBe(readIdempotencyKey(mocks.sendHostedLinqChatMessage, 0));
-    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
-    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(3);
-    expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(3);
-  });
-
-  it("retries a best-effort native voice memo after a pre-send upload failure", async () => {
-    mocks.uploadHostedLinqAttachment.mockRejectedValueOnce(
-      new Error("provider rejected upload"),
-    );
-
-    const voiceMemo = {
-      bytes: new Uint8Array([1, 2, 3]),
-      contentType: "audio/x-m4a" as const,
-      extension: "m4a",
-      sizeBytes: 3,
-    };
-
-    const first = await service.sendHostedOpsOnboardingInvite({
-      deliveryMode: "existing_chat",
-      linqChatId: "chat_existing",
-      recipientPhoneNumber: "+15551234567",
-      requestId: "request-voice-upload-retry",
-      voiceMemo,
-    });
-    const retry = await service.sendHostedOpsOnboardingInvite({
-      deliveryMode: "existing_chat",
-      linqChatId: "chat_existing",
-      recipientPhoneNumber: "+15551234567",
-      requestId: "request-voice-upload-retry",
-      voiceMemo,
-    });
-
-    expect(first.voiceMemo).toEqual({
-      error: "Voice memo delivery failed after the setup link was sent.",
-      requested: true,
-      sent: false,
-    });
-    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(2);
-    expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(1);
-    expect(retry.voiceMemo).toEqual({
-      error: null,
-      requested: true,
-      sent: true,
-    });
-  });
-
-  it("retries a best-effort native voice memo after a provider voice send failure", async () => {
-    mocks.sendHostedLinqVoiceMemo.mockRejectedValueOnce(
-      new Error("provider timed out after send request"),
-    );
-    const voiceMemo = {
-      bytes: new Uint8Array([1, 2, 3]),
-      contentType: "audio/x-m4a" as const,
-      extension: "m4a",
-      sizeBytes: 3,
-    };
-
-    const first = await service.sendHostedOpsOnboardingInvite({
-      deliveryMode: "existing_chat",
-      linqChatId: "chat_existing",
-      recipientPhoneNumber: "+15551234567",
-      requestId: "request-voice-send-failed",
-      voiceMemo,
-    });
-    const retry = await service.sendHostedOpsOnboardingInvite({
-      deliveryMode: "existing_chat",
-      linqChatId: "chat_existing",
-      recipientPhoneNumber: "+15551234567",
-      requestId: "request-voice-send-failed",
-      voiceMemo,
-    });
-
-    expect(readIdempotencyKey(mocks.sendHostedLinqChatMessage, 1))
-      .toBe(readIdempotencyKey(mocks.sendHostedLinqChatMessage, 0));
-    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(2);
-    expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(2);
-    expect(first.voiceMemo).toEqual({
-      error: "Voice memo delivery failed after the setup link was sent.",
-      requested: true,
-      sent: false,
-    });
-    expect(retry.voiceMemo).toEqual({
-      error: null,
-      requested: true,
-      sent: true,
-    });
-  });
-
-  it("returns a partial warning when voice delivery fails after the setup link", async () => {
-    mocks.uploadHostedLinqAttachment.mockRejectedValue(new Error("provider rejected upload"));
-
-    const result = await service.sendHostedOpsOnboardingInvite({
-      deliveryMode: "existing_chat",
-      linqChatId: "chat_existing",
-      recipientPhoneNumber: "+15551234567",
-      requestId: "request-voice-fail",
-      voiceMemo: {
-        bytes: new Uint8Array([1, 2, 3]),
-        contentType: "audio/x-m4a",
-        extension: "m4a",
-        sizeBytes: 3,
-      },
-    });
-
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalled();
-    expect(prisma.hostedInvite.updateMany).toHaveBeenCalled();
-    expect(mocks.sendHostedLinqVoiceMemo).not.toHaveBeenCalled();
-    expect(result.voiceMemo).toEqual({
-      error: "Voice memo delivery failed after the setup link was sent.",
-      requested: true,
-      sent: false,
-    });
-  });
-
-  it("normalizes route voice memo files without passing the original filename through", async () => {
+  it("rejects voice memo uploads before sending the invite link", async () => {
     const formData = new FormData();
     formData.set("deliveryMode", "existing_chat");
     formData.set("linqChatId", "chat_existing");
@@ -623,23 +434,19 @@ describe("hosted ops onboarding invites", () => {
       body: formData,
       method: "POST",
     }));
-    const payload = await response.json() as unknown;
+    const payload = await response.json() as { error?: { code?: string } };
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(400);
+    expect(payload.error?.code).toBe("HOSTED_OPS_ONBOARDING_VOICE_MEMO_UNAVAILABLE");
     expect(mocks.requireHostedOpsRequestAccess).toHaveBeenCalledWith(
       expect.any(Request),
       { requireMutationOrigin: true },
     );
-    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledWith({
-      bytes: new Uint8Array([4, 5]),
-      contentType: "audio/x-m4a",
-      filename: "murph-ops-voice-memo.m4a",
-      sizeBytes: 2,
-    });
-    expect(JSON.stringify(payload)).not.toContain("local-personal-recording");
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("rejects declared oversized voice memo forms before parsing multipart data", async () => {
+  it("rejects declared oversized onboarding invite forms before parsing multipart data", async () => {
     const response = await route.POST(new Request("https://app.example.test/api/ops/onboarding-invites", {
       body: "",
       headers: {
@@ -653,10 +460,9 @@ describe("hosted ops onboarding invites", () => {
     expect(response.status).toBe(413);
     expect(payload.error?.code).toBe("HOSTED_OPS_ONBOARDING_FORM_TOO_LARGE");
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
-    expect(mocks.uploadHostedLinqAttachment).not.toHaveBeenCalled();
   });
 
-  it("rejects streamed oversized voice memo forms before parsing multipart data", async () => {
+  it("rejects streamed oversized onboarding invite forms before parsing multipart data", async () => {
     const response = await route.POST(new Request("https://app.example.test/api/ops/onboarding-invites", {
       body: createBodyStream(route.HOSTED_OPS_ONBOARDING_FORM_BODY_MAX_BYTES + 1),
       headers: {
@@ -670,7 +476,6 @@ describe("hosted ops onboarding invites", () => {
     expect(response.status).toBe(413);
     expect(payload.error?.code).toBe("HOSTED_OPS_ONBOARDING_FORM_TOO_LARGE");
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
-    expect(mocks.uploadHostedLinqAttachment).not.toHaveBeenCalled();
   });
 });
 

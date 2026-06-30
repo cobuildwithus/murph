@@ -1,9 +1,6 @@
 import { requireHostedOpsRequestAccess } from "@/src/lib/hosted-ops/access";
 import {
-  HOSTED_OPS_ONBOARDING_VOICE_MEMO_MAX_BYTES,
-  resolveHostedOpsOnboardingVoiceMemoContentType,
   sendHostedOpsOnboardingInvite,
-  type HostedOpsOnboardingVoiceMemoInput,
 } from "@/src/lib/hosted-ops/onboarding-invites";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
@@ -16,17 +13,14 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
-const HOSTED_OPS_ONBOARDING_MULTIPART_OVERHEAD_MAX_BYTES = 256 * 1024;
-
-export const HOSTED_OPS_ONBOARDING_FORM_BODY_MAX_BYTES =
-  HOSTED_OPS_ONBOARDING_VOICE_MEMO_MAX_BYTES
-  + HOSTED_OPS_ONBOARDING_MULTIPART_OVERHEAD_MAX_BYTES;
+export const HOSTED_OPS_ONBOARDING_FORM_BODY_MAX_BYTES = 256 * 1024;
 
 export const POST = withJsonError(async (request: Request) => {
   await requireHostedOpsRequestAccess(request, {
     requireMutationOrigin: true,
   });
   const formData = await readHostedOpsOnboardingFormData(request);
+  assertNoHostedOpsOnboardingVoiceMemo(formData);
 
   return jsonOk(await sendHostedOpsOnboardingInvite({
     deliveryMode: readRequiredFormString(
@@ -51,7 +45,6 @@ export const POST = withJsonError(async (request: Request) => {
       "HOSTED_OPS_ONBOARDING_REQUEST_ID_REQUIRED",
       "Request id is required.",
     ),
-    voiceMemo: await readHostedOpsOnboardingVoiceMemo(formData),
   }));
 });
 
@@ -122,38 +115,29 @@ function readOptionalFormString(formData: FormData, key: string): string | null 
   return normalized.length > 0 ? normalized : null;
 }
 
-async function readHostedOpsOnboardingVoiceMemo(
-  formData: FormData,
-): Promise<HostedOpsOnboardingVoiceMemoInput | null> {
+function assertNoHostedOpsOnboardingVoiceMemo(formData: FormData): void {
   const value = formData.get("voiceMemo");
 
-  if (!isFile(value) || value.size === 0) {
-    return null;
+  if (value === null) {
+    return;
   }
 
-  if (value.size > HOSTED_OPS_ONBOARDING_VOICE_MEMO_MAX_BYTES) {
-    throw hostedOnboardingError({
-      code: "HOSTED_OPS_ONBOARDING_VOICE_MEMO_TOO_LARGE",
-      httpStatus: 413,
-      message: "Voice memo upload is too large.",
-      retryable: false,
-    });
+  const hasVoiceMemo = isFile(value)
+    ? value.size > 0
+    : value.trim().length > 0;
+
+  if (!hasVoiceMemo) {
+    return;
   }
 
-  const resolvedType = resolveHostedOpsOnboardingVoiceMemoContentType({
-    declaredContentType: value.type,
-    filename: value.name,
+  throw hostedOnboardingError({
+    code: "HOSTED_OPS_ONBOARDING_VOICE_MEMO_UNAVAILABLE",
+    httpStatus: 400,
+    message: "Voice memo delivery is not enabled for ops onboarding invites.",
+    retryable: false,
   });
-  const bytes = new Uint8Array(await value.arrayBuffer());
-
-  return {
-    bytes,
-    contentType: resolvedType.contentType,
-    extension: resolvedType.extension,
-    sizeBytes: value.size,
-  };
 }
 
-function isFile(value: FormDataEntryValue | null): value is File {
+function isFile(value: FormDataEntryValue): value is File {
   return typeof File !== "undefined" && value instanceof File;
 }
