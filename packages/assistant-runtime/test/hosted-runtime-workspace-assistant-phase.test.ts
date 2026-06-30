@@ -7248,6 +7248,42 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("recovers hidden provider cleanup after a stale foreground assistant wake is consumed", async () => {
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: true,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:09:00.000Z",
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-27T00:08:00.000Z",
+        nextWakeReason: "assistant",
+      }),
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      progressed: true,
+    }));
+  });
+
   it("does not drain queued provider cleanup when fresh input also produces delivery effects", async () => {
     mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
       captureIds: ["cap_terminal_cleanup"],
@@ -7300,6 +7336,58 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeAt: "2026-04-27T00:14:00.000Z",
       progressed: true,
     }));
+  });
+
+  it("reads hidden provider cleanup only after foreground delivery drains", async () => {
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "telegram",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: "fingerprint_synthetic",
+        effectId: "effect_synthetic",
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: "provider_message_from_reply",
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:09:00.000Z",
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-27T00:08:00.000Z",
+        nextWakeReason: "assistant",
+      }),
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      progressed: true,
+    }));
+    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(
+      mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.readHostedProviderCleanupCheckpoint.mock.invocationCallOrder[0] ??
+        Number.MAX_SAFE_INTEGER,
+    );
   });
 
   it("defers cleanup when input is admitted during the active turn", async () => {
