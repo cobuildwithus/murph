@@ -20,8 +20,16 @@ import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs"
 import { normalizePhoneNumber } from "./phone";
 import { type HostedOnboardingReadClient } from "./shared";
 
+export type HostedMemberPendingLinqNewChatReservationOutcome =
+  | "already_reserved"
+  | "home_chat_exists"
+  | "pending_chat_exists"
+  | "reservation_conflict"
+  | "reserved";
+
 export async function upsertHostedMemberPendingLinqBindingTx(input: {
   existingChatPolicy?: "replace" | "fail";
+  expectedNewChatReservationKey?: string | null;
   linqChatId: string;
   memberId: string;
   participantContact?: HostedLinqParticipantContact | null;
@@ -32,6 +40,7 @@ export async function upsertHostedMemberPendingLinqBindingTx(input: {
   await writeHostedMemberLinqBindingTx({
     clearPending: false,
     existingChatPolicy: input.existingChatPolicy ?? "replace",
+    expectedNewChatReservationKey: input.expectedNewChatReservationKey ?? null,
     kind: "pending",
     linqChatId: input.linqChatId,
     memberId: input.memberId,
@@ -39,6 +48,109 @@ export async function upsertHostedMemberPendingLinqBindingTx(input: {
     participantContactObservedAt: input.participantContactObservedAt ?? null,
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
+  });
+}
+
+export async function reserveHostedMemberPendingLinqNewChatTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  reservationKey: string;
+  reservedAt: Date;
+}): Promise<HostedMemberPendingLinqNewChatReservationOutcome> {
+  const reservationKey = normalizeHostedOpaqueInput(input.reservationKey);
+  if (!reservationKey) {
+    throw new TypeError("Hosted Linq new-chat reservation requires a non-empty key.");
+  }
+  if (Number.isNaN(input.reservedAt.getTime())) {
+    throw new TypeError("Hosted Linq new-chat reservation timestamp must be valid.");
+  }
+
+  await acquireHostedLinqRoutingWriteLockTx({
+    lockValue: input.memberId,
+    namespace: "member",
+    tx: input.prisma,
+  });
+
+  const existingRouting = await input.prisma.hostedMemberRouting.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: {
+      linqChatLookupKey: true,
+      pendingLinqChatLookupKey: true,
+      pendingLinqNewChatReservationKey: true,
+    },
+  });
+
+  if (existingRouting?.linqChatLookupKey) {
+    return "home_chat_exists";
+  }
+  if (existingRouting?.pendingLinqChatLookupKey) {
+    return "pending_chat_exists";
+  }
+  if (existingRouting?.pendingLinqNewChatReservationKey) {
+    return existingRouting.pendingLinqNewChatReservationKey === reservationKey
+      ? "already_reserved"
+      : "reservation_conflict";
+  }
+
+  await input.prisma.hostedMemberRouting.upsert({
+    where: {
+      memberId: input.memberId,
+    },
+    create: {
+      linqChatIdEncrypted: null,
+      linqChatLookupKey: null,
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId: input.memberId,
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqNewChatReservationKey: reservationKey,
+      pendingLinqNewChatReservedAt: input.reservedAt,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    },
+    update: {
+      pendingLinqNewChatReservationKey: reservationKey,
+      pendingLinqNewChatReservedAt: input.reservedAt,
+    },
+  });
+
+  return "reserved";
+}
+
+export async function clearHostedMemberPendingLinqNewChatReservationTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  reservationKey: string;
+}): Promise<void> {
+  const reservationKey = normalizeHostedOpaqueInput(input.reservationKey);
+  if (!reservationKey) {
+    throw new TypeError("Hosted Linq new-chat reservation requires a non-empty key.");
+  }
+
+  await acquireHostedLinqRoutingWriteLockTx({
+    lockValue: input.memberId,
+    namespace: "member",
+    tx: input.prisma,
+  });
+
+  await input.prisma.hostedMemberRouting.updateMany({
+    where: {
+      memberId: input.memberId,
+      pendingLinqNewChatReservationKey: reservationKey,
+    },
+    data: {
+      pendingLinqNewChatReservationKey: null,
+      pendingLinqNewChatReservedAt: null,
+    },
   });
 }
 
@@ -180,6 +292,7 @@ export async function upsertHostedMemberHomeLinqBindingTx(input: {
   await writeHostedMemberLinqBindingTx({
     clearPending: input.clearPending ?? false,
     existingChatPolicy: "replace",
+    expectedNewChatReservationKey: null,
     kind: "home",
     linqChatId: input.linqChatId,
     memberId: input.memberId,
@@ -237,6 +350,8 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
       memberId: input.memberId,
       pendingLinqChatIdEncrypted: null,
       pendingLinqChatLookupKey: null,
+      pendingLinqNewChatReservationKey: null,
+      pendingLinqNewChatReservedAt: null,
       pendingLinqParticipantContactEncrypted: null,
       pendingLinqParticipantContactKind: null,
       pendingLinqParticipantContactLookupKey: null,
@@ -256,6 +371,8 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
             linqLastInboundAt: promotedLinqLastInboundAt,
             pendingLinqChatIdEncrypted: null,
             pendingLinqChatLookupKey: null,
+            pendingLinqNewChatReservationKey: null,
+            pendingLinqNewChatReservedAt: null,
             pendingLinqParticipantContactEncrypted: null,
             pendingLinqParticipantContactKind: null,
             pendingLinqParticipantContactLookupKey: null,
@@ -336,6 +453,7 @@ export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
 async function writeHostedMemberLinqBindingTx(input: {
   clearPending: boolean;
   existingChatPolicy: "replace" | "fail";
+  expectedNewChatReservationKey: string | null;
   kind: "home" | "pending";
   linqChatId: string;
   memberId: string;
@@ -346,9 +464,15 @@ async function writeHostedMemberLinqBindingTx(input: {
 }): Promise<void> {
   const linqChatLookupKey = createHostedLinqChatLookupKey(input.linqChatId);
   const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.linqChatId);
+  const expectedNewChatReservationKey = normalizeHostedOpaqueInput(
+    input.expectedNewChatReservationKey,
+  );
 
   if (!linqChatLookupKey || linqChatLookupKeys.length === 0) {
     throw new TypeError("Hosted Linq routing requires a non-empty chat id.");
+  }
+  if (input.expectedNewChatReservationKey && !expectedNewChatReservationKey) {
+    throw new TypeError("Hosted Linq routing requires a non-empty reservation key.");
   }
 
   if (input.kind === "pending" && input.existingChatPolicy === "fail") {
@@ -364,6 +488,7 @@ async function writeHostedMemberLinqBindingTx(input: {
       select: {
         linqChatLookupKey: true,
         pendingLinqChatLookupKey: true,
+        pendingLinqNewChatReservationKey: true,
       },
     });
 
@@ -384,6 +509,18 @@ async function writeHostedMemberLinqBindingTx(input: {
         code: "HOSTED_LINQ_PENDING_CHAT_CONFLICT",
         httpStatus: 409,
         message: "Hosted Linq routing already has a different pending chat for this member.",
+        retryable: false,
+      });
+    }
+
+    if (
+      expectedNewChatReservationKey
+      && existingRouting?.pendingLinqNewChatReservationKey !== expectedNewChatReservationKey
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_PENDING_CHAT_RESERVATION_CONFLICT",
+        httpStatus: 409,
+        message: "Hosted Linq routing new-chat reservation is no longer owned by this send.",
         retryable: false,
       });
     }
@@ -498,6 +635,8 @@ function buildHostedMemberLinqBindingCreateData(input: {
       ? input.routingPrivateColumns.pendingLinqChatIdEncrypted
       : null,
     pendingLinqChatLookupKey: input.kind === "pending" ? input.linqChatLookupKey : null,
+    pendingLinqNewChatReservationKey: null,
+    pendingLinqNewChatReservedAt: null,
     pendingLinqParticipantContactEncrypted: input.kind === "pending"
       ? input.routingPrivateColumns.pendingLinqParticipantContactEncrypted
       : null,
@@ -543,6 +682,8 @@ function buildHostedMemberLinqBindingUpdateData(input: {
             linqLastInboundAt: input.promotedLinqLastInboundAt,
             pendingLinqChatIdEncrypted: null,
             pendingLinqChatLookupKey: null,
+            pendingLinqNewChatReservationKey: null,
+            pendingLinqNewChatReservedAt: null,
             pendingLinqParticipantContactEncrypted: null,
             pendingLinqParticipantContactKind: null,
             pendingLinqParticipantContactLookupKey: null,
@@ -558,6 +699,8 @@ function buildHostedMemberLinqBindingUpdateData(input: {
   return {
     pendingLinqChatIdEncrypted: input.routingPrivateColumns.pendingLinqChatIdEncrypted,
     pendingLinqChatLookupKey: input.linqChatLookupKey,
+    pendingLinqNewChatReservationKey: null,
+    pendingLinqNewChatReservedAt: null,
     ...(input.participantContact
       ? {
           pendingLinqParticipantContactEncrypted:

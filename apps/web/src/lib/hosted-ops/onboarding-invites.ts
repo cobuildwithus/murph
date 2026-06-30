@@ -18,9 +18,10 @@ import {
   uploadHostedLinqAttachment,
 } from "../hosted-onboarding/linq-client";
 import {
+  clearHostedMemberPendingLinqNewChatReservationTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqChatId,
-  readHostedMemberRoutingState,
+  reserveHostedMemberPendingLinqNewChatTx,
   upsertHostedMemberPendingLinqBindingTx,
 } from "../hosted-onboarding/hosted-member-routing-store";
 import { ensureHostedMemberForPhoneTx } from "../hosted-onboarding/member-identity-service";
@@ -252,29 +253,31 @@ async function sendHostedOpsOnboardingVoiceFirstNewChat(input: {
     request: input.request,
   });
   const memberId = prepared.memberId;
-  const openIdempotencyKey = buildHostedOpsOnboardingIdempotencyKey({
-    scopeKey: "voice-first-new-chat",
-    step: "open",
-    targetParts: [
-      memberId,
-      input.request.linqFromPhoneNumber,
-      input.request.recipientPhoneNumber,
-    ],
-  });
 
-  const attachment = await uploadHostedLinqAttachment({
-    bytes: voiceMemo.bytes,
-    contentType: voiceMemo.contentType,
-    filename: buildHostedOpsOnboardingVoiceMemoFilename(voiceMemo.extension),
-    sizeBytes: voiceMemo.sizeBytes,
-  });
+  let attachment: Awaited<ReturnType<typeof uploadHostedLinqAttachment>>;
+  try {
+    attachment = await uploadHostedLinqAttachment({
+      bytes: voiceMemo.bytes,
+      contentType: voiceMemo.contentType,
+      filename: buildHostedOpsOnboardingVoiceMemoFilename(voiceMemo.extension),
+      sizeBytes: voiceMemo.sizeBytes,
+    });
+  } catch (error) {
+    await clearHostedOpsOnboardingPendingLinqNewChatReservationBestEffort({
+      memberId,
+      prisma: input.prisma,
+      reservationKey: prepared.newChatReservationKey,
+    });
+    throw error;
+  }
+
   const createdChat = await createHostedLinqMediaChat({
     attachmentId: attachment.attachmentId,
     from: input.request.linqFromPhoneNumber,
     // Linq idempotency is on the chat message send. Attachment creation has no
     // stable idempotency field, so retries may re-upload while this key restores
     // the accepted chat/message and lets us restore the pending binding.
-    idempotencyKey: openIdempotencyKey,
+    idempotencyKey: prepared.newChatReservationKey,
     to: [input.request.recipientPhoneNumber],
   });
   const chatId = normalizeNullableString(createdChat.chatId);
@@ -291,6 +294,7 @@ async function sendHostedOpsOnboardingVoiceFirstNewChat(input: {
   await input.prisma.$transaction(async (tx) => {
     await upsertHostedMemberPendingLinqBindingTx({
       existingChatPolicy: "fail",
+      expectedNewChatReservationKey: prepared.newChatReservationKey,
       linqChatId: chatId,
       memberId,
       prisma: tx,
@@ -324,18 +328,30 @@ async function prepareHostedOpsOnboardingNewChat(input: {
   request: NormalizedHostedOpsOnboardingNewChatInviteInput;
 }): Promise<{
   memberId: string;
+  newChatReservationKey: string;
 }> {
   return input.prisma.$transaction(async (tx) => {
     const member = await ensureHostedMemberForPhoneTx({
       phoneNumber: input.request.recipientPhoneNumber,
       prisma: tx,
     });
-    const routing = await readHostedMemberRoutingState({
+    const newChatReservationKey = buildHostedOpsOnboardingIdempotencyKey({
+      scopeKey: "voice-first-new-chat",
+      step: "open",
+      targetParts: [
+        member.id,
+        input.request.linqFromPhoneNumber,
+        input.request.recipientPhoneNumber,
+      ],
+    });
+    const reservationOutcome = await reserveHostedMemberPendingLinqNewChatTx({
       memberId: member.id,
       prisma: tx,
+      reservationKey: newChatReservationKey,
+      reservedAt: new Date(),
     });
 
-    if (routing?.linqChatId) {
+    if (reservationOutcome === "home_chat_exists") {
       throw hostedOnboardingError({
         code: "HOSTED_OPS_ONBOARDING_HOME_LINQ_CHAT_EXISTS",
         httpStatus: 409,
@@ -344,7 +360,10 @@ async function prepareHostedOpsOnboardingNewChat(input: {
       });
     }
 
-    if (routing?.pendingLinqChatId) {
+    if (
+      reservationOutcome === "pending_chat_exists"
+      || reservationOutcome === "reservation_conflict"
+    ) {
       throw hostedOnboardingError({
         code: "HOSTED_OPS_ONBOARDING_PENDING_LINQ_CHAT_EXISTS",
         httpStatus: 409,
@@ -355,8 +374,28 @@ async function prepareHostedOpsOnboardingNewChat(input: {
 
     return {
       memberId: member.id,
+      newChatReservationKey,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function clearHostedOpsOnboardingPendingLinqNewChatReservationBestEffort(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  reservationKey: string;
+}): Promise<void> {
+  try {
+    await input.prisma.$transaction(async (tx) => {
+      await clearHostedMemberPendingLinqNewChatReservationTx({
+        memberId: input.memberId,
+        prisma: tx,
+        reservationKey: input.reservationKey,
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  } catch {
+    // Preserve the upload error. The same request can retry with the same
+    // reservation key, and a conflicting sender still fails before egress.
+  }
 }
 
 export function resolveHostedOpsOnboardingVoiceMemoContentType(input: {

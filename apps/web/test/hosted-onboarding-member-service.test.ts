@@ -23,6 +23,8 @@ import {
   ensureHostedMemberForPhone,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import {
+  clearHostedMemberPendingLinqNewChatReservationTx,
+  reserveHostedMemberPendingLinqNewChatTx,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberPendingLinqBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
@@ -754,6 +756,8 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
         memberId: "member_123",
         pendingLinqChatIdEncrypted: null,
         pendingLinqChatLookupKey: null,
+        pendingLinqNewChatReservationKey: null,
+        pendingLinqNewChatReservedAt: null,
         pendingLinqParticipantContactEncrypted: null,
         pendingLinqParticipantContactKind: null,
         pendingLinqParticipantContactLookupKey: null,
@@ -796,6 +800,180 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     ).rejects.toThrow("Hosted Linq routing requires a non-empty chat id.");
   });
 
+  it("reserves a pending Linq new-chat slot under the member lock", async () => {
+    const reservedAt = new Date("2026-06-30T12:00:00.000Z");
+    const reservationKey = "ops-onboarding-invite:open:reservation";
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const findUnique = vi.fn().mockResolvedValue(null);
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = asRootPrisma({
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        findUnique,
+        upsert,
+      },
+    });
+
+    await expect(reserveHostedMemberPendingLinqNewChatTx({
+      memberId: "member_123",
+      prisma: prisma as never,
+      reservationKey,
+      reservedAt,
+    })).resolves.toBe("reserved");
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(findUnique).toHaveBeenCalledWith({
+      select: {
+        linqChatLookupKey: true,
+        pendingLinqChatLookupKey: true,
+        pendingLinqNewChatReservationKey: true,
+      },
+      where: {
+        memberId: "member_123",
+      },
+    });
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        memberId: "member_123",
+        pendingLinqNewChatReservationKey: reservationKey,
+        pendingLinqNewChatReservedAt: reservedAt,
+      }),
+      update: {
+        pendingLinqNewChatReservationKey: reservationKey,
+        pendingLinqNewChatReservedAt: reservedAt,
+      },
+      where: {
+        memberId: "member_123",
+      },
+    }));
+  });
+
+  it("treats an existing matching pending Linq new-chat reservation as owned", async () => {
+    const reservationKey = "ops-onboarding-invite:open:reservation";
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const findUnique = vi.fn().mockResolvedValue({
+      linqChatLookupKey: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqNewChatReservationKey: reservationKey,
+    });
+    const upsert = vi.fn();
+    const prisma = asRootPrisma({
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        findUnique,
+        upsert,
+      },
+    });
+
+    await expect(reserveHostedMemberPendingLinqNewChatTx({
+      memberId: "member_123",
+      prisma: prisma as never,
+      reservationKey,
+      reservedAt: new Date("2026-06-30T12:00:00.000Z"),
+    })).resolves.toBe("already_reserved");
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("fails a pending Linq new-chat reservation when another send owns the slot", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const findUnique = vi.fn().mockResolvedValue({
+      linqChatLookupKey: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqNewChatReservationKey: "ops-onboarding-invite:open:other",
+    });
+    const upsert = vi.fn();
+    const prisma = asRootPrisma({
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        findUnique,
+        upsert,
+      },
+    });
+
+    await expect(reserveHostedMemberPendingLinqNewChatTx({
+      memberId: "member_123",
+      prisma: prisma as never,
+      reservationKey: "ops-onboarding-invite:open:reservation",
+      reservedAt: new Date("2026-06-30T12:00:00.000Z"),
+    })).resolves.toBe("reservation_conflict");
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("clears only the owned pending Linq new-chat reservation", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = asRootPrisma({
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        updateMany,
+      },
+    });
+
+    await clearHostedMemberPendingLinqNewChatReservationTx({
+      memberId: "member_123",
+      prisma: prisma as never,
+      reservationKey: "ops-onboarding-invite:open:reservation",
+    });
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(updateMany).toHaveBeenCalledWith({
+      data: {
+        pendingLinqNewChatReservationKey: null,
+        pendingLinqNewChatReservedAt: null,
+      },
+      where: {
+        memberId: "member_123",
+        pendingLinqNewChatReservationKey: "ops-onboarding-invite:open:reservation",
+      },
+    });
+  });
+
+  it("clears a pending Linq new-chat reservation when binding the provider chat", async () => {
+    const reservationKey = "ops-onboarding-invite:open:reservation";
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const findUnique = vi.fn()
+      .mockResolvedValueOnce({
+        linqChatLookupKey: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqNewChatReservationKey: reservationKey,
+      })
+      .mockResolvedValueOnce(null);
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = asRootPrisma({
+      $executeRaw: executeRaw,
+      hostedMemberRouting: {
+        findUnique,
+        updateMany,
+        upsert,
+      },
+    });
+
+    await upsertHostedMemberPendingLinqBindingTx({
+      existingChatPolicy: "fail",
+      expectedNewChatReservationKey: reservationKey,
+      linqChatId: "chat_new",
+      memberId: "member_123",
+      prisma: prisma as never,
+      recipientPhone: "+15550100001",
+    });
+
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        pendingLinqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+        pendingLinqNewChatReservationKey: null,
+        pendingLinqNewChatReservedAt: null,
+      }),
+      where: {
+        memberId: "member_123",
+      },
+    }));
+  });
+
   it("treats the same pending Linq chat as already owned when conflicts fail closed", async () => {
     const pendingLookupKey = createHostedLinqChatLookupKey("chat_existing");
     if (!pendingLookupKey) {
@@ -830,6 +1008,7 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
       select: {
         linqChatLookupKey: true,
         pendingLinqChatLookupKey: true,
+        pendingLinqNewChatReservationKey: true,
       },
       where: {
         memberId: "member_123",

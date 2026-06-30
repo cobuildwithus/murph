@@ -603,6 +603,8 @@ model HostedMemberRouting {
   pendingLinqParticipantContactLookupKey  String?   @unique @map("pending_linq_participant_contact_lookup_key")
   pendingLinqParticipantContactEncrypted  String?   @map("pending_linq_participant_contact_encrypted")
   pendingLinqParticipantContactObservedAt DateTime? @map("pending_linq_participant_contact_observed_at")
+  pendingLinqNewChatReservationKey        String?   @unique @map("pending_linq_new_chat_reservation_key")
+  pendingLinqNewChatReservedAt            DateTime? @map("pending_linq_new_chat_reserved_at")
   replyAliasLookupKey                String?      @unique @map("reply_alias_lookup_key")
   telegramUserLookupKey              String?      @unique @map("telegram_user_lookup_key")
   telegramUserIdEncrypted            String?      @map("telegram_user_id_encrypted")
