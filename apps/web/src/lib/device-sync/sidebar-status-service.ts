@@ -25,9 +25,11 @@ import {
 
 export async function buildHostedDeviceSyncSidebarStatusResponse(input: {
   memberId: string;
+  publicBaseUrl: string | null;
 }): Promise<SidebarDeviceSyncStatusResponse> {
   const sources = await buildHostedDeviceSyncSettingsSourcesForMember({
     memberId: input.memberId,
+    publicBaseUrl: input.publicBaseUrl,
   });
 
   return {
@@ -40,6 +42,7 @@ export async function buildHostedDeviceSyncSidebarStatusResponse(input: {
 export async function buildHostedDeviceSyncSettingsSurfaceResponse(input: {
   connectTargets?: readonly HostedDeviceSyncSettingsConnectTarget[];
   memberId: string;
+  publicBaseUrl: string | null;
 }): Promise<HostedDeviceSyncSettingsResponse> {
   return {
     generatedAt: new Date().toISOString(),
@@ -51,6 +54,7 @@ export async function buildHostedDeviceSyncSettingsSurfaceResponse(input: {
 async function buildHostedDeviceSyncSettingsSourcesForMember(input: {
   connectTargets?: readonly HostedDeviceSyncSettingsConnectTarget[];
   memberId: string;
+  publicBaseUrl: string | null;
 }) {
   const env = readHostedDeviceSyncEnvironment(process.env);
   const prisma = getPrisma();
@@ -73,7 +77,7 @@ async function buildHostedDeviceSyncSettingsSourcesForMember(input: {
   );
   const providers = listConfiguredDeviceSyncPublicProviderDescriptors(
     readConfiguredDeviceSyncProviderConfigs(process.env),
-    { publicBaseUrl: env.publicBaseUrl },
+    { publicBaseUrl: input.publicBaseUrl },
   );
   const sources = buildHostedDeviceSyncSettingsSources({
     connectionSources: connectionEntries.flatMap((entry) =>

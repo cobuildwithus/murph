@@ -10,6 +10,8 @@ import {
   type HostedDeviceSyncSettingsConnectTarget,
   type HostedDeviceSyncSettingsResponse,
 } from "./settings-surface";
+import { readHostedDeviceSyncEnvironment } from "./env";
+import { resolveConfiguredHostedDeviceSyncPublicBaseUrl } from "./public-base-url";
 import { buildHostedDeviceSyncSettingsSurfaceResponse } from "./sidebar-status-service";
 import {
   assertHostedMemberEffectiveActiveAccessAllowed,
@@ -19,11 +21,13 @@ import type { HostedOnboardingReadClient } from "../hosted-onboarding/shared";
 export async function buildHostedDeviceSyncSettingsResponse(input: {
   member: Pick<HostedMember, "billingStatus" | "id" | "suspendedAt">;
   prisma?: HostedOnboardingReadClient;
+  publicBaseUrl?: string | null;
 }): Promise<HostedDeviceSyncSettingsResponse> {
   await assertHostedMemberEffectiveActiveAccessAllowed({
     member: input.member,
     prisma: input.prisma,
   });
+  const env = readHostedDeviceSyncEnvironment(process.env);
 
   return buildHostedDeviceSyncSettingsSurfaceResponse({
     connectTargets: listConfiguredDeviceSyncReconnectTargets(
@@ -35,5 +39,7 @@ export async function buildHostedDeviceSyncSettingsResponse(input: {
       sourceProviderSlug: target.sourceProviderSlug ?? null,
     })),
     memberId: input.member.id,
+    publicBaseUrl:
+      input.publicBaseUrl ?? resolveConfiguredHostedDeviceSyncPublicBaseUrl(env),
   });
 }

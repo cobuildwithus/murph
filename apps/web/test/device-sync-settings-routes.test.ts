@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   getConnectionStatus: vi.fn(),
   getStoredConnectionAccountForUser: vi.fn(),
+  listConfiguredDeviceSyncPublicProviderDescriptors: vi.fn(),
   listConnections: vi.fn(),
   listConnectionsForUser: vi.fn(),
   probeRest: vi.fn(),
@@ -34,6 +35,20 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
 }));
+
+vi.mock("@murphai/device-syncd/public-provider-descriptors", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@murphai/device-syncd/public-provider-descriptors")>();
+
+  return {
+    ...actual,
+    listConfiguredDeviceSyncPublicProviderDescriptors: (
+      ...args: Parameters<typeof actual.listConfiguredDeviceSyncPublicProviderDescriptors>
+    ) => {
+      mocks.listConfiguredDeviceSyncPublicProviderDescriptors(...args);
+      return actual.listConfiguredDeviceSyncPublicProviderDescriptors(...args);
+    },
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
   assertHostedOnboardingMutationOrigin: mocks.assertHostedOnboardingMutationOrigin,
@@ -400,6 +415,14 @@ describe("device sync settings routes", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+    expect(mocks.listConfiguredDeviceSyncPublicProviderDescriptors).toHaveBeenCalledWith(
+      expect.objectContaining({
+        oura: expect.any(Object),
+      }),
+      {
+        publicBaseUrl: "https://join.example.test/api/device-sync",
+      },
+    );
     expect(mocks.findManyDeviceConnections).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         userId: "member_123",
@@ -443,6 +466,37 @@ describe("device sync settings routes", () => {
     }
   });
 
+  it("fails closed for the settings route in production when no public base URL is configured", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DEVICE_SYNC_PUBLIC_BASE_URL", "");
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "");
+    vi.stubEnv("HOSTED_WEB_BASE_URL", "");
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "");
+
+    try {
+      const response = await settingsDeviceSyncRoute.GET(
+        new Request("https://preview.example.test/api/settings/device-sync"),
+      );
+
+      expect(response.status).toBe(500);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
+      expect(mocks.findManyDeviceConnections).not.toHaveBeenCalled();
+      expect(mocks.listConfiguredDeviceSyncPublicProviderDescriptors).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "DEVICE_SYNC_PUBLIC_BASE_URL_REQUIRED",
+          message:
+            "Hosted device-sync public callback and webhook routes require DEVICE_SYNC_PUBLIC_BASE_URL or a canonical hosted public URL in production.",
+          retryable: false,
+        },
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("returns a minimized sidebar status summary for the authenticated hosted member", async () => {
     const response = await settingsDeviceSyncSidebarStatusRoute.GET(
       new Request("https://join.example.test/api/settings/device-sync/sidebar-status"),
@@ -452,6 +506,14 @@ describe("device sync settings routes", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+    expect(mocks.listConfiguredDeviceSyncPublicProviderDescriptors).toHaveBeenCalledWith(
+      expect.objectContaining({
+        oura: expect.any(Object),
+      }),
+      {
+        publicBaseUrl: "https://join.example.test/api/device-sync",
+      },
+    );
     expect(mocks.findManyDeviceConnections).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         userId: "member_123",
@@ -465,6 +527,37 @@ describe("device sync settings routes", () => {
         tone: "connected",
       },
     });
+  });
+
+  it("fails closed for sidebar status in production when no public base URL is configured", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DEVICE_SYNC_PUBLIC_BASE_URL", "");
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "");
+    vi.stubEnv("HOSTED_WEB_BASE_URL", "");
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "");
+
+    try {
+      const response = await settingsDeviceSyncSidebarStatusRoute.GET(
+        new Request("https://preview.example.test/api/settings/device-sync/sidebar-status"),
+      );
+
+      expect(response.status).toBe(500);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
+      expect(mocks.findManyDeviceConnections).not.toHaveBeenCalled();
+      expect(mocks.listConfiguredDeviceSyncPublicProviderDescriptors).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "DEVICE_SYNC_PUBLIC_BASE_URL_REQUIRED",
+          message:
+            "Hosted device-sync public callback and webhook routes require DEVICE_SYNC_PUBLIC_BASE_URL or a canonical hosted public URL in production.",
+          retryable: false,
+        },
+      });
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("returns a Junction upstream wearable label in the minimized sidebar status", async () => {
