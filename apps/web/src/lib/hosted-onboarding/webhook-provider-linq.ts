@@ -333,6 +333,24 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
+  if (
+    participantContact.kind === "email"
+    && existingPendingLinqChatLookup === null
+    && existingHomeLinqChatLookup === null
+    && await hasHostedMemberPendingLinqNewChatReservation({
+      prisma: input.prisma,
+      recipientPhone: recipientPhoneNumber,
+    })
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_PENDING_NEW_CHAT_BINDING_PENDING",
+      httpStatus: 503,
+      message:
+        "An ops-created Linq chat is still waiting for its durable route; retry this webhook after the route is bound.",
+      retryable: true,
+    });
+  }
+
   if (existingMember && existingMemberSuspended) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("suspended-member"),
@@ -649,23 +667,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
         routeStage: "first-contact-admission-required",
       }),
     );
-  }
-
-  if (
-    existingMember === null
-    && participantContact.kind === "email"
-    && await hasHostedMemberPendingLinqNewChatReservation({
-      prisma: input.prisma,
-      recipientPhone: recipientPhoneNumber,
-    })
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_PENDING_NEW_CHAT_BINDING_PENDING",
-      httpStatus: 503,
-      message:
-        "An ops-created Linq chat is still waiting for its durable route; retry this webhook after the route is bound.",
-      retryable: true,
-    });
   }
 
   const member = existingMember

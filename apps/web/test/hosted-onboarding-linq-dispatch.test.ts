@@ -8,6 +8,7 @@ import {
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
+  createHostedEmailLookupKey,
   createHostedExternalThreadLookupKey,
   createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
@@ -2808,6 +2809,111 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it("retries verified iMessage email handles while an ops new-chat route is still binding", async () => {
+    const now = new Date("2026-03-26T12:00:00.000Z");
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn(),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMemberEmailAuthorization: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            directPublicSenderAddressEncrypted: null,
+            directPublicSenderAuthorizedAt: null,
+            directPublicSenderLookupKey: null,
+            member: {
+              billingStatus: HostedBillingStatus.active,
+              createdAt: now,
+              id: "member_verified_email",
+              suspendedAt: null,
+              updatedAt: now,
+            },
+            memberId: "member_verified_email",
+            stripeCheckoutEmailAddressEncrypted: null,
+            stripeCheckoutEmailCollectedAt: null,
+            verifiedEmailAddressEncrypted: null,
+            verifiedEmailLookupKey: createHostedEmailLookupKey("Buddy@iCloud.com"),
+            verifiedEmailVerifiedAt: now,
+          },
+        ]),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn(),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue({ memberId: "member_123" }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn(),
+        upsert: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          sender_handle: {
+            handle: "Buddy@iCloud.com",
+            id: "handle_sender_email",
+            service: "iMessage",
+          },
+        },
+        eventId: "evt_verified_email_handle_binding_pending",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_PENDING_NEW_CHAT_BINDING_PENDING",
+      retryable: true,
+    });
+
+    expect(prismaMocks.hostedMemberEmailAuthorization.findMany).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedMemberRouting.findFirst).toHaveBeenCalledWith({
+      select: {
+        memberId: true,
+      },
+      where: {
+        pendingLinqNewChatReservationKey: {
+          not: null,
+        },
+        pendingLinqRecipientPhoneLookupKey: {
+          in: [createHostedPhoneLookupKey("+15550000000")],
+        },
+      },
+    });
+    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMemberIdentity.upsert).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("uses pending Linq chat bindings for email-handle media replies before first-contact admission", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     const pendingChatLookupKey = createHostedLinqChatLookupKey("chat_123");
@@ -3010,6 +3116,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         findMany: vi.fn().mockResolvedValue([]),
       },
       hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([]),
         upsert: vi.fn(),
       },
@@ -3420,6 +3527,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         findMany: vi.fn().mockResolvedValue([]),
       },
       hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([]),
         upsert: vi.fn(),
       },
