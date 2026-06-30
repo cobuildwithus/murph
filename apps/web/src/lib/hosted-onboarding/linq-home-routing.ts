@@ -1,21 +1,19 @@
 import { type HostedMemberSnapshot } from "./hosted-member-store";
 import {
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
+  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
 } from "./hosted-member-routing-store";
-import { chooseHostedLinqConversationRecipientPhone } from "./linq-routing-policy";
+import { chooseHostedLinqHomeLine } from "./linq-routing-policy";
 import {
   type HostedMemberAssistantNotificationRoute,
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "./messaging-state";
-import {
-  syncHostedLinqConfiguredLinesTx,
-} from "./linq-line-store";
+import { listHostedLinqAssignableHomeLines } from "./linq-line-store";
 import { normalizePhoneNumber } from "./phone";
-import { getHostedOnboardingEnvironment } from "./runtime";
 import { hostedOnboardingError } from "./errors";
 import type { Prisma } from "@prisma/client";
 
@@ -61,12 +59,11 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     };
   }
 
-  const targetRecipientPhone = normalizePhoneNumber(
-    await resolveHostedMemberActivationTargetRecipientPhone({
-      member: input.member,
-      prisma: input.prisma,
-    }),
-  );
+  const target = await resolveHostedMemberActivationTargetRecipientPhone({
+    member: input.member,
+    prisma: input.prisma,
+  });
+  const targetRecipientPhone = normalizePhoneNumber(target.recipientPhone);
 
   const pendingLinqRecipientPhone = normalizePhoneNumber(routing?.pendingLinqRecipientPhone);
 
@@ -83,6 +80,7 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
       pendingLinqRecipientPhone ?? targetRecipientPhone;
     await upsertHostedMemberHomeLinqBindingTx({
       clearPending: true,
+      homeLineAssignedAt: target.homeLineAssignedAt,
       linqChatId: routing.pendingLinqChatId,
       memberId: input.member.core.id,
       prisma: input.prisma,
@@ -103,7 +101,7 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
   if (!targetRecipientPhone) {
     throw hostedOnboardingError({
       code: "LINQ_CONVERSATION_PHONE_REQUIRED",
-      message: "Configure HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS before activating members without an existing Linq conversation thread.",
+      message: "Configure an enabled hosted_linq_line row before activating members without an existing Linq conversation thread.",
       httpStatus: 500,
     });
   }
@@ -118,6 +116,7 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
 
   await upsertHostedMemberHomeLinqRecipientPhoneTx({
     clearPending: true,
+    homeLineAssignedAt: target.homeLineAssignedAt,
     memberId: input.member.core.id,
     prisma: input.prisma,
     recipientPhone: targetRecipientPhone,
@@ -137,35 +136,60 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
 async function resolveHostedMemberActivationTargetRecipientPhone(input: {
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
-}): Promise<string | null> {
-  const environment = getHostedOnboardingEnvironment();
-  const preferredRecipientPhone = input.member.routing?.linqRecipientPhone
-    ?? input.member.routing?.pendingLinqRecipientPhone
-    ?? null;
-
-  if (environment.linqConversationPhoneNumbers.length === 0) {
-    return preferredRecipientPhone;
+}): Promise<{ homeLineAssignedAt: Date | null; recipientPhone: string | null }> {
+  const existingRecipientPhone = normalizePhoneNumber(input.member.routing?.linqRecipientPhone);
+  if (existingRecipientPhone) {
+    return {
+      homeLineAssignedAt: null,
+      recipientPhone: existingRecipientPhone,
+    };
   }
 
   await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
     prisma: input.prisma,
   });
 
-  await syncHostedLinqConfiguredLinesTx({
-    activeMemberLimit: environment.linqMaxActiveMembersPerConversationPhone,
-    phoneNumbers: environment.linqConversationPhoneNumbers,
+  const lines = await listHostedLinqAssignableHomeLines({
     prisma: input.prisma,
   });
+  const recipientPhones = lines.map((line) => line.phoneNumber);
+
+  if (recipientPhones.length === 0) {
+    return {
+      homeLineAssignedAt: null,
+      recipientPhone: null,
+    };
+  }
 
   const activeMembersByRecipientPhone = await countHostedMemberHomeLinqBindingsByRecipientPhone({
     prisma: input.prisma,
-    recipientPhones: environment.linqConversationPhoneNumbers,
+    recipientPhones,
+  });
+  const now = new Date();
+  const newAssignmentsByRecipientPhone =
+    await countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince({
+      prisma: input.prisma,
+      recipientPhones,
+      since: startOfUtcDay(now),
+    });
+
+  const chosen = chooseHostedLinqHomeLine({
+    activeMembersByRecipientPhone,
+    lines,
+    newAssignmentsByRecipientPhone,
+    preferredRecipientPhone: input.member.routing?.pendingLinqRecipientPhone ?? null,
   });
 
-  return chooseHostedLinqConversationRecipientPhone({
-    activeMembersByRecipientPhone,
-    maxActiveMembersPerPhoneNumber: environment.linqMaxActiveMembersPerConversationPhone,
-    preferredRecipientPhone,
-    recipientPhones: environment.linqConversationPhoneNumbers,
-  });
+  return {
+    homeLineAssignedAt: chosen ? now : null,
+    recipientPhone: chosen?.phoneNumber ?? null,
+  };
+}
+
+function startOfUtcDay(value: Date): Date {
+  return new Date(Date.UTC(
+    value.getUTCFullYear(),
+    value.getUTCMonth(),
+    value.getUTCDate(),
+  ));
 }

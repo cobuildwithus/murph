@@ -29,6 +29,7 @@ export async function upsertHostedMemberPendingLinqBindingTx(input: {
 }): Promise<void> {
   await writeHostedMemberLinqBindingTx({
     clearPending: false,
+    homeLineAssignedAt: null,
     kind: "pending",
     linqChatId: input.linqChatId,
     memberId: input.memberId,
@@ -169,6 +170,7 @@ export async function tryCreateHostedMemberPendingLinqParticipantContactTx(input
 
 export async function upsertHostedMemberHomeLinqBindingTx(input: {
   clearPending?: boolean;
+  homeLineAssignedAt?: Date | null;
   linqChatId: string;
   memberId: string;
   prisma: Prisma.TransactionClient;
@@ -183,11 +185,13 @@ export async function upsertHostedMemberHomeLinqBindingTx(input: {
     participantContactObservedAt: null,
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
+    homeLineAssignedAt: input.homeLineAssignedAt ?? null,
   });
 }
 
 export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
   clearPending?: boolean;
+  homeLineAssignedAt?: Date | null;
   memberId: string;
   prisma: Prisma.TransactionClient;
   recipientPhone: string;
@@ -228,6 +232,9 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
     create: {
       linqChatIdEncrypted: null,
       linqChatLookupKey: null,
+      ...(input.homeLineAssignedAt === undefined
+        ? {}
+        : { linqHomeLineAssignedAt: input.homeLineAssignedAt }),
       linqRecipientPhoneEncrypted: routingPrivateColumns.linqRecipientPhoneEncrypted,
       linqRecipientPhoneLookupKey: recipientPhoneLookupKey,
       memberId: input.memberId,
@@ -245,6 +252,9 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
     update: {
       linqChatIdEncrypted: null,
       linqChatLookupKey: null,
+      ...(input.homeLineAssignedAt === undefined
+        ? {}
+        : { linqHomeLineAssignedAt: input.homeLineAssignedAt }),
       linqRecipientPhoneEncrypted: routingPrivateColumns.linqRecipientPhoneEncrypted,
       linqRecipientPhoneLookupKey: recipientPhoneLookupKey,
       ...(input.clearPending
@@ -329,8 +339,61 @@ export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
   return counts;
 }
 
+export async function countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince(input: {
+  prisma: HostedOnboardingReadClient;
+  recipientPhones: readonly string[];
+  since: Date;
+}): Promise<Map<string, number>> {
+  const recipientPhoneEntries = buildHostedRecipientPhoneLookupEntries(
+    input.recipientPhones,
+  );
+
+  if (recipientPhoneEntries.length === 0) {
+    return new Map();
+  }
+
+  const counts = new Map<string, number>(
+    recipientPhoneEntries.map(({ recipientPhone }) => [recipientPhone, 0]),
+  );
+  const recipientPhoneByLookupKey = new Map(
+    recipientPhoneEntries.map(({ lookupKey, recipientPhone }) => [
+      lookupKey,
+      recipientPhone,
+    ] as const),
+  );
+
+  const routingRecords = await input.prisma.hostedMemberRouting.findMany({
+    where: {
+      linqHomeLineAssignedAt: {
+        gte: input.since,
+      },
+      linqRecipientPhoneLookupKey: {
+        in: recipientPhoneEntries.map(({ lookupKey }) => lookupKey),
+      },
+    },
+    select: {
+      linqRecipientPhoneLookupKey: true,
+    },
+  });
+
+  for (const routingRecord of routingRecords) {
+    const recipientPhone = routingRecord.linqRecipientPhoneLookupKey
+      ? recipientPhoneByLookupKey.get(routingRecord.linqRecipientPhoneLookupKey)
+      : null;
+
+    if (!recipientPhone) {
+      continue;
+    }
+
+    counts.set(recipientPhone, (counts.get(recipientPhone) ?? 0) + 1);
+  }
+
+  return counts;
+}
+
 async function writeHostedMemberLinqBindingTx(input: {
   clearPending: boolean;
+  homeLineAssignedAt: Date | null;
   kind: "home" | "pending";
   linqChatId: string;
   memberId: string;
@@ -409,6 +472,7 @@ async function writeHostedMemberLinqBindingTx(input: {
     },
     create: buildHostedMemberLinqBindingCreateData({
       kind: input.kind,
+      homeLineAssignedAt: input.homeLineAssignedAt,
       linqChatLookupKey,
       memberId: input.memberId,
       participantContact: input.participantContact,
@@ -419,6 +483,7 @@ async function writeHostedMemberLinqBindingTx(input: {
     update: buildHostedMemberLinqBindingUpdateData({
       clearPending: input.clearPending,
       kind: input.kind,
+      homeLineAssignedAt: input.homeLineAssignedAt,
       linqChatLookupKey,
       participantContact: input.participantContact,
       participantContactObservedAt: input.participantContactObservedAt,
@@ -431,6 +496,7 @@ async function writeHostedMemberLinqBindingTx(input: {
 }
 
 function buildHostedMemberLinqBindingCreateData(input: {
+  homeLineAssignedAt: Date | null;
   kind: "home" | "pending";
   linqChatLookupKey: string;
   memberId: string;
@@ -444,6 +510,9 @@ function buildHostedMemberLinqBindingCreateData(input: {
       ? input.routingPrivateColumns.linqChatIdEncrypted
       : null,
     linqChatLookupKey: input.kind === "home" ? input.linqChatLookupKey : null,
+    ...(input.kind === "home" && input.homeLineAssignedAt
+      ? { linqHomeLineAssignedAt: input.homeLineAssignedAt }
+      : {}),
     linqRecipientPhoneEncrypted: input.kind === "home"
       ? input.routingPrivateColumns.linqRecipientPhoneEncrypted
       : null,
@@ -480,6 +549,7 @@ function buildHostedMemberLinqBindingCreateData(input: {
 
 function buildHostedMemberLinqBindingUpdateData(input: {
   clearPending: boolean;
+  homeLineAssignedAt: Date | null;
   kind: "home" | "pending";
   linqChatLookupKey: string;
   participantContact: HostedLinqParticipantContact | null;
@@ -493,6 +563,9 @@ function buildHostedMemberLinqBindingUpdateData(input: {
     return {
       linqChatIdEncrypted: input.routingPrivateColumns.linqChatIdEncrypted,
       linqChatLookupKey: input.linqChatLookupKey,
+      ...(input.homeLineAssignedAt === null
+        ? {}
+        : { linqHomeLineAssignedAt: input.homeLineAssignedAt }),
       linqRecipientPhoneEncrypted: input.routingPrivateColumns.linqRecipientPhoneEncrypted,
       linqRecipientPhoneLookupKey: input.recipientPhoneLookupKey,
       ...(input.clearPending

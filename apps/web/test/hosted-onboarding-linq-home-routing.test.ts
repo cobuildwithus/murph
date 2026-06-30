@@ -8,34 +8,24 @@ import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-me
 
 const mocks = vi.hoisted(() => ({
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
+  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
-  getHostedOnboardingEnvironment: vi.fn(),
-  syncHostedLinqConfiguredLinesTx: vi.fn(),
+  listHostedLinqAssignableHomeLines: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberHomeLinqRecipientPhoneTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx: mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
+  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone: mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
   upsertHostedMemberHomeLinqBindingTx: mocks.upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx: mocks.upsertHostedMemberHomeLinqRecipientPhoneTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
-  syncHostedLinqConfiguredLinesTx: mocks.syncHostedLinqConfiguredLinesTx,
+  listHostedLinqAssignableHomeLines: mocks.listHostedLinqAssignableHomeLines,
 }));
-
-vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
-    "@/src/lib/hosted-onboarding/runtime",
-  );
-
-  return {
-    ...actual,
-    getHostedOnboardingEnvironment: mocks.getHostedOnboardingEnvironment,
-  };
-});
 
 import { resolveHostedMemberActivationLinqRoute } from "@/src/lib/hosted-onboarding/linq-home-routing";
 
@@ -43,12 +33,9 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
-    mocks.getHostedOnboardingEnvironment.mockReturnValue({
-      linqConversationPhoneNumbers: [],
-      linqMaxActiveMembersPerConversationPhone: null,
-    });
-    mocks.syncHostedLinqConfiguredLinesTx.mockResolvedValue(undefined);
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockResolvedValue(undefined);
   });
@@ -89,13 +76,19 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
   });
 
   it("reuses a pending Linq thread when its recipient matches the chosen home line", async () => {
-    mocks.getHostedOnboardingEnvironment.mockReturnValue({
-      linqConversationPhoneNumbers: ["+15550100001", "+15550100002"],
-      linqMaxActiveMembersPerConversationPhone: 3,
-    });
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+      buildLine("+15550100001", { activeMemberLimit: 3 }),
+      buildLine("+15550100002", { activeMemberLimit: 3 }),
+    ]);
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(
       new Map([
         ["+15550100001", 1],
+        ["+15550100002", 0],
+      ]),
+    );
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
+      new Map([
+        ["+15550100001", 0],
         ["+15550100002", 0],
       ]),
     );
@@ -123,13 +116,9 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
 
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
-    expect(mocks.syncHostedLinqConfiguredLinesTx).toHaveBeenCalledWith({
-      activeMemberLimit: 3,
-      phoneNumbers: ["+15550100001", "+15550100002"],
-      prisma: {} as never,
-    });
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
       clearPending: true,
+      homeLineAssignedAt: expect.any(Date),
       linqChatId: "chat_pending",
       memberId: "member_123",
       prisma: {} as never,
@@ -166,11 +155,13 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
         verifiedAt: new Date("2026-04-12T00:02:00.000Z"),
       },
     };
-    mocks.getHostedOnboardingEnvironment.mockReturnValue({
-      linqConversationPhoneNumbers: ["+15550100001"],
-      linqMaxActiveMembersPerConversationPhone: 3,
-    });
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+      buildLine("+15550100001", { activeMemberLimit: 3 }),
+    ]);
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(
+      new Map([["+15550100001", 0]]),
+    );
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
       new Map([["+15550100001", 0]]),
     );
 
@@ -196,6 +187,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
       clearPending: true,
+      homeLineAssignedAt: expect.any(Date),
       linqChatId: "chat_pending_email",
       memberId: "member_123",
       prisma: {} as never,
@@ -204,14 +196,20 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
   });
 
   it("assigns the pooled home line and builds a first-contact welcome route when there is no reusable pending thread", async () => {
-    mocks.getHostedOnboardingEnvironment.mockReturnValue({
-      linqConversationPhoneNumbers: ["+15550100001", "+15550100002"],
-      linqMaxActiveMembersPerConversationPhone: 3,
-    });
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+      buildLine("+15550100001", { activeMemberLimit: 3 }),
+      buildLine("+15550100002", { activeMemberLimit: 3 }),
+    ]);
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(
       new Map([
         ["+15550100001", 3],
         ["+15550100002", 1],
+      ]),
+    );
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
+      new Map([
+        ["+15550100001", 0],
+        ["+15550100002", 0],
       ]),
     );
 
@@ -247,6 +245,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
       clearPending: true,
+      homeLineAssignedAt: expect.any(Date),
       memberId: "member_123",
       prisma: {} as never,
       recipientPhone: "+15550100002",
@@ -271,6 +270,24 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
   });
 });
+
+function buildLine(
+  phoneNumber: string,
+  overrides: Partial<{
+    activeMemberLimit: number | null;
+    assignmentWeight: number;
+    maxNewConversationsPerDay: number | null;
+  }> = {},
+) {
+  return {
+    activeMemberLimit: overrides.activeMemberLimit ?? null,
+    assignmentWeight: overrides.assignmentWeight ?? 100,
+    maxNewConversationsPerDay: overrides.maxNewConversationsPerDay ?? null,
+    phoneNumber,
+    phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
+    phoneNumberLookupKey: `lookup:${phoneNumber}`,
+  };
+}
 
 function hashHostedLinqRouteIdentifier(
   value: string,

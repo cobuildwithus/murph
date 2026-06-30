@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   chooseHostedLinqConversationRecipientPhone,
+  chooseHostedLinqHomeLine,
   normalizeHostedLinqConversationRecipientPhones,
   resolveHostedLinqActiveRouteDecision,
   resolveHostedLinqHomeBindingRecipientPhone,
@@ -84,6 +85,74 @@ describe("chooseHostedLinqConversationRecipientPhone", () => {
         recipientPhones: [],
       }),
     ).toBe("+15550100009");
+  });
+});
+
+describe("chooseHostedLinqHomeLine", () => {
+  it("keeps a preferred DB line when active and daily caps have room", () => {
+    expect(
+      chooseHostedLinqHomeLine({
+        activeMembersByRecipientPhone: new Map([["+15550100001", 1]]),
+        lines: [
+          buildLine("+15550100001", {
+            activeMemberLimit: 3,
+            maxNewConversationsPerDay: 2,
+          }),
+          buildLine("+15550100002", {
+            activeMemberLimit: 3,
+            maxNewConversationsPerDay: 2,
+          }),
+        ],
+        newAssignmentsByRecipientPhone: new Map([["+15550100001", 1]]),
+        preferredRecipientPhone: "+15550100001",
+      })?.phoneNumber,
+    ).toBe("+15550100001");
+  });
+
+  it("skips DB lines that reached their daily new-conversation cap", () => {
+    expect(
+      chooseHostedLinqHomeLine({
+        activeMembersByRecipientPhone: new Map([
+          ["+15550100001", 0],
+          ["+15550100002", 2],
+        ]),
+        lines: [
+          buildLine("+15550100001", {
+            activeMemberLimit: 3,
+            maxNewConversationsPerDay: 1,
+          }),
+          buildLine("+15550100002", {
+            activeMemberLimit: 3,
+            maxNewConversationsPerDay: 3,
+          }),
+        ],
+        newAssignmentsByRecipientPhone: new Map([
+          ["+15550100001", 1],
+          ["+15550100002", 0],
+        ]),
+        preferredRecipientPhone: "+15550100001",
+      })?.phoneNumber,
+    ).toBe("+15550100002");
+  });
+
+  it("fails closed when every DB line is over an assignment cap", () => {
+    expect(
+      chooseHostedLinqHomeLine({
+        activeMembersByRecipientPhone: new Map([["+15550100001", 3]]),
+        lines: [
+          buildLine("+15550100001", {
+            activeMemberLimit: 3,
+            maxNewConversationsPerDay: 10,
+          }),
+          buildLine("+15550100002", {
+            activeMemberLimit: 3,
+            maxNewConversationsPerDay: 1,
+          }),
+        ],
+        newAssignmentsByRecipientPhone: new Map([["+15550100002", 1]]),
+        preferredRecipientPhone: "+15550100001",
+      }),
+    ).toBeNull();
   });
 });
 
@@ -204,6 +273,24 @@ describe("resolveHostedLinqActiveRouteDecision", () => {
     });
   });
 });
+
+function buildLine(
+  phoneNumber: string,
+  overrides: Partial<{
+    activeMemberLimit: number | null;
+    assignmentWeight: number;
+    maxNewConversationsPerDay: number | null;
+  }> = {},
+) {
+  return {
+    activeMemberLimit: overrides.activeMemberLimit ?? null,
+    assignmentWeight: overrides.assignmentWeight ?? 100,
+    maxNewConversationsPerDay: overrides.maxNewConversationsPerDay ?? null,
+    phoneNumber,
+    phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
+    phoneNumberLookupKey: `lookup:${phoneNumber}`,
+  };
+}
 
 describe("resolveHostedLinqHomeBindingRecipientPhone", () => {
   it("keeps the saved home recipient phone when the incoming chat already matches the durable home chat", () => {

@@ -17,6 +17,7 @@ import {
   sendHostedLinqVoiceMemo,
   uploadHostedLinqAttachment,
 } from "../hosted-onboarding/linq-client";
+import { isHostedLinqConfiguredLinePhone } from "../hosted-onboarding/linq-line-store";
 import {
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqChatId,
@@ -29,7 +30,6 @@ import {
 } from "../hosted-onboarding/shared";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
-import { getHostedOnboardingEnvironment } from "../hosted-onboarding/runtime";
 
 export const HOSTED_OPS_ONBOARDING_VOICE_MEMO_MAX_BYTES = 10 * 1024 * 1024;
 
@@ -158,7 +158,10 @@ export async function sendHostedOpsOnboardingInvite(
   const request = normalizeHostedOpsOnboardingInviteInput(input);
 
   if (request.deliveryMode === "new_chat") {
-    assertHostedOpsOnboardingAuthorizedLinqSenderPhone(request.linqFromPhoneNumber);
+    await assertHostedOpsOnboardingAuthorizedLinqSenderPhone({
+      prisma,
+      senderPhone: request.linqFromPhoneNumber,
+    });
   }
 
   const issued = await issueHostedOpsOnboardingInviteForRequest({
@@ -476,32 +479,20 @@ async function resolveHostedOpsOnboardingExistingLinqChatMemberId(input: {
   });
 }
 
-function assertHostedOpsOnboardingAuthorizedLinqSenderPhone(senderPhone: string): void {
-  const authorizedSenderPhones = new Set<string>();
+async function assertHostedOpsOnboardingAuthorizedLinqSenderPhone(input: {
+  prisma: PrismaClient;
+  senderPhone: string;
+}): Promise<void> {
+  const configured = await isHostedLinqConfiguredLinePhone({
+    phoneNumber: input.senderPhone,
+    prisma: input.prisma,
+  });
 
-  for (const configuredPhone of getHostedOnboardingEnvironment().linqConversationPhoneNumbers) {
-    const normalized = normalizePhoneNumber(configuredPhone);
-
-    if (normalized) {
-      authorizedSenderPhones.add(normalized);
-    }
-  }
-
-  if (authorizedSenderPhones.size === 0) {
-    throw hostedOnboardingError({
-      code: "HOSTED_OPS_ONBOARDING_LINQ_CONVERSATION_PHONE_REQUIRED",
-      httpStatus: 500,
-      message:
-        "Configure hosted Linq conversation phone numbers before creating a new onboarding chat.",
-      retryable: false,
-    });
-  }
-
-  if (!authorizedSenderPhones.has(senderPhone)) {
+  if (!configured) {
     throw hostedOnboardingError({
       code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_UNAUTHORIZED",
       httpStatus: 400,
-      message: "Linq sender phone must be a configured hosted conversation phone.",
+      message: "Linq sender phone must be a configured hosted Linq line.",
       retryable: false,
     });
   }

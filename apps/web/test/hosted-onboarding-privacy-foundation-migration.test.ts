@@ -78,6 +78,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'linqChatIdEncrypted String? @map("linq_chat_id_encrypted")',
     'linqRecipientPhoneLookupKey String? @map("linq_recipient_phone_lookup_key")',
     'linqRecipientPhoneEncrypted String? @map("linq_recipient_phone_encrypted")',
+    'linqHomeLineAssignedAt DateTime? @map("linq_home_line_assigned_at")',
     'linqLastInboundAt DateTime? @map("linq_last_inbound_at")',
     'pendingLinqChatLookupKey String? @unique @map("pending_linq_chat_lookup_key")',
     'pendingLinqChatIdEncrypted String? @map("pending_linq_chat_id_encrypted")',
@@ -548,6 +549,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260628000000_linq_first_contact_scrub_rejected_message_text",
       "20260628010000_linq_first_contact_drop_rejected_message_text",
       "20260629160000_computer_handoff_viewport_session_hint",
+      "20260630190000_hosted_linq_db_home_lines",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');

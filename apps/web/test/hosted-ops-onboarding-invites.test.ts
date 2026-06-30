@@ -7,8 +7,8 @@ const mocks = vi.hoisted(() => ({
   createHostedLinqChatLookupKey: vi.fn(),
   ensureHostedMemberForPhoneTx: vi.fn(),
   getPrisma: vi.fn(),
-  getHostedOnboardingEnvironment: vi.fn(),
   issueHostedInviteTx: vi.fn(),
+  isHostedLinqConfiguredLinePhone: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqChatId: vi.fn(),
@@ -49,6 +49,10 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   uploadHostedLinqAttachment: mocks.uploadHostedLinqAttachment,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
+  isHostedLinqConfiguredLinePhone: mocks.isHostedLinqConfiguredLinePhone,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   lookupHostedMemberRoutingByHomeLinqChatId: mocks.lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqChatId: mocks.lookupHostedMemberRoutingByPendingLinqChatId,
@@ -61,10 +65,6 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
   lookupHostedMemberIdentityByPhoneNumber: mocks.lookupHostedMemberIdentityByPhoneNumber,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
-  getHostedOnboardingEnvironment: mocks.getHostedOnboardingEnvironment,
 }));
 
 type ServiceModule = typeof import("../src/lib/hosted-ops/onboarding-invites");
@@ -108,9 +108,7 @@ describe("hosted ops onboarding invites", () => {
     mocks.createHostedLinqChatLookupKey.mockImplementation((chatId: string | null | undefined) =>
       chatId ? `lookup:${chatId}` : null
     );
-    mocks.getHostedOnboardingEnvironment.mockReturnValue({
-      linqConversationPhoneNumbers: ["+15557654321"],
-    });
+    mocks.isHostedLinqConfiguredLinePhone.mockResolvedValue(true);
     mocks.requireHostedOpsRequestAccess.mockResolvedValue({ member: { id: "member_ops" } });
     mocks.ensureHostedMemberForPhoneTx.mockResolvedValue({ id: "member_123" });
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
@@ -281,6 +279,10 @@ describe("hosted ops onboarding invites", () => {
       requestId: "request-456",
     });
 
+    expect(mocks.isHostedLinqConfiguredLinePhone).toHaveBeenCalledWith({
+      phoneNumber: "+15557654321",
+      prisma,
+    });
     expect(mocks.createHostedLinqChat).toHaveBeenCalledWith({
       from: "+15557654321",
       idempotencyKey: expect.stringMatching(
@@ -324,9 +326,7 @@ describe("hosted ops onboarding invites", () => {
   });
 
   it("rejects a new chat sender that is not a configured hosted Linq conversation phone", async () => {
-    mocks.getHostedOnboardingEnvironment.mockReturnValue({
-      linqConversationPhoneNumbers: ["+15550000000"],
-    });
+    mocks.isHostedLinqConfiguredLinePhone.mockResolvedValue(false);
 
     await expect(service.sendHostedOpsOnboardingInvite({
       deliveryMode: "new_chat",
@@ -337,6 +337,10 @@ describe("hosted ops onboarding invites", () => {
       code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_UNAUTHORIZED",
     });
 
+    expect(mocks.isHostedLinqConfiguredLinePhone).toHaveBeenCalledWith({
+      phoneNumber: "+15557654321",
+      prisma,
+    });
     expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
     expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();

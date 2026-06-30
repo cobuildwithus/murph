@@ -1,4 +1,5 @@
 import { normalizePhoneNumber } from "./phone";
+import type { HostedLinqAssignableHomeLine } from "./linq-line-store";
 
 export type HostedLinqActiveRouteDecision =
   | {
@@ -67,6 +68,49 @@ export function chooseHostedLinqConversationRecipientPhone(input: {
   }
 
   return recipientPhones[0] ?? preferredRecipientPhone;
+}
+
+export function chooseHostedLinqHomeLine(input: {
+  activeMembersByRecipientPhone: ReadonlyMap<string, number>;
+  lines: readonly HostedLinqAssignableHomeLine[];
+  newAssignmentsByRecipientPhone: ReadonlyMap<string, number>;
+  preferredRecipientPhone: string | null;
+}): HostedLinqAssignableHomeLine | null {
+  const preferredRecipientPhone = normalizePhoneNumber(input.preferredRecipientPhone);
+  const candidates = input.lines.filter((line) =>
+    isHostedLinqHomeLineUnderLimits({
+      activeMembersByRecipientPhone: input.activeMembersByRecipientPhone,
+      line,
+      newAssignmentsByRecipientPhone: input.newAssignmentsByRecipientPhone,
+    }),
+  );
+
+  if (preferredRecipientPhone) {
+    const preferred = candidates.find((line) => line.phoneNumber === preferredRecipientPhone);
+    if (preferred) {
+      return preferred;
+    }
+  }
+
+  return [...candidates].sort((left, right) => {
+    const leftDaily = input.newAssignmentsByRecipientPhone.get(left.phoneNumber) ?? 0;
+    const rightDaily = input.newAssignmentsByRecipientPhone.get(right.phoneNumber) ?? 0;
+    if (leftDaily !== rightDaily) {
+      return leftDaily - rightDaily;
+    }
+
+    const leftActive = input.activeMembersByRecipientPhone.get(left.phoneNumber) ?? 0;
+    const rightActive = input.activeMembersByRecipientPhone.get(right.phoneNumber) ?? 0;
+    if (leftActive !== rightActive) {
+      return leftActive - rightActive;
+    }
+
+    if (left.assignmentWeight !== right.assignmentWeight) {
+      return right.assignmentWeight - left.assignmentWeight;
+    }
+
+    return left.phoneNumberLookupKey.localeCompare(right.phoneNumberLookupKey);
+  })[0] ?? null;
 }
 
 export function resolveHostedLinqHomeBindingRecipientPhone(input: {
@@ -154,4 +198,28 @@ function isHostedLinqConversationRecipientPhoneAtCapacity(input: {
 
   return (input.activeMembersByRecipientPhone.get(input.recipientPhone) ?? 0)
     >= input.maxActiveMembersPerPhoneNumber;
+}
+
+function isHostedLinqHomeLineUnderLimits(input: {
+  activeMembersByRecipientPhone: ReadonlyMap<string, number>;
+  line: HostedLinqAssignableHomeLine;
+  newAssignmentsByRecipientPhone: ReadonlyMap<string, number>;
+}): boolean {
+  if (
+    input.line.activeMemberLimit !== null
+    && (input.activeMembersByRecipientPhone.get(input.line.phoneNumber) ?? 0)
+      >= input.line.activeMemberLimit
+  ) {
+    return false;
+  }
+
+  if (
+    input.line.maxNewConversationsPerDay !== null
+    && (input.newAssignmentsByRecipientPhone.get(input.line.phoneNumber) ?? 0)
+      >= input.line.maxNewConversationsPerDay
+  ) {
+    return false;
+  }
+
+  return true;
 }
