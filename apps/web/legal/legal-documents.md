@@ -11,7 +11,7 @@ This page collects the current Murph legal documents for the hosted service. The
 | Document | Current version | HTML | Latest PDF |
 | --- | --- | --- | --- |
 | Terms of Service | 2026-04-29 | [/legal/terms](/legal/terms) | [/legal/terms.pdf](/legal/terms.pdf) |
-| Privacy Policy | 2026-04-29 | [/legal/privacy](/legal/privacy) | [/legal/privacy.pdf](/legal/privacy.pdf) |
+| Privacy Policy | 2026-06-24 | [/legal/privacy](/legal/privacy) | [/legal/privacy.pdf](/legal/privacy.pdf) |
 | Consumer Health Data Notice | 2026-04-29 | [/consumer-health-data-privacy-policy](/consumer-health-data-privacy-policy) | [/legal/consumer-health-data-notice.pdf](/legal/consumer-health-data-notice.pdf) |
 | Health AI Safety Disclosure | 2026-04-29 | [/legal/health-ai-safety-disclosure](/legal/health-ai-safety-disclosure) | [/legal/health-ai-safety-disclosure.pdf](/legal/health-ai-safety-disclosure.pdf) |
 | Subprocessors and Model Providers | 2026-04-29 | [/subprocessors](/subprocessors) | [/legal/subprocessors.pdf](/legal/subprocessors.pdf) |
