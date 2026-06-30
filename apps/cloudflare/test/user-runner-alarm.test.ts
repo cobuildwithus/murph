@@ -1907,7 +1907,7 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("replaces a stale retention-only fence when default processing has no active child", async () => {
+  it("preempts a fresh inactive retention-only fence for default processing", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
@@ -1937,13 +1937,13 @@ describe("HostedUserRunner execution coordination", () => {
     const token = writeRuntimeFenceForTest(sql, {
       processingMode: "inbox_media_retention",
       runnerContainerName: TEST_USER_ID,
-      startedAt: "2026-04-26T23:59:20.000Z",
+      startedAt: "2026-04-27T00:00:20.000Z",
       workspaceVersion: "7",
     });
     vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
 
     await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-default-replaces-stale-retention",
+      orchestrationAttemptId: "test-orchestration-attempt-default-preempts-fresh-inactive-retention",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "replaced",

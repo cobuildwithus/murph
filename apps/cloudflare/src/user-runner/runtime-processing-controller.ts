@@ -421,6 +421,7 @@ export class RuntimeProcessingController {
         activeFence,
         commandBudget: input.commandBudget,
         input: input.input,
+        preserveStartingFence: false,
         record,
         runtimeWakeStartedAt: input.runtimeWakeStartedAt,
       });
