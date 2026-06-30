@@ -76,7 +76,7 @@ export function HostedAuthPanel({
   const canSwap = includesPhone && includesEmail;
   const showAlternateMethods = !codeSent && (includesTelegram || canSwap);
   const showResumableAuthState =
-    primaryMethod === "phone" && !telegramActive && resumableAuth !== null;
+    !codeSent && primaryMethod === "phone" && !telegramActive && resumableAuth !== null;
   const shouldRequireLaunchConsent = requireLaunchConsentOnCompletion ?? false;
   const shouldShowPassiveLegalNotice = showPassiveLegalNotice ?? false;
 

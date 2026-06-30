@@ -478,16 +478,11 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
-  it("does not pre-claim prefix-only non-canonical signup welcome delivery effects", async () => {
+  it("does not pre-claim non-canonical signup welcome delivery effects", async () => {
     const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
       assistantDeliveryEffects: [
         createEffect({
           idempotencyKey: "signup-welcome:member_placeholder:retry",
-          message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-          transportIdempotent: false,
-        }),
-        createEffect({
-          idempotencyKey: "signup-welcome:member_placeholder",
           message: "Fixed setup reminder.",
           transportIdempotent: false,
         }),
@@ -752,6 +747,111 @@ describe("hosted runtime callbacks", () => {
       idempotencyKey: "assistant-outbox:intent_linq",
       transportIdempotent: false,
     });
+  });
+
+  it("durably parks preferred vault-file intents when the hosted approval port is missing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+    try {
+      const vaultFile = {
+        contentType: "application/pdf",
+        filename: "report.pdf",
+        kind: "vault_file" as const,
+        ref: "documents/report.pdf",
+        sha256: "a".repeat(64),
+        sizeBytes: 42,
+      };
+      let storedIntent = {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        dedupeKey: "dedupe_vault_file",
+        delivery: null,
+        deliveryIdempotencyKey: "assistant-outbox:intent_vault_file",
+        deliveryTransportIdempotent: true,
+        explicitTarget: "linq_chat_1",
+        identityId: "identity_1",
+        intentId: "intent_vault_file",
+        lastAttemptAt: null,
+        lastError: null,
+        media: [vaultFile],
+        message: "Attached.",
+        nextAttemptAt: null,
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+        updatedAt: "2026-04-08T00:00:00.000Z",
+      };
+      const deferredIntent = {
+        ...storedIntent,
+        lastError: {
+          code: "ASSISTANT_VAULT_FILE_APPROVAL_CHECK_DEFERRED",
+          diagnosticContext: {
+            assistantDeliveryFailureClass: "blocked",
+            assistantDeliveryResumeTrigger: "approval_state_change",
+            retryable: false,
+          },
+          message: "Secure vault-file approval could not be checked yet.",
+        },
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        status: "awaiting_approval",
+        updatedAt: "2026-04-08T00:00:00.000Z",
+      };
+      mocks.listAssistantOutboxIntents.mockImplementation(async () => [
+        storedIntent,
+      ]);
+      mocks.readAssistantVaultFileMedia.mockReturnValue(vaultFile);
+      mocks.deferAssistantVaultFileApprovalCheck.mockImplementationOnce(
+        ({ intent, now }) => {
+          expect(intent).toBe(storedIntent);
+          expect(now.toISOString()).toBe("2026-04-08T00:00:00.000Z");
+          return deferredIntent;
+        },
+      );
+      mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementationOnce(
+        async ({ expectedDedupeKey, expectedStatus, expectedUpdatedAt, intent, vault }) => {
+          expect(expectedDedupeKey).toBe("dedupe_vault_file");
+          expect(expectedStatus).toBe("pending");
+          expect(expectedUpdatedAt).toBe("2026-04-08T00:00:00.000Z");
+          expect(vault).toBe("/tmp/vault");
+          storedIntent = intent;
+          return intent;
+        },
+      );
+
+      const sideEffects = await collectHostedAssistantDeliverySideEffects({
+        actionApprovalPort: null,
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: ["intent_vault_file"],
+        vaultRoot: "/tmp/vault",
+      });
+
+      expect(sideEffects).toEqual([]);
+      expect(storedIntent).toMatchObject({
+        intentId: "intent_vault_file",
+        lastError: {
+          code: "ASSISTANT_VAULT_FILE_APPROVAL_CHECK_DEFERRED",
+        },
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        status: "awaiting_approval",
+      });
+      expect(mocks.buildAssistantVaultFileSendApprovalRequest).not.toHaveBeenCalled();
+      expect(mocks.saveAssistantOutboxIntentIfUnchanged).toHaveBeenCalledTimes(1);
+
+      const wakeAt = await resolveHostedAssistantOutboxNextWakeAt({
+        now: new Date("2026-04-08T00:00:00.000Z"),
+        vaultRoot: "/tmp/vault",
+      });
+
+      expect(wakeAt).toBe("2026-04-08T00:01:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("abandons a queued signup welcome when a foreground reply targets the same route", async () => {
@@ -3666,6 +3766,9 @@ describe("hosted runtime callbacks", () => {
 
     expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledWith({
       dependencies: expect.any(Object),
+      dispatchHooks: expect.objectContaining({
+        preflightDispatchIntent: expect.any(Function),
+      }),
       intentId: effect.effectId,
       now: expect.any(Date),
       vault: HOSTED_WAKE.vaultRoot,
@@ -3710,6 +3813,9 @@ describe("hosted runtime callbacks", () => {
     const dispatchRequest = mocks.dispatchAssistantOutboxIntent.mock.calls[0]?.[0];
     expect(dispatchRequest).toEqual({
       dependencies: expect.any(Object),
+      dispatchHooks: expect.objectContaining({
+        preflightDispatchIntent: expect.any(Function),
+      }),
       intentId: effect.effectId,
       now: expect.any(Date),
       vault: HOSTED_WAKE.vaultRoot,
@@ -3891,6 +3997,9 @@ describe("hosted runtime callbacks", () => {
 
     expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledWith({
       dependencies: expect.any(Object),
+      dispatchHooks: expect.objectContaining({
+        preflightDispatchIntent: expect.any(Function),
+      }),
       intentId: effect.effectId,
       now: expect.any(Date),
       vault: HOSTED_WAKE.vaultRoot,
@@ -4157,6 +4266,136 @@ describe("hosted runtime callbacks", () => {
         retryable: false,
       }),
     ]);
+  });
+
+  it("blocks routed Linq reactions when route authority is revoked", async () => {
+    const routeAuthority = {
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq" as const,
+      containerMemberId: "member_123",
+      threadId: "linq_chat_123",
+    };
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_reaction_revoked",
+      linqMessage: {
+        chatId: "linq_chat_123",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_1",
+        parts: [
+          {
+            type: "text",
+            value: "hello",
+          },
+        ],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "phone_lookup_123",
+      routeAuthority,
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      channel: "linq",
+      bindingDeliveryTarget: "linq_chat_123",
+      message: "",
+      replyToMessageId: "linq_message_1",
+      transportIdempotent: false,
+    });
+    const assertAuthority = vi.fn(async () => {
+      throw new Error("route revoked");
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.setLinqMessageReaction({
+        reaction: "heart",
+        target: "linq_chat_123",
+        targetMessageId: "linq_message_1",
+      });
+
+      throw new Error("unreachable after route assertion failure");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqThreadRouteAuthority: assertAuthority,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake,
+    })).rejects.toThrow("route revoked");
+
+    expect(assertAuthority).toHaveBeenCalledWith(routeAuthority, {
+      signal: null,
+    });
+    expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
+  });
+
+  it("blocks routed Linq reactions when the requested target differs from the routed thread", async () => {
+    const routeAuthority = {
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq" as const,
+      containerMemberId: "member_123",
+      threadId: "linq_chat_123",
+    };
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_reaction_target_mismatch",
+      linqMessage: {
+        chatId: "linq_chat_123",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_1",
+        parts: [
+          {
+            type: "text",
+            value: "hello",
+          },
+        ],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "phone_lookup_123",
+      routeAuthority,
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      channel: "linq",
+      bindingDeliveryTarget: "linq_chat_123",
+      message: "",
+      replyToMessageId: "linq_message_1",
+      transportIdempotent: false,
+    });
+    const assertAuthority = vi.fn(async () => undefined);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.setLinqMessageReaction({
+        reaction: "heart",
+        target: "linq_chat_other",
+        targetMessageId: "linq_message_other",
+      });
+
+      throw new Error("unreachable after route target mismatch");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqThreadRouteAuthority: assertAuthority,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_LINQ_ROUTE_AUTHORITY_TARGET_MISMATCH",
+    });
+
+    expect(assertAuthority).not.toHaveBeenCalled();
+    expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
   });
 
   it("marks post-dispatch Linq reaction transport errors as possibly committed", async () => {
@@ -4534,6 +4773,337 @@ describe("hosted runtime callbacks", () => {
         providerMessageId: "linq_message_sent",
         providerThreadId: "linq_chat_materialized",
         target: "linq_chat_materialized",
+      }),
+    ]);
+  });
+
+  it("revalidates routed Linq authority before provider egress", async () => {
+    const routeAuthority = {
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq" as const,
+      containerMemberId: "member_123",
+      threadId: "linq_chat_current",
+    };
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_routed_provider_fetch",
+      linqMessage: {
+        chatId: "linq_chat_current",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_current",
+        parts: [
+          {
+            type: "text",
+            value: "hello on the routed wake",
+          },
+        ],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "+15559990000",
+      routeAuthority,
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      actorId: "ain_hashed_actor",
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_current",
+      channel: "linq",
+      explicitTarget: "linq_chat_current",
+      transportIdempotent: true,
+    });
+    const assertAuthority = vi.fn(async () => undefined);
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_current",
+      target: "linq_chat_current",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_hashed_target",
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_current",
+        target: "linq_chat_current",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqThreadRouteAuthority: assertAuthority,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+
+    expect(assertAuthority).toHaveBeenCalledWith(routeAuthority, {
+      signal: null,
+    });
+    expect(assertAuthority.mock.invocationCallOrder[0] ?? 0)
+      .toBeLessThan(mocks.sendLinqMessage.mock.invocationCallOrder[0] ?? 0);
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+      }),
+    ]);
+  });
+
+  it("blocks routed Linq provider egress when the requested target differs from the routed thread", async () => {
+    const routeAuthority = {
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq" as const,
+      containerMemberId: "member_123",
+      threadId: "linq_chat_current",
+    };
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_routed_target_mismatch",
+      linqMessage: {
+        chatId: "linq_chat_current",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_current",
+        parts: [
+          {
+            type: "text",
+            value: "hello on the routed wake",
+          },
+        ],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "+15559990000",
+      routeAuthority,
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      actorId: "ain_hashed_actor",
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_current",
+      channel: "linq",
+      explicitTarget: "linq_chat_current",
+      transportIdempotent: true,
+    });
+    const assertAuthority = vi.fn(async () => undefined);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_hashed_target",
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_current",
+        target: "linq_chat_other",
+        targetKind: "thread",
+      });
+
+      throw new Error("unreachable after route target mismatch");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqThreadRouteAuthority: assertAuthority,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_LINQ_ROUTE_AUTHORITY_TARGET_MISMATCH",
+    });
+
+    expect(assertAuthority).not.toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it("blocks routed Linq provider egress when route authority is revoked", async () => {
+    const routeAuthority = {
+      accountLookupKey: "hbidx:phone:v1:account",
+      channel: "linq" as const,
+      containerMemberId: "member_123",
+      threadId: "linq_chat_current",
+    };
+    const wake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_routed_revoked",
+      linqMessage: {
+        chatId: "linq_chat_current",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_current",
+        parts: [
+          {
+            type: "text",
+            value: "hello on the routed wake",
+          },
+        ],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "+15559990000",
+      routeAuthority,
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      actorId: "ain_hashed_actor",
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_current",
+      channel: "linq",
+      explicitTarget: "linq_chat_current",
+      transportIdempotent: true,
+    });
+    const assertAuthority = vi.fn(async () => {
+      throw new Error("route revoked");
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: null,
+        idempotencyKey: "assistant-outbox:intent_hashed_target",
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_current",
+        target: "linq_chat_current",
+        targetKind: "thread",
+      });
+
+      throw new Error("unreachable after route assertion failure");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      wake,
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqThreadRouteAuthority: assertAuthority,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    })).rejects.toThrow("route revoked");
+
+    expect(assertAuthority).toHaveBeenCalledWith(routeAuthority, {
+      signal: null,
+    });
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it("consumes approved vault-file actions before hosted Linq delivery", async () => {
+    const vaultFile = {
+      approvalGeneration: "b".repeat(64),
+      approvalId: `haa_${"a".repeat(32)}`,
+      contentType: "application/pdf",
+      filename: "report.pdf",
+      kind: "vault_file" as const,
+      ref: "documents/report.pdf",
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "chat_123",
+      channel: "linq",
+      media: [vaultFile],
+      transportIdempotent: true,
+    });
+    const approvalRequest = {
+      actionFingerprint: "a".repeat(64),
+      actionId: "vault-file-send:approved",
+      actionKind: "vault.file.send.v1",
+      presentation: {
+        body: "Send a vault file.",
+        title: "Send a file?",
+      },
+      returnContactKind: "text" as const,
+    };
+    const actionApprovalPort = {
+      consume: vi.fn(async () => ({
+        approvalGeneration: "b".repeat(64),
+        approvalId: `haa_${"a".repeat(32)}`,
+        status: "approved" as const,
+      })),
+      request: vi.fn(),
+    };
+    mocks.buildAssistantVaultFileSendApprovalRequest.mockReturnValueOnce(
+      approvalRequest,
+    );
+    mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
+      dedupeKey: "dedupe_123",
+      intentId: "intent_123",
+      media: [vaultFile],
+    });
+    mocks.readAssistantVaultFileMedia.mockReturnValueOnce(vaultFile);
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_vault_file_sent",
+      providerThreadId: "chat_123",
+      target: "chat_123",
+      targetKind: "thread",
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        idempotencyKey: "assistant-outbox:intent_123",
+        media: [vaultFile],
+        message: "Attached.",
+        replyToMessageId: null,
+        target: "chat_123",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      actionApprovalPort,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch: vi.fn<typeof fetch>(
+        async () => new Response(null, { status: 204 }),
+      ),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(actionApprovalPort.consume).toHaveBeenCalledWith({
+      approvalGeneration: "b".repeat(64),
+      consumerId: "assistant-outbox:intent_123",
+      request: approvalRequest,
+    });
+    expect(actionApprovalPort.request).not.toHaveBeenCalled();
+    expect(mocks.readVerifiedAssistantVaultFileBytes).toHaveBeenCalledWith({
+      file: vaultFile,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        media: [vaultFile],
+        target: "chat_123",
+      }),
+      expect.objectContaining({
+        loadVaultFile: expect.any(Function),
+      }),
+    );
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+        providerMessageId: "linq_vault_file_sent",
       }),
     ]);
   });

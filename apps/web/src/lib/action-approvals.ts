@@ -11,9 +11,11 @@ import {
   HOSTED_ACTION_APPROVAL_ID_PREFIX,
   HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS,
   isHostedActionApprovalId,
+  parseHostedActionApprovalConsumeRequest,
   parseHostedActionApprovalPresentation,
   parseHostedActionApprovalRequest,
   serializeHostedActionApprovalRequest,
+  type HostedActionApprovalConsumeRequest,
   type HostedActionApprovalRequest,
   type HostedActionApprovalResult,
   type HostedActionApprovalReturnContactKind,
@@ -36,6 +38,7 @@ const ACTION_APPROVAL_KIND = "assistant.action.approve";
 const ACTION_APPROVAL_KEY_VERSION = "murph-action-approval-key-v1";
 const ACTION_APPROVAL_HASH_VERSION = "murph-action-approval-request-hash-v1";
 const ACTION_APPROVAL_BINDING_VERSION = "murph-action-approval-binding-v1";
+const ACTION_APPROVAL_GENERATION_VERSION = "murph-action-approval-generation-v1";
 const ACTION_APPROVAL_PLACEHOLDER_VERSION = "murph-action-approval-placeholder-v1";
 const ACTION_APPROVAL_ID_BYTES = 24;
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
@@ -51,10 +54,29 @@ export interface PendingHostedActionApprovalIdentity {
   tokenHash: string;
 }
 
-type HostedActionApprovalReadStore = Pick<
-  PrismaClient,
-  "hostedSensitiveActionChallenge"
->;
+interface HostedActionApprovalReadChallengeDelegate {
+  findFirst(
+    args: Prisma.HostedSensitiveActionChallengeFindFirstArgs,
+  ): Promise<HostedSensitiveActionChallenge | null>;
+}
+
+interface HostedActionApprovalWriteChallengeDelegate
+  extends HostedActionApprovalReadChallengeDelegate {
+  updateMany(
+    args: Prisma.HostedSensitiveActionChallengeUpdateManyArgs,
+  ): Promise<Prisma.BatchPayload>;
+  upsert(
+    args: Prisma.HostedSensitiveActionChallengeUpsertArgs,
+  ): Promise<HostedSensitiveActionChallenge>;
+}
+
+interface HostedActionApprovalReadStore {
+  hostedSensitiveActionChallenge: HostedActionApprovalReadChallengeDelegate;
+}
+
+interface HostedActionApprovalWriteStore extends HostedActionApprovalReadStore {
+  hostedSensitiveActionChallenge: HostedActionApprovalWriteChallengeDelegate;
+}
 
 export function requireHostedActionApprovalId(value: unknown): string {
   if (!isHostedActionApprovalId(value)) {
@@ -66,56 +88,131 @@ export function requireHostedActionApprovalId(value: unknown): string {
 export async function requestHostedActionApproval(input: {
   memberId: string;
   now?: Date;
-  prisma: PrismaClient;
+  prisma: HostedActionApprovalWriteStore;
   request: HostedActionApprovalRequest | unknown;
 }): Promise<HostedActionApprovalResult> {
-  const request = parseHostedActionApprovalRequest(input.request);
-  const now = input.now ?? new Date();
-  const approvalId = buildHostedActionApprovalId({
-    actionId: request.actionId,
+  const prepared = prepareHostedActionApprovalRequest({
     memberId: input.memberId,
+    now: input.now,
+    request: input.request,
   });
-  const actionHash = hashHostedActionApprovalRequest({
-    memberId: input.memberId,
-    request,
-  });
-  const expiresAt = new Date(now.getTime() + ACTION_APPROVAL_TTL_MS);
 
   const approval = await input.prisma.hostedSensitiveActionChallenge.upsert({
-    where: { approvalKey: approvalId },
-    create: {
-      actionHash,
-      actionId: request.actionId,
-      approvalKey: approvalId,
-      approvalStatus: "pending",
-      bindingHash: actionHash,
-      createdAt: now,
-      expiresAt,
-      kind: ACTION_APPROVAL_KIND,
-      memberId: input.memberId,
-      presentationBody: request.presentation.body,
-      presentationTitle: request.presentation.title,
-      returnContactKind: request.returnContactKind,
-      tokenHash: buildHostedActionApprovalPlaceholderHash(approvalId),
-    },
+    where: { approvalKey: prepared.approvalId },
+    create: buildPendingHostedActionApprovalData(prepared),
     update: {},
   });
 
-  if (
-    approval.kind !== ACTION_APPROVAL_KIND
-    || approval.memberId !== input.memberId
-    || approval.actionId !== request.actionId
-    || approval.actionHash !== actionHash
-    || approval.approvalKey !== approvalId
-  ) {
-    throw hostedOnboardingError({
-      code: "ACTION_APPROVAL_IDENTITY_CONFLICT",
-      httpStatus: 409,
-      message: "This action id is already bound to a different sensitive action.",
-    });
+  assertHostedActionApprovalMatchesRequest(approval, prepared);
+
+  const status = readHostedActionApprovalStatus(approval, prepared.now);
+  if (status === "pending" || status === "approved") {
+    return buildHostedActionApprovalResult(approval, prepared.now);
   }
 
-  return buildHostedActionApprovalResult(approval, now);
+  return buildHostedActionApprovalResult(
+    await refreshHostedActionApprovalRequest({
+      approval,
+      prepared,
+      prisma: input.prisma,
+    }),
+    prepared.now,
+  );
+}
+
+export async function consumeHostedActionApproval(input: {
+  memberId: string;
+  now?: Date;
+  prisma: HostedActionApprovalWriteStore;
+  request: HostedActionApprovalConsumeRequest | unknown;
+}): Promise<HostedActionApprovalResult> {
+  const consumeRequest = parseHostedActionApprovalConsumeRequest(input.request);
+  const prepared = prepareHostedActionApprovalRequest({
+    memberId: input.memberId,
+    now: input.now,
+    request: consumeRequest.request,
+  });
+  const approval = await findHostedActionApprovalForRequest({
+    prepared,
+    prisma: input.prisma,
+  });
+
+  assertHostedActionApprovalMatchesRequest(approval, prepared);
+
+  const approvalGeneration = buildHostedActionApprovalGeneration(approval);
+  const consumedBy = normalizeActionApprovalConsumerId(approval.consumedBy);
+  if (
+    approval.approvalStatus === "approved"
+    && consumedBy !== null
+    && consumedBy === consumeRequest.consumerId
+    && approval.consumedAt !== null
+    && approval.expiresAt > prepared.now
+    && approvalGeneration === consumeRequest.approvalGeneration
+  ) {
+    return buildApprovedHostedActionApprovalResult(approval);
+  }
+
+  const status = readHostedActionApprovalStatus(approval, prepared.now);
+  if (status !== "approved") {
+    return buildHostedActionApprovalResult(approval, prepared.now);
+  }
+  if (approvalGeneration !== consumeRequest.approvalGeneration) {
+    return {
+      approvalId: prepared.approvalId,
+      status: "expired",
+    };
+  }
+
+  const updated = await input.prisma.hostedSensitiveActionChallenge.updateMany({
+    where: {
+      actionId: prepared.request.actionId,
+      approvalKey: prepared.approvalId,
+      approvalStatus: "approved",
+      consumedAt: null,
+      consumedBy: null,
+      expiresAt: { gt: prepared.now },
+      kind: ACTION_APPROVAL_KIND,
+      memberId: prepared.memberId,
+      tokenHash: approval.tokenHash,
+      AND: [buildHostedActionApprovalHashWhere(prepared)],
+    },
+    data: {
+      consumedAt: prepared.now,
+      consumedBy: consumeRequest.consumerId,
+    },
+  });
+
+  if (updated.count !== 1) {
+    const current = await findHostedActionApprovalForRequest({
+      prepared,
+      prisma: input.prisma,
+    });
+    assertHostedActionApprovalMatchesRequest(current, prepared);
+    const currentConsumedBy = normalizeActionApprovalConsumerId(current.consumedBy);
+    const currentGeneration = buildHostedActionApprovalGeneration(current);
+    if (currentGeneration !== consumeRequest.approvalGeneration) {
+      return {
+        approvalId: prepared.approvalId,
+        status: "expired",
+      };
+    }
+    if (
+      current.approvalStatus === "approved"
+      && current.consumedAt !== null
+      && currentConsumedBy === consumeRequest.consumerId
+      && current.expiresAt > prepared.now
+      && currentGeneration === consumeRequest.approvalGeneration
+    ) {
+      return buildApprovedHostedActionApprovalResult(current);
+    }
+    return buildHostedActionApprovalResult(current, prepared.now);
+  }
+
+  return {
+    approvalGeneration: consumeRequest.approvalGeneration,
+    approvalId: prepared.approvalId,
+    status: "approved",
+  };
 }
 
 export async function readHostedActionApproval(input: {
@@ -227,6 +324,9 @@ export async function decideHostedActionApprovalTx(input: {
   const proof = input.decision === "approved"
     ? requireApprovalChallenge(input.challenge)
     : null;
+  const expiresAt = input.decision === "approved"
+    ? new Date(now.getTime() + ACTION_APPROVAL_TTL_MS)
+    : input.approval.expiresAt;
   const updated = await input.tx.hostedSensitiveActionChallenge.updateMany({
     where: {
       actionHash: input.approval.actionHash,
@@ -241,7 +341,10 @@ export async function decideHostedActionApprovalTx(input: {
     },
     data: {
       approvalStatus: input.decision,
+      consumedAt: null,
+      consumedBy: null,
       decidedAt: now,
+      expiresAt,
     },
   });
 
@@ -251,7 +354,7 @@ export async function decideHostedActionApprovalTx(input: {
 
   return {
     approvalId: input.approval.approvalId,
-    expiresAt: input.approval.expiresAt.toISOString(),
+    expiresAt: expiresAt.toISOString(),
     presentation: input.approval.presentation,
     returnContactKind: input.approval.returnContactKind,
     status: input.decision,
@@ -308,6 +411,38 @@ export function hashHostedActionApprovalRequest(input: {
   ].join("\n"));
 }
 
+function hashLegacyNullReturnContactKindHostedActionApprovalRequest(input: {
+  memberId: string;
+  request: HostedActionApprovalRequest;
+}): string {
+  return sha256Hex([
+    ACTION_APPROVAL_HASH_VERSION,
+    input.memberId,
+    JSON.stringify([
+      "murph.hosted-action-approval-request.v1",
+      input.request.actionId,
+      input.request.actionKind,
+      input.request.actionFingerprint,
+      input.request.presentation.title,
+      input.request.presentation.body,
+    ]),
+  ].join("\n"));
+}
+
+function buildHostedActionApprovalHashWhere(
+  prepared: PreparedHostedActionApprovalRequest,
+): Prisma.HostedSensitiveActionChallengeWhereInput {
+  if (prepared.legacyNullReturnContactKindActionHash === null) {
+    return { actionHash: prepared.actionHash };
+  }
+  return {
+    OR: [
+      { actionHash: prepared.actionHash },
+      { actionHash: prepared.legacyNullReturnContactKindActionHash },
+    ],
+  };
+}
+
 function buildHostedActionApprovalResult(
   approval: HostedSensitiveActionChallenge,
   now: Date,
@@ -315,6 +450,9 @@ function buildHostedActionApprovalResult(
   const identity = requireHostedActionApprovalIdentity(approval);
   const status = readHostedActionApprovalStatus(approval, now);
 
+  if (status === "approved") {
+    return buildApprovedHostedActionApprovalResult(approval);
+  }
   if (status !== "pending") {
     return {
       approvalId: identity.approvalId,
@@ -328,6 +466,166 @@ function buildHostedActionApprovalResult(
     expiresAt: identity.expiresAt.toISOString(),
     status,
   };
+}
+
+interface PreparedHostedActionApprovalRequest {
+  actionHash: string;
+  approvalId: string;
+  expiresAt: Date;
+  legacyNullReturnContactKindActionHash: string | null;
+  memberId: string;
+  now: Date;
+  request: HostedActionApprovalRequest;
+}
+
+function prepareHostedActionApprovalRequest(input: {
+  memberId: string;
+  now?: Date;
+  request: HostedActionApprovalRequest | unknown;
+}): PreparedHostedActionApprovalRequest {
+  const request = parseHostedActionApprovalRequest(input.request);
+  const now = input.now ?? new Date();
+  const approvalId = buildHostedActionApprovalId({
+    actionId: request.actionId,
+    memberId: input.memberId,
+  });
+
+  const actionHash = hashHostedActionApprovalRequest({
+    memberId: input.memberId,
+    request,
+  });
+
+  return {
+    actionHash,
+    approvalId,
+    expiresAt: new Date(now.getTime() + ACTION_APPROVAL_TTL_MS),
+    legacyNullReturnContactKindActionHash: request.returnContactKind === null
+      ? hashLegacyNullReturnContactKindHostedActionApprovalRequest({
+          memberId: input.memberId,
+          request,
+        })
+      : null,
+    memberId: input.memberId,
+    now,
+    request,
+  };
+}
+
+function buildPendingHostedActionApprovalData(
+  prepared: PreparedHostedActionApprovalRequest,
+) {
+  return {
+    actionHash: prepared.actionHash,
+    actionId: prepared.request.actionId,
+    approvalKey: prepared.approvalId,
+    approvalStatus: "pending" as const,
+    bindingHash: prepared.actionHash,
+    consumedAt: null,
+    consumedBy: null,
+    createdAt: prepared.now,
+    decidedAt: null,
+    expiresAt: prepared.expiresAt,
+    kind: ACTION_APPROVAL_KIND,
+    memberId: prepared.memberId,
+    presentationBody: prepared.request.presentation.body,
+    presentationTitle: prepared.request.presentation.title,
+    returnContactKind: prepared.request.returnContactKind,
+    tokenHash: buildHostedActionApprovalPlaceholderHash(prepared.approvalId),
+  };
+}
+
+async function refreshHostedActionApprovalRequest(input: {
+  approval: HostedSensitiveActionChallenge;
+  prepared: PreparedHostedActionApprovalRequest;
+  prisma: HostedActionApprovalWriteStore;
+}): Promise<HostedSensitiveActionChallenge> {
+  const updated = await input.prisma.hostedSensitiveActionChallenge.updateMany({
+    where: {
+      actionId: input.prepared.request.actionId,
+      approvalKey: input.prepared.approvalId,
+      kind: ACTION_APPROVAL_KIND,
+      memberId: input.prepared.memberId,
+      tokenHash: input.approval.tokenHash,
+      AND: [
+        buildHostedActionApprovalHashWhere(input.prepared),
+        {
+          OR: [
+            { approvalStatus: "denied" },
+            {
+              approvalStatus: "pending",
+              expiresAt: { lte: input.prepared.now },
+            },
+            {
+              approvalStatus: "approved",
+              consumedAt: { not: null },
+            },
+            {
+              approvalStatus: "approved",
+              expiresAt: { lte: input.prepared.now },
+            },
+          ],
+        },
+      ],
+    },
+    data: buildPendingHostedActionApprovalData(input.prepared),
+  });
+
+  if (updated.count !== 1) {
+    return findHostedActionApprovalForRequest(input);
+  }
+
+  return findHostedActionApprovalForRequest(input);
+}
+
+async function findHostedActionApprovalForRequest(input: {
+  prepared: PreparedHostedActionApprovalRequest;
+  prisma: HostedActionApprovalReadStore;
+}): Promise<HostedSensitiveActionChallenge> {
+  const approval = await input.prisma.hostedSensitiveActionChallenge.findFirst({
+    where: {
+      approvalKey: input.prepared.approvalId,
+      kind: ACTION_APPROVAL_KIND,
+      memberId: input.prepared.memberId,
+    },
+  });
+
+  if (!approval) {
+    throw actionApprovalNotFound();
+  }
+  return approval;
+}
+
+function assertHostedActionApprovalMatchesRequest(
+  approval: HostedSensitiveActionChallenge,
+  prepared: PreparedHostedActionApprovalRequest,
+): void {
+  if (
+    approval.kind !== ACTION_APPROVAL_KIND
+    || approval.memberId !== prepared.memberId
+    || approval.actionId !== prepared.request.actionId
+    || approval.approvalKey !== prepared.approvalId
+  ) {
+    throw hostedOnboardingError({
+      code: "ACTION_APPROVAL_IDENTITY_CONFLICT",
+      httpStatus: 409,
+      message: "This action id is already bound to a different sensitive action.",
+    });
+  }
+  if (approval.actionHash === prepared.actionHash) {
+    return;
+  }
+  if (
+    prepared.legacyNullReturnContactKindActionHash !== null
+    && approval.actionHash === prepared.legacyNullReturnContactKindActionHash
+    && approval.returnContactKind === null
+  ) {
+    return;
+  }
+  throw hostedOnboardingError({
+    code: "ACTION_APPROVAL_IDENTITY_CONFLICT",
+    httpStatus: 409,
+    message: "This action id is already bound to a different sensitive action.",
+  });
 }
 
 function buildHostedActionApprovalView(
@@ -393,11 +691,13 @@ function readHostedActionApprovalStatus(
   approval: HostedSensitiveActionChallenge,
   now: Date,
 ): HostedActionApprovalStatus {
-  if (
-    approval.approvalStatus === "approved"
-    || approval.approvalStatus === "denied"
-  ) {
-    return approval.approvalStatus;
+  if (approval.approvalStatus === "approved") {
+    return approval.consumedAt !== null || approval.expiresAt <= now
+      ? "expired"
+      : "approved";
+  }
+  if (approval.approvalStatus === "denied") {
+    return "denied";
   }
   if (approval.approvalStatus !== "pending") {
     throw new TypeError("Hosted action approval status is invalid.");
@@ -419,6 +719,36 @@ function buildHostedActionApprovalPlaceholderHash(approvalId: string): string {
     ACTION_APPROVAL_PLACEHOLDER_VERSION,
     approvalId,
   ].join("\n"));
+}
+
+function buildApprovedHostedActionApprovalResult(
+  approval: HostedSensitiveActionChallenge,
+): HostedActionApprovalResult {
+  const identity = requireHostedActionApprovalIdentity(approval);
+  return {
+    approvalGeneration: buildHostedActionApprovalGeneration(approval),
+    approvalId: identity.approvalId,
+    status: "approved",
+  };
+}
+
+function buildHostedActionApprovalGeneration(
+  approval: HostedSensitiveActionChallenge,
+): string {
+  const identity = requireHostedActionApprovalIdentity(approval);
+  return sha256Hex([
+    ACTION_APPROVAL_GENERATION_VERSION,
+    identity.approvalId,
+    identity.actionHash,
+    identity.tokenHash,
+  ].join("\n"));
+}
+
+function normalizeActionApprovalConsumerId(value: string | null | undefined): string | null {
+  if (typeof value !== "string" || value.trim() !== value || value.length === 0) {
+    return null;
+  }
+  return value;
 }
 
 function buildHostedActionApprovalUrl(approvalId: string): string {

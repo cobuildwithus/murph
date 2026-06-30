@@ -80,6 +80,29 @@ test("VercelTelemetry redacts private handoff tokens before analytics sends", ()
       url: "https://join.example.test/computer/handoff/[token]",
     },
   );
+
+  assert.equal(
+    redactPrivateAnalyticsUrl(
+      "https://join.example.test/api/computer/handoff/private-token/viewport?height=844",
+    ),
+    "https://join.example.test/api/computer/handoff/[token]/viewport",
+  );
+  assert.equal(
+    redactPrivateAnalyticsUrl("/api/computer/handoff/private-token/done"),
+    "/api/computer/handoff/[token]/done",
+  );
+  assert.deepEqual(
+    speedInsightsProps.beforeSend({
+      route: "/api/computer/handoff/private-token/viewport",
+      type: "vital",
+      url: "https://join.example.test/api/computer/handoff/private-token/viewport?width=390",
+    }),
+    {
+      route: "/api/computer/handoff/[token]/viewport",
+      type: "vital",
+      url: "https://join.example.test/api/computer/handoff/[token]/viewport",
+    },
+  );
 });
 
 test("redactPrivateAnalyticsUrl leaves unrelated routes unchanged", () => {

@@ -54,6 +54,8 @@ vi.mock("@murphai/assistant-engine", () => ({
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_SCHEMA:
     "murph.assistant-context-diagnostics.v1",
   HOSTED_ASSISTANT_CONTEXT_DIAGNOSTICS_TYPE: "assistant.context.diagnostics",
+  HOSTED_ASSISTANT_TURN_TIMING_SCHEMA: "murph.assistant-turn-timing.v1",
+  HOSTED_ASSISTANT_TURN_TIMING_TYPE: "assistant.turn.timing",
   readAssistantAutomationState: mocks.readAssistantAutomationState,
   runAssistantAutomationPass: mocks.runAssistantAutomationPass,
 }));
@@ -1107,7 +1109,20 @@ describe("runHostedAssistantAutomation", () => {
   });
 
   it("rethrows unexpected automation failures", async () => {
-    mocks.runAssistantAutomationPass.mockRejectedValueOnce(new Error("automation failed"));
+    const failure = new Error("automation failed");
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      input.onTraceEvent?.({
+        codexThreadId: null,
+        rawEvent: {
+          schema: "murph.assistant-turn-timing.v1",
+          type: "assistant.turn.timing",
+          turnTimingElapsedMs: 17,
+          turnTimingStage: "usage-recorded",
+        },
+        updates: [],
+      });
+      throw failure;
+    });
 
     await expect(
       runHostedAssistantAutomation(
@@ -1129,6 +1144,28 @@ describe("runHostedAssistantAutomation", () => {
       },
     ),
     ).rejects.toThrow("automation failed");
+
+    const attachedLogEntries =
+      (failure as {
+        hostedAssistantAutomationRedactedLogEntries?: unknown;
+      }).hostedAssistantAutomationRedactedLogEntries;
+    expect(Array.isArray(attachedLogEntries)).toBe(true);
+    expect(attachedLogEntries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        message: "Hosted assistant turn timing milestone captured.",
+        redacted: expect.objectContaining({
+          schema: "murph.assistant-turn-timing.v1",
+          turnTimingElapsedMs: 17,
+          turnTimingStage: "usage-recorded",
+        }),
+      }),
+      expect.objectContaining({
+        message: "Hosted assistant automation pass failed.",
+      }),
+    ]));
+    expect(Object.keys(failure)).not.toContain(
+      "hostedAssistantAutomationRedactedLogEntries",
+    );
   });
 });
 
@@ -3050,7 +3087,17 @@ describe("runHostedAssistantAutomationLane", () => {
       startedAt: "2026-04-08T00:00:02.000Z",
     });
     await Promise.resolve();
-    expect(latencyTraceRecord).toHaveBeenCalledTimes(1);
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(2);
+    expect(latencyTraceRecord).toHaveBeenLastCalledWith({
+      event: {
+        assistantInputIds: ["input_2"],
+        at: "2026-04-08T00:00:02.000Z",
+        providerRequestOrdinal: 0,
+        runtimeAttemptId: "attempt_123",
+        source: "telegram",
+        type: "provider_started",
+      },
+    });
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 

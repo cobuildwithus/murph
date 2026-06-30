@@ -21,6 +21,7 @@ import {
 } from "../../shared-runtime.ts";
 
 const LINQ_CAPTURE_RAW_SCHEMA = "murph.linq-capture.v1";
+const LINQ_ATTACHMENT_DOWNLOAD_CONCURRENCY = 2;
 
 export interface LinqAttachmentDownloadDriver {
   downloadUrl(url: string, signal?: AbortSignal): Promise<Uint8Array | null>;
@@ -70,6 +71,7 @@ export interface NormalizeHostedLinqConversationMessageInput {
     replyToMessageId?: string | null;
     replyToPartIndex?: number | null;
     service?: string | null;
+    threadIsDirect?: boolean | null;
   };
   occurredAt: string;
   source?: string;
@@ -255,7 +257,9 @@ async function toHostedLinqChatMessage(input: {
     thread: {
       id: chatId,
       title: buildHostedLinqThreadTitle(message),
-      isDirect: true,
+      isDirect: typeof message.threadIsDirect === "boolean"
+        ? message.threadIsDirect
+        : true,
     },
     actor: {
       id: normalizeTextValue(message.from),
@@ -289,42 +293,78 @@ async function buildLinqAttachments(
   signal?: AbortSignal,
   attachmentDownloadTimeoutMs?: number | null,
 ): Promise<InboundAttachment[]> {
-  const attachments: InboundAttachment[] = [];
-
-  for (const [index, part] of (parts ?? []).entries()) {
-    if (!isLinqAttachmentPart(part)) {
-      continue;
-    }
-
-    const data = await downloadLinqAttachmentInlineBestEffort(
-      part,
-      downloadDriver,
-      signal,
-      attachmentDownloadTimeoutMs,
+  const attachmentParts = (parts ?? [])
+    .map((part, index) => ({ index, part }))
+    .filter((entry): entry is { index: number; part: LinqMediaPart } =>
+      isLinqAttachmentPart(entry.part)
     );
-    const mime = normalizeTextValue(part.mime_type ?? null);
-    const fileName = normalizeTextValue(part.filename ?? null)
-      ?? inferAttachmentFileName(part)
-      ?? inferFallbackAttachmentFileName(part, mime, index);
+  const normalizedTimeoutMs = normalizeAttachmentDownloadTimeout(attachmentDownloadTimeoutMs);
+  const deadlineMs = normalizedTimeoutMs === null ? null : Date.now() + normalizedTimeoutMs;
+  const attachments = new Array<InboundAttachment>(attachmentParts.length);
+  let nextAttachmentIndex = 0;
 
-    attachments.push({
-      externalId: normalizeTextValue(part.attachment_id ?? null) ?? `part:${index + 1}`,
-      kind: inferLinqAttachmentKind(part.type, mime, fileName),
-      mime,
-      fileName,
-      byteSize: normalizeAttachmentByteSize(part.size, data),
-      data,
-    });
+  async function buildNextAttachment(): Promise<void> {
+    for (;;) {
+      const resultIndex = nextAttachmentIndex;
+      nextAttachmentIndex += 1;
+      const entry = attachmentParts[resultIndex];
+      if (!entry) {
+        return;
+      }
+
+      attachments[resultIndex] = await buildLinqAttachment({
+        deadlineMs,
+        downloadDriver,
+        part: entry.part,
+        partIndex: entry.index,
+        signal,
+      });
+    }
   }
 
+  const workerCount = Math.min(LINQ_ATTACHMENT_DOWNLOAD_CONCURRENCY, attachmentParts.length);
+  await Promise.all(Array.from({ length: workerCount }, () => buildNextAttachment()));
   return attachments;
+}
+
+async function buildLinqAttachment(input: {
+  deadlineMs: number | null;
+  downloadDriver: LinqAttachmentDownloadDriver | null;
+  part: LinqMediaPart;
+  partIndex: number;
+  signal?: AbortSignal;
+}): Promise<InboundAttachment> {
+  const remainingTimeoutMs = readRemainingLinqAttachmentDownloadBudgetMs(input.deadlineMs);
+  const data = remainingTimeoutMs === 0
+    ? null
+    : await runLinqAttachmentDownloadWithTimeout(
+      (downloadSignal) => downloadLinqAttachmentInlineBestEffort(
+        input.part,
+        input.downloadDriver,
+        downloadSignal,
+      ),
+      remainingTimeoutMs,
+      input.signal,
+    );
+  const mime = normalizeTextValue(input.part.mime_type ?? null);
+  const fileName = normalizeTextValue(input.part.filename ?? null)
+    ?? inferAttachmentFileName(input.part, data)
+    ?? inferFallbackAttachmentFileName(input.part, mime, input.partIndex, data);
+
+  return {
+    externalId: normalizeTextValue(input.part.attachment_id ?? null) ?? `part:${input.partIndex + 1}`,
+    kind: inferLinqAttachmentKind(input.part.type, mime, fileName),
+    mime,
+    fileName,
+    byteSize: normalizeAttachmentByteSize(input.part.size, data),
+    data,
+  };
 }
 
 async function downloadLinqAttachmentInlineBestEffort(
   part: LinqMediaPart,
   downloadDriver: LinqAttachmentDownloadDriver | null,
   signal?: AbortSignal,
-  attachmentDownloadTimeoutMs?: number | null,
 ): Promise<Uint8Array | null> {
   const url = normalizeTextValue(part.url ?? null);
   if (!downloadDriver || (!url && !downloadDriver.downloadPart)) {
@@ -332,7 +372,6 @@ async function downloadLinqAttachmentInlineBestEffort(
   }
 
   try {
-    const normalizedTimeoutMs = normalizeAttachmentDownloadTimeout(attachmentDownloadTimeoutMs);
     const attachmentDownloadPart = {
       attachmentId: normalizeTextValue(part.attachment_id ?? null),
       fileName: normalizeTextValue(part.filename ?? null),
@@ -342,35 +381,16 @@ async function downloadLinqAttachmentInlineBestEffort(
       url,
     };
     const downloadOperation = (downloadSignal?: AbortSignal) => {
+      if (downloadDriver.downloadPart) {
+        return downloadDriver.downloadPart(attachmentDownloadPart, downloadSignal);
+      }
+
       if (url) {
-        return downloadDriver
-          .downloadUrl(url, downloadSignal)
-          .catch(async (error) => {
-            if (!downloadDriver.downloadPart) {
-              throw error;
-            }
-
-            return downloadDriver.downloadPart(attachmentDownloadPart, downloadSignal);
-          })
-          .then(async (data) => {
-            if (data !== null || !downloadDriver.downloadPart) {
-              return data;
-            }
-
-            return downloadDriver.downloadPart(attachmentDownloadPart, downloadSignal);
-          });
+        return downloadDriver.downloadUrl(url, downloadSignal);
       }
 
-      if (!downloadDriver.downloadPart) {
-        return Promise.resolve<Uint8Array | null>(null);
-      }
-
-      return downloadDriver.downloadPart(attachmentDownloadPart, downloadSignal);
+      return Promise.resolve<Uint8Array | null>(null);
     };
-
-    if (normalizedTimeoutMs !== null) {
-      return await runLinqAttachmentDownloadWithTimeout(downloadOperation, normalizedTimeoutMs, signal);
-    }
 
     return await downloadOperation(signal);
   } catch {
@@ -380,14 +400,18 @@ async function downloadLinqAttachmentInlineBestEffort(
 
 async function runLinqAttachmentDownloadWithTimeout(
   downloadOperation: (signal?: AbortSignal) => Promise<Uint8Array | null>,
-  timeoutMs: number,
+  timeoutMs: number | null,
   signal?: AbortSignal,
 ): Promise<Uint8Array | null> {
+  if (timeoutMs === null) {
+    return await downloadOperation(signal);
+  }
+
   const controller = new AbortController();
   const releaseRelay = signal ? relayAbort(signal, controller) : () => {};
 
   try {
-    return await new Promise<Uint8Array | null>((resolve, reject) => {
+    return await new Promise<Uint8Array | null>((resolve) => {
       const timeout = setTimeout(() => {
         controller.abort();
         resolve(null);
@@ -398,9 +422,9 @@ async function runLinqAttachmentDownloadWithTimeout(
           clearTimeout(timeout);
           resolve(data);
         })
-        .catch((error) => {
+        .catch(() => {
           clearTimeout(timeout);
-          reject(error);
+          resolve(null);
         });
     });
   } finally {
@@ -414,6 +438,14 @@ function normalizeAttachmentDownloadTimeout(value: number | null | undefined): n
   }
 
   return Math.max(0, Math.floor(value));
+}
+
+function readRemainingLinqAttachmentDownloadBudgetMs(deadlineMs: number | null): number | null {
+  if (deadlineMs === null) {
+    return null;
+  }
+
+  return Math.max(0, Math.floor(deadlineMs - Date.now()));
 }
 
 function buildLinqThreadTitle(data: LinqMessageReceivedData): string | null {
@@ -526,7 +558,14 @@ function buildLinqCaptureRawMetadata(input: {
   return raw;
 }
 
-function inferAttachmentFileName(part: LinqMediaPart): string | null {
+function inferAttachmentFileName(
+  part: LinqMediaPart,
+  data: Uint8Array | null,
+): string | null {
+  if (data === null) {
+    return null;
+  }
+
   const url = normalizeTextValue(part.url ?? null);
   if (!url) {
     return null;
@@ -545,14 +584,23 @@ function inferFallbackAttachmentFileName(
   part: LinqMediaPart,
   mime: string | null,
   index: number,
+  data: Uint8Array | null,
 ): string | null {
+  if (data === null) {
+    const isVoiceMemo = part.type === "voice_memo";
+    const suffix = inferFileExtensionFromMime(mime) ?? (isVoiceMemo ? "m4a" : null);
+    const prefix = isVoiceMemo ? "voice-memo" : "attachment";
+    return suffix
+      ? `${prefix}-part-${index + 1}.${suffix}`
+      : `${prefix}-part-${index + 1}`;
+  }
+
   if (part.type !== "voice_memo") {
     return null;
   }
 
   const suffix = inferFileExtensionFromMime(mime) ?? "m4a";
-  const identifier = normalizeTextValue(part.attachment_id ?? null) ?? `part-${index + 1}`;
-  return `voice-memo-${identifier}.${suffix}`;
+  return `voice-memo-part-${index + 1}.${suffix}`;
 }
 
 function inferLinqAttachmentKind(

@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 
 type HostedLinqDailyStateClient = PrismaClient | Prisma.TransactionClient;
 
-export const HOSTED_LINQ_DAILY_TEXT_LIMIT = 150;
+export const HOSTED_LINQ_DAILY_TEXT_LIMIT = 100;
 
 export function resolveHostedLinqDayUtc(value: Date | string): Date {
   const occurredAt = value instanceof Date ? value : new Date(value);

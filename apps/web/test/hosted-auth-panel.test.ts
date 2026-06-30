@@ -1,4 +1,4 @@
-import { act, createElement } from "react";
+import { act, createElement, useState } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { HostedAuthPanel } from "@/src/components/hosted-onboarding/hosted-auth-panel";
@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
       };
       redirectUrl: string;
     }) => Promise<void> | void;
+    onCodeSent?: () => void;
     onCompleted?: (payload: unknown) => Promise<void> | void;
   } | null,
   loginWithCode: vi.fn(),
@@ -85,6 +86,7 @@ vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
   HostedPhoneAuth(input: {
     disableSignup?: boolean;
     onAuthCompleted?: unknown;
+    onCodeSent?: () => void;
     onCompleted?: unknown;
     suppressAuthenticatedSessionIssue?: boolean;
   }) {
@@ -161,6 +163,62 @@ afterEach(async () => {
     await cleanupRender();
     cleanupRender = null;
   }
+});
+
+test("HostedAuthPanel keeps phone auth mounted after SMS code entry starts", async () => {
+  let privyAuthenticated = false;
+  let privyUser: {
+    linkedAccounts?: unknown;
+  } | null = null;
+  let rerenderHarness: (() => void) | null = null;
+
+  mocks.usePrivy.mockImplementation(() => ({
+    authenticated: privyAuthenticated,
+    logout: vi.fn(),
+    ready: true,
+  }));
+  mocks.useUser.mockImplementation(() => ({
+    user: privyUser,
+  }));
+
+  function PanelHarness() {
+    const [, setRenderVersion] = useState(0);
+    rerenderHarness = () => setRenderVersion((version) => version + 1);
+
+    return createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+    });
+  }
+
+  const { cleanup, container } = await renderClientComponent(
+    createElement(PanelHarness),
+  );
+  cleanupRender = cleanup;
+
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  expect(mocks.hostedPhoneAuthProps?.onCodeSent).toBeTypeOf("function");
+
+  await act(async () => {
+    mocks.hostedPhoneAuthProps?.onCodeSent?.();
+  });
+
+  privyAuthenticated = true;
+  privyUser = {
+    linkedAccounts: [
+      {
+        address: "login@example.com",
+        latest_verified_at: 1741194420,
+        type: "email",
+      },
+    ],
+  };
+
+  await act(async () => {
+    rerenderHarness?.();
+  });
+
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  expect(container.textContent).not.toContain("Continue with email");
 });
 
 test("HostedAuthPanel resumes a phone-less Telegram Privy session without showing phone recovery", async () => {

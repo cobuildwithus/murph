@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { readLinqEnvironment } from "../linq/env";
 import { normalizeMurphTelegramUsername } from "../murph-contact-routing";
@@ -19,14 +21,22 @@ export interface HostedContactPrivacyKeyring {
   readVersions: readonly string[];
 }
 
+export type HostedLinqFirstContactAdmissionMode = "enforce" | "off";
+
+const DEFAULT_HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MODEL = "gpt-5.5";
+
 export interface HostedOnboardingEnvironment {
   allowedMutationOrigins?: readonly string[];
   contactPrivacyKeyring: HostedContactPrivacyKeyring;
   inviteTtlHours: number;
   isProduction: boolean;
+  linqAttachmentUploadAllowedHosts: readonly string[];
   linqApiBaseUrl: string;
   linqApiToken: string | null;
   linqConversationPhoneNumbers: readonly string[];
+  linqFirstContactAdmissionMode: HostedLinqFirstContactAdmissionMode;
+  linqFirstContactAdmissionModel: string;
+  linqFirstContactAdmissionOpenAiApiKey: string | null;
   linqLocalAllowedInboundPhoneNumbers?: readonly string[];
   linqMaxActiveMembersPerConversationPhone: number | null;
   linqWebhookSecret: string | null;
@@ -60,9 +70,18 @@ export function readHostedOnboardingEnvironment(
       "HOSTED_ONBOARDING_INVITE_TTL_HOURS",
     ),
     isProduction,
+    linqAttachmentUploadAllowedHosts:
+      readHostedLinqAttachmentUploadAllowedHosts(source),
     linqApiBaseUrl: linq.apiBaseUrl,
     linqApiToken: linq.apiToken,
     linqConversationPhoneNumbers: readHostedLinqConversationPhoneNumbers(source),
+    linqFirstContactAdmissionMode: readHostedLinqFirstContactAdmissionMode(source),
+    linqFirstContactAdmissionModel:
+      readEnv(source, "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODEL")
+      ?? DEFAULT_HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MODEL,
+    linqFirstContactAdmissionOpenAiApiKey:
+      readEnv(source, "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY")
+      ?? readEnv(source, "OPENAI_API_KEY"),
     linqLocalAllowedInboundPhoneNumbers:
       readHostedLinqLocalAllowedInboundPhoneNumbers(source, isProduction),
     linqMaxActiveMembersPerConversationPhone: readPositiveInteger(
@@ -82,6 +101,60 @@ export function readHostedOnboardingEnvironment(
     telegramBotUsername: readHostedTelegramBotUsername(source),
     telegramWebhookSecret: readEnv(source, "TELEGRAM_WEBHOOK_SECRET"),
   };
+}
+
+function readHostedLinqAttachmentUploadAllowedHosts(
+  source: HostedOnboardingEnvSource,
+): string[] {
+  const configured = readEnv(
+    source,
+    "HOSTED_ONBOARDING_LINQ_ATTACHMENT_UPLOAD_ALLOWED_HOSTS",
+  );
+
+  if (!configured) {
+    return [];
+  }
+
+  const hosts: string[] = [];
+  for (const value of configured.split(/[\n,]+/u)) {
+    const host = normalizeHostedLinqAttachmentUploadAllowedHost(value);
+
+    if (host && !hosts.includes(host)) {
+      hosts.push(host);
+    }
+  }
+
+  return hosts;
+}
+
+function normalizeHostedLinqAttachmentUploadAllowedHost(value: string): string | null {
+  const normalized = normalizeNullableString(value)?.toLowerCase().replace(/\.$/u, "");
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (
+    normalized.includes("/")
+    || normalized.includes("@")
+    || normalized.includes(":")
+    || normalized === "localhost"
+    || normalized.endsWith(".localhost")
+    || normalized.endsWith(".local")
+    || isIP(normalized) !== 0
+  ) {
+    throw new TypeError(
+      "HOSTED_ONBOARDING_LINQ_ATTACHMENT_UPLOAD_ALLOWED_HOSTS entries must be bare public hostnames.",
+    );
+  }
+
+  if (!/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/u.test(normalized)) {
+    throw new TypeError(
+      "HOSTED_ONBOARDING_LINQ_ATTACHMENT_UPLOAD_ALLOWED_HOSTS contains an invalid hostname.",
+    );
+  }
+
+  return normalized;
 }
 
 function readHostedTelegramBotUsername(
@@ -349,6 +422,24 @@ function readHostedLinqLocalAllowedInboundPhoneNumbers(
     configured,
     "HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS",
     false,
+  );
+}
+
+function readHostedLinqFirstContactAdmissionMode(
+  source: HostedOnboardingEnvSource,
+): HostedLinqFirstContactAdmissionMode {
+  const configured = readEnv(source, "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE");
+  if (!configured) {
+    return "off";
+  }
+
+  const normalized = configured.trim().toLowerCase();
+  if (normalized === "enforce" || normalized === "off") {
+    return normalized;
+  }
+
+  throw new TypeError(
+    "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE must be either \"off\" or \"enforce\".",
   );
 }
 

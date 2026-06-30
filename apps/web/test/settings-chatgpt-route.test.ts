@@ -89,22 +89,25 @@ describe("ChatGPT settings route", () => {
     });
   });
 
-  it("rejects connect while hosted credential isolation is unavailable", async () => {
+  it("starts a connect attempt for an active hosted member", async () => {
     const response = await route.POST(jsonRequest("POST", {}));
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "HOSTED_CODEX_AUTH_UNAVAILABLE",
-        message: "ChatGPT connection is unavailable until hosted credential isolation is in place.",
-        retryable: false,
-      },
+      state: "connecting",
+      userCode: null,
+      verificationUrl: null,
     });
-    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.requireActiveHostedAppSessionFromRequest).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
-    expect(mocks.beginHostedCodexAuthAttempt).not.toHaveBeenCalled();
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.beginHostedCodexAuthAttempt).toHaveBeenCalledWith({
+      action: "connect",
+      memberId: "member_123",
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_item_codex_auth",
+    });
   });
 
   it("rejects non-empty mutation bodies before starting an attempt", async () => {

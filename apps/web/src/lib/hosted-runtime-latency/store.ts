@@ -3,8 +3,8 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import {
-  HOSTED_INGRESS_LATENCY_SOURCES,
   mergeHostedRuntimeLatencyPhaseBreakdownJson,
+  readHostedIngressLatencySource,
   type HostedIngressLatencySource,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyPhaseBreakdownPhase,
@@ -489,8 +489,9 @@ export async function readHostedIngressLatencyDashboard(
 function normalizeHostedIngressLatencySource(
   value: HostedIngressLatencySource | string,
 ): HostedIngressLatencySource {
-  if ((HOSTED_INGRESS_LATENCY_SOURCES as readonly string[]).includes(value)) {
-    return value as HostedIngressLatencySource;
+  const source = readHostedIngressLatencySource(value);
+  if (source) {
+    return source;
   }
 
   throw new TypeError("Hosted ingress latency source is not supported.");

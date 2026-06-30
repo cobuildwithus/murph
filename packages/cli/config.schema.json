@@ -1292,6 +1292,28 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "assistantTargetOverrideModel": {
+                          "description": "Optional assistant model override for scheduled turns.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "assistantTargetOverrideModelProvider": {
+                          "description": "Optional assistant model provider override for scheduled turns.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "assistantTargetOverrideReasoningEffort": {
+                          "description": "Optional assistant reasoning effort override for scheduled turns.",
+                          "type": "string",
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh"
+                          ]
+                        },
                         "instructions": {
                           "type": "string",
                           "minLength": 1,
@@ -1467,10 +1489,36 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "assistantTargetOverrideModel": {
+                          "description": "Optional assistant model override for scheduled turns.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "assistantTargetOverrideModelProvider": {
+                          "description": "Optional assistant model provider override for scheduled turns.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "assistantTargetOverrideReasoningEffort": {
+                          "description": "Optional assistant reasoning effort override for scheduled turns.",
+                          "type": "string",
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh"
+                          ]
+                        },
                         "instructions": {
                           "description": "Optional automation instructions.",
                           "type": "string",
                           "minLength": 1
+                        },
+                        "clearAssistantTargetOverride": {
+                          "description": "Clear the stored assistant target override.",
+                          "type": "boolean"
                         }
                       }
                     }
@@ -3058,7 +3106,7 @@
                         },
                         "input": {
                           "type": "string",
-                          "description": "Structured capture payload in @file.json form or - for stdin."
+                          "description": "Structured capture payload in @file.json form or - for stdin. Run capture payload-schema --format json for the exact file-body contract."
                         },
                         "media": {
                           "description": "Media file paths for one capture. Repeat --media for multiple views of the same observation.",
@@ -3150,6 +3198,10 @@
                       }
                     }
                   }
+                },
+                "payload-schema": {
+                  "type": "object",
+                  "additionalProperties": false
                 },
                 "show": {
                   "type": "object",
@@ -4335,6 +4387,10 @@
                   "type": "object",
                   "additionalProperties": false
                 },
+                "scout-batch-payload-schema": {
+                  "type": "object",
+                  "additionalProperties": false
+                },
                 "scout": {
                   "type": "object",
                   "additionalProperties": false,
@@ -4358,6 +4414,37 @@
                         "maxCandidates": {
                           "default": 12,
                           "description": "Maximum research candidates to request from Exa.",
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 12
+                        }
+                      }
+                    }
+                  }
+                },
+                "scout-batch": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "input": {
+                          "type": "string",
+                          "description": "Compact lane JSON in @file.json form or - for stdin. Use {\"lanes\":[{\"label\":\"sleep\",\"profile\":{\"topics\":[\"sleep\"]}}]}. Lane profiles use the same bucket fields as research scout and must not include raw labs, names, dates of birth, full notes, or medical records."
+                        },
+                        "since": {
+                          "type": "string",
+                          "description": "Inclusive lower publication date bound as YYYY-MM-DD or an ISO timestamp."
+                        },
+                        "until": {
+                          "type": "string",
+                          "description": "Inclusive upper publication date bound as YYYY-MM-DD or an ISO timestamp."
+                        },
+                        "maxCandidatesPerLane": {
+                          "default": 5,
+                          "description": "Maximum research candidates to request from Exa for each lane.",
                           "type": "integer",
                           "minimum": 1,
                           "maximum": 12

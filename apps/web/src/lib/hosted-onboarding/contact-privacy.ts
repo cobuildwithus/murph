@@ -3,8 +3,14 @@ export type {
   HostedBlindIndexParts,
 } from "./contact-privacy-core";
 export {
+  createHostedExternalThreadIdentityLookupKey,
+  createHostedExternalThreadIdentityLookupKeyReadCandidates,
+  createHostedExternalThreadLookupKey,
+  createHostedExternalThreadLookupKeyReadCandidates,
   createHostedEmailLookupKey,
   createHostedEmailLookupKeyReadCandidates,
+  HOSTED_EXTERNAL_THREAD_CHANNELS,
+  isHostedExternalThreadChannel,
   createHostedLinqChatLookupKey,
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedOpaqueIdentifier,

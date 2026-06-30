@@ -1,6 +1,6 @@
 {
   "name": "@murphai/hosted-execution",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": false,
   "type": "module",
   "license": "Apache-2.0",
@@ -50,6 +50,10 @@
       "types": "./dist/computer-use.d.ts",
       "default": "./dist/computer-use.js"
     },
+    "./phone-calls": {
+      "types": "./dist/phone-calls.d.ts",
+      "default": "./dist/phone-calls.js"
+    },
     "./dashboard-replica": {
       "types": "./dist/dashboard-replica.d.ts",
       "default": "./dist/dashboard-replica.js"
@@ -98,6 +102,10 @@
       "types": "./dist/runtime-control.d.ts",
       "default": "./dist/runtime-control.js"
     },
+    "./return-contact": {
+      "types": "./dist/return-contact.d.ts",
+      "default": "./dist/return-contact.js"
+    },
     "./side-effects": {
       "types": "./dist/side-effects.d.ts",
       "default": "./dist/side-effects.js"
@@ -130,6 +138,7 @@
     "node": ">=24.14.1"
   },
   "dependencies": {
+    "@junction-api/sdk": "1.2.0",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",

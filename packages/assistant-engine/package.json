@@ -125,6 +125,7 @@
     "node": ">=24.14.1"
   },
   "devDependencies": {
-    "@openai/codex": "0.135.0"
+    "@openai/codex": "0.135.0",
+    "openai": "6.45.0"
   }
 }

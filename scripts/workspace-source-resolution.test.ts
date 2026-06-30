@@ -116,6 +116,9 @@ describe("workspace source resolution", () => {
     ]);
     expect(tsconfig.compilerOptions?.paths?.["@murphai/runtime-state/node/hosted-bundle-codec"])
       .toEqual(["packages/runtime-state/src/node/hosted-bundle-codec.ts"]);
+    expect(tsconfig.compilerOptions?.paths?.["@murphai/hosted-execution/phone-calls"]).toEqual([
+      "packages/hosted-execution/src/phone-calls.ts",
+    ]);
   });
 });
 

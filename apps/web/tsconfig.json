@@ -97,6 +97,9 @@
       "@murphai/hosted-execution/parsers": [
         "packages/hosted-execution/src/parsers.ts"
       ],
+      "@murphai/hosted-execution/phone-calls": [
+        "packages/hosted-execution/src/phone-calls.ts"
+      ],
       "@murphai/hosted-execution/routes": [
         "packages/hosted-execution/src/routes.ts"
       ],

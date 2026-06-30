@@ -140,7 +140,11 @@ export function useHostedPhoneAuthController({
 
   const flowDisabled = !ready || effectivePendingAction !== null;
   const phoneEntrySendCodeDisabled = effectivePendingAction !== null || !normalizedPhoneNumber;
-  const showAuthenticatedLoadingState = authenticated && effectiveFinalizationState !== "idle";
+  const showPhoneVerificationLoadingState =
+    authenticated && effectivePendingAction === "verify-code";
+  const showAuthenticatedLoadingState =
+    authenticated
+    && (effectiveFinalizationState !== "idle" || showPhoneVerificationLoadingState);
   const allowAuthenticatedSessionStateUi = !suppressAuthenticatedSessionIssue;
   const showAuthenticatedManualResumeState =
     allowAuthenticatedSessionStateUi
@@ -154,13 +158,11 @@ export function useHostedPhoneAuthController({
     && intent !== "link"
     && (effectiveRequiresAuthenticatedSessionRestart
       || (authenticated && !showAuthenticatedLoadingState && authenticatedSessionMissingPhone));
-  const authenticatedView = effectivePendingAction === "verify-code"
-    ? null
-    : resolveHostedAuthenticatedPhoneAuthView({
-      showAuthenticatedLoadingState,
-      showAuthenticatedManualResumeState,
-      showAuthenticatedRestartState,
-    });
+  const authenticatedView = resolveHostedAuthenticatedPhoneAuthView({
+    showAuthenticatedLoadingState,
+    showAuthenticatedManualResumeState,
+    showAuthenticatedRestartState,
+  });
   const authenticatedLoadingTitle =
     intent === "link" ? "Saving your phone..." : "Finishing setup...";
   const authenticatedLoadingBody =

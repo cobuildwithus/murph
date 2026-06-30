@@ -8,7 +8,7 @@ import {
 } from '../src/assistant-codex/dynamic-tools.ts'
 
 describe('assistant progress prompt contract', () => {
-  it('requires progress preambles for longer or user-content-inspection work', () => {
+  it('keeps progress preambles scarce for longer or user-content-inspection work', () => {
     const prompt = buildAssistantExecutionBehaviorText({
       profile: 'gpt5-agentic',
     })
@@ -20,13 +20,22 @@ describe('assistant progress prompt contract', () => {
       'continue immediately with the first file, vault, web, skill, media, or CLI action',
     )
     expect(prompt).toContain(
-      'Use it for longer, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work',
+      'Use it sparingly for genuinely long, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work',
     )
     expect(prompt).toContain(
-      'If the turn remains long-running after substantial tool work, send another brief update so the user is not left hanging, up to three total progress updates in the turn',
+      'For work likely to finish in about a minute or less, send at most one progress update',
     )
     expect(prompt).toContain(
-      'Keep the text to one to three short conversational sentences, specific to the immediate next step',
+      'never send a third',
+    )
+    expect(prompt).toContain(
+      'Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage',
+    )
+    expect(prompt).toContain(
+      'never send progress updates for individual tool loops, searches, reads, page checks, clicks, or status churn',
+    )
+    expect(prompt).toContain(
+      'Keep the text to one or two short conversational sentences, specific to the immediate next step',
     )
     expect(prompt).toContain(
       'avoid stiff plan-recitation wording like "I\'m going to..."',
@@ -41,19 +50,22 @@ describe('assistant progress prompt contract', () => {
   it('keeps the dynamic tool description aligned with the progress prompt rule', () => {
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.name).toBe('send_progress_update')
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'before longer, tool-heavy, or substantial user-content-inspection work',
+      'only when longer, tool-heavy, or substantial user-content-inspection work would otherwise leave the user waiting',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'If the turn remains long-running after substantial tool work',
+      'For work likely to finish in about a minute or less, send at most one progress update',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'so the user is not left hanging',
+      'never send a third',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'up to three total progress updates in the turn',
+      'Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'Use immediately as the first assistant action',
+      'Use as the first assistant action',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'Do not use for individual tool loops, searches, reads, page checks, clicks, status churn',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'PDFs, lab reports, images, screenshots, CSVs',
@@ -77,7 +89,7 @@ describe('assistant progress prompt contract', () => {
       'reasoning over extracted content',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'Do not use for skill-file reads alone, setup checks, routine single-command vault reads',
+      'skill-file reads alone, setup checks, routine single-command vault reads',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'one-shot logging/capture/memory saves that only need a straightforward write',
@@ -99,7 +111,10 @@ describe('assistant progress prompt contract', () => {
       MURPH_SEND_PROGRESS_UPDATE_TOOL.inputSchema.properties.text
     expect(textProperty).not.toHaveProperty('maxLength')
     expect(textProperty.description).toContain(
-      'One to three short conversational first-person sentences about the immediate next step',
+      'Prefer one short conversational first-person sentence about the immediate next step',
+    )
+    expect(textProperty.description).toContain(
+      'use two only when needed to keep the quick note clear',
     )
     expect(textProperty.description).toContain('Use contractions when natural')
     expect(textProperty.description).toContain(

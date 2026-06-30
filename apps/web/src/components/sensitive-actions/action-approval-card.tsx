@@ -1,24 +1,23 @@
 "use client";
 
-import { CheckCircle2, ShieldCheck, XCircle } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { ActionApprovalScreen } from "@/src/components/sensitive-actions/action-approval-screen";
-import { Button, buttonVariants } from "@/src/components/ui/button";
+import { Button } from "@/src/components/ui/button";
 import type {
   HostedActionApprovalDecisionResponse,
   HostedActionApprovalView,
 } from "@/src/lib/action-approvals-shared";
 import type { SensitiveActionChallengeResponse } from "@/src/lib/sensitive-actions/shared";
-import { cn } from "@/src/lib/utils";
 
 import { useSensitiveActionAuthorization } from "./use-sensitive-action-authorization";
 
 type Submission = "approving" | "denying" | "returning" | null;
 
 const APPROVAL_CAVEAT =
-  "This approval is bound to this exact request. Murph must ask again if the action changes.";
+  "Murph must ask again if the file, destination, or any other detail changes.";
 
 export function ActionApprovalCard({
   approval,
@@ -68,13 +67,15 @@ export function ActionApprovalCard({
       url: `${endpointBase}/decision`,
     });
 
-    if (typeof response.redirectTo !== "string" || response.redirectTo.length === 0) {
-      throw new Error("The approval was saved. Return to your Murph thread to continue.");
-    }
-
-    setRedirectTo(response.redirectTo);
+    const nextRedirectTo =
+      typeof response.redirectTo === "string" && response.redirectTo.length > 0
+        ? response.redirectTo
+        : null;
+    setRedirectTo(nextRedirectTo);
     setSubmission("returning");
-    window.location.assign(response.redirectTo);
+    if (nextRedirectTo) {
+      window.location.assign(nextRedirectTo);
+    }
   }
 
   const busy = submission !== null;
@@ -85,52 +86,57 @@ export function ActionApprovalCard({
   return (
     <ActionApprovalScreen
       badgeIcon={ShieldCheck}
-      body={
-        <p className="break-words text-sm leading-6 text-muted-foreground text-pretty">
-          {approval.presentation.body}
-        </p>
-      }
+      body={<p className="break-words">{approval.presentation.body}</p>}
       caveat={APPROVAL_CAVEAT}
       title={approval.presentation.title}
     >
       {surfacedError ? (
-        <p className="mt-5 text-sm text-destructive" role="alert">
+        <p
+          className="mt-6 rounded-lg border border-[#8b5d3f]/30 bg-[#8b5d3f]/[0.06] px-4 py-3 text-[13px] leading-[1.5] text-[#8b5d3f]"
+          role="alert"
+        >
           {surfacedError}
         </p>
       ) : null}
 
-      <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-        <Button
-          className="w-full sm:w-auto"
-          disabled={busy}
-          onClick={approve}
-          size="lg"
-          type="button"
-        >
-          <CheckCircle2 aria-hidden="true" />
-          {primaryLabel}
-        </Button>
-        <Button
-          className="w-full sm:w-auto"
-          disabled={busy}
-          onClick={deny}
-          size="lg"
-          type="button"
-          variant="outline"
-        >
-          <XCircle aria-hidden="true" />
-          {submission === "denying" ? "Denying…" : "Deny"}
-        </Button>
-      </div>
+      <div className="mt-7 border-t border-[#c4a882]/25 pt-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Button
+            className="w-full sm:w-auto"
+            disabled={busy}
+            onClick={approve}
+            size="lg"
+            type="button"
+          >
+            {primaryLabel}
+          </Button>
+          <Button
+            className="w-full sm:w-auto sm:px-5"
+            disabled={busy}
+            onClick={deny}
+            size="lg"
+            type="button"
+            variant="ghost"
+          >
+            {submission === "denying" ? "Denying…" : "Deny"}
+          </Button>
+        </div>
 
-      {submission === "returning" && redirectTo ? (
-        <a
-          className={cn(buttonVariants({ size: "lg", variant: "outline" }), "mt-4 w-full sm:w-auto")}
-          href={redirectTo}
-        >
-          Return to Murph
-        </a>
-      ) : null}
+        {submission === "returning" ? (
+          redirectTo ? (
+            <p className="mt-5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+              Redirecting…{" "}
+              <a className="text-[#5a6e32] underline-offset-4 hover:underline" href={redirectTo}>
+                Return to Murph
+              </a>
+            </p>
+          ) : (
+            <p className="mt-5 text-sm leading-6 text-muted-foreground">
+              Approval saved. Return to the Murph thread where you requested this file.
+            </p>
+          )
+        ) : null}
+      </div>
     </ActionApprovalScreen>
   );
 }

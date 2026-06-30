@@ -52,6 +52,9 @@ import type {
   HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  readHostedIngressLatencySource,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import type {
@@ -73,6 +76,7 @@ import {
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
 import { emitHostedAssistantContextTraceLog } from "./context-diagnostics.ts";
+import { emitHostedAssistantTurnTimingTraceLog } from "./turn-timing-diagnostics.ts";
 import {
   closeHostedRuntimeDeviceSyncService,
   createHostedRuntimeDeviceSyncService,
@@ -436,6 +440,13 @@ export async function runHostedAssistantAutomation(
         if (contextEntry) {
           redactedLogEntries.push(contextEntry);
         }
+        const turnTimingEntry = emitHostedAssistantTurnTimingTraceLog({
+          event,
+          wake,
+        });
+        if (turnTimingEntry) {
+          redactedLogEntries.push(turnTimingEntry);
+        }
         const providerEntry = emitHostedAssistantProviderTraceLog({
           details: {
             requestId,
@@ -555,7 +566,7 @@ export async function runHostedAssistantAutomation(
       };
     }
 
-    emitHostedRuntimeRedactedLog({
+    redactedLogEntries.push(emitHostedRuntimeRedactedLog({
       component: "runtime",
       details: {
         requestId,
@@ -565,9 +576,25 @@ export async function runHostedAssistantAutomation(
       wake,
       message: "Hosted assistant automation pass failed.",
       phase: "failed",
-    });
+    }));
+    attachHostedAssistantAutomationFailureLogEntries(error, redactedLogEntries);
     throw error;
   }
+}
+
+function attachHostedAssistantAutomationFailureLogEntries(
+  error: unknown,
+  redactedLogEntries: readonly HostedExecutionRedactedLogEntry[],
+): void {
+  if (!error || typeof error !== "object" || Array.isArray(error)) {
+    return;
+  }
+
+  Object.defineProperty(error, "hostedAssistantAutomationRedactedLogEntries", {
+    configurable: true,
+    enumerable: false,
+    value: [...redactedLogEntries],
+  });
 }
 
 function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
@@ -583,7 +610,8 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
   startedAt: string;
   turnLockWaitMs?: number;
 }): void {
-  if (input.source !== "linq") {
+  const source = readHostedIngressLatencySource(input.source);
+  if (!source) {
     return;
   }
   if (!input.latencyTracePort || input.assistantInputIds.length === 0) {
@@ -614,7 +642,7 @@ function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {
         : {}),
       providerRequestOrdinal: input.providerRequestOrdinal,
       runtimeAttemptId: input.runtimeAttemptId ?? null,
-      source: "linq",
+      source,
       type: "provider_started",
     },
   }).catch(() => {

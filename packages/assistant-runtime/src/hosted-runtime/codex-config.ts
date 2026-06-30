@@ -10,6 +10,7 @@ import {
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/cli-runtime-bridge";
 import {
+  parseHostedLocalCodexSubscriptionHostAuth,
   parseHostedLocalCodexSubscriptionSeedAuth,
 } from "@murphai/hosted-execution/hosted-codex-subscription-auth";
 import {
@@ -63,11 +64,11 @@ const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 // reduction from 233k; 2026-06-24 rollout analysis showed multi-million-token
 // turns where a single user message ran 20+ computer-use tool round-trips
 // and finished without ever crossing 128k (starting ~44k, ending ~59k),
-// because tool-loop context grows in 1-2k chunks per round-trip. 84k fires
-// compaction in the middle of those tool loops instead of after them, while
+// because tool-loop context grows in 1-2k chunks per round-trip. 100k fires
+// compaction in the middle of longer tool loops instead of after them, while
 // staying well above the typical conversational floor so unrelated turns
 // don't compact every message.
-const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 84_000;
+const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 100_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
 const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 5;
@@ -139,7 +140,10 @@ export async function prepareHostedCodexRuntimeEnvironment(
   });
   await chmod(codexHome, 0o700);
   let chatGptAuthKind = await readHostedCodexAuthKind(codexAuthPath);
-  if (chatGptAuthKind === "invalid" || chatGptAuthKind === "managed") {
+  if (
+    chatGptAuthKind === "invalid"
+    || (chatGptAuthKind === "managed" && seededChatGptAuthJson !== null)
+  ) {
     await rm(codexAuthPath, { force: true });
     chatGptAuthKind = null;
   }
@@ -236,6 +240,7 @@ async function readHostedCodexAuthKind(
       ? Reflect.get(parsed, "auth_mode")
       : null;
     if (authMode === "chatgpt") {
+      parseHostedLocalCodexSubscriptionHostAuth(parsed);
       return "managed";
     }
     if (authMode === "chatgptAuthTokens") {
@@ -510,6 +515,7 @@ export function buildHostedCodexConfigToml(input: {
     "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
     "[features]",
     "plugins = false",
+    "multi_agent_v2 = true",
     "",
     "# Keep Codex skill file instructions out of hosted prompts. Their temporary",
     "# runner paths change on each wake and break provider prefix caching.",

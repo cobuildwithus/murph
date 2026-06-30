@@ -112,6 +112,7 @@ import {
 } from './assistant-codex/images.js'
 import type {
   AssistantHostedGeneratedImageUploader,
+  AssistantWorkspaceArtifactMaterializer,
 } from './assistant/execution-context.js'
 import type {
   AssistantHostedToolContext,
@@ -159,7 +160,10 @@ const CODEX_RPC_DEFAULT_TIMEOUT_MS = 120_000
 const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
 const CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS = 15_000
 const CODEX_MANAGED_ACCOUNT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000
-const CODEX_PROGRESS_FINAL_DRAIN_TIMEOUT_MS = 2_000
+const CODEX_MANAGED_ACCOUNT_CONFIG_OVERRIDES = [
+  'model_provider="openai"',
+  'cli_auth_credentials_store="file"',
+] as const
 const CODEX_APP_SERVER_COMMAND = 'app-server'
 const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
   'murph.assistant-codex-app-server-timing.v1'
@@ -372,27 +376,12 @@ function resolveCodexAppServerHostedToolContext(
 
 async function waitForCodexProgressDrain(
   pending: readonly Promise<unknown>[],
-): Promise<boolean> {
+): Promise<void> {
   if (pending.length === 0) {
-    return true
+    return
   }
 
-  let timeout: ReturnType<typeof setTimeout> | undefined
-  try {
-    return await Promise.race([
-      Promise.allSettled(pending).then(() => true),
-      new Promise<boolean>((resolve) => {
-        timeout = setTimeout(
-          () => resolve(false),
-          CODEX_PROGRESS_FINAL_DRAIN_TIMEOUT_MS,
-        )
-      }),
-    ])
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout)
-    }
-  }
+  await Promise.allSettled(pending)
 }
 
 function resolveCodexCurrentChannelProgressSource(
@@ -443,7 +432,11 @@ export interface CodexAppServerTurnInput {
   }) => Promise<void> | void) | null
   onProviderRequestStarted?: ((event: { startedAt: string }) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
+  loadAuthorizedReferenceImageRefs?:
+    | (() => Promise<ReadonlyMap<string, { sha256: string }>>)
+    | null
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   oss?: boolean
   profile?: string | null
@@ -460,6 +453,7 @@ export interface CodexAppServerTurnInput {
   providerRequestOrdinal?: number | null
   publicInternetFetch?: typeof fetch | null
   requireHostedGeneratedImageUploader?: boolean | null
+  vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
   workingDirectory: string
 }
@@ -621,10 +615,12 @@ export async function executeCodexAppServerTurn(
   const preparedInput: CodexAppServerPreparedTurnInput = {
     ...normalizedInput,
     args,
+    loadAuthorizedReferenceImageRefs: input.loadAuthorizedReferenceImageRefs ?? null,
     codexCommand,
     env: childEnv,
     fetchImpl: input.fetchImpl ?? fetch,
     hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     imagePaths,
     launchKey,
     publicInternetFetch: input.publicInternetFetch ?? null,
@@ -1463,6 +1459,11 @@ export type CodexManagedAccountOperationResult =
   | { kind: 'connected' }
   | { kind: 'disconnected' }
 
+interface CodexManagedAccountLoginCompletion {
+  error: string | null
+  success: boolean
+}
+
 /**
  * Runs one managed ChatGPT account operation through the same app-server
  * transport used by turns. The child is intentionally short lived: account
@@ -1479,7 +1480,9 @@ export async function executeCodexManagedAccountOperation(
     env: input.env,
   })
   const codexCommand = resolveCodexAppServerCommand(input.codexCommand)
-  const args = buildCodexAppServerArgs({})
+  const args = buildCodexAppServerArgs({
+    configOverrides: CODEX_MANAGED_ACCOUNT_CONFIG_OVERRIDES,
+  })
   const launchKey = buildCodexAppServerLaunchKey({
     args,
     codexCommand,
@@ -1496,19 +1499,28 @@ export async function executeCodexManagedAccountOperation(
     workingDirectory,
   })
 
-  let settleCompletion!: (success: boolean) => void
+  let settleAccountUpdate!: () => void
+  let rejectAccountUpdate!: (error: unknown) => void
+  const accountUpdate = new Promise<void>((resolve, reject) => {
+    settleAccountUpdate = resolve
+    rejectAccountUpdate = reject
+  })
+  void accountUpdate.catch(() => undefined)
+  let settleCompletion!: (completion: CodexManagedAccountLoginCompletion) => void
   let rejectCompletion!: (error: unknown) => void
-  const completion = new Promise<boolean>((resolve, reject) => {
+  const completion = new Promise<CodexManagedAccountLoginCompletion>((resolve, reject) => {
     settleCompletion = resolve
     rejectCompletion = reject
   })
   void completion.catch(() => undefined)
   let expectedLoginId: string | null = null
-  const bufferedCompletions = new Map<string, boolean>()
+  let acceptChatGptAccountUpdate = false
+  let bufferedChatGptAccountUpdate = false
+  const bufferedCompletions = new Map<string, CodexManagedAccountLoginCompletion>()
 
   const binding: CodexAppServerActiveTurnBinding = {
     onClose(code, signal) {
-      rejectCompletion(new VaultCliError(
+      const error = new VaultCliError(
         'ASSISTANT_CODEX_AUTH_PROCESS_EXITED',
         'Codex app-server exited during ChatGPT account authentication.',
         {
@@ -1516,17 +1528,22 @@ export async function executeCodexManagedAccountOperation(
           retryable: true,
           signal,
         },
-      ))
+      )
+      rejectCompletion(error)
+      rejectAccountUpdate(error)
     },
     onError(error) {
       rejectCompletion(error)
+      rejectAccountUpdate(error)
     },
     onFramingError() {
-      rejectCompletion(new VaultCliError(
+      const error = new VaultCliError(
         'ASSISTANT_CODEX_APP_SERVER_FRAMING_ERROR',
         'Codex app-server emitted malformed JSON during account authentication.',
         { retryable: false },
-      ))
+      )
+      rejectCompletion(error)
+      rejectAccountUpdate(error)
     },
     onParsedMessage(message) {
       const responseId = readCodexRpcResponseId(message)
@@ -1540,11 +1557,13 @@ export async function executeCodexManagedAccountOperation(
           resolved === 'unknown_response_id'
           && !processInstance.consumeIgnoredResponseId(responseId)
         ) {
-          rejectCompletion(new VaultCliError(
+          const error = new VaultCliError(
             'ASSISTANT_CODEX_APP_SERVER_PROTOCOL_ERROR',
             'Codex app-server returned an unexpected response during account authentication.',
             { retryable: false },
-          ))
+          )
+          rejectCompletion(error)
+          rejectAccountUpdate(error)
         }
         return
       }
@@ -1559,36 +1578,59 @@ export async function executeCodexManagedAccountOperation(
         return
       }
 
-      if (readCodexEventMethod(message) !== 'account/login/completed') {
+      const eventMethod = readCodexEventMethod(message)
+      if (eventMethod === 'account/updated') {
+        const params = asCodexRecord(message.params)
+        if (asCodexString(params?.authMode) !== 'chatgpt') {
+          return
+        }
+        if (!acceptChatGptAccountUpdate) {
+          return
+        }
+        if (expectedLoginId === null) {
+          bufferedChatGptAccountUpdate = true
+        } else {
+          settleAccountUpdate()
+        }
+        return
+      }
+
+      if (eventMethod !== 'account/login/completed') {
         return
       }
       const params = asCodexRecord(message.params)
       const loginId = asCodexString(params?.loginId)
-      const success = params?.success === true
       if (!loginId) {
         return
       }
+      const completionResult: CodexManagedAccountLoginCompletion = {
+        error: asCodexString(params?.error),
+        success: params?.success === true,
+      }
       if (loginId === expectedLoginId) {
-        settleCompletion(success)
+        settleCompletion(completionResult)
       } else {
-        bufferedCompletions.set(loginId, success)
+        bufferedCompletions.set(loginId, completionResult)
       }
     },
     onStderrLine: () => {},
     onStderrText: () => {},
     onStdinError(error) {
       rejectCompletion(error)
+      rejectAccountUpdate(error)
       return null
     },
     onStdoutText: () => {},
   }
 
   const onAbort = () => {
-    rejectCompletion(new VaultCliError(
+    const error = new VaultCliError(
       'ASSISTANT_CODEX_AUTH_ABORTED',
       'ChatGPT account authentication was interrupted.',
       { retryable: true },
-    ))
+    )
+    rejectCompletion(error)
+    rejectAccountUpdate(error)
   }
 
   try {
@@ -1613,6 +1655,7 @@ export async function executeCodexManagedAccountOperation(
       return { kind: 'connected' }
     }
 
+    acceptChatGptAccountUpdate = true
     const startResult = asCodexRecord(await withCodexRpcTimeout(
       processInstance.sendRequest('account/login/start', {
         type: 'chatgptDeviceCode',
@@ -1641,20 +1684,31 @@ export async function executeCodexManagedAccountOperation(
     if (buffered !== undefined) {
       settleCompletion(buffered)
     }
+    if (bufferedChatGptAccountUpdate) {
+      settleAccountUpdate()
+    }
     await input.onDeviceCode?.({ userCode, verificationUrl })
 
-    const succeeded = await withCodexRpcTimeout(
+    const loginCompletion = await withCodexRpcTimeout(
       completion,
       normalizeCodexManagedAccountTimeout(input.timeoutMs),
       'account/login/completed',
     )
-    if (!succeeded) {
+    if (!loginCompletion.success) {
       throw new VaultCliError(
         'ASSISTANT_CODEX_AUTH_FAILED',
         'ChatGPT account authentication did not complete successfully.',
-        { retryable: false },
+        {
+          ...(loginCompletion.error ? { codexLoginError: loginCompletion.error } : {}),
+          retryable: false,
+        },
       )
     }
+    await withCodexRpcTimeout(
+      accountUpdate,
+      CODEX_RPC_DEFAULT_TIMEOUT_MS,
+      'account/updated',
+    )
     if (!isCodexChatGptAccountReadResult(await readCodexManagedAccount(processInstance))) {
       throw new VaultCliError(
         'ASSISTANT_CODEX_AUTH_FAILED',
@@ -2233,6 +2287,7 @@ async function runCodexAppServerTurnOnProcess(
   let turnTerminal = false
   let providerRequestStartedNotified = false
   let contextCompactionProgressNotified = false
+  let contextCompactionProgressPending = false
   let releaseLiveTurn = () => {}
   const pendingProgressDeliveries = new Set<Promise<void>>()
   let dynamicToolExecutionChain: Promise<void> = Promise.resolve()
@@ -2616,19 +2671,39 @@ async function runCodexAppServerTurnOnProcess(
     const progressDelivery = resolveCodexAppServerProgressDelivery(input)
     if (
       !progressDelivery ||
-      (source === 'system' && contextCompactionProgressNotified)
+      (source === 'system' &&
+        (contextCompactionProgressNotified || contextCompactionProgressPending))
     ) {
       return false
     }
 
-    if (source === 'system') {
-      contextCompactionProgressNotified = true
-    }
     let progressPromise: Promise<AssistantProgressDeliveryResult>
     try {
-      progressPromise = progressDelivery.send(text, { source })
+      if (source === 'system') {
+        contextCompactionProgressPending = true
+      }
+      progressPromise = progressDelivery.send(text, {
+        ...(source === 'system' ? { required: true } : {}),
+        source,
+      })
     } catch {
+      if (source === 'system') {
+        contextCompactionProgressPending = false
+      }
       return false
+    }
+    if (source === 'system') {
+      progressPromise = progressPromise.then((result) => {
+        if (result.kind === 'sent') {
+          contextCompactionProgressNotified = true
+        } else {
+          contextCompactionProgressPending = false
+        }
+        return result
+      }, (error: unknown) => {
+        contextCompactionProgressPending = false
+        throw error
+      })
     }
     trackProgressDelivery(
       trackExternallyVisibleProgressDelivery({
@@ -2648,19 +2723,11 @@ async function runCodexAppServerTurnOnProcess(
     pendingProgressDeliveries.add(tracked)
   }
 
-  const closeProgressDelivery = (): void => {
-    resolveCodexAppServerProgressDelivery(input)?.close?.()
-  }
-
   const drainPendingProgressDeliveries = async (): Promise<void> => {
     while (pendingProgressDeliveries.size > 0) {
-      const drained = await waitForCodexProgressDrain([
+      await waitForCodexProgressDrain([
         ...pendingProgressDeliveries,
       ])
-      if (!drained) {
-        closeProgressDelivery()
-        return
-      }
     }
   }
 
@@ -2686,10 +2753,27 @@ async function runCodexAppServerTurnOnProcess(
     } while (drained !== dynamicToolExecutionChain)
   }
 
-  const applyResponseMediaPatch = (patch: {
-    media: AssistantResponseMedia[]
-    op: 'append' | 'replace'
-  }): void => {
+  const hasAcceptedNoReplyPatchForDeliveryContext = (
+    deliveryContextOrdinal: number,
+  ): boolean =>
+    finalActionPatches.some((entry) =>
+      entry.deliveryContextOrdinal === deliveryContextOrdinal &&
+      entry.patch.kind === 'none'
+    )
+
+  const applyResponseMediaPatch = (
+    patch: {
+      media: AssistantResponseMedia[]
+      op: 'append' | 'replace'
+    },
+    deliveryContextOrdinal: number,
+  ): void => {
+    if (hasAcceptedNoReplyPatchForDeliveryContext(deliveryContextOrdinal)) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY',
+        'Response media cannot be attached after finish_without_reply.',
+      )
+    }
     responseMedia = patch.op === 'replace'
       ? patch.media
       : normalizeAssistantResponseMediaList([...responseMedia, ...patch.media])
@@ -2707,6 +2791,9 @@ async function runCodexAppServerTurnOnProcess(
       trailingSteerCandidateDeliveryContextOrdinal !== null &&
       trailingSteerCandidateDeliveryContextOrdinal < deliveryContextOrdinal
     ) {
+      return false
+    }
+    if (responseMedia.length > 0) {
       return false
     }
     if (
@@ -3018,11 +3105,13 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    const dynamicToolRequestDeliveryContextOrdinal =
+      currentDeliveryContextOrdinal()
     const dynamicToolDeliveryContextOrdinal =
       dynamicToolRequest.kind === 'finish-without-reply' ||
       dynamicToolRequest.kind === 'react-to-message' ||
       dynamicToolRequest.kind === 'send-progress-update'
-        ? Math.max(0, completedUserMessageOrdinal)
+        ? dynamicToolRequestDeliveryContextOrdinal
         : null
     const dynamicToolProgressDelivery =
       dynamicToolRequest.kind === 'send-progress-update'
@@ -3075,11 +3164,14 @@ async function runCodexAppServerTurnOnProcess(
       abortSignal: input.abortSignal
         ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
         : dynamicToolAbortController.signal,
+      loadAuthorizedReferenceImageRefs:
+        input.loadAuthorizedReferenceImageRefs ?? null,
       codexHome: input.codexHome ?? input.env.CODEX_HOME ?? null,
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedGeneratedImageUploader: input.hostedGeneratedImageUploader,
       hostedToolContext: resolveCodexAppServerHostedToolContext(input),
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
       currentResponseMedia: responseMedia,
       nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
       productFeedbackRecorder: input.productFeedbackRecorder ?? null,
@@ -3091,6 +3183,7 @@ async function runCodexAppServerTurnOnProcess(
       request: dynamicToolRequest,
       requireHostedGeneratedImageUploader:
         input.requireHostedGeneratedImageUploader ?? false,
+      vaultRoot: input.vaultRoot ?? null,
       voiceMemoRuntime:
         dynamicToolRequest.kind === 'generate-voice-memo' ||
         dynamicToolRequest.kind === 'generate-song'
@@ -3108,8 +3201,15 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (result.responseMediaPatch) {
         try {
-          applyResponseMediaPatch(result.responseMediaPatch)
-        } catch {
+          applyResponseMediaPatch(
+            result.responseMediaPatch,
+            dynamicToolRequestDeliveryContextOrdinal,
+          )
+        } catch (error) {
+          const text = error instanceof VaultCliError &&
+            error.code === 'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY'
+            ? 'response media unavailable after finish_without_reply'
+            : 'response media limit reached'
           void tryWriteRpcMessage({
             id: requestId,
             result: {
@@ -3117,7 +3217,7 @@ async function runCodexAppServerTurnOnProcess(
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'response media limit reached',
+                  text,
                 },
               ],
             },
@@ -3798,6 +3898,7 @@ async function runCodexAppServerTurnOnProcess(
     emitActionDiagnosticsTrace()
     dynamicToolAbortController.abort()
     await drainPendingDynamicToolExecutions()
+    await drainPendingProgressDeliveries()
     annotateTurnFailureContext(error)
     closeLiveTurn()
     normalShutdown = true

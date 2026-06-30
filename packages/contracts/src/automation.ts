@@ -9,6 +9,7 @@ import {
   isValidExecutableCronExpression,
   MIN_EXECUTABLE_SCHEDULE_EVERY_MS,
 } from "./schedule-intent.ts";
+import { assistantReasoningEffortValues } from "./assistant.ts";
 import { withContractMetadata } from "./schema-metadata.ts";
 
 export const AUTOMATION_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.automationFrontmatter;
@@ -95,10 +96,117 @@ export const automationScheduleDeviceActivitySchema = z
   .object({
     kind: z.literal("deviceActivity"),
     after: isoTimestampSchema(),
+    afterOccurredAt: isoTimestampSchema().optional(),
+    afterEntityId: z.string().min(1).optional(),
     source: z.enum(automationDeviceActivitySourceValues).optional(),
     activityKind: automationDeviceActivityKindSchema.optional(),
   })
+  .superRefine((schedule, ctx) => {
+    const hasScalarOccurredAt = schedule.afterOccurredAt !== undefined;
+    const hasScalarEntityId = schedule.afterEntityId !== undefined;
+    if (hasScalarOccurredAt !== hasScalarEntityId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Device activity cursor must include afterOccurredAt and afterEntityId together.",
+        path: hasScalarOccurredAt ? ["afterEntityId"] : ["afterOccurredAt"],
+      });
+    }
+  })
   .strict();
+
+export interface DeviceActivityCoverageCursor {
+  after: string;
+  afterOccurredAt?: string;
+  afterEntityId?: string;
+}
+
+export interface DeviceActivityCoverageKey {
+  entityId: string;
+  occurredAt: string;
+  triggeredAt: string;
+}
+
+export interface DeviceActivityCoverageCursorPosition {
+  after: string;
+  afterOccurredAt: string;
+  afterEntityId: string;
+}
+
+export function compareDeviceActivityCoverageKeys(
+  left: DeviceActivityCoverageKey,
+  right: DeviceActivityCoverageKey,
+): number {
+  return compareIsoTimestamps(left.triggeredAt, right.triggeredAt)
+    || compareIsoTimestamps(left.occurredAt, right.occurredAt)
+    || left.entityId.localeCompare(right.entityId);
+}
+
+export function deviceActivityCoverageKeyIsAfterCursor(
+  key: DeviceActivityCoverageKey,
+  cursor: DeviceActivityCoverageCursor,
+): boolean {
+  const triggeredComparison = compareIsoTimestamps(key.triggeredAt, cursor.after);
+  if (triggeredComparison > 0) {
+    return true;
+  }
+  if (triggeredComparison < 0) {
+    return false;
+  }
+
+  if (cursor.afterOccurredAt && cursor.afterEntityId) {
+    return compareDeviceActivityCoverageKeys(key, {
+      entityId: cursor.afterEntityId,
+      occurredAt: cursor.afterOccurredAt,
+      triggeredAt: cursor.after,
+    }) > 0;
+  }
+
+  return false;
+}
+
+export function resolveNextDeviceActivityCoverageCursor(input: {
+  cursor: DeviceActivityCoverageCursor;
+  keys: readonly DeviceActivityCoverageKey[];
+}): DeviceActivityCoverageCursorPosition | null {
+  const latest = input.keys.reduce<DeviceActivityCoverageKey | null>((candidate, key) => {
+    if (!deviceActivityCoverageKeyIsAfterCursor(key, input.cursor)) {
+      return candidate;
+    }
+    if (!candidate || compareDeviceActivityCoverageKeys(key, candidate) > 0) {
+      return key;
+    }
+    return candidate;
+  }, null);
+  if (!latest) {
+    return null;
+  }
+
+  const next = {
+    after: latest.triggeredAt,
+    afterOccurredAt: latest.occurredAt,
+    afterEntityId: latest.entityId,
+  };
+
+  if (
+    latest.triggeredAt === input.cursor.after &&
+    input.cursor.afterOccurredAt === latest.occurredAt &&
+    input.cursor.afterEntityId === latest.entityId
+  ) {
+    return null;
+  }
+
+  return next;
+}
+
+function compareIsoTimestamps(left: string, right: string): number {
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  if (Number.isFinite(leftMs) && Number.isFinite(rightMs)) {
+    return leftMs - rightMs;
+  }
+
+  return left.localeCompare(right);
+}
 
 export const automationScheduleSchema = z.discriminatedUnion("kind", [
   ...automationTimeScheduleSchema.options,
@@ -125,6 +233,14 @@ export const automationRouteSchema = z
   })
   .strict();
 
+export const automationAssistantTargetOverrideSchema = z
+  .object({
+    model: z.string().min(1).max(200).nullable().optional(),
+    modelProvider: z.string().min(1).max(120).nullable().optional(),
+    reasoningEffort: z.enum(assistantReasoningEffortValues).nullable().optional(),
+  })
+  .strict();
+
 export const automationFrontmatterSchema = withContractMetadata(
   z
     .object({
@@ -137,6 +253,7 @@ export const automationFrontmatterSchema = withContractMetadata(
       summary: z.string().min(1).max(4000).optional(),
       schedule: automationScheduleSchema,
       route: automationRouteSchema,
+      assistantTargetOverride: automationAssistantTargetOverrideSchema.optional(),
       continuityPolicy: z.enum(automationContinuityPolicyValues),
       tags: z.array(z.string().min(1)).optional(),
       createdAt: isoTimestampSchema(),
@@ -160,6 +277,7 @@ export const automationScaffoldPayloadSchema = z
     continuityPolicy: z.enum(automationContinuityPolicyValues).default("preserve"),
     instructions: z.string().min(1),
     route: automationRouteSchema,
+    assistantTargetOverride: automationAssistantTargetOverrideSchema.nullable().optional(),
     schedule: automationScheduleSchema,
     slug: z.string().regex(slugPattern).optional(),
     status: z.enum(automationStatusValues).default("active"),
@@ -178,6 +296,9 @@ export type AutomationDeviceActivityKind = z.infer<typeof automationDeviceActivi
 export type AutomationTimeSchedule = z.infer<typeof automationTimeScheduleSchema>;
 export type AutomationSchedule = z.infer<typeof automationScheduleSchema>;
 export type AutomationRoute = z.infer<typeof automationRouteSchema>;
+export type AutomationAssistantTargetOverride = z.infer<
+  typeof automationAssistantTargetOverrideSchema
+>;
 export type AutomationFrontmatter = z.infer<typeof automationFrontmatterSchema>;
 export type AutomationMarkdownDocument = z.infer<typeof automationMarkdownDocumentSchema>;
 export type AutomationScaffoldPayload = z.infer<typeof automationScaffoldPayloadSchema>;

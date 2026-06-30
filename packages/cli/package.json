@@ -1,6 +1,6 @@
 {
   "name": "@murphai/murph",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": false,
   "description": "Murph is a personal health assistant you run locally. Install this package to get the murph CLI.",
   "license": "Apache-2.0",
@@ -60,6 +60,7 @@
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
+    "@junction-api/sdk": "1.2.0",
     "@modelcontextprotocol/server": "^2.0.0-alpha.2",
     "@murphai/assistant-cli": "workspace:*",
     "@murphai/assistant-engine": "workspace:*",

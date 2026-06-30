@@ -11,6 +11,7 @@ import type {
   HostedComputerHandoffPurpose,
   HostedComputerHandoffStatus,
   HostedComputerRunStatus,
+  HostedComputerReturnContactKind,
 } from "@murphai/hosted-execution/computer-use";
 
 import { getPrisma } from "../prisma";
@@ -63,13 +64,18 @@ export interface ComputerHandoffRecord {
   expiresAt: Date;
   id: string;
   memberId: string;
-  purpose: HostedComputerHandoffPurpose;
+  purpose: PersistedComputerHandoffPurpose;
   runId: string;
+  returnContactKind: HostedComputerReturnContactKind | null;
   status: HostedComputerHandoffStatus;
   suggestedReply: string | null;
   tokenHash: string;
   updatedAt: Date;
 }
+
+export type PersistedComputerHandoffPurpose =
+  | HostedComputerHandoffPurpose
+  | "screen_inspection";
 
 export interface ComputerCreateRunResult {
   created: boolean;
@@ -96,6 +102,7 @@ export interface ComputerUseStore {
     memberId: string;
     purpose: HostedComputerHandoffPurpose;
     runId: string;
+    returnContactKind: HostedComputerReturnContactKind | null;
     suggestedReply: string | null;
     tokenHash: string;
   }): Promise<ComputerHandoffRecord>;
@@ -199,6 +206,7 @@ export interface ComputerUseStore {
     awaitingReason: HostedComputerAwaitingReason | null;
     expectedHandoffStatus?: HostedComputerHandoffStatus | null;
     expectedHandoffUpdatedAt?: Date | null;
+    expectedKernelSessionId: string;
     expectedPausedAt: Date;
     expectedPendingHandoffId: string | null;
     now: Date;
@@ -479,6 +487,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     memberId: string;
     purpose: HostedComputerHandoffPurpose;
     runId: string;
+    returnContactKind: HostedComputerReturnContactKind | null;
     suggestedReply: string | null;
     tokenHash: string;
   }): Promise<ComputerHandoffRecord> {
@@ -489,6 +498,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         memberId: input.memberId,
         purpose: input.purpose,
         runId: input.runId,
+        returnContactKind: input.returnContactKind,
         suggestedReply: input.suggestedReply,
         tokenHash: input.tokenHash,
       },
@@ -797,6 +807,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     awaitingReason: HostedComputerAwaitingReason | null;
     expectedHandoffStatus?: HostedComputerHandoffStatus | null;
     expectedHandoffUpdatedAt?: Date | null;
+    expectedKernelSessionId: string;
     expectedPausedAt: Date;
     expectedPendingHandoffId: string | null;
     now: Date;
@@ -819,7 +830,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         where: {
           awaitingReason: input.awaitingReason,
           id: input.runId,
-          kernelSessionId: { not: null },
+          kernelSessionId: input.expectedKernelSessionId,
           pausedAt: input.expectedPausedAt,
           pendingHandoffId: input.expectedPendingHandoffId,
           status: "awaiting_user",
@@ -1136,7 +1147,7 @@ async function lockMemberComputerUseAvailable(
 function staleRunStateConflictError(): Error {
   return computerUseConflictError({
     code: "HOSTED_COMPUTER_RUN_STATE_CHANGED",
-    message: "Computer run state changed; observe the run before retrying.",
+    message: "Computer run state changed; open the browser before retrying.",
     retryable: true,
   });
 }
@@ -1297,12 +1308,27 @@ function mapHandoff(handoff: PrismaHostedComputerHandoff): ComputerHandoffRecord
     id: handoff.id,
     memberId: handoff.memberId,
     purpose: readHandoffPurpose(handoff.purpose),
+    returnContactKind: readHandoffReturnContactKind(handoff.returnContactKind),
     runId: handoff.runId,
     status: readHandoffStatus(handoff.status),
     suggestedReply: handoff.suggestedReply,
     tokenHash: handoff.tokenHash,
     updatedAt: handoff.updatedAt,
   };
+}
+
+function readHandoffReturnContactKind(
+  value: string | null,
+): HostedComputerReturnContactKind | null {
+  switch (value) {
+    case null:
+    case "text":
+    case "telegram":
+    case "email":
+      return value;
+    default:
+      throw new TypeError("Hosted computer handoff returnContactKind is invalid.");
+  }
 }
 
 function readRunStatus(value: string): HostedComputerRunStatus {
@@ -1337,15 +1363,15 @@ function readAwaitingReason(
   }
 }
 
-function readHandoffPurpose(value: string): HostedComputerHandoffPurpose {
+function readHandoffPurpose(value: string): PersistedComputerHandoffPurpose {
   switch (value) {
+    case "screen_inspection":
     case "managed_login":
     case "login":
     case "payment":
     case "card":
     case "captcha":
     case "manual_browser_help":
-    case "screen_inspection":
       return value;
     default:
       throw new TypeError("Stored computer handoff purpose is unsupported.");

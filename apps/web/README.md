@@ -72,7 +72,12 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - encrypted hosted mailbox rows and lane counters for durable execution inputs
 - latest hosted workspace checkpoint metadata plus redacted runtime logs/status
 - immutable hosted AI usage rows in Postgres for billing-safe reconciliation
+- event-id keyed Linq first-contact classifier decisions with no classifier
+  prompt/response bodies; the legacy rejected-message-text column is an ignored
+  deploy-skew compatibility column and is scrubbed by migration
 - bounded hosted product-feedback rows for explicit structured product feedback
+- member-bound hosted phone-call rows for web-owned Retell starts and signed
+  Retell function/webhook results
 - Kernel-backed hosted computer runs, Live View handoffs, and durable Managed Auth connections
 - hosted Stripe receipt/retry state, billing reconciliation, and onboarding webhook receipts
 - local-agent pairing plus sparse signal/token routes for hosted integrations
@@ -130,22 +135,29 @@ The hosted Prisma schema keeps ownership sharp and nested:
 - `HostedProductFeedback` owns assistant-captured structured product feedback
   with only a bounded product-only summary, kind, and optional changelog ids,
   without storing raw conversation text, health details, tags, topics, or provider payloads
+- `HostedPhoneCall` owns one member-bound Retell phone-call row per real call
+  with a bounded call brief, provider call id, status, and final analysis
+  result; Retell credentials stay in web env, transfer destinations are resolved
+  from verified member identity, and raw transcripts/audio are not stored in
+  Murph.
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;
   `apps/web` owns Kernel lifecycle and encrypted browser capabilities. Awaiting
-  runs resume when normal `computer_start_run` selects the member's active
-  awaiting run and `apps/web` verifies a newer hosted `conversation.message`
-  mailbox item for the same member and delivery context; model-supplied run ids
-  or confirmation text are not proof.
+  runs open through `computer_open`, which creates, reuses, resumes, or safely
+  reclaims completed or stale-checkpointed active runs and returns current page
+  state. `apps/web` verifies newer
+  hosted `conversation.message` mailbox items and delivery context when reply
+  proof is required; model-supplied run ids or confirmation text are not proof.
   `computer_act` runs bounded raw Playwright code against the current Kernel
   page, and `computer_os_control` is a bounded mouse/keyboard fallback for page
   surfaces that cannot be operated through Playwright. The agent explicitly
   selects `managed_login` for Kernel Hosted UI plus a durable profile/domain
   connection, or `login` for the existing Live View takeover; CAPTCHA,
-  payment, missing-detail, and direct takeover handoffs remain Live View. Each authenticated
-  handoff matches the active browser viewport to the opening screen before
-  showing the live view.
+  payment, missing-detail, and direct takeover handoffs remain Live View. Authenticated
+  handoffs reuse the current hosted web session's last measured takeover surface
+  as a fast browser-viewport hint, then correct from the live client surface in
+  the background without blocking takeover.
 - `hosted_user_crypto_envelope` stores signed wrapped per-user/per-domain root
   envelopes; plaintext roots are never stored
 - `hosted_user_crypto_audit` records hosted crypto authority events
@@ -289,8 +301,17 @@ Hosted onboarding extras:
 - `PRIVY_VERIFICATION_KEY`
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
 - `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`
+- `HOSTED_ONBOARDING_LINQ_ATTACHMENT_UPLOAD_ALLOWED_HOSTS` for hosted ops voice
+  memo attachments. Configure the exact Linq-owned upload host returned by the
+  attachment API; uploads fail closed when unset.
 - `HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS` for local `pnpm dev` or hosted-local runs only. Set this in local env when a development tunnel shares real Linq credentials so non-allowlisted inbound senders are accepted and ignored before mailbox append or assistant wake. Do not set it in production.
 - `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER`
+- `RETELL_API_KEY`, `RETELL_FROM_NUMBER`, `RETELL_AGENT_ID`,
+  `RETELL_AGENT_DATA_STORAGE_SETTING=basic_attributes_only`, and optional
+  `RETELL_AGENT_VERSION` enable hosted Retell phone calls, signed `ask_murph`
+  custom-function verification, and signed Retell lifecycle webhooks. Keep the
+  published Retell agent configured for basic-attributes-only storage and point
+  function/webhook URLs at the deployed `apps/web` routes.
 - `MURPH_TELEGRAM_USERNAME_OVERRIDE` optionally overrides user-facing Murph Telegram links. It is not a secret and is exposed to the browser bundle so local Vercel dev can point links at a development bot, for example `@murphdevelopment_bot`.
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY`
@@ -488,6 +509,8 @@ deploys `apps/web`. Production is the minimum.
 - Set `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET` to the same value used by the
   trusted auth edge that signs browser assertions for lower-level device-sync
   bridge routes.
+- Set `DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED=true` when admin
+  device-sync diagnostics should be available outside localhost.
 
 ## Browser auth contract
 
@@ -642,8 +665,8 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `GET /api/internal/hosted-workspace`
 - `POST /api/internal/hosted-workspace/checkpoint`
 - `POST /api/internal/computer/runs`
-- `POST /api/internal/computer/runs/:runId/observe`
 - `POST /api/internal/computer/runs/:runId/act`
+- `POST /api/internal/computer/runs/:runId/os-control`
 - `POST /api/internal/computer/runs/:runId/pause-for-user`
 - `POST /api/internal/computer/runs/:runId/finish`
 - `GET /api/internal/hosted-onboarding/stripe/cron`
@@ -672,6 +695,18 @@ Hosted onboarding surfaces:
 - `GET /api/hosted-onboarding/billing/success`
 - `POST /api/hosted-onboarding/linq/webhook`
 - `POST /api/hosted-onboarding/stripe/webhook`
+
+Hosted ops repair surfaces:
+
+- `/ops/onboarding-activation` and `POST /api/ops/onboarding-activation`
+  let allowlisted hosted ops members activate a verified hosted signup that
+  stopped before billing. The route accepts an existing invite code or join
+  URL, issues or reuses a fresh internal web invite for the same member, then
+  delegates to the no-card Pulse Trial enrollment path so billing state,
+  activation mailbox work, hosted crypto provisioning, runtime wake, and
+  welcome email behavior stay on the canonical signup path. It returns status
+  metadata only, not invite codes, invite URLs, phone numbers, or contact
+  targets.
 
 The onboarding lane is intentionally thin:
 

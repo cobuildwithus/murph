@@ -4,6 +4,9 @@ import {
   type AssistantOutboxIntent,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
+  readAssistantDeliveryFailureClass,
+} from '@murphai/operator-config/assistant/delivery-failure'
+import {
   redactAssistantStateString,
   sanitizeAssistantPortableStateString,
 } from '../redaction.js'
@@ -74,6 +77,14 @@ export function shouldBeginAssistantOutboxDispatch(
 }
 
 export function isAssistantOutboxRetryableError(error: unknown): boolean {
+  const failureClass = readAssistantDeliveryFailureClass(error)
+  if (failureClass === 'transient') {
+    return true
+  }
+  if (failureClass === 'blocked' || failureClass === 'terminal') {
+    return false
+  }
+
   const explicitRetryable = readAssistantOutboxRetryableFlag(error)
   if (explicitRetryable !== null) {
     return explicitRetryable
@@ -83,6 +94,9 @@ export function isAssistantOutboxRetryableError(error: unknown): boolean {
   const code = deliveryError.code?.toUpperCase() ?? ''
   const message = deliveryError.message.toLowerCase()
   if (assistantOutboxErrorCodeLooksPermanent(code)) {
+    return false
+  }
+  if (assistantOutboxErrorCodeIsInternal(code)) {
     return false
   }
 
@@ -254,6 +268,15 @@ function assistantOutboxErrorCodeLooksPermanent(code: string): boolean {
 
 function assistantOutboxErrorCodeLooksRetryable(code: string): boolean {
   return includesAny(code, RETRYABLE_OUTBOX_ERROR_CODE_MARKERS)
+}
+
+function assistantOutboxErrorCodeIsInternal(code: string): boolean {
+  return code.startsWith('ASSISTANT_') ||
+    code.startsWith('HOSTED_') ||
+    code.startsWith('LINQ_') ||
+    code.startsWith('TELEGRAM_') ||
+    code.startsWith('WHATSAPP_') ||
+    code.startsWith('AGENTMAIL_')
 }
 
 function assistantOutboxErrorMessageLooksRetryable(message: string): boolean {

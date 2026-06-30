@@ -42,6 +42,7 @@ import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
   releaseHostedAiUsageLimitNotice,
 } from "@/src/lib/hosted-execution/usage-allowance";
+import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import {
   buildHostedLinqConversationHomeRedirectReply,
@@ -81,9 +82,9 @@ describe("hosted Linq webhook transport", () => {
       }),
     ).resolves.toBeUndefined();
 
-    expect(buildHostedLinqConversationHomeRedirectReply).toHaveBeenCalledWith({
+    expect(buildHostedLinqConversationHomeRedirectReply).toHaveBeenCalledWith(expect.objectContaining({
       homeRecipientPhone: "+15555550100",
-    });
+    }));
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat-1",
@@ -122,9 +123,9 @@ describe("hosted Linq webhook transport", () => {
       }),
     ).resolves.toBeUndefined();
 
-    expect(buildHostedLinqConversationHomeRedirectReply).toHaveBeenCalledWith({
+    expect(buildHostedLinqConversationHomeRedirectReply).toHaveBeenCalledWith(expect.objectContaining({
       homeRecipientPhone: "+15555550200",
-    });
+    }));
   });
 
   it("delivers legacy invite_signin side effects as invite signup replies", async () => {
@@ -411,6 +412,48 @@ describe("hosted Linq webhook transport", () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+
+  it("revalidates routed daily quota replies before provider delivery", async () => {
+    const accountLookupKey = createHostedPhoneLookupKey("+15550000000");
+    if (!accountLookupKey) {
+      throw new Error("Expected test account lookup key.");
+    }
+    const prisma = {
+      hostedThreadRoute: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-group-1",
+      memberId: "member-thread-container-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      routeAuthority: {
+        accountLookupKey,
+        channel: "linq",
+        containerMemberId: "member-thread-container-1",
+        threadId: "chat-group-1",
+      },
+      sourceEventId: "event-route-daily-quota",
+      template: "daily_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+    });
+
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(releaseHostedLinqQuotaReplyNoticeClaim).toHaveBeenCalledWith({
+      memberId: "member-thread-container-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
   });
 
   it("logs claimed AI usage quota source event suffixes separately from period-scoped effect ids", async () => {

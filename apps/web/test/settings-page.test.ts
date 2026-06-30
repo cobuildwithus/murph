@@ -228,6 +228,7 @@ test("SettingsPage reads the app session and persisted account settings into the
   assert.match(markup, /Hosted data privacy settings/);
   assert.match(markup, /Your account/);
   assert.match(markup, /Subscription, connected accounts, and data privacy\./);
+  assert.doesNotMatch(markup, /ChatGPT/);
   assert.doesNotMatch(markup, /Data sources/);
   for (const removedCopy of [
     ["vault", "sync"].join(" "),
@@ -237,6 +238,7 @@ test("SettingsPage reads the app session and persisted account settings into the
     assert.equal(markup.includes(removedCopy), false);
   }
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
+  expect(mocks.prisma.hostedCodexAuthConnection.findUnique).not.toHaveBeenCalled();
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
     canStartPaidPulse: false,

@@ -8,10 +8,13 @@ import {
   isHostedLinqConversationMessageWake,
   isHostedTelegramConversationMessageWake,
   isHostedWhatsAppConversationMessageWake,
-  readHostedLinqConversationMessageContact,
+  readHostedLinqConversationMessageAccountLookupKey,
 } from "@murphai/hosted-execution";
 import type {
   HostedRuntimeLatencyTraceStagedMilestones,
+} from "@murphai/hosted-execution/runtime-control";
+import {
+  readHostedIngressLatencySource,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   createHostedAssistantConversationIdentifierBlind,
@@ -383,7 +386,8 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
   runtimeAttemptId?: string | null;
   wake: HostedExecutionConversationMessageWake;
 }): void {
-  if (input.wake.message.channel !== "linq") {
+  const source = readHostedIngressLatencySource(input.wake.message.channel);
+  if (!source) {
     return;
   }
   const latencyTracePort = input.runtime.platform.latencyTracePort ?? null;
@@ -412,7 +416,7 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
         ...(latencyMilestones?.phaseBreakdown === undefined
           ? {}
           : { phaseBreakdown: latencyMilestones.phaseBreakdown }),
-        source: "linq",
+        source,
         type: "assistant_input_staged",
         ...(latencyMilestones?.workspaceRestoreDoneAt === undefined
           ? {}
@@ -1079,11 +1083,11 @@ function createHostedConversationAssistantInputConversation(
   identifierBlind: HostedAssistantConversationIdentifierBlind,
 ): UpsertAssistantInputEventInput["conversation"] {
   if (isHostedLinqConversationMessageWake(wake)) {
-    const contact = readHostedLinqConversationMessageContact(wake.message);
+    const accountLookupKey = readHostedLinqConversationMessageAccountLookupKey(wake.message);
     return {
       accountId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
-        contact.lookupKey,
+        accountLookupKey,
       ),
       actorId: hashNullableHostedAssistantConversationIdentifier(
         identifierBlind,
@@ -1095,7 +1099,9 @@ function createHostedConversationAssistantInputConversation(
         identifierBlind,
         wake.message.linqMessage.chatId,
       ),
-      threadIsDirect: true,
+      threadIsDirect: typeof wake.message.linqMessage.threadIsDirect === "boolean"
+        ? wake.message.linqMessage.threadIsDirect
+        : true,
     };
   }
 
@@ -1162,7 +1168,7 @@ function readHostedConversationAssistantIdentifierSecret(
   wake: HostedExecutionConversationMessageWake,
 ): string {
   if (isHostedLinqConversationMessageWake(wake)) {
-    return readHostedLinqConversationMessageContact(wake.message).lookupKey;
+    return readHostedLinqConversationMessageAccountLookupKey(wake.message);
   }
 
   if (isHostedTelegramConversationMessageWake(wake)) {
@@ -1253,6 +1259,8 @@ function createHostedConversationAssistantInputSourceMetadata(
 ): UpsertAssistantInputEventInput["sourceMetadata"] {
   if (isHostedLinqConversationMessageWake(wake)) {
     return {
+      externalThreadRouteAuthorityPresent: wake.message.routeAuthority !== undefined
+        && wake.message.routeAuthority !== null,
       kind: "linq",
       partCount: wake.message.linqMessage.parts.length,
       reactionEligible: wake.message.linqMessage.reactionEligible === true,

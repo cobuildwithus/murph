@@ -81,6 +81,14 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.validateRuntimeProviderEgressToken(input);
   }
 
+  async validateRuntimeProviderEgressCredential(input: {
+    providerKind: string;
+    runnerContainerName: string;
+    userId: string;
+  }): ReturnType<HostedUserRunner["validateRuntimeProviderEgressCredential"]> {
+    return this.runner.validateRuntimeProviderEgressCredential(input);
+  }
+
   async createHostedWorkspaceSnapshotUploadSession(
     input: Parameters<HostedUserRunner["createHostedWorkspaceSnapshotUploadSession"]>[0],
   ): ReturnType<HostedUserRunner["createHostedWorkspaceSnapshotUploadSession"]> {

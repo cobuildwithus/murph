@@ -6,6 +6,10 @@ import { type Prisma } from "@prisma/client";
 import { cookies } from "next/headers";
 import { cache } from "react";
 
+import {
+  normalizeComputerHandoffViewportSize,
+  type ComputerHandoffViewportSize,
+} from "../computer-use/viewport";
 import { getPrisma } from "../prisma";
 import {
   assertHostedMemberEffectiveActiveAccessAllowed,
@@ -21,6 +25,7 @@ import {
 } from "./shared";
 
 export interface HostedAppSession {
+  computerHandoffViewportSize: ComputerHandoffViewportSize | null;
   expiresAt: Date;
   member: HostedMemberCoreState;
   privyUserId: string;
@@ -194,11 +199,24 @@ async function resolveHostedAppSessionFromToken(value: string | null | undefined
   }
 
   return {
+    computerHandoffViewportSize: readComputerHandoffViewportSizeFromSessionRecord(record),
     expiresAt: record.expiresAt,
     member,
     privyUserId: record.privyUserId,
     sessionId: record.id,
   };
+}
+
+function readComputerHandoffViewportSizeFromSessionRecord(
+  record: {
+    computerHandoffViewportHeight?: number | null;
+    computerHandoffViewportWidth?: number | null;
+  },
+): ComputerHandoffViewportSize | null {
+  return normalizeComputerHandoffViewportSize({
+    height: record.computerHandoffViewportHeight,
+    width: record.computerHandoffViewportWidth,
+  });
 }
 
 function generateHostedAppSessionToken(): string {

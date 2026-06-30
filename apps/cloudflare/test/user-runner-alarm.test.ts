@@ -50,6 +50,9 @@ import {
   type HostedWorkspaceSnapshotUploadSession,
 } from "../src/workspace-snapshot-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
+import {
+  verifyHostedProviderEgressCredential,
+} from "../src/hosted-provider-egress-credential.ts";
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 import {
   createTestHostedRuntimeCryptoContext,
@@ -92,6 +95,8 @@ const ACTIVE_RUNTIME_RECHECK_AT = "2026-04-27T00:01:00.000Z";
 const TEST_USER_ID = "member_123";
 const TEST_RUNNER_RUNTIME_ENV_SOURCE = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
+  HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+    "provider-egress-signing-secret",
   OPENAI_API_KEY: "test-openai-key",
 } as const;
 
@@ -176,6 +181,60 @@ describe("HostedUserRunner execution coordination", () => {
     expect(scheduledAlarms).toEqual([]);
     expect(alarms).toContain("deleted");
     expect(alarms).not.toContain(WORKSPACE_NEXT_WAKE_AT);
+  });
+
+  it("passes a runner-scoped OpenAI provider credential to hosted runtime jobs", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { invoke, runner } = createRunnerHarness({
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+        version: "5",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const job = invoke.mock.calls[0]?.[0].job;
+    const credential = job?.runtime?.forwardedEnv?.OPENAI_API_KEY;
+    expect(typeof credential).toBe("string");
+    expect(credential).not.toBe(TEST_RUNNER_RUNTIME_ENV_SOURCE.OPENAI_API_KEY);
+    expect(JSON.stringify(job)).not.toContain(
+      TEST_RUNNER_RUNTIME_ENV_SOURCE.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+    );
+    const verified = await verifyHostedProviderEgressCredential({
+      credential: String(credential),
+      source: TEST_RUNNER_RUNTIME_ENV_SOURCE,
+    });
+    expect(verified).toEqual({
+      claims: {
+        providerKind: "openai",
+        runnerContainerName: TEST_USER_ID,
+        schema: "murph.hosted-provider-egress-credential.v1",
+        scope: "hosted_runner_provider_egress",
+        userId: TEST_USER_ID,
+      },
+      ok: true,
+    });
+    const preparedLog = mocks.emitHostedExecutionStructuredLog.mock.calls
+      .map(([entry]) => entry)
+      .find((entry) => entry.message === "Hosted runner prepared workspace invocation.");
+    expect(preparedLog).toEqual(expect.objectContaining({
+      details: expect.objectContaining({
+        openAiCredentialAfterMintKind: "provider_egress",
+        openAiCredentialBeforeMintKind: "sentinel",
+        openAiProviderCredentialMinted: true,
+      }),
+    }));
   });
 
   it("passes a derived snapshot path diagnostics key without forwarding the raw log secret", async () => {
@@ -1430,6 +1489,47 @@ describe("HostedUserRunner execution coordination", () => {
       backoff_until: null,
       wake_at: null,
     });
+  });
+
+  it("calls the legacy wakeRuntime fallback directly on the container stub", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const wakeRuntime = vi.fn<NonNullable<HostedExecutionContainerStubLike["wakeRuntime"]>>(
+      async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }),
+    );
+    const { invoke, runner, sql } = createRunnerHarness({
+      wakeRuntime,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      workspaceVersion: "7",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "woken",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: expect.any(String),
+      runtimeAttemptId: token.attemptId,
+    });
+
+    expect(wakeRuntime).toHaveBeenCalledWith({
+      attemptId: token.attemptId,
+      leaseGeneration: String(token.generation),
+      orchestration: {
+        activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
+        userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
+      },
+      processingMode: "default",
+      userId: TEST_USER_ID,
+    });
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it("does not coalesce retention-only requests into a default active write fence", async () => {
@@ -3098,6 +3198,7 @@ function createRunnerHarness(input: {
   runtimeLogResponse?: () => Promise<Response> | Response;
   runnerRuntimeEnvSource?: Readonly<Record<string, unknown>>;
   runnerContainerNamespace?: HostedExecutionContainerNamespaceLike | null;
+  wakeRuntime?: HostedExecutionContainerStubLike["wakeRuntime"];
   workspace?: HostedWorkspaceState | null;
 } = {}) {
   const durable = createDurableObjectState({
@@ -3128,19 +3229,44 @@ function createRunnerHarness(input: {
     ...(ensureReadyForProcessing ? { ensureReadyForProcessing } : {}),
     ...(input.ensureProcessing
       ? {
-          ensureProcessing: async (ensureInput) => {
-            if (ensureInput.invoke) {
-              return {
-                action: ensureInput.activeRuntime ? "restarted" : "started",
-                kind: "accepted",
-                result: await invoke(ensureInput.invoke),
+          ensureProcessing: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>
+          >(
+            async function (
+              this: HostedExecutionContainerStubLike,
+              ensureInput,
+            ) {
+              if (ensureInput.invoke) {
+                return {
+                  action: ensureInput.activeRuntime ? "restarted" : "started",
+                  kind: "accepted",
+                  result: await invoke(ensureInput.invoke),
+                };
+              }
+              return await input.ensureProcessing?.call(this, ensureInput) ?? {
+                kind: "start-required",
+                reason: "no-active-child",
               };
-            }
-            return await input.ensureProcessing?.(ensureInput) ?? {
-              kind: "start-required",
-              reason: "no-active-child",
-            };
-          },
+            },
+          ),
+        }
+      : {}),
+    ...(input.wakeRuntime
+      ? {
+          wakeRuntime: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["wakeRuntime"]>
+          >(
+            async function (
+              this: HostedExecutionContainerStubLike,
+              wakeInput,
+            ) {
+              expect(this).toBe(stub);
+              return await input.wakeRuntime?.call(this, wakeInput) ?? {
+                kind: "not-wakeable",
+                reason: "no-active-child",
+              };
+            },
+          ),
         }
       : {}),
     invoke,

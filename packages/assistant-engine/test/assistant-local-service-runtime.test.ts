@@ -149,6 +149,69 @@ test('sendAssistantMessageLocal completes a successful turn, persists usage, and
   )
 })
 
+test('sendAssistantMessageLocal gives hosted manual phone-call turns a real accepted input id', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'assistant-local-service-phone-call-input-',
+  )
+  tempRoots.push(parentRoot)
+  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule({
+    realAcceptedInputPersistence: true,
+  })
+  let phoneCallScope: unknown = null
+
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    expect(providerInput.acceptedInputItems).toEqual([
+      expect.objectContaining({
+        id: 'manual-phone-call:turn-1',
+        promptFallback: expect.objectContaining({
+          reason: 'manual-input',
+        }),
+        source: 'manual',
+      }),
+    ])
+    phoneCallScope =
+      providerInput.hostedToolContext?.currentPhoneCallToolRequestKeyScope?.() ?? null
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-default',
+        response: 'assistant response',
+        route: {
+          routeId: 'route-default',
+        },
+        session,
+      },
+    }
+  })
+
+  await sendAssistantMessageLocal({
+    deliverResponse: false,
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        phoneCalls: {
+          start: vi.fn(async () => ({
+            phoneCallId: 'hpc_test',
+            status: 'calling' as const,
+          })),
+        },
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Please call the clinic.',
+    turnTrigger: 'manual-ask',
+    vault: vaultRoot,
+  })
+
+  expect(phoneCallScope).toMatchObject({
+    acceptedInputIds: ['manual-phone-call:turn-1'],
+  })
+})
+
 test('sendAssistantMessageLocal compacts oversized runtime logs before foreground turn writes', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'assistant-local-service-runtime-maintenance-',
@@ -4760,7 +4823,7 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
   ])
 })
 
-test('sendAssistantMessageLocal exposes hosted progress and computer context for auto-replies', async () => {
+test('sendAssistantMessageLocal suppresses hosted progress in queue-only auto-replies', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-hosted-auto-reply-progress-',
   )
@@ -4809,17 +4872,16 @@ test('sendAssistantMessageLocal exposes hosted progress and computer context for
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
   const hostedToolContext =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
-  assert.ok(progressDelivery)
+  assert.equal(progressDelivery, null)
   assert.ok(hostedToolContext)
-  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
   assert.equal(hostedToolContext.computerToolsAvailable, true)
-  await progressDelivery.send('Checking the iMessage thread.')
-  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
   assert.equal(progressDeliveryDependencies.sendLinq.mock.calls.length, 0)
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
 })
 
 test('sendAssistantMessageLocal routes hosted Linq model progress through progress delivery dependencies', async () => {
+  const refreshTyping = vi.fn(async () => undefined)
   const progressDeliveryDependencies = {
     sendLinq: vi.fn(async () => ({
       providerMessageId: 'progress-message',
@@ -4830,17 +4892,48 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
   }
   const sharedPlan = createSharedPlan()
   sharedPlan.conversationPolicy.audience.channel = 'linq'
+  const releaseProviderTurn = createDeferred<void>()
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    adapter: {
+      startTypingIndicator: vi.fn(async () => ({
+        refreshNow: refreshTyping,
+        stop: vi.fn(async () => undefined),
+      })),
+    },
     plan: {
       ...sharedPlan,
       persistUserPromptOnFailure: false,
     },
   })
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await providerInput.onProviderRequestPlanned?.({
+      providerAttemptId: null,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+    })
+    await releaseProviderTurn.promise
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-progress',
+        response: 'assistant response',
+        route: {
+          routeId: 'route-default',
+        },
+        session: createAssistantSession(),
+      },
+    }
+  })
 
-  await sendAssistantMessageLocal({
+  const resultPromise = sendAssistantMessageLocal({
     channel: 'linq',
     deliverResponse: true,
-    deliveryDispatchMode: 'queue-only',
+    deliveryDispatchMode: 'immediate',
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
@@ -4852,6 +4945,9 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
     turnTrigger: 'manual-ask',
     vault: '/vaults/test',
   })
+  await vi.waitFor(() => {
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(1)
+  })
 
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
@@ -4859,7 +4955,6 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(progressDelivery)
   assert.ok(hostedToolContext)
-  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
   assert.equal(hostedToolContext.computerToolsAvailable, false)
   await progressDelivery.send('Checking the iMessage thread.')
 
@@ -4872,6 +4967,235 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
     mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.text,
     'Checking the iMessage thread.',
   )
+  await vi.waitFor(() => {
+    expect(refreshTyping).toHaveBeenCalledTimes(1)
+  })
+
+  releaseProviderTurn.resolve()
+  await resultPromise
+})
+
+test('sendAssistantMessageLocal uses progress-materialized sessions for final replies', async () => {
+  const baseSession = createAssistantSession({
+    binding: {
+      actorId: 'actor-progress',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'participant',
+        target: 'participant-progress',
+      },
+      identityId: 'identity-progress',
+      threadId: null,
+      threadIsDirect: null,
+    },
+  })
+  const materializedSession: AssistantSession = {
+    ...baseSession,
+    binding: {
+      ...baseSession.binding,
+      delivery: {
+        kind: 'thread',
+        target: 'thread-progress-materialized',
+      },
+      threadId: 'thread-progress-materialized',
+      threadIsDirect: true,
+    },
+    updatedAt: '2026-04-08T12:00:03.000Z',
+  }
+  const providerSession: AssistantSession = {
+    ...baseSession,
+    turnCount: 7,
+    updatedAt: '2026-04-08T12:00:04.000Z',
+  }
+  const progressDeliveryDependencies = {
+    sendLinq: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'thread-progress-materialized',
+      target: 'thread-progress-materialized',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+    session: baseSession,
+  })
+  mocks.deliverAssistantProgressUpdate.mockResolvedValueOnce(materializedSession)
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await expect(
+      providerInput.progressDelivery?.send('Checking the iMessage thread.'),
+    ).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    return {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: true,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-default',
+        response: 'assistant response',
+        route: {
+          routeId: 'route-default',
+        },
+        session: providerSession,
+      },
+    }
+  })
+
+  await sendAssistantMessageLocal({
+    channel: 'linq',
+    deliverResponse: true,
+    deliveryDispatchMode: 'immediate',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        progressDeliveryDependencies,
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Hosted immediate manual reply',
+    turnTrigger: 'manual-ask',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(1)
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledTimes(1)
+  const finalSession = mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.session
+  expect(finalSession?.binding.delivery).toEqual({
+    kind: 'thread',
+    target: 'thread-progress-materialized',
+  })
+  expect(finalSession?.binding.threadId).toBe('thread-progress-materialized')
+  expect(finalSession?.binding.threadIsDirect).toBe(true)
+  expect(finalSession?.turnCount).toBe(7)
+})
+
+test('sendAssistantMessageLocal keeps progress-materialized sessions for no-reply terminal failures', async () => {
+  const terminalError = new Error('provider failed after no-reply progress')
+  const baseSession = createAssistantSession({
+    binding: {
+      actorId: 'actor-progress-no-reply',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'participant',
+        target: 'participant-progress-no-reply',
+      },
+      identityId: 'identity-progress-no-reply',
+      threadId: null,
+      threadIsDirect: null,
+    },
+    sessionId: 'session-progress-no-reply',
+  })
+  const materializedSession: AssistantSession = {
+    ...baseSession,
+    binding: {
+      ...baseSession.binding,
+      delivery: {
+        kind: 'thread',
+        target: 'thread-progress-no-reply',
+      },
+      threadId: 'thread-progress-no-reply',
+      threadIsDirect: true,
+    },
+    updatedAt: '2026-04-08T12:00:03.000Z',
+  }
+  const providerSession: AssistantSession = {
+    ...baseSession,
+    turnCount: 4,
+    updatedAt: '2026-04-08T12:00:04.000Z',
+  }
+  const progressDeliveryDependencies = {
+    sendLinq: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'thread-progress-no-reply',
+      target: 'thread-progress-no-reply',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+    session: baseSession,
+  })
+  mocks.deliverAssistantProgressUpdate.mockResolvedValueOnce(materializedSession)
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await expect(
+      providerInput.progressDelivery?.send('Checking the iMessage thread.'),
+    ).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    return {
+      acceptedNoReplyDeliveryContextOrdinals: [0],
+      attemptCount: 1,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+      codexThreadHistoryUnsafe: true,
+      codexThreadId: 'provider-thread-progress-no-reply',
+      error: terminalError,
+      kind: 'failed_terminal',
+      providerRequestOutcome: 'failed',
+      providerTurnId: 'provider-turn-progress-no-reply',
+      rawEvents: [],
+      route: {
+        provider: 'codex-cli',
+        providerOptions: {
+          model: 'gpt-5.4',
+        },
+      },
+      session: providerSession,
+      usage: null,
+      usageAttribution: null,
+    }
+  })
+
+  const result = await sendAssistantMessageLocal({
+    channel: 'linq',
+    deliverResponse: true,
+    deliveryDispatchMode: 'immediate',
+    executionContext: {
+      hosted: {
+        memberId: 'member-hosted',
+        progressDeliveryDependencies,
+        userEnvKeys: [],
+      },
+    },
+    prompt: 'Hosted no-reply manual task',
+    turnTrigger: 'manual-ask',
+    vault: '/vaults/test',
+  })
+
+  expect(result.status).toBe('completed')
+  const finalizedSession =
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.session
+  expect(finalizedSession?.binding.delivery).toEqual({
+    kind: 'thread',
+    target: 'thread-progress-no-reply',
+  })
+  expect(finalizedSession?.binding.threadId).toBe('thread-progress-no-reply')
+  expect(finalizedSession?.binding.threadIsDirect).toBe(true)
+  expect(finalizedSession?.turnCount).toBe(4)
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult.session
+      .binding.delivery,
+  ).toEqual({
+    kind: 'thread',
+    target: 'thread-progress-no-reply',
+  })
 })
 
 test('sendAssistantMessageLocal requires hosted Linq text delivery for model progress', async () => {
@@ -4895,7 +5219,7 @@ test('sendAssistantMessageLocal requires hosted Linq text delivery for model pro
   await sendAssistantMessageLocal({
     channel: 'linq',
     deliverResponse: true,
-    deliveryDispatchMode: 'queue-only',
+    deliveryDispatchMode: 'immediate',
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
@@ -4915,7 +5239,6 @@ test('sendAssistantMessageLocal requires hosted Linq text delivery for model pro
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.equal(progressDelivery, null)
   assert.ok(hostedToolContext)
-  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, false)
   assert.equal(hostedToolContext.computerToolsAvailable, false)
   assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
   assert.equal(progressDeliveryDependencies.sendLinqVoiceMemo.mock.calls.length, 0)
@@ -4942,7 +5265,7 @@ test('sendAssistantMessageLocal enables hosted computer tools for Telegram when 
   await sendAssistantMessageLocal({
     channel: 'telegram',
     deliverResponse: true,
-    deliveryDispatchMode: 'queue-only',
+    deliveryDispatchMode: 'immediate',
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
@@ -4962,7 +5285,6 @@ test('sendAssistantMessageLocal enables hosted computer tools for Telegram when 
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(progressDelivery)
   assert.ok(hostedToolContext)
-  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
   assert.equal(hostedToolContext.computerToolsAvailable, true)
   await progressDelivery.send('Checking the Telegram thread.')
 
@@ -5018,7 +5340,6 @@ test('sendAssistantMessageLocal does not expose hosted progress or computer deli
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.equal(progressDelivery, null)
   assert.ok(hostedToolContext)
-  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, false)
   assert.equal(hostedToolContext.computerToolsAvailable, false)
   assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
   assert.equal(progressDeliveryDependencies.sendTelegram.mock.calls.length, 0)
@@ -5132,7 +5453,7 @@ test('sendAssistantMessageLocal lets the provider own hosted attachment progress
     },
     channel: 'linq',
     deliverResponse: true,
-    deliveryDispatchMode: 'queue-only',
+    deliveryDispatchMode: 'immediate',
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
@@ -5163,20 +5484,15 @@ test('sendAssistantMessageLocal lets the provider own hosted attachment progress
   await expect(
     progressDelivery.send('Still checking the attachment context.'),
   ).resolves.toEqual({
-    kind: 'sent',
-    source: 'model',
-  })
-  await expect(
-    progressDelivery.send('Reviewing the recovered details now.'),
-  ).resolves.toEqual({
-    kind: 'sent',
+    kind: 'skipped',
+    reason: 'too-soon',
     source: 'model',
   })
   await expect(
     progressDelivery.send('One more progress update.'),
   ).resolves.toEqual({
     kind: 'skipped',
-    reason: 'limit',
+    reason: 'too-soon',
     source: 'model',
   })
   await expect(
@@ -5185,7 +5501,7 @@ test('sendAssistantMessageLocal lets the provider own hosted attachment progress
     kind: 'sent',
     source: 'model',
   })
-  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(4)
+  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(2)
 })
 
 test('sendAssistantMessageLocal uses resolved audience channel for hosted model progress', async () => {
@@ -5222,7 +5538,7 @@ test('sendAssistantMessageLocal uses resolved audience channel for hosted model 
 
   await sendAssistantMessageLocal({
     deliverResponse: true,
-    deliveryDispatchMode: 'queue-only',
+    deliveryDispatchMode: 'immediate',
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
@@ -5242,7 +5558,6 @@ test('sendAssistantMessageLocal uses resolved audience channel for hosted model 
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.ok(progressDelivery)
   assert.ok(hostedToolContext)
-  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
   assert.equal(hostedToolContext.computerToolsAvailable, true)
   const result = await progressDelivery.send('Checking the iMessage thread.')
 
@@ -5297,25 +5612,8 @@ test('sendAssistantMessageLocal does not expose optional progress delivery for h
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
   assert.equal(progressDelivery, null)
   assert.ok(hostedToolContext)
-  assert.equal(hostedToolContext.requiredUserMessageDeliveryAvailable, true)
   assert.equal(hostedToolContext.computerToolsAvailable, true)
-  const result = await hostedToolContext.sendRequiredUserMessage(
-    'Open this handoff link?',
-  )
-
-  assert.deepEqual(result, {
-    kind: 'sent',
-    source: 'model',
-  })
-  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)
-  assert.equal(
-    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.dependencies,
-    progressDeliveryDependencies,
-  )
-  assert.equal(
-    mocks.deliverAssistantProgressUpdate.mock.calls[0]?.[0]?.text,
-    'Open this handoff link?',
-  )
+  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
 })
 
 test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows terminal provider failures', async () => {
@@ -5450,6 +5748,357 @@ test('sendAssistantMessageLocal runs best-effort failure cleanup and rethrows te
   assert.equal(mocks.refreshAssistantStatusSnapshotLocal.mock.calls.length, 1)
 })
 
+test('sendAssistantMessageLocal saves progress-materialized sessions after terminal provider failures', async () => {
+  const terminalError = new Error('provider failed after progress')
+  const baseSession = createAssistantSession({
+    binding: {
+      actorId: 'actor-progress-failed',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'participant',
+        target: 'participant-progress-failed',
+      },
+      identityId: 'identity-progress-failed',
+      threadId: null,
+      threadIsDirect: null,
+    },
+    sessionId: 'session-progress-failed',
+  })
+  const materializedSession: AssistantSession = {
+    ...baseSession,
+    binding: {
+      ...baseSession.binding,
+      delivery: {
+        kind: 'thread',
+        target: 'thread-progress-failed',
+      },
+      threadId: 'thread-progress-failed',
+      threadIsDirect: true,
+    },
+    updatedAt: '2026-04-08T12:00:03.000Z',
+  }
+  const providerSession: AssistantSession = {
+    ...baseSession,
+    updatedAt: '2026-04-08T12:00:04.000Z',
+  }
+  const progressDeliveryDependencies = {
+    sendLinq: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'thread-progress-failed',
+      target: 'thread-progress-failed',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+    session: baseSession,
+  })
+  mocks.deliverAssistantProgressUpdate.mockResolvedValueOnce(materializedSession)
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await expect(
+      providerInput.progressDelivery?.send('Checking the iMessage thread.'),
+    ).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    return {
+      acceptedNoReplyDeliveryContextOrdinals: [],
+      attemptCount: 1,
+      codexContinuation: {
+        kind: 'explicit-structured-history',
+      },
+      codexThreadId: 'provider-thread-progress-failed',
+      error: terminalError,
+      kind: 'failed_terminal',
+      providerRequestOutcome: 'failed',
+      providerTurnId: 'provider-turn-progress-failed',
+      rawEvents: [],
+      route: {
+        provider: 'codex-cli',
+        providerOptions: {
+          model: 'gpt-5.4',
+        },
+      },
+      session: providerSession,
+      usage: null,
+      usageAttribution: null,
+    }
+  })
+
+  await expect(
+    sendAssistantMessageLocal({
+      channel: 'linq',
+      deliverResponse: true,
+      deliveryDispatchMode: 'immediate',
+      executionContext: {
+        hosted: {
+          memberId: 'member-hosted',
+          progressDeliveryDependencies,
+          userEnvKeys: [],
+        },
+      },
+      prompt: 'Hosted failed manual task',
+      turnTrigger: 'manual-ask',
+      vault: '/vaults/test',
+    }),
+  ).rejects.toBe(terminalError)
+
+  expect(mocks.saveAssistantSession).toHaveBeenCalledWith(
+    '/vaults/test',
+    expect.objectContaining({
+      binding: expect.objectContaining({
+        delivery: {
+          kind: 'thread',
+          target: 'thread-progress-failed',
+        },
+        threadId: 'thread-progress-failed',
+        threadIsDirect: true,
+      }),
+    }),
+  )
+  expect(
+    mocks.persistFailedAssistantPromptAttempt.mock.calls[0]?.[0]?.session.binding
+      .delivery,
+  ).toEqual({
+    kind: 'thread',
+    target: 'thread-progress-failed',
+  })
+})
+
+test('sendAssistantMessageLocal does not restore cleared Codex resume state after progress-materialized failures', async () => {
+  const terminalError = new Error('provider failed after unsafe progress')
+  const staleResumeState = {
+    routeFingerprint: 'route-stale-progress-failed',
+    threadId: 'provider-thread-stale-progress-failed',
+  }
+  const baseSession = createAssistantSession({
+    binding: {
+      actorId: 'actor-progress-failed-clear',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'participant',
+        target: 'participant-progress-failed-clear',
+      },
+      identityId: 'identity-progress-failed-clear',
+      threadId: null,
+      threadIsDirect: null,
+    },
+    resumeState: staleResumeState,
+    sessionId: 'session-progress-failed-clear',
+  })
+  const materializedSession: AssistantSession = {
+    ...baseSession,
+    binding: {
+      ...baseSession.binding,
+      delivery: {
+        kind: 'thread',
+        target: 'thread-progress-failed-clear',
+      },
+      threadId: 'thread-progress-failed-clear',
+      threadIsDirect: true,
+    },
+    updatedAt: '2026-04-08T12:00:03.000Z',
+  }
+  const clearedMaterializedSession: AssistantSession = {
+    ...materializedSession,
+    codexResume: null,
+    resumeState: null,
+    updatedAt: '2026-04-08T12:00:04.000Z',
+  }
+  const progressDeliveryDependencies = {
+    sendLinq: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'thread-progress-failed-clear',
+      target: 'thread-progress-failed-clear',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+    session: baseSession,
+  })
+  mocks.deliverAssistantProgressUpdate.mockResolvedValueOnce(materializedSession)
+  mocks.clearAssistantSessionCodexResumeState.mockResolvedValueOnce(
+    clearedMaterializedSession,
+  )
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    await expect(
+      providerInput.progressDelivery?.send('Checking the iMessage thread.'),
+    ).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    await providerInput.onCodexThreadHistoryUnsafe?.({
+      deliveryContextOrdinal: 0,
+    })
+    throw terminalError
+  })
+
+  await expect(
+    sendAssistantMessageLocal({
+      channel: 'linq',
+      deliverResponse: true,
+      deliveryDispatchMode: 'immediate',
+      executionContext: {
+        hosted: {
+          memberId: 'member-hosted',
+          progressDeliveryDependencies,
+          userEnvKeys: [],
+        },
+      },
+      prompt: 'Hosted failed unsafe manual task',
+      turnTrigger: 'manual-ask',
+      vault: '/vaults/test',
+    }),
+  ).rejects.toBe(terminalError)
+
+  expect(mocks.clearAssistantSessionCodexResumeState).toHaveBeenCalledWith({
+    session: materializedSession,
+    vault: '/vaults/test',
+  })
+  const savedFailedSession = mocks.saveAssistantSession.mock.calls.at(-1)?.[1]
+  expect(savedFailedSession?.binding.delivery).toEqual({
+    kind: 'thread',
+    target: 'thread-progress-failed-clear',
+  })
+  expect(savedFailedSession?.binding.threadId).toBe('thread-progress-failed-clear')
+  expect(savedFailedSession?.codexResume).toBeNull()
+  expect(savedFailedSession?.resumeState).toBeNull()
+  expect(
+    mocks.persistFailedAssistantPromptAttempt.mock.calls[0]?.[0]?.session
+      .resumeState,
+  ).toBeNull()
+})
+
+test('sendAssistantMessageLocal does not restore cleared Codex resume state when progress resolves after cleanup', async () => {
+  const terminalError = new Error('provider failed after late unsafe progress')
+  const progressDeliveryStarted = createDeferred<void>()
+  const progressDeliveryRelease = createDeferred<AssistantSession>()
+  const staleResumeState = {
+    routeFingerprint: 'route-late-progress-failed',
+    threadId: 'provider-thread-late-progress-failed',
+  }
+  const baseSession = createAssistantSession({
+    binding: {
+      actorId: 'actor-progress-failed-late-clear',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: {
+        kind: 'participant',
+        target: 'participant-progress-failed-late-clear',
+      },
+      identityId: 'identity-progress-failed-late-clear',
+      threadId: null,
+      threadIsDirect: null,
+    },
+    resumeState: staleResumeState,
+    sessionId: 'session-progress-failed-late-clear',
+  })
+  const materializedStaleSession: AssistantSession = {
+    ...baseSession,
+    binding: {
+      ...baseSession.binding,
+      delivery: {
+        kind: 'thread',
+        target: 'thread-progress-failed-late-clear',
+      },
+      threadId: 'thread-progress-failed-late-clear',
+      threadIsDirect: true,
+    },
+    updatedAt: '2026-04-08T12:00:03.000Z',
+  }
+  const clearedSession: AssistantSession = {
+    ...baseSession,
+    codexResume: null,
+    resumeState: null,
+    updatedAt: '2026-04-08T12:00:04.000Z',
+  }
+  const progressDeliveryDependencies = {
+    sendLinq: vi.fn(async () => ({
+      providerMessageId: 'progress-message',
+      providerThreadId: 'thread-progress-failed-late-clear',
+      target: 'thread-progress-failed-late-clear',
+      targetKind: 'thread' as const,
+    })),
+  }
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'linq'
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+    session: baseSession,
+  })
+  mocks.deliverAssistantProgressUpdate.mockImplementationOnce(async () => {
+    progressDeliveryStarted.resolve()
+    return await progressDeliveryRelease.promise
+  })
+  mocks.clearAssistantSessionCodexResumeState.mockResolvedValueOnce(
+    clearedSession,
+  )
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    const progressPromise = providerInput.progressDelivery?.send(
+      'Checking the iMessage thread.',
+    )
+    await progressDeliveryStarted.promise
+    await providerInput.onCodexThreadHistoryUnsafe?.({
+      deliveryContextOrdinal: 0,
+    })
+    progressDeliveryRelease.resolve(materializedStaleSession)
+    await expect(progressPromise).resolves.toEqual({
+      kind: 'sent',
+      source: 'model',
+    })
+    throw terminalError
+  })
+
+  await expect(
+    sendAssistantMessageLocal({
+      channel: 'linq',
+      deliverResponse: true,
+      deliveryDispatchMode: 'immediate',
+      executionContext: {
+        hosted: {
+          memberId: 'member-hosted',
+          progressDeliveryDependencies,
+          userEnvKeys: [],
+        },
+      },
+      prompt: 'Hosted failed unsafe manual task',
+      turnTrigger: 'manual-ask',
+      vault: '/vaults/test',
+    }),
+  ).rejects.toBe(terminalError)
+
+  const savedFailedSession = mocks.saveAssistantSession.mock.calls.at(-1)?.[1]
+  expect(savedFailedSession?.binding.delivery).toEqual({
+    kind: 'thread',
+    target: 'thread-progress-failed-late-clear',
+  })
+  expect(savedFailedSession?.binding.threadId).toBe(
+    'thread-progress-failed-late-clear',
+  )
+  expect(savedFailedSession?.codexResume).toBeNull()
+  expect(savedFailedSession?.resumeState).toBeNull()
+  expect(
+    mocks.persistFailedAssistantPromptAttempt.mock.calls[0]?.[0]?.session
+      .resumeState,
+  ).toBeNull()
+})
+
 test('sendAssistantMessageLocal completes accepted no-reply terminal provider failures', async () => {
   const terminalError = new Error('provider failed after no-reply')
   const failedProviderSession = createAssistantSession({
@@ -5550,6 +6199,7 @@ test('sendAssistantMessageLocal delivers preserved reactions for accepted no-rep
   const failedProviderSession = createAssistantSession({
     sessionId: 'session-provider-failed-after-reaction-no-reply',
   })
+  const traceEvents: unknown[] = []
   const reactionOutcome: AssistantDeliveryOutcome = {
     error: null,
     intentId: 'intent-failed-terminal-reaction',
@@ -5593,6 +6243,15 @@ test('sendAssistantMessageLocal delivers preserved reactions for accepted no-rep
 
   const result = await sendAssistantMessageLocal({
     deliverResponse: true,
+    executionContext: {
+      hosted: {
+        memberId: 'member-123',
+        userEnvKeys: [],
+      },
+    },
+    onTraceEvent(event) {
+      traceEvents.push(event)
+    },
     prompt: 'React and finish',
     vault: '/vaults/test',
   })
@@ -5638,6 +6297,20 @@ test('sendAssistantMessageLocal delivers preserved reactions for accepted no-rep
     turnId: 'turn-1',
     vault: '/vaults/test',
   })
+  const replyTiming = traceEvents.find((event) =>
+    isTraceEventWithRawType(event, 'assistant.turn.timing') &&
+    (event as { rawEvent?: { turnTimingStage?: unknown } }).rawEvent
+      ?.turnTimingStage === 'reply-dispatched',
+  )
+  expect(replyTiming).toBeDefined()
+  expect((replyTiming as { rawEvent: Record<string, unknown> }).rawEvent)
+    .toEqual(expect.objectContaining({
+      deliveryAttempted: true,
+      deliveryIntentPresent: true,
+      deliveryOutcomeKind: 'queued',
+      finalReplySelected: false,
+      schema: 'murph.assistant-turn-timing.v1',
+    }))
 })
 
 test('sendAssistantMessageLocal recovers reaction no-reply before draining later acknowledged steers', async () => {
@@ -5793,31 +6466,37 @@ test('sendAssistantMessageLocal recovers reaction no-reply before draining later
   ).toBe(false)
 })
 
-test('sendAssistantMessageLocal stops a typing indicator that resolves after the turn already finished', async () => {
+test('sendAssistantMessageLocal does not wait for a pending typing indicator start', async () => {
   const typingIndicatorDeferred = createDeferred<{ stop(): Promise<void> }>()
-  const stopCompleted = createDeferred<void>()
-  const stopTyping = vi.fn(async () => {
-    stopCompleted.resolve()
-  })
+  const stopTyping = vi.fn(async () => undefined)
   const { sendAssistantMessageLocal } = await loadLocalServiceModule({
     adapter: {
       startTypingIndicator: vi.fn(() => typingIndicatorDeferred.promise),
     },
   })
 
-  const result = await sendAssistantMessageLocal({
+  const resultPromise = sendAssistantMessageLocal({
     deliverResponse: true,
     prompt: 'Summarize my inbox',
     vault: '/vaults/test',
   })
+  let resultResolved = false
+  resultPromise.then(() => {
+    resultResolved = true
+  })
+  await Promise.resolve()
+  assert.equal(resultResolved, false)
 
+  const result = await resultPromise
   assert.equal(result.status, 'completed')
+  assert.equal(stopTyping.mock.calls.length, 0)
+
   typingIndicatorDeferred.resolve({
     stop: stopTyping,
   })
-  await stopCompleted.promise
-
-  assert.equal(stopTyping.mock.calls.length, 1)
+  await vi.waitFor(() => {
+    expect(stopTyping).toHaveBeenCalledTimes(1)
+  })
 })
 
 test('sendAssistantMessageLocal returns deferred delivery results and keeps typing in queue-only mode', async () => {
@@ -6184,6 +6863,94 @@ test('sendAssistantMessageLocal suppresses transcript and delivery for no-reply 
       session,
     },
   )
+})
+
+test('sendAssistantMessageLocal traces hosted reaction-only no-reply delivery outcomes', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-no-reply-final-reaction',
+  })
+  const traceEvents: unknown[] = []
+  const reactionOutcome: AssistantDeliveryOutcome = {
+    error: null,
+    intentId: 'intent-no-reply-reaction',
+    kind: 'queued',
+    media: [],
+    session,
+  }
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+        codexThreadId: 'provider-thread-no-reply-reaction',
+        finalAction: {
+          kind: 'none',
+        },
+        rawEvents: [],
+        reactions: [
+          {
+            deliveryContextOrdinal: 0,
+            reaction: 'heart',
+          },
+        ],
+        response: 'suppressed provider text',
+        route: {
+          routeId: 'route-no-reply-reaction',
+        },
+        session,
+      },
+    },
+    reactionOutcome,
+    session,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    executionContext: {
+      hosted: {
+        memberId: 'member-123',
+        userEnvKeys: [],
+      },
+    },
+    onTraceEvent(event) {
+      traceEvents.push(event)
+    },
+    prompt: 'react only',
+    vault: '/vaults/test',
+  })
+
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(mocks.deliverAssistantReaction).toHaveBeenCalledWith(
+    expect.objectContaining({
+      deliveryContextOrdinal: 0,
+      reaction: 'heart',
+      turnId: 'turn-1',
+    }),
+  )
+  expect(result).toMatchObject({
+    delivery: null,
+    deliveryDeferred: true,
+    deliveryIntentId: 'intent-no-reply-reaction',
+    response: '',
+    responseDisposition: 'none',
+  })
+  const replyTiming = traceEvents.find((event) =>
+    isTraceEventWithRawType(event, 'assistant.turn.timing') &&
+    (event as { rawEvent?: { turnTimingStage?: unknown } }).rawEvent
+      ?.turnTimingStage === 'reply-dispatched',
+  )
+  expect(replyTiming).toBeDefined()
+  expect((replyTiming as { rawEvent: Record<string, unknown> }).rawEvent)
+    .toEqual(expect.objectContaining({
+      deliveryAttempted: true,
+      deliveryIntentPresent: true,
+      deliveryOutcomeKind: 'queued',
+      finalReplySelected: false,
+      schema: 'murph.assistant-turn-timing.v1',
+    }))
 })
 
 test('sendAssistantMessageLocal durably records accepted no-reply markers before visible finalization', async () => {
@@ -7347,10 +8114,10 @@ async function loadLocalServiceModule(input?: {
     ),
     deliverAssistantProgressUpdate: vi.fn(
       async (
-        _input: Parameters<
+        progressInput: Parameters<
           typeof import('../src/assistant/delivery-service.js').deliverAssistantProgressUpdate
         >[0],
-      ) => undefined,
+      ) => progressInput.session,
     ),
     deliverAssistantReaction: vi.fn(
       async (
@@ -7384,10 +8151,10 @@ async function loadLocalServiceModule(input?: {
     ),
     finalizeAssistantTurnArtifacts: vi.fn(
       async (
-        _input: Parameters<
+        finalizeInput: Parameters<
           typeof import('../src/assistant/turn-finalizer.js').persistAssistantTurnAndSession
         >[0],
-      ) => session,
+      ) => finalizeInput.session,
     ),
     clearAssistantSessionCodexResumeState: vi.fn(
       async (

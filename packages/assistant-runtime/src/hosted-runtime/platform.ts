@@ -1,4 +1,8 @@
 import type {
+  HostedExecutionExternalThreadRouteAuthority,
+} from "@murphai/hosted-execution";
+import type {
+  HostedActionApprovalConsumeRequest,
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from "@murphai/hosted-execution/action-approval";
@@ -50,6 +54,10 @@ import type {
   HostedWorkspaceSnapshotV2Aad,
   HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
+import type {
+  HostedPhoneCallStartRequest,
+  HostedPhoneCallStartResponse,
+} from "@murphai/hosted-execution/phone-calls";
 import type {
   HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncDirtyAckRequest,
@@ -221,6 +229,10 @@ type HostedRuntimeEffectsPortBase = {
   readAssistantDeliveryRecord?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
   ): Promise<HostedAssistantDeliveryRecord | null>;
+  assertLinqThreadRouteAuthority?(
+    authority: HostedExecutionExternalThreadRouteAuthority,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<void>;
   sendEmail(request: HostedEmailSendRequest): Promise<{ target: string } | void>;
   writeAssistantDeliveryRecord?(
     record: HostedAssistantDeliveryRecord,
@@ -277,6 +289,15 @@ export interface HostedRuntimeFamilyPlanToolPort {
 
 export interface HostedRuntimeCodexAuthPort {
   update(update: HostedCodexAuthUpdate): Promise<HostedCodexAuthUpdateResponse>;
+}
+
+export interface HostedRuntimePhoneCallPort {
+  start(
+    request: HostedPhoneCallStartRequest,
+    context?: {
+      signal?: AbortSignal | null;
+    },
+  ): Promise<HostedPhoneCallStartResponse>;
 }
 
 export interface HostedRuntimeMailboxPort {
@@ -379,6 +400,9 @@ export interface HostedRuntimeLatencyTracePort {
 }
 
 export interface HostedRuntimeActionApprovalPort {
+  consume(
+    input: HostedActionApprovalConsumeRequest,
+  ): Promise<HostedActionApprovalResult>;
   request(
     input: HostedActionApprovalRequest,
   ): Promise<HostedActionApprovalResult>;
@@ -406,6 +430,7 @@ export interface HostedRuntimePlatform {
   latencyTracePort?: HostedRuntimeLatencyTracePort | null;
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
+  phoneCalls?: HostedRuntimePhoneCallPort | null;
   productFeedbackPort?: HostedRuntimeProductFeedbackPort | null;
   runtimeLivenessIntervalMs?: number | null;
   runtimeLivenessPort?: RuntimeLivenessPort | null;

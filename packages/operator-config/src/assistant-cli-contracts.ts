@@ -1,6 +1,7 @@
 import { isIP } from 'node:net'
 import { z } from 'zod'
 import {
+  assistantReasoningEffortValues as contractAssistantReasoningEffortValues,
   automationRouteSchema,
   automationScheduleAtSchema,
   automationScheduleCronSchema,
@@ -41,12 +42,7 @@ export const assistantSandboxValues = [
 ] as const
 
 export const assistantApprovalPolicyValues = ['never'] as const
-export const assistantReasoningEffortValues = [
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-] as const
+export const assistantReasoningEffortValues = contractAssistantReasoningEffortValues
 
 export const assistantChatProviderValues = ['codex-cli'] as const
 export const assistantChannelNameValues = ['telegram', 'linq', 'email', 'whatsapp'] as const
@@ -378,6 +374,8 @@ const assistantVoiceMemoResponseMediaSchema = z
 
 const assistantVaultFileResponseMediaSchema = z
   .object({
+    approvalGeneration: z.string().regex(/^[0-9a-f]{64}$/u).nullable().default(null),
+    approvalId: z.string().regex(/^haa_[A-Za-z0-9_-]{32}$/u).nullable().default(null),
     kind: z.literal('vault_file'),
     ref: z
       .string()
@@ -407,6 +405,10 @@ const assistantVaultFileResponseMediaSchema = z
     sizeBytes: z.number().int().positive().max(assistantVaultFileMaxBytes),
   })
   .strict()
+  .refine(
+    (value) => (value.approvalGeneration === null) === (value.approvalId === null),
+    'Assistant vault file approval id and generation must be present together.',
+  )
 
 export const assistantResponseMediaSchema = z.union([
   assistantImageResponseMediaSchema,

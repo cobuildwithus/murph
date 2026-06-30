@@ -49,7 +49,7 @@ export function StickyNav({
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/logo-dark.svg"
+          src={scrolled ? "/logo-dark.svg" : "/logo.svg"}
           alt="Murph"
           width={107}
           height={24}
@@ -65,7 +65,11 @@ export function StickyNav({
           <a
             key={href}
             href={href}
-            className="hidden text-sm text-white/75 transition-colors hover:text-white md:block"
+            className={`hidden text-sm transition-colors md:block ${
+              scrolled
+                ? "text-white/75 hover:text-white"
+                : "text-[#2d3436]/80 hover:text-[#2d3436]"
+            }`}
           >
             {label}
           </a>
@@ -79,7 +83,11 @@ export function StickyNav({
               ? `Star Murph on GitHub (${githubStarCount} stars)`
               : "Star Murph on GitHub"
           }
-          className="hidden items-center gap-1.5 text-sm text-white/75 transition-colors hover:text-white sm:inline-flex"
+          className={`hidden items-center gap-1.5 text-sm transition-colors sm:inline-flex ${
+            scrolled
+              ? "text-white/75 hover:text-white"
+              : "text-[#2d3436]/80 hover:text-[#2d3436]"
+          }`}
         >
           <svg
             viewBox="0 0 16 16"
@@ -96,6 +104,7 @@ export function StickyNav({
           authLabel="Dashboard"
           authenticated={authenticated}
           context="nav"
+          {...(scrolled ? { onDarkSurface: true } : {})}
           {...(preloadAuthPanel ? { preloadAuthPanel: true } : {})}
           splitUnauthenticated={splitUnauthenticatedAuth}
         />

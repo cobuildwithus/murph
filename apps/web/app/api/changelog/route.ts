@@ -13,7 +13,7 @@ import {
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 
 const DEFAULT_DAYS = 7;
-const MAX_DAYS = 31;
+const MAX_DAYS = 155;
 const CACHE_CONTROL = "public, s-maxage=300, stale-while-revalidate=3600";
 
 class ChangelogQueryError extends TypeError {}

@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://murph.example/schemas/rehab-protocol.schema.json",
+  "title": "Murph Rehabilitation Pattern Protocol",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "version",
+    "status",
+    "display_name",
+    "scope",
+    "entry",
+    "outcomes",
+    "intervention_roles",
+    "selection_rules",
+    "phases",
+    "referral_triggers",
+    "uncertainty",
+    "evidence",
+    "review"
+  ],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "status": {"enum": ["draft", "active", "deprecated"]},
+    "display_name": {"type": "string", "minLength": 5},
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["age_min", "age_max", "populations", "body_regions", "user_phrases"],
+      "properties": {
+        "age_min": {"type": "integer", "minimum": 0},
+        "age_max": {"type": ["integer", "null"], "minimum": 0},
+        "populations": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "body_regions": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "user_phrases": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inclusion_clues", "against_clues", "must_screen", "minimum_information", "out_of_scope"],
+      "properties": {
+        "inclusion_clues": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "against_clues": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "must_screen": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "minimum_information": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "out_of_scope": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+      }
+    },
+    "outcomes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal_examples", "primary_measures", "supporting_measures", "review_options"],
+      "properties": {
+        "goal_examples": {"type": "array", "items": {"type": "string"}},
+        "primary_measures": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "supporting_measures": {"type": "array", "items": {"type": "string"}},
+        "review_options": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+      }
+    },
+    "intervention_roles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "purpose", "required", "exercise_query"],
+        "properties": {
+          "id": {"type": "string"},
+          "purpose": {"type": "string"},
+          "required": {"type": "boolean"},
+          "exercise_query": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["rehab_roles", "target_capacities"],
+            "properties": {
+              "rehab_roles": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+              "target_capacities": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+              "preferred_task_transfer": {"type": "array", "items": {"type": "string"}}
+            }
+          }
+        }
+      }
+    },
+    "selection_rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min_exercises", "max_exercises", "hard_filters", "ranking_preferences", "dose_logic"],
+      "properties": {
+        "min_exercises": {"type": "integer", "minimum": 0},
+        "max_exercises": {"type": "integer", "minimum": 0},
+        "hard_filters": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "ranking_preferences": {"type": "array", "items": {"type": "string"}},
+        "dose_logic": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "mutually_exclusive_roles": {
+          "type": "array",
+          "items": {"type": "array", "items": {"type": "string"}, "minItems": 2}
+        }
+      }
+    },
+    "phases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "entry_criteria", "goals", "allowed_roles", "exit_criteria", "regress_when"],
+        "properties": {
+          "id": {"type": "string"},
+          "entry_criteria": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "goals": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "allowed_roles": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "exit_criteria": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "regress_when": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+        }
+      }
+    },
+    "referral_triggers": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "uncertainty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supported", "uncertain", "not_supported", "requires_in_person"],
+      "properties": {
+        "supported": {"type": "array", "items": {"type": "string"}},
+        "uncertain": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "not_supported": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "requires_in_person": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "tier", "scope", "finding", "limitations"],
+        "properties": {
+          "source_id": {"type": "string"},
+          "tier": {"enum": ["A", "B", "C", "D", "E"]},
+          "scope": {"type": "string"},
+          "finding": {"type": "string"},
+          "limitations": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_searched_on", "content_reviewed_on", "reviewer"],
+      "properties": {
+        "evidence_searched_on": {"type": "string", "format": "date"},
+        "content_reviewed_on": {"type": "string", "format": "date"},
+        "reviewer": {"type": "string"},
+        "next_review_due": {"type": "string", "format": "date"}
+      }
+    }
+  }
+}

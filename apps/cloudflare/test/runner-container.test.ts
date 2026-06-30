@@ -38,6 +38,9 @@ import {
   buildHostedRunnerContainerCaEnv,
 } from "../src/runner-container-ca-env.ts";
 import {
+  HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+} from "../src/runner-container-error-codes.ts";
+import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
 } from "../src/deploy-smoke-live-model.ts";
 
@@ -86,12 +89,17 @@ describe("RunnerContainer", () => {
       env: {
         HOSTED_AI_USAGE_REPORTING_SECRET: "fixture-usage-reporting-secret",
         HOSTED_LOG_FINGERPRINT_SECRET: "fixture-log-fingerprint-secret",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "fixture-provider-egress-signing-secret",
       },
     });
 
     expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
     expect(container.envVars).not.toHaveProperty("HOSTED_LOG_FINGERPRINT_SECRET");
     expect(container.envVars).not.toHaveProperty("HOSTED_AI_USAGE_REPORTING_SECRET");
+    expect(container.envVars).not.toHaveProperty(
+      "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET",
+    );
   });
 
   it("does not derive CPU watchdog startup env from blank log fingerprint config", () => {
@@ -171,6 +179,58 @@ describe("RunnerContainer", () => {
     ]);
     expect(firstBody.hostedRuntimeArchitectureVersion).toBe(HOSTED_RUNTIME_ARCHITECTURE_VERSION);
     expect(secondBody.hostedRuntimeArchitectureVersion).toBe(HOSTED_RUNTIME_ARCHITECTURE_VERSION);
+  });
+
+  it("recycles a warm v1 shell before posting v2 provider-credential jobs", async () => {
+    const healthChecks: string[] = [];
+    const { container, containerFetch, destroy, startAndWaitForPorts } =
+      createContainerDouble({
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            healthChecks.push(url);
+            const version = healthChecks.length === 1
+              ? "hosted-direct-v1"
+              : HOSTED_RUNTIME_ARCHITECTURE_VERSION;
+            return new Response(JSON.stringify({
+              hostedRuntimeArchitectureVersion: version,
+              ok: true,
+            }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            });
+          }
+
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }),
+        initialStatus: "running",
+      });
+
+    await expect(container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_recycle_v1_runtime"),
+      },
+      timeoutMs: 60_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    expect(healthChecks).toHaveLength(2);
+
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(executeCalls).toHaveLength(1);
+    const body = JSON.parse(executeCalls[0]?.[1]?.body as string);
+    expect(body.hostedRuntimeArchitectureVersion).toBe(HOSTED_RUNTIME_ARCHITECTURE_VERSION);
   });
 
   it("does not recycle a healthy warm shell by successful invocation count", async () => {
@@ -808,6 +868,51 @@ describe("RunnerContainer", () => {
       String(url).endsWith("/internal/workspace-invocation")
     );
     expect(executeCalls).toHaveLength(1);
+  });
+
+  it("ensureProcessing treats runner shutdown rejection as replacement-required", async () => {
+    const { container, containerFetch, destroy } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+        return new Response(JSON.stringify({
+          code: HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+          error: "Hosted runner is shutting down.",
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 503,
+        });
+      }),
+    });
+
+    await expect(container.ensureProcessing({
+      invoke: {
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_shutdown_replacement_required"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      },
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "start-required",
+      reason: "no-active-child",
+    });
+
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(executeCalls).toHaveLength(1);
+    expect(destroy).toHaveBeenCalledTimes(1);
   });
 
   it("ensureReadyForProcessing starts and health-checks without invoking workspace work", async () => {
@@ -5281,6 +5386,129 @@ describe("RunnerContainer", () => {
       timeoutMs: 45_000,
       userId: "member_123",
     });
+  });
+
+  it("retries a prepared invocation once when the warm runner is shutting down", async () => {
+    let workspaceInvocationCount = 0;
+    const { container, containerFetch, destroy, startAndWaitForPorts } =
+      createContainerDouble({
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            return new Response(JSON.stringify(createRunnerHealthResult()), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            });
+          }
+
+          workspaceInvocationCount += 1;
+          if (workspaceInvocationCount === 1) {
+            return new Response(JSON.stringify({
+              code: HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+              error: "Hosted runner is shutting down.",
+            }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 503,
+            });
+          }
+
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }),
+      });
+    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => container);
+
+    await expect(invokeHostedExecutionContainerRunner({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_shutdown_retry"),
+      },
+      runnerContainerNamespace: { getByName },
+      timeoutMs: 45_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    expect(getByName).toHaveBeenCalledOnce();
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(executeCalls).toHaveLength(2);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the shutdown replacement retry when warm cleanup rejects", async () => {
+    let workspaceInvocationCount = 0;
+    let stateReadCount = 0;
+    const { container, containerFetch, destroy, startAndWaitForPorts } =
+      createContainerDouble({
+        destroy: vi.fn(async () => {
+          throw new Error("destroy failed after runner shutdown");
+        }),
+        getState: vi.fn(async () => {
+          stateReadCount += 1;
+          return {
+            lastChange: Date.now(),
+            status: stateReadCount <= 2 ? "running" : "stopped",
+          };
+        }),
+        startAndWaitForPorts: vi.fn(async () => {}),
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            return new Response(JSON.stringify(createRunnerHealthResult()), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 200,
+            });
+          }
+
+          workspaceInvocationCount += 1;
+          if (workspaceInvocationCount === 1) {
+            return new Response(JSON.stringify({
+              code: HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+              error: "Hosted runner is shutting down.",
+            }), {
+              headers: {
+                "content-type": "application/json; charset=utf-8",
+              },
+              status: 503,
+            });
+          }
+
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }),
+      });
+    const getByName = vi.fn((_name: string): HostedExecutionContainerStubLike => container);
+
+    await expect(invokeHostedExecutionContainerRunner({
+      job: {
+        kind: "workspace-invocation",
+        request: createRunnerRequest("evt_shutdown_retry_cleanup_rejects"),
+      },
+      runnerContainerNamespace: { getByName },
+      timeoutMs: 45_000,
+      userId: "member_123",
+    })).resolves.toEqual(createRunnerResult());
+
+    const executeCalls = containerFetch.mock.calls.filter(([url]) =>
+      String(url).endsWith("/internal/workspace-invocation")
+    );
+    expect(executeCalls).toHaveLength(2);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
   });
 
   it("uses an explicit runner container name without changing the job user identity", async () => {

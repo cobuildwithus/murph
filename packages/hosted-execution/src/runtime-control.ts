@@ -721,6 +721,28 @@ export type HostedProductFeedbackKind =
 
 export const HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH = 500;
 
+const HOSTED_PRODUCT_FEEDBACK_REDACTION_TOKEN = "[redacted]";
+
+const HOSTED_PRODUCT_FEEDBACK_SUMMARY_REDACTION_PATTERNS = [
+  /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu,
+  /\bhttps?:\/\/[^\s<>"']+/giu,
+  /\bwww\.[^\s<>"']+/giu,
+  /\b(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}\b/gu,
+  /\b\d{3}-\d{2}-\d{4}\b/gu,
+  /\b(?:\d[ -]?){13,19}\b/gu,
+  /\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\b/gu,
+  /\b(?:sk|pk|rk|ak|pat|ghp|gho|ghu|ghs|github_pat|xox[baprs])_[A-Za-z0-9_=-]{12,}\b/gu,
+  /\b[A-Fa-f0-9]{32,}\b/gu,
+] as const;
+
+export function sanitizeHostedProductFeedbackSummary(value: string): string {
+  let summary = value.trim().replace(/\s+/gu, " ");
+  for (const pattern of HOSTED_PRODUCT_FEEDBACK_SUMMARY_REDACTION_PATTERNS) {
+    summary = summary.replace(pattern, HOSTED_PRODUCT_FEEDBACK_REDACTION_TOKEN);
+  }
+  return summary.trim().replace(/\s+/gu, " ");
+}
+
 export interface HostedRuntimeProductFeedbackRecord {
   idempotencyKey: string;
   kind: HostedProductFeedbackKind;
@@ -866,10 +888,22 @@ export interface HostedRuntimeIssueExportResponse {
 
 export const HOSTED_INGRESS_LATENCY_SOURCES = [
   "linq",
+  "telegram",
 ] as const;
 
 export type HostedIngressLatencySource =
   (typeof HOSTED_INGRESS_LATENCY_SOURCES)[number];
+
+export function readHostedIngressLatencySource(
+  value: unknown,
+): HostedIngressLatencySource | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  return (HOSTED_INGRESS_LATENCY_SOURCES as readonly string[]).includes(value)
+    ? value as HostedIngressLatencySource
+    : null;
+}
 
 export const HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS = 64;
 export const HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES = 32 * 1024;
@@ -1452,6 +1486,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "workspace.codex_continuity_repaired",
   "workspace.codex_home_snapshot_failed",
   "assistant.device_connect",
+  "assistant.codex_auth_failed",
   "assistant.automation_detail",
   "assistant.computer_tool_failed",
   "assistant.pass_finished",

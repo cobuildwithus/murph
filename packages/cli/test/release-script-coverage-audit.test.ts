@@ -286,17 +286,32 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-browser-profile.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.config.sh'))).toBe(true)
-    expect(reviewGptConfig).toContain('repo_context_url="https://github.com/cobuildwithus/murph"')
-    expect(reviewGptConfig).toContain('attach_artifacts=0')
-    expect(reviewGptConfig).toContain('app_connector="github"')
+    expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-pr-head-preflight.sh'))).toBe(true)
+    expect(reviewGptConfig).toContain('repo_context_url=""')
+    expect(reviewGptConfig).toContain('attach_artifacts=1')
+    expect(reviewGptConfig).toContain('app_connector="current"')
+    expect(reviewGptConfig).toContain('model="gpt-5.5-pro"')
+    expect(reviewGptConfig).toContain('snapshot_attachment_name="repo.snapshot.zip"')
+    expect(reviewGptConfig).toContain('repomix_attachment_format="zip"')
     const prDeepReviewPrompt = readFileSync(
       path.join(repoRoot, 'scripts', 'chatgpt-review-presets', 'pr-deep-review.md'),
       'utf8',
     )
-    expect(prDeepReviewPrompt).toContain('review:gpt `app_connector="github"` config')
-    expect(prDeepReviewPrompt).toContain('Treat missing GitHub connector context as a hard stop')
-    expect(prDeepReviewPrompt).toContain('do not review from pasted context, memory, files attached out of band, or the PR description alone')
-    expect(reviewGptConfig).not.toContain('snapshot_attachment_name=')
+    expect(prDeepReviewPrompt).toContain('Use the attached review artifacts to read the repository context.')
+    expect(prDeepReviewPrompt).toContain('Do not review the diff in isolation.')
+    expect(prDeepReviewPrompt).toContain('Do not use app connectors for this preset.')
+    expect(prDeepReviewPrompt).toContain('if you cannot read `review-gpt-pr-context/pr.diff`')
+    expect(prDeepReviewPrompt).toContain('cannot read the source snapshot / repomix attachments')
+    expect(prDeepReviewPrompt).toContain('do not review from memory, a connector, pasted context, or the PR')
+    expect(prDeepReviewPrompt).toContain('description alone')
+    expect(prDeepReviewPrompt).toContain('start the final message with a single `Checked:` line')
+    expect(prDeepReviewPrompt).toContain('`Checked: PR #123 @ abc1234`')
+    const prDeepReviewLoop = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'pr-deep-review-loop.md'),
+      'utf8',
+    )
+    expect(prDeepReviewLoop).toContain('scripts/review-gpt-pr-head-preflight.sh "$pr_url"')
+    expect(prDeepReviewLoop).toContain('confirm the Eragon composer has no selected app connector pill')
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)
@@ -614,6 +629,7 @@ Updated: 2026-04-24
       expect(leanEntries).toContain('agent-docs/product-specs/repo.md')
       expect(leanEntries).not.toContain('agent-docs/product-specs/repo-v1.md')
       expect(leanEntries).toContain('docs/architecture.md')
+      expect(leanEntries).toContain('docs/contracts/00-invariants.md')
       expect(leanEntries).not.toContain('agent-docs/generated/doc-inventory.md')
       expect(leanEntries).not.toContain('agent-docs/exec-plans/completed/README.md')
       expect(leanEntries).not.toContain('agent-docs/prompts/coverage-write.md')
@@ -641,7 +657,7 @@ Updated: 2026-04-24
       rmSync(leanBundle.outDir, { force: true, recursive: true })
       rmSync(fullBundle.outDir, { force: true, recursive: true })
     }
-  })
+  }, 120_000)
 
   it('keeps release:check focused on release guards, typecheck, clean workspace build, and coverage verification', () => {
     const releaseCheck = readFileSync(

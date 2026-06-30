@@ -22,16 +22,24 @@
 - If two paths intentionally overlap — retry, replay, push+pull ingestion, warm/cold runtime restart, provider webhook reorder, outbox resend, media normalization, or migration re-entry — the shared identity must make overlap safe by construction.
 - A new write path is not complete until it names the stable identity it uses for idempotency, explains which mutable fields are excluded, and has a regression proving retry/replay/cold-start overlap does not duplicate or lose the user-visible fact.
 
+## Minimal Mechanism Bias
+
+- For "do this exactly once," start with a stable identity, a uniqueness constraint, and an idempotent write the losing caller can no-op on. Reach for processing-state columns, leases, owner tokens, or fences only when a concrete downstream failure cannot be expressed as a uniqueness or dedupe key at the layer where it actually lives.
+- Trust idempotency at the side-effect layer first. If each write, send, or row a path produces is individually retry-safe via its own unique key or upsert, a top-level processing fence usually adds failure modes (stuck leases, owner mismatch on redeploy, replay-vs-reclaim races) without removing any.
+- Treat fix-loop length as a design signal. When a single protocol picks up double-digit "fix: preserve/scope/fence/reclaim" commits chasing edge cases, the abstraction is wrong; fall back to the smallest primitive the proven failure requires. PR 320 is the named anti-pattern.
+
 ## Ordered Progress And Causal Anchors
 
 - Any persisted cursor, mailbox sequence, pending-input index, consume ack, wake gate, receipt watermark, or paginated read must use a total, transitive, owner-shared ordering primitive. Do not duplicate timestamp comparators, pick timestamp fields pairwise, or rely on ordering that can make persisted records unreachable or repeated.
 - Import progress is not handling progress; checkpoint progress is not delivery progress; scanner discovery is not consume authority. Consume/clear/advance only from owner-provided coverage plus terminal evidence, and preserve gates when a later pass sees no current work but older retryable work still exists.
+- Post-checkpoint side effects are state transitions, not auxiliary logs. When a post-checkpoint send, cleanup, or provider mutation consumes a pending wake or delivery effect, its result must replace the pre-side-effect wake/status before the next durable checkpoint; do not preserve stale due wakes or pending counters with a scheduler/harness retry.
 - Explicit causal anchors beat positional heuristics: provider reply ids, selected input ids, delivery-context ordinals, server sequences, and segment ordinals must be resolved before "latest", "oldest", grouping, watermarks, or time-window fallbacks. Events with different explicit anchors must not be grouped into one turn.
 
 ## Deliverability And Provider Capability Contract
 
 - A saved automation, assistant side effect, notification, media response, or provider call must carry a concrete deliverable/authorized target before it can be persisted as executable or run side effects. Continuity locators, thread ids, redacted/private placeholders, route hints, and dashboard state are context only; they are not delivery targets.
 - Channel/provider capability must be one typed contract from planning through outbox/delivery service, hosted side-effect parsing, platform egress, and regression tests. Adding a new provider, media kind, channel operation, or runtime tool is incomplete until the exact operation has target validation, idempotency identity, and egress authorization.
+- External provider API request and response shapes should come from the provider's canonical SDK or published typed contract when that SDK is lightweight, actively maintained, exact-version-pinnable, and compatible with our credential and egress authority boundaries. Do not roll bespoke provider request types or hand-shaped payloads by default; if a custom boundary is necessary because the SDK is too heavy, unpinnable, stale, or would move authority/credentials to the wrong owner, document that reason and cover the exact provider JSON shape with focused tests.
 - Invalid routes or unauthorized provider operations must fail before model execution, delivery, provider mutation, or generated subject/media work. Do not add a scheduler, queue, route-repair worker, or broad abstraction to compensate for an invalid route shape.
 
 ## Decision Sources And Projection Drift
@@ -89,7 +97,7 @@
 
 ## User-Facing Message Sends
 
-- Do not hard-code messages that automatically send to users, except for the AI usage gate, signup link delivery, first welcome, and billing cancellation feedback email. All other automatic outbound user messages must come from the normal AI-gated assistant path, an explicit user/operator-authored message, or another reviewed product-copy surface that is not sent automatically.
+- Do not hard-code messages that automatically send to users, except for the AI usage gate, signup link delivery, first welcome, Linq daily text quota, Linq home-thread redirect, and billing cancellation feedback email. The Linq quota and home-thread redirects are narrowly scoped policy responses that preserve admission/routing invariants before assistant generation runs. All other automatic outbound user messages must come from the normal AI-gated assistant path, an explicit user/operator-authored message, or another reviewed product-copy surface that is not sent automatically.
 
 ## Hosted Foreground Priority
 
@@ -103,6 +111,7 @@
 ## Hosted Runner Boundary
 
 - Cloudflare must remain a thin execution runner over the same Murph runtime used locally. It may own platform coordination, workspace restore/checkpoint transport, write fences, secret injection, and process cleanup, but assistant business logic, vault semantics, Codex orchestration policy, and product state belong to the Murph runtime and hosted web owners.
+- Cloudflare container and Durable Object RPC methods are platform stub methods, not ordinary callbacks. Invoke them directly on the stub (`container.method(...)`) instead of detaching, binding, wrapping, or passing them around; test harnesses for these seams must preserve that direct-call contract so local tests catch Cloudflare-style receiver/proxy bugs.
 - Assistant-engine owns one reusable Codex App Server slot per Node runtime/container for the current stable process identity. A turn is an RPC into that process; clean successful turns leave it idle, while overlapping direct turns fail busy instead of creating a process map. Identity/config mismatch, abort cleanup, malformed output, off-turn output, process failure, or idle explicit shutdown stops or poisons it before a later turn can reuse it.
 - Codex App Server process env is for process authority/configuration. Hosted and non-hosted warm identity hashing must cover the exact child process env passed to Codex. If a value should not affect warm reuse, do not put it in the Codex process env; pass it through Codex RPC or an active runtime seam instead. Prompt text, session ids, and assistant turn ids are turn request data and must not be smuggled into process env in a way that makes ordinary turns restart the warm process.
 - Native Codex thread resume must receive the current non-instruction execution context through RPC, including cwd, model/provider, sandbox, and approval policy. Resume state is continuity, not permission to keep stale execution policy from the original thread or process launch. When stale resume is detected, the product provider must fall back to a fresh thread for the same user turn instead of failing to reply.
@@ -115,6 +124,7 @@
 - Warm-container lifecycle code must not shut down the app-server process or outer runtime while a foreground assistant turn is active. Idle shutdown, activity expiry, or post-turn process cleanup may only stop idle or poisoned processes; active turns are interrupted through the explicit turn abort/interrupt path and keep the app server alive until terminal turn handling or poisoning completes.
 - Warm container reuse is only an optimization. Each message still enters through the assistant input spine, validates current user/write-fence/config authority, uses invocation-local cache/temp state, and falls back to cold restore or process restart when safe reuse cannot be proven.
 - Intercepted provider APIs are part of the hosted runner boundary. Adding a new runtime tool, provider method, or provider API path for OpenAI, Exa, Mapbox, Linq, Telegram, WhatsApp, or another Worker-owned credential is not complete until the Cloudflare egress allowlist, sentinel credential rewrite, and focused regression tests cover the exact upstream operation.
+- Hosted provider credentials placed in native provider slots identify the provider, hosted user, and runner only. They must not be treated as standalone authority: Worker egress must validate current server-owned runtime state for that user/runner/provider before injecting any Worker-owned provider secret. Container runtime identifiers such as outbound `ctx.containerId` are not authorization.
 
 ## Observability And Logging
 

@@ -2,17 +2,19 @@ import {
   requireObject,
   requireString,
 } from "./parsers/assertions.ts";
+import {
+  HOSTED_RETURN_CONTACT_KINDS,
+  parseHostedReturnContactKind,
+  type HostedReturnContactKind,
+} from "./return-contact.ts";
 
 export const HOSTED_ACTION_APPROVAL_ID_PREFIX = "haa_";
 
-export const HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS = [
-  "text",
-  "telegram",
-  "email",
-] as const;
+export const HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS =
+  HOSTED_RETURN_CONTACT_KINDS;
 
 export type HostedActionApprovalReturnContactKind =
-  (typeof HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS)[number];
+  HostedReturnContactKind;
 
 const ACTION_ID_MAX_LENGTH = 200;
 const ACTION_KIND_MAX_LENGTH = 120;
@@ -51,9 +53,20 @@ export type HostedActionApprovalResult =
       status: "pending";
     }
   | {
+      approvalGeneration: string;
       approvalId: string;
-      status: "approved" | "denied" | "expired";
+      status: "approved";
+    }
+  | {
+      approvalId: string;
+      status: "denied" | "expired";
     };
+
+export interface HostedActionApprovalConsumeRequest {
+  approvalGeneration: string;
+  consumerId: string;
+  request: HostedActionApprovalRequest;
+}
 
 export function isHostedActionApprovalId(value: unknown): value is string {
   return typeof value === "string" && APPROVAL_ID_PATTERN.test(value);
@@ -70,8 +83,8 @@ export function parseHostedActionApprovalRequest(
       "actionId",
       "actionKind",
       "presentation",
-      "returnContactKind",
     ],
+    ["returnContactKind"],
   );
   const actionFingerprint = requireString(
     request.actionFingerprint,
@@ -106,17 +119,9 @@ export function parseHostedActionApprovalRequest(
 function parseHostedActionApprovalReturnContactKind(
   value: unknown,
 ): HostedActionApprovalReturnContactKind | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (
-    typeof value === "string"
-    && (HOSTED_ACTION_APPROVAL_RETURN_CONTACT_KINDS as readonly string[]).includes(value)
-  ) {
-    return value as HostedActionApprovalReturnContactKind;
-  }
-  throw new TypeError(
-    "Hosted action approval request returnContactKind must be null or one of text, telegram, email.",
+  return parseHostedReturnContactKind(
+    value,
+    "Hosted action approval request returnContactKind",
   );
 }
 
@@ -192,6 +197,21 @@ export function parseHostedActionApprovalResult(
       return { approvalId, approvalUrl, expiresAt, status };
     }
     case "approved":
+      {
+        const exact = requireExactObject(
+          value,
+          "Hosted approved action approval result",
+          ["approvalGeneration", "approvalId", "status"],
+        );
+        return {
+          approvalGeneration: requireSha256Hex(
+            exact.approvalGeneration,
+            "Hosted action approval result approvalGeneration",
+          ),
+          approvalId,
+          status,
+        };
+      }
     case "denied":
     case "expired":
       requireExactObject(
@@ -207,11 +227,42 @@ export function parseHostedActionApprovalResult(
   }
 }
 
+export function parseHostedActionApprovalConsumeRequest(
+  value: unknown,
+): HostedActionApprovalConsumeRequest {
+  const request = requireExactObject(
+    value,
+    "Hosted action approval consume request",
+    ["approvalGeneration", "consumerId", "request"],
+  );
+
+  return {
+    approvalGeneration: requireSha256Hex(
+      request.approvalGeneration,
+      "Hosted action approval consume request approvalGeneration",
+    ),
+    consumerId: requireBoundedString(
+      request.consumerId,
+      "Hosted action approval consume request consumerId",
+      ACTION_ID_MAX_LENGTH,
+    ),
+    request: parseHostedActionApprovalRequest(request.request),
+  };
+}
+
 function requireApprovalId(value: unknown): string {
   if (!isHostedActionApprovalId(value)) {
     throw new TypeError("Hosted action approval result approvalId is invalid.");
   }
   return value;
+}
+
+function requireSha256Hex(value: unknown, label: string): string {
+  const text = requireString(value, label);
+  if (!SHA256_HEX_PATTERN.test(text)) {
+    throw new TypeError(`${label} must be a lowercase SHA-256 hex digest.`);
+  }
+  return text;
 }
 
 function requireBoundedString(
@@ -235,9 +286,10 @@ function requireExactObject(
   value: unknown,
   label: string,
   keys: readonly string[],
+  optionalKeys: readonly string[] = [],
 ): Record<string, unknown> {
   const record = requireObject(value, label);
-  const allowed = new Set(keys);
+  const allowed = new Set([...keys, ...optionalKeys]);
   const unexpected = Object.keys(record).filter((key) => !allowed.has(key));
 
   if (unexpected.length > 0) {

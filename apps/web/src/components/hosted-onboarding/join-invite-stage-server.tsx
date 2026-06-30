@@ -13,6 +13,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { PlanVisual } from "@/src/components/ui/plan-visual";
+import { ConsentSkeleton } from "@/src/components/legal/hosted-legal-consent-card";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import {
   isHostedAutoPulseTrialEnabled,
@@ -193,12 +194,14 @@ function JoinInvitePhoneVerificationPanel({
 }) {
   if (awaitingInviteSessionResolution) {
     return (
-      <Alert className="border-amber/20 bg-cream/40">
-        <AlertTitle>Checking your signup state</AlertTitle>
-        <AlertDescription>
-          One moment while we pick up your session.
-        </AlertDescription>
-      </Alert>
+      <div
+        aria-busy="true"
+        aria-live="polite"
+        role="status"
+        className="rounded-2xl border border-border bg-card p-6"
+      >
+        <ConsentSkeleton />
+      </div>
     );
   }
 

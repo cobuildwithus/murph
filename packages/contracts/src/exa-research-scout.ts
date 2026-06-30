@@ -10,6 +10,8 @@ export const EXA_RESEARCH_SCOUT_MODE = "deep-reasoning";
 export const EXA_RESEARCH_SCOUT_CATEGORY = "research paper";
 export const DEFAULT_EXA_RESEARCH_SCOUT_TIMEOUT_MS = 60_000;
 export const MAX_RESEARCH_SCOUT_CANDIDATES = 12;
+export const MAX_RESEARCH_SCOUT_BATCH_LANES = 4;
+export const DEFAULT_RESEARCH_SCOUT_BATCH_CANDIDATES_PER_LANE = 5;
 
 export const EXA_RESEARCH_SCOUT_SYSTEM_PROMPT = [
   "Find high-quality recent human health research.",
@@ -117,6 +119,9 @@ const unsafeResearchScoutTagPatterns = [
   /\b(?:i|i'm|ive|i've|me|my|mine)\b/iu,
 ] as const;
 const researchScoutCategoryTagPattern = /^[a-z0-9](?:[a-z0-9 /-]*[a-z0-9])?$/u;
+type ResearchScoutProfileField =
+  typeof EXA_RESEARCH_SCOUT_QUERY_PROFILE_SECTIONS[number]["field"];
+type ResearchScoutProfileShape = Record<ResearchScoutProfileField, readonly string[]>;
 
 export function isSafeResearchScoutProfileTag(value: string): boolean {
   const tag = value.trim();
@@ -165,6 +170,35 @@ export const researchScoutProfileSchema = z
   })
   .strict();
 
+export function hasResearchScoutProfileTags(
+  profile: ResearchScoutProfileShape,
+): boolean {
+  return EXA_RESEARCH_SCOUT_QUERY_PROFILE_SECTIONS.some(
+    (section) => profile[section.field].length > 0,
+  );
+}
+
+const emptyResearchScoutLaneProfileMessage =
+  "Research scout batch lanes must include at least one compact profile tag.";
+
+export const researchScoutBatchLaneSchema = z
+  .object({
+    label: tagSchema,
+    profile: researchScoutProfileSchema.refine(hasResearchScoutProfileTags, {
+      message: emptyResearchScoutLaneProfileMessage,
+    }),
+  })
+  .strict();
+
+export const researchScoutBatchPayloadSchema = z
+  .object({
+    lanes: z
+      .array(researchScoutBatchLaneSchema)
+      .min(1)
+      .max(MAX_RESEARCH_SCOUT_BATCH_LANES),
+  })
+  .strict();
+
 export const researchScoutInputSchema = z
   .object({
     profile: researchScoutProfileSchema,
@@ -176,6 +210,19 @@ export const researchScoutInputSchema = z
       .min(1)
       .max(MAX_RESEARCH_SCOUT_CANDIDATES)
       .default(MAX_RESEARCH_SCOUT_CANDIDATES),
+  })
+  .strict();
+
+export const researchScoutBatchInputSchema = researchScoutBatchPayloadSchema
+  .extend({
+    since: z.string().datetime(),
+    until: z.string().datetime(),
+    maxCandidatesPerLane: z
+      .number()
+      .int()
+      .min(1)
+      .max(MAX_RESEARCH_SCOUT_CANDIDATES)
+      .default(DEFAULT_RESEARCH_SCOUT_BATCH_CANDIDATES_PER_LANE),
   })
   .strict();
 
@@ -219,6 +266,35 @@ export const researchScoutResultSchema = z
       })
       .strict(),
     response: z.unknown(),
+  })
+  .strict();
+
+export const researchScoutBatchResultSchema = z
+  .object({
+    provider: z
+      .object({
+        name: z.literal(EXA_RESEARCH_SCOUT_PROVIDER_NAME),
+        endpoint: z.literal(EXA_RESEARCH_SCOUT_ENDPOINT),
+        mode: z.literal(EXA_RESEARCH_SCOUT_MODE),
+      })
+      .strict(),
+    privacy: z
+      .object({
+        tokenSource: z.literal("env"),
+        persistedByTool: z.literal(false),
+        sentProfileKind: z.literal("tag_profile"),
+        rawVaultValuesSent: z.literal(false),
+      })
+      .strict(),
+    lanes: z
+      .array(z
+        .object({
+          label: tagSchema,
+          response: z.unknown(),
+        })
+        .strict())
+      .min(1)
+      .max(MAX_RESEARCH_SCOUT_BATCH_LANES),
   })
   .strict();
 
@@ -280,6 +356,9 @@ export interface ExaResearchScoutParsedRequest {
 }
 
 export type ResearchScoutInput = z.infer<typeof researchScoutInputSchema>;
+export type ResearchScoutBatchInput = z.infer<typeof researchScoutBatchInputSchema>;
+export type ResearchScoutBatchPayload = z.infer<typeof researchScoutBatchPayloadSchema>;
+export type ResearchScoutBatchResult = z.infer<typeof researchScoutBatchResultSchema>;
 export type ResearchScoutProfile = z.infer<typeof researchScoutProfileSchema>;
 export type ResearchScoutResult = z.infer<typeof researchScoutResultSchema>;
 export type ExaResearchScoutStructuredCandidate = z.infer<

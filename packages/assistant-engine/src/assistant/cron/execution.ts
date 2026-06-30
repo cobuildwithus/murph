@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
 import {
+  type AutomationQueryRecord,
+} from '@murphai/query'
+import {
   assistantCronJobSchema,
   assistantCronRunRecordSchema,
   type AssistantCronJob,
@@ -37,6 +40,12 @@ import {
 } from './runtime-state.js'
 import { runScheduledLogCronJob } from './scheduled-log.js'
 import {
+  assistantDeviceActivityAuthorityKeyMatches,
+  buildAssistantDeviceActivityDeliveryIdempotencyKey,
+  readAssistantDeviceActivityCronJobMetadata,
+} from '../device-activity-cron-tags.js'
+import { readAssistantDeviceActivityParentAutomation } from '../device-activity-parent-automation.js'
+import {
   buildCanonicalAutomationUpsertInput,
   buildVisibleLocalAssistantCronStore,
   isCanonicalAssistantCronSourceEnabled,
@@ -71,6 +80,8 @@ const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR =
   'Assistant cron notification expired before delivery.'
+const ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR =
+  'Device activity occurrence skipped because its parent listener is no longer authorized.'
 const ASSISTANT_CRON_ONBOARDING_OPEN_RESEARCH_SKIP_ERROR =
   'Assistant cron research-oriented managed automation skipped because assistant onboarding is open.'
 const ASSISTANT_CRON_ONBOARDING_UNREADABLE_RESEARCH_SKIP_ERROR =
@@ -295,6 +306,10 @@ export async function executeClaimedAssistantCronJob(input: {
       })
     }
 
+    const deviceActivityAuthority = await resolveDeviceActivityParentAuthority({
+      job: input.job,
+      vault: input.vault,
+    })
     const staleError =
       input.trigger === 'scheduled'
         ? resolveStaleAssistantCronNotificationError({
@@ -304,7 +319,10 @@ export async function executeClaimedAssistantCronJob(input: {
           })
         : null
 
-    if (staleError) {
+    if (deviceActivityAuthority.error !== null) {
+      status = 'skipped'
+      errorText = deviceActivityAuthority.error
+    } else if (staleError) {
       status = 'skipped'
       errorText = staleError
     } else {
@@ -337,6 +355,9 @@ export async function executeClaimedAssistantCronJob(input: {
           job: claimedJob,
         })
         const automationTurn = buildAssistantAutomationTurnEnvelope({
+          assistantTargetOverride:
+            resolveAssistantCronAutomationTargetOverride(input.job) ??
+            deviceActivityAuthority.assistantTargetOverride,
           deliveryDispatchMode: input.deliveryDispatchMode,
           executionContext: input.executionContext,
           serviceTier,
@@ -380,42 +401,46 @@ export async function executeClaimedAssistantCronJob(input: {
           errorText = lifecycleSkipReason
         } else {
           const result = await sendAssistantNotificationLocal({
-          vault: input.vault,
-          ...automationTurn,
-          instructions: buildAssistantCronExecutionInstructions(claimedJob),
-          deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
-            job: claimedJob,
-            trigger: input.trigger,
-          }),
-          hostedDeliveryIdempotency: buildAssistantCronHostedDeliveryIdempotency({
-            job: claimedJob,
-            trigger: input.trigger,
-          }),
-          sessionId: claimedJob.target.sessionId,
-          alias: claimedJob.target.alias,
-          allowBindingRebind: claimedJob.target.sessionId !== null,
-          channel: claimedJob.target.channel,
-          identityId: claimedJob.target.identityId,
-          onTraceEvent: input.onTraceEvent,
-          participantId: claimedJob.target.participantId,
-          responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
-          threadId: claimedJob.target.threadId,
-          bindingDeliveryTarget: bindingDelivery?.target ?? undefined,
-          deliveryKind: bindingDelivery?.kind ?? undefined,
-          deliverySource: claimedJob.target.deliverySource,
-          deliveryTarget: claimedJob.target.deliveryTarget,
-          operatorAuthority: 'direct-operator',
-          workingDirectory: input.vault,
-        })
+            vault: input.vault,
+            ...automationTurn,
+            instructions: buildAssistantCronExecutionInstructions(claimedJob),
+            deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
+              job: claimedJob,
+              trigger: input.trigger,
+            }),
+            deliveryIdempotencyKey: buildAssistantCronDeviceActivityDeliveryIdempotencyKey({
+              job: claimedJob,
+              trigger: input.trigger,
+            }),
+            hostedDeliveryIdempotency: buildAssistantCronHostedDeliveryIdempotency({
+              job: claimedJob,
+              trigger: input.trigger,
+            }),
+            sessionId: claimedJob.target.sessionId,
+            alias: claimedJob.target.alias,
+            allowBindingRebind: claimedJob.target.sessionId !== null,
+            channel: claimedJob.target.channel,
+            identityId: claimedJob.target.identityId,
+            onTraceEvent: input.onTraceEvent,
+            participantId: claimedJob.target.participantId,
+            responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
+            threadId: claimedJob.target.threadId,
+            bindingDeliveryTarget: bindingDelivery?.target ?? undefined,
+            deliveryKind: bindingDelivery?.kind ?? undefined,
+            deliverySource: claimedJob.target.deliverySource,
+            deliveryTarget: claimedJob.target.deliveryTarget,
+            operatorAuthority: 'direct-operator',
+            workingDirectory: input.vault,
+          })
 
-        sessionId = result.session.sessionId
-        response = result.response ?? result.decision.privateSummary
-        if (result.deliveryOutcome?.kind === 'queued') {
-          pendingDeliveryIntentId = result.deliveryOutcome.intentId
-          status = 'skipped'
-        } else {
-          status = 'succeeded'
-        }
+          sessionId = result.session.sessionId
+          response = result.response ?? result.decision.privateSummary
+          if (result.deliveryOutcome?.kind === 'queued') {
+            pendingDeliveryIntentId = result.deliveryOutcome.intentId
+            status = 'skipped'
+          } else {
+            status = 'succeeded'
+          }
         }
       }
     }
@@ -476,7 +501,6 @@ export async function executeClaimedAssistantCronJob(input: {
       }
 
       await writeAssistantCronStore(input.paths, store)
-
       return {
         job: finalizedJob,
         removedAfterRun,
@@ -635,14 +659,52 @@ function resolveAssistantCronTurnServiceTier(input: {
   return input.job.state.consecutiveFailures === 0 ? 'flex' : null
 }
 
+function resolveAssistantCronAutomationTargetOverride(
+  job: ResolvedAssistantCronJob,
+): AutomationQueryRecord['assistantTargetOverride'] | null {
+  return job.kind === 'canonical' && job.source.kind === 'automation'
+    ? job.source.assistantTargetOverride
+    : null
+}
+
 function resolveAssistantCronNotificationResponsePolicy(
   job: ResolvedAssistantCronJob,
 ): { kind: 'require_send' } | null {
-  return job.kind === 'canonical' &&
-    job.source.kind === 'automation' &&
-    job.source.tags.includes(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+  if (readAssistantDeviceActivityCronJobMetadata(job.job.name)) {
+    return { kind: 'require_send' }
+  }
+
+  return listAssistantCronNotificationTags(job).includes(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     ? { kind: 'require_send' }
     : null
+}
+
+function buildAssistantCronDeviceActivityDeliveryIdempotencyKey(input: {
+  job: AssistantCronJob
+  trigger: AssistantCronTrigger
+}): string | null {
+  const metadata = readAssistantDeviceActivityCronJobMetadata(input.job.name)
+  const dueAt = normalizeNullableString(input.job.state.nextRunAt)
+  if (!metadata || input.trigger !== 'scheduled' || !dueAt) {
+    return null
+  }
+
+  return buildAssistantDeviceActivityDeliveryIdempotencyKey({
+    discriminator: {
+      operation: 'assistant-device-activity-notification',
+    },
+    metadata,
+  })
+}
+
+function listAssistantCronNotificationTags(
+  job: ResolvedAssistantCronJob,
+): readonly string[] {
+  if (job.kind === 'canonical' && job.source.kind === 'automation') {
+    return job.source.tags
+  }
+
+  return []
 }
 
 function finalizeAssistantCronJobAfterRun(input: {
@@ -831,6 +893,85 @@ function assistantCronJobHasStableSessionLocator(job: AssistantCronJob): boolean
       (job.target.channel &&
         (job.target.participantId || job.target.threadId)),
   )
+}
+
+async function resolveDeviceActivityParentAuthority(input: {
+  job: ResolvedAssistantCronJob
+  vault: string
+}): Promise<{
+  assistantTargetOverride: AutomationQueryRecord['assistantTargetOverride'] | null
+  error: string | null
+}> {
+  if (input.job.kind !== 'local') {
+    return {
+      assistantTargetOverride: null,
+      error: null,
+    }
+  }
+
+  const metadata = readAssistantDeviceActivityCronJobMetadata(input.job.job.name)
+  if (!metadata) {
+    return {
+      assistantTargetOverride: null,
+      error: null,
+    }
+  }
+
+  const parentAutomation = await readAssistantDeviceActivityParentAutomation({
+    metadata,
+    vault: input.vault,
+  })
+  if (!parentAutomation || parentAutomation.status !== 'active') {
+    return {
+      assistantTargetOverride: null,
+      error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
+    }
+  }
+  if (parentAutomation.schedule.kind !== 'deviceActivity') {
+    return {
+      assistantTargetOverride: null,
+      error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
+    }
+  }
+  if (!assistantCronTargetMatchesAutomationRoute(input.job.job.target, parentAutomation.route)) {
+    return {
+      assistantTargetOverride: null,
+      error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
+    }
+  }
+
+  const authorityMatches = assistantDeviceActivityAuthorityKeyMatches({
+    authorityKey: metadata.authorityKey,
+    automation: {
+      ...parentAutomation,
+      schedule: {
+        activityKind: parentAutomation.schedule.activityKind,
+        source: parentAutomation.schedule.source,
+      },
+    },
+  })
+
+  return authorityMatches
+    ? {
+        assistantTargetOverride: parentAutomation.assistantTargetOverride,
+        error: null,
+      }
+    : {
+        assistantTargetOverride: null,
+        error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
+      }
+}
+
+function assistantCronTargetMatchesAutomationRoute(
+  target: AssistantCronJob['target'],
+  route: AutomationQueryRecord['route'],
+): boolean {
+  return target.channel === route.channel &&
+    JSON.stringify(target.deliverySource) === JSON.stringify(route.deliverySource) &&
+    target.deliveryTarget === route.deliveryTarget &&
+    target.identityId === route.identityId &&
+    target.participantId === route.participantId &&
+    target.threadId === route.threadId
 }
 
 function truncateAssistantCronResponse(response: string | null): string | null {

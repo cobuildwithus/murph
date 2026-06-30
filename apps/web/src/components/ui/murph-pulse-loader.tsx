@@ -88,6 +88,7 @@ export function MurphPulseLoader({
     <svg
       aria-hidden="true"
       className={cn("block", className)}
+      data-murph-pulse-loader="true"
       fill="none"
       viewBox="-4 -4 73 52"
       xmlns="http://www.w3.org/2000/svg"

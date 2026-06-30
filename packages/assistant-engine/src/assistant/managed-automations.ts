@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto'
 import {
+  loadVault,
   patchAutomation,
   showAutomation,
   upsertAutomation,
@@ -6,6 +8,7 @@ import {
 } from '@murphai/core'
 import {
   MURPH_PRODUCT_ORIGIN,
+  type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
   type AutomationRoute,
   type AutomationSchedule,
@@ -34,6 +37,7 @@ export type MurphManagedAutomationSchedule = Exclude<
 
 export interface MurphManagedAutomationSeed {
   automationId: string
+  assistantTargetOverride?: AutomationAssistantTargetOverride | null
   continuityPolicy?: AutomationContinuityPolicy
   instructions: string
   requiredRuntimeEnvKeys?: readonly string[]
@@ -57,6 +61,8 @@ export interface ApplyMurphManagedAutomationsInput {
 export interface ApplyMurphManagedAutomationsResult {
   created: number
   skipped: number
+  stableKeyFailure?: unknown
+  stableKeyRetryNeeded?: true
   updated: number
 }
 
@@ -68,6 +74,48 @@ export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
   'automation_01K0EXA5C0VT9F7X3KG6JMPZ5A'
 export const MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID =
   'automation_01K0Z7X9Y8W6V5T4S3R2Q1P0NM'
+
+interface MurphManagedWeeklyScheduleSpread {
+  daysOfWeek: readonly number[]
+  slotsPerDay: number
+  slotMinutes: number
+  startMinuteOfDay: number
+}
+
+// Built-in recurring managed automations should not all land at one global
+// local time. Keep the public/persisted model simple: these private windows
+// deterministically resolve to ordinary cron schedules before new records are
+// persisted. Existing active records keep their current cron until a separate
+// runtime-aware migration can preserve the current cadence boundary.
+const MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS: Partial<Record<
+  string,
+  MurphManagedWeeklyScheduleSpread
+>> = {
+  [MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID]: {
+    daysOfWeek: [1, 2],
+    startMinuteOfDay: 8 * 60 + 30,
+    slotMinutes: 30,
+    slotsPerDay: 8,
+  },
+  [MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID]: {
+    daysOfWeek: [0, 1, 2],
+    startMinuteOfDay: 10 * 60,
+    slotMinutes: 30,
+    slotsPerDay: 14,
+  },
+  [MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID]: {
+    daysOfWeek: [3, 4],
+    startMinuteOfDay: 14 * 60,
+    slotMinutes: 30,
+    slotsPerDay: 12,
+  },
+  [MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID]: {
+    daysOfWeek: [4, 5],
+    startMinuteOfDay: 10 * 60,
+    slotMinutes: 30,
+    slotsPerDay: 14,
+  },
+}
 
 // One-shot ('at') seeds are delivery-time-sensitive: runtimes apply seeds
 // lazily on background wakes, so a dormant user may first see a one-shot
@@ -115,9 +163,19 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
     ],
     instructions: [
-      'Each Monday morning, produce one concise weekly health digest for the configured automation route.',
+      'On this scheduled weekly run, decide whether to send a concise weekly health digest, send a short reconnect prompt, or suppress the run entirely. A digest with no substance is worse than no message at all.',
       '',
-      'Focus on:',
+      'Substance check before composing:',
+      '- Read `vault-cli device account list` to see which wearable / device accounts exist and their auth status.',
+      '- Read `vault-cli wearables sources list` to see per-provider freshness, `lastDate`, and `stalenessVsNewestDays`.',
+      "- Skim recent user-logged substance since roughly the last digest: wearables (`vault-cli wearables latest`), and any manual logs the user typically keeps (samples, food, supplements, body, events, knowledge edits). Use the smallest CLI calls needed; do not exhaustively scan the vault.",
+      '',
+      'Branch on what you find:',
+      '- Substance present: meaningful new wearable data, fresh manual logs, experiment movement, or notable changes since the last digest. Produce the concise weekly health digest as described below.',
+      '- Wearable connected but not delivering: a device account exists with `status: reauthorization_required`, or its sources show no new data for roughly a week or more. Instead of a digest, send one short, warm in-chat note acknowledging the gap and inviting the user to reconnect so Murph can keep seeing their data. Include a fresh reconnect link by calling `vault-cli device connect <provider> --return-to /settings/devices` and using the `connectUrl` from the result. Do not fabricate a digest from stale data, and do not list every disconnected provider — focus on the one most likely to matter.',
+      '- No substance and no live wearable: no connected device accounts, no recent manual logs, and no experiment movement worth mentioning. Suppress the scheduled message — do not send a hollow digest, do not invent updates, and do not nag the user to set things up from this automation.',
+      '',
+      'When producing the digest, focus on:',
       '- sleep',
       '- recovery',
       '- workouts / activity',
@@ -139,11 +197,14 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       expression: '0 12 * * 0',
     },
     continuityPolicy: 'fresh',
+    assistantTargetOverride: {
+      reasoningEffort: 'high',
+    },
     tags: [
       'murph-managed:weekly-health-insight',
     ],
     instructions: [
-      'Each Sunday at noon local time, find one useful, non-obvious personal health/body insight that goes beyond dashboards, generic advice, and vendor score formulas.',
+      'On this scheduled weekly run, find zero or one useful, non-obvious personal health/body insight that goes beyond dashboards, generic advice, and vendor score formulas. It is better to send nothing than to force a weak weekly note.',
       '',
       'Before choosing a finding:',
       '- Read the derived knowledge index.',
@@ -166,25 +227,35 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Food planning: places where a goal would be easier with a practical meal, grocery, or prep change, such as protein at breakfast, lower-friction dinners, travel snacks, or fewer late meals.',
       '- Goal progress: small behaviors that appear to move the user toward or away from a stated goal, but only when they reveal a non-obvious lever, bottleneck, or tradeoff. A goal plus missing or messy logs is not enough.',
       '- Subjective state: mood, stress, soreness, motivation, libido, focus, cravings, or "felt awful/great" notes that explain wearable, food, lab, or supplement patterns better than the raw score does.',
+      '- Recurring stress windows: HRV dips, RHR spikes, restless sleep, or "felt anxious/off" notes that cluster at the same day-of-week or time-of-day (Sunday evening, weekday 6pm, post-standup, after a recurring call), pointing at a repeating trigger worth naming.',
+      '- Stress coupled to a place, person, or event: stress signatures that line up with logged context like a specific location, transition (commute, coming home), recurring meeting series, social plan, family interaction, or living situation. Name the pattern; do not diagnose the relationship.',
+      '- Anticipatory stress: sleep, HRV, or wake time degrading the night before a recurring event (Sunday-night dread, pre-flight, pre-presentation, day-before travel) rather than during it.',
+      "- Personal cliff (your number, not the generic one): a specific sleep duration, drink count, last-bite-to-bed gap, weekly training load, caffeine cutoff time, or similar threshold where this user's next-day signal (HRV, deep sleep, RHR, mood, GI, recovery) stops degrading gracefully and breaks. State the personal number with how confident the data is, not a population norm.",
+      '- Slow drift over months: a trend in baseline RHR, HRV, weight, sleep onset, cycle length, fasting glucose, ApoB, or recovery scores that is invisible week-to-week but real over 60-180 days. Only surface when there is enough history to call a slope, not noise.',
+      '- Compounding inputs: two or more behaviors that are each fine alone but reliably backfire together (late dinner plus early alarm, alcohol plus travel day, hard lift plus low-carb day, sauna plus late caffeine). Name the pairing; either side can be the lever.',
+      '- Environmental confounders: bedroom temperature, humidity, CO2, outdoor air quality, ambient light, or noise that explains sleep, HRV, or morning energy better than the behavior the user is currently tuning. Worth flagging when paired data points more at the room than the routine.',
+      '- Quiet decay or asymmetric ROI: a routine, supplement, or practice that used to correlate with a positive signal but has silently stopped working, or a small low-effort behavior that is punching above its weight while a more effortful one is not. Suggest one thing to drop alongside one thing to keep.',
       '- Adherence friction: recurring places where the user forgets to log, take supplements, eat enough, prep food, or wind down, plus one low-effort way to make the behavior easier.',
       '- Fun experiments: suggest a tiny one-week experiment only when it follows from the data, is low risk, and has a clear thing to measure.',
       '',
       "A finding clears the bar only when it is specific to this user's vault, has concrete evidence, is not a repeat of an existing wiki finding, and can be said with uncertainty.",
-      'Interestingness gate: send only if the finding is worth a short weekly note. It should make the user think "I did not know that about me" or change what they might measure, try, interpret, or ignore. Interesting can mean surprising, explanatory, actionable, hunch-falsifying, or showing a stable personal threshold or tradeoff; it does not have to be a tidy recommendation.',
+      'Interestingness gate: send only if the finding is worth a short weekly note. It should make the user think "I did not know that about me, that is interesting!" or change what they might measure, try, interpret, or ignore. Interesting can mean surprising, explanatory, actionable, hunch-falsifying, or showing a stable personal threshold or tradeoff; it does not have to be a tidy recommendation.',
       'Suppress true-but-boring findings. Do not send when the main point is missing data, messy tags, lack of evidence for a stated goal, generic goal progress, or "Murph cannot currently see X." Better tagging or more complete logging can be a caveat or follow-up, but it is not the insight.',
       "Reject tautological findings: do not treat a vendor score as the insight when the evidence is a direct or obvious input to how that score is designed or calculated. For example, do not say WHOOP recovery tracks sleep, HRV, resting heart rate, or respiratory rate unless the finding isolates a non-obvious mismatch, exception, lag, threshold, or personal pattern beyond the score's formula.",
       'Prefer findings that compare independent signals, explain a surprising mismatch, show a durable threshold, or expose a personal tradeoff the user could plausibly act on.',
       'Prefer insights that make the user feel more in control of their day. Avoid insights that only explain a score, praise or criticize compliance, or require perfect tracking to be useful.',
       'Stop when one candidate clearly clears the bar or clearly does not; do not keep researching to make a weak idea sound interesting.',
       '',
-      'If nothing clears the bar, suppress the scheduled message and do not append to the wiki.',
+      'If nothing clears the bar, return `{"kind":"skip","privateSummary":"No weekly health insight cleared the interestingness bar."}`, suppress the scheduled message, and do not append to the wiki. Do not send a process note, apology, "nothing this week" message, setup nag, or request for better logs.',
       '',
       'If something clears the bar:',
       '- Use the current local date as the section heading: `YYYY-MM-DD`.',
-      '- If `weekly-health-insights` already has a `YYYY-MM-DD` section, treat it as this run\'s finding: read it, do not append another section, and still send the concise note from that section.',
+      '- If `weekly-health-insights` already has a `YYYY-MM-DD` section, read it as this run\'s candidate and do not append another section. Send from it only if it still clears the current interestingness bar and is useful enough to repeat now; otherwise return `{"kind":"skip","privateSummary":"Existing weekly health insight did not clear the current send bar."}`.',
       '- Otherwise append one dated section to the single rolling page with the locked append surface, for example: `vault-cli knowledge append-section weekly-health-insights YYYY-MM-DD --title "Weekly health insights" --body <markdown> --source-path <canonical-vault-path>`. Cite only canonical vault source paths, never `derived/**` or `.runtime/**` paths.',
-      '- If append-section reports that the section already exists, another run created it first: read `weekly-health-insights` and send the concise note from that existing section.',
-      '- Then send one concise note in plain adult language: what you noticed, the simple translation, the evidence, why it may matter, and a light optional follow-up.',
+      '- If append-section reports that the section already exists, another run created it first: read `weekly-health-insights` and apply the same current interestingness gate before deciding whether to send or return a `{"kind":"skip","privateSummary":"Existing weekly health insight did not clear the current send bar."}` decision.',
+      '- Then, only when the finding clears the bar, send one concise note in plain adult language: a clear claim anchored in recognizable context, compact evidence, the simple translation, and a light optional follow-up.',
+      '- Use dates for traceability, not as the story: prefer context the user may recognize (for example, "after two hard days in a row") and use exact dates only when they help.',
+      '- Name the outcome before contrasting causes. Prefer "The recovery dip looked tied to stacking hard days, not running by itself" over "running itself is not the problem."',
       '- Do not make the user infer the point from raw biomarker names, lab ranges, supplement ingredients, or device jargon. Explain the marker or mechanism in one short phrase when it matters, such as "TSH is the brain\'s signal asking the thyroid for more hormone."',
       '- Name the practical takeaway clearly: watch this context next time, measure one thing, test a hunch, ignore a misleading score, change a low-risk behavior, or ask a clinician. If the short note would be confusing, simplify the framing or choose another candidate.',
       '',
@@ -203,59 +274,65 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     },
     continuityPolicy: 'fresh',
     requiredRuntimeEnvKeys: ['EXA_API_KEY'],
+    assistantTargetOverride: {
+      reasoningEffort: 'high',
+    },
     tags: [
       'murph-managed:weekly-health-research-scout',
     ],
     instructions: [
-      'Each Wednesday at 7:30 PM local time, produce a concise weekly health research scout for the configured automation route.',
+      'On this scheduled weekly run, run a quiet weekly health research scout for the configured automation route.',
       '',
-      'Goal:',
-      "Find 0-1 really insightful studies, therapies, treatments, clinical guidelines, or research insights from the last two years that clearly relate to the user's current health context.",
-      'Prefer recent research when it is genuinely useful, but an older high-signal item from the last year or two beats a minor recent finding.',
+      'Outcome:',
+      "Surface 0-1 genuinely useful research-backed note that changes how the user might think about a current health experiment, habit, symptom, lab, device trend, or clinician question.",
+      'If nothing is useful enough to feel like a natural chat message from Murph, send nothing.',
       '',
-      'Before choosing items:',
+      'Language and conversational style:',
+      "- Write the outbound note in the user's normal Murph chat language. If unclear, use English.",
+      '- Do not infer the output language from Telegram, source language, vault timezone, current location, or foreign-language text in retrieved sources.',
+      '- Do not mix languages except for proper nouns, study names, product names, or unavoidable technical terms.',
+      '- The sent note should feel like a thoughtful chat message, not a research digest, literature review, or evidence table.',
+      '- Do not use a numbered list of studies.',
+      '- Do not use fixed labels like `Why it matters`, `Evidence strength`, `Confidence`, `Practically`, `Do not overinterpret`, or `Basically` in the user-facing message.',
+      '- Do not lead with journal, publisher, study type, or publication date. Lead with the useful point for the user.',
+      '',
+      'Evidence and retrieval budget:',
       '- Read the derived knowledge index.',
       '- Read `vault-cli knowledge show weekly-health-research-scout`. If missing, treat as no prior research scout ledger.',
       '- Check that `EXA_API_KEY` is available in the runtime environment. If it is missing, suppress the scheduled message and do not append to the wiki.',
       '- Build a compact local research profile from the vault: labs/biomarkers, activity, sleep, recovery, supplements, conditions or concerns, active experiments, and stated goals.',
-      '- The external profile must be tag-level only. Do not send raw lab values, names, dates of birth, full notes, medical records, or precise private identifiers to external providers.',
-      '- Use only broad lowercase non-identifying category tags, such as sleep, metabolic health, glucose, hs-crp, resistance training, creatine, type 2 diabetes, better recovery, or morning light. Do not invent person, organization, location, event, or raw measurement tags.',
-      '- If unsure about the file body, run `vault-cli research payload-schema --format json` before the scout call.',
-      '- Use `vault-cli research scout` once with the compact profile. The `--input` body is the profile object itself with bucket fields `topics`, `biomarkers`, `behaviors`, `supplements`, `conditionsOrConcerns`, `goals`, and `activeExperiments`; do not use a generic `tags` field. Example body: `{"topics":["sleep","recovery"],"behaviors":["exercise"]}`.',
-      '- Pass publication bounds as `--since` and `--until`; YYYY-MM-DD dates or full ISO timestamps are accepted. Prefer the last two years and use a small candidate pool by capping `--maxCandidates` at 5 for this automation.',
+      '- The external profile must be tag-level only. Do not send raw lab values, names, dates of birth, full notes, medical records, precise private identifiers, organizations, locations, events, or raw measurements to external providers.',
+      '- Use only broad lowercase non-identifying category tags, such as sleep, metabolic health, glucose, hs-crp, resistance training, creatine, type 2 diabetes, better recovery, or morning light.',
+      '- Define 1-4 focused, mechanism-shaped research lanes tied to current questions or experiments. Group related tags into one lane; do not create one lane per tag. Good lane labels include evening light and sleep, wearable hrv reliability, training recovery, or creatine and recovery.',
+      '- If unsure about the batch file body, run `vault-cli research scout-batch-payload-schema --format json` before the scout call.',
+      '- Use `vault-cli research scout-batch` once. The `--input` body is `{"lanes":[{"label":"sleep","profile":{...}}]}`. Each lane profile uses bucket fields `topics`, `biomarkers`, `behaviors`, `supplements`, `conditionsOrConcerns`, `goals`, and `activeExperiments`; do not use a generic `tags` field. Example body: `{"lanes":[{"label":"evening light and sleep","profile":{"topics":["sleep"],"behaviors":["evening light"],"activeExperiments":["blue light glasses"]}},{"label":"wearable hrv reliability","profile":{"topics":["recovery"],"behaviors":["wearable tracking"]}}]}`.',
+      '- Pass publication bounds as `--since` and `--until`; YYYY-MM-DD dates or full ISO timestamps are accepted. Prefer the last two years and cap `--maxCandidatesPerLane` at 8 for this automation.',
+      '- Treat the returned results as a candidate pool only. Review, dedupe, and rank candidates locally against the current vault context and prior research scout ledger, then either send one conversational note or suppress the run.',
       '- Do not perform an open-ended web browsing loop.',
-      '- Deduplicate against prior `weekly-health-research-scout` sections.',
       '',
-      'Candidate quality rules:',
-      "- Insightful means the item changes a practical question the user is already working on: how to run an active experiment, what to ask a clinician, or how to interpret a current habit, symptom, lab, or device trend. Novelty alone is not enough.",
-      '- Prefer human studies, clinical guidelines, meta-analyses, systematic reviews, randomized trials, and large prospective cohorts.',
+      'Selection rules:',
+      "- A candidate clears the bar only if it changes one practical question the user is already working on: how to run an active experiment, what to measure next, what to ask a clinician, how to interpret a device or lab signal, or what noisy metric to ignore.",
+      '- Prefer human studies, clinical guidelines, meta-analyses, systematic reviews, randomized trials, and large prospective cohorts, but do not send a stronger-but-irrelevant source over a weaker-but-practical one.',
       '- Include therapies or treatments only when source quality is credible.',
       '- Treat preprints, animal studies, cell studies, press releases, supplement marketing, podcasts, and tweets as weak evidence.',
-      '- Reject generic health news.',
-      '- Reject narrow supplement-timing, performance-hack, or biomarker trivia unless it changes a practical question the user is already working on.',
+      '- Reject generic health news, obvious habit advice, mildly topical findings, and narrow supplement-timing, performance-hack, or biomarker trivia.',
       "- Reject items that are not clearly related to the user's vault context.",
       '- Reject alarmist or fear-mongering interpretations.',
       '- Do not recommend starting, stopping, or changing medications.',
       '- For medical topics, frame the item as a clinician discussion prompt, not a diagnosis or prescription.',
       '',
       'If nothing clears the bar:',
-      '- Prefer sending nothing over sending a merely topical or mildly useful item.',
       '- Suppress the scheduled message and do not append to the wiki.',
       '',
       'If something clears the bar:',
-      '- Send at most 1 item.',
-      '- Treat `--maxCandidates` as the retrieval budget, not the final output count; review the small candidate pool and choose only the single best item if one clears the bar.',
-      '- Include at most one kudos item when research supports something the user is already doing well.',
-      '- For each item include:',
-      '  - study/source and date',
-      '  - why it may matter for this user specifically',
-      '  - evidence strength',
-      '  - one useful action, experiment, or clinician question',
-      '  - one thing not to overinterpret',
-      '  - a final plain-English `Basically:` sentence that explains what the item means without jargon',
-      '- Explain technical terms in ordinary language before relying on them; do not assume the user knows phrases like CBT-I, network meta-analysis, or circadian entrainment.',
+      '- Send exactly one short note about the single best item. Never send a second item, even if several candidates are interesting.',
+      '- Lead with why the item is useful for this user, not with source metadata.',
+      '- Mention source provenance naturally only when it helps trust, such as `I found a recent sleep paper...`; do not include source URLs unless the user asks.',
+      '- Keep study names, publication dates, study type, evidence strength, source URLs, candidate ranking notes, and detailed caveats in the `weekly-health-research-scout` wiki section instead of the outbound note unless the user asks for sources.',
+      '- Explain any technical term in ordinary language before using it.',
+      '- Put one practical next move in the prose: tweak an active experiment, measure one thing, ignore a noisy metric, ask a clinician a better question, or keep a simple behavior stable.',
       '- Keep the message practical, calm, and non-alarmist.',
-      '- Append one dated section to `weekly-health-research-scout`.',
+      '- Append one dated section to `weekly-health-research-scout` with source details, candidate ranking notes, and why the final item was chosen.',
     ].join('\n'),
   },
   {
@@ -272,23 +349,22 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'murph-managed:weekly-product-updates',
     ],
     instructions: [
-      'Each Thursday at 11:30 AM local time, compose one concise personalized in-chat update about what is new in Murph.',
+      'Goal: send one concise personalized in-chat update with the 2-3 shipped Murph updates this user is most likely to find genuinely interesting. If nothing clears that bar, send nothing.',
       '',
-      `Fetch the canonical JSON feed once from ${MURPH_PRODUCT_ORIGIN}/api/changelog?days=7&featureLimit=20&improvementLimit=5.`,
+      `Fetch the canonical JSON feed once from ${MURPH_PRODUCT_ORIGIN}/api/changelog?days=7&featureLimit=70&improvementLimit=10.`,
       '- Treat that feed as the only source of shipped-product truth. Do not infer launches from repository history or invent availability, benefits, or try-it instructions.',
       '- If the feed is unavailable, invalid, or empty, return `{"kind":"skip","privateSummary":"Changelog feed unavailable or empty."}` and do not attach media.',
       '',
-      'Choose 3-7 items that are most likely to matter to this user. Rank using only context Murph already has for normal assistance: connected providers and channels, active experiments and automations, recurring request categories, and features the user already uses.',
+      'Selection budget: choose 2-3 items from the feed using only context Murph already has for normal assistance: connected providers and channels, active experiments and automations, recurring request categories, and features the user already uses.',
       '- Do not inspect raw health values solely to personalize product news.',
-      '- Prefer relevance, practical benefit, editorial priority, and novelty. Do not fill space with weak matches.',
+      '- Prefer user-fit, practical benefit, editorial priority, and novelty. Do not pad with weak matches; send one strong item or skip rather than stretching to fill 2-3 slots.',
       '- Use the canonical title, summary, URL, and tryIt fields from the feed.',
+      '- Before sending, verify each selected item has a concrete reason it may interest this user and a canonical feed-backed title or summary. Drop anything that is merely generally new.',
       '',
-      'Create the visual digest deterministically:',
-      '- Take the selected item ids in message order and join them with `~`.',
-      '- Replace `{ids}` in `links.digestCardTemplate` with that joined value.',
-      '- Attach the resulting PNG URL with `murph.attach_response_media` and useful alt text.',
+      'Keep this scheduled announcement text-only. Do not create, attach, or send a changelog image or response media.',
       '',
-      'Write a brief, warm note with the selected updates, why the top choices fit this user, and the canonical full changelog link.',
+      'Write a brief, warm note with the selected updates and why they may be interesting for this user. Keep it compact; 2-3 short bullets or short paragraphs are enough.',
+      'If the user has not received one of these announcement automations before, add one short opening sentence about the update, then move directly into the chosen items.',
       'Close by inviting the user to reply if any update sounds interesting, or if they have another feature in mind they would like Murph to add.',
       '',
       'On a later user turn, call `murph.submit_product_feedback` for explicit product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Use only structured kind, a concise product-only summary, and optional changelog item ids; do not include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
@@ -300,12 +376,23 @@ export async function applyMurphManagedAutomations(
   input: ApplyMurphManagedAutomationsInput,
 ): Promise<ApplyMurphManagedAutomationsResult> {
   const now = input.now ?? new Date()
-  const seeds =
+  const rawSeeds =
     input.seeds ??
     [
       ...MURPH_MANAGED_AUTOMATIONS,
       ...(await buildExperimentFinalResultsSeeds({ vaultRoot: input.vaultRoot, now })),
     ]
+  let scheduleStableKey: string | null | undefined
+  let scheduleStableKeyUnavailable = false
+  const resolveScheduleStableKey = async (): Promise<string | null> => {
+    if (scheduleStableKey !== undefined) {
+      return scheduleStableKey
+    }
+    scheduleStableKey = await resolveMurphManagedScheduleStableKey({
+      vaultRoot: input.vaultRoot,
+    })
+    return scheduleStableKey
+  }
   let createRoute: AutomationRoute | null | undefined
   const resolveCreateRoute = async (): Promise<AutomationRoute | null> => {
     if (createRoute !== undefined) {
@@ -320,13 +407,40 @@ export async function applyMurphManagedAutomations(
     updated: 0,
   }
 
-  for (const seed of seeds) {
+  for (const rawSeed of rawSeeds) {
     const existing = await showAutomation({
-      automationId: seed.automationId,
+      automationId: rawSeed.automationId,
       vaultRoot: input.vaultRoot,
     })
 
     if (!existing) {
+      let stableKey: string | null = null
+      if (shouldSpreadMurphManagedAutomationSchedule(rawSeed)) {
+        if (scheduleStableKeyUnavailable) {
+          result.skipped += 1
+          result.stableKeyRetryNeeded = true
+          continue
+        }
+        try {
+          stableKey = await resolveScheduleStableKey()
+        } catch (error) {
+          scheduleStableKeyUnavailable = true
+          result.skipped += 1
+          result.stableKeyFailure = error
+          result.stableKeyRetryNeeded = true
+          continue
+        }
+      }
+
+      const seed = resolveMurphManagedAutomationCreateSeed({
+        seed: rawSeed,
+        stableKey,
+      })
+      if (!seed) {
+        result.skipped += 1
+        continue
+      }
+
       if (!murphManagedAutomationRuntimeRequirementsMet(seed, input.runtimeEnv)) {
         result.skipped += 1
         continue
@@ -358,6 +472,9 @@ export async function applyMurphManagedAutomations(
         continuityPolicy: resolveMurphManagedAutomationContinuity(seed),
         instructions: seed.instructions,
         now,
+        ...(seed.assistantTargetOverride === undefined
+          ? {}
+          : { assistantTargetOverride: seed.assistantTargetOverride }),
         route,
         schedule: seed.schedule,
         slug: seed.slug,
@@ -373,6 +490,10 @@ export async function applyMurphManagedAutomations(
       continue
     }
 
+    const preserveExistingSchedule =
+      shouldSpreadMurphManagedAutomationSchedule(rawSeed)
+    const seed = rawSeed
+
     if (existing.status !== 'active') {
       result.skipped += 1
       continue
@@ -383,7 +504,22 @@ export async function applyMurphManagedAutomations(
       continue
     }
 
-    if (!murphManagedAutomationSeedChanged(existing, seed)) {
+    if (
+      preserveExistingSchedule &&
+      existing.schedule.kind === 'at'
+    ) {
+      // Device-activity matching rewrites the reusable managed record into a
+      // due one-shot with occurrence-specific prompt context. Do not reconcile
+      // the weekly seed over that queued payload before the automation lane runs.
+      result.skipped += 1
+      continue
+    }
+
+    if (!murphManagedAutomationSeedChanged(
+      existing,
+      seed,
+      { ignoreSchedule: preserveExistingSchedule },
+    )) {
       result.skipped += 1
       continue
     }
@@ -397,14 +533,18 @@ export async function applyMurphManagedAutomations(
     // schedule (cron/every/dailyLocal) under one-shot instructions would
     // fire the final-review repeatedly, so it must be replaced with the
     // new desired schedule (and archived if that is itself stale).
-    const newDesiredStale = isStaleOneShotSchedule(seed.schedule, now)
+    const newDesiredStale = preserveExistingSchedule
+      ? false
+      : isStaleOneShotSchedule(seed.schedule, now)
     const legacyOneShotStillFires =
       existing.schedule.kind === 'at' &&
       !isStaleOneShotSchedule(existing.schedule, now)
-    let reconciledSchedule: MurphManagedAutomationSchedule = seed.schedule
+    let reconciledSchedule: AutomationSchedule = preserveExistingSchedule
+      ? existing.schedule
+      : seed.schedule
     let reconciledStatus: AutomationStatus = existing.status
     if (newDesiredStale && legacyOneShotStillFires) {
-      reconciledSchedule = existing.schedule as MurphManagedAutomationSchedule
+      reconciledSchedule = existing.schedule
     } else if (newDesiredStale) {
       reconciledStatus = 'archived'
     }
@@ -415,6 +555,9 @@ export async function applyMurphManagedAutomations(
       continuityPolicy: resolveMurphManagedAutomationContinuity(seed),
       instructions: seed.instructions,
       now,
+      ...(seed.assistantTargetOverride === undefined
+        ? {}
+        : { assistantTargetOverride: seed.assistantTargetOverride }),
       // Routes are user/runtime-owned: seeds never carry one, so updates
       // preserve the existing route without re-checking deliverability.
       // Only the create path validates routes, because that is the only
@@ -441,6 +584,85 @@ export async function applyMurphManagedAutomations(
   }
 
   return result
+}
+
+async function resolveMurphManagedScheduleStableKey(input: {
+  vaultRoot: string
+}): Promise<string | null> {
+  const vault = await loadVault({ vaultRoot: input.vaultRoot })
+  const vaultId = typeof vault.metadata.vaultId === 'string'
+    ? vault.metadata.vaultId.trim()
+    : ''
+  return vaultId.length > 0 ? vaultId : null
+}
+
+function shouldSpreadMurphManagedAutomationSchedule(
+  seed: MurphManagedAutomationSeed,
+): boolean {
+  return seed.schedule.kind === 'cron' &&
+    MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS[seed.automationId] !== undefined
+}
+
+function resolveMurphManagedAutomationCreateSeed(input: {
+  seed: MurphManagedAutomationSeed
+  stableKey: string | null
+}): MurphManagedAutomationSeed | null {
+  const spread = MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS[input.seed.automationId]
+  if (!spread || input.seed.schedule.kind !== 'cron') {
+    return input.seed
+  }
+
+  if (input.stableKey === null) {
+    return null
+  }
+
+  return {
+    ...input.seed,
+    schedule: resolveMurphManagedWeeklySpreadSchedule({
+      automationId: input.seed.automationId,
+      spread,
+      stableKey: input.stableKey,
+    }),
+  }
+}
+
+function resolveMurphManagedWeeklySpreadSchedule(input: {
+  automationId: string
+  spread: MurphManagedWeeklyScheduleSpread
+  stableKey: string
+}): MurphManagedAutomationSchedule {
+  const slots = input.spread.daysOfWeek.length * input.spread.slotsPerDay
+  const slotIndex = stableHashToIndex(
+    [
+      'murph-managed-weekly-schedule',
+      input.stableKey,
+      input.automationId,
+    ].join(':'),
+    slots,
+  )
+  const dayIndex = Math.floor(slotIndex / input.spread.slotsPerDay)
+  const slotInDay = slotIndex % input.spread.slotsPerDay
+  const dayOfWeek = input.spread.daysOfWeek[dayIndex]
+  if (dayOfWeek === undefined) {
+    throw new Error('Managed automation schedule spread resolved an invalid day.')
+  }
+  const minuteOfDay =
+    input.spread.startMinuteOfDay + slotInDay * input.spread.slotMinutes
+  const hour = Math.floor(minuteOfDay / 60)
+  const minute = minuteOfDay % 60
+
+  return {
+    kind: 'cron',
+    expression: `${minute} ${hour} * * ${dayOfWeek}`,
+  }
+}
+
+function stableHashToIndex(material: string, length: number): number {
+  if (!Number.isSafeInteger(length) || length <= 0) {
+    throw new Error('Managed automation schedule spread requires at least one slot.')
+  }
+
+  return createHash('sha256').update(material).digest().readUInt32BE(0) % length
 }
 
 async function reconcileExistingOnboardingFollowupAutomation(input: {
@@ -552,6 +774,7 @@ function isLegacySeededOnboardingFollowupAutomation(
 function murphManagedAutomationSeedChanged(
   existing: AutomationRecord,
   seed: MurphManagedAutomationSeed,
+  options: { ignoreSchedule?: boolean } = {},
 ): boolean {
   // A seed without a summary leaves the stored summary unmanaged. This must
   // match upsertAutomation's omitted-field semantics (an omitted summary
@@ -562,7 +785,17 @@ function murphManagedAutomationSeedChanged(
     (summary !== null && existing.summary !== summary) ||
     existing.continuityPolicy !== resolveMurphManagedAutomationContinuity(seed) ||
     existing.instructions !== seed.instructions ||
-    !murphManagedAutomationValuesEqual(existing.schedule, seed.schedule) ||
+    (
+      seed.assistantTargetOverride !== undefined &&
+      !murphManagedAutomationValuesEqual(
+        existing.assistantTargetOverride,
+        seed.assistantTargetOverride,
+      )
+    ) ||
+    (
+      options.ignoreSchedule !== true &&
+      !murphManagedAutomationValuesEqual(existing.schedule, seed.schedule)
+    ) ||
     !murphManagedAutomationValuesEqual(
       existing.tags,
       buildMurphManagedAutomationTags(seed),

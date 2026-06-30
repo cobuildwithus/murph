@@ -18,6 +18,9 @@ import type {
   AssistantProviderServiceTier,
   AssistantProviderTurnExecutionResult,
 } from './providers/types.js'
+import type {
+  AutomationAssistantTargetOverride,
+} from '@murphai/contracts'
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantCliAccessContext } from '../assistant-cli-access.js'
 import type { AssistantOutboxDispatchMode } from './outbox.js'
@@ -106,6 +109,9 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   } | null
   activeTurnCheckpoint?: AssistantActiveTurnInputCheckpointHook
   activeTurnInput?: AssistantActiveTurnInputAdmissionHook
+  // Automation-owned per-turn provider route override. It is execution input,
+  // not durable session target state.
+  assistantTargetOverride?: AutomationAssistantTargetOverride | null
   codexCommand?: string
   deliverResponse?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode

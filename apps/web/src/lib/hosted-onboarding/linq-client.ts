@@ -1,12 +1,55 @@
 import type {
-  LinqCreateChatResponse,
-  LinqCreateWebhookSubscriptionResponse,
-} from "@murphai/messaging-ingress/linq-webhook";
+  AttachmentCreateParams,
+  AttachmentCreateResponse,
+  ChatCreateParams,
+  ChatCreateResponse,
+  ChatSendVoicememoParams,
+  SupportedContentType,
+  TextPart,
+  WebhookEventType,
+  WebhookSubscriptionCreateParams,
+  WebhookSubscriptionCreateResponse,
+} from "@linqapp/sdk/resources";
+import type { MessageSendParams } from "@linqapp/sdk/resources/chats";
+import { isIP } from "node:net";
 
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError } from "./errors";
 import { requireHostedOnboardingLinqConfig } from "./runtime";
 import { normalizeNullableString } from "./shared";
+
+const HOSTED_LINQ_WEBHOOK_EVENT_TYPES = [
+  "message.sent",
+  "message.received",
+  "message.read",
+  "message.delivered",
+  "message.failed",
+  "message.edited",
+  "reaction.added",
+  "reaction.removed",
+  "participant.added",
+  "participant.removed",
+  "chat.created",
+  "chat.group_name_updated",
+  "chat.group_icon_updated",
+  "chat.group_name_update_failed",
+  "chat.group_icon_update_failed",
+  "chat.typing_indicator.started",
+  "chat.typing_indicator.stopped",
+  "phone_number.status_updated",
+  "call.initiated",
+  "call.ringing",
+  "call.answered",
+  "call.ended",
+  "call.failed",
+  "call.declined",
+  "call.no_answer",
+  "location.sharing.started",
+  "location.sharing.stopped",
+] as const satisfies readonly WebhookEventType[];
+const HOSTED_LINQ_WEBHOOK_EVENT_TYPE_SET: ReadonlySet<string> =
+  new Set(HOSTED_LINQ_WEBHOOK_EVENT_TYPES);
+const HOSTED_LINQ_ATTACHMENT_UPLOAD_TIMEOUT_MS = 10_000;
 
 export type HostedLinqWebhookSubscription = {
   createdAt: string | null;
@@ -107,15 +150,17 @@ export async function createHostedLinqChat(input: {
   signal?: AbortSignal;
   to: string[];
 }): Promise<{ chatId: string | null; messageId: string | null }> {
+  const body: ChatCreateParams = {
+    from: normalizeRequiredString(input.from, "from"),
+    message: buildHostedLinqTextMessageBody({
+      idempotencyKey: input.idempotencyKey,
+      message: input.message,
+    }).message,
+    to: normalizeHostedLinqRecipients(input.to),
+  };
+
   const response = await fetchHostedLinqApiOrThrow({
-    body: JSON.stringify({
-      from: normalizeRequiredString(input.from, "from"),
-      message: buildHostedLinqTextMessageBody({
-        idempotencyKey: input.idempotencyKey,
-        message: input.message,
-      }).message,
-      to: normalizeHostedLinqRecipients(input.to),
-    }),
+    body: JSON.stringify(body),
     method: "POST",
     operation: "outbound chat creation",
     path: "chats",
@@ -131,11 +176,94 @@ export async function createHostedLinqChat(input: {
     });
   }
 
-  const payload = (await response.json()) as LinqCreateChatResponse;
+  const payload = (await response.json()) as ChatCreateResponse;
   return {
     chatId: normalizeNullableString(payload.chat?.id),
     messageId: normalizeNullableString(payload.chat?.message?.id),
   };
+}
+
+export async function uploadHostedLinqAttachment(input: {
+  bytes: Uint8Array;
+  contentType: SupportedContentType;
+  filename: string;
+  signal?: AbortSignal;
+  sizeBytes: number;
+}): Promise<{ attachmentId: string }> {
+  const linqConfig = requireHostedOnboardingLinqConfig();
+  const body: AttachmentCreateParams = {
+    content_type: input.contentType,
+    filename: normalizeRequiredString(input.filename, "attachment filename"),
+    size_bytes: normalizeHostedLinqAttachmentSize(input.sizeBytes),
+  };
+  const response = await fetchHostedLinqApiOrThrow({
+    body: JSON.stringify(body),
+    method: "POST",
+    operation: "attachment creation",
+    path: "attachments",
+    signal: input.signal,
+    timeoutMessage: "Linq attachment creation timed out.",
+  });
+
+  if (!response.ok) {
+    throw buildHostedLinqRequestFailedError({
+      operation: "attachment creation",
+      retryable: isRetryableHostedLinqStatus(response.status),
+      status: response.status,
+    });
+  }
+
+  const attachment = parseHostedLinqAttachmentUploadResponse(
+    (await response.json()) as AttachmentCreateResponse,
+    {
+      allowedUploadHosts: linqConfig.attachmentUploadAllowedHosts,
+    },
+  );
+  const uploadResponse = await fetchHostedLinqAttachmentUploadUrl({
+    bytes: input.bytes,
+    requiredHeaders: attachment.requiredHeaders,
+    signal: input.signal,
+    uploadUrl: attachment.uploadUrl,
+  });
+
+  if (!uploadResponse.ok) {
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      message: `Linq attachment upload failed with HTTP ${uploadResponse.status}.`,
+      httpStatus: 502,
+      retryable: isRetryableHostedLinqStatus(uploadResponse.status),
+    });
+  }
+
+  return { attachmentId: attachment.attachmentId };
+}
+
+export async function sendHostedLinqVoiceMemo(input: {
+  attachmentId: string;
+  chatId: string;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const body: ChatSendVoicememoParams = {
+    attachment_id: normalizeRequiredString(input.attachmentId, "attachment id"),
+  };
+  const response = await fetchHostedLinqApiOrThrow({
+    body: JSON.stringify(body),
+    method: "POST",
+    operation: "voice memo send",
+    path: `chats/${
+      encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))
+    }/voicememo`,
+    signal: input.signal,
+    timeoutMessage: "Linq voice memo send timed out.",
+  });
+
+  if (!response.ok) {
+    throw buildHostedLinqRequestFailedError({
+      operation: "voice memo send",
+      retryable: isRetryableHostedLinqStatus(response.status),
+      status: response.status,
+    });
+  }
 }
 
 export async function createHostedLinqWebhookSubscription(input: {
@@ -144,16 +272,21 @@ export async function createHostedLinqWebhookSubscription(input: {
   subscribedEvents: readonly string[];
   targetUrl: string;
 }): Promise<HostedLinqWebhookSubscription> {
+  const phoneNumbers = input.phoneNumbers && input.phoneNumbers.length > 0
+    ? normalizeHostedLinqRecipients(input.phoneNumbers)
+    : null;
+  const body: WebhookSubscriptionCreateParams = {
+    ...(phoneNumbers
+      ? {
+          phone_numbers: phoneNumbers,
+        }
+      : {}),
+    subscribed_events: normalizeHostedLinqSubscribedEvents(input.subscribedEvents),
+    target_url: normalizeRequiredString(input.targetUrl, "target url"),
+  };
+
   const response = await fetchHostedLinqApiOrThrow({
-    body: JSON.stringify({
-      ...(input.phoneNumbers && input.phoneNumbers.length > 0
-        ? {
-            phone_numbers: normalizeHostedLinqRecipients(input.phoneNumbers),
-          }
-        : {}),
-      subscribed_events: normalizeHostedLinqSubscribedEvents(input.subscribedEvents),
-      target_url: normalizeRequiredString(input.targetUrl, "target url"),
-    }),
+    body: JSON.stringify(body),
     method: "POST",
     operation: "webhook subscription creation",
     path: "webhook-subscriptions",
@@ -169,7 +302,7 @@ export async function createHostedLinqWebhookSubscription(input: {
     });
   }
 
-  const payload = (await response.json()) as LinqCreateWebhookSubscriptionResponse;
+  const payload = (await response.json()) as WebhookSubscriptionCreateResponse;
   return {
     createdAt: normalizeNullableString(payload.created_at),
     id: normalizeNullableString(payload.id),
@@ -184,6 +317,7 @@ export async function createHostedLinqWebhookSubscription(input: {
 
 async function fetchHostedLinqApiOrThrow(input: {
   body: string;
+  headers?: HeadersInit;
   method: string;
   operation: string;
   path: string;
@@ -197,6 +331,7 @@ async function fetchHostedLinqApiOrThrow(input: {
       apiBaseUrl,
       apiToken,
       body: input.body,
+      headers: input.headers,
       method: input.method,
       path: input.path,
       signal: input.signal,
@@ -242,32 +377,276 @@ function isRetryableHostedLinqStatus(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
+async function fetchHostedLinqAttachmentUploadUrl(input: {
+  bytes: Uint8Array;
+  requiredHeaders: Record<string, string>;
+  signal?: AbortSignal;
+  uploadUrl: string;
+}): Promise<Response> {
+  const { clearTimeout, didTimeout, signal } = createHostedLinqTimeoutSignal({
+    signal: input.signal,
+    timeoutMs: HOSTED_LINQ_ATTACHMENT_UPLOAD_TIMEOUT_MS,
+  });
+
+  try {
+    return await fetch(input.uploadUrl, {
+      body: copyBytesToArrayBuffer(input.bytes),
+      headers: normalizeHostedLinqAttachmentUploadHeaders(input.requiredHeaders),
+      method: "PUT",
+      redirect: "error",
+      signal,
+    });
+  } catch (error) {
+    if (didTimeout() && !input.signal?.aborted) {
+      throw hostedOnboardingError({
+        code: "LINQ_SEND_FAILED",
+        message: "Linq attachment upload timed out.",
+        httpStatus: 502,
+        retryable: true,
+      });
+    }
+
+    throw error;
+  } finally {
+    clearTimeout();
+  }
+}
+
+function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
+function createHostedLinqTimeoutSignal(input: {
+  signal?: AbortSignal;
+  timeoutMs: number;
+}): {
+  clearTimeout: () => void;
+  didTimeout: () => boolean;
+  signal: AbortSignal;
+} {
+  const controller = new AbortController();
+  let timedOut = false;
+  const onAbort = () => {
+    controller.abort(input.signal?.reason);
+  };
+
+  if (input.signal) {
+    if (input.signal.aborted) {
+      controller.abort(input.signal.reason);
+    } else {
+      input.signal.addEventListener("abort", onAbort, { once: true });
+    }
+  }
+
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new LinqApiTimeoutError("Linq attachment upload timed out."));
+  }, input.timeoutMs);
+
+  return {
+    clearTimeout: () => {
+      clearTimeout(timeoutId);
+      input.signal?.removeEventListener("abort", onAbort);
+    },
+    didTimeout: () => timedOut,
+    signal: controller.signal,
+  };
+}
+
+function normalizeHostedLinqAttachmentSize(value: number): number {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new TypeError("attachment size must be a positive integer.");
+  }
+
+  return value;
+}
+
+function normalizeHostedLinqAttachmentUploadUrl(
+  value: unknown,
+  allowedUploadHosts: readonly string[],
+): string {
+  let url: URL;
+
+  try {
+    url = new URL(normalizeRequiredString(value, "attachment upload URL"));
+  } catch {
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      message: "Linq attachment upload URL was invalid.",
+      httpStatus: 502,
+      retryable: false,
+    });
+  }
+
+  if (url.protocol !== "https:") {
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      message: "Linq attachment upload URL must use HTTPS.",
+      httpStatus: 502,
+      retryable: false,
+    });
+  }
+
+  if (url.username || url.password || url.hash) {
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      message: "Linq attachment upload URL must not include credentials or fragments.",
+      httpStatus: 502,
+      retryable: false,
+    });
+  }
+
+  if (!isAllowedHostedLinqAttachmentUploadHost(url.hostname, allowedUploadHosts)) {
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      message: "Linq attachment upload URL host is not authorized.",
+      httpStatus: 502,
+      retryable: false,
+    });
+  }
+
+  return url.toString();
+}
+
+function parseHostedLinqAttachmentUploadResponse(
+  value: AttachmentCreateResponse,
+  options: {
+    allowedUploadHosts: readonly string[];
+  },
+): {
+  attachmentId: string;
+  requiredHeaders: Record<string, string>;
+  uploadUrl: string;
+} {
+  const record = readRecord(value);
+  const attachmentId = normalizeNullableString(record?.attachment_id);
+  const uploadUrl = normalizeNullableString(record?.upload_url);
+  const expiresAt = normalizeNullableString(record?.expires_at);
+  const httpMethod = normalizeNullableString(record?.http_method);
+  const requiredHeaders = readStringRecord(record?.required_headers);
+
+  if (!attachmentId || !uploadUrl || !expiresAt || !requiredHeaders) {
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      message: "Linq attachment upload response was missing required fields.",
+      httpStatus: 502,
+      retryable: false,
+    });
+  }
+
+  if (httpMethod && httpMethod.toUpperCase() !== "PUT") {
+    throw hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      message: "Linq attachment upload response returned an unsupported upload method.",
+      httpStatus: 502,
+      retryable: false,
+    });
+  }
+
+  return {
+    attachmentId,
+    requiredHeaders,
+    uploadUrl: normalizeHostedLinqAttachmentUploadUrl(
+      uploadUrl,
+      options.allowedUploadHosts,
+    ),
+  };
+}
+
+function normalizeHostedLinqAttachmentUploadHeaders(
+  value: Record<string, string>,
+): Headers {
+  const headers = new Headers();
+
+  for (const [name, headerValue] of Object.entries(value)) {
+    if (!name || typeof headerValue !== "string") {
+      throw new TypeError("attachment upload headers are invalid.");
+    }
+
+    if (isForbiddenHostedLinqAttachmentUploadHeader(name)) {
+      throw hostedOnboardingError({
+        code: "LINQ_SEND_FAILED",
+        message: "Linq attachment upload headers included an unsafe header.",
+        httpStatus: 502,
+        retryable: false,
+      });
+    }
+
+    headers.set(name, headerValue);
+  }
+
+  return headers;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readStringRecord(value: unknown): Record<string, string> | null {
+  const record = readRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const output: Record<string, string> = {};
+  for (const [key, recordValue] of Object.entries(record)) {
+    if (typeof recordValue !== "string") {
+      return null;
+    }
+    output[key] = recordValue;
+  }
+
+  return output;
+}
+
+function isAllowedHostedLinqAttachmentUploadHost(
+  hostname: string,
+  allowedUploadHosts: readonly string[],
+): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.$/u, "");
+  if (
+    !normalized
+    || normalized === "localhost"
+    || normalized.endsWith(".localhost")
+    || normalized.endsWith(".local")
+  ) {
+    return false;
+  }
+
+  const ipLiteral = normalized.startsWith("[") && normalized.endsWith("]")
+    ? normalized.slice(1, -1)
+    : normalized;
+
+  return isIP(ipLiteral) === 0 && allowedUploadHosts.includes(normalized);
+}
+
+function isForbiddenHostedLinqAttachmentUploadHeader(name: string): boolean {
+  const normalized = name.toLowerCase();
+  return normalized === "authorization"
+    || normalized === "cookie"
+    || normalized === "proxy-authorization";
+}
+
 function buildHostedLinqTextMessageBody(input: {
   idempotencyKey?: string | null;
   message: string;
   replyToMessageId?: string | null;
-}): {
-  message: {
-    idempotency_key?: string;
-    parts: Array<{
-      type: "text";
-      value: string;
-    }>;
-    reply_to?: {
-      message_id: string;
-    };
-  };
-} {
+}): MessageSendParams {
   const idempotencyKey = normalizeNullableString(input.idempotencyKey);
   const replyToMessageId = normalizeNullableString(input.replyToMessageId);
+  const textPart: TextPart = {
+    type: "text",
+    value: normalizeRequiredString(input.message, "message"),
+  };
 
   return {
     message: {
       parts: [
-        {
-          type: "text",
-          value: normalizeRequiredString(input.message, "message"),
-        },
+        textPart,
       ],
       ...(idempotencyKey
         ? {
@@ -297,16 +676,27 @@ function normalizeHostedLinqRecipients(values: readonly string[]): string[] {
   return recipients;
 }
 
-function normalizeHostedLinqSubscribedEvents(values: readonly string[]): string[] {
+function normalizeHostedLinqSubscribedEvents(values: readonly string[]): WebhookEventType[] {
   const subscribedEvents = values
     .map((value) => normalizeRequiredString(value, "subscribed event"))
-    .filter((value, index, array) => array.indexOf(value) === index);
+    .filter((value, index, array) => array.indexOf(value) === index)
+    .map((value) => {
+      if (isHostedLinqWebhookEventType(value)) {
+        return value;
+      }
+
+      throw new TypeError("Linq subscribed event is not supported by the Linq SDK contract.");
+    });
 
   if (subscribedEvents.length === 0) {
     throw new TypeError("At least one Linq subscribed event is required.");
   }
 
   return subscribedEvents;
+}
+
+function isHostedLinqWebhookEventType(value: string): value is WebhookEventType {
+  return HOSTED_LINQ_WEBHOOK_EVENT_TYPE_SET.has(value);
 }
 
 function normalizeHostedLinqOptionalTextArray(values: readonly unknown[] | null | undefined): string[] {

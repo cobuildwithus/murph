@@ -176,7 +176,6 @@ async function startVaultPersistenceScenario(input: {
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
     },
     assistantProviderMode: "live",
     assistantProviderStubModelId: safeLiveAssistantModel,

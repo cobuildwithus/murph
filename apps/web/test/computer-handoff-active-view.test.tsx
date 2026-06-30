@@ -12,6 +12,7 @@ import { ComputerHandoffActiveView } from "@/src/components/computer-use/compute
 import { renderClientComponent } from "./render-client-component";
 
 const DONE_ENDPOINT = "/api/computer/handoff/handoff-token/done";
+const VIEWPORT_ENDPOINT = "/api/computer/handoff/handoff-token/viewport";
 
 let cleanupRender: (() => Promise<void>) | null = null;
 
@@ -75,6 +76,92 @@ test("ComputerHandoffActiveView starts takeover with one click", async () => {
   expect(track).toHaveBeenCalledWith("live_view_focus_enabled");
 });
 
+test("ComputerHandoffActiveView posts the first measured viewport size", async () => {
+  vi.useFakeTimers();
+  vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+    headers: { "content-type": "application/json" },
+    status: 202,
+  }));
+  const { cleanup, container, window } = await renderHandoff();
+  cleanupRender = cleanup;
+
+  await measureViewportSurface(container, window, { height: 844, width: 390 });
+
+  expectViewportPost({ height: 844, width: 392 });
+});
+
+test("ComputerHandoffActiveView retries the same viewport size after an HTTP failure", async () => {
+  vi.useFakeTimers();
+  vi.mocked(fetch)
+    .mockResolvedValueOnce(new Response(JSON.stringify({ ok: false }), {
+      headers: { "content-type": "application/json" },
+      status: 400,
+    }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+      headers: { "content-type": "application/json" },
+      status: 202,
+    }));
+  const { cleanup, container, window } = await renderHandoff();
+  cleanupRender = cleanup;
+
+  await measureViewportSurface(container, window, { height: 844, width: 390 });
+  expect(fetch).toHaveBeenCalledTimes(1);
+
+  await measureViewportSurface(container, window, { height: 844, width: 390 });
+
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expectViewportPost({ height: 844, width: 392 });
+});
+
+test("ComputerHandoffActiveView suppresses cached viewport jitter", async () => {
+  vi.useFakeTimers();
+  vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+    headers: { "content-type": "application/json" },
+    status: 202,
+  }));
+  const { cleanup, container, window } = await renderHandoff({
+    initialViewportSize: { height: 844, width: 392 },
+  });
+  cleanupRender = cleanup;
+
+  await measureViewportSurface(container, window, { height: 852, width: 400 });
+
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test("ComputerHandoffActiveView posts a material viewport correction", async () => {
+  vi.useFakeTimers();
+  vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+    headers: { "content-type": "application/json" },
+    status: 202,
+  }));
+  const { cleanup, container, window } = await renderHandoff({
+    initialViewportSize: { height: 844, width: 392 },
+  });
+  cleanupRender = cleanup;
+
+  await measureViewportSurface(container, window, { height: 844, width: 430 });
+
+  expectViewportPost({ height: 844, width: 432 });
+});
+
+test("ComputerHandoffActiveView keeps viewport sync alive after takeover", async () => {
+  vi.useFakeTimers();
+  vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+    headers: { "content-type": "application/json" },
+    status: 202,
+  }));
+  const { cleanup, container, window } = await renderHandoff({
+    initialViewportSize: { height: 844, width: 392 },
+  });
+  cleanupRender = cleanup;
+
+  await click(window, findTakeoverButton(container));
+  await measureViewportSurface(container, window, { height: 844, width: 430 });
+
+  expectViewportPost({ height: 844, width: 432 });
+});
+
 test("ComputerHandoffActiveView can refocus the live view after takeover", async () => {
   const { cleanup, container, window } = await renderHandoff();
   cleanupRender = cleanup;
@@ -97,7 +184,7 @@ test("ComputerHandoffActiveView can refocus the live view after takeover", async
   ).toHaveLength(1);
 });
 
-test("ComputerHandoffActiveView covers the iframe with the saving overlay while completing a handoff", async () => {
+test("ComputerHandoffActiveView unmounts the iframe while completing a handoff", async () => {
   let resolveDone!: (response: Response) => void;
   const donePromise = new Promise<Response>((resolve) => {
     resolveDone = resolve;
@@ -129,11 +216,9 @@ test("ComputerHandoffActiveView covers the iframe with the saving overlay while 
   assert.ok(savingStatus);
   expect(savingStatus.textContent).toContain("Saving your progress");
   expect(savingStatus.querySelector("svg .murph-loader-dot")).toBeTruthy();
-  expect(container.querySelector("iframe")).toBe(iframe);
-  expect(findDoneButton(container)).toBe(doneButton);
-  expect(findFocusButton(container)).toBe(focusButton);
-  expect(doneButton.disabled).toBe(true);
-  expect(focusButton.disabled).toBe(true);
+  expect(container.querySelector("iframe")).toBeNull();
+  expect(findDoneButton(container)).toBeNull();
+  expect(findFocusButton(container)).toBeNull();
 
   await act(async () => {
     resolveDone(new Response(JSON.stringify({ redirectTo: "sms:+15550100001?body=Done" }), {
@@ -216,7 +301,11 @@ test.each([
   ["HTTP error", new Response("server error", { status: 500 })],
   ["invalid JSON", new Response("not-json", { status: 200 })],
 ])("ComputerHandoffActiveView clears the saving overlay after %s", async (_label, response) => {
-  vi.mocked(fetch).mockResolvedValue(response);
+  let resolveDone!: (doneResponse: Response) => void;
+  const donePromise = new Promise<Response>((resolve) => {
+    resolveDone = resolve;
+  });
+  vi.mocked(fetch).mockReturnValue(donePromise);
 
   const { cleanup, container, window } = await renderHandoff({
     iframeAllow: "clipboard-read",
@@ -234,27 +323,85 @@ test.each([
 
   await click(window, doneButton);
 
-  expect(container.querySelector("iframe")).toBe(iframeBeforeClick);
+  expect(container.querySelector("iframe")).toBeNull();
+  expect(container.querySelector('[aria-busy="true"]')?.textContent).toContain(
+    "Saving your progress",
+  );
+
+  await act(async () => {
+    resolveDone(response);
+    await donePromise;
+    await flushMicrotasks();
+  });
+
   expect(container.querySelector('[aria-busy="true"]')).toBeNull();
   expect(container.querySelector('[role="alert"]')?.textContent).toBe(
     "Could not complete. Try again.",
   );
-  expect(findDoneButton(container)).toBe(doneButton);
-  expect(findFocusButton(container)).toBe(focusButton);
+  expect(container.querySelector("iframe")).not.toBe(iframeBeforeClick);
+  expect(findDoneButton(container)).not.toBe(doneButton);
+  expect(findFocusButton(container)).not.toBe(focusButton);
   expect(findDoneButton(container)?.disabled).toBe(false);
   expect(findFocusButton(container)?.disabled).toBe(false);
 });
 
 async function renderHandoff(overrides: {
   iframeAllow?: string;
+  initialViewportSize?: { height: number; width: number } | null;
 } = {}) {
   return await renderClientComponent(
     createElement(ComputerHandoffActiveView, {
       doneEndpoint: DONE_ENDPOINT,
       iframeAllow: overrides.iframeAllow ?? "clipboard-read; clipboard-write",
+      initialViewportSize: overrides.initialViewportSize ?? null,
       liveViewUrl: "https://browser.example.test/live",
+      viewportEndpoint: VIEWPORT_ENDPOINT,
     }),
   );
+}
+
+async function measureViewportSurface(
+  container: HTMLElement,
+  window: Window & typeof globalThis,
+  size: { height: number; width: number },
+): Promise<void> {
+  const iframe = container.querySelector("iframe");
+  assert.ok(iframe?.parentElement);
+  iframe.parentElement.getBoundingClientRect = vi.fn(() => ({
+    bottom: size.height,
+    height: size.height,
+    left: 0,
+    right: size.width,
+    toJSON: () => ({}),
+    top: 0,
+    width: size.width,
+    x: 0,
+    y: 0,
+  }));
+
+  await act(async () => {
+    window.dispatchEvent(new window.Event("orientationchange"));
+    await vi.advanceTimersByTimeAsync(200);
+  });
+  await flushMicrotasks();
+}
+
+function expectViewportPost(expectedSize: { height: number; width: number }): void {
+  expect(fetch).toHaveBeenCalledWith(VIEWPORT_ENDPOINT, {
+    body: expect.any(String),
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  const init = vi.mocked(fetch).mock.calls.at(-1)?.[1] as RequestInit | undefined;
+  expect(JSON.parse(String(init?.body))).toEqual({
+    ...expectedSize,
+    observedAt: expect.any(String),
+  });
 }
 
 function findTakeoverButton(container: HTMLElement): HTMLButtonElement | null {
@@ -271,7 +418,7 @@ function findDoneButton(container: HTMLElement): HTMLButtonElement | null {
 
 function findFocusButton(container: HTMLElement): HTMLButtonElement | null {
   return container.querySelector<HTMLButtonElement>(
-    'button[aria-label="Focus the private browser for keyboard and paste"]',
+    'button[aria-label="Focus the private browser"]',
   );
 }
 

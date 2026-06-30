@@ -63,12 +63,15 @@ import {
   type HostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
+  HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
+  HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
+  HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
@@ -309,20 +312,25 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
-      goal: "Book a dentist appointment.",
-      startUrl: "https://example.test",
-      taskKind: "appointment",
+      authority: {
+        accountLookupKey: "hbidx:phone:v1:account",
+        channel: "linq",
+        containerMemberId: "member_123",
+        threadId: "linq_chat_123",
+      },
     },
-    name: "hosted computer start run",
-    path: HOSTED_COMPUTER_RUNS_PATH,
+    name: "hosted thread-route egress authority assertion",
+    path: HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
   },
   {
-    body: {},
-    name: "hosted computer observe",
-    path: buildHostedComputerRunOperationPath({
-      operation: "observe",
-      runId: "run_123",
-    }),
+    body: {
+      goal: "Book a dentist appointment.",
+      resumeAfterMailboxItemId: null,
+      resumeDeliveryContext: null,
+      startUrl: "https://example.test",
+    },
+    name: "hosted computer open",
+    path: HOSTED_COMPUTER_RUNS_PATH,
   },
   {
     body: {
@@ -560,6 +568,17 @@ describe("handleRunnerOutboundRequest", () => {
       error: "Not found",
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("allowlists hosted action approval request and consume routes", () => {
+    expect(isAllowedHostedRunnerWebControlRequest({
+      method: "POST",
+      path: HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
+    })).toBe(true);
+    expect(isAllowedHostedRunnerWebControlRequest({
+      method: "POST",
+      path: HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
+    })).toBe(true);
   });
 
   it.each(ALLOWLISTED_WEB_CONTROL_CASES)(

@@ -1,4 +1,5 @@
 import {
+  HOSTED_RUNTIME_PROCESS_ENV_MARKER,
   prepareAssistantDirectCliEnv,
 } from '../../assistant-cli-access.js'
 import {
@@ -201,13 +202,17 @@ export async function executeCodexAssistantTurnAttempt(
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,
     configOverrides: mergeCodexConfigOverrides({
+      enableMultiAgentV2:
+        codexProcessEnv[HOSTED_RUNTIME_PROCESS_ENV_MARKER]?.trim() === '1',
       modelProvider: providerConfig.target.modelProvider,
       showThinkingTraces: input.showThinkingTraces ?? false,
     }),
+    loadAuthorizedReferenceImageRefs: input.loadAuthorizedReferenceImageRefs ?? null,
     env: codexProcessEnv,
     fetchImpl: input.providerFetch ?? undefined,
     hostedGeneratedImageUploader: input.generatedImageUploader ?? null,
     hostedToolContext: input.hostedToolContext ?? null,
+    materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     model: providerConfig.target.model ?? undefined,
     modelProvider: providerConfig.target.modelProvider ?? undefined,
     onCodexThreadHistoryUnsafe: input.onCodexThreadHistoryUnsafe ?? null,
@@ -254,6 +259,7 @@ export async function executeCodexAssistantTurnAttempt(
     reasoningEffort: providerConfig.policy.reasoningEffort ?? undefined,
     sandbox: providerConfig.policy.sandbox ?? undefined,
     serviceTier: input.serviceTier ?? null,
+    vaultRoot: input.vaultRoot ?? null,
     voiceMemoRuntime,
     workingDirectory: input.workingDirectory,
   } as const

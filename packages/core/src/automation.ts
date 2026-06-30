@@ -2,13 +2,17 @@ import {
   AUTOMATION_DOC_TYPE,
   AUTOMATION_SCHEMA_VERSION,
   MIN_AUTOMATION_EVERY_MS,
+  assistantReasoningEffortValues,
   automationFrontmatterSchema,
   automationContinuityPolicyValues,
   automationDeviceActivityKindSchema,
   automationDeviceActivitySourceValues,
   automationScheduleKindValues,
   automationStatusValues,
+  compareDeviceActivityCoverageKeys,
   isValidAutomationCronExpression,
+  resolveNextDeviceActivityCoverageCursor,
+  type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
   type AutomationDeviceActivityKind,
   type AutomationDeviceActivitySource,
@@ -61,6 +65,7 @@ function rejectRecurringScheduleTimeZone(object: Record<string, unknown>): void 
 }
 
 export type {
+  AutomationAssistantTargetOverride,
   AutomationContinuityPolicy,
   AutomationRoute,
   AutomationSchedule,
@@ -77,6 +82,7 @@ export interface AutomationRecord {
   summary: string | null;
   schedule: AutomationSchedule;
   route: AutomationRoute;
+  assistantTargetOverride: AutomationAssistantTargetOverride | null;
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
   createdAt: string;
@@ -107,6 +113,7 @@ export interface PatchAutomationInput {
   lookup: string;
   now?: Date;
   route?: AutomationRoute;
+  assistantTargetOverride?: AutomationAssistantTargetOverride | null;
   schedule?: AutomationSchedule;
   slug?: string;
   status?: AutomationStatus;
@@ -114,6 +121,25 @@ export interface PatchAutomationInput {
   tags?: string[];
   title?: string;
   vaultRoot: string;
+}
+
+export interface AdvanceAutomationDeviceActivityCursorInput {
+  after: string;
+  afterEntityId: string;
+  afterOccurredAt: string;
+  expectedActivityKind?: AutomationDeviceActivityKind;
+  expectedContinuityPolicy: AutomationContinuityPolicy;
+  expectedInstructions: string;
+  expectedRoute: AutomationRoute;
+  expectedSource?: AutomationDeviceActivitySource;
+  lookup: string;
+  now?: Date;
+  vaultRoot: string;
+}
+
+export interface AdvanceAutomationDeviceActivityCursorResult {
+  advanced: boolean;
+  record: AutomationRecord;
 }
 
 export interface ReadAutomationInput {
@@ -185,6 +211,24 @@ function normalizeAutomationDeviceActivityKind(value: unknown): AutomationDevice
   }
 
   return parsed.data;
+}
+
+function normalizeAutomationDeviceActivityCursorEntityId(value: unknown): string | undefined {
+  return optionalString(value, "schedule.afterEntityId", 240) ?? undefined;
+}
+
+function assertAutomationDeviceActivityCursorShape(input: {
+  afterEntityId?: string;
+  afterOccurredAt?: string;
+}): void {
+  const hasScalarOccurredAt = input.afterOccurredAt !== undefined;
+  const hasScalarEntityId = input.afterEntityId !== undefined;
+  if (hasScalarOccurredAt !== hasScalarEntityId) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "schedule.afterOccurredAt and schedule.afterEntityId must be provided together.",
+    );
+  }
 }
 
 function normalizeDeviceActivityKindToken(value: string): string {
@@ -264,10 +308,20 @@ function normalizeAutomationSchedule(
     case "deviceActivity": {
       const source = normalizeAutomationDeviceActivitySource(object.source);
       const activityKind = normalizeAutomationDeviceActivityKind(object.activityKind);
+      const afterOccurredAt = object.afterOccurredAt === undefined || object.afterOccurredAt === null
+        ? undefined
+        : normalizeAutomationIsoTimestamp(object.afterOccurredAt, "schedule.afterOccurredAt");
+      const afterEntityId = normalizeAutomationDeviceActivityCursorEntityId(object.afterEntityId);
+      assertAutomationDeviceActivityCursorShape({
+        afterEntityId,
+        afterOccurredAt,
+      });
 
       return {
         kind,
         after: normalizeAutomationIsoTimestamp(object.after, "schedule.after"),
+        ...(afterOccurredAt ? { afterOccurredAt } : {}),
+        ...(afterEntityId ? { afterEntityId } : {}),
         ...(source ? { source } : {}),
         ...(activityKind ? { activityKind } : {}),
       };
@@ -321,6 +375,68 @@ function normalizeAutomationRouteChannel(value: unknown): string {
     default:
       return channel;
   }
+}
+
+function normalizeAutomationAssistantTargetOverride(
+  value: unknown,
+): AutomationAssistantTargetOverride | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const object = requireObject(value, "assistantTargetOverride");
+  const model = normalizeAutomationAssistantTargetOverrideString(
+    object.model,
+    "assistantTargetOverride.model",
+    200,
+  );
+  const modelProvider = normalizeAutomationAssistantTargetOverrideString(
+    object.modelProvider,
+    "assistantTargetOverride.modelProvider",
+    120,
+  );
+  const reasoningEffort = normalizeAutomationAssistantTargetOverrideReasoningEffort(
+    object.reasoningEffort,
+  );
+  const target: AutomationAssistantTargetOverride = {
+    ...(model ? { model } : {}),
+    ...(modelProvider ? { modelProvider } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+  };
+
+  return Object.keys(target).length > 0 ? target : null;
+}
+
+function normalizeAutomationAssistantTargetOverrideReasoningEffort(
+  value: unknown,
+): AutomationAssistantTargetOverride["reasoningEffort"] | null {
+  return optionalEnum(
+    value,
+    assistantReasoningEffortValues,
+    "assistantTargetOverride.reasoningEffort",
+  ) ?? null;
+}
+
+function normalizeAutomationAssistantTargetOverrideString(
+  value: unknown,
+  fieldName: string,
+  maxLength: number,
+): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  return requireString(value, fieldName, maxLength);
+}
+
+function buildAutomationAssistantTargetOverrideFrontmatter(
+  target: AutomationAssistantTargetOverride,
+): FrontmatterObject {
+  return {
+    ...(target.model ? { model: target.model } : {}),
+    ...(target.modelProvider ? { modelProvider: target.modelProvider } : {}),
+    ...(target.reasoningEffort ? { reasoningEffort: target.reasoningEffort } : {}),
+  };
 }
 
 function normalizeAutomationInstructions(value: unknown): string {
@@ -392,6 +508,8 @@ function buildAutomationScheduleFrontmatter(schedule: AutomationSchedule): Front
       return {
         kind: schedule.kind,
         after: schedule.after,
+        ...(schedule.afterOccurredAt ? { afterOccurredAt: schedule.afterOccurredAt } : {}),
+        ...(schedule.afterEntityId ? { afterEntityId: schedule.afterEntityId } : {}),
         ...(schedule.source ? { source: schedule.source } : {}),
         ...(schedule.activityKind ? { activityKind: schedule.activityKind } : {}),
       };
@@ -422,6 +540,13 @@ function buildAutomationFrontmatter(record: AutomationRecord): FrontmatterObject
     ...(record.summary === null ? {} : { summary: record.summary }),
     schedule: buildAutomationScheduleFrontmatter(record.schedule),
     route: buildAutomationRouteFrontmatter(record.route),
+    ...(record.assistantTargetOverride === null
+      ? {}
+      : {
+          assistantTargetOverride: buildAutomationAssistantTargetOverrideFrontmatter(
+            record.assistantTargetOverride,
+          ),
+        }),
     continuityPolicy: record.continuityPolicy,
     tags: record.tags,
     createdAt: record.createdAt,
@@ -456,6 +581,9 @@ function parseAutomationRecord(
     summary: normalizeAutomationSummary(attributes.summary),
     schedule: normalizeAutomationSchedule(attributes.schedule),
     route: normalizeAutomationRoute(attributes.route),
+    assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
+      attributes.assistantTargetOverride,
+    ),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeAutomationTags(attributes.tags),
     createdAt: requireString(attributes.createdAt, "createdAt", 64),
@@ -499,6 +627,7 @@ function matchesAutomationText(record: AutomationRecord, text: string | undefine
     record.instructions,
     JSON.stringify(record.schedule),
     JSON.stringify(record.route),
+    JSON.stringify(record.assistantTargetOverride),
     record.continuityPolicy,
     ...(record.tags ?? []),
   ]
@@ -547,6 +676,7 @@ export function scaffoldAutomationPayload(): AutomationScaffoldPayload {
       participantId: null,
       threadId: null,
     },
+    assistantTargetOverride: null,
     instructions: "Write the scheduled assistant instructions here.",
     summary: "Weekly scheduled assistant notification instructions.",
     tags: ["assistant", "scheduled"],
@@ -637,6 +767,10 @@ export async function patchAutomation(
       instructions: input.instructions ?? existingRecord.instructions,
       now: input.now,
       route: input.route ?? existingRecord.route,
+      assistantTargetOverride:
+        input.assistantTargetOverride === undefined
+          ? existingRecord.assistantTargetOverride
+          : normalizeAutomationAssistantTargetOverride(input.assistantTargetOverride),
       schedule: input.schedule ?? existingRecord.schedule,
       slug: input.slug ?? existingRecord.slug,
       status: input.status ?? existingRecord.status,
@@ -646,6 +780,80 @@ export async function patchAutomation(
       vaultRoot: input.vaultRoot,
       allowSlugRename: input.slug !== undefined,
     }, records);
+  });
+}
+
+export async function advanceAutomationDeviceActivityCursor(
+  input: AdvanceAutomationDeviceActivityCursorInput,
+): Promise<AdvanceAutomationDeviceActivityCursorResult> {
+  const after = normalizeAutomationIsoTimestamp(input.after, "after");
+  const afterOccurredAt = normalizeAutomationIsoTimestamp(input.afterOccurredAt, "afterOccurredAt");
+  const afterEntityId = requireString(input.afterEntityId, "afterEntityId");
+
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const records = await loadAutomationRecords(input.vaultRoot);
+    const existingRecord = selectAutomationRecord(records, {
+      automationId: input.lookup,
+      slug: input.lookup,
+    });
+    if (!existingRecord) {
+      throw new VaultError("VAULT_AUTOMATION_MISSING", "Automation was not found.");
+    }
+    if (
+      existingRecord.status !== "active" ||
+      existingRecord.continuityPolicy !== input.expectedContinuityPolicy ||
+      existingRecord.instructions !== input.expectedInstructions ||
+      !automationRoutesEqual(existingRecord.route, input.expectedRoute) ||
+      existingRecord.schedule.kind !== "deviceActivity" ||
+      existingRecord.schedule.activityKind !== input.expectedActivityKind ||
+      existingRecord.schedule.source !== input.expectedSource
+    ) {
+      return {
+        advanced: false,
+        record: existingRecord,
+      };
+    }
+
+    const cursor = resolveAdvancedDeviceActivityCursor({
+      currentAfter: existingRecord.schedule.after,
+      currentAfterEntityId: existingRecord.schedule.afterEntityId,
+      currentAfterOccurredAt: existingRecord.schedule.afterOccurredAt,
+      nextAfter: after,
+      nextAfterEntityId: afterEntityId,
+      nextAfterOccurredAt: afterOccurredAt,
+    });
+    if (!cursor) {
+      return {
+        advanced: false,
+        record: existingRecord,
+      };
+    }
+
+    const updated = await upsertAutomationWithLatestRegistry({
+      automationId: existingRecord.automationId,
+      continuityPolicy: existingRecord.continuityPolicy,
+      instructions: existingRecord.instructions,
+      now: input.now,
+      route: existingRecord.route,
+      assistantTargetOverride: existingRecord.assistantTargetOverride,
+      schedule: {
+        ...existingRecord.schedule,
+        after: cursor.after,
+        afterOccurredAt: cursor.afterOccurredAt,
+        afterEntityId: cursor.afterEntityId,
+      },
+      slug: existingRecord.slug,
+      status: existingRecord.status,
+      summary: existingRecord.summary,
+      tags: existingRecord.tags,
+      title: existingRecord.title,
+      vaultRoot: input.vaultRoot,
+    }, records);
+
+    return {
+      advanced: true,
+      record: updated.record,
+    };
   });
 }
 
@@ -659,6 +867,44 @@ function assertAutomationPatchHasChanges(input: PatchAutomationInput): void {
     "VAULT_AUTOMATION_EMPTY_PATCH",
     "Automation edit requires at least one field to update.",
   );
+}
+
+function automationRoutesEqual(left: AutomationRoute, right: AutomationRoute): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function resolveAdvancedDeviceActivityCursor(input: {
+  currentAfter: string;
+  currentAfterEntityId?: string;
+  currentAfterOccurredAt?: string;
+  nextAfter: string;
+  nextAfterEntityId: string;
+  nextAfterOccurredAt: string;
+}): { after: string; afterOccurredAt: string; afterEntityId: string } | null {
+  const nextKey = {
+    entityId: input.nextAfterEntityId,
+    occurredAt: input.nextAfterOccurredAt,
+    triggeredAt: input.nextAfter,
+  };
+  const cursor = resolveNextDeviceActivityCoverageCursor({
+    cursor: {
+      after: input.currentAfter,
+      ...(input.currentAfterOccurredAt ? { afterOccurredAt: input.currentAfterOccurredAt } : {}),
+      ...(input.currentAfterEntityId ? { afterEntityId: input.currentAfterEntityId } : {}),
+    },
+    keys: [nextKey],
+  });
+  if (!cursor) {
+    return null;
+  }
+
+  return compareDeviceActivityCoverageKeys(nextKey, {
+    entityId: cursor.afterEntityId,
+    occurredAt: cursor.afterOccurredAt,
+    triggeredAt: cursor.after,
+  }) === 0
+    ? cursor
+    : null;
 }
 
 async function upsertAutomationWithLatestRegistry(
@@ -708,6 +954,10 @@ async function upsertAutomationWithLatestRegistry(
       input.route !== undefined
         ? normalizeAutomationRoute(input.route)
         : existingRecord?.route ?? scaffoldAutomationPayload().route,
+    assistantTargetOverride:
+      input.assistantTargetOverride === undefined
+        ? existingRecord?.assistantTargetOverride ?? null
+        : normalizeAutomationAssistantTargetOverride(input.assistantTargetOverride),
     continuityPolicy:
       normalizeAutomationContinuityPolicy(input.continuityPolicy ?? existingRecord?.continuityPolicy),
     tags:
@@ -770,6 +1020,9 @@ export function buildAutomationMarkdownPreview(
     summary: normalizeAutomationSummary(input.summary),
     schedule: normalizeAutomationSchedule(input.schedule),
     route: normalizeAutomationRoute(input.route),
+    assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
+      input.assistantTargetOverride,
+    ),
     continuityPolicy: normalizeAutomationContinuityPolicy(input.continuityPolicy),
     tags: normalizeAutomationTags(input.tags),
     createdAt: new Date().toISOString(),

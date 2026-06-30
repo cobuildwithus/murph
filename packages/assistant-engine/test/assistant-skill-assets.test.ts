@@ -27,6 +27,86 @@ const DELETED_COMMONS_COMMANDS = [
   'vault-cli commons source list',
 ] as const
 
+type AssistantSkillMetadata = {
+  readonly description: string
+  readonly name: string
+}
+
+function parseAssistantSkillFrontmatter(raw: string): AssistantSkillMetadata {
+  const normalized = raw.replace(/\r\n/gu, '\n')
+  if (!normalized.startsWith('---\n')) {
+    throw new Error('SKILL.md must start with YAML frontmatter')
+  }
+
+  const frontmatterEnd = normalized.indexOf('\n---\n', 4)
+  if (frontmatterEnd === -1) {
+    throw new Error('SKILL.md must close YAML frontmatter')
+  }
+
+  const values = new Map<string, string>()
+  let blockKey: string | null = null
+  let blockStyle: 'folded' | 'literal' | null = null
+
+  for (const line of normalized.slice(4, frontmatterEnd).split('\n')) {
+    if (line.length === 0) {
+      continue
+    }
+
+    if (/^\s/u.test(line)) {
+      if (!blockKey || !blockStyle) {
+        throw new Error(`Unexpected indented SKILL.md frontmatter line: ${line}`)
+      }
+      const current = values.get(blockKey) ?? ''
+      const text = line.trim()
+      values.set(
+        blockKey,
+        blockStyle === 'folded'
+          ? [current, text].filter(Boolean).join(' ')
+          : [current, text].filter(Boolean).join('\n'),
+      )
+      continue
+    }
+
+    blockKey = null
+    blockStyle = null
+    const match = /^([A-Za-z][A-Za-z0-9_-]*):(?:\s*(.*))?$/u.exec(line)
+    if (!match) {
+      throw new Error(`Invalid SKILL.md frontmatter line: ${line}`)
+    }
+
+    const key = match[1]
+    const value = match[2] ?? ''
+    if (!key) {
+      throw new Error(`Invalid SKILL.md frontmatter key: ${line}`)
+    }
+
+    if (/^[>|][+-]?$/u.test(value)) {
+      blockKey = key
+      blockStyle = value.startsWith('>') ? 'folded' : 'literal'
+      values.set(key, '')
+      continue
+    }
+
+    const trimmedValue = value.trim()
+    const quoted =
+      trimmedValue.startsWith('"') || trimmedValue.startsWith("'")
+    if (!quoted && /:\s/u.test(trimmedValue)) {
+      throw new Error(
+        `Plain SKILL.md frontmatter scalar for ${key} contains ': '; use a quoted or folded scalar`,
+      )
+    }
+    values.set(key, trimmedValue)
+  }
+
+  const name = values.get('name')?.trim()
+  const description = values.get('description')?.trim()
+  if (!name || !description) {
+    throw new Error('SKILL.md frontmatter must include name and description')
+  }
+
+  return { description, name }
+}
+
 describe('assistant skill assets', () => {
   async function readSkillFile(skill: (typeof ASSISTANT_SKILLS)[number]) {
     return readFile(
@@ -44,10 +124,10 @@ describe('assistant skill assets', () => {
   it('has a valid SKILL.md for every registered assistant skill', async () => {
     for (const skill of ASSISTANT_SKILLS) {
       const raw = await readSkillFile(skill)
+      const metadata = parseAssistantSkillFrontmatter(raw)
 
-      expect(raw).toContain('---')
-      expect(raw).toContain(`name: ${skill.name}`)
-      expect(raw).toContain('description:')
+      expect(metadata.name).toBe(skill.name)
+      expect(metadata.description.length).toBeGreaterThan(0)
       expect(raw.length).toBeGreaterThan(0)
     }
   })
@@ -76,6 +156,18 @@ describe('assistant skill assets', () => {
     )
     expect(buildAssistantSkillFileRef('behavior-followthrough')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
+    )
+    expect(buildAssistantSkillFileRef('competition-training')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/competition-training/SKILL.md',
+    )
+    expect(buildAssistantSkillFileRef('strength-training')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/strength-training/SKILL.md',
+    )
+    expect(buildAssistantSkillFileRef('running-cardio')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md',
+    )
+    expect(buildAssistantSkillFileRef('stress-regulation')).toBe(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/stress-regulation/SKILL.md',
     )
     expect(buildAssistantSkillFileRef('computer-use')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/computer-use/SKILL.md',
@@ -133,8 +225,8 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Pause only when Murph is actually blocked: expired login, CAPTCHA',
     )
-    expect(raw).toContain('call `computer_start_run` normally')
-    expect(raw).toContain('selects the active awaiting run')
+    expect(raw).toContain('call `computer_open`')
+    expect(raw).toContain('supplies hidden mailbox proof and delivery context, selects the active awaiting')
     expect(raw).toContain('exact quoted phrase such as "place order"')
     expect(raw).toMatch(/ordinary\s+confirmations like "yes", "go\s+ahead", or "you're good" are enough/u)
     expect((playbook.match(/^### \d+\./gmu) ?? []).length).toBe(25)
@@ -320,6 +412,60 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('.codex-hosted')
   })
 
+  it('keeps strength training guidance in the package skill route', async () => {
+    const strengthTrainingSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'strength-training',
+    )
+    expect(strengthTrainingSkill).toBeTruthy()
+    if (!strengthTrainingSkill) {
+      return
+    }
+
+    expect(strengthTrainingSkill.triggerHint).toContain(
+      'strength or resistance training plans',
+    )
+    expect(strengthTrainingSkill.triggerHint).toContain(
+      'Do not use for diagnosis, rehabilitation, medical clearance',
+    )
+
+    const raw = await readSkillFile(strengthTrainingSkill)
+
+    expect(raw).toContain('# Strength Training')
+    expect(raw).toContain('Load only what the task needs')
+    expect(raw).toContain('references/programming.md')
+    expect(raw).toContain('references/coaching.md')
+    expect(raw).toContain('references/safety.md')
+    expect(raw).toContain('references/evidence.md')
+    expect(raw).toContain(
+      "Murph's available response-media or image support only if the current runtime exposes it",
+    )
+    expect(raw).not.toContain('$murph-exercise-images')
+    expect(raw).not.toContain('/tmp/')
+    expect(raw).not.toContain('.codex-hosted')
+
+    const referenceTexts = await Promise.all(
+      ['coaching.md', 'evidence.md', 'programming.md', 'safety.md'].map(
+        (referenceFile) =>
+          readFile(
+            path.join(
+              resolveAssistantSkillsRoot(),
+              strengthTrainingSkill.slug,
+              'references',
+              referenceFile,
+            ),
+            'utf8',
+          ),
+      ),
+    )
+    const referenceText = referenceTexts.join('\n')
+
+    expect(referenceText).toContain(
+      "Murph's available response-media or image support only if the current runtime exposes it",
+    )
+    expect(referenceText).not.toContain('$murph-exercise-images')
+    expect(referenceText).not.toContain('exercise-image skill')
+  })
+
   it('keeps Murph onboarding details in the skill file, not the prompt', async () => {
     const murphOnboardingSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'murph-onboarding',
@@ -343,8 +489,9 @@ describe('assistant skill assets', () => {
       'mark onboarding complete with the declined reason',
     )
     expect(murphOnboardingSkill.triggerHint).toContain(
-      'files, labs, supplement labels, wearable data, medications, meals, workouts, symptoms, or setup answers',
+      'files, labs, supplement labels, wearable data, medications, meals, workouts, symptoms, setup answers, or slow lab/supplement saves',
     )
+    expect(murphOnboardingSkill.triggerHint).toContain('delegated to a V2 subagent')
 
     expect(raw).toContain(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)
     expect(raw).toContain(
@@ -367,10 +514,13 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('diagnosed conditions, allergies or intolerances, and pregnancy or nursing')
     expect(raw).toContain('name plus optional age/gender question')
     expect(raw).toContain(
-      'Name and optional age/gender. After the welcome, ask exactly this setup question by itself',
+      'Name and optional age/gender. After the welcome, ask one short setup message by itself that requests their name and, as optional shares, their age and whether they\'re a guy or girl',
     )
     expect(raw).toContain(
-      'how old are you and what\'s your gender?',
+      'Phrase it in your own conversational voice; do not say "biological sex" or "gender" and do not make it sound like a form',
+    )
+    expect(raw).toContain(
+      'Keep it to a single brief message, make the age and guy/girl parts clearly optional, and do not bundle any other intake question with it',
     )
     expect(raw).toContain(
       'If they already gave their name, skip this even if they skipped age/gender; never re-ask solely for optional demographics.',
@@ -514,14 +664,38 @@ describe('assistant skill assets', () => {
       'Supplements: mention that they can send a photo of supplement bottles or labels if that is easier',
     )
     expect(raw).toContain('Follow the supplement input affordance')
+    expect(raw).toContain('## Delegating slow onboarding saves')
     expect(raw).toContain(
-      'When their supplement answer will require ingredient lookup',
+      'Use a V2 subagent for slow lab or supplement ingestion when the full parse/lookup is not needed for the current visible reply',
+    )
+    expect(raw).toContain('collaboration.spawn_agent')
+    expect(raw).toContain('fork_turns: "none"')
+    expect(raw).toContain(
+      'The spawn message must be self-contained',
     )
     expect(raw).toContain(
-      'call `send_progress_update` once before the first lookup',
+      'The child owns the full canonical save, not a staging summary',
     )
     expect(raw).toContain(
-      'Default to `vault-cli supplement search-labels` for one supplement or `vault-cli supplement search-labels-batch` for several',
+      'Do not use a child for urgent or safety-sensitive replies, user-facing messages, approvals, voice memos, progress updates, or any Murph dynamic/server-request tool',
+    )
+    expect(raw).toContain(
+      'If the result is reply-critical or the user explicitly asks Murph to finish the save before continuing',
+    )
+    expect(raw).toContain(
+      'If no V2 spawn tool is available and the save is not reply-critical, preserve durable evidence, save only obvious high-value structure needed now, and continue the visible reply with the remaining parse/import state clear',
+    )
+    expect(raw).toContain(
+      'Treat a delegated save as unresolved until the child completion or a direct vault read confirms the canonical records are present',
+    )
+    expect(raw).toContain(
+      'When their supplement answer requires ingredient lookup and canonical save work',
+    )
+    expect(raw).toContain(
+      'prefer the delegated-save path above if the result is not needed for the current visible reply',
+    )
+    expect(raw).toContain(
+      'The supplement child should default to `vault-cli supplement search-labels` for one supplement or `vault-cli supplement search-labels-batch` for several',
     )
     expect(raw).toContain(
       'For batch lookup, pass one repeated `--query` flag per product; do not pass product names as positional arguments',
@@ -533,10 +707,13 @@ describe('assistant skill assets', () => {
       'fall back to web search for products or ingredients it misses',
     )
     expect(raw).toContain(
-      'Do not use a progress update for a quick memory save or a single follow-up question',
+      'If running synchronously instead of delegating, use at most one `send_progress_update` before the first lookup',
     )
     expect(raw).toContain(
-      'After lookup when useful, save every current supplement product through `vault-cli supplement save`',
+      'do not use a progress update for a quick memory save or a single follow-up question',
+    )
+    expect(raw).toContain(
+      'After delegated or synchronous lookup when useful, every current supplement product should be saved through `vault-cli supplement save`',
     )
     expect(raw).toContain(
       'ask one short follow-up for duration or start timing after the structured save or on the next onboarding turn',
@@ -556,7 +733,13 @@ describe('assistant skill assets', () => {
       'If the user sends lab PDFs, Lab Results of Record documents, pasted lab results, or other blood-test documents',
     )
     expect(raw).toContain(
-      'call `send_progress_update` before reading the content or using file/import tools',
+      'prefer the delegated-save path above',
+    )
+    expect(raw).toContain(
+      'save the full recoverable structure with `blood-test import-json` or typed blood-test save commands',
+    )
+    expect(raw).toContain(
+      'If synchronous inspection is needed for the current reply, call `send_progress_update` before reading the content or using file/import tools',
     )
     expect(raw).toContain('Persist useful answers as they arrive, not at the end')
     expect(raw).toContain(
@@ -772,7 +955,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain(
       'Do not press for skipped demographic details, birth date, birth month/year, sex assigned at birth, or gender wording beyond the user\'s plain answer.',
     )
-    expect(raw.slice(nameContextIndex, healthContextIndex)).toContain('```text')
+    expect(raw.slice(nameContextIndex, healthContextIndex)).not.toContain('```text')
     expect(raw.slice(healthContextIndex, wearableIndex)).toContain('```text')
     const movementSection = raw.slice(movementIndex, protocolsIndex)
     const movementExamples = [
@@ -855,6 +1038,7 @@ describe('assistant skill assets', () => {
     const removedFixedScripts = [
       'One high-level setup detail first: what age and gender should I use for context?',
       'how old are you, and what gender should I use for health context?',
+      'how old are you and what\'s your gender?',
       'What\'s your name? And is there anything health-wise you\'ve been curious about, working on, or dealing with lately?',
       'what gender should I use when interpreting health stuff',
       'Are you already trying any health protocols or experiments, or mostly starting fresh?',

@@ -149,6 +149,10 @@ describe('assistant channels runtime seam', () => {
     expect(ASSISTANT_CHANNEL_ADAPTERS.linq.canAutoReply(groupCapture)).toBe(
       'iMessage auto-reply only runs for direct chats',
     )
+    expect(ASSISTANT_CHANNEL_ADAPTERS.linq.canAutoReply({
+      ...groupCapture,
+      externalThreadRouteAuthorityPresent: true,
+    })).toBeNull()
     expect(ASSISTANT_CHANNEL_ADAPTERS.email.canAutoReply(groupCapture)).toContain(
       'direct threads',
     )
@@ -1148,6 +1152,8 @@ describe('assistant channels runtime seam', () => {
     await expect(sendLinqMessage({
       idempotencyKey: 'delivery_123',
       media: [{
+        approvalGeneration: null,
+        approvalId: null,
         contentType: 'application/pdf',
         filename: 'report.pdf',
         kind: 'vault_file',
@@ -1335,7 +1341,7 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
   })
 
-  it('refreshes the Linq typing indicator every two seconds by default', async () => {
+  it('refreshes the Linq typing indicator at the low-volume default cadence', async () => {
     vi.useFakeTimers()
     runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
     runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
@@ -1351,20 +1357,142 @@ describe('assistant channels runtime seam', () => {
       },
     )
 
-    await vi.advanceTimersByTimeAsync(1_999)
+    await vi.advanceTimersByTimeAsync(44_999)
     expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
 
     await vi.advanceTimersByTimeAsync(1)
     expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
 
-    await vi.advanceTimersByTimeAsync(2_000)
+    await vi.advanceTimersByTimeAsync(45_000)
     expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
 
     await handle.stop()
-    await vi.advanceTimersByTimeAsync(2_000)
+    await vi.advanceTimersByTimeAsync(45_000)
 
     expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+  })
+
+  it('restarts the Linq typing refresh timer after an explicit activity refresh', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    await vi.advanceTimersByTimeAsync(40_000)
+    await handle.refreshNow?.()
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(44_999)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
+    await handle.stop()
+  })
+
+  it('serializes explicit Linq typing refreshes after an in-flight refresh', async () => {
+    vi.useFakeTimers()
+    let resolveInFlightRefresh: () => void = () => {
+      throw new Error('in-flight refresh was not started')
+    }
+    runtimeMocks.startLinqChatTypingIndicator
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          resolveInFlightRefresh = resolve
+        })
+      })
+      .mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    vi.advanceTimersByTime(45_000)
+    await Promise.resolve()
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+
+    const explicitRefresh = handle.refreshNow?.()
+    const secondExplicitRefresh = handle.refreshNow?.()
+    await Promise.resolve()
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
+
+    resolveInFlightRefresh()
+    await explicitRefresh
+    await secondExplicitRefresh
+
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(4)
+    await handle.stop()
+  })
+
+  it('stops the Linq typing indicator after the max session cap', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1)
+    expect(runtimeMocks.stopLinqChatTypingIndicator).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+
+    await handle.stop()
+    expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries Linq typing stop on explicit cleanup after a failed max session stop', async () => {
+    vi.useFakeTimers()
+    runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
+    runtimeMocks.stopLinqChatTypingIndicator
+      .mockRejectedValueOnce(new Error('temporary Linq stop failure'))
+      .mockResolvedValueOnce(undefined)
+
+    const handle = await startLinqTypingIndicator(
+      {
+        target: 'chat-typing',
+      },
+      {
+        env: {
+          LINQ_API_TOKEN: 'linq-token',
+        },
+      },
+    )
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
+
+    await handle.stop()
+    expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(2)
   })
 
   it('recovers Linq thread sends when the stored chat id is stale', async () => {

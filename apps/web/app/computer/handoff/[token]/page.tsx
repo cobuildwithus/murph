@@ -1,32 +1,33 @@
 import { CheckCircle2, Clock3 } from "lucide-react";
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 
 import { ComputerHandoffActiveView } from "@/src/components/computer-use/computer-handoff-active-view";
 import { ComputerHandoffAuthRequiredState } from "@/src/components/computer-use/computer-handoff-auth-required";
+import { ComputerHandoffReplyAction } from "@/src/components/computer-use/computer-handoff-reply-action";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
-import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { buttonVariants } from "@/src/components/ui/button";
+import { scheduleHostedWebSessionComputerHandoffViewportApply } from "@/src/lib/computer-use/handoff-viewport-session";
 import { createComputerUseService } from "@/src/lib/computer-use/service";
-import { resolveComputerBrowserViewportPreset } from "@/src/lib/computer-use/viewport";
 import { requireActiveHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import type { MurphContactKind, MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 const HANDOFF_DONE_REPLY_BODY = "Done";
-const HANDOFF_VIEWPORT_SSR_TIMEOUT_MS = 5_000;
+type HandoffSearchParams = {
+  managed?: string | string[];
+};
 
 export default async function ComputerHandoffPage({
   params,
   searchParams,
 }: {
   params: Promise<{ token: string }>;
-  searchParams?: Promise<{ managed?: string | string[] }>;
+  searchParams?: Promise<HandoffSearchParams>;
 }) {
   const { token } = await params;
-  const managedState = readManagedHandoffState(
-    await (searchParams ?? Promise.resolve({})),
-  );
+  const resolvedSearchParams = await (searchParams ?? Promise.resolve({}));
+  const managedState = readManagedHandoffState(resolvedSearchParams);
   const session = await readHandoffSessionOrAuthState();
   if (!session) {
     return <ComputerHandoffAuthRequiredState />;
@@ -56,7 +57,7 @@ export default async function ComputerHandoffPage({
             </h1>
             <p className="mt-4 text-sm text-muted-foreground text-pretty">
               {isRetry
-                ? "Try again. If the site still cannot connect, return to Murph and ask for browser takeover."
+                ? "Try again. If the site still cannot connect, return to Murph and ask for a live browser link."
                 : "Kernel is still finishing this sign-in. Check again in a moment."}
             </p>
             <a
@@ -78,6 +79,7 @@ export default async function ComputerHandoffPage({
   ) {
     const isCompleted = state.kind === "completed";
     const canSendDoneReply = isCompleted;
+    const isEmailReturn = isCompleted && state.returnContactKind === "email";
     const Icon = isCompleted ? CheckCircle2 : Clock3;
     const title = isCompleted
       ? "All set"
@@ -87,15 +89,15 @@ export default async function ComputerHandoffPage({
     const iconClassName = isCompleted
       ? "mb-4 h-8 w-8 text-primary"
       : "mb-4 h-8 w-8 text-muted-foreground";
-    const nextStep = isCompleted
-      ? "Reply to Murph to continue."
+    const nextStep = isEmailReturn
+      ? "Reply with Done in your existing Murph email thread to continue."
+      : isCompleted
+        ? "Reply to Murph to continue."
       : state.kind === "checkpointing"
         ? "Keep this tab open for a moment, then return to Murph when saving finishes."
         : "Return to Murph and ask for a new link.";
-    const contactOptions = canSendDoneReply
-      ? await resolveHostedMurphContactOptions({
-          message: { body: HANDOFF_DONE_REPLY_BODY },
-        })
+    const contactOptions = canSendDoneReply && !isEmailReturn
+      ? await resolveCompletedHandoffContactOptions(state.returnContactKind)
       : [];
 
     return (
@@ -105,26 +107,23 @@ export default async function ComputerHandoffPage({
             <Icon className={iconClassName} aria-hidden="true" />
             <h1 className="font-serif text-3xl text-balance">{title}</h1>
             <p className="mt-4 text-sm text-muted-foreground text-pretty">{nextStep}</p>
-            {contactOptions.length > 0 ? (
-              <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                {contactOptions.map((option) => (
-                  <MurphContactLink
-                    key={`${option.kind}:${option.href}`}
-                    actionLabel="Reply to Murph"
-                    option={option}
-                    className={cn(
-                      buttonVariants({ size: "lg" }),
-                      "w-full sm:w-auto",
-                    )}
-                  >
-                    Reply in {option.label}
-                  </MurphContactLink>
-                ))}
+            {isEmailReturn ? (
+              <div className="mt-6 border-t border-border pt-4">
+                <p className="text-sm text-muted-foreground">
+                  Reply in the existing email thread with:
+                </p>
+                <p className="mt-3 break-words font-mono text-sm text-foreground">
+                  {HANDOFF_DONE_REPLY_BODY}
+                </p>
+              </div>
+            ) : contactOptions.length > 0 ? (
+              <div className="mt-6">
+                <ComputerHandoffReplyAction options={contactOptions} />
               </div>
             ) : canSendDoneReply ? (
               <div className="mt-6 border-t border-border pt-4">
                 <p className="text-sm text-muted-foreground">
-                  Return to your Murph thread and reply with:
+                  Reply with:
                 </p>
                 <p className="mt-3 break-words font-mono text-sm text-foreground">
                   {HANDOFF_DONE_REPLY_BODY}
@@ -137,56 +136,35 @@ export default async function ComputerHandoffPage({
     );
   }
 
-  if (state.interaction === "view_only") {
-    return (
-      <main className="relative min-h-dvh bg-foreground text-foreground">
-        {/* eslint-disable-next-line @next/next/no-img-element -- Ephemeral data URL screenshot; next/image optimization does not apply. */}
-        <img
-          alt="Murph private page preview"
-          className="block h-dvh w-full object-contain bg-foreground"
-          draggable={false}
-          src={state.screenshotDataUrl}
-        />
-      </main>
-    );
-  }
+  const encodedToken = encodeURIComponent(token);
+  const doneEndpoint = `/api/computer/handoff/${encodedToken}/done`;
+  const viewportEndpoint = `/api/computer/handoff/${encodedToken}/viewport`;
+  const initialViewportSize = session.computerHandoffViewportSize;
 
-  const preset = resolveComputerBrowserViewportPreset(
-    (await headers()).get("user-agent"),
-  );
-  try {
-    await Promise.race([
-      service.ensureHandoffViewport({
-        memberId: session.member.id,
-        preset,
-        token,
-      }),
-      new Promise<never>((_, reject) => {
-        setTimeout(
-          () => reject(new Error("viewport resize timed out")),
-          HANDOFF_VIEWPORT_SSR_TIMEOUT_MS,
-        );
-      }),
-    ]);
-  } catch (error) {
-    console.warn("[computer-handoff] viewport resize failed", error);
+  if (initialViewportSize) {
+    scheduleHostedWebSessionComputerHandoffViewportApply({
+      memberId: session.member.id,
+      reason: "cached",
+      sessionId: session.sessionId,
+      token,
+    });
   }
-
-  const doneEndpoint = `/api/computer/handoff/${encodeURIComponent(token)}/done`;
 
   return (
     <main className="relative min-h-dvh bg-foreground text-foreground">
       <ComputerHandoffActiveView
         doneEndpoint={doneEndpoint}
         iframeAllow={state.iframeAllow}
+        initialViewportSize={initialViewportSize}
         liveViewUrl={state.liveViewUrl}
+        viewportEndpoint={viewportEndpoint}
       />
     </main>
   );
 }
 
 function readManagedHandoffState(
-  searchParams: { managed?: string | string[] },
+  searchParams: HandoffSearchParams,
 ): "retry" | "waiting" | null {
   const value = Array.isArray(searchParams.managed)
     ? searchParams.managed[0]
@@ -211,4 +189,21 @@ async function readHandoffSessionOrAuthState() {
 
     throw error;
   }
+}
+
+async function resolveCompletedHandoffContactOptions(
+  returnContactKind: MurphContactKind | null,
+): Promise<MurphContactOption[]> {
+  let options: MurphContactOption[];
+  try {
+    options = await resolveHostedMurphContactOptions({
+      message: { body: HANDOFF_DONE_REPLY_BODY },
+      preferredKind: returnContactKind,
+    });
+  } catch {
+    return [];
+  }
+  return returnContactKind
+    ? options.filter((option) => option.kind === returnContactKind)
+    : options;
 }

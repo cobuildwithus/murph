@@ -35,6 +35,7 @@ import {
   buildCodexAppServerArgs,
   compactWarmCodexThread,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
+  executeCodexManagedAccountOperation,
   readCodexAppServerTurnFailureContext,
   resolveCodexDisplayOptions,
   snapshotExpectedCodexRootProcess,
@@ -142,16 +143,11 @@ function createProgressDeliveryMock(
 
 function createHostedToolContext(input: {
   computerToolsAvailable?: boolean
-  sendResult?: Awaited<ReturnType<AssistantHostedToolContext['sendRequiredUserMessage']>>
 } = {}): AssistantHostedToolContext {
   return {
     computerToolsAvailable: input.computerToolsAvailable ?? true,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
-    requiredUserMessageDeliveryAvailable: true,
-    sendRequiredUserMessage: vi.fn(async () =>
-      input.sendResult ?? { kind: 'sent' as const, source: 'model' as const }
-    ),
     sendVaultFile: vi.fn(async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
@@ -1481,7 +1477,6 @@ describe('assistant codex runtime', () => {
       finalMessage: 'Paused for confirmation.',
     })
     expect(fetchOrder).toEqual(['act:start', 'act:end', 'pause'])
-    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
   })
 
   it('closes live steering before saving a computer pause', async () => {
@@ -1638,7 +1633,6 @@ describe('assistant codex runtime', () => {
       finalMessage: 'Paused for confirmation.',
     })
     expect(liveTurnReleased).toBe(1)
-    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
   })
 
   it('allows finish_without_reply after pausing a computer run for the user', async () => {
@@ -1774,7 +1768,6 @@ describe('assistant codex runtime', () => {
       finalAction: { kind: 'none' },
       finalMessage: '',
     })
-    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
   })
 
   it('aborts and drains in-flight image generation when the turn fails', async () => {
@@ -4886,7 +4879,6 @@ describe('assistant codex runtime', () => {
       turnId: 'turn-prestart-pause-live-turn-2',
     })
     expect(liveTurnRegistrations).toBe(0)
-    expect(hostedToolContext.sendRequiredUserMessage).not.toHaveBeenCalled()
   })
 
   it('preserves reused turn/start JSON-RPC errors instead of reporting missing turn ids', async () => {
@@ -8349,6 +8341,188 @@ describe('assistant codex runtime', () => {
     expect(codexMocks.spawn).not.toHaveBeenCalled()
   })
 
+  it('waits for the Codex account update before verifying managed ChatGPT connect', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-managed-auth-work-')
+    const codexHome = await createTempDir('assistant-codex-managed-auth-home-')
+    const child = new MockChildProcess()
+    const loginStarted = createDeferred<void>()
+    const onDeviceCode = vi.fn()
+
+    codexMocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+          child.stdout.write(jsonLine({
+            method: 'account/updated',
+            params: {
+              authMode: 'chatgpt',
+              planType: 'pro',
+            },
+          }))
+
+          const initialRead = await waitForRpcMethodCount(child, 'account/read', 1)
+          child.stdout.write(jsonLine({
+            id: initialRead.id,
+            result: {
+              account: null,
+              requiresOpenaiAuth: true,
+            },
+          }))
+
+          const loginStart = await waitForRpcMethod(child, 'account/login/start')
+          expect(loginStart.params).toEqual({
+            type: 'chatgptDeviceCode',
+          })
+          child.stdout.write(jsonLine({
+            id: loginStart.id,
+            result: {
+              type: 'chatgptDeviceCode',
+              loginId: 'login-managed-chatgpt',
+              verificationUrl: 'https://auth.openai.com/codex/device',
+              userCode: 'ABCD-1234',
+            },
+          }))
+          loginStarted.resolve()
+        })()
+      })
+
+      return child
+    })
+
+    const operation = executeCodexManagedAccountOperation({
+      action: 'connect',
+      codexHome,
+      onDeviceCode,
+      timeoutMs: 1_000,
+      workingDirectory,
+    })
+
+    await loginStarted.promise
+    await waitForMockCall(onDeviceCode, 1)
+    expect(onDeviceCode).toHaveBeenCalledWith({
+      userCode: 'ABCD-1234',
+      verificationUrl: 'https://auth.openai.com/codex/device',
+    })
+
+    child.stdout.write(jsonLine({
+      method: 'account/login/completed',
+      params: {
+        loginId: 'login-managed-chatgpt',
+        success: true,
+      },
+    }))
+    await waitForStableMicrotask()
+    expect(readWrittenRpcMessages(child).filter(
+      (message) => message.method === 'account/read',
+    )).toHaveLength(1)
+
+    child.stdout.write(jsonLine({
+      method: 'account/updated',
+      params: {
+        authMode: 'chatgpt',
+        planType: 'pro',
+      },
+    }))
+
+    const verifiedRead = await waitForRpcMethodCount(child, 'account/read', 2)
+    child.stdout.write(jsonLine({
+      id: verifiedRead.id,
+      result: {
+        account: {
+          type: 'chatgpt',
+          email: 'user@example.com',
+          planType: 'pro',
+        },
+        requiresOpenaiAuth: true,
+      },
+    }))
+
+    await expect(operation).resolves.toEqual({
+      kind: 'connected',
+    })
+    expect(codexMocks.spawn).toHaveBeenCalledWith(
+      'codex',
+      [
+        '--config',
+        'model_provider="openai"',
+        '--config',
+        'cli_auth_credentials_store="file"',
+        'app-server',
+      ],
+      expect.any(Object),
+    )
+  })
+
+  it('preserves Codex managed ChatGPT login completion errors', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-managed-auth-error-work-')
+    const codexHome = await createTempDir('assistant-codex-managed-auth-error-home-')
+    const child = new MockChildProcess()
+    const loginStarted = createDeferred<void>()
+    const onDeviceCode = vi.fn()
+
+    codexMocks.spawn.mockImplementation(() => {
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          const initialRead = await waitForRpcMethodCount(child, 'account/read', 1)
+          child.stdout.write(jsonLine({
+            id: initialRead.id,
+            result: {
+              account: null,
+              requiresOpenaiAuth: true,
+            },
+          }))
+
+          const loginStart = await waitForRpcMethod(child, 'account/login/start')
+          child.stdout.write(jsonLine({
+            id: loginStart.id,
+            result: {
+              type: 'chatgptDeviceCode',
+              loginId: 'login-managed-chatgpt-error',
+              verificationUrl: 'https://auth.openai.com/codex/device',
+              userCode: 'WXYZ-9876',
+            },
+          }))
+          loginStarted.resolve()
+        })()
+      })
+
+      return child
+    })
+
+    const operation = executeCodexManagedAccountOperation({
+      action: 'connect',
+      codexHome,
+      onDeviceCode,
+      timeoutMs: 1_000,
+      workingDirectory,
+    })
+
+    await loginStarted.promise
+    await waitForMockCall(onDeviceCode, 1)
+
+    child.stdout.write(jsonLine({
+      method: 'account/login/completed',
+      params: {
+        error: 'device auth failed with status 500',
+        loginId: 'login-managed-chatgpt-error',
+        success: false,
+      },
+    }))
+
+    await expect(operation).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_AUTH_FAILED',
+      context: {
+        codexLoginError: 'device auth failed with status 500',
+        retryable: false,
+      },
+      message: 'ChatGPT account authentication did not complete successfully.',
+    })
+  })
+
   it('preserves missing Codex startup errors emitted before turn binding', async () => {
     const workingDirectory = await createTempDir('assistant-codex-prebind-not-found-')
 
@@ -9841,13 +10015,126 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('releases the final turn when current-channel progress never settles', async () => {
+  it('waits for in-flight current-channel progress before returning turn failures', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-progress-drain-failure-')
+    const progressSent = createDeferred<ReturnType<typeof sentProgressResult>>()
+    let progressResolvedBeforeFailure = false
+    const progressDelivery = {
+      send: vi.fn(async (_text: string) => {
+        void _text
+        const result = await progressSent.promise
+        progressResolvedBeforeFailure = true
+        return result
+      }),
+    }
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(
+            jsonLine({
+              id: 2,
+              result: {
+                thread: {
+                  id: 'thread-progress-drain-failure',
+                },
+              },
+            }),
+          )
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(
+            jsonLine({
+              id: 3,
+              result: {
+                turn: {
+                  id: 'turn-progress-drain-failure',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-progress-drain-failure',
+                  type: 'assistant_message',
+                  phase: 'commentary',
+                  message: 'Checking the thread now.',
+                },
+              },
+            }),
+          )
+          child.stdout.write(
+            jsonLine({
+              method: 'turn/completed',
+              params: {
+                turn: {
+                  id: 'turn-progress-drain-failure',
+                  status: 'failed',
+                },
+              },
+            }),
+          )
+          child.emit('exit', 0, null)
+          child.emit('close', 0, null)
+        })()
+      })
+
+      return child
+    })
+
+    let settled = false
+    const turnPromise = executeCodexAppServerTurn({
+      prompt: 'fail with delayed progress',
+      progressDelivery,
+      workingDirectory,
+    }).finally(() => {
+      settled = true
+    })
+
+    for (
+      let attempt = 0;
+      attempt < 200 && progressDelivery.send.mock.calls.length === 0;
+      attempt += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(progressDelivery.send).toHaveBeenCalledWith(
+      'Checking the thread now.',
+      { source: 'model' },
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(settled).toBe(false)
+
+    progressSent.resolve(sentProgressResult())
+    const error: unknown = await turnPromise.then(
+      () => {
+        throw new Error('expected the Codex turn to fail')
+      },
+      (turnError: unknown) => turnError,
+    )
+
+    expect(progressResolvedBeforeFailure).toBe(true)
+    expect(error).toMatchObject({
+      code: 'ASSISTANT_CODEX_FAILED',
+    })
+    expect(readCodexAppServerTurnFailureContext(error)).toMatchObject({
+      codexThreadId: 'thread-progress-drain-failure',
+      providerTurnId: 'turn-progress-drain-failure',
+    })
+  })
+
+  it('keeps the final turn pending while current-channel progress remains unsettled', async () => {
     const workingDirectory = await createTempDir('assistant-codex-progress-drain-timeout-')
     const stalledProgress = createDeferred<ReturnType<typeof sentProgressResult>>()
     const progressDelivery = {
-      close: vi.fn(() => {
-        stalledProgress.resolve(sentProgressResult())
-      }),
       send: vi.fn(async (_text: string) => {
         void _text
         return await stalledProgress.promise
@@ -9926,10 +10213,13 @@ describe('assistant codex runtime', () => {
       return child
     })
 
+    let settled = false
     const turnPromise = executeCodexAppServerTurn({
       prompt: 'answer with stalled progress',
       progressDelivery,
       workingDirectory,
+    }).finally(() => {
+      settled = true
     })
 
     for (
@@ -9944,12 +10234,15 @@ describe('assistant codex runtime', () => {
       { source: 'model' },
     )
 
+    await new Promise((resolve) => setTimeout(resolve, 2_100))
+    expect(settled).toBe(false)
+
+    stalledProgress.resolve(sentProgressResult())
     await expect(turnPromise).resolves.toMatchObject({
       finalMessage: 'Final answer after stalled progress.',
       sessionId: 'thread-progress-drain-timeout',
       turnId: 'turn-progress-drain-timeout',
     })
-    expect(progressDelivery.close).toHaveBeenCalledTimes(1)
   })
 
   it('returns unavailable for progress tool calls when no progress sink exists', async () => {
@@ -10046,21 +10339,25 @@ describe('assistant codex runtime', () => {
     const workingDirectory = await createTempDir('assistant-codex-context-compact-')
     const onProgress = vi.fn()
     const onTraceEvent = vi.fn()
-    const selectedProgressText = CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS[4]
-    expect(CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS).toEqual([
-      'Hang on, refreshing my memory real quick.',
-      'One moment while I catch up on our conversation.',
-      'Bear with me, pulling my thoughts together.',
-      'Hang on, piecing everything together real quick.',
-      'One sec, getting everything sorted in my head.',
-      'Give me a moment — lots to keep track of here.',
-      'Hold on, gathering my thoughts on all of this.',
-      'One sec — just making sure I\'m not missing anything.',
-    ])
-    expect(CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS).not.toEqual(
-      expect.arrayContaining([expect.stringMatching(/\bcontext\b/iu)]),
-    )
     vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    const selectedProgressText =
+      CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS[Math.floor(
+        0.5 * CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS.length,
+      )] ?? CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS[0]
+
+    expect(CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS.length).toBeGreaterThanOrEqual(100)
+    expect(new Set(CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS).size).toBe(
+      CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS.length,
+    )
+    for (const progressText of CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS) {
+      expect(progressText).toMatch(/^[\x20-\x7E]+$/u)
+      expect(progressText.length).toBeGreaterThanOrEqual(18)
+      expect(progressText.length).toBeLessThanOrEqual(95)
+      expect(progressText).not.toMatch(/https?:\/\/|www\.|bit\.ly|tinyurl/iu)
+      expect(progressText).not.toMatch(
+        /\b(compaction|context|token|prompt|model|provider|infrastructure|signup)\b/iu,
+      )
+    }
     const progressDelivery = createProgressDeliveryMock()
 
     codexMocks.spawn.mockImplementation(() => {
@@ -10171,7 +10468,7 @@ describe('assistant codex runtime', () => {
     expect(progressDelivery.send).toHaveBeenCalledTimes(1)
     expect(progressDelivery.send).toHaveBeenCalledWith(
       selectedProgressText,
-      { source: 'system' },
+      { required: true, source: 'system' },
     )
     expect(
       onProgress.mock.calls.some(([event]) => event?.id === 'context-compact-1'),
@@ -13504,6 +13801,7 @@ describe('steered final segments', () => {
         event: Record<string, unknown>
       }
     | {
+        expectedSuccess?: boolean
         expectedText: string
         id: number
         kind: 'attach-response-media'
@@ -13603,7 +13901,7 @@ describe('steered final segments', () => {
               await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
                 id: step.id,
                 result: {
-                  success: true,
+                  success: step.expectedSuccess ?? true,
                   contentItems: [
                     {
                       type: 'inputText',
@@ -14030,28 +14328,65 @@ describe('steered final segments', () => {
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
-  it('drops attached media when finish_without_reply selects no final response', async () => {
+  it('rejects finish_without_reply after response media is attached', async () => {
+    const media = {
+      kind: 'image',
+      url: 'https://cdn.example.test/assistant/no-reply.png',
+      alt: 'No-reply media that should still be delivered',
+      source: 'no-reply-media-test',
+    }
     const result = await runScriptedSteeredFinalSegmentsTurn([
       {
         kind: 'attach-response-media',
         id: 76,
-        media: [
-          {
-            kind: 'image',
-            url: 'https://cdn.example.test/assistant/no-reply.png',
-            alt: 'No-reply media that should not be delivered',
-            source: 'no-reply-media-test',
-          },
-        ],
+        media: [media],
         expectedText: '1 response image attached',
       },
       {
         kind: 'finish-without-reply',
         id: 77,
-        expectedText: 'finished without reply',
+        expectedSuccess: false,
+        expectedText: 'finish_without_reply unavailable after assistant output',
       },
       completedItemEvent({
         id: 'assistant-no-reply-media',
+        type: 'assistant_message',
+        message: 'This final text should be delivered.',
+      }),
+    ])
+
+    expect(result.finalAction).toBeNull()
+    expect(result.finalActionExplicit).toBe(false)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
+    expect(result.codexThreadHistoryUnsafe).toBe(false)
+    expect(result.finalMessage).toBe('This final text should be delivered.')
+    expect(result.responseMedia).toEqual([media])
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('rejects response media after finish_without_reply selects no final response', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        kind: 'finish-without-reply',
+        id: 78,
+        expectedText: 'finished without reply',
+      },
+      {
+        kind: 'attach-response-media',
+        id: 79,
+        media: [
+          {
+            kind: 'image',
+            url: 'https://cdn.example.test/assistant/no-reply-late.png',
+            alt: 'Late no-reply media that should not be attached',
+            source: 'no-reply-media-test',
+          },
+        ],
+        expectedSuccess: false,
+        expectedText: 'response media unavailable after finish_without_reply',
+      },
+      completedItemEvent({
+        id: 'assistant-no-reply-late-media',
         type: 'assistant_message',
         message: 'This final text should not be delivered.',
       }),
@@ -14063,6 +14398,56 @@ describe('steered final segments', () => {
     expect(result.codexThreadHistoryUnsafe).toBe(true)
     expect(result.finalMessage).toBe('')
     expect(result.responseMedia).toEqual([])
+    expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('allows response media for a later steered message after earlier finish_without_reply', async () => {
+    const media = {
+      kind: 'image',
+      url: 'https://cdn.example.test/assistant/later-after-no-reply.png',
+      alt: 'Later steered message media',
+      source: 'later-no-reply-media-test',
+    }
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-1',
+        type: 'user_message',
+        message: 'First question',
+      }),
+      {
+        kind: 'finish-without-reply',
+        id: 80,
+        expectedText: 'finished without reply',
+      },
+      completedItemEvent({
+        id: 'assistant-earlier-no-reply',
+        type: 'assistant_message',
+        message: 'This first answer should not be delivered.',
+      }),
+      completedItemEvent({
+        id: 'user-2',
+        type: 'user_message',
+        message: 'Second question',
+      }),
+      {
+        kind: 'attach-response-media',
+        id: 81,
+        media: [media],
+        expectedText: '1 response image attached',
+      },
+      completedItemEvent({
+        id: 'assistant-later-media',
+        type: 'assistant_message',
+        message: 'Visible answer with media.',
+      }),
+    ])
+
+    expect(result.finalAction).toBeNull()
+    expect(result.finalActionExplicit).toBe(false)
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
+    expect(result.codexThreadHistoryUnsafe).toBe(true)
+    expect(result.finalMessage).toBe('Visible answer with media.')
+    expect(result.responseMedia).toEqual([media])
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
@@ -14256,6 +14641,7 @@ it('rejects finish_without_reply after context compaction progress was sent', as
   })
 
   expect(progressDelivery.send).toHaveBeenCalledWith(expect.any(String), {
+    required: true,
     source: 'system',
   })
   expect(result.finalMessage).toBe('Final answer after system progress.')
@@ -14464,6 +14850,25 @@ async function waitForRpcMethodCount(
   }
 
   throw new Error(`Expected ${count} RPC ${method} messages from Murph.`)
+}
+
+async function waitForMockCall(
+  mock: { mock: { calls: unknown[] } },
+  count: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (mock.mock.calls.length >= count) {
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+
+  throw new Error(`Expected mock to be called at least ${count} time(s).`)
+}
+
+async function waitForStableMicrotask(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 async function waitForProcessKill(

@@ -773,6 +773,7 @@ test('capture descriptor exposes the add, show, list, and manifest leaves', () =
   assert.deepEqual([...descriptionsByPath.keys()], [
     'capture add',
     'capture import-json',
+    'capture payload-schema',
     'capture show',
     'capture list',
     'capture manifest',
@@ -782,6 +783,10 @@ test('capture descriptor exposes the add, show, list, and manifest leaves', () =
   assert.equal(
     descriptionsByPath.get('capture import-json')?.description,
     captureCommandDescriptions.importJson,
+  )
+  assert.equal(
+    descriptionsByPath.get('capture payload-schema')?.description,
+    captureCommandDescriptions.payloadSchema,
   )
   assert.equal(descriptionsByPath.get('capture show')?.description, captureCommandDescriptions.show)
   assert.equal(descriptionsByPath.get('capture list')?.description, captureCommandDescriptions.list)
@@ -1780,6 +1785,9 @@ test('automation save and edit schemas expose typed automation fields and a sepa
     'identityId',
     'participantId',
     'threadId',
+    'assistantTargetOverrideModel',
+    'assistantTargetOverrideModelProvider',
+    'assistantTargetOverrideReasoningEffort',
   ]) {
     assert.equal(field in saveSchema.options.properties, true, field)
   }
@@ -1801,7 +1809,16 @@ test('automation save and edit schemas expose typed automation fields and a sepa
   assert.deepEqual(editSchema.args.required, ['lookup'])
   assert.equal('input' in editSchema.options.properties, false)
   assert.equal(editSchema.options.required?.includes('instructions') ?? false, false)
-  for (const field of ['title', 'continuityPolicy', 'instructions', 'channel']) {
+  for (const field of [
+    'title',
+    'continuityPolicy',
+    'instructions',
+    'channel',
+    'assistantTargetOverrideModel',
+    'assistantTargetOverrideModelProvider',
+    'assistantTargetOverrideReasoningEffort',
+    'clearAssistantTargetOverride',
+  ]) {
     assert.equal(field in editSchema.options.properties, true, field)
   }
 

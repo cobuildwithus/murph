@@ -21,6 +21,8 @@ import {
 const requiredWorkerSecrets = {
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
   HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+  HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+    "provider-egress-signing-secret",
   HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "r2-access-fixture",
   HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "r2-signing-fixture",
   HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "webhook-private",
@@ -232,6 +234,9 @@ describe("buildHostedWorkerSecretsPayload", () => {
     expect(payload.ELEVENLABS_API_KEY).toBe("elevenlabs-secret");
     expect(payload.OLLAMA_API_KEY).toBeUndefined();
     expect(payload.HOSTED_LOG_FINGERPRINT_SECRET).toBe("log-fingerprint-secret");
+    expect(payload.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET).toBe(
+      "provider-egress-signing-secret",
+    );
     expect(payload.OPENAI_API_KEY).toBe("openai-secret");
     expect(payload.VERCEL_AI_API_KEY).toBeUndefined();
   });

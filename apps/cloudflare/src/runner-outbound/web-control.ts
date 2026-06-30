@@ -15,6 +15,7 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
@@ -121,6 +122,9 @@ export async function handleRunnerWebControlRequest(input: {
   const isActionApprovalRequest =
     input.url.pathname === HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH
     && input.request.method === "POST";
+  const isActionApprovalConsume =
+    input.url.pathname === HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH
+    && input.request.method === "POST";
   const isCheckpointRequest = input.url.pathname === HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH
     && input.request.method === "POST";
   const isBrowserVaultReplicaPublishRequest =
@@ -141,10 +145,13 @@ export async function handleRunnerWebControlRequest(input: {
     && input.request.method === "POST";
   const isCodexAuthUpdateRequest = policy.operation === "codex_auth_update"
     && input.request.method === "POST";
+  const isPhoneCallStartRequest = policy.operation === "phone_call_start"
+    && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority | null =
     null;
   if (
     isActionApprovalRequest
+    || isActionApprovalConsume
     || isCheckpointRequest
     || isBrowserVaultReplicaPublishRequest
     || isDeviceSyncRuntimeSnapshotRequest
@@ -153,6 +160,7 @@ export async function handleRunnerWebControlRequest(input: {
     || isComputerUseRequest
     || isConnectedAppsRequest
     || isCodexAuthUpdateRequest
+    || isPhoneCallStartRequest
   ) {
     try {
       writeAuthority = await (

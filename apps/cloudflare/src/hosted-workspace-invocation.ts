@@ -54,6 +54,7 @@ import {
 } from "./hosted-env-policy.ts";
 import {
   createHostedRunnerNativeParserToolchain,
+  isHostedRunnerNativeParserToolchain,
   isHostedRunnerLocalE2eParserToolchain,
 } from "./runner-native-parser-toolchain.ts";
 const HOSTED_RUNNER_WARM_WORKSPACES_DIRECTORY = "hosted-runner-workspaces";
@@ -358,7 +359,11 @@ function bindHostedExecutionJobParserToolchain(
     );
   }
 
-  if (parserToolchain && isHostedRunnerLocalE2eParserToolchain(parserToolchain)) {
+  if (
+    parserToolchain &&
+    (isHostedRunnerLocalE2eParserToolchain(parserToolchain) ||
+      isHostedRunnerNativeParserToolchain(parserToolchain))
+  ) {
     return parserToolchain;
   }
 

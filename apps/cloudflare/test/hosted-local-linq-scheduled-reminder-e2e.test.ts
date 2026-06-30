@@ -35,15 +35,13 @@ import {
 const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
-const fastDeployGate = process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";
-const scheduledReminderFullLeadMs = 300_000;
-const scheduledReminderFastGateLeadMs = 120_000;
-const scheduledReminderLeadMs = resolveScheduledReminderLeadMs(fastDeployGate);
-const setupLeadText = fastDeployGate ? "about two minutes" : "about five minutes";
+const scheduledReminderLeadMs = 90_000;
+const setupLeadText = "about ninety seconds";
 const setupReplyText = `Done - I will remind you here in ${setupLeadText}.`;
 const setupRequestText = `Remind me here in ${setupLeadText} to go to sleep.`;
 const scheduledReminderMinimumRunwayMs = 10_000;
-const scheduledReminderSendWaitMs = 240_000;
+const scheduledReminderSendWaitMs = 90_000;
+const scheduledReminderCompletionWaitMs = 60_000;
 const productionLikeAssistantModel = "gpt-5.5";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -156,7 +154,9 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 
     expect(sendRequest.method).toBe("POST");
     expect(requireLinqStub().readObservedMessageText(sendRequest)).toBe(reminderText);
-    const reminderStatus = await requireScenario().waitForHostedCompletion(userId);
+    const reminderStatus = await requireScenario().waitForHostedCompletion(userId, {
+      timeoutMs: scheduledReminderCompletionWaitMs,
+    });
     expect(reminderStatus.lastErrorCode ?? null).toBeNull();
     const providerRequestTokenPricingBasis =
       await resolveScheduledReminderCronProviderRequestTokenPricingBasis({
@@ -172,21 +172,11 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 });
 
 describe("hosted local Linq scheduled reminder timing helpers", () => {
-  it("uses a two-minute lead for fast deploy gates and five minutes otherwise", () => {
+  it("uses a ninety-second lead", () => {
     const now = new Date("2026-06-18T12:00:00.000Z");
 
-    expect(resolveScheduledReminderLeadMs(true)).toBe(scheduledReminderFastGateLeadMs);
-    expect(resolveScheduledReminderLeadMs(false)).toBe(scheduledReminderFullLeadMs);
-    expect(resolveScheduledReminderTimes(now, scheduledReminderFastGateLeadMs)).toEqual({
-      dueAtIso: "2026-06-18T12:02:00.000Z",
-    });
-    expect(resolveScheduledReminderTimes(now, scheduledReminderFullLeadMs)).toEqual({
-      dueAtIso: "2026-06-18T12:05:00.000Z",
-    });
     expect(resolveScheduledReminderTimes(now)).toEqual({
-      dueAtIso: fastDeployGate
-        ? "2026-06-18T12:02:00.000Z"
-        : "2026-06-18T12:05:00.000Z",
+      dueAtIso: "2026-06-18T12:01:30.000Z",
     });
     expect(scheduledReminderLeadMs).toBeGreaterThan(scheduledReminderMinimumRunwayMs);
   });
@@ -306,7 +296,6 @@ async function startScenario(): Promise<void> {
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
       OPENAI_API_KEY: "stub-local-openai-key",
     },
@@ -432,10 +421,6 @@ function summarizeObservedLinqRequests(): Array<{ method: string; url: string }>
     method: request.method,
     url: request.url,
   }));
-}
-
-function resolveScheduledReminderLeadMs(useFastGate: boolean): number {
-  return useFastGate ? scheduledReminderFastGateLeadMs : scheduledReminderFullLeadMs;
 }
 
 function resolveScheduledReminderTimes(

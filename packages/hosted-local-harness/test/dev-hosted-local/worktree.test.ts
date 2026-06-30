@@ -98,6 +98,8 @@ function buildValidHostedLocalWorktreeCryptoStateText(
     HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "local-wrap-key",
     HOSTED_DEVICE_ROUTING_INDEX_KEY: "device-routing-key",
     HOSTED_LOG_FINGERPRINT_SECRET: "local-log-fingerprint-secret",
+    HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+      "local-provider-egress-signing-secret",
     HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: "v1",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: privateJwk,
     HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON: JSON.stringify({

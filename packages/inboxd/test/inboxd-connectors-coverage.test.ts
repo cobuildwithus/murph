@@ -1127,7 +1127,7 @@ test("normalizeLinqWebhookEvent keeps voice attachments when downloads fail", as
       byteSize: 512,
       data: null,
       externalId: "att-voice",
-      fileName: "voice.amr",
+      fileName: "attachment-part-1.amr",
       kind: "audio",
       mime: "audio/amr",
     },

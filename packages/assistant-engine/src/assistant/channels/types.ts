@@ -23,6 +23,7 @@ type AssistantVaultFileResponseMedia = Extract<
 >
 
 export interface AssistantChannelActivityHandle {
+  refreshNow?: () => Promise<void>
   stop: () => Promise<void>
 }
 
@@ -43,6 +44,7 @@ export interface LinqRuntimeDependencies {
   loadVaultFile?: (
     media: AssistantVaultFileResponseMedia,
   ) => Promise<Uint8Array>
+  maxSessionMs?: number
   refreshMs?: number
   signal?: AbortSignal
 }
@@ -203,6 +205,7 @@ export interface AssistantDeliveryCandidate {
 }
 
 export interface AssistantChannelAutoReplyEligibility {
+  externalThreadRouteAuthorityPresent?: boolean
   source: string | null
   threadIsDirect: boolean | null
 }

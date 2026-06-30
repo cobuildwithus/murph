@@ -158,6 +158,11 @@
       "types": "./dist/vault-cli-errors.d.ts",
       "import": "./dist/vault-cli-errors.js",
       "default": "./dist/vault-cli-errors.js"
+    },
+    "./assistant/delivery-failure": {
+      "types": "./dist/assistant/delivery-failure.d.ts",
+      "import": "./dist/assistant/delivery-failure.js",
+      "default": "./dist/assistant/delivery-failure.js"
     }
   },
   "files": [
@@ -178,6 +183,9 @@
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@linqapp/sdk": "0.28.0"
   },
   "engines": {
     "node": ">=24.14.1"

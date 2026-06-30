@@ -38,8 +38,8 @@ import {
   isHostedComputerWebControlRequest,
   parseHostedComputerActRequest,
   parseHostedComputerFinishRunRequest,
+  parseHostedComputerOpenRunRequest,
   parseHostedComputerPauseForUserRequest,
-  parseHostedComputerStartRunRequest,
   readHostedComputerRunOperationRoute,
 } from "../src/computer-use.ts";
 import type {
@@ -522,6 +522,8 @@ describe("hosted execution coverage gaps", () => {
       "./legacy-dashboard-replica",
       "./orchestration-control",
       "./parsers",
+      "./phone-calls",
+      "./return-contact",
       "./routes",
       "./runtime-control",
       "./side-effects",
@@ -618,6 +620,7 @@ describe("hosted execution coverage gaps", () => {
     expect(Object.keys(routeModule).sort()).toEqual([
       "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID",
       "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH",
+      "HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH",
       "HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH",
       "HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH",
       "HOSTED_RUNTIME_CODEX_AUTH_PATH",
@@ -632,6 +635,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
       "HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH",
       "HOSTED_RUNTIME_STATUS_PATH",
+      "HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH",
       "HOSTED_RUNTIME_USAGE_RECORD_PATH",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH",
       "HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH",
@@ -645,6 +649,9 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(routeModule.HOSTED_RUNTIME_USAGE_RECORD_PATH).toBe(
       "/api/internal/hosted-execution/usage/record",
+    );
+    expect(routeModule.HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH).toBe(
+      "/api/internal/hosted-runtime/action-approvals/consume",
     );
     expect(routeModule.HOSTED_RUNTIME_ISSUE_RECORD_PATH).toBe(
       "/api/internal/hosted-execution/issues/record",
@@ -684,31 +691,38 @@ describe("hosted execution coverage gaps", () => {
       method: "GET",
       path: pausePath,
     })).toBe(false);
+    expect(readHostedComputerRunOperationRoute(
+      "/api/internal/computer/runs/run_abc123/observe",
+    )).toBe(null);
+    expect(isHostedComputerWebControlRequest({
+      method: "POST",
+      path: "/api/internal/computer/runs/run_abc123/observe",
+    })).toBe(false);
 
-    expect(() => parseHostedComputerStartRunRequest({
+    expect(() => parseHostedComputerOpenRunRequest({
       profileKey: "appointments",
       startUrl: "https://example.test/start",
     })).toThrow(TypeError);
-    expect(() => parseHostedComputerStartRunRequest({
+    expect(() => parseHostedComputerOpenRunRequest({
       legacyProfileKey: "appointments",
       startUrl: "https://example.test/start",
     })).toThrow(TypeError);
-    expect(() => parseHostedComputerStartRunRequest({
+    expect(() => parseHostedComputerOpenRunRequest({
       memberScopedProfileRequired: true,
       startUrl: "https://example.test/start",
     })).toThrow(TypeError);
-    expect(() => parseHostedComputerStartRunRequest({
+    expect(() => parseHostedComputerOpenRunRequest({
       resumeRunId: "hcr_paused_run",
       startUrl: "https://example.test/start",
     })).toThrow(TypeError);
-    expect(parseHostedComputerStartRunRequest({
+    expect(parseHostedComputerOpenRunRequest({
       goal: "Runner goal.",
     })).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
       startUrl: null,
     });
-    expect(parseHostedComputerStartRunRequest({
+    expect(parseHostedComputerOpenRunRequest({
     })).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
@@ -734,14 +748,14 @@ describe("hosted execution coverage gaps", () => {
       code: "const buttons = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); await buttons.last().click(); return { count: await buttons.count() };",
       timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
     });
-    expect(parseHostedComputerStartRunRequest({
+    expect(parseHostedComputerOpenRunRequest({
       startUrl: "about:blank",
     })).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
       startUrl: "about:blank",
     });
-    expect(parseHostedComputerStartRunRequest({
+    expect(parseHostedComputerOpenRunRequest({
       startUrl: "http://127.0.0.1:3000",
     })).toEqual({
       resumeAfterMailboxItemId: null,

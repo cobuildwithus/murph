@@ -109,6 +109,40 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
+  it('requires pending vault-file approvals to include the returned handoff link', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Vault file sends:')
+    expect(prompt).toContain(
+      'send a normal text reply with the raw approval URL',
+    )
+    expect(prompt).toContain(
+      'The file is not attached yet.',
+    )
+    expect(prompt).toContain(
+      'Do not omit the URL, summarize around it without the URL, or rely on a separate automated message.',
+    )
+    expect(prompt).toContain(
+      'When `murph.send_vault_file` returns `status: "approved"`',
+    )
+  })
+
+  it('routes accepted habit plans through canonical health surfaces', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('regimen with `kind=habit`')
+    expect(prompt).toContain(
+      'automation only for reminders, check-ins, or bounded support',
+    )
+    expect(prompt).toContain(
+      'baseline/current state, target/date, ladder',
+    )
+    expect(prompt).toContain(
+      'read the relevant active goal/regimen/automation record',
+    )
+    expect(prompt).toContain('instead of inventing it')
+  })
+
   it('guides explicit structured product feedback capture', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
@@ -118,8 +152,9 @@ describe('assistant execution prompt contract', () => {
       'capture explicit Murph product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction',
     )
     expect(prompt).toContain(
-      'Record only the structured kind, a concise product-only summary, and any relevant changelog item ids',
+      'Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known',
     )
+    expect(prompt).toContain('Changelog ids are optional metadata')
     expect(prompt).toContain('Start inferred summaries with `Speculative:`')
     expect(prompt).toContain('assistant-observed summaries with `Murph-observed:`')
     expect(prompt).toContain('Do not log vague low-confidence guesses')
@@ -148,16 +183,40 @@ describe('assistant execution prompt contract', () => {
       'A required `send_progress_update` call is not a final answer and does not conflict with acting directly',
     )
     expect(prompt).toContain(
-      'Use it for longer, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work',
+      'Use it sparingly for genuinely long, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work',
     )
     expect(prompt).toContain(
-      'If the turn remains long-running after substantial tool work, send another brief update so the user is not left hanging, up to three total progress updates in the turn',
+      'For work likely to finish in about a minute or less, send at most one progress update',
     )
     expect(prompt).toContain(
-      'Keep the text to one to three short conversational sentences, specific to the immediate next step',
+      'never send a third',
     )
     expect(prompt).toContain(
-      '3. Use `send_progress_update` first for genuinely longer, multi-step, research, long parsing/scans, or substantial non-audio content-inspection work. If the turn remains long-running after substantial tool work, send another brief update so the user is not left hanging, up to three total progress updates in the turn. Keep the progress text to one to three short conversational sentences, specific to the immediate next step; avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works.',
+      'Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage',
+    )
+    expect(prompt).toContain(
+      'Keep the text to one or two short conversational sentences, specific to the immediate next step',
+    )
+    expect(prompt).toContain(
+      '3. Follow the progress-update rules in the execution behavior guidance before genuinely long work, but never let progress updates outrank immediate safe action or create extra tool/status churn.',
+    )
+    expect(
+      prompt.match(
+        /If the turn becomes unusually long-running after substantial tool work, you may send one more brief update so the user is not left hanging; never send a third\./g,
+      ) ?? [],
+    ).toHaveLength(1)
+    expect(
+      prompt.match(
+        /Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq\/iMessage/g,
+      ) ?? [],
+    ).toHaveLength(1)
+    expect(
+      prompt.match(
+        /never send progress updates for individual tool loops, searches, reads, page checks, clicks, or status churn/g,
+      ) ?? [],
+    ).toHaveLength(1)
+    expect(prompt).not.toContain(
+      '3. Use `send_progress_update` first only for genuinely long',
     )
     expect(prompt).toContain(
       'Prefer using available sources over giving the user busywork such as sending logs, restating device-derived facts, or reporting completion of an activity that Murph can verify itself.',
@@ -322,10 +381,10 @@ describe('assistant execution prompt contract', () => {
       'For repeat action tasks such as reordering supplements or products, booking or rescheduling with a known provider, or using a known portal, run `vault-cli memory show` when saved preferences could materially change the site, product, provider, delivery, or scheduling choice.',
     )
     expect(prompt).toContain(
-      'call `murph.computer_start_run` normally',
+      'call `murph.computer_open`',
     )
     expect(prompt).toContain(
-      'The runtime supplies hidden mailbox proof and delivery context and selects the active awaiting run.',
+      'The runtime supplies hidden mailbox proof and delivery context, selects the active awaiting run, and returns current page state.',
     )
     expect(prompt).toContain('vault-cli memory upsert')
     expect(prompt).toContain('standing instruction')
@@ -367,6 +426,21 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).toContain(
       'so each run starts from current vault/tool evidence instead of prior run transcript context.',
+    )
+  })
+
+  it('warns before creating off-hours Linq/iMessage reminder automations', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Linq/iMessage off-hours reminder guard')
+    expect(prompt).toContain('23:00 through 04:59')
+    expect(prompt).toContain("recipient's local timezone")
+    expect(prompt).toContain('channel=linq')
+    expect(prompt).toContain(
+      'A clear user confirmation for that exact off-hours time is enough to proceed',
+    )
+    expect(prompt).toContain(
+      'Do not add this extra confirmation for non-Linq channels',
     )
   })
 })
@@ -505,7 +579,10 @@ describe('assistant local PDF evidence guidance', () => {
       'When the user sends or references a file, image, screenshot, PDF, CSV, audio/video file, large pasted text, lab report',
     )
     expect(prompt).toContain(
-      'If the current task requires substantial non-audio content inspection or multiple parse/import steps, call `send_progress_update` first',
+      'If the current task requires substantial non-audio content inspection or multiple parse/import steps, use the progress-update budget above',
+    )
+    expect(prompt).toContain(
+      'at most one for ordinary long work, one more only after a multi-minute delay, and none when the final reply should be available shortly',
     )
     expect(prompt).toContain(
       'Do not use it for straightforward one-shot logging or capture writes',
@@ -560,7 +637,7 @@ describe('assistant consumption lookup guidance', () => {
       'when the user asks to log/import/save it or simply sends the data for Murph to use',
     )
     expect(prompt).toContain(
-      'Do not save when the user clearly asks only for analysis/advice',
+      'Do not save when the user clearly asks only for ephemeral analysis/advice without retention',
     )
     expect(prompt).toContain(
       'evidence is too ambiguous to create a meaningful record without one targeted follow-up',
@@ -587,6 +664,12 @@ describe('assistant consumption lookup guidance', () => {
     )
     expect(prompt).toContain(
       'When meal logging or food-pattern context is central, follow the food-journal skill',
+    )
+    expect(prompt).toContain(
+      'For forward-looking nutrition advice, including meal structure, protein, body-composition direction, training fuel, hydration, appetite or under-fueling, GI comfort, or realistic food-system changes, read `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/SKILL.md` before recommending what to eat or change.',
+    )
+    expect(prompt).toContain(
+      'Use food-journal for capture and retrospective observation; use experiment-onboarding only after the user chooses a bounded change to test.',
     )
     expect(prompt).toContain(
       'Ask one targeted follow-up only when missing detail materially changes the user\'s chosen focus, safety, or whether the record will be useful',
@@ -736,13 +819,10 @@ describe('assistant consumption lookup guidance', () => {
       'then `vault-cli exercise show <id-or-slug> --format json` for final movements',
     )
     expect(prompt).toContain(
-      'catalog steps, tips, equipment, level, targets, and source-backed safety notes',
+      'catalog steps, tips, equipment, level, targets, images, and source-backed safety notes',
     )
     expect(prompt).toContain(
       'If the catalog has no useful match, say so plainly and keep the suggestion conservative',
-    )
-    expect(prompt).toContain(
-      'Size exercise and session guidance to what is new',
     )
     expect(prompt).toContain(
       'a short reference once the routine is known',
@@ -750,6 +830,21 @@ describe('assistant consumption lookup guidance', () => {
     expect(prompt).toContain(
       'never assign reporting homework',
     )
+  })
+
+  it('uses image-first guided UX for new exercise instruction', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Movement instruction UX')
+    expect(prompt).toContain('do not dump a long numbered exercise plan')
+    expect(prompt).toContain('attach available catalog images')
+    expect(prompt).toContain('ask whether to walk the user through')
+    expect(prompt).toContain('Use returned catalog `images[]` as response media')
+    expect(prompt).toContain('no catalog image yet')
+    expect(prompt).toContain(
+      'If images are unavailable, keep the first reply to minimal text cues for safety and identification',
+    )
+    expect(prompt).not.toContain('images are unavailable, or safety requires it')
   })
 })
 
@@ -810,6 +905,9 @@ describe('assistant user-facing wording guidance', () => {
       'Do not write any substring shaped like `[text](url)`',
     )
     expect(prompt).toContain(
+      'If a URL must be shown, show only the clean raw URL',
+    )
+    expect(prompt).toContain(
       'Source links are not action links',
     )
     expect(prompt).toContain(
@@ -834,7 +932,7 @@ describe('assistant user-facing wording guidance', () => {
       'provide raw URLs only',
     )
     expect(prompt).toContain(
-      'Never copy citation helper URLs, citationMarker parameters, tracking parameters, or generated source wrappers into the user reply',
+      'Never copy citation helper URLs, citationMarker parameters, tracking parameters such as `utm_*`, or generated source wrappers into the user reply',
     )
     expect(prompt).toContain(
       'Do not include citations, source lists, internal paths, ledger details, raw machine timestamps, source links, Markdown tables, Markdown headers, or fenced code blocks by default',
@@ -1105,7 +1203,7 @@ Execution context:
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'd1922b3e1eeb662572620de81255491d40318dde5f1de9342104a4cab136ddf2',
+      'f19b8aa894d30b48c4b3ad5ee6aecc5dc0cf421ed035ad3bf672f5112bf73ab6',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -1332,6 +1430,19 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'Treat this check-in as the one adjacent next step; do not also offer tracking, reminders, or other follow-ups unless the user asks.',
     )
+    expect(prompt).toContain('Supplement order logging:')
+    expect(prompt).toContain(
+      'When Murph helps the user order a supplement and the action result gives a reliable delivery date',
+    )
+    expect(prompt).toContain(
+      'proactively save or update the supplement in the user\'s vault with `vault-cli supplement save` and `--started-on <delivery-date>`',
+    )
+    expect(prompt).toContain(
+      'Treat this as part of completing the supplement-ordering task, not as an extra follow-up offer.',
+    )
+    expect(prompt).toContain(
+      'If the delivery date is not reliable, do not invent a start date',
+    )
     expect(prompt).toContain('Make at most one proactive offer per completed action.')
     expect(prompt).toContain('Do not re-offer after the user declines.')
     expect(prompt).toContain(
@@ -1350,16 +1461,60 @@ describe('assistant experiment onboarding guidance', () => {
       'When the user signals a recurring problem, goal, or intent to change behavior, prefer a small setup over advice',
     )
     expect(prompt).toContain(
+      'When stress, overload, acute activation, winding down, or symptom fear is the immediate bottleneck, use the stress-regulation skill',
+    )
+    expect(prompt).toContain(
       'For repeated behaviors, routines, habits, or experiment sessions where follow-through, ignored reminders, friction, accountability, support style, social/visual support, or reminder fatigue matters, read the behavior-followthrough skill before scheduling, continuing, or repairing support.',
     )
     expect(prompt).toContain(
-      'use Murph\'s routine, automation, or experiment setup surfaces where available',
+      'use canonical vault surfaces before treating it as active',
     )
     expect(prompt).not.toContain(
       'This skill is a lightweight policy layer over existing Murph surfaces.',
     )
     expect(prompt).not.toContain(
       'When a scheduled support automation fires, choose one structured outcome: `skip` or `send_message`.',
+    )
+  })
+
+  it('renders running and cardio planning through the Murph skill registry', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const healthReasoningStart = prompt.indexOf('Health reasoning:')
+    const chronicSupportStart = prompt.indexOf(
+      'Chronic illness, persistent pain, and self-management experiments:',
+    )
+
+    expect(prompt).toContain(
+      '- running-cardio: Use for running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning',
+    )
+    expect(prompt).toContain(
+      'otherwise read running-cardio and keep support bounded to general capacity and preparation rather than event-specific tapering, peaking, race rules, or benchmark-specific progression.',
+    )
+    expect(prompt).toContain(
+      'Use physical-therapy first for active pain, injury, rehabilitation, or return-to-run clearance.',
+    )
+    expect(prompt).toContain(
+      'Use chronic-illness-support when illness determines capacity and behavior-followthrough when recurring support is central.',
+    )
+    expect(prompt).toContain(
+      'File: `$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md`.',
+    )
+    expect(healthReasoningStart).toBeGreaterThanOrEqual(0)
+    expect(chronicSupportStart).toBeGreaterThan(healthReasoningStart)
+    expect(
+      prompt.slice(healthReasoningStart, chronicSupportStart),
+    ).not.toContain('running-cardio')
+    expect(prompt).toContain('- competition-training: Use when a user is preparing')
+  })
+
+  it('routes acute stress support through the Murph stress skill', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      'Use `stress-regulation` when stress or overload is the immediate bottleneck and the useful answer is a brief safety-aware downshift, load adjustment, or handoff.',
+    )
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/stress-regulation/SKILL.md',
     )
   })
 
@@ -1383,6 +1538,30 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/behavior-followthrough/SKILL.md',
     )
+    expect(prompt).toContain('competition-training')
+    expect(prompt).toContain('target fitness race or competition')
+    expect(prompt).toContain('use strength-training first')
+    expect(prompt).toContain('powerlifting, weightlifting, or strongman')
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/competition-training/SKILL.md',
+    )
+    expect(prompt).toContain('strength-training')
+    expect(prompt).toContain('strength or resistance training plans')
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/strength-training/SKILL.md',
+    )
+    expect(prompt).toContain('running-cardio')
+    expect(prompt).toContain(
+      'running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning',
+    )
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md',
+    )
+    expect(prompt).toContain('stress-regulation')
+    expect(prompt).toContain('stress or overload is the immediate bottleneck')
+    expect(prompt).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/stress-regulation/SKILL.md',
+    )
     expect(prompt).toContain(
       'read the minimal matching skill file(s) before acting',
     )
@@ -1400,6 +1579,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).not.toContain(
       'This skill is a lightweight policy layer over existing Murph surfaces.',
     )
+    expect(prompt).not.toContain('One composable engine')
     expect(prompt).not.toContain('/tmp/')
     expect(prompt).not.toContain('.codex-hosted')
   })
@@ -1591,6 +1771,22 @@ describe('assistant Murph onboarding guidance', () => {
     )
     expect(prompt).toContain(
       'If this turn was a meal photo, symptom report, or other health-data immediate request, do not append an onboarding question in the same turn',
+    )
+    expect(prompt).toContain(
+      'For slow, non-reply-critical onboarding ingestion such as lab PDFs or supplement-label lookup',
+    )
+    expect(prompt).toContain('collaboration.spawn_agent')
+    expect(prompt).toContain(
+      'Spawn it as a fresh thread with `fork_turns: "none"`',
+    )
+    expect(prompt).toContain(
+      'make the spawn message self-contained with durable source evidence, needed user/vault context, duplicate-avoidance instructions, and the expected completion format',
+    )
+    expect(prompt).toContain(
+      'The child must call the relevant `vault-cli` save/import commands, avoid duplicates, and return saved record ids or blockers',
+    )
+    expect(prompt).toContain(
+      'The parent may continue the visible onboarding flow and incorporate the result on the next turn',
     )
     expect(prompt).toContain(
       'If the user clearly declines or skips onboarding',

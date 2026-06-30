@@ -195,7 +195,7 @@ describe("murph connected-app dynamic tools", () => {
     // unsubscribe, calendar invites) or image alt text — those are the
     // bits a user typically asks Murph to act on.
     const htmlBody = `<!doctype html><html><head><style>.x{color:red}</style></head>`
-      + `<body><table><tr><td><p>Hello&nbsp;<strong>Will</strong>,</p>`
+      + `<body><table><tr><td><p>Hello&nbsp;<strong>Alex</strong>,</p>`
       + `<p>Thanks for your order #1234. Subtotal: $42.00</p>`
       + `<p>Track it here: <a href="https://orders.example.com/1234">View order</a>.</p>`
       + `<p>To stop these emails, <a href='https://example.com/unsub?u=42'>unsubscribe</a>.</p>`
@@ -225,7 +225,7 @@ describe("murph connected-app dynamic tools", () => {
     expect(compactedBody).not.toMatch(/color:red/u);
     // Email prose, link text, and link URLs all survive.
     expect(compactedBody).toContain("Hello");
-    expect(compactedBody).toContain("Will");
+    expect(compactedBody).toContain("Alex");
     expect(compactedBody).toContain("Thanks for your order #1234");
     expect(compactedBody).toContain("View order (https://orders.example.com/1234)");
     expect(compactedBody).toContain("unsubscribe (https://example.com/unsub?u=42)");
@@ -316,11 +316,6 @@ function createHostedToolContext(
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
-    requiredUserMessageDeliveryAvailable: false,
-    sendRequiredUserMessage: async () => ({
-      kind: "failed",
-      source: "model",
-    }),
     sendVaultFile: async () => {
       throw new Error("Vault-file sending is unavailable for this turn.");
     },

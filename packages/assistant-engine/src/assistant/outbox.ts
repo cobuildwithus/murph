@@ -12,8 +12,10 @@ import {
   type AssistantSession,
   type AssistantStatusOutboxSummary,
   type AssistantTurnTrigger,
-  type AssistantVaultFileResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  type AutomationQueryRecord,
+} from '@murphai/query'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { mergeAssistantBinding } from './bindings.js'
 import {
@@ -84,6 +86,11 @@ import {
   normalizeAssistantResponseMediaList,
 } from './response-media.js'
 import { writeAssistantAutoReplyIntentProvenance } from './automation/intent-provenance.js'
+import {
+  assistantDeviceActivityAuthorityKeyMatches,
+  readAssistantDeviceActivityDeliveryIdempotencyMetadata,
+} from './device-activity-cron-tags.js'
+import { readAssistantDeviceActivityParentAutomation } from './device-activity-parent-automation.js'
 
 const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
 
@@ -150,6 +157,11 @@ export type {
   AssistantOutboxIntentMirrorState,
 } from './outbox/dispatch-state.js'
 
+export type AssistantOutboxDispatchPreflightResult =
+  | { action: 'continue' }
+  | { action: 'defer'; intent: AssistantOutboxIntent }
+  | { action: 'stop'; intent: AssistantOutboxIntent }
+
 export interface AssistantOutboxDispatchHooks {
   clearPreparedIntent?: (input: {
     intent: AssistantOutboxIntent
@@ -160,6 +172,16 @@ export interface AssistantOutboxDispatchHooks {
     intent: AssistantOutboxIntent
     vault: string
   }) => Promise<void>
+  /**
+   * Runs before an outbox intent is claimed as `sending`. Preflight owns
+   * local/security/control-plane prerequisites that must not increment
+   * delivery attempt counters or enter timed provider retry.
+   */
+  preflightDispatchIntent?: (input: {
+    intent: AssistantOutboxIntent
+    now: Date
+    vault: string
+  }) => Promise<AssistantOutboxDispatchPreflightResult | void>
   prepareDispatchIntent?: (input: {
     intent: AssistantOutboxIntent
     vault: string
@@ -219,36 +241,6 @@ export type AssistantOutboxCreateIntentInput = {
 
 export async function createAssistantOutboxIntent(
   input: AssistantOutboxCreateIntentInput,
-): Promise<AssistantOutboxIntent> {
-  return createAssistantOutboxIntentWithInitialStatus(input, 'pending')
-}
-
-export async function createAssistantVaultFileSendOutboxIntent(
-  input: Omit<AssistantOutboxCreateIntentInput, 'media' | 'operation'> & {
-    file: AssistantVaultFileResponseMedia
-  },
-): Promise<AssistantOutboxIntent> {
-  if (normalizeNullableString(input.channel)?.toLowerCase() !== 'linq') {
-    throw new VaultCliError(
-      'ASSISTANT_VAULT_FILE_CHANNEL_UNSUPPORTED',
-      'Vault file delivery currently supports only the current iMessage conversation.',
-    )
-  }
-
-  const { file, ...outboxInput } = input
-  return createAssistantOutboxIntentWithInitialStatus(
-    {
-      ...outboxInput,
-      media: [file],
-      operation: null,
-    },
-    'awaiting_approval',
-  )
-}
-
-async function createAssistantOutboxIntentWithInitialStatus(
-  input: AssistantOutboxCreateIntentInput,
-  initialStatus: 'awaiting_approval' | 'pending',
 ): Promise<AssistantOutboxIntent> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
@@ -367,7 +359,7 @@ async function createAssistantOutboxIntentWithInitialStatus(
       nextAttemptAt: createdAt,
       sentAt: null,
       attemptCount: 0,
-      status: initialStatus,
+      status: 'pending',
       message,
       media,
       subject,
@@ -528,7 +520,7 @@ export async function listAssistantOutboxIntentsLocal(
   return listAssistantOutboxIntentsLocalStore(vault)
 }
 
-export async function dispatchAssistantOutboxIntent(input: {
+export interface DispatchAssistantOutboxIntentInput {
   allowPreparedSending?: boolean
   dependencies?: AssistantChannelDependencies
   dispatchHooks?: AssistantOutboxDispatchHooks
@@ -542,6 +534,19 @@ export async function dispatchAssistantOutboxIntent(input: {
   }
   signal?: AbortSignal
   vault: string
+}
+
+export async function dispatchAssistantOutboxIntent(
+  input: DispatchAssistantOutboxIntentInput,
+): Promise<DispatchAssistantOutboxIntentResult> {
+  return dispatchAssistantOutboxIntentInternal({
+    ...input,
+    preflightCompleted: false,
+  })
+}
+
+async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOutboxIntentInput & {
+  preflightCompleted: boolean
 }): Promise<DispatchAssistantOutboxIntentResult> {
   const now = input.now ?? new Date()
   const prepared = await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
@@ -590,6 +595,14 @@ export async function dispatchAssistantOutboxIntent(input: {
     if (shouldReconcileAssistantOutboxIntent(intent)) {
       return {
         action: 'reconcile' as const,
+        intent,
+        intentPath,
+      }
+    }
+
+    if (!input.preflightCompleted && input.dispatchHooks?.preflightDispatchIntent) {
+      return {
+        action: 'preflight' as const,
         intent,
         intentPath,
       }
@@ -644,6 +657,30 @@ export async function dispatchAssistantOutboxIntent(input: {
       deliveryError: prepared.intent.lastError,
       session: null,
     }
+  }
+
+  if (prepared.action === 'preflight') {
+    const preflight = await input.dispatchHooks?.preflightDispatchIntent?.({
+      intent: prepared.intent,
+      now,
+      vault: input.vault,
+    })
+    if (preflight?.action === 'defer' || preflight?.action === 'stop') {
+      await repairAssistantOutboxReceiptForIntent({
+        intent: preflight.intent,
+        vault: input.vault,
+      })
+      return {
+        intent: preflight.intent,
+        deliveryError: preflight.intent.lastError,
+        session: null,
+      }
+    }
+
+    return dispatchAssistantOutboxIntentInternal({
+      ...input,
+      preflightCompleted: true,
+    })
   }
 
   if (prepared.action === 'recover-stale-non-idempotent') {
@@ -738,6 +775,26 @@ export async function dispatchAssistantOutboxIntent(input: {
       fault: 'delivery',
       message: 'Injected assistant delivery failure.',
     })
+
+    const deviceActivityAuthorityError = await resolveDeviceActivityOutboxAuthorityError({
+      intent: dispatchIntent,
+      vault: input.vault,
+    })
+    if (deviceActivityAuthorityError) {
+      const failedIntent = await markAssistantOutboxIntentMirrorTerminal({
+        error: deviceActivityAuthorityError,
+        failedAt: now,
+        intent: dispatchIntent,
+        intentPath: dispatchIntentPath,
+        status: 'failed',
+        vault: input.vault,
+      })
+      return {
+        intent: failedIntent,
+        deliveryError: failedIntent.lastError,
+        session: null,
+      }
+    }
 
     await input.dispatchHooks?.prepareDispatchIntent?.({
       intent: dispatchIntent,
@@ -881,6 +938,45 @@ function assistantOutboxIntentMatchesPreparedDispatch(
     intent.deliveryTransportIdempotent === preparedDispatch.deliveryTransportIdempotent
 }
 
+async function resolveDeviceActivityOutboxAuthorityError(input: {
+  intent: AssistantOutboxIntent
+  vault: string
+}): Promise<Error | null> {
+  const metadata = readAssistantDeviceActivityDeliveryIdempotencyMetadata(
+    input.intent.deliveryIdempotencyKey,
+  )
+  if (!metadata) {
+    return null
+  }
+
+  const parentAutomation = await readAssistantDeviceActivityParentAutomation({
+    metadata,
+    vault: input.vault,
+  })
+  if (
+    !parentAutomation ||
+    parentAutomation.status !== 'active' ||
+    parentAutomation.schedule.kind !== 'deviceActivity' ||
+    !assistantDeviceActivityAuthorityKeyMatches({
+      authorityKey: metadata.authorityKey,
+      automation: {
+        ...parentAutomation,
+        schedule: {
+          activityKind: parentAutomation.schedule.activityKind,
+          source: parentAutomation.schedule.source,
+        },
+      },
+    })
+  ) {
+    return new VaultCliError(
+      'ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE',
+      'Device activity automation authority changed before outbound delivery.',
+    )
+  }
+
+  return null
+}
+
 export async function deliverAssistantOutboxMessage(input: {
   actorId?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
@@ -967,6 +1063,7 @@ export async function deliverAssistantOutboxMessage(input: {
   }
 
   if (
+    dispatched.intent.status === 'awaiting_approval' ||
     dispatched.intent.status === 'pending' ||
     dispatched.intent.status === 'retryable' ||
     dispatched.intent.status === 'sending'
@@ -1084,6 +1181,7 @@ export async function deliverAssistantOutboxReaction(input: {
   }
 
   if (
+    dispatched.intent.status === 'awaiting_approval' ||
     dispatched.intent.status === 'pending' ||
     dispatched.intent.status === 'retryable' ||
     dispatched.intent.status === 'sending'

@@ -253,6 +253,9 @@ importers:
       recharts:
         specifier: 3.8.1
         version: 3.8.1(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react-is@16.13.1)(react@19.2.6)(redux@5.0.1)
+      retell-sdk:
+        specifier: 5.39.0
+        version: 5.39.0
       server-only:
         specifier: 0.0.1
         version: 0.0.1
@@ -278,6 +281,9 @@ importers:
         specifier: 4.2.4
         version: 4.2.4(@nestjs/common@11.1.19(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.19(@nestjs/common@11.1.19(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.0)(@swc/cli@0.8.1(@swc/core@1.15.3(@swc/helpers@0.5.21))(chokidar@5.0.0))(@swc/core@1.15.3(@swc/helpers@0.5.21))(@swc/helpers@0.5.21)(magicast@0.5.2)(next@16.2.6(@babel/core@7.29.0)(@opentelemetry/api@1.9.0)(@playwright/test@1.59.1)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(typescript@5.9.3)
     devDependencies:
+      '@linqapp/sdk':
+        specifier: 0.28.0
+        version: 0.28.0
       '@playwright/test':
         specifier: ^1.59.1
         version: 1.59.1
@@ -302,6 +308,9 @@ importers:
       linkedom:
         specifier: 0.18.12
         version: 0.18.12
+      openai:
+        specifier: 6.45.0
+        version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))(zod@4.3.6)
       prisma:
         specifier: ^7.8.0
         version: 7.8.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(better-sqlite3@12.6.2)(magicast@0.5.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@5.9.3)
@@ -391,6 +400,9 @@ importers:
       '@openai/codex':
         specifier: 0.135.0
         version: 0.135.0
+      openai:
+        specifier: 6.45.0
+        version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
 
   packages/assistant-runtime:
     dependencies:
@@ -454,6 +466,9 @@ importers:
       '@cfworker/json-schema':
         specifier: ^4.1.1
         version: 4.1.1
+      '@junction-api/sdk':
+        specifier: 1.2.0
+        version: 1.2.0
       '@modelcontextprotocol/server':
         specifier: ^2.0.0-alpha.2
         version: 2.0.0-alpha.2(@cfworker/json-schema@4.1.1)
@@ -584,6 +599,9 @@ importers:
 
   packages/device-syncd:
     dependencies:
+      '@junction-api/sdk':
+        specifier: 1.2.0
+        version: 1.2.0
       '@murphai/importers':
         specifier: workspace:*
         version: link:../importers
@@ -645,6 +663,9 @@ importers:
 
   packages/hosted-execution:
     dependencies:
+      '@junction-api/sdk':
+        specifier: 1.2.0
+        version: 1.2.0
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -799,6 +820,10 @@ importers:
       zod:
         specifier: ^4.4.3
         version: 4.4.3
+    devDependencies:
+      '@linqapp/sdk':
+        specifier: 0.28.0
+        version: 0.28.0
 
   packages/parsers:
     dependencies:
@@ -1975,11 +2000,18 @@ packages:
     peerDependencies:
       tslib: '2'
 
+  '@junction-api/sdk@1.2.0':
+    resolution: {integrity: sha512-D5SjCUEKWsdwEUQZqVoodhO17Tss11DxSn6tRT6/Dm8G9mdmAZKUmxjlvG7SXXZCFk/8+NNB0JfRVkl6NNz25Q==}
+    engines: {node: '>=18.0.0'}
+
   '@keyv/serialize@1.1.1':
     resolution: {integrity: sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA==}
 
   '@kurkle/color@0.3.4':
     resolution: {integrity: sha512-M5UknZPHRu3DEDWoipU6sE8PdkZ6Z/S+v4dD+Ke8IaNlpdSQah50lz1KtcFBa2vsdOnwbbnxJwVM4wty6udA5w==}
+
+  '@linqapp/sdk@0.28.0':
+    resolution: {integrity: sha512-Hd6FligxpH3G9Dq0HV6dSjE5hBwI/NanyXVlsZlETKdAtdcRLhXDYI9gJPkqDLfFdWjaAYvCndnaF4lD7DU8eA==}
 
   '@lit-labs/ssr-dom-shim@1.5.1':
     resolution: {integrity: sha512-Aou5UdlSpr5whQe8AA/bZG0jMj96CoJIWbGfZ91qieWu5AWUMKw8VR/pAkQkJYvBNhmCcWnZlyyk5oze8JIqYA==}
@@ -7603,6 +7635,26 @@ packages:
     resolution: {integrity: sha512-XgFPPM+B28FtCCgSb9I+s9szOC1vZRSwgWsRUA5ylIxRTgKozqjOCrVOqGsYABPYK5qnfqClxZTFBa8PKt2v6Q==}
     engines: {node: '>=12'}
 
+  openai@6.45.0:
+    resolution: {integrity: sha512-5DQVNErssk0afNpTTHUm/qZPU4iKR9OYdNid8Ib4puq4gHNNvGWZht2zY4h9a8JMF949Ik6m8gQutllVPbjdnw==}
+    peerDependencies:
+      '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
+      '@smithy/hash-node': '>=4.3.0 <5'
+      '@smithy/signature-v4': '>=5.4.0 <6'
+      ws: ^8.18.0
+      zod: ^3.25 || ^4.0
+    peerDependenciesMeta:
+      '@aws-sdk/credential-provider-node':
+        optional: true
+      '@smithy/hash-node':
+        optional: true
+      '@smithy/signature-v4':
+        optional: true
+      ws:
+        optional: true
+      zod:
+        optional: true
+
   openapi-fetch@0.13.8:
     resolution: {integrity: sha512-yJ4QKRyNxE44baQ9mY5+r/kAzZ8yXMemtNAOFwOzRXJscdjSxxzWSNlyBAr+o5JjkUw9Lc3W7OIoca0cY3PYnQ==}
 
@@ -8308,6 +8360,9 @@ packages:
   restore-cursor@5.1.0:
     resolution: {integrity: sha512-oMA2dcrw6u0YfxJQXm342bFKX/E4sG9rbTzO9ptUcR/e8A33cHuvStiYOwH7fszkZlZ1z/ta9AAoPk2F4qIOHA==}
     engines: {node: '>=18'}
+
+  retell-sdk@5.39.0:
+    resolution: {integrity: sha512-5Y6aW9ZfAIPH1IhdsVI/qNj2gV0Dy8G/zKydGJ24lsEnN6lTJTb1WJcsTSUMdrGAA8wOZS3/rioDAtmRPlmtqQ==}
 
   retry@0.12.0:
     resolution: {integrity: sha512-9LkiTwjUh6rT555DtE9rTX+BKByPfrMzEAtnlEtdEwr3Nkffwiihqe2bWADg+OQRjt9gl6ICdmB/ZFDCGAtSow==}
@@ -11088,9 +11143,15 @@ snapshots:
       '@jsonjoy.com/codegen': 17.67.0(tslib@2.8.1)
       tslib: 2.8.1
 
+  '@junction-api/sdk@1.2.0': {}
+
   '@keyv/serialize@1.1.1': {}
 
   '@kurkle/color@0.3.4': {}
+
+  '@linqapp/sdk@0.28.0':
+    dependencies:
+      standardwebhooks: 1.0.0
 
   '@lit-labs/ssr-dom-shim@1.5.1': {}
 
@@ -11290,7 +11351,7 @@ snapshots:
       '@types/debug': 4.1.13
       debug: 4.4.3(supports-color@8.1.1)
       pony-cause: 2.1.11
-      semver: 7.8.0
+      semver: 7.8.5
       uuid: 11.1.1
     transitivePeerDependencies:
       - supports-color
@@ -17195,7 +17256,7 @@ snapshots:
 
   extension-port-stream@3.0.0:
     dependencies:
-      readable-stream: 3.6.2
+      readable-stream: 4.7.0
       webextension-polyfill: 0.10.0
 
   fast-check@3.23.2:
@@ -18716,6 +18777,16 @@ snapshots:
       is-docker: 2.2.1
       is-wsl: 2.2.0
 
+  openai@6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))(zod@4.3.6):
+    optionalDependencies:
+      ws: 8.21.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
+      zod: 4.3.6
+
+  openai@6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3):
+    optionalDependencies:
+      ws: 8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      zod: 4.4.3
+
   openapi-fetch@0.13.8:
     dependencies:
       openapi-typescript-helpers: 0.0.15
@@ -19564,6 +19635,8 @@ snapshots:
     dependencies:
       onetime: 7.0.0
       signal-exit: 4.1.0
+
+  retell-sdk@5.39.0: {}
 
   retry@0.12.0: {}
 

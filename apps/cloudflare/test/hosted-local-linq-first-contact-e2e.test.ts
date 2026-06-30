@@ -66,7 +66,7 @@ const typingLoopUserId = `member_local_linq_typing_loop_${Date.now()}`;
 const linqApiToken = "linq-local-test-token";
 const linqWebhookSecret = "linq-local-webhook-secret";
 const signupFollowupQuestionText =
-  "What's your name? And if you're comfortable sharing, how old are you and what's your gender?";
+  "What's your name? And if you're comfortable sharing, your age and whether you're a guy or girl.";
 const checkpointReplayReplyText = "Yes - I can help with that.";
 const progressToolAttemptText = "Checking the current iMessage thread now.";
 const progressToolFinalReplyText = "I checked that and can keep helping from here.";
@@ -76,6 +76,9 @@ const localRunnerIdleTtlMs = "300000";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const fastDeployGate = process.env.MURPH_HOSTED_LOCAL_E2E_FAST_GATE === "1";
+const testControlsEnabled = process.env.MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS === "1";
+const productionDescribe = testControlsEnabled ? describe.skip : describe;
+const testControlsDescribe = testControlsEnabled ? describe : describe.skip;
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 const itOutsideFastDeployGate = fastDeployGate ? it.skip : it;
@@ -119,7 +122,7 @@ it("derives stable numeric suffixes from the full Linq user id", () => {
   );
 });
 
-describe("hosted local Linq first-contact e2e", () => {
+productionDescribe("hosted local Linq first-contact e2e", () => {
   beforeAll(async () => {
     await ensureLinqScenario();
   }, 300_000);
@@ -288,7 +291,7 @@ describe("hosted local Linq first-contact e2e", () => {
     });
   }, 300_000);
 
-  it("delivers model-authored progress updates from hosted Linq auto-replies", async () => {
+  it("suppresses model-authored progress updates from hosted queue-only Linq auto-replies", async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(progressToolUserId),
       memberId: progressToolUserId,
@@ -347,7 +350,7 @@ describe("hosted local Linq first-contact e2e", () => {
     const completionPromise = requireScenario()
       .waitForHostedCompletion(progressToolUserId);
     const matchingSends = await requireLinqStub().waitForMatchingSendCount({
-      expectedCount: outboundCountBeforeReply + 2,
+      expectedCount: outboundCountBeforeReply + 1,
       expectedPath: expectedDirectReplyChatPath,
       scenario: requireScenario(),
       userId: progressToolUserId,
@@ -359,17 +362,14 @@ describe("hosted local Linq first-contact e2e", () => {
       matchingSends
         .slice(outboundCountBeforeReply)
         .map((request) => request.authorizationStatus),
-    ).toEqual(["hosted-sentinel", "hosted-sentinel"]);
-    expect(newSendTexts).toEqual([
-      progressToolAttemptText,
-      progressToolFinalReplyText,
-    ]);
+    ).toEqual(["hosted-sentinel"]);
+    expect(newSendTexts).toEqual([progressToolFinalReplyText]);
 
     const finalStatus = await completionPromise;
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(requireLinqStub().countObservedSends(expectedDirectReplyChatPath)).toBe(
-      outboundCountBeforeReply + 2,
+      outboundCountBeforeReply + 1,
     );
   }, 300_000);
 
@@ -611,7 +611,7 @@ describe("hosted local Linq first-contact e2e", () => {
     const assistantProviderResponseCountBefore =
       countAssistantProviderResponsesApiRequests();
     const assistantQuestionText =
-      "What's your name? And if you're comfortable sharing, how old are you and what's your gender?";
+      "What's your name? And if you're comfortable sharing, your age and whether you're a guy or girl.";
     const assistantSecondReplyText =
       "Got it. I will remember that and we can work from those goals.";
     requireScenario().queueAssistantResponses([
@@ -693,6 +693,8 @@ describe("hosted local Linq first-contact e2e", () => {
     });
     expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
       computerToolsAvailable: true,
+      connectedAppsAvailable: true,
+      progressUpdatesAvailable: false,
       vaultFileSendAvailable: true,
     });
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
@@ -711,7 +713,7 @@ describe("hosted local Linq first-contact e2e", () => {
 
 });
 
-describe("hosted local Linq checkpoint replay e2e", () => {
+testControlsDescribe("hosted local Linq checkpoint replay e2e", () => {
   beforeAll(async () => {
     await ensureLinqScenario();
   }, 300_000);
@@ -819,7 +821,7 @@ describe("hosted local Linq checkpoint replay e2e", () => {
   );
 });
 
-describe("hosted local Linq stale scheduled wake e2e", () => {
+testControlsDescribe("hosted local Linq stale scheduled wake e2e", () => {
   beforeAll(async () => {
     await restartLinqScenario({
       HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "1200",
@@ -1233,7 +1235,6 @@ async function startLinqScenario(
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: localRunnerIdleTtlMs,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
       OPENAI_API_KEY: "stub-local-openai-key",
       ...additionalEnv,
     },

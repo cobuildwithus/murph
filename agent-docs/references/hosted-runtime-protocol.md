@@ -109,20 +109,23 @@ active invocation lease to the Worker egress authorizer. UserRunner stores only
 the token hash on the active write fence. The Worker validates the token against
 that hash, injects the Worker-owned provider credential on success, and strips
 the provider-egress token before forwarding upstream.
-Warm Codex App Server OpenAI egress may not be able to carry that
-per-invocation token because the app-server is a warm subprocess that makes its
-own HTTPS calls. Tokenless intercepted OpenAI egress uses active-user-fence
-proof instead: the Worker resolves the current container Durable Object from the
-intercept context, reads that container's active invocation user, requires any
-bound-user header to match that trusted active user, and validates that
-UserRunner still has an active runtime-kind write fence for the user before
-injecting the Worker-owned OpenAI credential. Missing current-container user,
-missing runner state, missing write fence, stale fence, wrong user, or validator
-failure all fail closed without injecting a provider credential.
-Runtime-controlled provider integrations such as Linq, Telegram, WhatsApp, and
-Mapbox still use provider-egress token proof when exact runtime authority
-headers are absent. Runner container names remain lifecycle/routing handles, not
-provider-egress authority.
+Warm Codex App Server OpenAI egress uses a signed Murph provider credential in
+the native OpenAI bearer slot instead of the injected-credential sentinel. That
+credential identifies provider kind, hosted user, and runner container name. It
+does not authorize egress by itself: the Worker verifies the signature, asks
+UserRunner whether the same runner currently has an active runtime for that
+user/provider, then injects the Worker-owned OpenAI credential only after the
+OpenAI request policy passes. Missing runner state, missing active runtime,
+wrong runner, wrong user, wrong provider, missing signing config, or validator
+failure all fail closed without provider secret injection. `ctx.containerId` and
+RunnerContainer active-user recovery are not OpenAI provider-egress authority.
+Runtime-controlled delivery/control provider integrations such as Linq,
+Telegram, and WhatsApp still use provider-egress token proof when exact runtime
+authority headers are absent. Legacy lookup providers such as Exa, Mapbox,
+`murph_data_api`, and `workers_ai_transcribe` remain on the tokenless
+active-user-fence fallback until they are migrated deliberately. Runner
+container names remain lifecycle/routing handles, not provider-egress authority
+outside the explicit signed provider credential identity checked by UserRunner.
 Hosted-local may rewrite loopback provider bases to the configured
 `HOSTED_EXECUTION_RUNNER_HOST_ALIAS` so Linux runner containers can reach host
 stubs through the Docker bridge. The provider-fetch allowlist may accept HTTP
@@ -309,6 +312,13 @@ The page is intentionally small: it pages active checkpointed hosted workspaces,
 can wake one explicit workspace, and caps batch wakes to a tiny window that
 stops on the first signal failure. It is not a scheduler, queue, or generic
 admin job framework.
+
+The same ops page may also expose narrow hosted-runtime setup actions that reuse
+existing source-of-truth services, such as manually ensuring a Linq
+external-thread route through `/api/ops/thread-routes`. Those actions must use
+the same hosted app-session, allowlist, and same-origin mutation gate, and must
+delegate to the owning service primitive rather than hand-writing persisted
+runtime rows.
 
 For hard-cut rollouts, deploy consumers before producers: Cloudflare and the
 runtime parser must understand the new mailbox kind before web emits it. After

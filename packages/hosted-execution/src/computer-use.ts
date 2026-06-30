@@ -1,8 +1,13 @@
 import { z } from "zod";
 
+import {
+  HOSTED_RETURN_CONTACT_KINDS,
+  type HostedReturnContactKind,
+} from "./return-contact.ts";
+
 export const HOSTED_COMPUTER_RUNS_PATH = "/api/internal/computer/runs";
 export const HOSTED_COMPUTER_RUN_OPERATION_PATH_PATTERN =
-  /^\/api\/internal\/computer\/runs\/(?<runId>[^/]+)\/(?<operation>observe|act|os-control|pause-for-user|finish)$/u;
+  /^\/api\/internal\/computer\/runs\/(?<runId>[^/]+)\/(?<operation>act|os-control|pause-for-user|finish)$/u;
 
 export const HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS = 25_000;
 export const HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH = 12_000;
@@ -37,7 +42,6 @@ export const HOSTED_COMPUTER_HANDOFF_PURPOSES = [
   "card",
   "captcha",
   "manual_browser_help",
-  "screen_inspection",
 ] as const;
 export type HostedComputerHandoffPurpose =
   (typeof HOSTED_COMPUTER_HANDOFF_PURPOSES)[number];
@@ -50,6 +54,11 @@ export const HOSTED_COMPUTER_HANDOFF_STATUSES = [
 ] as const;
 export type HostedComputerHandoffStatus =
   (typeof HOSTED_COMPUTER_HANDOFF_STATUSES)[number];
+
+export const HOSTED_COMPUTER_RETURN_CONTACT_KINDS = HOSTED_RETURN_CONTACT_KINDS;
+
+export type HostedComputerReturnContactKind =
+  HostedReturnContactKind;
 
 export const HOSTED_COMPUTER_OS_CONTROL_ACTIONS = [
   "clickMouse",
@@ -110,10 +119,12 @@ export const hostedComputerDeliveryContextSchema = z
   .object({
     conversationId: z.string().trim().min(1).max(1_000).nullable().default(null),
     recipientKey: z.string().trim().min(1).max(1_000).nullable().default(null),
+    returnContactKind:
+      z.enum(HOSTED_COMPUTER_RETURN_CONTACT_KINDS).nullable().default(null),
   })
   .strict();
 
-export const hostedComputerStartRunRequestSchema = z
+export const hostedComputerOpenRunRequestSchema = z
   .object({
     goal: z.string().trim().min(1).max(2_000).optional(),
     resumeAfterMailboxItemId: z.string().trim().min(1).max(200).nullable().default(null),
@@ -122,8 +133,6 @@ export const hostedComputerStartRunRequestSchema = z
   })
   .strict()
   .transform(({ goal: _goal, ...request }) => request);
-
-export const hostedComputerObserveRequestSchema = z.object({}).strict();
 
 const hostedComputerActTimeoutSchema = z
   .number()
@@ -254,10 +263,8 @@ export const hostedComputerFinishRunRequestSchema = z
   .strict()
   .transform(({ summary: _summary, ...request }) => request);
 
-export type HostedComputerStartRunRequest =
-  z.infer<typeof hostedComputerStartRunRequestSchema>;
-export type HostedComputerObserveRequest =
-  z.infer<typeof hostedComputerObserveRequestSchema>;
+export type HostedComputerOpenRunRequest =
+  z.infer<typeof hostedComputerOpenRunRequestSchema>;
 export type HostedComputerActRequest =
   z.infer<typeof hostedComputerActRequestSchema>;
 export type HostedComputerOsControlRequest =
@@ -270,7 +277,6 @@ export type HostedComputerFinishRunRequest =
   z.infer<typeof hostedComputerFinishRunRequestSchema>;
 
 export type HostedComputerRunOperation =
-  | "observe"
   | "act"
   | "os-control"
   | "pause-for-user"
@@ -317,23 +323,13 @@ export function isHostedComputerWebControlRequest(input: {
     || readHostedComputerRunOperationRoute(input.path) !== null;
 }
 
-export function parseHostedComputerStartRunRequest(
+export function parseHostedComputerOpenRunRequest(
   value: unknown,
-): HostedComputerStartRunRequest {
+): HostedComputerOpenRunRequest {
   return parseHostedComputerRequest(
-    hostedComputerStartRunRequestSchema,
+    hostedComputerOpenRunRequestSchema,
     value,
-    "Hosted computer start-run request",
-  );
-}
-
-export function parseHostedComputerObserveRequest(
-  value: unknown,
-): HostedComputerObserveRequest {
-  return parseHostedComputerRequest(
-    hostedComputerObserveRequestSchema,
-    value,
-    "Hosted computer observe request",
+    "Hosted computer open-run request",
   );
 }
 
@@ -379,7 +375,6 @@ function readHostedComputerRunOperation(
   value: string | undefined,
 ): HostedComputerRunOperation | null {
   switch (value) {
-    case "observe":
     case "act":
     case "os-control":
     case "pause-for-user":

@@ -41,6 +41,9 @@ import {
 } from '@murphai/operator-config/http-retry'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  createAssistantDeliveryTransientError,
+} from '@murphai/operator-config/assistant/delivery-failure'
+import {
   renderMarkdownMessageText,
   splitDecoratedMessageText,
   type MessageTextDecoration,
@@ -66,7 +69,8 @@ const TELEGRAM_MAX_DELIVERY_ATTEMPTS = 3
 const TELEGRAM_MAX_RETRY_DELAY_MS = 30_000
 const TELEGRAM_SEND_TIMEOUT_MS = 30_000
 const TELEGRAM_MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
-const LINQ_TYPING_REFRESH_MS = 2_000
+const LINQ_TYPING_REFRESH_MS = 45_000
+const LINQ_TYPING_MAX_SESSION_MS = 5 * 60_000
 
 type TelegramParsedTarget = TelegramThreadTarget
 type TelegramSendOperation = 'sendMessage' | 'sendPhoto' | 'sendVoice'
@@ -714,6 +718,7 @@ export async function startTelegramTypingIndicator(
 export async function startAssistantChannelActivitySession(input: {
   refresh?: ((signal: AbortSignal) => Promise<void>) | null
   refreshMs: number
+  maxSessionMs?: number | null
   signal?: AbortSignal
   start: (signal: AbortSignal) => Promise<void>
   stop?: (() => Promise<void>) | null
@@ -726,47 +731,145 @@ export async function startAssistantChannelActivitySession(input: {
     throw error
   }
 
+  const refreshMs = Math.max(1, Math.trunc(input.refreshMs))
+  const maxSessionMs = normalizeAssistantChannelActivityMaxSessionMs(
+    input.maxSessionMs ?? null,
+  )
+  const refresh = input.refresh ?? input.start
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null
+  let maxSessionTimer: ReturnType<typeof setTimeout> | null = null
   let refreshFailure: unknown = null
-  const refreshLoop = keepAssistantChannelActivitySessionAlive({
-    refresh: input.refresh ?? input.start,
-    refreshMs: input.refreshMs,
-    signal: linkedStopSignal.signal,
-  }).catch((error) => {
-    if (!linkedStopSignal.signal.aborted) {
-      refreshFailure = error
-    }
-  })
-
+  let refreshTail: Promise<void> = Promise.resolve()
   let stopped = false
+  let stopPromise: Promise<void> | null = null
+
+  scheduleNextRefresh()
+  if (maxSessionMs !== null) {
+    maxSessionTimer = setTimeout(() => {
+      void stopActivity({
+        retryableFailure: true,
+      }).catch(() => {})
+    }, maxSessionMs)
+    unrefAssistantChannelActivityTimer(maxSessionTimer)
+  }
+
   return {
-    async stop() {
-      if (stopped) {
-        await refreshLoop
-        if (refreshFailure) {
-          throw refreshFailure
-        }
+    refreshNow: async () => {
+      clearRefreshTimer()
+      await enqueueRefresh()
+      scheduleNextRefresh()
+    },
+    stop: stopActivity,
+  }
+
+  function scheduleNextRefresh(): void {
+    if (stopped || linkedStopSignal.signal.aborted || refreshFailure) {
+      return
+    }
+
+    clearRefreshTimer()
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null
+      void enqueueRefresh().then(() => {
+        scheduleNextRefresh()
+      })
+    }, refreshMs)
+    unrefAssistantChannelActivityTimer(refreshTimer)
+  }
+
+  function enqueueRefresh(): Promise<void> {
+    refreshTail = refreshTail.then(async () => {
+      if (stopped || linkedStopSignal.signal.aborted || refreshFailure) {
         return
       }
 
-      stopped = true
-      linkedStopSignal.controller.abort()
-      linkedStopSignal.cleanup()
-      await refreshLoop
+      await refresh(linkedStopSignal.signal)
+        .catch((error) => {
+          if (!linkedStopSignal.signal.aborted) {
+            refreshFailure = error
+          }
+        })
+    })
+    return refreshTail
+  }
 
-      let stopFailure: unknown = null
-      try {
-        await input.stop?.()
-      } catch (error) {
-        stopFailure = error
+  async function stopActivity(
+    options: {
+      retryableFailure?: boolean
+    } = {},
+  ): Promise<void> {
+    if (!stopPromise) {
+      startStopActivity(options)
+    }
+
+    try {
+      await stopPromise
+    } catch (error) {
+      if (options.retryableFailure || stopPromise) {
+        throw error
       }
 
-      if (refreshFailure) {
-        throw refreshFailure
+      startStopActivity()
+      await stopPromise
+    }
+  }
+
+  function startStopActivity(
+    options: {
+      retryableFailure?: boolean
+    } = {},
+  ): void {
+    const attempt = stopActivityOnce()
+    if (!options.retryableFailure) {
+      stopPromise = attempt
+      return
+    }
+
+    const retryableAttempt = attempt.catch((error) => {
+      if (stopPromise === retryableAttempt) {
+        stopPromise = null
       }
-      if (stopFailure) {
-        throw stopFailure
-      }
-    },
+      throw error
+    })
+    stopPromise = retryableAttempt
+  }
+
+  async function stopActivityOnce(): Promise<void> {
+    stopped = true
+    clearRefreshTimer()
+    clearMaxSessionTimer()
+    linkedStopSignal.controller.abort()
+    linkedStopSignal.cleanup()
+
+    await refreshTail
+
+    let stopFailure: unknown = null
+    try {
+      await input.stop?.()
+    } catch (error) {
+      stopFailure = error
+    }
+
+    if (refreshFailure) {
+      throw refreshFailure
+    }
+    if (stopFailure) {
+      throw stopFailure
+    }
+  }
+
+  function clearRefreshTimer(): void {
+    if (refreshTimer) {
+      clearTimeout(refreshTimer)
+      refreshTimer = null
+    }
+  }
+
+  function clearMaxSessionTimer(): void {
+    if (maxSessionTimer) {
+      clearTimeout(maxSessionTimer)
+      maxSessionTimer = null
+    }
   }
 }
 
@@ -795,6 +898,7 @@ export async function startLinqTypingIndicator(
 
   return startAssistantChannelActivitySession({
     refreshMs: dependencies.refreshMs ?? LINQ_TYPING_REFRESH_MS,
+    maxSessionMs: dependencies.maxSessionMs ?? LINQ_TYPING_MAX_SESSION_MS,
     signal: dependencies.signal,
     start: (signal) => startLinqChatTypingIndicator(
       {
@@ -818,20 +922,27 @@ export async function startLinqTypingIndicator(
   })
 }
 
-async function keepAssistantChannelActivitySessionAlive(input: {
-  refresh: (signal: AbortSignal) => Promise<void>
-  refreshMs: number
-  signal: AbortSignal
-}): Promise<void> {
-  const refreshMs = Math.max(1, Math.trunc(input.refreshMs))
+function normalizeAssistantChannelActivityMaxSessionMs(
+  value: number | null,
+): number | null {
+  if (value === null) {
+    return null
+  }
 
-  while (!input.signal.aborted) {
-    await waitForAssistantChannelActivityRefresh(refreshMs, input.signal)
-    if (input.signal.aborted) {
-      return
-    }
+  const normalized = Math.trunc(value)
+  return normalized > 0 ? normalized : null
+}
 
-    await input.refresh(input.signal)
+function unrefAssistantChannelActivityTimer(
+  timer: ReturnType<typeof setTimeout>,
+): void {
+  if (typeof timer !== 'object' || timer === null || !('unref' in timer)) {
+    return
+  }
+
+  const unref = (timer as { unref?: () => void }).unref
+  if (typeof unref === 'function') {
+    unref.call(timer)
   }
 }
 
@@ -1981,25 +2092,32 @@ function resolveTelegramSendAttemptOutcome(input: {
     }
   }
 
-  const failure = new VaultCliError(
-    'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
-    errorContext.description ??
-      `Telegram Bot API ${input.operation} failed with HTTP ${input.result.response.status}.`,
-    {
-      errorCode: errorContext.errorCode,
-      migrateToChatId: errorContext.migrateToChatId,
-      operation: input.operation,
-      status: input.result.response.status,
-      target: input.targetLabel,
-    },
+  const retryable = shouldRetryTelegramSend(
+    input.result.response.status,
+    errorContext.errorCode,
   )
-
-  if (
-    shouldRetryTelegramSend(
-      input.result.response.status,
-      errorContext.errorCode,
+  const failureMessage = errorContext.description ??
+    `Telegram Bot API ${input.operation} failed with HTTP ${input.result.response.status}.`
+  const failureContext = {
+    errorCode: errorContext.errorCode,
+    migrateToChatId: errorContext.migrateToChatId,
+    operation: input.operation,
+    status: input.result.response.status,
+    target: input.targetLabel,
+  }
+  const failure = retryable
+    ? createAssistantDeliveryTransientError(
+      'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
+      failureMessage,
+      failureContext,
     )
-  ) {
+    : new VaultCliError(
+      'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
+      failureMessage,
+      failureContext,
+    )
+
+  if (retryable) {
     return {
       kind: 'retry',
       failure,

@@ -4,8 +4,8 @@ export const CHANGELOG_FEED_SCHEMA = "murph.changelog-feed.v1";
 export const CHANGELOG_CARD_VERSION = "v1";
 export const CHANGELOG_CARD_MAX_ITEMS = 7;
 export const CHANGELOG_PREVIEW_CARD_ITEMS = 5;
-export const CHANGELOG_FEATURE_LIMIT_MAX = 20;
-export const CHANGELOG_IMPROVEMENT_LIMIT_MAX = 5;
+export const CHANGELOG_FEATURE_LIMIT_MAX = 100;
+export const CHANGELOG_IMPROVEMENT_LIMIT_MAX = 25;
 
 const CHANGELOG_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const CHANGELOG_TAG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
@@ -56,11 +56,714 @@ export interface ChangelogQuery {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-06-29",
+    publishedOn: "2026-06-29",
+    title: "Garmin sleep through Junction, and a smoother phone sign-in",
+    summary:
+      "Garmin sleep, cycles, and hypnograms imported through Junction now arrive as real records. The phone-number sign-in stops freezing right after the verification code lands.",
+    items: [
+      {
+        id: "garmin-junction-sleep-records",
+        kind: "feature",
+        priority: 4,
+        title: "Garmin sleep arrives through Junction as real records",
+        summary:
+          "Garmin sleep, sleep cycles, and hypnograms pushed through Junction now land as full records instead of being dropped as skeleton completion events.",
+        relevanceTags: ["wearables", "garmin", "junction", "sleep"],
+        sourcePullRequests: [336],
+      },
+      {
+        id: "phone-auth-post-code-state",
+        kind: "improvement",
+        priority: 3,
+        title: "Phone sign-in no longer freezes after the code",
+        summary:
+          "Closed a state bug where the hosted phone-number sign-in could land on a blank step right after the SMS code was accepted.",
+        relevanceTags: ["auth", "sign-in"],
+        sourcePullRequests: [],
+      },
+    ],
+  },
+  {
+    id: "2026-06-28",
+    publishedOn: "2026-06-28",
+    title: "Don't lose real people when the classifier blinks",
+    summary:
+      "If the first-contact admission classifier is unavailable, Murph now admits the new contact and sends the normal signup reply instead of silent dead-air. Explicit spam blocks still hold.",
+    items: [
+      {
+        id: "first-contact-classifier-fail-open",
+        kind: "improvement",
+        priority: 4,
+        title: "First-contact gate fails open when the classifier is down",
+        summary:
+          "Unknown senders now get the normal signup-link reply when the OpenAI admission classifier is unavailable. Deterministic spam blocks, content-filter blocks, and budget exhaustion still gate before any side effects.",
+        relevanceTags: ["safety", "linq", "onboarding"],
+        sourcePullRequests: [334],
+      },
+      {
+        id: "weekly-insight-framing-refresh",
+        kind: "improvement",
+        priority: 3,
+        title: "Weekly health insight finds the actual story",
+        summary:
+          "Sunday's recap can now lead with stress patterns and cross-metric meta-patterns when those are the real story, instead of always slotting findings into fixed sleep/activity sections.",
+        relevanceTags: ["assistant", "weekly-insight"],
+        sourcePullRequests: [],
+      },
+    ],
+  },
+  {
+    id: "2026-06-27",
+    publishedOn: "2026-06-27",
+    title: "Murph knows your meds before it answers",
+    summary:
+      "Active conditions, allergies, meds, and supplements ride along in Murph's working context so safety-relevant guidance is shaped before the first vault lookup. Image generation can build on photos you sent, progress shots save durably, and Sunday's digest stays quiet when nothing happened.",
+    items: [
+      {
+        id: "safety-critical-context-snapshot",
+        kind: "feature",
+        priority: 5,
+        title: "Active conditions, meds, and allergies ride in Murph's working context",
+        summary:
+          "Murph now sees your active conditions, allergies, medication regimens, and supplement regimens at the top of every turn — sorted by severity, capped on size, and linked to the right vault-cli lookup for deeper detail.",
+        details:
+          "Stopped medications never reappear through a condition's related-regimen link. Absence reads as NKDA, not as missing information.",
+        relevanceTags: ["assistant", "safety", "health", "context"],
+        sourcePullRequests: [327],
+        tryIt: {
+          label: "Ask a meds-aware question",
+          prompt:
+            "I'm thinking about a low-dose magnesium at night — anything in my current meds I should watch out for?",
+        },
+      },
+      {
+        id: "image-gen-reference-images",
+        kind: "feature",
+        priority: 5,
+        title: "Generate images that build on photos you sent",
+        summary:
+          "Send Murph a sketch, a product shot, or a style reference and `generate_image` can use it as the basis for the next image instead of asking you to describe it in words.",
+        details:
+          "Up to 16 ordered reference images per call, drawn from the current turn's attachments. JPG, PNG, and WebP only; 2 MiB per image, 32 MiB combined.",
+        relevanceTags: ["assistant", "images", "tools"],
+        sourcePullRequests: [330],
+        tryIt: {
+          label: "Try reference images",
+          prompt:
+            "Use that fridge photo I just sent and show me what it would look like with the new produce on the middle shelf.",
+        },
+      },
+      {
+        id: "durable-progress-photo-captures",
+        kind: "feature",
+        priority: 4,
+        title: "Progress photos save somewhere you can find them",
+        summary:
+          "Skin, posture, wound, and form check-in photos now land in your vault as canonical capture records, so the bytes are still there weeks later when you want to compare a series — instead of expiring with inbox media.",
+        relevanceTags: ["vault", "images", "captures"],
+        sourcePullRequests: [329],
+      },
+      {
+        id: "weekly-digest-substance-gate",
+        kind: "improvement",
+        priority: 4,
+        title: "Sunday digest skips weeks where nothing happened",
+        summary:
+          "Murph's Sunday health digest now skips itself when there's no real wearable or experiment movement. If your wearable's quietly broken, it sends one short reconnect note instead of a hollow recap.",
+        relevanceTags: ["assistant", "weekly-insight", "wearables"],
+        sourcePullRequests: [331],
+      },
+      {
+        id: "first-contact-classifier-budget",
+        kind: "improvement",
+        priority: 4,
+        title: "First-contact gate stops blocking real people",
+        summary:
+          "The unknown-sender classifier now lets through anyone who mentions Murph or asks a real Murph question, with a per-contact cap of 4 attempts so transient outages don't permanently silence one person.",
+        relevanceTags: ["safety", "linq", "onboarding"],
+        sourcePullRequests: [324],
+      },
+      {
+        id: "home-redirect-notice-dedup",
+        kind: "improvement",
+        priority: 3,
+        title: "Stop announcing your home line on every message",
+        summary:
+          "If you keep replying on the wrong Linq chat, Murph tells you to switch to your home line once per chat — not on every inbound until you finally move.",
+        relevanceTags: ["linq", "messaging", "polish"],
+        sourcePullRequests: [325],
+      },
+      {
+        id: "vault-file-approval-durable-park",
+        kind: "improvement",
+        priority: 3,
+        title: "Vault-file sends park durably when approval isn't ready",
+        summary:
+          "When a vault-file delivery is missing approval state, the outbox now parks the intent durably and resumes when you approve, instead of churning through pre-provider retries.",
+        relevanceTags: ["assistant", "reliability", "approvals"],
+        sourcePullRequests: [326],
+      },
+      {
+        id: "retell-phone-call-authority-fix",
+        kind: "improvement",
+        priority: 3,
+        title: "Hardened the new phone-call path against stale callbacks",
+        summary:
+          "Retell now receives call metadata in the fields its API expects, and delayed analysis callbacks can't resurrect a phone call Murph already failed before it started.",
+        relevanceTags: ["phone-calls", "reliability"],
+        sourcePullRequests: [323],
+      },
+    ],
+  },
+  {
+    id: "2026-06-26",
+    publishedOn: "2026-06-26",
+    title: "Murph can call you — and the noise level drops everywhere else",
+    summary:
+      "Approve a brief and Murph can place an outbound phone call on your behalf. Health records you upload land in your vault, computer handoffs return on the channel that started them, WHOOP and Junction days line up with your calendar, and a wave of polish trims chat noise.",
+    items: [
+      {
+        id: "retell-phone-calls",
+        kind: "feature",
+        priority: 5,
+        title: "Murph can place a phone call for you",
+        summary:
+          "Approve a call brief and Murph places the outbound call through Retell — pharmacy refills, restaurant reservations, vet check-ins, clinic intake — then drops a clean summary back into chat once the call ends.",
+        details:
+          "Transfer to you only when the brief explicitly allows it. Retell receives just the bounded brief and an opaque call id; transcripts, recordings, and provider bodies are never persisted.",
+        relevanceTags: ["assistant", "phone-calls", "voice", "tools"],
+        sourcePullRequests: [295],
+        tryIt: {
+          label: "Ask Murph to call",
+          prompt:
+            "Call my pharmacy and ask if my prescription is ready to pick up.",
+        },
+      },
+      {
+        id: "uploaded-health-records-vault",
+        kind: "feature",
+        priority: 4,
+        title: "Uploaded health records actually land in your vault",
+        summary:
+          "Lab reports, visit summaries, medication lists, function-health panels, imaging reports — Murph now writes them to canonical vault surfaces with raw evidence preserved, instead of stranding them in a chat note.",
+        details:
+          "Large bundles get a fast triage reply, then a non-blocking background parse for the rest. You can stop wondering whether what you sent is actually in your record.",
+        relevanceTags: ["vault", "health", "records"],
+        sourcePullRequests: [322],
+        tryIt: {
+          label: "Send a record",
+          prompt:
+            "Here's my latest lipid panel PDF — file it under blood tests and tell me what stands out.",
+        },
+      },
+      {
+        id: "onboarding-name-free-text",
+        kind: "feature",
+        priority: 3,
+        title: "Onboarding asks for your name like a person would",
+        summary:
+          "Murph now asks for your name as freeform text and treats age and a quick gender ask as optional, instead of routing you through a structured form with required fields.",
+        relevanceTags: ["onboarding", "polish"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "handoff-return-to-source-channel",
+        kind: "improvement",
+        priority: 4,
+        title: "Computer handoffs return to the channel that started them",
+        summary:
+          "Finish a browser task that started over text and Murph replies on text. Telegram-origin handoffs return on Telegram. Email-origin handoffs stay in the same email thread instead of opening a fresh compose.",
+        relevanceTags: ["browser", "handoff", "messaging"],
+        sourcePullRequests: [318, 314],
+      },
+      {
+        id: "whoop-junction-local-day",
+        kind: "improvement",
+        priority: 4,
+        title: "WHOOP and Junction days line up with your calendar",
+        summary:
+          "Closed a class of bugs where WHOOP or Junction records could drift into the next calendar day when the provider timestamp crossed UTC midnight — including WHOOP records flowing through Junction. Past records repair on replay.",
+        relevanceTags: ["wearables", "whoop", "junction", "data"],
+        sourcePullRequests: [304],
+      },
+      {
+        id: "assistant-progress-cap",
+        kind: "improvement",
+        priority: 4,
+        title: "Fewer mid-turn progress updates",
+        summary:
+          "At most two non-required progress updates per turn now, spaced apart and only when silence would hurt. Required system notices still bypass the budget.",
+        relevanceTags: ["assistant", "messaging", "polish"],
+        sourcePullRequests: [317],
+      },
+      {
+        id: "preflight-outbox-no-churn",
+        kind: "improvement",
+        priority: 3,
+        title: "No more pre-provider retry churn on approval gaps",
+        summary:
+          "When Murph can't send yet because approval is pending or a config gap exists, the outbox parks the intent before claiming a delivery attempt — no wasted retries, no auto-reply replay.",
+        relevanceTags: ["reliability", "messaging"],
+        sourcePullRequests: [321],
+      },
+      {
+        id: "vault-file-approval-consume-binding",
+        kind: "improvement",
+        priority: 3,
+        title: "Vault-file approvals bind to the exact media Murph sent",
+        summary:
+          "Approvals are now consumed atomically against the exact approved media in the model's reply, so stale URLs and replayed retries can't deliver a file you didn't approve.",
+        relevanceTags: ["security", "vault", "approvals"],
+        sourcePullRequests: [312],
+      },
+      {
+        id: "message-variants-deliverability",
+        kind: "improvement",
+        priority: 3,
+        title: "Refreshed copy on welcome, invite, and quota messages",
+        summary:
+          "Rewrote the bank of system replies — welcome, invite/signup, daily quota, home-redirect, AI usage notices — for clearer voice and steadier deliverability when many people see the same message.",
+        relevanceTags: ["messaging", "polish", "deliverability"],
+        sourcePullRequests: [319],
+      },
+      {
+        id: "linq-typing-cadence",
+        kind: "improvement",
+        priority: 3,
+        title: "Calmer typing indicator on Linq",
+        summary:
+          "Linq typing stays alive across an assistant turn without a 2-second keepalive loop. You still see Murph working — just without the high-frequency churn.",
+        relevanceTags: ["linq", "polish"],
+        sourcePullRequests: [313],
+      },
+      {
+        id: "linq-audio-bounded-retry",
+        kind: "improvement",
+        priority: 3,
+        title: "Voice memos with slow CDNs don't get stuck",
+        summary:
+          "When a Linq voice memo's audio hasn't fully landed yet, Murph retries briefly then degrades cleanly. No provider URLs, storage paths, or routing labels leak into the model prompt.",
+        relevanceTags: ["linq", "voice", "reliability"],
+        sourcePullRequests: [315],
+      },
+      {
+        id: "device-activity-listener-handoff",
+        kind: "improvement",
+        priority: 3,
+        title: "Device-activity reminders fire for every match",
+        summary:
+          "Multiple matching activities in one wearable sync now each queue the configured reminder. The durable listener stays put for next time, instead of being archived after one fire.",
+        relevanceTags: ["wearables", "automations", "reminders"],
+        sourcePullRequests: [306],
+      },
+      {
+        id: "managed-automation-schedule-spread",
+        kind: "improvement",
+        priority: 3,
+        title: "Murph-managed automations spread across the day",
+        summary:
+          "Newly created weekly managed automations now seed at vault-deterministic times across a daytime window, instead of every account receiving the same exact send minute.",
+        relevanceTags: ["automations", "reliability"],
+        sourcePullRequests: [311],
+      },
+      {
+        id: "handoff-all-set-single-cta",
+        kind: "improvement",
+        priority: 3,
+        title: "One Reply to Murph button after a handoff",
+        summary:
+          "The 'All set' screen after a browser handoff now offers a single Reply to Murph button instead of stacking every channel CTA at the bottom of the page.",
+        relevanceTags: ["handoff", "polish"],
+        sourcePullRequests: [],
+      },
+    ],
+  },
+  {
+    id: "2026-06-25",
+    publishedOn: "2026-06-25",
+    title: "Six new coaches, plus real help for pain and chronic conditions",
+    summary:
+      "Sleep, stress, food, running, lifting, and race-prep each get their own coach. Clinical-style pain and rehab help, recommendations for chronic conditions, and goals that pin across sessions.",
+    items: [
+      {
+        id: "coach-skills-six-new",
+        kind: "feature",
+        priority: 5,
+        title: "Six new coaches: sleep, stress, food, running, lifting, race prep",
+        summary:
+          "Each gets its own routing and reasoning — sleep & recovery readiness, stress regulation, nutrition strategy, running & cardio, strength training, and competition prep.",
+        relevanceTags: ["assistant", "health", "coaching", "skills"],
+        sourcePullRequests: [298, 299, 300, 301, 302, 303],
+        tryIt: {
+          label: "Try a coach skill",
+          prompt:
+            "Half marathon in 8 weeks and I'm lifting twice a week — what should I actually do?",
+        },
+      },
+      {
+        id: "linq-first-contact-admission",
+        kind: "improvement",
+        priority: 5,
+        title: "Unknown first contacts get gated before the invite path",
+        summary:
+          "Strangers texting the Murph line now pass a fail-closed classifier before any invite, member record, or reply gets created.",
+        relevanceTags: ["safety", "linq", "onboarding"],
+        sourcePullRequests: [309],
+      },
+      {
+        id: "live-browser-replaces-screen-inspection",
+        kind: "improvement",
+        priority: 4,
+        title: "Live browser handoff replaces static screenshots",
+        summary:
+          "When Murph needs you to look at a paused browser, you get the live, passkey-gated handoff used everywhere else — not a static screenshot.",
+        relevanceTags: ["browser", "handoff"],
+        sourcePullRequests: [296],
+      },
+      {
+        id: "checkout-confirm-in-chat",
+        kind: "improvement",
+        priority: 4,
+        title: "Confirm the final checkout step in chat",
+        summary:
+          "A simple \"yes\" or \"go ahead\" lets Murph place the order. The handoff link is still there if you want to take over.",
+        relevanceTags: ["browser", "checkout"],
+        sourcePullRequests: [307],
+      },
+      {
+        id: "linq-off-hours-reminder-guard",
+        kind: "improvement",
+        priority: 3,
+        title: "Off-hours iMessage reminders ask first",
+        summary:
+          "Before scheduling a Linq reminder for 11pm–5am local time, Murph flags the spam risk, suggests a nearby waking-hour time, and asks.",
+        relevanceTags: ["assistant", "linq", "reminders"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "longer-tool-loops-before-compaction",
+        kind: "improvement",
+        priority: 3,
+        title: "Longer tool-using turns before context compacts",
+        summary:
+          "Hosted auto-compaction now waits until 100k tokens instead of 84k, so long browser/computer-use loops finish in one piece.",
+        relevanceTags: ["assistant", "runtime"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "all-current-turn-auto-replies-dispatch",
+        kind: "improvement",
+        priority: 3,
+        title: "Every planned reply in a turn actually sends",
+        summary:
+          "When Murph plans multiple replies in one turn, all of them dispatch instead of only the first reaching you.",
+        relevanceTags: ["assistant", "automation"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "proactive-chronic-support",
+        kind: "feature",
+        priority: 5,
+        title: "Recommendations for chronic illness and pain, not just referrals",
+        summary:
+          "For chronic illness, chronic pain, and at-home self-management experiments, Murph now gives a best-current-assessment plus a recommended next action — not just validation or a pointer to a clinician. Pain or symptom reduction counts as a real outcome.",
+        details:
+          "Low-risk experiments can go forward without clinician pre-approval. Hard stops still hold for prescription changes, dangerous provocation, fixed graded activity when PEM is in play, emergencies, and direct death-wish language.",
+        relevanceTags: ["assistant", "health", "chronic-illness", "chronic-pain", "experiments"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "physical-therapy-skill",
+        kind: "feature",
+        priority: 4,
+        title: "Murph thinks like a PT for pain and rehab",
+        summary:
+          "Mention a strain, an ache, or a rehab program and Murph routes through clinical-reasoning steps — triage and red flags, exercise selection and dosing, follow-up and progression — instead of generic advice.",
+        details:
+          "Remote-observation cues let Murph make the most of whatever you describe or send. Symptom-free workout programming stays on the regular exercise path, not this one.",
+        relevanceTags: ["assistant", "health", "rehab", "pain"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "active-plan-context",
+        kind: "improvement",
+        priority: 4,
+        title: "Goals and habits Murph keeps in working memory",
+        summary:
+          "When you accept a habit, ramp, or non-experiment plan, it now lands on a canonical goal-and-regimen surface — and Murph reads that surface back at the start of each turn, so baselines, ladders, and targets don't get stranded in chat.",
+        relevanceTags: ["assistant", "goals", "habits", "memory"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "exercise-image-walkthroughs",
+        kind: "improvement",
+        priority: 4,
+        title: "Calmer exercise intros, with pictures",
+        summary:
+          "When Murph introduces movements you haven't seen before, it now picks 2-4, attaches catalog images, gives only the immediate safety stop rule, and asks whether to walk you through them — instead of dumping a long numbered plan.",
+        relevanceTags: ["assistant", "exercise", "images", "polish"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "openweather-tool",
+        kind: "feature",
+        priority: 4,
+        title: "Real weather, current and five days out",
+        summary:
+          "Ask about today's heat, tomorrow's rain, or the forecast for your long run on Saturday — Murph now pulls live current conditions and a five-day forecast from OpenWeather, scoped to wherever you ask about.",
+        relevanceTags: ["assistant", "weather", "tools"],
+        sourcePullRequests: [284],
+        tryIt: {
+          label: "Check the forecast",
+          prompt:
+            "What's the weather looking like for my long run Saturday morning?",
+        },
+      },
+      {
+        id: "composio-search-tools",
+        kind: "feature",
+        priority: 4,
+        title: "Search Amazon, Walmart, Google Maps, and find a clinician",
+        summary:
+          "Murph can now search Amazon and Walmart for products, look places up on Google Maps, and find providers by name or specialty through the national NPI directory — all in chat, no app switch.",
+        details:
+          "Product and place search lands the actual listing instead of guessing. The NPI lookup returns a real provider record — NPI number, address, taxonomy — so referrals and verifications stop being a dead end.",
+        relevanceTags: ["assistant", "search", "shopping", "providers", "tools"],
+        sourcePullRequests: [284],
+        tryIt: {
+          label: "Try a search",
+          prompt:
+            "Find a cardiologist near me on the NPI registry, and price magnesium glycinate on Amazon and Walmart while you're at it.",
+        },
+      },
+    ],
+  },
+  {
+    id: "2026-06-24",
+    publishedOn: "2026-06-24",
+    title: "Songs, PDFs, and a tap to approve",
+    summary:
+      "Ask Murph for a song or a one-page PDF, approve sensitive actions with your passkey, and welcome Outlook and Zoho to connected apps. Inbox media now expires after 14 days, and long browser tasks stay snappy.",
+    items: [
+      {
+        id: "song-generation",
+        kind: "feature",
+        priority: 5,
+        title: "Murph can write you a song",
+        summary:
+          "Ask for a quick song and Murph generates it with ElevenLabs music, then ships it as a voice memo right in iMessage or Telegram — no new attachment kind, no app switch.",
+        details:
+          "Lyrics, mood, instrumental, and length are all promptable. Cost rides on the existing voice-memo allowance at $0.15 per generated minute.",
+        relevanceTags: ["assistant", "voice", "telegram", "imessage", "media"],
+        sourcePullRequests: [279],
+        tryIt: {
+          label: "Ask for a song",
+          prompt:
+            "Write me a 30-second hype song for tonight's workout — upbeat, no lyrics.",
+        },
+      },
+      {
+        id: "sensitive-action-approval",
+        kind: "feature",
+        priority: 5,
+        title: "Approve big actions with your passkey",
+        summary:
+          "Before Murph runs a sensitive action on your behalf, you get a one-tap approval link. Sign with your passkey-protected wallet and the action goes through — deny it and nothing happens.",
+        details:
+          "Same rail powers Settings → Export vault and Delete account, so every irreversible move is gated by the same secure approval flow.",
+        relevanceTags: ["security", "auth", "passkeys", "approvals"],
+        sourcePullRequests: [283, 274],
+      },
+      {
+        id: "assistant-pdf-skill",
+        kind: "feature",
+        priority: 5,
+        title: "PDFs you can ask for in chat",
+        summary:
+          "Murph can author and send a clean, typeset PDF — a one-page summary, a workout plan, a lab-results recap — right back into the conversation.",
+        details:
+          "A pinned Typst 0.15 toolchain runs inside the hosted runner, so layout is deterministic and the output is the same PDF every time.",
+        relevanceTags: ["assistant", "documents", "pdf"],
+        sourcePullRequests: [272],
+        tryIt: {
+          label: "Ask for a PDF",
+          prompt:
+            "Make me a one-page PDF of my training week — sessions, totals, and one note per day.",
+        },
+      },
+      {
+        id: "connected-apps-outlook-zoho",
+        kind: "feature",
+        priority: 4,
+        title: "Outlook & Zoho Mail join your inbox apps",
+        summary:
+          "Connect Outlook or Zoho Mail once and Murph can read, draft, and send through them — same flow as Gmail, same in-chat experience.",
+        relevanceTags: ["integrations", "email", "outlook", "zoho"],
+        sourcePullRequests: [282],
+        tryIt: {
+          label: "Connect Outlook",
+          prompt: "Connect my Outlook so you can send and draft email for me.",
+        },
+      },
+      {
+        id: "connected-apps-files-tasks-notes",
+        kind: "feature",
+        priority: 4,
+        title: "Files, tasks, and notes — all reachable",
+        summary:
+          "Connect Google Drive, OneDrive, Dropbox, Notion, Todoist, or Google Tasks once. Murph can pull a doc, add a to-do, capture a note, or hand you a file without leaving chat.",
+        relevanceTags: ["integrations", "files", "tasks", "notes", "notion"],
+        sourcePullRequests: [284],
+        tryIt: {
+          label: "Connect Notion",
+          prompt:
+            "Connect my Notion so you can capture notes and pull pages when I ask.",
+        },
+      },
+      {
+        id: "connected-apps-calendar-events",
+        kind: "feature",
+        priority: 5,
+        title: "Murph can put it on your calendar",
+        summary:
+          "Ask Murph to add an event and it actually writes to your Google Calendar or Outlook calendar — title, start, duration, location, notes — with a strict allowlist that keeps it scoped to what you said.",
+        details:
+          "No surprise invites, no online-meeting rooms by default. Just the event you described, on the calendar you connected.",
+        relevanceTags: ["integrations", "calendar", "outlook", "google"],
+        sourcePullRequests: [284],
+        tryIt: {
+          label: "Add an event",
+          prompt:
+            "Add a 45-minute call with Sam to my calendar tomorrow at 2pm, location: Zoom.",
+        },
+      },
+      {
+        id: "home-experiment-result-cards",
+        kind: "feature",
+        priority: 4,
+        title: "Home shows your experiment results",
+        summary:
+          "The home screen now leads with your own experiment results — the primary metric for finished runs, live progress for active ones — instead of generic protocol art.",
+        relevanceTags: ["experiments", "home", "dashboard"],
+        sourcePullRequests: [],
+        tryIt: {
+          href: "/home",
+          label: "Open home",
+        },
+      },
+      {
+        id: "computer-use-managed-auth",
+        kind: "feature",
+        priority: 4,
+        title: "Browser tasks can hand login pauses to managed auth",
+        summary:
+          "When a browser task pauses on a login, Murph can hand it off to Kernel's managed auth so you complete the sign-in in a guided flow, then resume the original task right where it stopped.",
+        relevanceTags: ["browser", "automation", "auth"],
+        sourcePullRequests: [278],
+      },
+      {
+        id: "finite-supply-reorder-check-in",
+        kind: "feature",
+        priority: 4,
+        title: "Reorder check-ins for finite supplies",
+        summary:
+          "After Murph completes a verified order for a finite consumable — a 30-day supplement supply, weekly meal boxes, contacts — it schedules one calm check-in around when you'll run out.",
+        details:
+          "No auto-reorder, no nagging. One reminder, framed around when supply is actually low, and only when the supply duration is clear.",
+        relevanceTags: ["assistant", "automations", "supplements"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "experiment-lifecycle-moments",
+        kind: "feature",
+        priority: 3,
+        title: "Experiments check in mid-run and morning-after",
+        summary:
+          "Active experiments now get a day-four progress nudge and a morning-after final review — both pinned to your local clock, both skippable if you've opted out.",
+        relevanceTags: ["experiments", "automations", "lifecycle"],
+        sourcePullRequests: [273],
+      },
+      {
+        id: "computer-use-auto-compact",
+        kind: "improvement",
+        priority: 5,
+        title: "Long browser tasks stay snappy",
+        summary:
+          "Murph now compacts its working memory partway through long browser sessions, instead of waiting until the end. Multi-step tasks stay quick and cost less, even when they grow.",
+        relevanceTags: ["browser", "performance", "assistant"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "foreground-wake-preemption-fix",
+        kind: "improvement",
+        priority: 5,
+        title: "Steadier wakes during long-running work",
+        summary:
+          "Closed a class of races where a long-running turn could overwrite its own next-wake while you sent a follow-up, so reminders, device-sync continuations, and retries no longer slip behind.",
+        relevanceTags: ["reliability", "reminders", "messaging"],
+        sourcePullRequests: [259],
+      },
+      {
+        id: "inbox-media-retention-window",
+        kind: "improvement",
+        priority: 4,
+        title: "Raw inbox media expires after 14 days",
+        summary:
+          "Photos, audio, and video you send Murph are now purged from the inbox after 14 days. Murph still remembers what they were — only the raw bytes go.",
+        details:
+          "Bytes are hash-verified before deletion, so nothing tampered with disappears silently, and anything Murph is still mid-reply about stays protected until the reply lands.",
+        relevanceTags: ["privacy", "inbox", "media", "data"],
+        sourcePullRequests: [240],
+      },
+      {
+        id: "hosted-egress-container-identity",
+        kind: "improvement",
+        priority: 4,
+        title: "Research and route tools work everywhere again",
+        summary:
+          "In-container tools that run during a turn — research scout, route estimates, supplement lookups — authorize through the same container-identity fence the rest of Murph uses, instead of failing with a silent 401.",
+        relevanceTags: ["reliability", "hosted", "assistant"],
+        sourcePullRequests: [275],
+      },
+      {
+        id: "telegram-image-response-fix",
+        kind: "improvement",
+        priority: 4,
+        title: "Image replies land on Telegram",
+        summary:
+          "Closed a delivery gap where Murph's generated and reference images would sometimes fail to attach on Telegram. They now come through cleanly the same way iMessage does.",
+        relevanceTags: ["telegram", "images", "messaging"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "messaging-italic-underline",
+        kind: "improvement",
+        priority: 3,
+        title: "Italic and underline on Linq & Telegram",
+        summary:
+          "Murph can now use italic and underline alongside bold and strikethrough on supported chat channels — emphasis renders natively, not as raw markdown.",
+        relevanceTags: ["messaging", "linq", "telegram", "polish"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "resume-checkout-from-join",
+        kind: "improvement",
+        priority: 3,
+        title: "Resume checkout from join",
+        summary:
+          "If you bounced out of checkout, signing back in through /join now drops you right back into the same checkout step instead of restarting the flow.",
+        relevanceTags: ["billing", "auth", "onboarding"],
+        sourcePullRequests: [280],
+      },
+    ],
+  },
+  {
     id: "2026-06-23",
     publishedOn: "2026-06-23",
     title: "Passkeys, and a handoff that fits your phone",
     summary:
-      "Add a passkey as your second factor in one tap, computer handoff sizes to your phone from the first frame, and auto-replies remember the conversation that came before them.",
+      "Add a passkey as your second factor in one tap, computer handoff remembers each device's browser size, and auto-replies remember the conversation that came before them.",
     items: [
       {
         id: "passkey-mfa-setup",
@@ -82,9 +785,9 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "Browser handoff matches your phone",
         summary:
-          "When Murph hands the browser off to you, the page now sizes to your phone or laptop from the first frame — no more zoomed-out desktop on mobile.",
+          "When Murph hands the browser off to you, the page remembers this browser session's last handoff size and corrects it from the live takeover surface.",
         details:
-          "Murph reads your screen on the server, resizes the remote browser once, then renders. A pulse loader holds the page while everything lines up.",
+          "Murph starts from the saved size for this device session, then measures the actual handoff surface and resizes the remote browser in the background without blocking takeover.",
         relevanceTags: ["browser", "automation", "mobile"],
         sourcePullRequests: [268],
       },

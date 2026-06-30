@@ -4,6 +4,7 @@ import {
   extractIsoDatePrefix,
   ID_PREFIXES,
   MEAL_MICRONUTRIENT_KEYS,
+  toLocalDayKey,
   type MealMicronutrientKey,
   type MealMicronutrients,
   type MealNutrition,
@@ -87,7 +88,11 @@ import type {
   DeviceSamplePayload,
 } from "../core-port.ts";
 import type { PlainObject } from "./shared-normalization.ts";
-import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
+import type {
+  DeviceProviderAdapter,
+  DeviceProviderNormalizationContext,
+  NormalizedDeviceBatch,
+} from "./types.ts";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
 
 export {
@@ -132,6 +137,7 @@ interface ResourceContext {
 }
 
 interface NormalizationContext {
+  defaultTimeZone?: string;
   importedAt?: string;
   windowStart?: string;
   windowEnd?: string;
@@ -326,6 +332,12 @@ const JUNCTION_MEAL_CALENDAR_DATE_PATHS = [
   "local_date",
   "date",
   "day",
+] as const;
+const JUNCTION_LOCAL_CALENDAR_DATE_PATHS = [
+  "calendarDate",
+  "calendar_date",
+  "localDate",
+  "local_date",
 ] as const;
 const JUNCTION_MEAL_ITEM_CONTAINER_PATHS = [
   "data",
@@ -619,6 +631,24 @@ const JUNCTION_TIME_ZONE_OFFSET_SECOND_PATHS = [
   "utcOffsetSeconds",
   "utc_offset_seconds",
 ] as const;
+const JUNCTION_SLEEP_STAGE_START_OFFSET_SECOND_PATHS = [
+  "stageStartOffsetSecond",
+  "stage_start_offset_second",
+  "stageStartOffsetSeconds",
+  "stage_start_offset_seconds",
+] as const;
+const JUNCTION_SLEEP_STAGE_END_OFFSET_SECOND_PATHS = [
+  "stageEndOffsetSecond",
+  "stage_end_offset_second",
+  "stageEndOffsetSeconds",
+  "stage_end_offset_seconds",
+] as const;
+const JUNCTION_SLEEP_STAGE_TYPE_ARRAY_PATHS = [
+  "stageType",
+  "stage_type",
+  "sleepStageType",
+  "sleep_stage_type",
+] as const;
 
 type JunctionSleepStage = JunctionSleepStageValue;
 
@@ -628,6 +658,7 @@ interface JunctionDailyTimeseriesAggregate {
   firstSampleAt: string;
   lastRecordedAt?: string;
   lastSampleAt: string;
+  legacyDayKeys: Set<string>;
   maxValue: number;
   minValue: number;
   evidencePartRole: string;
@@ -642,7 +673,10 @@ function parseJunctionSnapshot(snapshot: unknown): JunctionSnapshotInput {
   return junctionSnapshotSchema.parse(snapshot);
 }
 
-export function normalizeJunctionSnapshot(snapshot: JunctionSnapshotInput): NormalizedDeviceBatch {
+export function normalizeJunctionSnapshot(
+  snapshot: JunctionSnapshotInput,
+  providerContext: DeviceProviderNormalizationContext = {},
+): NormalizedDeviceBatch {
   const importedAt = normalizeTimestamp(snapshot.importedAt);
   const windowStart = normalizeTimestamp(snapshot.windowStart);
   const windowEnd = normalizeTimestamp(snapshot.windowEnd);
@@ -654,6 +688,7 @@ export function normalizeJunctionSnapshot(snapshot: JunctionSnapshotInput): Norm
     return normalized ? [normalized] : [];
   });
   const context: NormalizationContext = {
+    defaultTimeZone: providerContext.defaultTimeZone,
     importedAt,
     windowStart,
     windowEnd,
@@ -1093,8 +1128,9 @@ function buildJunctionDailyTimeseriesAggregates(input: {
 
     const value = input.normalizeValue(firstNumberFromPaths(entry, input.valuePaths));
     const timestamp = resolveRecordTimestamp(entry, input.context, resourceContext.sourceProviderSlug);
-    const sampleAt = timestamp.occurredAt ?? timestamp.recordedAt;
-    const dayKey = resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt);
+    const sampleAt = resolveJunctionDailyAggregateSampleAt(timestamp);
+    const dayKey = resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt, input.context.defaultTimeZone);
+    const legacyDayKey = resolveLegacyJunctionTimeseriesAggregateDayKey(entry, timestamp, sampleAt);
 
     if (value === undefined || !sampleAt || !dayKey) {
       continue;
@@ -1109,6 +1145,10 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     const existing = aggregates.get(key);
     const recordedAt = timestamp.recordedAt ?? sampleAt;
     const timeZone = firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]);
+    const legacyDayKeys = new Set<string>();
+    if (legacyDayKey && legacyDayKey !== dayKey) {
+      legacyDayKeys.add(legacyDayKey);
+    }
 
     if (!existing) {
       aggregates.set(key, {
@@ -1117,6 +1157,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
         firstSampleAt: sampleAt,
         lastRecordedAt: recordedAt,
         lastSampleAt: sampleAt,
+        legacyDayKeys,
         maxValue: value,
         minValue: value,
         evidencePartRole,
@@ -1131,6 +1172,9 @@ function buildJunctionDailyTimeseriesAggregates(input: {
 
     existing.sampleCount += 1;
     existing.sum += value;
+    if (legacyDayKey && legacyDayKey !== dayKey) {
+      existing.legacyDayKeys.add(legacyDayKey);
+    }
     if (sampleAt < existing.firstSampleAt) {
       existing.firstSampleAt = sampleAt;
     }
@@ -1221,6 +1265,9 @@ function pushJunctionDailyTimeseriesAggregateArtifacts(
             firstSampleAt: aggregate.firstSampleAt,
             lastSampleAt: aggregate.lastSampleAt,
             lastRecordedAt: aggregate.lastRecordedAt,
+            legacyDayKeys: aggregate.legacyDayKeys.size > 0
+              ? [...aggregate.legacyDayKeys].sort()
+              : undefined,
             meanValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.sum / aggregate.sampleCount),
             minValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.minValue),
             maxValue: roundJunctionTimeseriesAggregateValue(resource, aggregate.maxValue),
@@ -1281,6 +1328,7 @@ function pushJunctionDailyTimeseriesObservation(
     dayKey: aggregate.dayKey,
     observedAtRaw: `${aggregate.dayKey}:${aggregate.resourceContext.resource}:daily`,
   });
+  const legacyExternalRefs = legacyJunctionDailyTimeseriesAggregateExternalRefs(aggregate, observation.metric);
 
   context.events.push(stripUndefined({
     kind: "observation",
@@ -1292,6 +1340,7 @@ function pushJunctionDailyTimeseriesObservation(
     title: observation.title,
     evidenceRoles: [aggregate.evidencePartRole],
     externalRef: makeJunctionExternalRef(aggregate.resourceContext, aggregate.entry, timestamp, observation.metric),
+    legacyExternalRefs: legacyExternalRefs.length > 0 ? legacyExternalRefs : undefined,
     dataOrigin: buildDataOrigin(aggregate.entry, aggregate.resourceContext, timestamp),
     fields: {
       metric: observation.metric,
@@ -1300,6 +1349,29 @@ function pushJunctionDailyTimeseriesObservation(
       unit: observation.unit,
     },
   }));
+}
+
+function legacyJunctionDailyTimeseriesAggregateExternalRefs(
+  aggregate: JunctionDailyTimeseriesAggregate,
+  metric: string,
+): DeviceExternalRefPayload[] {
+  if (aggregate.legacyDayKeys.size === 0) {
+    return [];
+  }
+
+  return [...aggregate.legacyDayKeys].sort().map((legacyDayKey) =>
+    makeJunctionExternalRef(
+      aggregate.resourceContext,
+      aggregate.entry,
+      withTimestampOverride(aggregate.timestamp, {
+        occurredAt: aggregate.lastSampleAt,
+        recordedAt: aggregate.lastRecordedAt,
+        dayKey: legacyDayKey,
+        observedAtRaw: `${legacyDayKey}:${aggregate.resourceContext.resource}:daily`,
+      }),
+      metric,
+    )
+  );
 }
 
 // Sparse paired blood-pressure readings land as-is: one canonical
@@ -1336,7 +1408,7 @@ function pushJunctionBloodPressureReadings(
     const diastolic = normalizeDiastolicMmHg(firstNumberFromPaths(entry, JUNCTION_BLOOD_PRESSURE_DIASTOLIC_PATHS));
     const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
     const occurredAt = timestamp.occurredAt ?? timestamp.recordedAt;
-    const dayKey = resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, occurredAt);
+    const dayKey = resolveJunctionTimeseriesAggregateDayKey(entry, timestamp, occurredAt, context.defaultTimeZone);
 
     if (systolic === undefined || diastolic === undefined || systolic <= diastolic || !occurredAt || !dayKey) {
       continue;
@@ -1615,20 +1687,23 @@ function pushSleepSummary(
       millisecondsToMinutes(firstNumberFromPaths(entry, JUNCTION_SLEEP_DURATION_MILLISECOND_PATHS)),
     ) ??
     normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
+  const sleepTimestamp = withTimestampOverride(timestamp, {
+    occurredAt: endAt ?? startAt ?? timestamp.occurredAt,
+  });
 
   if (startAt && endAt && durationMinutes !== undefined) {
-    const occurredAt = startAt;
+    const occurredAt = sleepTimestamp.occurredAt ?? startAt;
     context.events.push(stripUndefined({
       kind: "sleep_session",
       occurredAt,
-      recordedAt: timestamp.recordedAt,
-      dayKey: timestamp.dayKey,
+      recordedAt: sleepTimestamp.recordedAt,
+      dayKey: sleepTimestamp.dayKey,
       timeZone: firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
       source: "device",
       title: "Junction sleep",
       evidenceRoles: resourceContext.evidenceRoles,
-      externalRef: makeJunctionExternalRef(resourceContext, entry, timestamp, "session"),
-      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      externalRef: makeJunctionExternalRef(resourceContext, entry, sleepTimestamp, "session"),
+      dataOrigin: buildDataOrigin(entry, resourceContext, sleepTimestamp),
       fields: {
         startAt,
         endAt,
@@ -1637,8 +1712,8 @@ function pushSleepSummary(
     }));
   }
 
-  pushObservationMetrics(entry, resourceContext, context, SLEEP_METRICS);
-  pushJunctionRecoveryReadinessScore(entry, resourceContext, context, timestamp);
+  pushObservationMetrics(entry, resourceContext, context, SLEEP_METRICS, sleepTimestamp);
+  pushJunctionRecoveryReadinessScore(entry, resourceContext, context, sleepTimestamp);
 }
 
 function pushSleepCycle(
@@ -1677,14 +1752,16 @@ function pushSleepCycle(
     }
 
     const intervalTimestamp = resolveRecordTimestamp(intervalEntry, context, resourceContext.sourceProviderSlug);
+    const originEntry: PlainObject = { ...entry, ...intervalEntry };
     const stageTimestamp = withTimestampOverride(intervalTimestamp, {
       occurredAt: resolvedStartAt,
       recordedAt: intervalTimestamp.recordedAt ?? parentTimestamp.recordedAt ?? resolvedStartAt,
-      dayKey: extractIsoDatePrefix(resolvedStartAt) ?? intervalTimestamp.dayKey ?? parentTimestamp.dayKey,
+      dayKey: resolveSleepStageDayKey(intervalEntry, entry, resolvedStartAt, context.defaultTimeZone) ??
+        intervalTimestamp.dayKey ??
+        parentTimestamp.dayKey,
       observedAtRaw: stringId(startAtRaw) ?? intervalTimestamp.observedAtRaw ?? parentTimestamp.observedAtRaw ?? resolvedStartAt,
       timestampSemantics: intervalTimestamp.timestampSemantics ?? parentTimestamp.timestampSemantics,
     });
-    const originEntry: PlainObject = { ...entry, ...intervalEntry };
 
     context.samples.push(stripUndefined({
       stream: "sleep_stage",
@@ -1709,6 +1786,28 @@ function pushSleepCycle(
   }
 }
 
+function resolveSleepStageDayKey(
+  intervalEntry: PlainObject,
+  parentEntry: PlainObject,
+  resolvedStartAt: string,
+  defaultTimeZone: string | undefined,
+): string | undefined {
+  const explicitTimeZone = firstStringFromPaths(intervalEntry, ["timeZone", "timezone", "time_zone"])
+    ?? firstStringFromPaths(parentEntry, ["timeZone", "timezone", "time_zone"]);
+  // Samples do not yet have event-style legacyExternalRefs, so offset-only
+  // sleep-stage rows keep their historic UTC-day identity for stable replay.
+  const hasOffsetOnlyEvidence = !explicitTimeZone && (
+    readJunctionTimeZoneOffsetSeconds(intervalEntry) !== undefined ||
+    readJunctionTimeZoneOffsetSeconds(parentEntry) !== undefined
+  );
+  const timeZone = explicitTimeZone ?? (hasOffsetOnlyEvidence ? undefined : defaultTimeZone);
+
+  return firstIsoDateFromPaths(intervalEntry, JUNCTION_LOCAL_CALENDAR_DATE_PATHS) ??
+    resolveVaultLocalDayKey(resolvedStartAt, timeZone) ??
+    extractIsoDatePrefix(resolvedStartAt) ??
+    undefined;
+}
+
 function pushWorkoutSummary(
   entry: PlainObject,
   resourceContext: ResourceContext,
@@ -1720,8 +1819,9 @@ function pushWorkoutSummary(
     startAtRaw,
     resourceContext.sourceProviderSlug,
   );
+  const endAtRaw = firstValueFromPaths(entry, ["endAt", "end_at", "end", "timeEnd", "time_end"]);
   const endAt = resolveSafeTimestamp(
-    firstValueFromPaths(entry, ["endAt", "end_at", "end", "timeEnd", "time_end"]),
+    endAtRaw,
     resourceContext.sourceProviderSlug,
   );
   const movingTimeMinutes = resolveWorkoutMovingTimeMinutes(entry);
@@ -1742,7 +1842,7 @@ function pushWorkoutSummary(
   const workoutTimestamp = occurredAt
     ? withTimestampOverride(timestamp, {
       occurredAt,
-      dayKey: extractIsoDatePrefix(occurredAt) ?? undefined,
+      dayKey: resolveJunctionWorkoutDayKey(entry, startAtRaw, endAtRaw, occurredAt, timestamp),
       observedAtRaw: stringId(startAtRaw) ?? occurredAt,
     })
     : timestamp;
@@ -1750,7 +1850,7 @@ function pushWorkoutSummary(
     return;
   }
 
-  const dayKey = extractIsoDatePrefix(occurredAt) ?? timestamp.dayKey;
+  const dayKey = workoutTimestamp.dayKey;
   const rawSport = firstStringFromPaths(entry, ["sport.slug", "sportSlug", "sport_slug", "sport.type", "sportType", "sport_type", "sport.name", "sportName", "sport_name", "sport"]);
   const sportName = trimOptionalToLength(
     firstStringFromPaths(entry, ["sport.name", "sportName", "sport_name", "sport.type", "sportType", "sport_type", "sport"]),
@@ -1803,6 +1903,53 @@ function pushWorkoutSummary(
       }),
     }),
   }));
+}
+
+function resolveJunctionWorkoutDayKey(
+  entry: PlainObject,
+  startAtRaw: unknown,
+  endAtRaw: unknown,
+  occurredAt: string,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): string | undefined {
+  const calendarDayKey = firstIsoDateFromPaths(entry, JUNCTION_LOCAL_CALENDAR_DATE_PATHS);
+  if (calendarDayKey) {
+    return calendarDayKey;
+  }
+
+  const startDayKey = resolveJunctionLocalDayKey(entry, startAtRaw, occurredAt);
+  if (stringId(startAtRaw) !== undefined) {
+    return startDayKey ?? timestamp.dayKey;
+  }
+
+  const endOffsetSeconds = readEmbeddedTimestampOffsetSeconds(endAtRaw);
+  if (endOffsetSeconds !== undefined) {
+    const endOffsetDayKey = extractLocalDayKeyFromUtcOffset(occurredAt, endOffsetSeconds);
+    if (endOffsetDayKey) {
+      return endOffsetDayKey;
+    }
+  }
+
+  const computedOccurredDayKey = resolveJunctionLocalDayKey(entry, occurredAt, occurredAt, "utc");
+  if (computedOccurredDayKey) {
+    return computedOccurredDayKey;
+  }
+
+  if (
+    timestamp.observedAtRaw
+    && (timestamp.timestampSemantics === "floating" || isDateOnlyJunctionTimestamp(timestamp.observedAtRaw))
+  ) {
+    return timestamp.dayKey;
+  }
+
+  return undefined;
+}
+
+function readEmbeddedTimestampOffsetSeconds(value: unknown): number | undefined {
+  const rawTimestamp = stringId(value)?.trim();
+  const offset = rawTimestamp ? /([+-]\d{2}:?\d{2})$/u.exec(rawTimestamp)?.[1] : undefined;
+  const offsetMinutes = offset ? parseJunctionTimeZoneOffsetMinutes(offset) : undefined;
+  return offsetMinutes === undefined ? undefined : offsetMinutes * 60;
 }
 
 function pushMealSummary(
@@ -2303,7 +2450,7 @@ function resolveJunctionMealTimestamp(
     occurredAt,
     timestamp: withTimestampOverride(timestamp, {
       occurredAt,
-      dayKey: calendarDayKey ?? timestamp.dayKey ?? extractIsoDatePrefix(occurredAt) ?? undefined,
+      dayKey: calendarDayKey ?? timestamp.dayKey,
       observedAtRaw: timestamp.observedAtRaw ?? calendarDayKey ?? occurredAt,
     }),
   };
@@ -3150,6 +3297,7 @@ function resolveRecordTimestamp(
     "bedtimeStart",
     "bedtime_start",
   ]);
+  const localCalendarDayKey = firstIsoDateFromPaths(entry, JUNCTION_LOCAL_CALENDAR_DATE_PATHS);
   const explicitSemantics = firstTimestampSemantics(entry);
   const hasSourceSpecificFloatingTime = hasFloatingTimestampSourceProvider(sourceProviderSlug);
   const timestampSemantics = hasSourceSpecificFloatingTime
@@ -3172,10 +3320,45 @@ function resolveRecordTimestamp(
   return stripUndefined({
     occurredAt,
     recordedAt,
-    dayKey: extractIsoDatePrefix(rawObservedAt) ?? extractIsoDatePrefix(occurredAt) ?? undefined,
+    dayKey: localCalendarDayKey ?? resolveJunctionLocalDayKey(entry, rawObservedAt, occurredAt, timestampSemantics),
     observedAtRaw: rawObservedAt,
     timestampSemantics,
   });
+}
+
+function resolveJunctionLocalDayKey(
+  entry: PlainObject,
+  rawTimestampValue: unknown,
+  resolvedTimestamp: string | undefined,
+  timestampSemanticsOverride?: TimestampSemantics,
+): string | undefined {
+  const rawTimestamp = stringId(rawTimestampValue);
+  const rawDayKey = extractIsoDatePrefix(rawTimestamp) ?? undefined;
+  if (!rawTimestamp) {
+    return undefined;
+  }
+
+  const timestampSemantics = timestampSemanticsOverride
+    ?? firstTimestampSemantics(entry)
+    ?? inferTimestampSemantics(rawTimestamp);
+
+  if (timestampSemantics === "floating" || isDateOnlyJunctionTimestamp(rawTimestamp)) {
+    return rawDayKey;
+  }
+
+  if (timestampSemantics === "offset") {
+    return rawDayKey;
+  }
+
+  const offsetSeconds = readJunctionTimeZoneOffsetSeconds(entry);
+  if (offsetSeconds !== null && offsetSeconds !== undefined && resolvedTimestamp) {
+    const offsetDayKey = extractLocalDayKeyFromUtcOffset(resolvedTimestamp, offsetSeconds);
+    if (offsetDayKey) {
+      return offsetDayKey;
+    }
+  }
+
+  return undefined;
 }
 
 function buildConnectionsByKey(connections: readonly PlainObject[]): ReadonlyMap<string, PlainObject> {
@@ -3368,7 +3551,10 @@ function groupedTimeseriesResourceEntries(payload: unknown): JunctionResourceEnt
 }
 
 function sleepStageIntervalEntries(entry: PlainObject): PlainObject[] {
-  return collectSleepStageIntervalEntries(entry);
+  return [
+    ...collectSleepStageIntervalEntries(entry),
+    ...parallelSleepStageIntervalEntries(entry),
+  ];
 }
 
 function collectSleepStageIntervalEntries(value: unknown): PlainObject[] {
@@ -3392,6 +3578,52 @@ function collectSleepStageIntervalEntries(value: unknown): PlainObject[] {
     }
 
     return collectSleepStageIntervalEntries(nested);
+  });
+}
+
+function parallelSleepStageIntervalEntries(entry: PlainObject): PlainObject[] {
+  const sessionStartRaw = firstValueFromPaths(entry, [
+    "sessionStart",
+    "session_start",
+    ...JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
+  ]);
+  const sessionStartAt = normalizeTimestamp(sessionStartRaw);
+  if (!sessionStartAt) {
+    return [];
+  }
+
+  const startOffsets = firstNumberArrayFromPaths(entry, JUNCTION_SLEEP_STAGE_START_OFFSET_SECOND_PATHS);
+  const endOffsets = firstNumberArrayFromPaths(entry, JUNCTION_SLEEP_STAGE_END_OFFSET_SECOND_PATHS);
+  const stageValues = firstArrayFromPaths(entry, JUNCTION_SLEEP_STAGE_TYPE_ARRAY_PATHS);
+  if (startOffsets.length === 0 || endOffsets.length === 0 || stageValues.length === 0) {
+    return [];
+  }
+
+  const timeZone = firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]);
+
+  return stageValues.flatMap((stageValue, index) => {
+    const stage = normalizeJunctionSleepStageValue(stageValue);
+    const startOffsetSeconds = startOffsets[index];
+    const endOffsetSeconds = endOffsets[index];
+    if (!stage || startOffsetSeconds === undefined || endOffsetSeconds === undefined) {
+      return [];
+    }
+
+    const startAt = addMinutes(sessionStartAt, startOffsetSeconds / 60);
+    const endAt = addMinutes(sessionStartAt, endOffsetSeconds / 60);
+    if (!startAt || !endAt || Date.parse(endAt) <= Date.parse(startAt)) {
+      return [];
+    }
+
+    return [stripUndefined({
+      start: startAt,
+      end: endAt,
+      stage,
+      localDate: resolveVaultLocalDayKey(startAt, timeZone),
+      stageStartOffsetSecond: startOffsetSeconds,
+      stageEndOffsetSecond: endOffsetSeconds,
+      stageIndex: index,
+    })];
   });
 }
 
@@ -3535,6 +3767,59 @@ function resolveJunctionTimeseriesAggregateDayKey(
   entry: PlainObject,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
   sampleAt: string | undefined,
+  defaultTimeZone: string | undefined,
+): string | undefined {
+  if (timestamp.timestampSemantics === "offset") {
+    return timestamp.dayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
+  }
+
+  const offsetSeconds = readJunctionTimeZoneOffsetSeconds(entry);
+  if (
+    offsetSeconds !== null
+    && offsetSeconds !== undefined
+    && sampleAt
+    && timestamp.observedAtRaw
+    && timestamp.timestampSemantics !== "floating"
+    && !isDateOnlyJunctionTimestamp(timestamp.observedAtRaw)
+  ) {
+    const offsetDayKey = extractLocalDayKeyFromUtcOffset(sampleAt, offsetSeconds);
+    if (offsetDayKey) {
+      return offsetDayKey;
+    }
+  }
+
+  const vaultDayKey = sampleAt
+    ? resolveVaultLocalDayKey(sampleAt, defaultTimeZone)
+    : undefined;
+  return timestamp.dayKey ?? vaultDayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
+}
+
+function resolveJunctionDailyAggregateSampleAt(
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+): string | undefined {
+  return timestamp.occurredAt ?? timestamp.recordedAt ?? (
+    timestamp.timestampSemantics === "floating" && timestamp.dayKey
+      ? `${timestamp.dayKey}T00:00:00.000Z`
+      : undefined
+  );
+}
+
+function resolveVaultLocalDayKey(timestamp: string, defaultTimeZone: string | undefined): string | undefined {
+  if (!defaultTimeZone) {
+    return undefined;
+  }
+
+  try {
+    return toLocalDayKey(timestamp, defaultTimeZone);
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveLegacyJunctionTimeseriesAggregateDayKey(
+  entry: PlainObject,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  sampleAt: string | undefined,
 ): string | undefined {
   const offsetSeconds = readJunctionTimeZoneOffsetSeconds(entry);
   if (
@@ -3551,7 +3836,7 @@ function resolveJunctionTimeseriesAggregateDayKey(
     }
   }
 
-  return timestamp.dayKey ?? extractIsoDatePrefix(sampleAt) ?? undefined;
+  return extractIsoDatePrefix(timestamp.observedAtRaw) ?? extractIsoDatePrefix(sampleAt) ?? undefined;
 }
 
 function isDateOnlyJunctionTimestamp(value: string): boolean {
@@ -3572,23 +3857,99 @@ function extractLocalDayKeyFromUtcOffset(timestamp: string, offsetSeconds: numbe
 }
 
 function readJunctionTimeZoneOffsetMinutes(entry: PlainObject): number | null | undefined {
-  const minuteValue = firstNullableNumberFromPaths(entry, JUNCTION_TIME_ZONE_OFFSET_MINUTE_PATHS);
+  const minuteValue = firstNullableJunctionTimeZoneOffsetValueFromPaths(
+    entry,
+    JUNCTION_TIME_ZONE_OFFSET_MINUTE_PATHS,
+    "minutes",
+  );
   if (minuteValue !== undefined) {
     return minuteValue;
   }
 
-  const secondValue = firstNullableNumberFromPaths(entry, JUNCTION_TIME_ZONE_OFFSET_SECOND_PATHS);
+  const secondValue = firstNullableJunctionTimeZoneOffsetValueFromPaths(
+    entry,
+    JUNCTION_TIME_ZONE_OFFSET_SECOND_PATHS,
+    "seconds",
+  );
 
   return secondValue === undefined || secondValue === null ? secondValue : secondValue / 60;
 }
 
 function readJunctionTimeZoneOffsetSeconds(entry: PlainObject): number | null | undefined {
-  const minuteValue = firstNullableNumberFromPaths(entry, JUNCTION_TIME_ZONE_OFFSET_MINUTE_PATHS);
+  const minuteValue = firstNullableJunctionTimeZoneOffsetValueFromPaths(
+    entry,
+    JUNCTION_TIME_ZONE_OFFSET_MINUTE_PATHS,
+    "minutes",
+  );
   if (minuteValue !== undefined) {
     return minuteValue === null ? null : minuteValue * 60;
   }
 
-  return firstNullableNumberFromPaths(entry, JUNCTION_TIME_ZONE_OFFSET_SECOND_PATHS);
+  return firstNullableJunctionTimeZoneOffsetValueFromPaths(entry, JUNCTION_TIME_ZONE_OFFSET_SECOND_PATHS, "seconds");
+}
+
+function firstNullableJunctionTimeZoneOffsetValueFromPaths(
+  source: PlainObject,
+  paths: readonly string[],
+  unit: "minutes" | "seconds",
+): number | null | undefined {
+  for (const path of paths) {
+    const value = readPath(source, path);
+
+    if (value === undefined) {
+      continue;
+    }
+
+    if (value === null) {
+      return null;
+    }
+
+    const numeric = finiteNumber(value);
+    if (numeric !== undefined) {
+      return numeric;
+    }
+
+    if (typeof value !== "string") {
+      continue;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    const offsetMinutes = parseJunctionTimeZoneOffsetMinutes(trimmed);
+    if (offsetMinutes !== undefined) {
+      return unit === "minutes" ? offsetMinutes : offsetMinutes * 60;
+    }
+
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return undefined;
+}
+
+function parseJunctionTimeZoneOffsetMinutes(value: string): number | undefined {
+  if (value.toUpperCase() === "Z") {
+    return 0;
+  }
+
+  const match = /^([+-])(\d{2}):?(\d{2})$/u.exec(value);
+  if (!match) {
+    return undefined;
+  }
+
+  const hours = Number(match[2]);
+  const minutes = Number(match[3]);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes) || hours > 24 || minutes > 59) {
+    return undefined;
+  }
+
+  const sign = match[1] === "-" ? -1 : 1;
+  return sign * (hours * 60 + minutes);
 }
 
 function firstNumberFromPaths(source: PlainObject | undefined, paths: readonly string[]): number | undefined {
@@ -3600,6 +3961,25 @@ function firstNumberFromPaths(source: PlainObject | undefined, paths: readonly s
   }
 
   return undefined;
+}
+
+function firstNumberArrayFromPaths(source: PlainObject | undefined, paths: readonly string[]): Array<number | undefined> {
+  for (const path of paths) {
+    const values = numberArrayFromValue(readPath(source, path));
+    if (values.length > 0) {
+      return values;
+    }
+  }
+
+  return [];
+}
+
+function numberArrayFromValue(value: unknown): Array<number | undefined> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((entry) => finiteNumber(entry));
 }
 
 function firstNonNegativeNumberFromPaths(source: PlainObject | undefined, paths: readonly string[]): number | undefined {
@@ -3941,6 +4321,17 @@ function firstStringArrayFromPaths(source: PlainObject | undefined, paths: reado
     const values = stringArrayFromValue(readPath(source, path));
     if (values.length > 0) {
       return values;
+    }
+  }
+
+  return [];
+}
+
+function firstArrayFromPaths(source: PlainObject | undefined, paths: readonly string[]): unknown[] {
+  for (const path of paths) {
+    const value = readPath(source, path);
+    if (Array.isArray(value) && value.length > 0) {
+      return value;
     }
   }
 

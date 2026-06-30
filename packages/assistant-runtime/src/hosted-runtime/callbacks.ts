@@ -1,10 +1,10 @@
 import type {
+  HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionStructuredLogDetails,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
   compareIsoTimestampsAscending as compareHostedIsoTimestampsAscending,
-  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
 import {
   emitHostedExecutionStructuredLog,
@@ -43,6 +43,7 @@ import {
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
   type AssistantHostedProgressDeliveryDependencies,
+  type AssistantOutboxDispatchPreflightResult,
   type AssistantOutboxPreparedDispatchState,
 } from "@murphai/assistant-engine";
 import {
@@ -60,6 +61,10 @@ import {
   assistantChannelDeliverySchema,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import {
+  createAssistantDeliveryBlockedError,
+  createAssistantDeliveryTerminalError,
+} from "@murphai/operator-config/assistant/delivery-failure";
 
 import type {
   HostedAssistantDeliveryErrorDetails,
@@ -82,6 +87,7 @@ import {
 } from "../hosted-provider-effects.ts";
 import {
   buildHostedAssistantLinqDeliveryContextFromWake,
+  resolveHostedAssistantLinqReactionDeliveryContextForRequest,
   resolveHostedAssistantLinqDeliveryContextForRequest,
   type HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
@@ -152,6 +158,7 @@ export async function collectHostedAssistantDeliverySideEffects(
     const reconciliation = await reconcileHostedAssistantVaultFileApproval({
       actionApprovalPort: input.actionApprovalPort ?? null,
       intent,
+      missingApprovalPort: "block",
       now,
       vaultRoot: request.vaultRoot,
     });
@@ -269,9 +276,9 @@ export async function collectHostedAssistantDeliverySideEffects(
 }
 
 /**
- * Bounds the set of intents reconciled per collect. The dispatch-time gate in
- * `preloadApprovedHostedAssistantVaultFiles` is the security invariant; this
- * pass exists only so freshly-decided approvals transition out of
+ * Bounds the set of intents reconciled per collect. The dispatch preflight
+ * gate is the security invariant; this pass exists only so freshly-decided
+ * approvals transition out of
  * `awaiting_approval` promptly. Reconciling every stored intent would add an
  * O(n) sequence of web-control round trips to the foreground delivery path.
  */
@@ -298,6 +305,7 @@ function selectHostedAssistantApprovalReconcileTargets(input: {
 async function reconcileHostedAssistantVaultFileApproval(input: {
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
   intent: AssistantOutboxIntent;
+  missingApprovalPort: "block" | "skip";
   now: Date;
   vaultRoot: string;
 }): Promise<{ blocked: boolean; intent: AssistantOutboxIntent }> {
@@ -328,6 +336,13 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
   }
 
   if (!input.actionApprovalPort) {
+    if (input.missingApprovalPort === "skip") {
+      return {
+        blocked: true,
+        intent: input.intent,
+      };
+    }
+
     const deferred = deferAssistantVaultFileApprovalCheck({
       intent: input.intent,
       now: input.now,
@@ -342,11 +357,37 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
     };
   }
 
+  if (
+    file.approvalId
+    && file.approvalGeneration
+    && input.intent.status !== "awaiting_approval"
+  ) {
+    return { blocked: false, intent: input.intent };
+  }
+
+  let approvalRequest: ReturnType<typeof buildAssistantVaultFileSendApprovalRequest>;
+  try {
+    approvalRequest = buildAssistantVaultFileSendApprovalRequest(input.intent);
+  } catch (error) {
+    const failed = await markAssistantOutboxIntentMirrorTerminalById({
+      error: createAssistantDeliveryTerminalError(
+        "ASSISTANT_VAULT_FILE_APPROVAL_TARGET_INVALID",
+        "Secure vault-file approval could not be requested because the delivery target is invalid.",
+        { cause: error instanceof Error ? error.message : String(error) },
+      ),
+      intentId: input.intent.intentId,
+      status: "failed",
+      vault: input.vaultRoot,
+    });
+    return {
+      blocked: true,
+      intent: failed ?? input.intent,
+    };
+  }
+
   let approval: HostedActionApprovalResult;
   try {
-    approval = await input.actionApprovalPort.request(
-      buildAssistantVaultFileSendApprovalRequest(input.intent),
-    );
+    approval = await input.actionApprovalPort.request(approvalRequest);
   } catch {
     const deferred = deferAssistantVaultFileApprovalCheck({
       intent: input.intent,
@@ -377,6 +418,29 @@ async function reconcileHostedAssistantVaultFileApproval(input: {
       approval.status !== "approved"
       || persisted.status === "awaiting_approval",
     intent: persisted,
+  };
+}
+
+async function preflightHostedAssistantVaultFileDispatch(input: {
+  actionApprovalPort: HostedRuntimeActionApprovalPort | null;
+  intent: AssistantOutboxIntent;
+  now: Date;
+  vaultRoot: string;
+}): Promise<AssistantOutboxDispatchPreflightResult> {
+  const reconciled = await reconcileHostedAssistantVaultFileApproval({
+    actionApprovalPort: input.actionApprovalPort,
+    intent: input.intent,
+    missingApprovalPort: "block",
+    now: input.now,
+    vaultRoot: input.vaultRoot,
+  });
+  if (!reconciled.blocked) {
+    return { action: "continue" };
+  }
+
+  return {
+    action: reconciled.intent.status === "awaiting_approval" ? "defer" : "stop",
+    intent: reconciled.intent,
   };
 }
 
@@ -446,11 +510,7 @@ function isHostedSignupWelcomeDeliveryPayload(
     return false;
   }
   const tokenTarget = payload.idempotencyKey.slice(prefix.length);
-  return (
-    tokenTarget.length > 0
-    && !tokenTarget.includes(":")
-    && payload.message === MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE
-  );
+  return tokenTarget.length > 0 && !tokenTarget.includes(":");
 }
 
 function hostedAssistantDeliveryRecipientKeysOverlap(
@@ -952,10 +1012,11 @@ export async function prepareHostedAssistantDeliveryEffectsForDispatch(input: {
 function shouldPrepareHostedAssistantDeliveryEffectForDispatch(
   effect: HostedAssistantDeliveryEffect,
 ): boolean {
-  return effect.payload.transportIdempotent
-    || isHostedAssistantReactionOnlyEffect(effect)
-    || hasHostedAssistantVoiceMemoMedia(effect.payload)
-    || isHostedSignupWelcomeDeliveryPayload(effect.payload);
+  return !hasHostedAssistantVaultFileMedia(effect.payload)
+    && (effect.payload.transportIdempotent
+      || isHostedAssistantReactionOnlyEffect(effect)
+      || hasHostedAssistantVoiceMemoMedia(effect.payload)
+      || isHostedSignupWelcomeDeliveryPayload(effect.payload));
 }
 
 function hasHostedAssistantVoiceMemoMedia(
@@ -964,8 +1025,14 @@ function hasHostedAssistantVoiceMemoMedia(
   return payload.media.some((item) => item.kind === "voice_memo");
 }
 
+function hasHostedAssistantVaultFileMedia(
+  payload: HostedAssistantDeliveryPayload,
+): boolean {
+  return payload.media.some((item) => item.kind === "vault_file");
+}
+
 export function createHostedAssistantProgressDeliveryDependencies(input: {
-  effectsPort?: Pick<HostedRuntimeEffectsPort, "sendEmail"> | null;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority" | "sendEmail"> | null;
   forwardedEnv?: Readonly<Record<string, string>>;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   platformEnv?: Readonly<Record<string, string>>;
@@ -998,12 +1065,14 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       telegramEnv,
     }),
     sendLinq: createHostedAssistantLinqSendDependency({
+      effectsPort: input.effectsPort ?? null,
       linqEnv,
       linqDeliveryContext,
       providerFetch: input.providerFetch ?? null,
       signal: input.signal ?? null,
     }),
     sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
+      effectsPort: input.effectsPort ?? null,
       linqEnv,
       linqDeliveryContext,
       providerFetch: input.providerFetch ?? null,
@@ -1215,10 +1284,17 @@ function shouldBlockLaterHostedAssistantForegroundDeliveries(input: {
   effect: HostedAssistantDeliveryEffect;
   outcome: HostedAssistantDeliveryOutcome;
 }): boolean {
-  return input.effect.deliveryPhase === "foreground_current_turn"
-    && !isHostedAssistantReactionOnlyEffect(input.effect)
-    && input.outcome.deliveryStatus !== "sent"
-    && input.outcome.retryable === true;
+  if (input.effect.deliveryPhase !== "foreground_current_turn") {
+    return false;
+  }
+  if (isHostedAssistantReactionOnlyEffect(input.effect)) {
+    return false;
+  }
+  if (input.outcome.deliveryStatus === "sent") {
+    return false;
+  }
+  return input.outcome.retryable === true
+    || input.outcome.deliveryStatus === "pending";
 }
 
 function isHostedLinqTransportFailure(error: unknown): boolean {
@@ -1341,6 +1417,15 @@ async function deliverHostedPreparedAssistantDelivery(input: {
       return disabledAutoReplyOutcome;
     }
     const dispatched = await dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        preflightDispatchIntent: async ({ intent, now: preflightNow, vault }) =>
+          preflightHostedAssistantVaultFileDispatch({
+            actionApprovalPort: input.actionApprovalPort,
+            intent,
+            now: preflightNow,
+            vaultRoot: vault,
+          }),
+      },
       dependencies: {
         sendEmail: async (request) => {
           if (request.targetKind === "participant") {
@@ -1425,6 +1510,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         sendLinq: createHostedAssistantLinqSendDependency({
           actionApprovalPort: input.actionApprovalPort,
           assertLiveness: input.assertLiveness,
+          effectsPort: input.effectsPort,
           expectedDedupeKey: input.assistantDeliveryEffect.fingerprint,
           intentId: input.assistantDeliveryEffect.effectId,
           linqEnv: input.linqEnv,
@@ -1440,6 +1526,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         }),
         sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
           assertLiveness: input.assertLiveness,
+          effectsPort: input.effectsPort,
           linqEnv: input.linqEnv,
           linqDeliveryContext: input.wake
             ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
@@ -1452,6 +1539,19 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         }),
         setLinqMessageReaction: async (request) => {
           await assertHostedDeliveryLiveNow(input);
+          const routeScopedContext = input.wake
+            ? buildHostedAssistantLinqDeliveryContextFromWake(input.wake)
+            : null;
+          await assertHostedAssistantLinqRouteAuthorityForDelivery({
+            deliveryContext: resolveHostedAssistantLinqReactionDeliveryContextForRequest({
+              context: routeScopedContext,
+              target: request.target,
+              targetMessageId: request.targetMessageId,
+            }),
+            effectsPort: input.effectsPort,
+            routeScopedContext,
+            signal: input.signal,
+          });
           let reactionProviderDispatchEntered = false;
           const result = await setHostedProviderLinqMessageReaction({
             reaction: request.reaction,
@@ -1689,6 +1789,7 @@ function readProviderFetchRequestUrl(request: Parameters<typeof fetch>[0]): stri
 function createHostedAssistantLinqSendDependency(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   assertLiveness?: () => Promise<void>;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null;
   expectedDedupeKey?: string | null;
   intentId?: string | null;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
@@ -1718,6 +1819,12 @@ function createHostedAssistantLinqSendDependency(input: {
       fetchImplementation: input.providerFetch,
       ...(signal ? { signal } : {}),
     }, "Hosted assistant Linq delivery");
+    await assertHostedAssistantLinqRouteAuthorityForDelivery({
+      deliveryContext,
+      effectsPort: input.effectsPort ?? null,
+      routeScopedContext: input.linqDeliveryContext ?? null,
+      signal: signal ?? null,
+    });
     const verifiedVaultFiles = await preloadApprovedHostedAssistantVaultFiles({
       actionApprovalPort: input.actionApprovalPort ?? null,
       expectedDedupeKey: input.expectedDedupeKey ?? null,
@@ -1775,14 +1882,13 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
   if (
     vaultFiles.length !== 1
     || input.media.length !== 1
-    || !input.actionApprovalPort
     || !input.expectedDedupeKey
     || !input.intentId
     || !input.vaultRoot
   ) {
-    throw createRetryableHostedVaultFileError(
-      "ASSISTANT_VAULT_FILE_APPROVAL_UNAVAILABLE",
-      "Secure approval could not be verified before vault-file delivery.",
+    throw createAssistantDeliveryTerminalError(
+      "ASSISTANT_VAULT_FILE_APPROVAL_INVARIANT_FAILED",
+      "Secure vault-file delivery reached provider dispatch without complete approval prerequisites.",
     );
   }
 
@@ -1799,6 +1905,8 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
   const persistedFile = readAssistantVaultFileMedia(intent);
   if (
     !persistedFile
+    || !persistedFile.approvalId
+    || !persistedFile.approvalGeneration
     || buildHostedVaultFileMediaIdentity(persistedFile)
       !== buildHostedVaultFileMediaIdentity(vaultFiles[0]!)
   ) {
@@ -1808,25 +1916,35 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
     );
   }
 
+  if (!input.actionApprovalPort) {
+    throw createAssistantDeliveryTerminalError(
+      "ASSISTANT_VAULT_FILE_APPROVAL_INVARIANT_FAILED",
+      "Secure vault-file delivery reached provider dispatch without an approval boundary.",
+    );
+  }
+
   let approval: HostedActionApprovalResult;
   try {
-    approval = await input.actionApprovalPort.request(
-      buildAssistantVaultFileSendApprovalRequest(intent),
-    );
-  } catch {
-    throw createRetryableHostedVaultFileError(
-      "ASSISTANT_VAULT_FILE_APPROVAL_UNAVAILABLE",
-      "Secure approval could not be verified before vault-file delivery.",
+    approval = await input.actionApprovalPort.consume({
+      approvalGeneration: persistedFile.approvalGeneration,
+      consumerId: intent.deliveryIdempotencyKey ?? `assistant-outbox:${intent.intentId}`,
+      request: buildAssistantVaultFileSendApprovalRequest(intent),
+    });
+  } catch (error) {
+    throw createAssistantDeliveryTerminalError(
+      "ASSISTANT_VAULT_FILE_APPROVAL_INVARIANT_FAILED",
+      "Secure vault-file approval could not be consumed at provider dispatch.",
+      { cause: error instanceof Error ? error.message : String(error) },
     );
   }
   if (approval.status === "pending") {
-    throw createRetryableHostedVaultFileError(
-      "ASSISTANT_VAULT_FILE_APPROVAL_PENDING",
-      "Vault-file delivery is still awaiting secure approval.",
+    throw createAssistantDeliveryTerminalError(
+      "ASSISTANT_VAULT_FILE_APPROVAL_INVARIANT_FAILED",
+      "Vault-file delivery reached provider dispatch while approval was still pending.",
     );
   }
   if (approval.status !== "approved") {
-    throw new VaultCliError(
+    throw createAssistantDeliveryTerminalError(
       approval.status === "denied"
         ? "ASSISTANT_VAULT_FILE_APPROVAL_DENIED"
         : "ASSISTANT_VAULT_FILE_APPROVAL_EXPIRED",
@@ -1846,6 +1964,8 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
 }
 
 function buildHostedVaultFileMediaIdentity(input: {
+  approvalGeneration?: string | null;
+  approvalId?: string | null;
   contentType: string;
   filename: string;
   ref: string;
@@ -1858,20 +1978,14 @@ function buildHostedVaultFileMediaIdentity(input: {
     input.filename,
     input.contentType,
     input.sizeBytes,
+    input.approvalId ?? null,
+    input.approvalGeneration ?? null,
   ]);
-}
-
-function createRetryableHostedVaultFileError(
-  code: string,
-  message: string,
-): VaultCliError & { retryable: true } {
-  return Object.assign(new VaultCliError(code, message), {
-    retryable: true as const,
-  });
 }
 
 function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   assertLiveness?: () => Promise<void>;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
@@ -1892,6 +2006,12 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       fetchImplementation: input.providerFetch,
       ...(signal ? { signal } : {}),
     }, "Hosted assistant Linq voice memo delivery");
+    await assertHostedAssistantLinqRouteAuthorityForDelivery({
+      deliveryContext,
+      effectsPort: input.effectsPort ?? null,
+      routeScopedContext: input.linqDeliveryContext ?? null,
+      signal: signal ?? null,
+    });
     input.onProviderDispatchEntered?.();
     const result = await sendHostedProviderLinqVoiceMemo({
       attachmentId: request.attachmentId,
@@ -1900,6 +2020,52 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
     await assertHostedDeliveryLiveNow(input);
     return result;
   };
+}
+
+async function assertHostedAssistantLinqRouteAuthorityForDelivery(input: {
+  deliveryContext: HostedAssistantLinqDeliveryContext | null;
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null;
+  routeScopedContext?: HostedAssistantLinqDeliveryContext | null;
+  signal: AbortSignal | null;
+}): Promise<void> {
+  const routeAuthority = input.deliveryContext?.routeAuthority ?? null;
+  if (!routeAuthority) {
+    if (input.routeScopedContext?.routeAuthority) {
+      throw new VaultCliError(
+        "ASSISTANT_LINQ_ROUTE_AUTHORITY_TARGET_MISMATCH",
+        "Hosted Linq route authority does not match the requested delivery target.",
+      );
+    }
+    return;
+  }
+
+  const assertAuthority = requireHostedAssistantLinqRouteAuthorityAssert(
+    input.effectsPort ?? null,
+  );
+  await assertAuthority(routeAuthority, {
+    signal: input.signal,
+  });
+}
+
+function requireHostedAssistantLinqRouteAuthorityAssert(
+  effectsPort: Pick<HostedRuntimeEffectsPort, "assertLinqThreadRouteAuthority"> | null,
+): (
+  authority: HostedExecutionExternalThreadRouteAuthority,
+  context?: { signal?: AbortSignal | null },
+) => Promise<void> {
+  const assertAuthority = effectsPort?.assertLinqThreadRouteAuthority;
+  if (!assertAuthority) {
+    throw createAssistantDeliveryBlockedError(
+      "ASSISTANT_LINQ_ROUTE_AUTHORITY_ASSERT_BLOCKED",
+      "Hosted Linq route authority cannot be revalidated before provider delivery.",
+      {
+        blockKind: "linq_route_authority_assert_missing",
+        resume: "deploy_or_config_change",
+      },
+    );
+  }
+
+  return assertAuthority;
 }
 
 function normalizeHostedLinqDirectRecipient(value: string | null | undefined): string | null {
@@ -2250,6 +2416,7 @@ function emitHostedAssistantDeliveryDispatchOutcome(input: {
     | "failed"
     | "failed_ambiguous"
     | "missing-result"
+    | "pending"
     | "retryable"
     | "sending";
   wake: HostedRuntimeEvent;
@@ -2337,6 +2504,24 @@ async function buildHostedAssistantDeliveryDispatchResult(input: {
         deliveryErrorDetails,
         deliveryErrorMessage: deliveryError.message,
         deliveryStatus: "failed",
+        effect: assistantDeliveryEffect,
+        retryable: false,
+      });
+    case "awaiting_approval":
+      emitHostedAssistantDeliveryDispatchOutcome({
+        deliveryError,
+        deliveryErrorDetails,
+        deliveryStatus: "pending",
+        wake: input.wake,
+        effect: assistantDeliveryEffect,
+        retryable: false,
+        userId: input.userId,
+      });
+      return buildHostedAssistantDeliveryOutcome({
+        deliveryErrorCode: deliveryError.code,
+        deliveryErrorDetails,
+        deliveryErrorMessage: deliveryError.message,
+        deliveryStatus: "pending",
         effect: assistantDeliveryEffect,
         retryable: false,
       });

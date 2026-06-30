@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_CONNECTED_APPS_PATH } from "@murphai/hosted-execution/connected-apps";
+import { HOSTED_PHONE_CALLS_PATH } from "@murphai/hosted-execution/phone-calls";
 
 const mocks = vi.hoisted(() => ({
   fetchHostedExecutionWebControlPlaneResponse: vi.fn(),
@@ -45,6 +46,24 @@ describe("connected-app web-control policy", () => {
     expect(readHostedRunnerWebControlPolicy({
       method: "POST",
       path: "/api/internal/connected-apps/arbitrary",
+    }).allowed).toBe(false);
+  });
+
+  it("allows only the bounded phone-call start route", () => {
+    expect(readHostedRunnerWebControlPolicy({
+      method: "POST",
+      path: HOSTED_PHONE_CALLS_PATH,
+    })).toEqual({
+      allowed: true,
+      operation: "phone_call_start",
+    });
+    expect(readHostedRunnerWebControlPolicy({
+      method: "GET",
+      path: HOSTED_PHONE_CALLS_PATH,
+    }).allowed).toBe(false);
+    expect(readHostedRunnerWebControlPolicy({
+      method: "POST",
+      path: "/api/internal/phone-calls/arbitrary",
     }).allowed).toBe(false);
   });
 

@@ -2,12 +2,14 @@ import {
   AUTOMATION_DOC_TYPE,
   AUTOMATION_SCHEMA_VERSION,
   MIN_AUTOMATION_EVERY_MS,
+  assistantReasoningEffortValues,
   automationContinuityPolicyValues,
   automationDeviceActivityKindSchema,
   automationDeviceActivitySourceValues,
   automationScheduleKindValues,
   automationStatusValues,
   VAULT_LAYOUT,
+  type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
   type AutomationDeviceActivityKind,
   type AutomationDeviceActivitySource,
@@ -17,7 +19,7 @@ import {
   type AutomationStatus,
 } from "@murphai/contracts";
 
-import { readMarkdownDocument, walkRelativeFiles } from "./health/loaders.ts";
+import { readMarkdownDocument, readOptionalMarkdownDocumentOutcome, walkRelativeFiles } from "./health/loaders.ts";
 import {
   applyLimit,
   compareNullableStrings,
@@ -29,8 +31,12 @@ import { parseFrontmatterDocument, type FrontmatterObject } from "./health/share
 
 const AUTOMATIONS_DIRECTORY = VAULT_LAYOUT.automationsDirectory;
 const dailyLocalTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
+type AutomationAssistantReasoningEffort = NonNullable<
+  AutomationAssistantTargetOverride["reasoningEffort"]
+>;
 
 export type {
+  AutomationAssistantTargetOverride,
   AutomationContinuityPolicy,
   AutomationRoute,
   AutomationSchedule,
@@ -47,6 +53,7 @@ export interface AutomationQueryRecord {
   summary: string | null;
   schedule: AutomationSchedule;
   route: AutomationRoute;
+  assistantTargetOverride: AutomationAssistantTargetOverride | null;
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
   createdAt: string;
@@ -90,6 +97,25 @@ function requireStringValue(value: unknown, fieldName: string): string {
   }
 
   return normalized;
+}
+
+function normalizeDeviceActivityCursorEntityId(value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  return requireStringValue(value, "schedule.afterEntityId");
+}
+
+function assertDeviceActivityCursorShape(input: {
+  afterEntityId?: string;
+  afterOccurredAt?: string;
+}): void {
+  const hasScalarOccurredAt = input.afterOccurredAt !== undefined;
+  const hasScalarEntityId = input.afterEntityId !== undefined;
+  if (hasScalarOccurredAt !== hasScalarEntityId) {
+    throw new Error("schedule.afterOccurredAt and schedule.afterEntityId must be provided together.");
+  }
 }
 
 function rejectRecurringScheduleTimeZone(object: Record<string, unknown>): void {
@@ -205,11 +231,24 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
       if (Number.isNaN(Date.parse(after))) {
         throw new Error("schedule.after must be a valid ISO timestamp.");
       }
+      const afterOccurredAt = object.afterOccurredAt === undefined || object.afterOccurredAt === null
+        ? undefined
+        : requireStringValue(object.afterOccurredAt, "schedule.afterOccurredAt");
+      if (afterOccurredAt && Number.isNaN(Date.parse(afterOccurredAt))) {
+        throw new Error("schedule.afterOccurredAt must be a valid ISO timestamp.");
+      }
+      const afterEntityId = normalizeDeviceActivityCursorEntityId(object.afterEntityId);
       const source = normalizeDeviceActivitySource(object.source);
       const activityKind = normalizeDeviceActivityKind(object.activityKind);
+      assertDeviceActivityCursorShape({
+        afterEntityId,
+        afterOccurredAt,
+      });
       return {
         kind,
         after,
+        ...(afterOccurredAt ? { afterOccurredAt } : {}),
+        ...(afterEntityId ? { afterEntityId } : {}),
         ...(source ? { source } : {}),
         ...(activityKind ? { activityKind } : {}),
       };
@@ -233,6 +272,69 @@ function normalizeAutomationRoute(value: unknown): AutomationRoute {
     participantId: normalizeNullableRouteString(object.participantId),
     threadId: normalizeNullableRouteString(object.threadId),
   };
+}
+
+function normalizeAutomationAssistantTargetOverride(
+  value: unknown,
+): AutomationAssistantTargetOverride | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("assistantTargetOverride must be an object.");
+  }
+
+  const object = value as Record<string, unknown>;
+  const model = normalizeAutomationAssistantTargetOverrideString(object.model);
+  const modelProvider = normalizeAutomationAssistantTargetOverrideString(object.modelProvider);
+  const reasoningEffort = normalizeAutomationAssistantTargetOverrideReasoningEffort(
+    object.reasoningEffort,
+  );
+  const target: AutomationAssistantTargetOverride = {
+    ...(model ? { model } : {}),
+    ...(modelProvider ? { modelProvider } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+  };
+
+  return Object.keys(target).length > 0 ? target : null;
+}
+
+function normalizeAutomationAssistantTargetOverrideString(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new Error("assistantTargetOverride values must be strings when provided.");
+  }
+
+  return normalizeNullableString(value);
+}
+
+function normalizeAutomationAssistantTargetOverrideReasoningEffort(
+  value: unknown,
+): AutomationAssistantReasoningEffort | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new Error("assistantTargetOverride.reasoningEffort must be a string.");
+  }
+
+  const normalized = normalizeNullableString(value);
+  if (!normalized) {
+    return null;
+  }
+  if (
+    !assistantReasoningEffortValues.includes(
+      normalized as AutomationAssistantReasoningEffort,
+    )
+  ) {
+    throw new Error(
+      `assistantTargetOverride.reasoningEffort must be one of ${assistantReasoningEffortValues.join(", ")}.`,
+    );
+  }
+
+  return normalized as AutomationAssistantReasoningEffort;
 }
 
 function normalizeAutomationRouteDeliverySource(
@@ -306,6 +408,9 @@ function parseAutomationRecord(
     summary: normalizeNullableString(typeof attributes.summary === "string" ? attributes.summary : null),
     schedule: normalizeAutomationSchedule(attributes.schedule),
     route: normalizeAutomationRoute(attributes.route),
+    assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
+      attributes.assistantTargetOverride,
+    ),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeTags(attributes.tags),
     createdAt: requireStringValue(attributes.createdAt, "createdAt"),
@@ -351,6 +456,7 @@ function matchesAutomationText(record: AutomationQueryRecord, text: string | und
       record.continuityPolicy,
       JSON.stringify(record.schedule),
       JSON.stringify(record.route),
+      JSON.stringify(record.assistantTargetOverride),
       record.tags,
     ],
     text,
@@ -385,6 +491,30 @@ export async function readAutomation(
   return records.find((record) => record.automationId === automationId) ?? null;
 }
 
+export async function readAutomationByRelativePath(
+  vaultRoot: string,
+  relativePath: string,
+): Promise<AutomationQueryRecord | null> {
+  const normalizedPath = normalizeAutomationRelativePath(relativePath);
+  if (!normalizedPath) {
+    return null;
+  }
+
+  const outcome = await readOptionalMarkdownDocumentOutcome(vaultRoot, normalizedPath);
+  if (!outcome) {
+    return null;
+  }
+  if (!outcome.ok) {
+    throw new Error(`Failed to parse automation at ${outcome.relativePath}: ${outcome.reason}`);
+  }
+
+  return parseAutomationRecord(
+    outcome.document.attributes,
+    outcome.document.relativePath,
+    outcome.document.markdown,
+  );
+}
+
 export async function showAutomation(
   vaultRoot: string,
   lookup: string,
@@ -396,4 +526,20 @@ export async function showAutomation(
       matchesLookup(normalized, record.automationId, record.slug, record.title)
     ) ?? null
   );
+}
+
+function normalizeAutomationRelativePath(relativePath: string): string | null {
+  const normalized = relativePath.trim();
+  if (
+    normalized.length === 0 ||
+    normalized.includes("\\") ||
+    normalized.startsWith("/") ||
+    normalized.split("/").includes("..") ||
+    !normalized.startsWith(`${AUTOMATIONS_DIRECTORY}/`) ||
+    !normalized.endsWith(".md")
+  ) {
+    return null;
+  }
+
+  return normalized;
 }

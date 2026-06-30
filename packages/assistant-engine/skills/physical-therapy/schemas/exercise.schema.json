@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://murph.example/schemas/rehab-exercise.schema.json",
+  "title": "Murph Rehabilitation Exercise",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "version",
+    "status",
+    "display_name",
+    "classification",
+    "environment",
+    "instructions",
+    "dose_options",
+    "safety",
+    "response",
+    "adaptations",
+    "evidence",
+    "review"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "status": {
+      "enum": ["draft", "active", "deprecated"]
+    },
+    "replaced_by": {
+      "type": ["object", "null"],
+      "required": ["id", "version"],
+      "properties": {
+        "id": {"type": "string"},
+        "version": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "display_name": {"type": "string", "minLength": 3},
+    "aliases": {
+      "type": "array",
+      "items": {"type": "string"},
+      "uniqueItems": true,
+      "default": []
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["body_regions", "movement_patterns", "rehab_roles", "target_capacities", "task_transfer", "positions"],
+      "properties": {
+        "body_regions": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+        "movement_patterns": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+        "rehab_roles": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+        "target_capacities": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+        "task_transfer": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "positions": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true}
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_equipment", "optional_equipment", "space", "support_required", "supervision"],
+      "properties": {
+        "required_equipment": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "optional_equipment": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "space": {"type": "string"},
+        "support_required": {"type": "boolean"},
+        "supervision": {"enum": ["independent", "nearby-support", "clinician"]}
+      }
+    },
+    "instructions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["setup", "steps", "cues"],
+      "properties": {
+        "setup": {"type": "string", "minLength": 10},
+        "steps": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "cues": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
+        "common_compensations": {"type": "array", "items": {"type": "string"}},
+        "side_specific": {"type": "boolean", "default": false}
+      }
+    },
+    "dose_options": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "context", "mode", "starting_range", "effort", "rest", "frequency", "basis"],
+        "properties": {
+          "id": {"type": "string"},
+          "context": {"type": "string"},
+          "mode": {"enum": ["repetitions", "hold", "time", "distance", "interval"]},
+          "starting_range": {"type": "string"},
+          "effort": {"type": "string"},
+          "rest": {"type": "string"},
+          "frequency": {"type": "string"},
+          "basis": {"enum": ["condition-specific-evidence", "exercise-family-evidence", "general-training-guidance", "practice-heuristic"]}
+        }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prerequisites", "contraindication_tags", "caution_tags", "hard_stop_conditions", "clearance_required"],
+      "properties": {
+        "prerequisites": {"type": "array", "items": {"type": "string"}},
+        "contraindication_tags": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "caution_tags": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "hard_stop_conditions": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "clearance_required": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["acceptable", "same_day_regress", "next_day_regress", "progress_when"],
+      "properties": {
+        "acceptable": {"type": "array", "items": {"type": "string"}},
+        "same_day_regress": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "next_day_regress": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "progress_when": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+      }
+    },
+    "adaptations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["regressions", "progressions", "substitutions"],
+      "properties": {
+        "regressions": {"$ref": "#/$defs/relations"},
+        "progressions": {"$ref": "#/$defs/relations"},
+        "substitutions": {"$ref": "#/$defs/relations"}
+      }
+    },
+    "media_refs": {
+      "type": "array",
+      "items": {"type": "string"},
+      "default": []
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tier", "scope", "source_ids", "summary", "limitations"],
+      "properties": {
+        "tier": {"enum": ["A", "B", "C", "D", "E"]},
+        "scope": {"type": "string", "minLength": 10},
+        "source_ids": {"type": "array", "items": {"type": "string"}},
+        "summary": {"type": "string", "minLength": 10},
+        "limitations": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_searched_on", "content_reviewed_on", "reviewer"],
+      "properties": {
+        "evidence_searched_on": {"type": "string", "format": "date"},
+        "content_reviewed_on": {"type": "string", "format": "date"},
+        "reviewer": {"type": "string"},
+        "conflicts": {"type": "string"}
+      }
+    }
+  },
+  "$defs": {
+    "relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["exercise_id", "dimension", "reason"],
+        "properties": {
+          "exercise_id": {"type": "string"},
+          "dimension": {"enum": ["range", "load", "support", "balance", "speed", "impact", "volume", "task-specificity", "equivalent-role"]},
+          "reason": {"type": "string"}
+        }
+      }
+    }
+  }
+}

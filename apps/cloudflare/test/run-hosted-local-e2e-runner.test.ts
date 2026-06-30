@@ -66,6 +66,7 @@ const controlledEnvKeys = [
   "MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED",
   "MURPH_HOSTED_LOCAL_RUN_ID",
   "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID",
+  "MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS",
 ] as const;
 const originalEnv = new Map<string, string | undefined>();
 let originalExitCode: typeof process.exitCode;
@@ -255,7 +256,7 @@ function buildExpectedScenarioBatches(
   let currentBatch: HostedLocalE2eScenario[] = [];
 
   for (const scenario of scenarios) {
-    if (scenario.processIsolation) {
+    if (scenario.processIsolation || scenario.testControls === true) {
       if (currentBatch.length > 0) {
         batches.push(currentBatch);
         currentBatch = [];
@@ -324,67 +325,77 @@ function expectAggregateVitestSpawnCalls(expectedVitestCalls: number): void {
   expect(options?.env.MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED).toBe("1");
   expect(options?.env.MURPH_HEALTH_COMMONS_GENERATED_PREPARED).toBe("1");
   expect(options?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE).toBe("1");
+  expect(options?.env.MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS).toBeUndefined();
   expect(options?.env.MURPH_DEV_TEMPORAL).toBe("managed");
   expect(options?.stdio).toBe("inherit");
 
-  if (expectedVitestCalls === 1) {
-    return;
-  }
-
-  for (let batchIndex = 1; batchIndex < expectedScenarioBatches.length - 1; batchIndex += 1) {
+  for (let batchIndex = 1; batchIndex < expectedVitestCalls; batchIndex += 1) {
     const batch = expectedScenarioBatches[batchIndex] ?? [];
-    expect(batch).toHaveLength(1);
     const [command, args, batchOptions] = spawnMock.mock.calls[3 + batchIndex] ?? [];
     expect(command).toBe("pnpm");
-    expect(args).toEqual([
-      "exec",
-      "vitest",
-      "run",
-      "--config",
-      "apps/cloudflare/vitest.e2e.config.ts",
-      batch[0]?.file,
-      "--no-coverage",
-    ]);
-    expect(batchOptions?.env).not.toBe(options?.env);
-    expect(batchOptions?.env).toEqual(expect.objectContaining({
-      MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
-      MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
-      MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
-      MURPH_DEV_SKIP_RUNNER_DOCKER_BASE: "1",
-      MURPH_DEV_TEMPORAL: "managed",
-      MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
-      MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
-      MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
-      MURPH_HOSTED_LOCAL_RUN_ID: options?.env.MURPH_HOSTED_LOCAL_RUN_ID,
-      MURPH_HOSTED_LOCAL_STATE_PATH: options?.env.MURPH_HOSTED_LOCAL_STATE_PATH,
-      MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID:
-        options?.env.MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID,
-      MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
-    }));
-    expect(batchOptions?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE)
-      .toBeUndefined();
-    expect(batchOptions?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID)
-      .toBeUndefined();
+    expect(args).toEqual(buildExpectedVitestArgs(batch));
+    if (batchRequiresDedicatedEnv(batch)) {
+      expect(batchOptions?.env).not.toBe(options?.env);
+      expect(batchOptions?.env).toEqual(expect.objectContaining({
+        MURPH_DEV_LINQ_WEBHOOK_TUNNEL: "0",
+        MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+        MURPH_DEV_SKIP_RUNNER_BUNDLE: "1",
+        MURPH_DEV_SKIP_RUNNER_DOCKER_BASE: "1",
+        MURPH_DEV_TEMPORAL: "managed",
+        MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
+        MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+        MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+        MURPH_HOSTED_LOCAL_RUN_ID: options?.env.MURPH_HOSTED_LOCAL_RUN_ID,
+        MURPH_HOSTED_LOCAL_STATE_PATH: options?.env.MURPH_HOSTED_LOCAL_STATE_PATH,
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID:
+          options?.env.MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID,
+        MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
+      }));
+      expect(batchOptions?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE)
+        .toBeUndefined();
+      expect(batchOptions?.env.MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID)
+        .toBeUndefined();
+    } else {
+      expect(batchOptions?.env).toBe(options?.env);
+    }
+    expectTestControlsEnv(batchOptions?.env, batch);
     expect(batchOptions?.stdio).toBe("inherit");
   }
+}
 
-  const finalBatch = expectedScenarioBatches.at(-1) ?? [];
-  const [finalCommand, finalArgs, finalOptions] =
-    spawnMock.mock.calls[3 + expectedScenarioBatches.length - 1] ?? [];
-  expect(finalCommand).toBe("pnpm");
-  expect(finalArgs).toEqual([
+function buildExpectedVitestArgs(
+  scenarios: readonly HostedLocalE2eScenario[],
+): string[] {
+  return [
     "exec",
     "vitest",
     "run",
     "--config",
     "apps/cloudflare/vitest.e2e.config.ts",
-    ...finalBatch.map((scenario) => scenario.file),
-    "--bail",
-    "1",
+    ...scenarios.map((scenario) => scenario.file),
+    ...(scenarios.length > 1 ? ["--bail", "1"] : []),
     "--no-coverage",
-  ]);
-  expect(finalOptions?.env).toMatchObject(options?.env ?? {});
-  expect(finalOptions?.stdio).toBe("inherit");
+  ];
+}
+
+function batchRequiresDedicatedEnv(
+  scenarios: readonly HostedLocalE2eScenario[],
+): boolean {
+  return scenarios.some((scenario) =>
+    scenario.processIsolation || scenario.testControls === true
+  );
+}
+
+function expectTestControlsEnv(
+  env: NodeJS.ProcessEnv | undefined,
+  scenarios: readonly HostedLocalE2eScenario[],
+): void {
+  if (scenarios.some((scenario) => scenario.testControls === true)) {
+    expect(env?.MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS).toBe("1");
+    return;
+  }
+
+  expect(env?.MURPH_HOSTED_LOCAL_E2E_TEST_CONTROLS).toBeUndefined();
 }
 
 function restoreControlledEnv(): void {
