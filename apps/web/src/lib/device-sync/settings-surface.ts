@@ -3,8 +3,8 @@ import type { ConfiguredDeviceSyncProviderKey } from "@murphai/device-syncd/conn
 
 import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-label";
 
+import type { HostedBrowserDeviceSyncConnectionSource } from "./browser-connection-source";
 import type { HostedBrowserDeviceSyncConnection } from "./public-connection";
-import type { HostedBrowserDeviceSyncConnectionSource } from "./public-ingress-service";
 
 import {
   formatHostedDeviceSyncProviderLabel,

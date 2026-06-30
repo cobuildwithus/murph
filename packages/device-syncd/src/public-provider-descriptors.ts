@@ -1,30 +1,17 @@
-import {
-  JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
-  OURA_DEVICE_PROVIDER_DESCRIPTOR,
-  STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
-  WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
-  resolveDeviceProviderConnectionDescriptor,
-  type DeviceProviderDescriptor,
-} from "@murphai/importers/device-providers/provider-descriptors";
+import { resolveDeviceProviderConnectionDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
 
-import { resolveConfiguredDeviceSyncProviderCredentialPolicy } from "./provider-credential-policy.ts";
 import {
-  configuredDeviceSyncProviderKeys,
-  listConfiguredDeviceSyncProviderNames,
-} from "./config/provider-keys.ts";
+  getConfiguredDeviceSyncProviderDescriptor,
+  resolveConfiguredDeviceSyncProviderDescriptor,
+} from "./configured-provider-descriptors.ts";
+import { resolveConfiguredDeviceSyncProviderCredentialPolicy } from "./provider-credential-policy.ts";
+import { listConfiguredDeviceSyncProviderNames } from "./config/provider-keys.ts";
 
 import type {
   ConfiguredDeviceSyncProviderKey,
   ConfiguredDeviceSyncProviderPresence,
 } from "./config/provider-types.ts";
 import type { PublicProviderDescriptor } from "./types.ts";
-
-const CONFIGURED_DEVICE_SYNC_PROVIDER_DESCRIPTORS = Object.freeze({
-  junction: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
-  oura: OURA_DEVICE_PROVIDER_DESCRIPTOR,
-  whoop: WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
-  strava: STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
-} satisfies Record<ConfiguredDeviceSyncProviderKey, DeviceProviderDescriptor>);
 
 export interface DeviceSyncPublicProviderDescriptorOptions {
   publicBaseUrl?: string | null;
@@ -43,7 +30,7 @@ export function describeConfiguredDeviceSyncPublicProvider(
   provider: ConfiguredDeviceSyncProviderKey,
   options: DeviceSyncPublicProviderDescriptorOptions = {},
 ): PublicProviderDescriptor {
-  const descriptor = CONFIGURED_DEVICE_SYNC_PROVIDER_DESCRIPTORS[provider];
+  const descriptor = getConfiguredDeviceSyncProviderDescriptor(provider);
   const connection = resolveDeviceProviderConnectionDescriptor(descriptor);
   const callbackPath = connection.callbackPath ?? null;
   const webhookPath = descriptor.webhook?.path ?? null;
@@ -61,15 +48,7 @@ export function describeConfiguredDeviceSyncPublicProvider(
     webhookUrl: joinPublicUrl(options.publicBaseUrl, webhookPath),
   };
 }
-
-export function resolveConfiguredDeviceSyncProviderDescriptor(
-  provider: string,
-): DeviceProviderDescriptor | undefined {
-  const normalized = provider.trim().toLowerCase();
-  return configuredDeviceSyncProviderKeys.find((key) => key === normalized)
-    ? CONFIGURED_DEVICE_SYNC_PROVIDER_DESCRIPTORS[normalized as ConfiguredDeviceSyncProviderKey]
-    : undefined;
-}
+export { resolveConfiguredDeviceSyncProviderDescriptor };
 
 function joinPublicUrl(
   publicBaseUrl: string | null | undefined,

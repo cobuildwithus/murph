@@ -6,14 +6,11 @@ import {
   type DeviceProviderAdapter,
 } from "@murphai/importers";
 import {
-  JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
-  OURA_DEVICE_PROVIDER_DESCRIPTOR,
-  STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
-  WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
   normalizeDeviceProviderKey,
   resolveDeviceProviderConnectionDescriptor,
   type DeviceProviderDescriptor,
 } from "@murphai/importers/device-providers/provider-descriptors";
+import { configuredDeviceSyncProviderDescriptors } from "../configured-provider-descriptors.ts";
 import { configuredDeviceSyncProviderCredentialPolicies } from "../provider-credential-policy.ts";
 import { configuredDeviceSyncProviderJobDefinitions } from "../provider-job-definitions.ts";
 
@@ -174,7 +171,7 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
 >({
   provider: "junction",
   credentialPolicy: configuredDeviceSyncProviderCredentialPolicies.junction,
-  descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
+  descriptor: configuredDeviceSyncProviderDescriptors.junction,
   importer: junctionProviderAdapter,
   env: JUNCTION_DEVICE_SYNC_PROVIDER_ENV_SPEC,
   readConfig: readConfiguredJunctionDeviceSyncProviderConfig,
@@ -212,7 +209,7 @@ const OURA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderMan
 >({
   provider: "oura",
   credentialPolicy: configuredDeviceSyncProviderCredentialPolicies.oura,
-  descriptor: OURA_DEVICE_PROVIDER_DESCRIPTOR,
+  descriptor: configuredDeviceSyncProviderDescriptors.oura,
   importer: ouraProviderAdapter,
   env: OURA_DEVICE_SYNC_PROVIDER_ENV_SPEC,
   readConfig(env) {
@@ -269,7 +266,7 @@ const WHOOP_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderMa
 >({
   provider: "whoop",
   credentialPolicy: configuredDeviceSyncProviderCredentialPolicies.whoop,
-  descriptor: WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
+  descriptor: configuredDeviceSyncProviderDescriptors.whoop,
   importer: whoopProviderAdapter,
   env: WHOOP_DEVICE_SYNC_PROVIDER_ENV_SPEC,
   readConfig(env) {
@@ -319,7 +316,7 @@ const STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderM
 >({
   provider: "strava",
   credentialPolicy: configuredDeviceSyncProviderCredentialPolicies.strava,
-  descriptor: STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
+  descriptor: configuredDeviceSyncProviderDescriptors.strava,
   importer: stravaProviderAdapter,
   env: STRAVA_DEVICE_SYNC_PROVIDER_ENV_SPEC,
   readConfig(env) {

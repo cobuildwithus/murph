@@ -7,7 +7,7 @@ import {
 } from "@murphai/device-syncd/public-ingress";
 
 import type { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
-import { isAvailableConnectionSourceResource } from "./public-ingress-service";
+import { isAvailableConnectionSourceResource } from "./browser-connection-source";
 
 /** The companion app's only device-sync provider. */
 export const COMPANION_DEVICE_SYNC_PROVIDER = "junction";

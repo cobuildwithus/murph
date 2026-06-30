@@ -9,12 +9,10 @@ import {
 
 import { getPrisma } from "../prisma";
 import { readHostedDeviceSyncEnvironment } from "./env";
+import { toHostedBrowserDeviceSyncConnectionSource } from "./browser-connection-source";
 import { toHostedBrowserDeviceSyncConnection } from "./public-connection";
 import { PrismaHostedConnectionStore } from "./prisma-store/connections";
-import {
-  PrismaHostedConnectionSourceStore,
-  type HostedDeviceConnectionSource,
-} from "./prisma-store/sources";
+import { PrismaHostedConnectionSourceStore } from "./prisma-store/sources";
 import {
   buildHostedDeviceSyncSettingsSources,
   type HostedDeviceSyncSettingsConnectTarget,
@@ -89,59 +87,4 @@ async function buildHostedDeviceSyncSettingsSourcesForMember(input: {
   });
 
   return sources;
-}
-
-interface HostedBrowserDeviceSyncConnectionSource {
-  connectionId: string;
-  firstSeenAt: string;
-  lastSeenAt: string;
-  requiresReconnect?: boolean;
-  resourceCount: number;
-  sourceProviderSlug: string;
-  status: HostedDeviceConnectionSource["status"];
-}
-
-function toHostedBrowserDeviceSyncConnectionSource(
-  source: HostedDeviceConnectionSource,
-  browserConnectionId: string,
-): HostedBrowserDeviceSyncConnectionSource {
-  return {
-    connectionId: browserConnectionId,
-    firstSeenAt: source.firstSeenAt,
-    lastSeenAt: source.lastSeenAt,
-    ...(requiresConnectionSourceReconnect(source) ? { requiresReconnect: true } : {}),
-    resourceCount: countSourceResources(source.resourceAvailabilitySummary),
-    sourceProviderSlug: source.sourceProviderSlug,
-    status: source.status,
-  };
-}
-
-const CONNECTION_SOURCE_SUMMARY_METADATA_KEYS = new Set([
-  "sourceInstanceKeyFallback",
-]);
-const CONNECTION_SOURCE_RECONNECT_ERROR_CODES = new Set(["TOKEN_REFRESH_FAILED"]);
-
-function isAvailableConnectionSourceResource(key: string, value: unknown): boolean {
-  return !CONNECTION_SOURCE_SUMMARY_METADATA_KEYS.has(key)
-    && value !== false
-    && value !== null
-    && value !== undefined;
-}
-
-function countSourceResources(
-  summary: HostedDeviceConnectionSource["resourceAvailabilitySummary"],
-): number {
-  if (!summary) {
-    return 0;
-  }
-
-  return Object.entries(summary).filter(([key, value]) =>
-    isAvailableConnectionSourceResource(key, value)
-  ).length;
-}
-
-function requiresConnectionSourceReconnect(source: HostedDeviceConnectionSource): boolean {
-  return source.status === "error"
-    && source.lastErrorCode !== null
-    && CONNECTION_SOURCE_RECONNECT_ERROR_CODES.has(source.lastErrorCode);
 }
