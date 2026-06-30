@@ -730,7 +730,7 @@ export function HeroClocksIn({
             Murph is your personal health assistant. Wearables, bloodwork,
             doctor visits, supplements, blood pressure, sleep. Murph runs it
             all and helps you figure out what actually makes you healthier,
-            then build the habits that stick.
+            then build habits that stick.
           </p>
 
           <div className="mt-10 hidden lg:block">

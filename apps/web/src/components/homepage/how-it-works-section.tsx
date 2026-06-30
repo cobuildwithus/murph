@@ -146,10 +146,6 @@ function ConnectCard() {
           </div>
         </div>
       </div>
-
-      <p className="text-[0.8125rem] leading-[1.6] text-[#736a58]">
-        Wearables, meals, labs — Murph connects it all.
-      </p>
     </div>
   );
 }
