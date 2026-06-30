@@ -210,6 +210,49 @@ describe("runtime invocation transport failure fence handling", () => {
     ]);
   });
 
+  it("keeps the accepted write fence when liveness fails even if committed progress is visible", async () => {
+    const readHostedRuntimeStatusFromWeb = vi.fn(async (userId: string) => ({
+      mailboxLag: [],
+      userId,
+      workspace: {
+        createdAt: FIXED_NOW,
+        nextWakeAt: null,
+        nextWakeReason: null,
+        redactedStatus: {},
+        snapshotRef: null,
+        updatedAt: FIXED_NOW,
+        userId,
+        version: "1",
+      },
+    }));
+    const harness = await createTransportFailureHarness({
+      readActiveRuntimeUserFence: async () => {
+        throw new Error("container health still active");
+      },
+      readHostedRuntimeStatusFromWeb,
+    });
+
+    await expect(harness.invoke()).rejects.toThrow("container transport failed");
+
+    await expect(harness.stateStore.readWriteFenceToken()).resolves.toEqual(
+      expect.objectContaining({
+        attemptId: harness.token.attemptId,
+        userId: TEST_USER_ID,
+      }),
+    );
+    expect(harness.loggedFailureEntries()).toEqual([
+      expect.objectContaining({
+        eventCode: "runner.accepted_attempt_failed",
+        redactedJson: expect.objectContaining({
+          attemptLivenessProbeOutcome: "error",
+          attemptStillActive: false,
+          fenceCleared: false,
+        }),
+      }),
+    ]);
+    expect(readHostedRuntimeStatusFromWeb).not.toHaveBeenCalled();
+  });
+
   it("keeps the accepted write fence when the liveness probe hangs past its timeout but progress is not durable yet", async () => {
     const harness = await createTransportFailureHarness({
       readActiveRuntimeUserFence: () =>

@@ -263,7 +263,9 @@ export class RuntimeInvocationService {
         throw error;
       }
 
-      if (input.acceptedProcessingAttempt) {
+      const livenessIndeterminate =
+        probeOutcome === "error" || probeOutcome === "timeout";
+      if (input.acceptedProcessingAttempt && !livenessIndeterminate) {
         const committedResult =
           await this.recoverAcceptedRuntimeCompletionFromCommittedProgress({
             executionInput,
@@ -277,32 +279,32 @@ export class RuntimeInvocationService {
         if (committedResult.kind === "unknown") {
           throw error;
         }
-        if (probeOutcome !== "mismatch") {
-          await this.recordAcceptedRuntimeAttemptFailureBestEffort({
-            error,
-            executionInput,
-            fenceCleared: false,
-            probeOutcome,
-            token,
+      }
+      if (input.acceptedProcessingAttempt && probeOutcome !== "mismatch") {
+        await this.recordAcceptedRuntimeAttemptFailureBestEffort({
+          error,
+          executionInput,
+          fenceCleared: false,
+          probeOutcome,
+          token,
+          workspaceVersion,
+        });
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+            orchestrationAttemptId: executionInput.orchestrationAttemptId,
+            transportFailureFenceCleared: false,
+            workspaceAttemptId: token.attemptId,
             workspaceVersion,
-          });
-          emitHostedExecutionStructuredLog({
-            component: "hosted.runner",
-            details: {
-              ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-              orchestrationAttemptId: executionInput.orchestrationAttemptId,
-              transportFailureFenceCleared: false,
-              workspaceAttemptId: token.attemptId,
-              workspaceVersion,
-            },
-            level: "warn",
-            message:
-            "Hosted runner accepted runtime transport failed before committed progress was visible; preserving the write fence for identity-aware wake recovery.",
-            phase: "failed",
-            userId: executionInput.userId,
-          });
-          throw error;
-        }
+          },
+          level: "warn",
+          message:
+          "Hosted runner accepted runtime transport failed before committed progress was visible; preserving the write fence for identity-aware wake recovery.",
+          phase: "failed",
+          userId: executionInput.userId,
+        });
+        throw error;
       }
 
       const failed = await this.input.stateStore.clearWriteFenceAfterTransportFailure({
