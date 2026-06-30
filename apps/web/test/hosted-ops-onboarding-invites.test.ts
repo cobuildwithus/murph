@@ -80,6 +80,9 @@ type MockedPrisma = {
   hostedInvite: {
     updateMany: ReturnType<typeof vi.fn>;
   };
+  hostedOpsOnboardingVoiceMemoAttempt: {
+    createMany: ReturnType<typeof vi.fn>;
+  };
 };
 
 let prisma: MockedPrisma;
@@ -102,6 +105,9 @@ describe("hosted ops onboarding invites", () => {
       ),
       hostedInvite: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedOpsOnboardingVoiceMemoAttempt: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     };
     mocks.getPrisma.mockReturnValue(prisma);
@@ -447,6 +453,20 @@ describe("hosted ops onboarding invites", () => {
       filename: "murph-ops-voice-memo.m4a",
       sizeBytes: 3,
     });
+    expect(prisma.hostedOpsOnboardingVoiceMemoAttempt.createMany).toHaveBeenCalledWith({
+      data: {
+        dedupeKey: expect.stringMatching(
+          /^ops-onboarding-invite:voice:[a-f0-9]{64}$/u,
+        ),
+        id: expect.any(String),
+        memberId: "member_123",
+        requestId: "request-voice",
+      },
+      skipDuplicates: true,
+    });
+    expect(readVoiceAttemptDedupeKey(
+      prisma.hostedOpsOnboardingVoiceMemoAttempt.createMany,
+    )).not.toContain("chat_existing");
     expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledWith({
       attachmentId: "attachment_123",
       chatId: "chat_existing",
@@ -458,7 +478,11 @@ describe("hosted ops onboarding invites", () => {
     });
   });
 
-  it("keeps the text invite idempotent when the same best-effort voice request is submitted twice", async () => {
+  it("skips duplicate same-request voice sends while allowing a new request id to resend", async () => {
+    prisma.hostedOpsOnboardingVoiceMemoAttempt.createMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
     const voiceMemo = {
       bytes: new Uint8Array([1, 2, 3]),
       contentType: "audio/x-m4a" as const,
@@ -480,11 +504,20 @@ describe("hosted ops onboarding invites", () => {
       requestId: "request-voice-repeat",
       voiceMemo,
     });
+    await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_existing",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-voice-repeat-2",
+      voiceMemo,
+    });
 
     expect(readIdempotencyKey(mocks.sendHostedLinqChatMessage, 1))
       .toBe(readIdempotencyKey(mocks.sendHostedLinqChatMessage, 0));
+    expect(readIdempotencyKey(mocks.sendHostedLinqChatMessage, 2))
+      .not.toBe(readIdempotencyKey(mocks.sendHostedLinqChatMessage, 0));
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
-    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(2);
+    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(3);
     expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(2);
   });
 
@@ -521,6 +554,7 @@ describe("hosted ops onboarding invites", () => {
       sent: false,
     });
     expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedOpsOnboardingVoiceMemoAttempt.createMany).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(1);
     expect(retry.voiceMemo).toEqual({
       error: null,
@@ -547,6 +581,7 @@ describe("hosted ops onboarding invites", () => {
     });
 
     expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedOpsOnboardingVoiceMemoAttempt.createMany).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(1);
     expect(result.voiceMemo).toEqual({
       error: "Voice memo delivery failed after the setup link was sent.",
@@ -573,6 +608,7 @@ describe("hosted ops onboarding invites", () => {
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalled();
     expect(prisma.hostedInvite.updateMany).toHaveBeenCalled();
+    expect(prisma.hostedOpsOnboardingVoiceMemoAttempt.createMany).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqVoiceMemo).not.toHaveBeenCalled();
     expect(result.voiceMemo).toEqual({
       error: "Voice memo delivery failed after the setup link was sent.",
@@ -685,4 +721,25 @@ function readIdempotencyKey(
   }
 
   return input.idempotencyKey;
+}
+
+function readVoiceAttemptDedupeKey(
+  mock: { mock: { calls: Array<Array<unknown>> } },
+  callIndex = 0,
+): string {
+  const input = mock.mock.calls[callIndex]?.[0];
+
+  if (!isRecord(input) || !isRecord(input.data)) {
+    throw new Error("Expected voice attempt createMany input to include data.");
+  }
+
+  if (typeof input.data.dedupeKey !== "string") {
+    throw new Error("Expected voice attempt createMany input to include a dedupe key.");
+  }
+
+  return input.data.dedupeKey;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

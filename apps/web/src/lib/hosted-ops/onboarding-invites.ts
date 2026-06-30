@@ -2,7 +2,7 @@ import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { SupportedContentType } from "@linqapp/sdk/resources";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { getPrisma } from "../prisma";
 import { readHostedPhoneHint } from "../hosted-onboarding/contact-privacy";
@@ -164,6 +164,8 @@ export async function sendHostedOpsOnboardingInvite(
   const voiceMemo = request.voiceMemo
     ? await sendHostedOpsOnboardingVoiceMemoBestEffort({
         chatId: delivery.chatId,
+        memberId: issued.memberId,
+        prisma,
         request,
       })
     : {
@@ -355,6 +357,8 @@ async function resolveHostedOpsOnboardingInviteDelivery(input: {
 
 async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
   chatId: string;
+  memberId: string;
+  prisma: PrismaClient;
   request: NormalizedHostedOpsOnboardingInviteInput;
 }): Promise<HostedOpsOnboardingInviteResult["voiceMemo"]> {
   if (!input.request.voiceMemo) {
@@ -375,6 +379,28 @@ async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
       sizeBytes: input.request.voiceMemo.sizeBytes,
     });
 
+    const attempt = await input.prisma.hostedOpsOnboardingVoiceMemoAttempt.createMany({
+      data: {
+        dedupeKey: buildHostedOpsOnboardingVoiceMemoAttemptDedupeKey({
+          chatId: input.chatId,
+          memberId: input.memberId,
+          requestId: input.request.requestId,
+        }),
+        id: randomUUID(),
+        memberId: input.memberId,
+        requestId: input.request.requestId,
+      },
+      skipDuplicates: true,
+    });
+
+    if (attempt.count === 0) {
+      return {
+        error: null,
+        requested: true,
+        sent: true,
+      };
+    }
+
     await sendHostedLinqVoiceMemo({
       attachmentId: attachment.attachmentId,
       chatId: input.chatId,
@@ -392,6 +418,21 @@ async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
     requested: true,
     sent: true,
   };
+}
+
+function buildHostedOpsOnboardingVoiceMemoAttemptDedupeKey(input: {
+  chatId: string;
+  memberId: string;
+  requestId: string;
+}): string {
+  return buildHostedOpsOnboardingIdempotencyKey({
+    requestId: input.requestId,
+    step: "voice",
+    targetParts: [
+      input.memberId,
+      input.chatId,
+    ],
+  });
 }
 
 async function resolveHostedOpsOnboardingExistingChatMemberId(input: {
