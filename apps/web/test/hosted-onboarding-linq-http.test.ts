@@ -427,30 +427,8 @@ describe("hosted Linq attachment voice memo transport", () => {
     expect(readJsonRequestBody(fetchMock.mock.calls[0]?.[1])).toEqual({
       attachment_id: "attachment_123",
     });
-  });
-
-  it("sends deterministic idempotency keys on native voice memo requests", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return createJsonResponse({
-        voice_memo: {
-          id: "voice_123",
-        },
-      }, 201);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(sendHostedLinqVoiceMemo({
-      attachmentId: "attachment_123",
-      chatId: "chat_123",
-      idempotencyKey: "ops-onboarding-invite:request-voice:voice-memo",
-    })).resolves.toBeUndefined();
-
     const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
-    expect(headers.get("idempotency-key")).toBe(
-      "ops-onboarding-invite:request-voice:voice-memo",
-    );
+    expect(headers.get("idempotency-key")).toBeNull();
   });
 
   it("rejects attachment upload responses with unsupported methods before uploading bytes", async () => {

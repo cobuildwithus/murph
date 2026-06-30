@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   createHostedLinqChat: vi.fn(),
+  createHostedLinqChatLookupKey: vi.fn(),
   ensureHostedMemberForPhoneTx: vi.fn(),
   getPrisma: vi.fn(),
   getHostedOnboardingEnvironment: vi.fn(),
@@ -19,6 +20,16 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
+  createHostedLinqChatLookupKey: mocks.createHostedLinqChatLookupKey,
+  readHostedPhoneHint: vi.fn((phoneNumber: string | null | undefined) => {
+    if (!phoneNumber) {
+      return null;
+    }
+    return `*** ${phoneNumber.slice(-4)}`;
+  }),
 }));
 
 vi.mock("@/src/lib/hosted-ops/access", () => ({
@@ -61,6 +72,12 @@ let prisma: {
   hostedInvite: {
     updateMany: ReturnType<typeof vi.fn>;
   };
+  hostedOpsOnboardingVoiceMemoSend: {
+    createMany: ReturnType<typeof vi.fn>;
+    findFirst: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+    updateMany: ReturnType<typeof vi.fn>;
+  };
 };
 const tx = { transaction: true };
 
@@ -79,8 +96,17 @@ describe("hosted ops onboarding invites", () => {
       hostedInvite: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
+      hostedOpsOnboardingVoiceMemoSend: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findFirst: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue({ id: "voice_claim_123" }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
     };
     mocks.getPrisma.mockReturnValue(prisma);
+    mocks.createHostedLinqChatLookupKey.mockImplementation((chatId: string | null | undefined) =>
+      chatId ? `lookup:${chatId}` : null
+    );
     mocks.getHostedOnboardingEnvironment.mockReturnValue({
       linqConversationPhoneNumbers: ["+15557654321"],
     });
@@ -292,6 +318,15 @@ describe("hosted ops onboarding invites", () => {
       },
     });
 
+    expect(prisma.hostedOpsOnboardingVoiceMemoSend.createMany).toHaveBeenCalledWith({
+      data: {
+        id: expect.any(String),
+        linqChatLookupKey: "lookup:chat_existing",
+        memberId: "member_123",
+        requestId: "request-voice",
+      },
+      skipDuplicates: true,
+    });
     expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledWith({
       bytes: new Uint8Array([1, 2, 3]),
       contentType: "audio/x-m4a",
@@ -301,12 +336,70 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledWith({
       attachmentId: "attachment_123",
       chatId: "chat_existing",
-      idempotencyKey: "ops-onboarding-invite:request-voice:voice-memo",
+    });
+    expect(prisma.hostedOpsOnboardingVoiceMemoSend.update).toHaveBeenCalledWith({
+      data: {
+        failedAt: null,
+        sentAt: expect.any(Date),
+      },
+      where: {
+        id: expect.any(String),
+      },
     });
     expect(result.voiceMemo).toEqual({
       error: null,
       requested: true,
       sent: true,
+    });
+  });
+
+  it("does not resend a native voice memo when the same request id is submitted again", async () => {
+    prisma.hostedOpsOnboardingVoiceMemoSend.createMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    prisma.hostedOpsOnboardingVoiceMemoSend.findFirst.mockResolvedValueOnce({
+      sentAt: null,
+    });
+
+    const voiceMemo = {
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "audio/x-m4a" as const,
+      extension: "m4a",
+      sizeBytes: 3,
+    };
+
+    await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_existing",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-voice-replay",
+      voiceMemo,
+    });
+    const replay = await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_existing",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-voice-replay",
+      voiceMemo,
+    });
+
+    expect(prisma.hostedOpsOnboardingVoiceMemoSend.createMany).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedOpsOnboardingVoiceMemoSend.findFirst).toHaveBeenCalledWith({
+      select: {
+        sentAt: true,
+      },
+      where: {
+        linqChatLookupKey: "lookup:chat_existing",
+        memberId: "member_123",
+        requestId: "request-voice-replay",
+      },
+    });
+    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(1);
+    expect(replay.voiceMemo).toEqual({
+      error: "Voice memo delivery is already pending for this setup link request.",
+      requested: true,
+      sent: false,
     });
   });
 
@@ -328,6 +421,15 @@ describe("hosted ops onboarding invites", () => {
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalled();
     expect(prisma.hostedInvite.updateMany).toHaveBeenCalled();
+    expect(prisma.hostedOpsOnboardingVoiceMemoSend.updateMany).toHaveBeenCalledWith({
+      data: {
+        failedAt: expect.any(Date),
+      },
+      where: {
+        id: expect.any(String),
+        sentAt: null,
+      },
+    });
     expect(result.voiceMemo).toEqual({
       error: "Voice memo delivery failed after the setup link was sent.",
       requested: true,

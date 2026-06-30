@@ -237,20 +237,13 @@ export async function uploadHostedLinqAttachment(input: {
 export async function sendHostedLinqVoiceMemo(input: {
   attachmentId: string;
   chatId: string;
-  idempotencyKey?: string | null;
   signal?: AbortSignal;
 }): Promise<void> {
   const body: ChatSendVoicememoParams = {
     attachment_id: normalizeRequiredString(input.attachmentId, "attachment id"),
   };
-  const idempotencyKey = normalizeNullableString(input.idempotencyKey);
   const response = await fetchHostedLinqApiOrThrow({
     body: JSON.stringify(body),
-    headers: idempotencyKey
-      ? {
-          "Idempotency-Key": idempotencyKey,
-        }
-      : undefined,
     method: "POST",
     operation: "voice memo send",
     path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/voicememo`,

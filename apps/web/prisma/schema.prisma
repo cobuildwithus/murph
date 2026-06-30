@@ -344,6 +344,7 @@ model HostedMember {
   routing                        HostedMemberRouting?
   billingRef                     HostedMemberBillingRef?
   emailAuthorization             HostedMemberEmailAuthorization?
+  opsOnboardingVoiceMemoSends    HostedOpsOnboardingVoiceMemoSend[]
   hostedMailboxItems             HostedMailboxItem[]
   hostedMailboxPayloads          HostedMailboxPayload[]
   hostedMailboxLaneCounters      HostedMailboxLaneCounter[]
@@ -837,6 +838,22 @@ model HostedInvite {
   @@index([memberId, createdAt])
   @@index([expiresAt])
   @@map("hosted_invite")
+}
+
+model HostedOpsOnboardingVoiceMemoSend {
+  id                String       @id
+  memberId          String       @map("member_id")
+  linqChatLookupKey String       @map("linq_chat_lookup_key")
+  requestId         String       @map("request_id")
+  sentAt            DateTime?    @map("sent_at")
+  failedAt          DateTime?    @map("failed_at")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+  member            HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, linqChatLookupKey, requestId], map: "hosted_ops_onboarding_voice_memo_member_chat_request_key")
+  @@index([memberId, createdAt], map: "hosted_ops_onboarding_voice_memo_member_created_at_idx")
+  @@map("hosted_ops_onboarding_voice_memo_send")
 }
 
 model HostedLinqFirstContactAdmissionDecision {

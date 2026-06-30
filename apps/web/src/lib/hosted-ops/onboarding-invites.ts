@@ -2,9 +2,13 @@ import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
 import type { SupportedContentType } from "@linqapp/sdk/resources";
+import { randomUUID } from "node:crypto";
 
 import { getPrisma } from "../prisma";
-import { readHostedPhoneHint } from "../hosted-onboarding/contact-privacy";
+import {
+  createHostedLinqChatLookupKey,
+  readHostedPhoneHint,
+} from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   buildHostedInviteUrl,
@@ -174,6 +178,8 @@ export async function sendHostedOpsOnboardingInvite(
   const voiceMemo = request.voiceMemo
     ? await sendHostedOpsOnboardingVoiceMemoBestEffort({
         chatId: delivery.chatId,
+        memberId: issued.memberId,
+        prisma,
         request,
       })
     : {
@@ -319,6 +325,8 @@ async function resolveHostedOpsOnboardingInviteDelivery(input: {
 
 async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
   chatId: string;
+  memberId: string;
+  prisma: PrismaClient;
   request: NormalizedHostedOpsOnboardingInviteInput;
 }): Promise<HostedOpsOnboardingInviteResult["voiceMemo"]> {
   if (!input.request.voiceMemo) {
@@ -327,6 +335,27 @@ async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
       requested: false,
       sent: false,
     };
+  }
+
+  const claim = await claimHostedOpsOnboardingVoiceMemoSend({
+    chatId: input.chatId,
+    memberId: input.memberId,
+    prisma: input.prisma,
+    requestId: input.request.requestId,
+  });
+
+  if (claim.status !== "claimed") {
+    return claim.status === "already_sent"
+      ? {
+          error: null,
+          requested: true,
+          sent: true,
+        }
+      : {
+          error: "Voice memo delivery is already pending for this setup link request.",
+          requested: true,
+          sent: false,
+        };
   }
 
   try {
@@ -342,10 +371,16 @@ async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
     await sendHostedLinqVoiceMemo({
       attachmentId: attachment.attachmentId,
       chatId: input.chatId,
-      idempotencyKey: buildHostedOpsOnboardingIdempotencyKey(
-        input.request.requestId,
-        "voice-memo",
-      ),
+    });
+
+    await input.prisma.hostedOpsOnboardingVoiceMemoSend.update({
+      data: {
+        failedAt: null,
+        sentAt: new Date(),
+      },
+      where: {
+        id: claim.id,
+      },
     });
 
     return {
@@ -354,12 +389,82 @@ async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
       sent: true,
     };
   } catch {
+    await input.prisma.hostedOpsOnboardingVoiceMemoSend.updateMany({
+      data: {
+        failedAt: new Date(),
+      },
+      where: {
+        id: claim.id,
+        sentAt: null,
+      },
+    });
+
     return {
       error: "Voice memo delivery failed after the setup link was sent.",
       requested: true,
       sent: false,
     };
   }
+}
+
+type HostedOpsOnboardingVoiceMemoSendClaim =
+  | {
+      id: string;
+      status: "claimed";
+    }
+  | {
+      status: "already_claimed" | "already_sent";
+    };
+
+async function claimHostedOpsOnboardingVoiceMemoSend(input: {
+  chatId: string;
+  memberId: string;
+  prisma: PrismaClient;
+  requestId: string;
+}): Promise<HostedOpsOnboardingVoiceMemoSendClaim> {
+  const linqChatLookupKey = createHostedLinqChatLookupKey(input.chatId);
+
+  if (!linqChatLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_OPS_ONBOARDING_LINQ_CHAT_ID_REQUIRED",
+      httpStatus: 400,
+      message: "Linq chat id is required before sending a voice memo.",
+      retryable: false,
+    });
+  }
+
+  const id = randomUUID();
+  const created = await input.prisma.hostedOpsOnboardingVoiceMemoSend.createMany({
+    data: {
+      id,
+      linqChatLookupKey,
+      memberId: input.memberId,
+      requestId: input.requestId,
+    },
+    skipDuplicates: true,
+  });
+
+  if (created.count === 1) {
+    return {
+      id,
+      status: "claimed",
+    };
+  }
+
+  const existing = await input.prisma.hostedOpsOnboardingVoiceMemoSend.findFirst({
+    select: {
+      sentAt: true,
+    },
+    where: {
+      linqChatLookupKey,
+      memberId: input.memberId,
+      requestId: input.requestId,
+    },
+  });
+
+  return {
+    status: existing?.sentAt ? "already_sent" : "already_claimed",
+  };
 }
 
 async function assertHostedOpsOnboardingExistingLinqChatAuthority(input: {
@@ -644,7 +749,7 @@ function buildHostedOpsOnboardingInviteMessage(input: {
 
 function buildHostedOpsOnboardingIdempotencyKey(
   requestId: string,
-  step: "invite" | "open" | "voice-memo",
+  step: "invite" | "open",
 ): string {
   return `ops-onboarding-invite:${requestId}:${step}`;
 }
