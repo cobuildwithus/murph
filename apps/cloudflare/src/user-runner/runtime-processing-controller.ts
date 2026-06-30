@@ -301,14 +301,23 @@ export class RuntimeProcessingController {
       });
     }
 
-    const recoveredCompletion =
-      await this.recoverActiveRuntimeFenceCompletion({
+    const activeRuntimeState =
+      await this.readActiveRuntimeFenceWithoutWake({
         activeFence,
-        input: inputAfterActiveWake,
+        commandBudget: input.commandBudget,
         record,
       });
-    if (recoveredCompletion.kind === "completed") {
-      return this.createActiveRuntimeFenceCompletionResponse(activeFence);
+    if (activeRuntimeState === "inactive") {
+      const recoveredCompletion =
+        await this.recoverActiveRuntimeFenceCompletion({
+          activeFence,
+          commandBudget: input.commandBudget,
+          input: inputAfterActiveWake,
+          record,
+        });
+      if (recoveredCompletion.kind === "completed") {
+        return this.createActiveRuntimeFenceCompletionResponse(activeFence);
+      }
     }
 
     await this.syncRunnerAlarm(record);
@@ -337,6 +346,7 @@ export class RuntimeProcessingController {
     const recoveredCompletion =
       await this.recoverActiveRuntimeFenceCompletion({
         activeFence,
+        commandBudget: input.commandBudget,
         input: input.input,
         record,
       });
@@ -390,6 +400,7 @@ export class RuntimeProcessingController {
 
   private async recoverActiveRuntimeFenceCompletion(input: {
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
+    commandBudget: RuntimeProcessingCommandBudget;
     input: RuntimeProcessingInput;
     record: RunnerStateRecord;
   }): Promise<AcceptedRuntimeCompletionRecoveryResult> {
@@ -409,6 +420,7 @@ export class RuntimeProcessingController {
         userId: record.userId,
         workspaceVersion: activeFence.workspaceVersion,
       },
+      commandBudget: input.commandBudget,
       workspaceVersion: activeFence.workspaceVersion,
     });
   }

@@ -369,6 +369,7 @@ export class RuntimeInvocationService {
   }
 
   async recoverAcceptedRuntimeCompletionFromCommittedProgress(input: {
+    commandBudget?: RuntimeProcessingCommandBudget;
     executionInput: RuntimeInvocationInput;
     token: RunnerWriteFenceToken;
     transportError?: unknown;
@@ -379,6 +380,7 @@ export class RuntimeInvocationService {
     }
     const committedResult =
       await this.readAcceptedRuntimeCommittedProgressAfterTransportFailure({
+        commandBudget: input.commandBudget ?? null,
         executionInput: input.executionInput,
         workspaceVersion: input.workspaceVersion,
       });
@@ -421,15 +423,27 @@ export class RuntimeInvocationService {
   }
 
   private async readAcceptedRuntimeCommittedProgressAfterTransportFailure(input: {
+    commandBudget: RuntimeProcessingCommandBudget | null;
     executionInput: RuntimeInvocationInput;
     workspaceVersion: string;
   }): Promise<AcceptedRuntimeCompletionRecoveryResult> {
     let status: HostedRuntimeWebStatusResponse;
     try {
-      status = await this.input.readHostedRuntimeStatusFromWeb(
-        input.executionInput.userId,
-      );
+      const readStatus = async () =>
+        await this.input.readHostedRuntimeStatusFromWeb(
+          input.executionInput.userId,
+        );
+      status = input.commandBudget
+        ? await runRuntimeProcessingCommandStep({
+            budget: input.commandBudget,
+            operation: readStatus,
+            stepTimeoutMs: this.input.env.webControlTimeoutMs,
+          })
+        : await readStatus();
     } catch (error) {
+      if (isRuntimeProcessingCommandBudgetTimeout(error)) {
+        return { kind: "not_completed" };
+      }
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
