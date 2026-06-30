@@ -9,6 +9,7 @@ import {
   anonymousHostedSidebarAuthSnapshot,
   type HostedSidebarAuthSnapshot,
 } from "./sidebar-auth";
+import { hasActiveHostedFamilyAccess } from "./family-plan";
 import { deriveHostedPostVerificationStage } from "./lifecycle";
 
 export interface HostedPageAuthSnapshot {
@@ -45,23 +46,34 @@ export async function getHostedPageAuthSnapshot(): Promise<HostedPageAuthSnapsho
 
 export async function getHostedDashboardPageAuthSnapshot(): Promise<HostedPageAuthSnapshot> {
   const auth = await getHostedPageAuthSnapshot();
-  redirectHostedDashboardCheckoutIfNeeded(auth);
+  await redirectHostedDashboardCheckoutIfNeeded(auth);
   return auth;
 }
 
-export function redirectHostedDashboardCheckoutIfNeeded(
+export async function redirectHostedDashboardCheckoutIfNeeded(
   auth: HostedPageAuthSnapshot,
-): void {
+): Promise<void> {
   const member = auth.authenticatedMember;
-  if (
-    member
-    && deriveHostedPostVerificationStage({
-      billingStatus: member.billingStatus,
-      suspendedAt: member.suspendedAt,
-    }) === "checkout"
-  ) {
-    redirect("/join");
+  if (!member) {
+    return;
   }
+
+  const stageWithoutFamilyAccess = deriveHostedPostVerificationStage({
+    billingStatus: member.billingStatus,
+    suspendedAt: member.suspendedAt,
+  });
+  if (stageWithoutFamilyAccess !== "checkout") {
+    return;
+  }
+
+  const familyAccessActive = await hasActiveHostedFamilyAccess({
+    memberId: member.id,
+  });
+  if (familyAccessActive) {
+    return;
+  }
+
+  redirect("/join");
 }
 
 const resolveHostedSidebarAuthSnapshot = cache(async (): Promise<HostedSidebarAuthSnapshot> => {
