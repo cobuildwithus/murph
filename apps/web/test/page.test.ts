@@ -7,9 +7,12 @@ import { expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getMurphGithubStarCount: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
-  headers: vi.fn(async () => new Headers({
-    "x-vercel-ip-country": "US",
-  })),
+  headers: vi.fn(
+    async () =>
+      new Headers({
+        "x-vercel-ip-country": "US",
+      }),
+  ),
   LandingAuthActions: vi.fn(
     (props: {
       authenticated: boolean;
@@ -41,6 +44,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 
+vi.mock("next/headers", () => ({
+  headers: mocks.headers,
+}));
+
 vi.mock("next/image", () => ({
   default: (props: {
     alt?: string;
@@ -51,11 +58,7 @@ vi.mock("next/image", () => ({
       alt: props.alt ?? "",
       className: props.className,
       src: props.src,
-  }),
-}));
-
-vi.mock("next/headers", () => ({
-  headers: mocks.headers,
+    }),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
@@ -133,6 +136,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "hero",
       authLabel: "Meet Murph",
+      leadingIcon: expect.anything(),
       preloadAuthPanel: true,
     }),
     undefined
@@ -143,6 +147,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "hero",
       authLabel: "Meet Murph",
+      leadingIcon: expect.anything(),
     }),
     undefined
   );
