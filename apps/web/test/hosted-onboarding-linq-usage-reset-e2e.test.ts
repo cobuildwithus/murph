@@ -84,7 +84,6 @@ const mocks = vi.hoisted(() => {
     lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
     lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
     lookupHostedMemberRoutingByPendingLinqChatId: vi.fn(),
-    lookupHostedMemberRoutingByPendingLinqNewChatLinePhone: vi.fn(),
     lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
     nudgeHostedRunnerUserBestEffortResult: vi.fn(async (
       input?: {
@@ -168,8 +167,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
     ...actual,
     lookupHostedMemberRoutingByPendingLinqChatId:
       mocks.lookupHostedMemberRoutingByPendingLinqChatId,
-    lookupHostedMemberRoutingByPendingLinqNewChatLinePhone:
-      mocks.lookupHostedMemberRoutingByPendingLinqNewChatLinePhone,
     lookupHostedMemberRoutingByPendingLinqParticipantContact:
       mocks.lookupHostedMemberRoutingByPendingLinqParticipantContact,
     readHostedMemberHomeLinqRoute: mocks.readHostedMemberHomeLinqRoute,
@@ -373,7 +370,6 @@ describe("hosted Linq usage reset e2e", () => {
       matchedBy: "phoneNumber",
     });
     mocks.lookupHostedMemberRoutingByPendingLinqParticipantContact.mockResolvedValue(null);
-    mocks.lookupHostedMemberRoutingByPendingLinqNewChatLinePhone.mockResolvedValue(null);
     mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
       linqChatId: CHAT_ID,
       linqRecipientPhone: OWNER_PHONE,

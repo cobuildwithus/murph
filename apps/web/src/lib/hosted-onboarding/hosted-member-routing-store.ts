@@ -6,7 +6,6 @@ import { Prisma } from "@prisma/client";
 import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
 import {
   createHostedLinqChatLookupKeyReadCandidates,
-  createHostedPhoneLookupKeyReadCandidates,
   createHostedTelegramUserLookupKeyReadCandidates,
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
@@ -62,12 +61,6 @@ export type HostedMemberRoutingByTelegramUserIdResolution =
   | {
       status: "missing";
     };
-
-export type HostedMemberPendingLinqNewChatLineReservationLookup =
-  HostedMemberRoutingLookup & {
-    reservationKey: string;
-    reservedAt: Date | null;
-  };
 
 export async function readHostedMemberIdByReplyAliasLookupKey(input: {
   prisma: HostedOnboardingReadClient;
@@ -229,74 +222,6 @@ export async function lookupHostedMemberRoutingByPendingLinqChatId(input: {
     prisma: input.prisma,
     routingRecords,
   });
-}
-
-export async function lookupHostedMemberRoutingByPendingLinqNewChatLinePhone(input: {
-  linePhoneNumber: string | null | undefined;
-  prisma: HostedOnboardingReadClient;
-}): Promise<HostedMemberPendingLinqNewChatLineReservationLookup | null> {
-  const lookupKeys = createHostedPhoneLookupKeyReadCandidates(input.linePhoneNumber);
-  if (lookupKeys.length === 0) {
-    return null;
-  }
-
-  const routingRecords = await input.prisma.hostedMemberRouting.findMany({
-    where: {
-      linqChatLookupKey: null,
-      pendingLinqChatLookupKey: null,
-      pendingLinqNewChatLinePhoneLookupKey: {
-        in: lookupKeys,
-      },
-      pendingLinqNewChatReservationKey: {
-        not: null,
-      },
-    },
-    select: {
-      ...hostedMemberRoutingLookupSelect,
-      pendingLinqNewChatReservationKey: true,
-      pendingLinqNewChatReservedAt: true,
-    },
-  });
-
-  if (routingRecords.length === 0) {
-    return null;
-  }
-
-  const routingRecordByMemberId = new Map<string, (typeof routingRecords)[number]>();
-  for (const routingRecord of routingRecords) {
-    if (!routingRecordByMemberId.has(routingRecord.memberId)) {
-      routingRecordByMemberId.set(routingRecord.memberId, routingRecord);
-    }
-  }
-
-  if (routingRecordByMemberId.size !== 1) {
-    throw hostedOnboardingError({
-      code: "LINQ_PENDING_NEW_CHAT_LINE_ROUTING_LOOKUP_AMBIGUOUS",
-      details: {
-        matchCount: routingRecordByMemberId.size,
-        matchedBy: "pendingLinqNewChatLinePhoneLookupKey",
-      },
-      httpStatus: 500,
-      message: "Hosted member routing lookup matched multiple pending Linq new-chat line reservations.",
-      retryable: true,
-    });
-  }
-
-  const [routingRecord] = [...routingRecordByMemberId.values()];
-  const reservationKey = routingRecord.pendingLinqNewChatReservationKey?.trim() ?? "";
-  if (!reservationKey) {
-    return null;
-  }
-
-  return {
-    ...(await projectHostedMemberRoutingLookup(
-      routingRecord,
-      "pendingLinqNewChatLinePhoneLookupKey",
-      input.prisma,
-    )),
-    reservationKey,
-    reservedAt: routingRecord.pendingLinqNewChatReservedAt ?? null,
-  };
 }
 
 export async function lookupHostedMemberRoutingByTelegramUserId(input: {

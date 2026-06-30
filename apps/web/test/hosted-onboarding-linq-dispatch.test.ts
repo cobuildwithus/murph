@@ -2867,46 +2867,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
   });
 
-  it("uses pending Linq new-chat line reservations for email-handle media replies before provider chat binding", async () => {
+  it("does not use pending Linq new-chat line reservations as webhook authority", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
-    const linePhoneLookupKey = createHostedPhoneLookupKey("+15550000000");
-    if (!linePhoneLookupKey) {
-      throw new Error("Expected test line phone to produce a lookup key.");
-    }
-    const reservationKey = "ops-onboarding-invite:open:reservation";
-    const invite = {
-      channel: "linq",
-      id: "invite_pending_line",
-      inviteCode: "code_pending_line",
-      memberId: "member_123",
-      sentAt: null,
-      status: "pending",
-    };
-    const routingRecord = {
-      linqChatIdEncrypted: null,
-      linqRecipientPhoneEncrypted: null,
-      member: {
-        billingStatus: HostedBillingStatus.not_started,
-        createdAt: new Date("2026-03-25T00:00:00.000Z"),
-        id: "member_123",
-        suspendedAt: null,
-        updatedAt: new Date("2026-03-25T00:00:00.000Z"),
-      },
-      memberId: "member_123",
-      pendingLinqChatIdEncrypted: null,
-      pendingLinqChatLookupKey: null,
-      pendingLinqNewChatLinePhoneLookupKey: linePhoneLookupKey,
-      pendingLinqNewChatReservationKey: reservationKey,
-      pendingLinqNewChatReservedAt: new Date("2026-03-26T11:59:00.000Z"),
-      pendingLinqParticipantContactEncrypted: null,
-      pendingLinqParticipantContactKind: null,
-      pendingLinqParticipantContactLookupKey: null,
-      pendingLinqParticipantContactObservedAt: null,
-      pendingLinqRecipientPhoneEncrypted: null,
-      replyAliasLookupKey: null,
-      telegramUserIdEncrypted: null,
-      telegramUserLookupKey: null,
-    };
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
       hostedWebhookReceipt: {
@@ -2921,14 +2883,27 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedInvite: {
-        create: vi.fn().mockResolvedValue(invite),
+        create: vi.fn(),
+        findFirst: vi.fn(),
+        findUnique: vi.fn(),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedLinqFirstContactAdmissionBudget: {
+        count: vi.fn().mockResolvedValue(0),
+        create: vi.fn(),
         findFirst: vi.fn().mockResolvedValue(null),
-        findUnique: vi.fn().mockResolvedValue(invite),
-        update: vi.fn().mockResolvedValue({
-          id: "invite_pending_line",
-          sentAt: new Date("2026-03-26T12:00:01.000Z"),
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue({
+            confidence: 1,
+            decision: "block",
+            eventId: "evt_pending_line_email_media",
+            source: "deterministic",
+          }),
       },
       hostedMember: {
         create: vi.fn(),
@@ -2939,31 +2914,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         findMany: vi.fn().mockResolvedValue([]),
       },
       hostedMemberRouting: {
-        findUnique: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
-          if (where.memberId === "member_123") {
-            return {
-              linqChatLookupKey: null,
-              pendingLinqChatLookupKey: null,
-              pendingLinqNewChatReservationKey: reservationKey,
-            };
-          }
-
-          if (where.pendingLinqNewChatLinePhoneLookupKey === linePhoneLookupKey) {
-            return routingRecord;
-          }
-
-          return null;
-        }),
         findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
-          const lineLookupKeys =
-            (where.pendingLinqNewChatLinePhoneLookupKey as { in?: unknown[] } | undefined)?.in ?? [];
-          return lineLookupKeys.includes(linePhoneLookupKey) ? [routingRecord] : [];
+          if ("pendingLinqNewChatLinePhoneLookupKey" in where) {
+            throw new Error("Line-only new-chat reservations must not route webhooks.");
+          }
+
+          return [];
         }),
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-        upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
-          ...create,
-          ...update,
-        })),
+        upsert: vi.fn(),
       },
     };
     const prisma = asPrismaTransactionClient(prismaMocks);
@@ -2974,8 +2932,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         data: {
           parts: [
             {
-              attachment_id: "attachment_audio_123",
               type: "media",
+              value: "https://example.test/voice.m4a",
             },
           ],
           sender_handle: {
@@ -2992,66 +2950,17 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(response).toMatchObject({
-      inviteCode: "code_pending_line",
-      joinUrl: "https://join.example.test/join/code_pending_line",
+      ignored: true,
       ok: true,
-      reason: "sent-signup-link",
+      reason: "blocked-first-contact-admission",
     });
     expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedMemberRouting.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          linqChatLookupKey: null,
-          pendingLinqChatLookupKey: null,
-          pendingLinqNewChatLinePhoneLookupKey: {
-            in: expect.arrayContaining([linePhoneLookupKey]),
-          },
-          pendingLinqNewChatReservationKey: {
-            not: null,
-          },
-        }),
-      }),
-    );
-    expect(prismaMocks.hostedMemberRouting.findUnique).toHaveBeenCalledWith(
-      expect.objectContaining({
-        select: expect.objectContaining({
-          pendingLinqNewChatReservationKey: true,
-        }),
-        where: {
-          memberId: "member_123",
-        },
-      }),
-    );
-    expect(prismaMocks.hostedMemberRouting.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        update: expect.objectContaining({
-          pendingLinqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
-          pendingLinqNewChatLinePhoneLookupKey: null,
-          pendingLinqNewChatReservationKey: null,
-          pendingLinqNewChatReservedAt: null,
-        }),
-      }),
-    );
-    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          memberId: "member_123",
-        }),
-      }),
-    );
-    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
-      memberId: "member_123",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      prisma,
-    });
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        chatId: "chat_123",
-        message: expect.stringContaining("https://join.example.test/join/code_pending_line"),
-        replyToMessageId: "msg_123",
-      }),
-    );
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("fails closed when a pending Linq chat reply sender belongs to another member", async () => {
@@ -6896,9 +6805,6 @@ async function readHostedMemberRoutingFromMockLookup(input: {
   const where = input.input.where;
   const linqChatLookupKey = readFirstLookupCandidate(where.linqChatLookupKey);
   const pendingLinqChatLookupKey = readFirstLookupCandidate(where.pendingLinqChatLookupKey);
-  const pendingLinqNewChatLinePhoneLookupKey = readFirstLookupCandidate(
-    where.pendingLinqNewChatLinePhoneLookupKey,
-  );
   const pendingLinqParticipantContactLookupKey = readFirstLookupCandidate(
     where.pendingLinqParticipantContactLookupKey,
   );
@@ -6908,9 +6814,6 @@ async function readHostedMemberRoutingFromMockLookup(input: {
       ...(typeof linqChatLookupKey === "string" ? { linqChatLookupKey } : {}),
       ...(typeof pendingLinqChatLookupKey === "string"
         ? { pendingLinqChatLookupKey }
-        : {}),
-      ...(typeof pendingLinqNewChatLinePhoneLookupKey === "string"
-        ? { pendingLinqNewChatLinePhoneLookupKey }
         : {}),
       ...(typeof pendingLinqParticipantContactLookupKey === "string"
         ? { pendingLinqParticipantContactLookupKey }
@@ -6925,18 +6828,6 @@ async function readHostedMemberRoutingFromMockLookup(input: {
       || typeof record !== "object"
       || (record as { pendingLinqChatLookupKey?: unknown }).pendingLinqChatLookupKey
         !== pendingLinqChatLookupKey
-    )
-  ) {
-    return null;
-  }
-
-  if (
-    typeof pendingLinqNewChatLinePhoneLookupKey === "string"
-    && (
-      !record
-      || typeof record !== "object"
-      || (record as { pendingLinqNewChatLinePhoneLookupKey?: unknown }).pendingLinqNewChatLinePhoneLookupKey
-        !== pendingLinqNewChatLinePhoneLookupKey
     )
   ) {
     return null;
