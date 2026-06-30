@@ -122,6 +122,7 @@ export function requireHostedStripeWebhookVerificationConfig(): {
 export function requireHostedOnboardingLinqConfig(): {
   apiBaseUrl: string;
   apiToken: string;
+  attachmentUploadAllowedHosts: readonly string[];
 } {
   const environment = getHostedOnboardingEnvironment();
 
@@ -136,5 +137,6 @@ export function requireHostedOnboardingLinqConfig(): {
   return {
     apiBaseUrl: environment.linqApiBaseUrl,
     apiToken: environment.linqApiToken,
+    attachmentUploadAllowedHosts: environment.linqAttachmentUploadAllowedHosts,
   };
 }
