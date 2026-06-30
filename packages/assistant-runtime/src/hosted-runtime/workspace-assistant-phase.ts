@@ -2976,12 +2976,14 @@ async function runProviderCleanupPhase(input: {
   }
 
   const providerCleanupCheckpoint = input.foregroundAssistantPass
-    ? null
+    ? input.initialProviderCleanupCheckpoint
+      ?? await readHostedProviderCleanupCheckpoint(input.input.restored.vaultRoot)
     : input.initialProviderCleanupCheckpoint;
   const providerCleanupDue = !input.foregroundAssistantPass
     && isHostedProviderCleanupCheckpointDue(providerCleanupCheckpoint, input.input);
   const deferredProviderCleanupWakeAt = input.foregroundAssistantPass
     ? resolveHostedForegroundDeferredProviderCleanupWakeAt({
+        checkpoint: providerCleanupCheckpoint,
         input: input.input,
         terminalLinqCleanupPending: input.terminalLinqCleanup.linqMessageIds.length > 0,
       })
@@ -5172,14 +5174,41 @@ function resolveHostedFastDispatchBaseNextWake(input: {
 }
 
 function resolveHostedForegroundDeferredProviderCleanupWakeAt(input: {
+  checkpoint: HostedProviderCleanupCheckpoint | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   terminalLinqCleanupPending: boolean;
 }): string | null {
-  return input.terminalLinqCleanupPending
-    ? resolveHostedProviderCleanupDeferredWakeAt({
-        nowMs: resolveHostedAssistantPhaseNowMs(input.input),
-      })
+  const nowMs = resolveHostedAssistantPhaseNowMs(input.input);
+  const terminalCleanupWakeAt = input.terminalLinqCleanupPending
+    ? resolveHostedProviderCleanupDeferredWakeAt({ nowMs })
     : null;
+  const checkpointWakeAt = resolveHostedForegroundProviderCleanupCheckpointWakeAt({
+    checkpoint: input.checkpoint,
+    nowMs,
+  });
+  return selectHostedRuntimeWakeCandidate([
+    createHostedRuntimeWakeCandidate(terminalCleanupWakeAt, "assistant"),
+    createHostedRuntimeWakeCandidate(checkpointWakeAt, "assistant"),
+  ]).at;
+}
+
+function resolveHostedForegroundProviderCleanupCheckpointWakeAt(input: {
+  checkpoint: HostedProviderCleanupCheckpoint | null;
+  nowMs: number;
+}): string | null {
+  if (!input.checkpoint) {
+    return null;
+  }
+
+  const checkpointWakeAt = input.checkpoint.nextWakeAt ?? null;
+  const checkpointWakeMs = Date.parse(checkpointWakeAt ?? "");
+  if (!Number.isFinite(checkpointWakeMs) || checkpointWakeMs <= input.nowMs) {
+    return resolveHostedProviderCleanupDeferredWakeAt({
+      nowMs: input.nowMs,
+    });
+  }
+
+  return checkpointWakeAt;
 }
 
 function shouldDropHostedFastDispatchSkippedDeviceSyncRetry(input: {
