@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { dirname, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { test } from "vitest";
 
@@ -23,6 +26,7 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     "./hosted-hints",
     "./hosted-runtime",
     "./http",
+    "./junction-resources",
     "./local-secret-codec",
     "./provider-configs",
     "./provider-credential-policy",
@@ -33,6 +37,7 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     "./providers/oura",
     "./providers/strava",
     "./providers/whoop",
+    "./public-account",
     "./public-ingress",
     "./public-provider-descriptors",
     "./registry",
@@ -53,6 +58,10 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     default: "./dist/local-secret-codec.js",
     types: "./dist/local-secret-codec.d.ts",
   });
+  assert.deepEqual(packageManifest.exports?.["./junction-resources"], {
+    default: "./dist/junction-resources.js",
+    types: "./dist/junction-resources.d.ts",
+  });
   assert.deepEqual(packageManifest.exports?.["./provider-credential-policy"], {
     default: "./dist/provider-credential-policy.js",
     types: "./dist/provider-credential-policy.d.ts",
@@ -69,6 +78,10 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     default: "./dist/public-provider-descriptors.js",
     types: "./dist/public-provider-descriptors.d.ts",
   });
+  assert.deepEqual(packageManifest.exports?.["./public-account"], {
+    default: "./dist/public-account.js",
+    types: "./dist/public-account.d.ts",
+  });
   assert.deepEqual(packageManifest.exports?.["./providers/junction-client"], {
     default: "./dist/providers/junction-client.js",
     types: "./dist/providers/junction-client.d.ts",
@@ -84,3 +97,167 @@ test("@murphai/device-syncd root barrel exposes the local secret codec API", () 
   assert.equal("buildDeviceSyncSecretAad" in rootExports, false);
   assert.equal("buildDeviceSyncTokenCipherOptions" in rootExports, false);
 });
+
+test("hosted web-safe device-sync graph stays out of provider runtime modules", async () => {
+  const failures = await Promise.all(
+    WEB_SAFE_DEVICE_SYNC_GRAPH_ROOTS.map(async (root) => {
+      const path = await findDeniedDeviceSyncGraphPath(root);
+      return path ? { root, path } : null;
+    }),
+  );
+  const failingPaths = failures.filter((failure): failure is NonNullable<typeof failure> =>
+    failure !== null
+  );
+
+  assert.deepEqual(
+    failingPaths,
+    [],
+    failingPaths.map(({ root, path }) => `${root}\n${path.join("\n  -> ")}`).join("\n\n"),
+  );
+});
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const deviceSyncdSrcRoot = resolve(repoRoot, "packages/device-syncd/src");
+const webRoot = resolve(repoRoot, "apps/web");
+
+const WEB_SAFE_DEVICE_SYNC_GRAPH_ROOTS = [
+  "apps/web/app/api/device-sync/route.ts",
+  "apps/web/app/api/device-sync/agent/connections/[connectionId]/export-token-bundle/route.ts",
+  "apps/web/app/api/device-sync/agent/connections/[connectionId]/local-heartbeat/route.ts",
+  "apps/web/app/api/device-sync/agent/connections/[connectionId]/refresh-token-bundle/route.ts",
+  "apps/web/app/api/device-sync/agent/session/revoke/route.ts",
+  "apps/web/app/api/device-sync/agents/pair/route.ts",
+  "apps/web/app/api/device-sync/companion/status/route.ts",
+  "apps/web/app/api/settings/device-sync/route.ts",
+  "apps/web/app/api/settings/device-sync/sidebar-status/route.ts",
+  "apps/web/src/lib/device-sync/control-plane.ts",
+  "apps/web/src/lib/device-sync/sidebar-status-service.ts",
+  "packages/device-syncd/src/connect-config.ts",
+  "packages/device-syncd/src/errors.ts",
+  "packages/device-syncd/src/hosted-hints.ts",
+  "packages/device-syncd/src/junction-resources.ts",
+  "packages/device-syncd/src/provider-configs.ts",
+  "packages/device-syncd/src/provider-credential-policy.ts",
+  "packages/device-syncd/src/provider-label.ts",
+  "packages/device-syncd/src/provider-match.ts",
+  "packages/device-syncd/src/public-account.ts",
+  "packages/device-syncd/src/public-provider-descriptors.ts",
+] as const;
+
+const DENIED_WEB_SAFE_DEVICE_SYNC_MODULES = new Set([
+  "packages/device-syncd/src/config.ts",
+  "packages/device-syncd/src/config/provider-factory.ts",
+  "packages/device-syncd/src/config/provider-manifests.ts",
+  "packages/device-syncd/src/public-ingress.ts",
+  "packages/device-syncd/src/registry.ts",
+  "packages/device-syncd/src/service.ts",
+  "packages/device-syncd/src/webhook-verification.ts",
+]);
+
+async function findDeniedDeviceSyncGraphPath(root: string): Promise<string[] | null> {
+  const rootPath = resolve(repoRoot, root);
+  const visited = new Set<string>();
+  const stack: Array<{ file: string; path: string[] }> = [{
+    file: rootPath,
+    path: [toRepoPath(rootPath)],
+  }];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || visited.has(current.file)) {
+      continue;
+    }
+    visited.add(current.file);
+
+    if (isDeniedWebSafeDeviceSyncModule(current.file)) {
+      return current.path;
+    }
+
+    const source = await readFile(current.file, "utf8");
+    for (const specifier of readModuleSpecifiers(source)) {
+      const resolvedModule = resolveLocalModule(current.file, specifier);
+      if (!resolvedModule || visited.has(resolvedModule)) {
+        continue;
+      }
+      stack.push({
+        file: resolvedModule,
+        path: [...current.path, toRepoPath(resolvedModule)],
+      });
+    }
+  }
+
+  return null;
+}
+
+function readModuleSpecifiers(source: string): string[] {
+  const specifiers = new Set<string>();
+  const patterns = [
+    /\bimport\s+(?!type\b)(?:[^'";]*?\s+from\s+)?["']([^"']+)["']/gu,
+    /\bexport\s+(?!type\b)[^'";]*?\s+from\s+["']([^"']+)["']/gu,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      const specifier = match[1];
+      if (specifier) {
+        specifiers.add(specifier);
+      }
+    }
+  }
+
+  return [...specifiers];
+}
+
+function resolveLocalModule(importer: string, specifier: string): string | null {
+  if (specifier.startsWith("@murphai/device-syncd")) {
+    return resolveDeviceSyncdSubpath(specifier);
+  }
+
+  if (specifier.startsWith("@/")) {
+    return resolveTsModule(resolve(webRoot, specifier.slice(2)));
+  }
+
+  if (specifier.startsWith(".")) {
+    return resolveTsModule(resolve(dirname(importer), specifier));
+  }
+
+  return null;
+}
+
+function resolveDeviceSyncdSubpath(specifier: string): string | null {
+  if (specifier === "@murphai/device-syncd") {
+    return resolveTsModule(resolve(deviceSyncdSrcRoot, "index"));
+  }
+
+  const prefix = "@murphai/device-syncd/";
+  if (!specifier.startsWith(prefix)) {
+    return null;
+  }
+
+  return resolveTsModule(resolve(deviceSyncdSrcRoot, specifier.slice(prefix.length)));
+}
+
+function resolveTsModule(basePath: string): string | null {
+  const candidates = [
+    basePath,
+    `${basePath}.ts`,
+    `${basePath}.tsx`,
+    resolve(basePath, "index.ts"),
+  ];
+
+  return candidates.find(isFile) ?? null;
+}
+
+function isDeniedWebSafeDeviceSyncModule(file: string): boolean {
+  const repoPath = toRepoPath(file);
+  return DENIED_WEB_SAFE_DEVICE_SYNC_MODULES.has(repoPath)
+    || repoPath.startsWith("packages/device-syncd/src/providers/");
+}
+
+function toRepoPath(file: string): string {
+  return relative(repoRoot, file).replaceAll("\\", "/");
+}
+
+function isFile(file: string): boolean {
+  return existsSync(file) && statSync(file).isFile();
+}

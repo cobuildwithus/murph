@@ -10,6 +10,7 @@ import {
   type PublicProviderDescriptor,
   type SdkSignInSessionResult,
 } from "@murphai/device-syncd/public-ingress";
+import type { DeviceSyncRegistry } from "@murphai/device-syncd/types";
 
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
 import {
@@ -36,11 +37,12 @@ export class HostedDeviceSyncPublicIngressService {
   constructor(
     private readonly context: HostedDeviceSyncControlPlaneContext,
     private readonly webhookAdmin: HostedDeviceSyncWebhookAdminService,
+    private readonly registry: DeviceSyncRegistry,
   ) {
     this.ingress = createDeviceSyncPublicIngress({
       publicBaseUrl: this.context.publicIngressBaseUrl,
       allowedReturnOrigins: this.context.allowedReturnOrigins,
-      registry: this.context.registry,
+      registry: this.registry,
       store: this.context.store,
       hooks: {
         onConnectionEstablished: async ({
@@ -220,7 +222,7 @@ export class HostedDeviceSyncPublicIngressService {
     const connection = await this.requireOwnedBrowserConnection(userId, connectionId);
     const disconnected = await disconnectHostedDeviceSyncConnection({
       connectionId: connection.id,
-      registry: this.context.registry,
+      registry: this.registry,
       store: this.context.store,
       userId,
     });

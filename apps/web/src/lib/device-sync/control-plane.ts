@@ -1,6 +1,7 @@
 import type {
+  DeviceSyncRegistry,
   PublicProviderDescriptor,
-} from "@murphai/device-syncd/public-ingress";
+} from "@murphai/device-syncd/types";
 
 import {
   assertBrowserMutationOrigin,
@@ -20,29 +21,29 @@ import {
   type HostedTokenBundleExportResponse,
   type HostedTokenBundleRefreshResponse,
 } from "./agent-session-service";
-import { HostedDeviceSyncPublicIngressService } from "./public-ingress-service";
+import type { HostedDeviceSyncPublicIngressService } from "./public-ingress-service";
+import { createHostedBrowserConnectionId } from "./public-connection";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
 
 export class HostedDeviceSyncControlPlane {
   readonly request: Request;
   readonly env: HostedDeviceSyncControlPlaneContext["env"];
-  readonly registry: HostedDeviceSyncControlPlaneContext["registry"];
   readonly store: HostedDeviceSyncControlPlaneContext["store"];
   readonly publicIngressBaseUrl: string;
   readonly publicIngressBaseUrlSource:
     HostedDeviceSyncControlPlaneContext["publicIngressBaseUrlSource"];
   readonly allowedReturnOrigins: string[];
   readonly agentSessions: HostedDeviceSyncAgentSessionService;
-  readonly connections: HostedDeviceSyncPublicIngressService;
   readonly webhookAdmin: HostedDeviceSyncWebhookAdminService;
   private readonly context: HostedDeviceSyncControlPlaneContext;
   private authenticatedUserPromise: Promise<AuthenticatedHostedUser> | null = null;
+  private connectionsPromise: Promise<HostedDeviceSyncPublicIngressService> | null = null;
+  private registryPromise: Promise<DeviceSyncRegistry> | null = null;
 
   constructor(request: Request) {
     this.request = request;
     this.context = createHostedDeviceSyncControlPlaneContext(request);
     this.env = this.context.env;
-    this.registry = this.context.registry;
     this.store = this.context.store;
     this.publicIngressBaseUrl = this.context.publicIngressBaseUrl;
     this.publicIngressBaseUrlSource = this.context.publicIngressBaseUrlSource;
@@ -50,10 +51,8 @@ export class HostedDeviceSyncControlPlane {
     this.agentSessions = new HostedDeviceSyncAgentSessionService({
       request,
       store: this.store,
-      registry: this.registry,
     });
     this.webhookAdmin = new HostedDeviceSyncWebhookAdminService(this.context);
-    this.connections = new HostedDeviceSyncPublicIngressService(this.context, this.webhookAdmin);
   }
 
   requireAuthenticatedUser(): Promise<AuthenticatedHostedUser> {
@@ -73,16 +72,26 @@ export class HostedDeviceSyncControlPlane {
     });
   }
 
-  describeProviders(): PublicProviderDescriptor[] {
-    return this.connections.describeProviders();
+  async requireRegistry(): Promise<DeviceSyncRegistry> {
+    if (!this.registryPromise) {
+      this.registryPromise = import("./providers").then(({ createHostedDeviceSyncRegistry }) =>
+        createHostedDeviceSyncRegistry(process.env)
+      );
+    }
+
+    return this.registryPromise;
+  }
+
+  async describeProviders(): Promise<PublicProviderDescriptor[]> {
+    return (await this.getConnections()).describeProviders();
   }
 
   async listConnections(userId: string) {
-    return this.connections.listConnections(userId);
+    return (await this.getConnections()).listConnections(userId);
   }
 
   async getConnectionStatus(userId: string, publicConnectionId: string) {
-    return this.connections.getConnectionStatus(userId, publicConnectionId);
+    return (await this.getConnections()).getConnectionStatus(userId, publicConnectionId);
   }
 
   async startConnection(
@@ -95,7 +104,7 @@ export class HostedDeviceSyncControlPlane {
       connectTarget?: string | null;
     } = {},
   ) {
-    return this.connections.startConnection(userId, provider, returnTo, options);
+    return (await this.getConnections()).startConnection(userId, provider, returnTo, options);
   }
 
   async handleOAuthCallback(provider: string, options: { expectedOwnerId?: string | null } = {}) {
@@ -103,23 +112,27 @@ export class HostedDeviceSyncControlPlane {
   }
 
   async createSdkSignInSession(userId: string, provider: string) {
-    return this.connections.createSdkSignInSession(userId, provider);
+    return (await this.getConnections()).createSdkSignInSession(userId, provider);
   }
 
   async handleConnectionCallback(provider: string, options: { expectedOwnerId?: string | null } = {}) {
-    return this.connections.handleConnectionCallback(provider, options);
+    return (await this.getConnections()).handleConnectionCallback(provider, options);
   }
 
   async readWebhookRawBody() {
-    return this.connections.readWebhookRawBody();
+    return (await this.getConnections()).readWebhookRawBody();
   }
 
   async handleWebhook(provider: string, rawBody?: Buffer) {
-    return this.connections.handleWebhook(provider, rawBody);
+    return (await this.getConnections()).handleWebhook(provider, rawBody);
   }
 
   async disconnectConnection(userId: string, connectionId: string) {
-    return this.connections.disconnectConnection(userId, connectionId);
+    return (await this.getConnections()).disconnectConnection(userId, connectionId);
+  }
+
+  createBrowserConnectionId(connectionId: string): string {
+    return createHostedBrowserConnectionId(this.env.routingIndexKey, connectionId);
   }
 
   async pairAgent(user: AuthenticatedHostedUser, label: string | null): Promise<{
@@ -158,6 +171,17 @@ export class HostedDeviceSyncControlPlane {
     patch: HostedLocalHeartbeatPatch,
   ) {
     return this.agentSessions.recordLocalHeartbeat(userId, connectionId, patch);
+  }
+
+  private async getConnections(): Promise<HostedDeviceSyncPublicIngressService> {
+    if (!this.connectionsPromise) {
+      this.connectionsPromise = this.requireRegistry().then(async (registry) => {
+        const { HostedDeviceSyncPublicIngressService } = await import("./public-ingress-service");
+        return new HostedDeviceSyncPublicIngressService(this.context, this.webhookAdmin, registry);
+      });
+    }
+
+    return this.connectionsPromise;
   }
 }
 

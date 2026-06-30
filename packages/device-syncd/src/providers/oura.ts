@@ -44,6 +44,9 @@ import {
 } from "./provider-diagnostics.ts";
 
 import type {
+  OuraDeviceSyncProviderConfig,
+} from "../config/provider-types.ts";
+import type {
   DeviceSyncAccount,
   DeviceSyncJobInput,
   DeviceSyncWebhookPreflightResponse,
@@ -62,6 +65,8 @@ import type {
 } from "../types.ts";
 import { classifyDeviceSyncWebhookAcceptanceMode, getDeviceSyncAccountOAuthTokens } from "../types.ts";
 import type { OuraWebhookSubscriptionClient } from "./oura-webhooks.ts";
+
+export type { OuraDeviceSyncProviderConfig } from "../config/provider-types.ts";
 
 const OURA_AUTH_BASE_URL = "https://cloud.ouraring.com";
 const OURA_API_BASE_URL = "https://api.ouraring.com";
@@ -149,21 +154,6 @@ interface OuraResourceDescriptor {
   narrowWindowDaysBefore: number;
   narrowWindowDaysAfter: number;
   fetch(api: OuraApiSession, windowStart: string, windowEnd: string): Promise<Record<string, unknown>[]>;
-}
-
-export interface OuraDeviceSyncProviderConfig {
-  clientId: string;
-  clientSecret: string;
-  authBaseUrl?: string;
-  apiBaseUrl?: string;
-  scopes?: string[];
-  backfillDays?: number;
-  reconcileDays?: number;
-  reconcileIntervalMs?: number;
-  requestTimeoutMs?: number;
-  webhookTimestampToleranceMs?: number;
-  webhookVerificationToken?: string;
-  fetchImpl?: typeof fetch;
 }
 
 function hasOuraScope(account: DeviceSyncAccount, scope: string): boolean {

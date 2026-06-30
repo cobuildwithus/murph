@@ -3,7 +3,7 @@ import type {
   DeviceAccountCredentialKind,
   DeviceSyncAccount,
 } from "@murphai/device-syncd/types";
-import { sanitizeStoredDeviceSyncMetadata } from "@murphai/device-syncd/public-ingress";
+import { sanitizeStoredDeviceSyncMetadata } from "@murphai/device-syncd/public-account";
 
 import type { HostedStaticDeviceSyncConnectionRecord } from "../internal-runtime";
 import {

@@ -1,4 +1,4 @@
-import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
+import { createHostedDeviceSyncAgentSessionService } from "@/src/lib/device-sync/agent-session-service";
 import { jsonOk, postOnlyJson, withJsonError } from "@/src/lib/device-sync/http";
 
 export function GET() {
@@ -6,7 +6,7 @@ export function GET() {
 }
 
 export const POST = withJsonError(async (request: Request) => {
-  const controlPlane = createHostedDeviceSyncControlPlane(request);
-  const session = await controlPlane.requireAgentSession();
-  return jsonOk(await controlPlane.revokeAgentSession(session));
+  const agentSessions = createHostedDeviceSyncAgentSessionService(request);
+  const session = await agentSessions.requireAgentSession();
+  return jsonOk(await agentSessions.revokeAgentSession(session));
 });

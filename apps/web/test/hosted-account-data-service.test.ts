@@ -798,9 +798,9 @@ describe("deleteHostedAccountData", () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const operationOrder: string[] = [];
     serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValueOnce({
-      registry: {
+      requireRegistry: vi.fn(async () => ({
         get: vi.fn(() => null),
-      },
+      })),
       store: {
         getStoredConnectionAccountForUser: vi.fn(async () => null),
       },
@@ -852,9 +852,9 @@ describe("deleteHostedAccountData", () => {
   it("locks webhook trace owners in deterministic unique order before account deletion", async () => {
     const operationOrder: string[] = [];
     serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValueOnce({
-      registry: {
+      requireRegistry: vi.fn(async () => ({
         get: vi.fn(() => null),
-      },
+      })),
       store: {
         getStoredConnectionAccountForUser: vi.fn(async () => null),
       },
@@ -998,13 +998,13 @@ describe("deleteHostedAccountData", () => {
       updatedAt: "2026-04-27T00:07:00.000Z",
     }));
     serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      registry: {
+      requireRegistry: vi.fn(async () => ({
         get: vi.fn(() => ({
           connectionHandler: {
             revokeAccess,
           },
         })),
-      },
+      })),
       store: {
         getStoredConnectionAccountForUser,
       },
@@ -1382,13 +1382,13 @@ describe("deleteHostedAccountData", () => {
       updatedAt: "2026-04-27T00:07:00.000Z",
     }));
     serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      registry: {
+      requireRegistry: vi.fn(async () => ({
         get: vi.fn(() => ({
           connectionHandler: {
             revokeAccess,
           },
         })),
-      },
+      })),
       store: {
         getStoredConnectionAccountForUser,
       },

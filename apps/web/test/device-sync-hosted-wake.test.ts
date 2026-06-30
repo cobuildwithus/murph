@@ -1499,12 +1499,13 @@ describe("hosted device-sync wakes", () => {
 
   it("wires an unknown webhook hook so verified orphan deliveries can be accepted", async () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    new HostedDeviceSyncControlPlane(
+    const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/device-sync/webhooks/junction", {
         method: "POST",
         body: "{}",
       }),
     );
+    await controlPlane.describeProviders();
     const ingressInput = mocks.createDeviceSyncPublicIngress.mock.calls.at(-1)?.[0] as {
       hooks?: {
         onUnknownWebhook?: (value: {

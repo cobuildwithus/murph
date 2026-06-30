@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
 import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-label";
-import { isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
 import { ComputerUseService } from "../computer-use/service";
@@ -1533,7 +1533,7 @@ async function revokeDeviceProvidersBestEffort(input: {
         continue;
       }
 
-      const provider = controlPlane.registry.get(connection.provider);
+      const provider = (await controlPlane.requireRegistry()).get(connection.provider);
       const revokeAccess = provider?.connectionHandler?.revokeAccess;
 
       if (!revokeAccess) {

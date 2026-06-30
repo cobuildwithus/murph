@@ -44,6 +44,9 @@ import {
 } from "./provider-diagnostics.ts";
 
 import type {
+  WhoopDeviceSyncProviderConfig,
+} from "../config/provider-types.ts";
+import type {
   DeviceSyncAccount,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
@@ -59,6 +62,8 @@ import type {
   StoredDeviceSyncAccount,
 } from "../types.ts";
 import { classifyDeviceSyncWebhookAcceptanceMode, getDeviceSyncAccountOAuthTokens } from "../types.ts";
+
+export type { WhoopDeviceSyncProviderConfig } from "../config/provider-types.ts";
 
 const WHOOP_AUTH_PATH = "/oauth/oauth2/auth";
 const WHOOP_TOKEN_PATH = "/oauth/oauth2/token";
@@ -100,19 +105,6 @@ interface WhoopCollectionResponse<TRecord extends Record<string, unknown>> {
   records?: TRecord[];
   next_token?: string | null;
   nextToken?: string | null;
-}
-
-export interface WhoopDeviceSyncProviderConfig {
-  clientId: string;
-  clientSecret: string;
-  baseUrl?: string;
-  scopes?: string[];
-  backfillDays?: number;
-  reconcileDays?: number;
-  reconcileIntervalMs?: number;
-  webhookTimestampToleranceMs?: number;
-  requestTimeoutMs?: number;
-  fetchImpl?: typeof fetch;
 }
 
 interface WhoopDeleteMarker {

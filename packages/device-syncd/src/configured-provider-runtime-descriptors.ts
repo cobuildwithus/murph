@@ -17,16 +17,16 @@ import {
 } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { normalizeString } from "./shared.ts";
-import { normalizeJunctionProviderFilter } from "./providers/junction-connect-sources.ts";
+import { normalizeJunctionProviderFilter } from "./config/junction-connect-sources.ts";
 
 import type {
   ConfiguredDeviceSyncProviderConfigByKey,
   ConfiguredDeviceSyncProviderKey,
+  JunctionDeviceSyncProviderConfig,
+  OuraDeviceSyncProviderConfig,
+  StravaDeviceSyncProviderConfig,
+  WhoopDeviceSyncProviderConfig,
 } from "./config/provider-types.ts";
-import type { JunctionDeviceSyncProviderConfig } from "./providers/junction.ts";
-import type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
-import type { StravaDeviceSyncProviderConfig } from "./providers/strava.ts";
-import type { WhoopDeviceSyncProviderConfig } from "./providers/whoop.ts";
 
 const OURA_OAUTH = requireDeviceProviderOAuthDescriptor(OURA_DEVICE_PROVIDER_DESCRIPTOR);
 const OURA_SYNC = requireDeviceProviderSyncDescriptor(OURA_DEVICE_PROVIDER_DESCRIPTOR);

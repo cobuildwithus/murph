@@ -1,20 +1,22 @@
 import { randomUUID } from "node:crypto";
 
-import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import type {
   DeviceSyncRegistry,
   PublicDeviceSyncAccount,
-} from "@murphai/device-syncd/public-ingress";
+} from "@murphai/device-syncd/types";
 import {
   HostedAgentSessionService,
   type HostedAgentUser,
 } from "../hosted-agent-sessions";
+import { getPrisma } from "../prisma";
 import {
   requireHostedDeviceSyncStoredTokenBundle,
 } from "./internal-runtime";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
-import { requireHostedDeviceSyncProvider } from "./providers";
+import { readHostedDeviceSyncEnvironment } from "./env";
+import type { HostedDeviceSyncEnvironment } from "./env";
 import {
   type HostedAgentSessionRecord,
   type HostedPrismaTransactionClient,
@@ -46,6 +48,12 @@ export interface HostedTokenBundleExportResponse {
 export interface HostedTokenBundleRefreshResponse extends HostedTokenBundleExportResponse {
   refreshed: boolean;
   tokenVersionChanged: boolean;
+}
+
+export interface HostedDeviceSyncAgentSessionContext {
+  readonly agentSessions: HostedDeviceSyncAgentSessionService;
+  readonly env: HostedDeviceSyncEnvironment;
+  readonly store: PrismaDeviceSyncControlPlaneStore;
 }
 
 const HOSTED_DEVICE_SYNC_AGENT_PAIR_PATH = "/api/device-sync/agents/pair";
@@ -116,16 +124,16 @@ type HostedTokenExportLockResult =
 
 export class HostedDeviceSyncAgentSessionService {
   readonly store: PrismaDeviceSyncControlPlaneStore;
-  readonly registry: DeviceSyncRegistry;
   readonly agentSessions: HostedAgentSessionService;
+  private registry: DeviceSyncRegistry | null;
 
   constructor(input: {
     request: Request;
     store: PrismaDeviceSyncControlPlaneStore;
-    registry: DeviceSyncRegistry;
+    registry?: DeviceSyncRegistry | null;
   }) {
     this.store = input.store;
-    this.registry = input.registry;
+    this.registry = input.registry ?? null;
     this.agentSessions = new HostedAgentSessionService({
       request: input.request,
       store: input.store,
@@ -545,7 +553,11 @@ export class HostedDeviceSyncAgentSessionService {
       return currentRefreshState;
     }
 
-    const provider = requireHostedDeviceSyncProvider(this.registry, currentRefreshState.account.provider);
+    const { requireHostedDeviceSyncProvider } = await import("./providers");
+    const provider = requireHostedDeviceSyncProvider(
+      await this.requireRegistry(),
+      currentRefreshState.account.provider,
+    );
     const refreshResult = await refreshProviderTokens({
       account: currentRefreshState.account,
       provider,
@@ -1115,6 +1127,40 @@ export class HostedDeviceSyncAgentSessionService {
   private async assertCurrentAgentSessionStillActive(): Promise<void> {
     await this.agentSessions.requireAgentSession();
   }
+
+  private async requireRegistry(): Promise<DeviceSyncRegistry> {
+    if (!this.registry) {
+      const { createHostedDeviceSyncRegistry } = await import("./providers");
+      this.registry = createHostedDeviceSyncRegistry(process.env);
+    }
+
+    return this.registry;
+  }
+}
+
+export function createHostedDeviceSyncAgentSessionService(
+  request: Request,
+): HostedDeviceSyncAgentSessionService {
+  return createHostedDeviceSyncAgentSessionContext(request).agentSessions;
+}
+
+export function createHostedDeviceSyncAgentSessionContext(
+  request: Request,
+): HostedDeviceSyncAgentSessionContext {
+  const env = readHostedDeviceSyncEnvironment(process.env);
+  const store = new PrismaDeviceSyncControlPlaneStore({
+    providerAccountBlindIndexKey: env.routingIndexKey,
+    prisma: getPrisma(),
+  });
+
+  return {
+    agentSessions: new HostedDeviceSyncAgentSessionService({
+      request,
+      store,
+    }),
+    env,
+    store,
+  };
 }
 
 function toPublicHostedDeviceSyncAccount(

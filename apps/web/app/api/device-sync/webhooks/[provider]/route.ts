@@ -14,7 +14,7 @@ export const GET = withJsonError(async (
   const controlPlane = createHostedDeviceSyncControlPlane(request);
   const preflight = await resolveDeviceSyncWebhookPreflightResponse({
     provider: decodedProvider,
-    registry: controlPlane.registry,
+    registry: await controlPlane.requireRegistry(),
     method: request.method,
     url: new URL(request.url),
     headers: request.headers,
@@ -40,7 +40,7 @@ export const POST = withJsonError(async (
   const rawBody = await controlPlane.readWebhookRawBody();
   const preflight = await resolveDeviceSyncWebhookPreflightResponse({
     provider,
-    registry: controlPlane.registry,
+    registry: await controlPlane.requireRegistry(),
     method: request.method,
     url: new URL(request.url),
     headers: request.headers,

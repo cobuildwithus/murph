@@ -40,15 +40,17 @@ import {
   JunctionClient,
   type JunctionClientConfig,
   type JunctionDateQueryFormat,
-  type JunctionEnvironment,
   type JunctionProviderConnection,
-  type JunctionRegion,
 } from "./junction-client.ts";
 import {
   buildJunctionProviderSourceInstanceKey,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
   normalizeJunctionProviderFilter,
-} from "./junction-connect-sources.ts";
+} from "../config/junction-connect-sources.ts";
+import type {
+  JunctionDeviceSyncProviderConfig,
+  JunctionEnvironment,
+} from "../config/provider-types.ts";
 
 import type {
   DeviceConnectionSourceStatus,
@@ -73,6 +75,7 @@ import type {
 } from "../types.ts";
 import { classifyDeviceSyncWebhookAcceptanceMode } from "../types.ts";
 
+export type { JunctionDeviceSyncProviderConfig } from "../config/provider-types.ts";
 export { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR };
 export {
   JUNCTION_CONNECT_SOURCE_TARGETS,
@@ -81,27 +84,8 @@ export {
   normalizeJunctionProviderFilter,
   resolveJunctionConnectSourceLabel,
   resolveJunctionConnectTargetForSourceId,
-} from "./junction-connect-sources.ts";
-export type { JunctionConnectSourceTarget } from "./junction-connect-sources.ts";
-
-export interface JunctionDeviceSyncProviderConfig {
-  apiKey: string;
-  clientUserIdSecret: string;
-  environment: JunctionEnvironment;
-  region: JunctionRegion;
-  allowedLinkHosts?: readonly string[];
-  providerFilter?: string[];
-  summaryResources?: string[];
-  timeseriesResources?: string[];
-  summaryBackfillDays?: number;
-  timeseriesBackfillDays?: number;
-  reconcileDays?: number;
-  reconcileIntervalMs?: number;
-  requestTimeoutMs?: number;
-  webhookSecret?: string;
-  webhookTimestampToleranceMs?: number;
-  fetchImpl?: typeof fetch;
-}
+} from "../config/junction-connect-sources.ts";
+export type { JunctionConnectSourceTarget } from "../config/junction-connect-sources.ts";
 
 export const JUNCTION_PROVIDER_CONFIG_KEY = "junction";
 export {
@@ -4741,16 +4725,7 @@ function inferJunctionWebhookResource(
   };
 }
 
-export { normalizeJunctionResourceName } from "@murphai/importers/device-providers/junction-resources";
-
-/**
- * Resolves the normalized Junction resource name carried by a webhook event
- * type such as `daily.data.sleep.created`. Lifecycle events (for example
- * `provider.connection.created`) carry no data resource and resolve to null.
- */
-export function readJunctionWebhookResourceName(eventType: string): string | null {
-  return normalizeJunctionResourceName(readJunctionWebhookResourceFromEventType(eventType));
-}
+export { normalizeJunctionResourceName, readJunctionWebhookResourceName } from "../junction-resources.ts";
 
 function readJunctionWebhookResourceFromEventType(eventType: string): string | null {
   const parts = eventType.split(".").map((part) => part.trim()).filter(Boolean);

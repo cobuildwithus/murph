@@ -46,6 +46,9 @@ import {
 } from "./provider-diagnostics.ts";
 
 import type {
+  StravaDeviceSyncProviderConfig,
+} from "../config/provider-types.ts";
+import type {
   DeviceSyncAccount,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
@@ -64,6 +67,8 @@ import type {
 } from "../types.ts";
 import { classifyDeviceSyncWebhookAcceptanceMode, getDeviceSyncAccountOAuthTokens } from "../types.ts";
 import type { StravaWebhookSubscriptionClient } from "./strava-webhooks.ts";
+
+export type { StravaDeviceSyncProviderConfig } from "../config/provider-types.ts";
 
 const STRAVA_AUTH_BASE_URL = "https://www.strava.com";
 const STRAVA_API_BASE_URL = "https://www.strava.com/api/v3";
@@ -136,22 +141,6 @@ interface StravaApiSession {
   requestJson<T>(path: string, options?: { optional?: boolean }): Promise<T | null>;
   fetchActivities(windowStart: string, windowEnd: string): Promise<Record<string, unknown>[]>;
   fetchActivityById(activityId: string): Promise<Record<string, unknown> | null>;
-}
-
-export interface StravaDeviceSyncProviderConfig {
-  clientId: string;
-  clientSecret: string;
-  authBaseUrl?: string;
-  apiBaseUrl?: string;
-  scopes?: string[];
-  backfillDays?: number;
-  reconcileDays?: number;
-  reconcileIntervalMs?: number;
-  requestTimeoutMs?: number;
-  webhookSigningSecret?: string;
-  webhookTimestampToleranceMs?: number;
-  webhookVerifyToken?: string;
-  fetchImpl?: typeof fetch;
 }
 
 interface StravaWebhookSignatureHeader {

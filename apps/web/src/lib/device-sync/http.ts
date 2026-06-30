@@ -2,11 +2,11 @@ import {
   buildDeviceSyncCallbackErrorRedirectLocation,
   buildDeviceSyncCallbackSuccessRedirectLocation,
 } from "@murphai/device-syncd/callback-redirect";
-import { buildPublicDeviceSyncErrorPayload } from "@murphai/device-syncd/http";
 import {
+  buildPublicDeviceSyncErrorPayload,
   DeviceSyncError,
   isDeviceSyncError,
-} from "@murphai/device-syncd/public-ingress";
+} from "@murphai/device-syncd/errors";
 import { NextResponse } from "next/server";
 
 import {

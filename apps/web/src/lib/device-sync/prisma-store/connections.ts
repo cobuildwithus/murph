@@ -1,13 +1,13 @@
 import { Prisma, PrismaClient } from "@prisma/client";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
+import { toRedactedPublicDeviceSyncAccount } from "@murphai/device-syncd/public-account";
 import {
-  deviceSyncError,
-  toRedactedPublicDeviceSyncAccount,
   type MarkPublicDeviceSyncConnectionSetupFailedInput,
   type ProviderAuthTokens,
   type PublicDeviceSyncAccount,
   type UpsertPublicDeviceSyncConnectionInput,
   type UpsertPublicDeviceSyncConnectionResult,
-} from "@murphai/device-syncd/public-ingress";
+} from "@murphai/device-syncd/types";
 import {
   resolveConfiguredDeviceSyncProviderCredentialPolicy,
 } from "@murphai/device-syncd/provider-credential-policy";

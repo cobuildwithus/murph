@@ -1,12 +1,14 @@
 import {
   deviceSyncError,
-} from "@murphai/device-syncd/public-ingress";
+} from "@murphai/device-syncd/errors";
 import { createOuraDeviceSyncProvider } from "@murphai/device-syncd/providers/oura";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createBearerRequest, createJsonPostRequest, createRouteContext } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
+  createHostedDeviceSyncAgentSessionContext: vi.fn(),
+  createHostedDeviceSyncAgentSessionService: vi.fn(),
   assertBrowserMutationOrigin: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
   exportTokenBundle: vi.fn(),
@@ -16,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   refreshTokenBundle: vi.fn(),
   requireAgentSession: vi.fn(),
   requireAuthenticatedUser: vi.fn(),
+  requireRegistry: vi.fn(),
   webhookRegistry: {
     get: vi.fn(),
   },
@@ -23,6 +26,14 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
+}));
+vi.mock("@/src/lib/device-sync/agent-session-service", () => ({
+  createHostedDeviceSyncAgentSessionContext: mocks.createHostedDeviceSyncAgentSessionContext,
+  createHostedDeviceSyncAgentSessionService: mocks.createHostedDeviceSyncAgentSessionService,
+}));
+vi.mock("@/src/lib/device-sync/auth", () => ({
+  assertBrowserMutationOrigin: mocks.assertBrowserMutationOrigin,
+  requireAuthenticatedHostedUser: mocks.requireAuthenticatedUser,
 }));
 
 type ExportRouteModule = typeof import("../app/api/device-sync/agent/connections/[connectionId]/export-token-bundle/route");
@@ -47,14 +58,23 @@ describe("hosted device-sync agent and webhook routes", () => {
     vi.clearAllMocks();
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       assertBrowserMutationOrigin: mocks.assertBrowserMutationOrigin,
-      exportTokenBundle: mocks.exportTokenBundle,
       handleWebhook: mocks.handleWebhook,
       pairAgent: mocks.pairAgent,
       readWebhookRawBody: mocks.readWebhookRawBody,
-      registry: mocks.webhookRegistry,
+      requireAuthenticatedUser: mocks.requireAuthenticatedUser,
+      requireRegistry: mocks.requireRegistry,
+    });
+    mocks.createHostedDeviceSyncAgentSessionService.mockReturnValue({
+      exportTokenBundle: mocks.exportTokenBundle,
       refreshTokenBundle: mocks.refreshTokenBundle,
       requireAgentSession: mocks.requireAgentSession,
-      requireAuthenticatedUser: mocks.requireAuthenticatedUser,
+    });
+    mocks.createHostedDeviceSyncAgentSessionContext.mockReturnValue({
+      agentSessions: {
+        createAgentSession: mocks.pairAgent,
+      },
+      env: {},
+      store: {},
     });
     mocks.requireAuthenticatedUser.mockResolvedValue({
       email: "person@example.test",
@@ -67,6 +87,7 @@ describe("hosted device-sync agent and webhook routes", () => {
       userId: "user-123",
     });
     mocks.readWebhookRawBody.mockResolvedValue(Buffer.from('{"event":"sleep.updated"}', "utf8"));
+    mocks.requireRegistry.mockResolvedValue(mocks.webhookRegistry);
     mocks.pairAgent.mockResolvedValue({
       agent: {
         createdAt: "2026-03-26T12:00:00.000Z",

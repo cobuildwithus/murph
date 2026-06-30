@@ -59,15 +59,13 @@ describe("hosted ops Junction diagnostics", () => {
       connectionId === "dsc_junction_123" ? "dspc_junction_123" : connectionId
     );
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      connections: {
-        createBrowserConnectionId: mocks.createBrowserConnectionId,
-      },
+      createBrowserConnectionId: mocks.createBrowserConnectionId,
       listConnections: mocks.listConnections,
       publicIngressBaseUrl: "https://join.example.test/api/device-sync",
       publicIngressBaseUrlSource: "request",
-      registry: {
+      requireRegistry: vi.fn(async () => ({
         get: mocks.registryGet,
-      },
+      })),
       store: {
         getStoredConnectionAccountForUser: mocks.getStoredConnectionAccountForUser,
         listConnectionsForUser: mocks.listConnectionsForUser,

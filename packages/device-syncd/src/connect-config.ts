@@ -17,6 +17,7 @@ import {
   parseCsvEnv,
   readOptionalCredentialPair,
 } from "./config/provider-config-helpers.ts";
+import { assertValidJunctionClientConfig } from "./config/junction-client-config.ts";
 
 export {
   listConfiguredDeviceSyncConnectTargets,
@@ -61,7 +62,7 @@ export {
   resolveJunctionConnectSourceLabel,
   resolveJunctionConnectTargetForSourceId,
   type JunctionConnectSourceTarget,
-} from "./providers/junction-connect-sources.ts";
+} from "./config/junction-connect-sources.ts";
 
 import type {
   ConfiguredDeviceSyncProviderKey,
@@ -133,18 +134,7 @@ function assertValidJunctionConnectTargetConfig(input: {
   environment: "sandbox" | "production";
   region: "us" | "eu";
 }): void {
-  const expectedPrefix = {
-    "production:us": "pk_us_",
-    "production:eu": "pk_eu_",
-    "sandbox:us": "sk_us_",
-    "sandbox:eu": "sk_eu_",
-  }[`${input.environment}:${input.region}`];
-
-  if (!input.apiKey.startsWith(expectedPrefix)) {
-    throw new TypeError(
-      `JUNCTION_API_KEY must start with ${expectedPrefix} for ${input.environment}/${input.region}.`,
-    );
-  }
+  assertValidJunctionClientConfig(input);
 }
 
 function parseJunctionEnvironment(value: string): "sandbox" | "production" {

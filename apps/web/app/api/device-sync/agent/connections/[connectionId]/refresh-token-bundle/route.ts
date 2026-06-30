@@ -1,6 +1,6 @@
-import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 
-import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
+import { createHostedDeviceSyncAgentSessionService } from "@/src/lib/device-sync/agent-session-service";
 import {
   jsonOk,
   postOnlyJson,
@@ -17,13 +17,13 @@ export const POST = withJsonError(async (
   request: Request,
   context: { params: Promise<{ connectionId: string }> },
 ) => {
-  const controlPlane = createHostedDeviceSyncControlPlane(request);
-  const session = await controlPlane.requireAgentSession();
+  const agentSessions = createHostedDeviceSyncAgentSessionService(request);
+  const session = await agentSessions.requireAgentSession();
   const body = await readOptionalJsonObject(request);
   const expectedTokenVersion = readExpectedTokenVersion(body);
   const force = body.force === true;
   const connectionId = await resolveDecodedRouteParam(context.params, "connectionId");
-  const refresh = await controlPlane.refreshTokenBundle(session, connectionId, {
+  const refresh = await agentSessions.refreshTokenBundle(session, connectionId, {
     expectedTokenVersion,
     force,
   });

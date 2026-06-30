@@ -19,7 +19,7 @@ import {
   normalizeJunctionProviderFilter,
   resolveJunctionConnectSourceLabel,
   resolveJunctionConnectTargetForSourceId,
-} from "../src/providers/junction-connect-sources.ts";
+} from "../src/config/junction-connect-sources.ts";
 import {
   isAllowedJunctionLinkHost,
   JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS,

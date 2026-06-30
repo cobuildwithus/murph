@@ -1534,12 +1534,12 @@ export { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
 export { sanitizeStoredDeviceSyncMetadata } from "./shared.ts";
 export { resolveDeviceSyncWebhookPreflightResponse } from "./webhook-verification.ts";
 export { createOuraDeviceSyncProvider } from "./providers/oura.ts";
-export type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
+export type { OuraDeviceSyncProviderConfig } from "./config/provider-types.ts";
 export { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
-export type { WhoopDeviceSyncProviderConfig } from "./providers/whoop.ts";
+export type { WhoopDeviceSyncProviderConfig } from "./config/provider-types.ts";
 export { createStravaDeviceSyncProvider, resolveStravaWebhookPreflightResponse } from "./providers/strava.ts";
-export type { StravaDeviceSyncProviderConfig } from "./providers/strava.ts";
-export { normalizeJunctionResourceName, readJunctionWebhookResourceName } from "./providers/junction.ts";
+export type { StravaDeviceSyncProviderConfig } from "./config/provider-types.ts";
+export { normalizeJunctionResourceName, readJunctionWebhookResourceName } from "./junction-resources.ts";
 export {
   DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
   DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,

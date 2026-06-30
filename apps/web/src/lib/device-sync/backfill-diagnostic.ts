@@ -1,6 +1,6 @@
 import "server-only";
 
-import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 import type {
   DeviceSyncAccount,
   DeviceSyncProvider,
@@ -139,7 +139,7 @@ export async function runHostedDeviceSyncBackfillDiagnostic(
     });
   }
 
-  const provider = input.controlPlane.registry.get(connection.provider);
+  const provider = (await input.controlPlane.requireRegistry()).get(connection.provider);
   if (!provider) {
     throw deviceSyncError({
       code: "DEVICE_SYNC_DIAGNOSTIC_PROVIDER_UNAVAILABLE",
@@ -639,7 +639,7 @@ async function resolveDurableConnectionForBrowserConnection(input: {
 
   return durableConnections.find((candidate) =>
     candidate.provider === input.browserConnection.provider
-    && input.controlPlane.connections.createBrowserConnectionId(candidate.id)
+    && input.controlPlane.createBrowserConnectionId(candidate.id)
       === input.browserConnection.id
   ) ?? null;
 }

@@ -1,4 +1,4 @@
-import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
 import {
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
@@ -8,7 +8,7 @@ import type {
   DeviceConnectionHandler,
   DeviceSyncProvider,
   PublicDeviceSyncAccount,
-} from "@murphai/device-syncd/public-ingress";
+} from "@murphai/device-syncd/types";
 import type {
   HostedPrismaTransactionClient,
   HostedStoredDeviceSyncAccount,

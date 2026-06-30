@@ -1,4 +1,4 @@
-import type { PublicProviderDescriptor } from "@murphai/device-syncd/public-ingress";
+import type { PublicProviderDescriptor } from "@murphai/device-syncd/types";
 import type { ConfiguredDeviceSyncProviderKey } from "@murphai/device-syncd/connect-config";
 
 import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-label";

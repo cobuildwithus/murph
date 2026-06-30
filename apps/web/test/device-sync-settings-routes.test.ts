@@ -228,17 +228,15 @@ describe("device sync settings routes", () => {
       },
     });
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      connections: {
-        createBrowserConnectionId: mocks.createBrowserConnectionId,
-      },
+      createBrowserConnectionId: mocks.createBrowserConnectionId,
       disconnectConnection: mocks.disconnectConnection,
       getConnectionStatus: mocks.getConnectionStatus,
       listConnections: mocks.listConnections,
       publicIngressBaseUrl: "http://localhost:3000/api/device-sync",
       publicIngressBaseUrlSource: "request",
-      registry: {
+      requireRegistry: vi.fn(async () => ({
         get: mocks.registryGet,
-      },
+      })),
       startConnection: mocks.startConnection,
       store: {
         getConnectionForUser: mocks.getConnectionForUser,
