@@ -21,6 +21,7 @@ const identityMocks = vi.hoisted(() => ({
 const runtimeMocks = vi.hoisted(() => ({
   requireHostedOnboardingPublicBaseUrl: vi.fn(),
   requireHostedStripeApi: vi.fn(),
+  requireHostedStripeBillingPlanConfig: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-web/encryption", () => ({
@@ -43,6 +44,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: runtimeMocks.requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeApi: runtimeMocks.requireHostedStripeApi,
+  requireHostedStripeBillingPlanConfig: runtimeMocks.requireHostedStripeBillingPlanConfig,
 }));
 
 import {
@@ -102,6 +104,11 @@ type FamilyPlanTxMock = Prisma.TransactionClient & {
   hostedMember: Prisma.TransactionClient["hostedMember"] & {
     create: MockFn;
     findUnique: MockFn;
+    update: MockFn;
+  };
+  hostedMemberBillingRef: Prisma.TransactionClient["hostedMemberBillingRef"] & {
+    findUnique: MockFn;
+    updateMany: MockFn;
   };
   hostedMemberRouting: Prisma.TransactionClient["hostedMemberRouting"] & {
     findMany: MockFn;
@@ -125,6 +132,10 @@ describe("hosted Family plan", () => {
     process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY;
   const previousLegacyHostedFamilyStripePriceId =
     process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MONTHLY;
+  const previousHostedPulseStripePriceId =
+    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY;
+  const previousHostedEdgeStripePriceId =
+    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY;
   const previousHostedOnboardingPublicBaseUrl =
     process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
 
@@ -133,6 +144,8 @@ describe("hosted Family plan", () => {
     process.env.HOSTED_CONTACT_PRIVACY_KEYS = `v1:${TEST_CONTACT_PRIVACY_KEY}`;
     process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v1";
     process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://local.withmurph.ai:3443";
+    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY = "price_pulse";
+    process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY = "price_edge";
     process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY = "price_family";
     delete process.env.HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MONTHLY;
     clearHostedOnboardingEnvCache();
@@ -157,6 +170,11 @@ describe("hosted Family plan", () => {
         }),
       },
     });
+    runtimeMocks.requireHostedStripeBillingPlanConfig.mockImplementation(({ billingPlanCode }) => ({
+      billingPlanCode,
+      priceId: billingPlanCode === "launch_edge_monthly" ? "price_edge" : "price_pulse",
+      stripe: runtimeMocks.requireHostedStripeApi(),
+    }));
     runtimeMocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue(
       "https://local.withmurph.ai:3443",
     );
@@ -181,6 +199,14 @@ describe("hosted Family plan", () => {
     restoreEnvValue(
       "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
       previousHostedFamilyStripePriceId,
+    );
+    restoreEnvValue(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
+      previousHostedPulseStripePriceId,
+    );
+    restoreEnvValue(
+      "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
+      previousHostedEdgeStripePriceId,
     );
     restoreEnvValue(
       "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
@@ -1571,7 +1597,16 @@ describe("hosted Family plan", () => {
       billedSeatCount: null,
       group,
     });
-    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
+    tx.hostedAccountGroupBillingRef.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(createBillingRefMock({
+        billedSeatCount: null,
+        currentBillingPhase: null,
+        group,
+        stripeCustomerIdEncrypted: null,
+        stripeSubscriptionIdEncrypted: null,
+        stripeSubscriptionItemIdEncrypted: null,
+      }));
     const prisma = tx as FamilyPlanTxMock & {
       $transaction: ReturnType<typeof vi.fn>;
     };
@@ -1629,6 +1664,181 @@ describe("hosted Family plan", () => {
         groupId: "hbag_family",
       }),
     }));
+  });
+
+  it("converts an active direct paid owner subscription into Family billing without creating a second checkout", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
+    tx.hostedMember.findUnique.mockResolvedValueOnce({
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    });
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValueOnce(createMemberBillingRefMock());
+
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const checkoutCreate = vi.fn();
+    const directSubscription = makeFamilyStripeSubscription({
+      customerId: "cus_direct",
+      itemQuantity: 1,
+      metadata: {
+        billingPlanCode: "launch_monthly",
+        checkoutOffer: "standard",
+        memberId: "member_owner",
+      },
+      priceId: "price_pulse",
+      subscriptionId: "sub_direct",
+    });
+    const updatedSubscription = makeFamilyStripeSubscription({
+      customerId: "cus_direct",
+      itemQuantity: 2,
+      metadata: {
+        accountGroupId: "hbag_family",
+        billingPlanCode: "launch_family_monthly",
+        kind: "hosted_family_plan",
+        ownerMemberId: "member_owner",
+      },
+      priceId: "price_family",
+      subscriptionId: "sub_direct",
+    });
+    const subscriptionRetrieve = vi.fn().mockResolvedValue(directSubscription);
+    const subscriptionUpdate = vi.fn().mockResolvedValue(updatedSubscription);
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: {
+        sessions: {
+          create: checkoutCreate,
+        },
+      },
+      subscriptions: {
+        retrieve: subscriptionRetrieve,
+        update: subscriptionUpdate,
+      },
+    });
+    const result = await createHostedFamilyBillingCheckout({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      seatCount: 2,
+    });
+    expect(result).toEqual({
+      alreadyActive: true,
+      url: null,
+    });
+
+    expect(checkoutCreate).not.toHaveBeenCalled();
+    expect(subscriptionRetrieve).toHaveBeenCalledWith("sub_direct", {
+      expand: ["items.data.price"],
+    });
+    expect(subscriptionUpdate).toHaveBeenCalledWith("sub_direct", expect.objectContaining({
+      items: [{
+        id: "si_family",
+        price: "price_family",
+        quantity: 2,
+      }],
+      metadata: expect.objectContaining({
+        accountGroupId: "hbag_family",
+        billingPlanCode: "launch_family_monthly",
+        checkoutOffer: "",
+        kind: "hosted_family_plan",
+        memberId: "",
+        ownerMemberId: "member_owner",
+      }),
+      payment_behavior: "pending_if_incomplete",
+      proration_behavior: "always_invoice",
+    }), {
+      idempotencyKey: "hosted-family-direct-paid-upgrade:hbag_family:sub_direct:launch_monthly:price_pulse:price_family:seats-2",
+    });
+    expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        billedSeatCount: 2,
+        currentBillingPhase: "paid",
+        stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
+      }),
+    }));
+    expect(tx.hostedMember.update).toHaveBeenCalledWith({
+      data: {
+        billingStatus: HostedBillingStatus.not_started,
+      },
+      where: {
+        id: "member_owner",
+      },
+    });
+    expect(tx.hostedMemberBillingRef.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        currentBillingPhase: null,
+        currentBillingPlanCode: null,
+        stripeCustomerLookupKey: null,
+        stripeSubscriptionLookupKey: null,
+      }),
+      where: {
+        memberId: "member_owner",
+      },
+    }));
+  });
+
+  it("keeps unsupported direct paid subscription items as a non-retryable owner transfer error", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({
+      billedSeatCount: null,
+      group,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
+    tx.hostedMember.findUnique.mockResolvedValueOnce({
+      billingStatus: HostedBillingStatus.active,
+      suspendedAt: null,
+    });
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValueOnce(createMemberBillingRefMock());
+
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const subscriptionUpdate = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      subscriptions: {
+        retrieve: vi.fn().mockResolvedValue(makeFamilyStripeSubscription({
+          customerId: "cus_direct",
+          duplicateFamilyItems: true,
+          itemQuantity: 1,
+          metadata: {
+            billingPlanCode: "launch_monthly",
+            checkoutOffer: "standard",
+            memberId: "member_owner",
+          },
+          priceId: "price_pulse",
+          subscriptionId: "sub_direct",
+        })),
+        update: subscriptionUpdate,
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_DIRECT_PAID_SUBSCRIPTION_ITEMS_UNSUPPORTED",
+      httpStatus: 409,
+      retryable: false,
+    });
+    expect(subscriptionUpdate).not.toHaveBeenCalled();
   });
 
   it("reuses a pending Family checkout attempt for duplicate checkout starts", async () => {
@@ -2162,6 +2372,35 @@ function createBillingRefMock(overrides: Partial<{
   };
 }
 
+function createMemberBillingRefMock(overrides: Partial<{
+  currentBillingPhase: string | null;
+  currentBillingPlanCode: string | null;
+  stripeCustomerIdEncrypted: string | null;
+  stripeSubscriptionIdEncrypted: string | null;
+}> = {}) {
+  return {
+    currentBillingPhase: overrides.currentBillingPhase ?? "paid",
+    currentBillingPlanCode: overrides.currentBillingPlanCode ?? "launch_monthly",
+    currentCheckoutOffer: "standard",
+    currentPeriodEnd: new Date("2026-07-18T12:00:00.000Z"),
+    currentPeriodStart: new Date("2026-06-18T12:00:00.000Z"),
+    currentTrialEndsAt: null,
+    currentTrialStartedAt: null,
+    lastStripeEventCreatedAt: null,
+    memberId: "member_owner",
+    pulseTrialPolicyVersion: null,
+    pulseTrialRedeemedAt: null,
+    scheduledBillingEffectiveAt: null,
+    scheduledBillingPlanCode: null,
+    stripeCustomerIdEncrypted: overrides.stripeCustomerIdEncrypted ?? "encrypted:cus_direct",
+    stripeCustomerLookupKey: "hbidx:stripe-customer:v1:direct",
+    stripeSubscriptionIdEncrypted: overrides.stripeSubscriptionIdEncrypted ?? "encrypted:sub_direct",
+    stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:direct",
+    stripeSubscriptionScheduleIdEncrypted: null,
+    stripeSubscriptionScheduleLookupKey: null,
+  };
+}
+
 function createTxMock(input: {
   activeMembershipCount?: number;
   billedSeatCount?: number | null;
@@ -2281,7 +2520,17 @@ function createTxMock(input: {
           currentBillingPhase: null,
         },
         billingStatus: HostedBillingStatus.not_started,
+        suspendedAt: null,
       }),
+      update: vi.fn().mockResolvedValue({
+        billingStatus: HostedBillingStatus.not_started,
+        id: "member_owner",
+        suspendedAt: null,
+      }),
+    },
+    hostedMemberBillingRef: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     hostedMemberRouting: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -2333,17 +2582,20 @@ function makeFamilyStripeCheckoutSession(input: {
 }
 
 function makeFamilyStripeSubscription(input: {
+  customerId?: string;
   duplicateFamilyItems?: boolean;
   itemQuantity?: number;
   metadata?: Stripe.Metadata;
+  priceId?: string;
   subscriptionId?: string;
 } = {}): Stripe.Subscription {
   const subscriptionId = input.subscriptionId ?? "sub_family";
+  const priceId = input.priceId ?? "price_family";
   const familyItem = {
     id: "si_family",
     quantity: input.itemQuantity ?? 4,
     price: {
-      id: "price_family",
+      id: priceId,
     },
   } as Stripe.SubscriptionItem;
   const subscription: Stripe.Subscription & {
@@ -2371,7 +2623,7 @@ function makeFamilyStripeSubscription(input: {
     collection_method: "charge_automatically",
     created: 1_771_948_800,
     currency: "usd",
-    customer: "cus_family",
+    customer: input.customerId ?? "cus_family",
     customer_account: null,
     current_period_end: 1_774_540_800,
     current_period_start: 1_771_948_800,

@@ -81,6 +81,10 @@ export function HostedFamilyStartButton(props: {
         window.location.assign(response.url);
         return;
       }
+      if (response.alreadyActive) {
+        window.location.reload();
+        return;
+      }
       setIsSubmitting(false);
     } catch (error) {
       setIsSubmitting(false);

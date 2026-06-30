@@ -241,6 +241,7 @@ test("SettingsPage reads the app session and persisted account settings into the
   expect(mocks.prisma.hostedCodexAuthConnection.findUnique).not.toHaveBeenCalled();
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     authenticated: true,
+    canStartFamily: true,
     canStartPaidPulse: false,
     canUpgradeToEdge: true,
     currentBillingPhase: "paid",
