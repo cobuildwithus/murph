@@ -249,6 +249,13 @@ export class RuntimeProcessingController {
           runtimeWakeStartedAt: input.runtimeWakeStartedAt,
         });
       }
+      if (activeRuntimeState === "indeterminate") {
+        await this.syncRunnerAlarm(record);
+        return createRuntimeProcessingRetryLater({
+          reason: "container_rpc_error",
+          userId: input.input.userId,
+        });
+      }
 
       await this.syncRunnerAlarm(record);
       return {
