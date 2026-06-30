@@ -1,20 +1,31 @@
 const PILLARS = [
   {
-    body: "Protocols cite 5,972 studies",
-    title: "Research-backed",
+    anchor: "5,972",
+    label: "Studies cited",
+    body: "Every protocol traces to peer-reviewed evidence.",
   },
   {
-    body: "Apache 2.0 — inspect or self-host",
-    title: "Open source",
+    anchor: "Apache 2.0",
+    label: "License",
+    body: "Inspect, fork, or run the whole stack yourself.",
   },
   {
-    body: "Encrypted, never sold",
-    title: "Private by default",
+    anchor: "Never sold",
+    label: "Privacy",
+    body: "Encrypted at rest. Never used to train AI.",
   },
   {
-    body: "Export data or cancel anytime",
-    title: "Yours to keep",
+    anchor: "Anytime",
+    label: "Export",
+    body: "Take everything with you on the way out.",
   },
+] as const;
+
+const COL_BORDER_CLASS = [
+  "",
+  "sm:border-l sm:border-[#c4a882]/40 sm:pl-8 lg:pl-10",
+  "lg:border-l lg:border-[#c4a882]/40 lg:pl-10",
+  "sm:border-l sm:border-[#c4a882]/40 sm:pl-8 lg:pl-10",
 ] as const;
 
 export function TrustSection() {
@@ -31,20 +42,19 @@ export function TrustSection() {
           </span>
         </div>
 
-        <div className="mt-8 grid gap-4 sm:gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {PILLARS.map((p) => (
+        <div className="mt-12 grid grid-cols-1 gap-y-10 sm:grid-cols-2 sm:gap-y-12 lg:grid-cols-4">
+          {PILLARS.map((p, i) => (
             <div
-              key={p.title}
-              className="flex flex-col gap-3 rounded-2xl border border-[#c4a882]/15 bg-[#fffcf6] px-6 py-5"
+              key={p.label}
+              className={`flex flex-col gap-3 ${COL_BORDER_CLASS[i]}`}
             >
-              <span
-                aria-hidden="true"
-                className="inline-block size-1.5 rounded-full bg-[#5a6e32]"
-              />
-              <h3 className="font-serif text-[1.375rem] font-semibold leading-[1.15] tracking-[-0.02em] text-[#2d3436]">
-                {p.title}
-              </h3>
-              <p className="text-[0.75rem] leading-[1.5] text-[#736a58]">
+              <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#736a58]">
+                {p.label}
+              </span>
+              <p className="font-serif text-[clamp(1.75rem,2.6vw,2.25rem)] font-semibold leading-[1] tracking-[-0.02em] text-[#2d3436]">
+                {p.anchor}
+              </p>
+              <p className="max-w-[26ch] text-[0.875rem] leading-[1.55] text-[#736a58]">
                 {p.body}
               </p>
             </div>
