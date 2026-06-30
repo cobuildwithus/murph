@@ -265,7 +265,11 @@ export class RuntimeInvocationService {
 
       const livenessIndeterminate =
         probeOutcome === "error" || probeOutcome === "timeout";
-      if (input.acceptedProcessingAttempt && !livenessIndeterminate) {
+      if (
+        input.acceptedProcessingAttempt
+        && !livenessIndeterminate
+        && probeOutcome !== "mismatch"
+      ) {
         const committedResult =
           await this.recoverAcceptedRuntimeCompletionFromCommittedProgress({
             executionInput,

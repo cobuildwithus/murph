@@ -288,6 +288,20 @@ describe("runtime invocation transport failure fence handling", () => {
   });
 
   it("clears the write fence when only the lease generation differs", async () => {
+    const readHostedRuntimeStatusFromWeb = vi.fn(async (userId: string) => ({
+      mailboxLag: [],
+      userId,
+      workspace: {
+        createdAt: FIXED_NOW,
+        nextWakeAt: "2026-06-11T00:05:00.000Z",
+        nextWakeReason: "scheduled_wake",
+        redactedStatus: { lastTurn: "ok" },
+        snapshotRef: null,
+        updatedAt: FIXED_NOW,
+        userId,
+        version: "1",
+      },
+    }));
     const harness = await createTransportFailureHarness({
       readActiveRuntimeUserFence: async (token) => ({
         active: true,
@@ -295,11 +309,13 @@ describe("runtime invocation transport failure fence handling", () => {
         leaseGeneration: "999",
         userId: TEST_USER_ID,
       }),
+      readHostedRuntimeStatusFromWeb,
     });
 
     await expect(harness.invoke()).rejects.toThrow("container transport failed");
 
     await expect(harness.stateStore.readWriteFenceToken()).resolves.toBeNull();
+    expect(readHostedRuntimeStatusFromWeb).not.toHaveBeenCalled();
     expect(harness.loggedFailureEntries()).toEqual([
       expect.objectContaining({
         eventCode: "runner.accepted_attempt_failed",
