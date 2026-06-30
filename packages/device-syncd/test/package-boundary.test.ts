@@ -149,6 +149,7 @@ const WEB_SAFE_DEVICE_SYNC_GRAPH_ROOTS = [
   "apps/web/src/lib/device-sync/control-plane.ts",
   "apps/web/src/lib/device-sync/sidebar-status-service.ts",
   "packages/device-syncd/src/connect-config.ts",
+  "packages/device-syncd/src/config/provider-manifests.ts",
   "packages/device-syncd/src/errors.ts",
   "packages/device-syncd/src/hosted-hints.ts",
   "packages/device-syncd/src/junction-resources.ts",
@@ -163,7 +164,6 @@ const WEB_SAFE_DEVICE_SYNC_GRAPH_ROOTS = [
 const DENIED_WEB_SAFE_DEVICE_SYNC_MODULES = new Set([
   "packages/device-syncd/src/config.ts",
   "packages/device-syncd/src/config/provider-factory.ts",
-  "packages/device-syncd/src/config/provider-manifests.ts",
   "packages/device-syncd/src/public-ingress.ts",
   "packages/device-syncd/src/registry.ts",
   "packages/device-syncd/src/service.ts",

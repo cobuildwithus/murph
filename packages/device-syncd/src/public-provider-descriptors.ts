@@ -1,10 +1,10 @@
 import { resolveDeviceProviderConnectionDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
 
 import {
+  buildConfiguredDeviceSyncProviderRuntimeDescriptor,
+  getConfiguredDeviceSyncProviderManifest,
   resolveConfiguredDeviceSyncProviderDescriptor,
-} from "./configured-provider-descriptors.ts";
-import { buildConfiguredDeviceSyncProviderRuntimeDescriptor } from "./configured-provider-runtime-descriptors.ts";
-import { resolveConfiguredDeviceSyncProviderCredentialPolicy } from "./provider-credential-policy.ts";
+} from "./config/provider-manifests.ts";
 import { resolvePublicProviderDefaultScopes } from "./public-provider-descriptor-shared.ts";
 import { listConfiguredDeviceSyncProviderNames } from "./config/provider-keys.ts";
 
@@ -55,8 +55,7 @@ export function describeConfiguredDeviceSyncPublicProvider<
     callbackPath,
     callbackUrl: joinPublicUrl(options.publicBaseUrl, callbackPath),
     connectionKind: connection.kind,
-    credentialPolicy:
-      resolveConfiguredDeviceSyncProviderCredentialPolicy(provider)?.kind ?? "none",
+    credentialPolicy: getConfiguredDeviceSyncProviderCredentialPolicyKind(provider),
     defaultScopes: resolvePublicProviderDefaultScopes(descriptor, connection),
     supportsWebhooks: Boolean(webhookPath),
     webhookPath,
@@ -64,6 +63,12 @@ export function describeConfiguredDeviceSyncPublicProvider<
   };
 }
 export { resolveConfiguredDeviceSyncProviderDescriptor };
+
+function getConfiguredDeviceSyncProviderCredentialPolicyKind(
+  provider: ConfiguredDeviceSyncProviderKey,
+): PublicProviderDescriptor["credentialPolicy"] {
+  return getConfiguredDeviceSyncProviderManifest(provider).credentialPolicy.kind;
+}
 
 function joinPublicUrl(
   publicBaseUrl: string | null | undefined,

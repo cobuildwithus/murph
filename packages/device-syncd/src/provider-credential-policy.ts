@@ -1,31 +1,25 @@
+import { resolveConfiguredDeviceSyncProviderManifest } from "./config/provider-manifests.ts";
+
 import type {
   DeviceSyncProvider,
   DeviceSyncProviderCredentialPolicy,
 } from "./types.ts";
 import type { ConfiguredDeviceSyncProviderKey } from "./config/provider-types.ts";
 
-export const configuredDeviceSyncProviderCredentialPolicies = Object.freeze({
-  junction: Object.freeze({
-    kind: "provider_config",
-    providerConfigKey: "junction",
-  }),
-  oura: Object.freeze({
-    kind: "oauth_tokens",
-  }),
-  whoop: Object.freeze({
-    kind: "oauth_tokens",
-  }),
-  strava: Object.freeze({
-    kind: "oauth_tokens",
-  }),
-} satisfies Record<ConfiguredDeviceSyncProviderKey, DeviceSyncProviderCredentialPolicy>);
+export const configuredDeviceSyncProviderCredentialPolicies = Object.freeze(
+  Object.fromEntries(
+    (["junction", "oura", "whoop", "strava"] satisfies ConfiguredDeviceSyncProviderKey[])
+      .map((provider) => [
+        provider,
+        Object.freeze({ ...resolveConfiguredDeviceSyncProviderManifest(provider)!.credentialPolicy }),
+      ]),
+  ),
+) as Readonly<Record<ConfiguredDeviceSyncProviderKey, DeviceSyncProviderCredentialPolicy>>;
 
 export function resolveConfiguredDeviceSyncProviderCredentialPolicy(
   provider: string,
 ): DeviceSyncProviderCredentialPolicy | undefined {
-  const key = normalizeConfiguredDeviceSyncProviderKey(provider);
-
-  return key ? configuredDeviceSyncProviderCredentialPolicies[key] : undefined;
+  return resolveConfiguredDeviceSyncProviderManifest(provider)?.credentialPolicy;
 }
 
 export function resolveDeviceSyncProviderCredentialPolicy(
@@ -43,21 +37,4 @@ export function resolveDeviceSyncProviderCredentialPolicy(
   return provider.descriptor.oauth
     ? { kind: "oauth_tokens" }
     : { kind: "none" };
-}
-
-function normalizeConfiguredDeviceSyncProviderKey(
-  provider: string,
-): ConfiguredDeviceSyncProviderKey | null {
-  const key = typeof provider === "string" ? provider.trim().toLowerCase() : "";
-
-  if (
-    key === "junction"
-    || key === "oura"
-    || key === "whoop"
-    || key === "strava"
-  ) {
-    return key;
-  }
-
-  return null;
 }

@@ -151,15 +151,21 @@ export {
 export {
   deviceSyncProviderManifests,
   getConfiguredDeviceSyncProviderManifest,
-  getConfiguredDeviceSyncProviderJobDefinition,
   listDeviceSyncProviderCatalog,
   listConfiguredDeviceSyncProviderManifests,
-  normalizeConfiguredDeviceSyncJobInput,
-  normalizeConfiguredDeviceSyncJobRecord,
   requireConfiguredDeviceSyncProviderManifest,
   resolveConfiguredDeviceSyncProviderManifest,
-  shapeConfiguredDeviceSyncHostedHintPayload,
 } from "./config/provider-manifests.ts";
+export {
+  getConfiguredDeviceSyncProviderJobDefinition,
+  normalizeConfiguredDeviceSyncJobInput,
+  normalizeConfiguredDeviceSyncJobRecord,
+  shapeConfiguredDeviceSyncHostedHintPayload,
+} from "./provider-job-definitions.ts";
+export {
+  resolveConfiguredDeviceSyncProviderCredentialPolicy,
+  resolveDeviceSyncProviderCredentialPolicy,
+} from "./provider-credential-policy.ts";
 export {
   createConfiguredDeviceSyncProviders,
   createConfiguredDeviceSyncProvidersFromConfigs,

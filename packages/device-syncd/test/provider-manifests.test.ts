@@ -29,14 +29,13 @@ import {
 import { resolveDeviceProviderConnectionDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
 
 describe("deviceSyncProviderManifests", () => {
-  it("keeps provider ids, descriptors, importers, and capabilities aligned", () => {
+  it("keeps provider ids, descriptors, and capabilities aligned", () => {
     expect(deviceSyncProviderManifests.map((manifest) => manifest.provider)).toEqual(
       configuredDeviceSyncProviderKeys,
     );
 
     for (const manifest of deviceSyncProviderManifests) {
       expect(manifest.descriptor.provider).toBe(manifest.provider);
-      expect(manifest.importer.provider).toBe(manifest.provider);
       expect(manifest.capabilities.scheduledPoll).toBe(
         manifest.descriptor.transportModes.includes("scheduled_poll"),
       );
@@ -192,7 +191,7 @@ describe("deviceSyncProviderManifests", () => {
       webhookPath: "/webhooks/whoop",
       supportsWebhooks: true,
     });
-    expect(JSON.stringify(catalog)).not.toMatch(/clientSecret|clientId|readConfig|createProvider/u);
+    expect(JSON.stringify(catalog)).not.toMatch(/clientSecret|clientId|readConfig/u);
   });
 
   it("reads configured providers and creates runtime providers through the manifest registry", () => {
