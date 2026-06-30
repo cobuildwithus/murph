@@ -21,6 +21,7 @@ import {
 export type HeroMessengerChannel = "imessage" | "telegram";
 
 import { ExperimentCard, type ExperimentResult } from "./phone-mock";
+import { MurphHeadshotAvatar } from "./murph-headshot-avatar";
 
 type BloodworkMarker = {
   label: string;
@@ -95,9 +96,9 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
   },
   {
     topic: "Bone density",
-    user: "Find me a DEXA scan nearby.",
+    user: "Book me a DEXA scan nearby.",
     murph:
-      "BodySpec on Mission has Thursday at 2pm for $49, 1.4 miles away. I put a hold on it. Confirm and I'll book it.",
+      "Booked BodySpec on Mission for Thursday at 2pm: $49, 1.4 miles away. I added the confirmation and prep notes to your calendar.",
   },
   {
     topic: "LDL cholesterol",
@@ -1096,11 +1097,7 @@ function ChatHeader() {
       </div>
 
       <div className="flex flex-1 flex-col items-center">
-        <div className="relative z-10 flex size-[38px] items-center justify-center rounded-full bg-[#4a4035] shadow-[0_2px_6px_-2px_rgba(0,0,0,0.3)]">
-          <span className="text-[1.125rem] font-semibold leading-none text-[#f5f0e8]">
-            M
-          </span>
-        </div>
+        <MurphHeadshotAvatar />
         <div className="-mt-[5px] flex items-center gap-[3px] rounded-full bg-[#2d3436]/10 px-2.5 py-[3px] backdrop-blur-md ring-1 ring-inset ring-white/50">
           <p className="text-[0.6875rem] font-semibold tracking-tight text-[#2d3436]">
             Murph
