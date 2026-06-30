@@ -24,6 +24,7 @@ import { PrismaHostedOAuthSessionStore } from "./prisma-store/oauth-sessions";
 import {
   PrismaHostedConnectionSourceStore,
   type HostedDeviceConnectionSource,
+  type ListHostedRuntimeSnapshotConnectionSourcesInput,
   type MarkHostedDeviceConnectionSourcesDisconnectedInput,
   type UpsertHostedDeviceConnectionSourceInput,
 } from "./prisma-store/sources";
@@ -59,6 +60,7 @@ export {
   mapHostedConnectionSourceRecord,
   type HostedConnectionSourceRecord,
   type HostedDeviceConnectionSource,
+  type ListHostedRuntimeSnapshotConnectionSourcesInput,
   type MarkHostedDeviceConnectionSourcesDisconnectedInput,
   type UpsertHostedDeviceConnectionSourceInput,
 } from "./prisma-store/sources";
@@ -358,6 +360,12 @@ export class PrismaDeviceSyncControlPlaneStore
     tx?: HostedPrismaTransactionClient,
   ): Promise<HostedDeviceConnectionSource[]> {
     return this.sources.listConnectionSources(connectionId, tx);
+  }
+
+  async listRuntimeSnapshotConnectionSources(
+    input: ListHostedRuntimeSnapshotConnectionSourcesInput,
+  ): Promise<HostedDeviceConnectionSource[]> {
+    return this.sources.listRuntimeSnapshotConnectionSources(input);
   }
 
   async consumeBrowserAssertionNonce(input: {
