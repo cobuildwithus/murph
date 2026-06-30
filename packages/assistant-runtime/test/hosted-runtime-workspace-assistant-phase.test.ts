@@ -3613,7 +3613,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(prompt).not.toContain("vault-cli device connect oura --format json");
   });
 
-  it("defers active-turn input before hosted device sync dynamic context can commit delivery", async () => {
+  it("reruns without hosted device sync dynamic context after active-turn input is deferred", async () => {
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),
       async applyUpdates() {
@@ -3683,13 +3683,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runningJobs: 0,
       totalJobs: 1,
     });
-    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
-      activeTurnInputIngested: true,
-      assistantAutomationCurrentTurnDeliveryIntentIds: [],
-      assistantAutomationProgressed: true,
-      nextWakeAt: null,
-      redactedLogEntries: [],
-    });
+    mocks.runHostedAssistantAutomationLane
+      .mockResolvedValueOnce({
+        activeTurnInputIngested: true,
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: true,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      })
+      .mockResolvedValueOnce({
+        activeTurnInputIngested: true,
+        assistantAutomationCurrentTurnDeliveryIntentIds: ["foreground-intent"],
+        assistantAutomationProgressed: true,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
       resolvedDeviceSync: {
@@ -3706,15 +3714,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runtimeDeviceSyncPort: deviceSyncPort,
     }));
 
-    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(2);
     const firstCall = mocks.runHostedAssistantAutomationLane.mock.calls[0]?.[0];
+    const secondCall = mocks.runHostedAssistantAutomationLane.mock.calls[1]?.[0];
     expect(firstCall?.signal).toEqual(expect.any(AbortSignal));
     expect(firstCall?.deferActiveTurnInput).toBe(true);
     expect(firstCall?.executionContext.hosted?.dynamicContextPrompts).toHaveLength(1);
+    expect(secondCall).not.toHaveProperty("deferActiveTurnInput");
+    expect(secondCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
       expect.objectContaining({
         includeBackgroundDueIntents: false,
-        preferredIntentIds: [],
+        preferredIntentIds: ["foreground-intent"],
       }),
     );
   });
