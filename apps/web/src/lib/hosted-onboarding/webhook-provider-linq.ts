@@ -11,6 +11,7 @@ import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import {
+  hostedOnboardingError,
   isHostedOnboardingError,
 } from "./errors";
 import {
@@ -28,6 +29,7 @@ import {
   lookupHostedMemberByVerifiedEmailAddress,
 } from "./hosted-member-store";
 import {
+  hasHostedMemberPendingLinqNewChatReservation,
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
@@ -649,16 +651,21 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
-  if (existingMember === null && participantContact.kind === "email") {
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildIgnoredLinqWebhookPlan("unknown-email-first-contact"),
-      buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        existingMemberActive: false,
-        existingMemberMatch,
-        reason: "unknown-email-first-contact",
-        routeStage: "ignored-unknown-email-first-contact",
-      }),
-    );
+  if (
+    existingMember === null
+    && participantContact.kind === "email"
+    && await hasHostedMemberPendingLinqNewChatReservation({
+      prisma: input.prisma,
+      recipientPhone: recipientPhoneNumber,
+    })
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_PENDING_NEW_CHAT_BINDING_PENDING",
+      httpStatus: 503,
+      message:
+        "An ops-created Linq chat is still waiting for its durable route; retry this webhook after the route is bound.",
+      retryable: true,
+    });
   }
 
   const member = existingMember

@@ -319,6 +319,7 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.reserveHostedMemberPendingLinqNewChatTx).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: tx,
+      recipientPhone: "+15557654321",
       reservationKey: openIdempotencyKey,
       reservedAt: expect.any(Date),
     });

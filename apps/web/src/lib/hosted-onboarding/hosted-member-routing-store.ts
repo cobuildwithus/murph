@@ -30,6 +30,7 @@ export {
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   clearHostedMemberPendingLinqNewChatReservationTx,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
+  hasHostedMemberPendingLinqNewChatReservation,
   reserveHostedMemberPendingLinqNewChatTx,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,

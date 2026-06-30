@@ -367,6 +367,7 @@ async function prepareHostedOpsOnboardingNewChat(input: {
     const reservationOutcome = await reserveHostedMemberPendingLinqNewChatTx({
       memberId: member.id,
       prisma: tx,
+      recipientPhone: input.request.linqFromPhoneNumber,
       reservationKey: newChatReservationKey,
       reservedAt: new Date(),
     });

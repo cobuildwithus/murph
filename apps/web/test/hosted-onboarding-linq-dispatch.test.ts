@@ -2597,7 +2597,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("fails closed for unknown iMessage email handles without pending route authority", async () => {
+  it("stores iMessage email handles as pending Linq contact claims instead of verified emails", async () => {
     const invite = {
       channel: "linq",
       id: "invite_email_handle",
@@ -2648,6 +2648,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         })),
       },
       hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findUnique: vi.fn().mockResolvedValue(null),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
         upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
@@ -2676,11 +2677,131 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(response).toMatchObject({
-      ignored: true,
+      inviteCode: "code_email_handle",
+      joinUrl: "https://join.example.test/join/code_email_handle",
       ok: true,
-      reason: "unknown-email-first-contact",
+      reason: "sent-signup-link",
     });
     expect(prismaMocks.hostedMemberEmailAuthorization.findMany).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedMemberRouting.findFirst).toHaveBeenCalledWith({
+      select: {
+        memberId: true,
+      },
+      where: {
+        pendingLinqNewChatReservationKey: {
+          not: null,
+        },
+        pendingLinqRecipientPhoneLookupKey: {
+          in: [createHostedPhoneLookupKey("+15550000000")],
+        },
+      },
+    });
+    expect(prismaMocks.hostedMemberIdentity.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          phoneLookupKey: null,
+          phoneNumberEncrypted: null,
+        }),
+      }),
+    );
+    expect(prismaMocks.hostedMemberRouting.upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          pendingLinqParticipantContactKind: "email",
+          pendingLinqParticipantContactLookupKey: expect.stringMatching(/^hbidx:email:v1:/u),
+        }),
+        update: expect.objectContaining({
+          pendingLinqParticipantContactKind: "email",
+          pendingLinqParticipantContactLookupKey: expect.stringMatching(/^hbidx:email:v1:/u),
+        }),
+      }),
+    );
+    expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: expect.stringContaining("https://join.example.test/join/code_email_handle"),
+        replyToMessageId: "msg_123",
+      }),
+    );
+  });
+
+  it("retries unknown iMessage email handles while an ops new-chat route is still binding", async () => {
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn(),
+        update: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMemberEmailAuthorization: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn(),
+      },
+      hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue({ memberId: "member_123" }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn(),
+        upsert: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          sender_handle: {
+            handle: "Buddy@iCloud.com",
+            id: "handle_sender_email",
+            service: "iMessage",
+          },
+        },
+        eventId: "evt_email_handle_binding_pending",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_PENDING_NEW_CHAT_BINDING_PENDING",
+      retryable: true,
+    });
+
+    expect(prismaMocks.hostedMemberRouting.findFirst).toHaveBeenCalledWith({
+      select: {
+        memberId: true,
+      },
+      where: {
+        pendingLinqNewChatReservationKey: {
+          not: null,
+        },
+        pendingLinqRecipientPhoneLookupKey: {
+          in: [createHostedPhoneLookupKey("+15550000000")],
+        },
+      },
+    });
+    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedMemberIdentity.upsert).not.toHaveBeenCalled();
     expect(prismaMocks.hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();

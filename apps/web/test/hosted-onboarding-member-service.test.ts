@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
-import { createHostedLinqChatLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  createHostedLinqChatLookupKey,
+  createHostedPhoneLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import * as barrel from "@/src/lib/hosted-onboarding/member-service";
 import {
   completeHostedPrivyVerification,
@@ -817,6 +820,7 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     await expect(reserveHostedMemberPendingLinqNewChatTx({
       memberId: "member_123",
       prisma: prisma as never,
+      recipientPhone: "+15550100001",
       reservationKey,
       reservedAt,
     })).resolves.toBe("reserved");
@@ -837,10 +841,14 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
         memberId: "member_123",
         pendingLinqNewChatReservationKey: reservationKey,
         pendingLinqNewChatReservedAt: reservedAt,
+        pendingLinqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
+        pendingLinqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15550100001"),
       }),
       update: {
         pendingLinqNewChatReservationKey: reservationKey,
         pendingLinqNewChatReservedAt: reservedAt,
+        pendingLinqRecipientPhoneEncrypted: expect.stringMatching(/^hsb-test:/u),
+        pendingLinqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15550100001"),
       },
       where: {
         memberId: "member_123",
@@ -868,6 +876,7 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     await expect(reserveHostedMemberPendingLinqNewChatTx({
       memberId: "member_123",
       prisma: prisma as never,
+      recipientPhone: "+15550100001",
       reservationKey,
       reservedAt: new Date("2026-06-30T12:00:00.000Z"),
     })).resolves.toBe("already_reserved");
@@ -895,6 +904,7 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     await expect(reserveHostedMemberPendingLinqNewChatTx({
       memberId: "member_123",
       prisma: prisma as never,
+      recipientPhone: "+15550100001",
       reservationKey: "ops-onboarding-invite:open:reservation",
       reservedAt: new Date("2026-06-30T12:00:00.000Z"),
     })).resolves.toBe("reservation_conflict");

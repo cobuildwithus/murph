@@ -54,12 +54,20 @@ export async function upsertHostedMemberPendingLinqBindingTx(input: {
 export async function reserveHostedMemberPendingLinqNewChatTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
+  recipientPhone: string;
   reservationKey: string;
   reservedAt: Date;
 }): Promise<HostedMemberPendingLinqNewChatReservationOutcome> {
   const reservationKey = normalizeHostedOpaqueInput(input.reservationKey);
+  const recipientPhone = normalizePhoneNumber(input.recipientPhone);
+  const recipientPhoneLookupKey = createHostedPhoneLookupKey(recipientPhone);
   if (!reservationKey) {
     throw new TypeError("Hosted Linq new-chat reservation requires a non-empty key.");
+  }
+  if (!recipientPhone || !recipientPhoneLookupKey) {
+    throw new TypeError(
+      "Hosted Linq new-chat reservation requires a non-empty recipient phone.",
+    );
   }
   if (Number.isNaN(input.reservedAt.getTime())) {
     throw new TypeError("Hosted Linq new-chat reservation timestamp must be valid.");
@@ -95,6 +103,18 @@ export async function reserveHostedMemberPendingLinqNewChatTx(input: {
     return "already_reserved";
   }
 
+  const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
+    linqChatId: null,
+    linqRecipientPhone: null,
+    memberId: input.memberId,
+    pendingLinqChatId: null,
+    pendingLinqParticipantContact: null,
+    pendingLinqRecipientPhone: recipientPhone,
+    prisma: input.prisma,
+    telegramThreadId: null,
+    telegramUserId: null,
+  });
+
   await input.prisma.hostedMemberRouting.upsert({
     where: {
       memberId: input.memberId,
@@ -113,14 +133,18 @@ export async function reserveHostedMemberPendingLinqNewChatTx(input: {
       pendingLinqParticipantContactKind: null,
       pendingLinqParticipantContactLookupKey: null,
       pendingLinqParticipantContactObservedAt: null,
-      pendingLinqRecipientPhoneEncrypted: null,
-      pendingLinqRecipientPhoneLookupKey: null,
+      pendingLinqRecipientPhoneEncrypted:
+        routingPrivateColumns.pendingLinqRecipientPhoneEncrypted,
+      pendingLinqRecipientPhoneLookupKey: recipientPhoneLookupKey,
       telegramUserIdEncrypted: null,
       telegramUserLookupKey: null,
     },
     update: {
       pendingLinqNewChatReservationKey: reservationKey,
       pendingLinqNewChatReservedAt: input.reservedAt,
+      pendingLinqRecipientPhoneEncrypted:
+        routingPrivateColumns.pendingLinqRecipientPhoneEncrypted,
+      pendingLinqRecipientPhoneLookupKey: recipientPhoneLookupKey,
     },
   });
 
@@ -153,6 +177,35 @@ export async function clearHostedMemberPendingLinqNewChatReservationTx(input: {
       pendingLinqNewChatReservedAt: null,
     },
   });
+}
+
+export async function hasHostedMemberPendingLinqNewChatReservation(input: {
+  prisma: HostedOnboardingReadClient;
+  recipientPhone: string | null;
+}): Promise<boolean> {
+  const recipientPhoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(
+    input.recipientPhone,
+  );
+
+  if (recipientPhoneLookupKeys.length === 0) {
+    return false;
+  }
+
+  const reservation = await input.prisma.hostedMemberRouting.findFirst({
+    where: {
+      pendingLinqNewChatReservationKey: {
+        not: null,
+      },
+      pendingLinqRecipientPhoneLookupKey: {
+        in: recipientPhoneLookupKeys,
+      },
+    },
+    select: {
+      memberId: true,
+    },
+  });
+
+  return Boolean(reservation);
 }
 
 export async function upsertHostedMemberPendingLinqParticipantContactTx(input: {
