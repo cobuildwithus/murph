@@ -8293,6 +8293,86 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("deferred provider cleanup wake does not bypass the foreground idle checkpoint delay", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const idleCheckpointDelayMs = 250;
+    const providerCleanupWakeAt = new Date(Date.now() + 5 * 60_000).toISOString();
+    let snapshotStartedAtMs: number | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const startedAt = performance.now();
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_provider_cleanup_idle_delay",
+            idleCheckpointDelayMs,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            snapshotStartedAtMs = performance.now();
+            events.push(`snapshot:${snapshotInput.reason}`);
+            assert.equal(snapshotInput.reason, "idle_shutdown");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "6".repeat(64),
+                key: "users/bundles/member-synthetic/provider-cleanup-idle-delay.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            return {
+              checkpointReason: "outbox_receipt",
+              nextWakeAt: providerCleanupWakeAt,
+              nextWakeReason: "assistant",
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantNextWakeAt: providerCleanupWakeAt,
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, providerCleanupWakeAt);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, providerCleanupWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.ok(snapshotStartedAtMs !== null);
+      assert.ok(snapshotStartedAtMs - startedAt >= idleCheckpointDelayMs - 50);
+      assert.ok(snapshotStartedAtMs - startedAt < 5_000);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("due projected runtime wake runs a hot pass without forcing an early idle checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];

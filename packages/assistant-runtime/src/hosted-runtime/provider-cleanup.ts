@@ -105,7 +105,7 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
     });
     await assertHostedProviderCleanupLiveNow(input);
   } catch (error) {
-    const nextWakeAt = new Date(Date.now() + HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS).toISOString();
+    const nextWakeAt = resolveHostedProviderCleanupDeferredWakeAt();
     await writeHostedProviderCleanupState(input.vaultRoot, {
       schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
       checkpoint: {
@@ -147,6 +147,15 @@ export function collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes(
   outcomes: readonly HostedAssistantDeliveryOutcome[],
 ): string[] {
   return normalizeHostedProviderMessageIds(collectHostedLinqProviderMessageIds(outcomes));
+}
+
+export function resolveHostedProviderCleanupDeferredWakeAt(input: {
+  nowMs?: number | null;
+} = {}): string {
+  const nowMs = Number.isFinite(input.nowMs)
+    ? Number(input.nowMs)
+    : Date.now();
+  return new Date(nowMs + HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS).toISOString();
 }
 
 async function assertHostedProviderCleanupLiveNow(input: {

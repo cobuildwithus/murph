@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => ({
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
+  resolveHostedProviderCleanupDeferredWakeAt: vi.fn(),
   resolveHostedPendingAssistantInputWakeAt: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
   resolveHostedDeviceSyncNextWakeAt: vi.fn(),
@@ -134,6 +135,8 @@ vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
   drainHostedProviderCleanupAfterCommit: mocks.drainHostedProviderCleanupAfterCommit,
   recordHostedProviderCleanupBeforeCommit: mocks.recordHostedProviderCleanupBeforeCommit,
   readHostedProviderCleanupCheckpoint: mocks.readHostedProviderCleanupCheckpoint,
+  resolveHostedProviderCleanupDeferredWakeAt:
+    mocks.resolveHostedProviderCleanupDeferredWakeAt,
 }));
 
 vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
@@ -344,6 +347,13 @@ beforeEach(() => {
     stillDirty: false,
   });
   mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValue(undefined);
+  mocks.resolveHostedProviderCleanupDeferredWakeAt.mockImplementation((input = {}) => {
+    const record = input as { nowMs?: number | null };
+    const nowMs = Number.isFinite(record.nowMs)
+      ? Number(record.nowMs)
+      : Date.parse("2026-04-27T00:00:00.000Z");
+    return new Date(nowMs + 5 * 60_000).toISOString();
+  });
   mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValue({
     failed: 0,
     nextWakeAt: null,
@@ -3113,6 +3123,49 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         secret: "synthetic-device-sync-secret",
       },
       workspace: createDueAssistantWorkspace({
+        nextWakeReason: "device-sync.reconcile",
+      }),
+    }));
+
+    expectAssistantLaneCallWithoutDeviceSyncOptions({
+      freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
+    });
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      progressed: true,
+    }));
+  });
+
+  it("uses a skipped device-sync retry instead of a stale local schedule", async () => {
+    mocks.resolveHostedDeviceSyncNextWakeAt.mockReturnValueOnce("2026-04-26T23:59:59.000Z");
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: false,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
         nextWakeReason: "device-sync.reconcile",
       }),
     }));
@@ -7109,7 +7162,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
     expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
-    expect(result.nextWakeAt).toBe("2026-04-27T00:09:00.000Z");
+    expect(result.nextWakeAt).toBe("2026-04-27T00:14:00.000Z");
   });
 
   it("collects only current-turn delivery effects on foreground conversation input", async () => {
@@ -7151,7 +7204,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
     expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
-    expect(result.nextWakeAt).toBe("2026-04-27T00:09:00.000Z");
+    expect(result.nextWakeAt).toBe("2026-04-27T00:14:00.000Z");
     expect(result.progressed).toBe(false);
     expect(result.checkpointReason).toBeUndefined();
   });
@@ -7198,14 +7251,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
     expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
       checkpoint: {
-        nextWakeAt: null,
+        nextWakeAt: "2026-04-27T00:14:00.000Z",
       },
       linqMessageIds: ["provider_message_from_reply"],
       vaultRoot: "/tmp/murph-vault",
     });
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
-      nextWakeAt: "2026-04-27T00:09:00.000Z",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
       progressed: true,
     }));
   });
@@ -7274,14 +7327,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
     expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
       checkpoint: {
-        nextWakeAt: null,
+        nextWakeAt: "2026-04-27T00:14:00.000Z",
       },
       linqMessageIds: ["provider_message_from_active_turn"],
       vaultRoot: "/tmp/murph-vault",
     });
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
-      nextWakeAt: "2026-04-27T00:09:00.000Z",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
       progressed: true,
     }));
   });

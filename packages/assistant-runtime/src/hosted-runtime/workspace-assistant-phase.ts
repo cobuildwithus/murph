@@ -84,6 +84,7 @@ import {
   drainHostedProviderCleanupAfterCommit,
   readHostedProviderCleanupCheckpoint,
   recordHostedProviderCleanupBeforeCommit,
+  resolveHostedProviderCleanupDeferredWakeAt,
   type HostedProviderCleanupCheckpoint,
 } from "./provider-cleanup.ts";
 import { normalizeHostedFutureWakeAt } from "./wake-time.ts";
@@ -3645,15 +3646,18 @@ async function deferHostedProviderCleanupAfterDelivery(input: {
     };
   }
 
+  const nextWakeAt = resolveHostedProviderCleanupDeferredWakeAt({
+    nowMs: resolveHostedAssistantPhaseNowMs(input.input),
+  });
   await recordHostedProviderCleanupBeforeCommit({
     checkpoint: {
-      nextWakeAt: null,
+      nextWakeAt,
     },
     linqMessageIds: providerCleanupMessageIds,
     vaultRoot: input.input.restored.vaultRoot,
   });
   return {
-    nextWakeAt: new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString(),
+    nextWakeAt,
   };
 }
 
@@ -3904,7 +3908,7 @@ function resolveHostedDeviceSyncFollowUpWake(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   pendingAssistantInputWakeAt: string | null;
 }): HostedRuntimeWakeCandidate | null {
-  const localDeviceSyncScheduledWake = resolveHostedLocalDeviceSyncScheduledWake(input.input);
+  let localDeviceSyncScheduledWake = resolveHostedLocalDeviceSyncScheduledWake(input.input);
   const handledDeviceSyncWake = input.input.deviceSyncWorkspaceWakeHandled ?? null;
   if (
     localDeviceSyncScheduledWake?.at
@@ -3916,6 +3920,16 @@ function resolveHostedDeviceSyncFollowUpWake(input: {
   }
 
   const skippedDeviceSyncWake = resolveSkippedDeviceSyncWake(input);
+  if (
+    skippedDeviceSyncWake?.at
+    && shouldDropStaleLocalDeviceSyncWakeForSkippedRetry({
+      input: input.input,
+      localDeviceSyncScheduledWake,
+      skippedDeviceSyncWake,
+    })
+  ) {
+    localDeviceSyncScheduledWake = null;
+  }
   const selectedDeviceSyncFollowUpWake = selectHostedRuntimeWakeCandidate([
     localDeviceSyncScheduledWake,
     skippedDeviceSyncWake,
@@ -3923,6 +3937,30 @@ function resolveHostedDeviceSyncFollowUpWake(input: {
   return selectedDeviceSyncFollowUpWake.at
     ? selectedDeviceSyncFollowUpWake
     : null;
+}
+
+function shouldDropStaleLocalDeviceSyncWakeForSkippedRetry(input: {
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  localDeviceSyncScheduledWake: HostedRuntimeWakeCandidate | null;
+  skippedDeviceSyncWake: HostedRuntimeWakeCandidate;
+}): boolean {
+  if (input.skippedDeviceSyncWake.reason !== HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON) {
+    return false;
+  }
+
+  const nowMs = resolveHostedAssistantPhaseNowMs(input.input);
+  const skippedWakeMs = Date.parse(input.skippedDeviceSyncWake.at ?? "");
+  if (!Number.isFinite(skippedWakeMs) || skippedWakeMs <= nowMs) {
+    return false;
+  }
+
+  const localWakeAt = input.localDeviceSyncScheduledWake?.at ?? null;
+  if (!localWakeAt) {
+    return false;
+  }
+
+  const localWakeMs = Date.parse(localWakeAt);
+  return !Number.isFinite(localWakeMs) || localWakeMs <= nowMs;
 }
 
 function shouldRescheduleSkippedDeviceSyncWake(
@@ -5133,33 +5171,14 @@ function resolveHostedFastDispatchBaseNextWake(input: {
   ]);
 }
 
-function resolveHostedDeferredProviderCleanupWakeAt(input: {
-  checkpoint: HostedProviderCleanupCheckpoint | null;
-  input: HostedWorkspaceRuntimeAssistantPhaseInput;
-  terminalLinqCleanupPending: boolean;
-}): string | null {
-  const wakeAt = new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString();
-  if (input.terminalLinqCleanupPending) {
-    return wakeAt;
-  }
-
-  if (!input.checkpoint) {
-    return null;
-  }
-
-  if (isHostedProviderCleanupCheckpointDue(input.checkpoint, input.input)) {
-    return wakeAt;
-  }
-
-  return input.checkpoint.nextWakeAt ?? null;
-}
-
 function resolveHostedForegroundDeferredProviderCleanupWakeAt(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   terminalLinqCleanupPending: boolean;
 }): string | null {
   return input.terminalLinqCleanupPending
-    ? new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString()
+    ? resolveHostedProviderCleanupDeferredWakeAt({
+        nowMs: resolveHostedAssistantPhaseNowMs(input.input),
+      })
     : null;
 }
 
