@@ -265,7 +265,7 @@ export class RuntimeInvocationService {
 
       if (input.acceptedProcessingAttempt) {
         const committedResult =
-          await this.recoverAcceptedRuntimeCompletionAfterTransportFailure({
+          await this.recoverAcceptedRuntimeCompletionFromCommittedProgress({
             executionInput,
             transportError: error,
             token,
@@ -368,7 +368,7 @@ export class RuntimeInvocationService {
     return result;
   }
 
-  async recoverAcceptedRuntimeCompletionAfterTransportFailure(input: {
+  async recoverAcceptedRuntimeCompletionFromCommittedProgress(input: {
     executionInput: RuntimeInvocationInput;
     token: RunnerWriteFenceToken;
     transportError?: unknown;
@@ -408,7 +408,9 @@ export class RuntimeInvocationService {
         workspaceVersion: input.workspaceVersion,
       },
       level: "warn",
-      message: "Hosted runner accepted runtime attempt committed progress despite transport failure.",
+      message: input.transportError === undefined
+        ? "Hosted runner accepted runtime attempt committed progress; completing the active write fence."
+        : "Hosted runner accepted runtime attempt committed progress despite transport failure.",
       phase: "checkpoint",
       userId: input.executionInput.userId,
     });

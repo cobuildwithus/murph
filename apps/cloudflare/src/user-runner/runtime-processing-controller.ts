@@ -42,6 +42,7 @@ import {
 } from "./runtime-processing-responses.js";
 import {
   RuntimeInvocationService,
+  type AcceptedRuntimeCompletionRecoveryResult,
   type PreparedRuntimeInvocation,
   type RuntimeInvocationInput,
 } from "./runtime-invocation.js";
@@ -300,6 +301,16 @@ export class RuntimeProcessingController {
       });
     }
 
+    const recoveredCompletion =
+      await this.recoverActiveRuntimeFenceCompletion({
+        activeFence,
+        input: inputAfterActiveWake,
+        record,
+      });
+    if (recoveredCompletion.kind === "completed") {
+      return this.createActiveRuntimeFenceCompletionResponse(activeFence);
+    }
+
     await this.syncRunnerAlarm(record);
     return createRuntimeProcessingRetryLater({
       reason: mapRunnerProcessingRetryReason(containerResult.reason),
@@ -324,31 +335,13 @@ export class RuntimeProcessingController {
     }
 
     const recoveredCompletion =
-      await this.input.invocationService.recoverAcceptedRuntimeCompletionAfterTransportFailure({
-        executionInput: toRuntimeInvocationInput(input.input),
-        token: {
-          attemptId: activeFence.attemptId,
-          expiresAt: activeFence.expiresAt,
-          generation: String(activeFence.generation),
-          kind: activeFence.kind,
-          leaseGeneration: String(activeFence.generation),
-          processingMode: activeFence.processingMode,
-          providerEgressToken: null,
-          runnerContainerName: activeFence.runnerContainerName,
-          startedAt: activeFence.startedAt,
-          userId: record.userId,
-          workspaceVersion: activeFence.workspaceVersion,
-        },
-        workspaceVersion: activeFence.workspaceVersion,
+      await this.recoverActiveRuntimeFenceCompletion({
+        activeFence,
+        input: input.input,
+        record,
       });
     if (recoveredCompletion.kind === "completed") {
-      return {
-        action: "already_running",
-        kind: "runtime_processing_accepted",
-        recommendedRecheckAt:
-          this.computeRuntimeProcessingOwnerRecheckAt(),
-        runtimeAttemptId: activeFence.attemptId,
-      };
+      return this.createActiveRuntimeFenceCompletionResponse(activeFence);
     }
     if (recoveredCompletion.kind === "unknown") {
       await this.syncRunnerAlarm(record);
@@ -380,6 +373,43 @@ export class RuntimeProcessingController {
       commandBudget: input.commandBudget,
       input: replacementInput,
       runtimeWakeStartedAt: input.runtimeWakeStartedAt,
+    });
+  }
+
+  private createActiveRuntimeFenceCompletionResponse(
+    activeFence: NonNullable<RunnerStateRecord["writeFence"]>,
+  ): HostedRuntimeEnsureProcessingResponse {
+    return {
+      action: "already_running",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt:
+        this.computeRuntimeProcessingOwnerRecheckAt(),
+      runtimeAttemptId: activeFence.attemptId,
+    };
+  }
+
+  private async recoverActiveRuntimeFenceCompletion(input: {
+    activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
+    input: RuntimeProcessingInput;
+    record: RunnerStateRecord;
+  }): Promise<AcceptedRuntimeCompletionRecoveryResult> {
+    const { activeFence, record } = input;
+    return await this.input.invocationService.recoverAcceptedRuntimeCompletionFromCommittedProgress({
+      executionInput: toRuntimeInvocationInput(input.input),
+      token: {
+        attemptId: activeFence.attemptId,
+        expiresAt: activeFence.expiresAt,
+        generation: String(activeFence.generation),
+        kind: activeFence.kind,
+        leaseGeneration: String(activeFence.generation),
+        processingMode: activeFence.processingMode,
+        providerEgressToken: null,
+        runnerContainerName: activeFence.runnerContainerName,
+        startedAt: activeFence.startedAt,
+        userId: record.userId,
+        workspaceVersion: activeFence.workspaceVersion,
+      },
+      workspaceVersion: activeFence.workspaceVersion,
     });
   }
 
