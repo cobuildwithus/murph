@@ -1,3 +1,5 @@
+import type { MurphHeadshotSrc } from "./murph-headshot-avatar";
+
 import { PhoneMock, type PhoneMessage } from "./phone-mock";
 
 const CHANNELS = ["iMessage", "Telegram", "Email"] as const;
@@ -17,7 +19,11 @@ const MESSAGES: ReadonlyArray<PhoneMessage> = [
   },
 ];
 
-export function AssistantSection() {
+export function AssistantSection({
+  murphHeadshotSrc,
+}: {
+  murphHeadshotSrc: MurphHeadshotSrc;
+}) {
   return (
     <section className="bg-[#2a2520] px-5 py-16 sm:px-10 lg:px-16 lg:py-24">
       <div className="mx-auto max-w-[1080px]">
@@ -47,7 +53,11 @@ export function AssistantSection() {
           </div>
 
           <div className="mx-auto w-full max-w-[300px]">
-            <PhoneMock conversationHeight={470} messages={MESSAGES} />
+            <PhoneMock
+              conversationHeight={470}
+              messages={MESSAGES}
+              murphHeadshotSrc={murphHeadshotSrc}
+            />
           </div>
         </div>
       </div>

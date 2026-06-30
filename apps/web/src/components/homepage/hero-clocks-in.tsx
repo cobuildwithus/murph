@@ -21,7 +21,10 @@ import {
 export type HeroMessengerChannel = "imessage" | "telegram";
 
 import { ExperimentCard, type ExperimentResult } from "./phone-mock";
-import { MurphHeadshotAvatar } from "./murph-headshot-avatar";
+import {
+  MurphHeadshotAvatar,
+  type MurphHeadshotSrc,
+} from "./murph-headshot-avatar";
 
 type BloodworkMarker = {
   label: string;
@@ -331,10 +334,12 @@ export function HeroClocksIn({
   authenticated,
   contactInfo,
   messengerChannel,
+  murphHeadshotSrc,
 }: {
   authenticated: boolean;
   contactInfo: HeroContactInfo;
   messengerChannel: HeroMessengerChannel;
+  murphHeadshotSrc: MurphHeadshotSrc;
 }) {
   const [items, setItems] = useState<ReadonlyArray<StreamItem>>([]);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
@@ -746,7 +751,7 @@ export function HeroClocksIn({
                 <StatusBar />
                 <div className="relative">
                   <div className="absolute inset-x-0 top-0 z-20">
-                    <ChatHeader />
+                    <ChatHeader murphHeadshotSrc={murphHeadshotSrc} />
                   </div>
                   <div className="relative" style={{ height: 580 }}>
                     <div
@@ -1078,7 +1083,11 @@ function StatusBar() {
   );
 }
 
-function ChatHeader() {
+function ChatHeader({
+  murphHeadshotSrc,
+}: {
+  murphHeadshotSrc: MurphHeadshotSrc;
+}) {
   return (
     <div className="relative z-20 flex items-start justify-between px-2.5 pb-2 pt-1.5">
       <div className="flex h-[30px] items-center gap-1.5 rounded-full bg-[#2d3436]/10 px-2.5 pr-1.5 backdrop-blur-md ring-1 ring-inset ring-white/50">
@@ -1097,7 +1106,7 @@ function ChatHeader() {
       </div>
 
       <div className="flex flex-1 flex-col items-center">
-        <MurphHeadshotAvatar />
+        <MurphHeadshotAvatar src={murphHeadshotSrc} />
         <div className="-mt-[5px] flex items-center gap-[3px] rounded-full bg-[#2d3436]/10 px-2.5 py-[3px] backdrop-blur-md ring-1 ring-inset ring-white/50">
           <p className="text-[0.6875rem] font-semibold tracking-tight text-[#2d3436]">
             Murph
