@@ -1,16 +1,20 @@
 import {
+  createDeviceSyncPublicIngress,
+  resolveDeviceSyncWebhookPreflightResponse,
+} from "@murphai/device-syncd/public-ingress";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
+import {
   DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
   DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
-  createDeviceSyncPublicIngress,
-  deviceSyncError,
   type BeginConnectionResult,
   type CompleteConnectionResult,
   type HandleWebhookResult,
+  type DeviceSyncWebhookPreflightResponse,
   type PublicDeviceSyncAccount,
   type PublicProviderDescriptor,
   type SdkSignInSessionResult,
-} from "@murphai/device-syncd/public-ingress";
-import type { DeviceSyncRegistry } from "@murphai/device-syncd/types";
+  type DeviceSyncRegistry,
+} from "@murphai/device-syncd/types";
 
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
 import {
@@ -213,6 +217,20 @@ export class HostedDeviceSyncPublicIngressService {
   async handleWebhook(provider: string, rawBody?: Buffer): Promise<HandleWebhookResult> {
     const resolvedRawBody = rawBody ?? (await this.readWebhookRawBody());
     return this.ingress.handleWebhook(provider, this.context.request.headers, resolvedRawBody);
+  }
+
+  async resolveWebhookPreflight(
+    provider: string,
+    rawBody: Buffer,
+  ): Promise<DeviceSyncWebhookPreflightResponse | null> {
+    return resolveDeviceSyncWebhookPreflightResponse({
+      provider,
+      registry: this.registry,
+      method: this.context.request.method,
+      url: new URL(this.context.request.url),
+      headers: this.context.request.headers,
+      rawBody,
+    });
   }
 
   async disconnectConnection(userId: string, connectionId: string): Promise<{

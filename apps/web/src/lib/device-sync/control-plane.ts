@@ -127,6 +127,10 @@ export class HostedDeviceSyncControlPlane {
     return (await this.getConnections()).handleWebhook(provider, rawBody);
   }
 
+  async resolveWebhookPreflight(provider: string, rawBody: Buffer) {
+    return (await this.getConnections()).resolveWebhookPreflight(provider, rawBody);
+  }
+
   async disconnectConnection(userId: string, connectionId: string) {
     return (await this.getConnections()).disconnectConnection(userId, connectionId);
   }

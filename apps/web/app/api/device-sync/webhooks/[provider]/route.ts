@@ -1,6 +1,3 @@
-import {
-  resolveDeviceSyncWebhookPreflightResponse,
-} from "@murphai/device-syncd/public-ingress";
 import type { DeviceSyncWebhookPreflightResponse } from "@murphai/device-syncd/types";
 
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
@@ -12,14 +9,7 @@ export const GET = withJsonError(async (
 ) => {
   const decodedProvider = await resolveDecodedRouteParam(context.params, "provider");
   const controlPlane = createHostedDeviceSyncControlPlane(request);
-  const preflight = await resolveDeviceSyncWebhookPreflightResponse({
-    provider: decodedProvider,
-    registry: await controlPlane.requireRegistry(),
-    method: request.method,
-    url: new URL(request.url),
-    headers: request.headers,
-    rawBody: Buffer.alloc(0),
-  });
+  const preflight = await controlPlane.resolveWebhookPreflight(decodedProvider, Buffer.alloc(0));
 
   if (preflight) {
     return createWebhookPreflightResponse(preflight);
@@ -38,14 +28,7 @@ export const POST = withJsonError(async (
   const provider = await resolveDecodedRouteParam(context.params, "provider");
   const controlPlane = createHostedDeviceSyncControlPlane(request);
   const rawBody = await controlPlane.readWebhookRawBody();
-  const preflight = await resolveDeviceSyncWebhookPreflightResponse({
-    provider,
-    registry: await controlPlane.requireRegistry(),
-    method: request.method,
-    url: new URL(request.url),
-    headers: request.headers,
-    rawBody,
-  });
+  const preflight = await controlPlane.resolveWebhookPreflight(provider, rawBody);
 
   if (preflight) {
     return createWebhookPreflightResponse(preflight);

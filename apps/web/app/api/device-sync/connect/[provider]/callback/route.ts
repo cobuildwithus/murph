@@ -2,7 +2,7 @@ import {
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
 } from "@murphai/device-syncd/hosted-runtime";
-import { isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 
 import {
   InvalidRouteParamEncodingError,

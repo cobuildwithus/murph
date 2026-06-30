@@ -1,7 +1,5 @@
-import {
-  sanitizeStoredDeviceSyncMetadata,
-  type PublicDeviceSyncAccount,
-} from "@murphai/device-syncd/public-ingress";
+import { sanitizeStoredDeviceSyncMetadata } from "@murphai/device-syncd/public-account";
+import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
 import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncDirtyAckRequest,
