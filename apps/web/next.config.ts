@@ -62,6 +62,8 @@ const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 export const WORKSPACE_SOURCE_PACKAGE_NAMES = HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES;
+export const HOSTED_WEB_NEXT_TSCONFIG_PATH = "./tsconfig.next.json";
+export const HOSTED_WEB_PRODUCTION_BUILD_CPUS = 2;
 export const HOSTED_WEB_WORKFLOW_OPTIONS = {
   workflows: {
     lazyDiscovery: true,
@@ -277,6 +279,7 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
     distDir: resolveHostedWebDistDir(phase, process.env),
     env: buildHostedWebClientEnv(process.env),
     experimental: {
+      cpus: HOSTED_WEB_PRODUCTION_BUILD_CPUS,
       turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(process.env),
     },
     outputFileTracingIncludes: {
@@ -301,6 +304,9 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
     outputFileTracingRoot: path.resolve(appDir, "../.."),
     transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
     turbopack: buildHostedWebTurbopackConfig(),
+    typescript: {
+      tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
+    },
     headers: async () => [
       {
         source: HOSTED_WEB_HEADER_SOURCE,

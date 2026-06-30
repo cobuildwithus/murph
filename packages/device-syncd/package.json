@@ -54,6 +54,14 @@
       "types": "./dist/provider-label.d.ts",
       "default": "./dist/provider-label.js"
     },
+    "./provider-credential-policy": {
+      "types": "./dist/provider-credential-policy.d.ts",
+      "default": "./dist/provider-credential-policy.js"
+    },
+    "./provider-match": {
+      "types": "./dist/provider-match.d.ts",
+      "default": "./dist/provider-match.js"
+    },
     "./runtime-config": {
       "types": "./dist/runtime-config.d.ts",
       "default": "./dist/runtime-config.js"
@@ -85,6 +93,10 @@
     "./providers/junction-client": {
       "types": "./dist/providers/junction-client.d.ts",
       "default": "./dist/providers/junction-client.js"
+    },
+    "./providers/junction-config": {
+      "types": "./dist/providers/junction-config.d.ts",
+      "default": "./dist/providers/junction-config.js"
     },
     "./registry": {
       "types": "./dist/registry.d.ts",

@@ -18,7 +18,6 @@ import type {
   ConfiguredDeviceSyncProviderPresence,
   DeviceSyncEnvSource,
 } from "./provider-types.ts";
-import type { JunctionDeviceSyncProviderConfig } from "../providers/junction.ts";
 import type { OuraDeviceSyncProviderConfig } from "../providers/oura.ts";
 import type { StravaDeviceSyncProviderConfig } from "../providers/strava.ts";
 import type { WhoopDeviceSyncProviderConfig } from "../providers/whoop.ts";
@@ -50,11 +49,7 @@ export function readConfiguredDeviceSyncProviderConfigs(
   return configs;
 }
 
-export function readConfiguredJunctionDeviceSyncProviderConfig(
-  env: DeviceSyncEnvSource,
-): JunctionDeviceSyncProviderConfig | null {
-  return getConfiguredDeviceSyncProviderManifest("junction").readConfig(env);
-}
+export { readConfiguredJunctionDeviceSyncProviderConfig } from "../providers/junction-config.ts";
 
 export function readConfiguredWhoopDeviceSyncProviderConfig(
   env: DeviceSyncEnvSource,

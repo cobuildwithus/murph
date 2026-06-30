@@ -1,6 +1,6 @@
-import { readConfiguredJunctionDeviceSyncProviderConfig } from "@murphai/device-syncd/config";
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
 import { JunctionClient } from "@murphai/device-syncd/providers/junction-client";
+import { readConfiguredJunctionDeviceSyncProviderConfig } from "@murphai/device-syncd/providers/junction-config";
 import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
 
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";

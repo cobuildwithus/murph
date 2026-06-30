@@ -1,9 +1,9 @@
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
+import { resolveDeviceSyncProviderCredentialPolicy } from "./provider-credential-policy.ts";
 import {
   normalizeConfiguredDeviceSyncJobInput,
-  resolveDeviceSyncProviderCredentialPolicy,
-} from "./config/provider-manifests.ts";
+} from "./provider-job-definitions.ts";
 import { resolveDeviceProviderConnectionDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
 import {
   addMilliseconds,

@@ -8,7 +8,9 @@ import {
   type UpsertPublicDeviceSyncConnectionInput,
   type UpsertPublicDeviceSyncConnectionResult,
 } from "@murphai/device-syncd/public-ingress";
-import { resolveConfiguredDeviceSyncProviderManifest } from "@murphai/device-syncd/config";
+import {
+  resolveConfiguredDeviceSyncProviderCredentialPolicy,
+} from "@murphai/device-syncd/provider-credential-policy";
 import type {
   DeviceAccountCredential,
   DeviceAccountCredentialKind,
@@ -1160,8 +1162,7 @@ function validateHostedDeviceSyncCredentialPolicy(
   provider: string,
   credential: DeviceAccountCredential,
 ): void {
-  const manifest = resolveConfiguredDeviceSyncProviderManifest(provider);
-  const policy = manifest?.credentialPolicy;
+  const policy = resolveConfiguredDeviceSyncProviderCredentialPolicy(provider);
 
   if (policy) {
     if (credential.kind !== policy.kind) {
