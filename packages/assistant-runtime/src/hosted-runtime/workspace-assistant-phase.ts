@@ -332,16 +332,30 @@ export async function runHostedWorkspaceAssistantPhase(
         return assistantLaneExecutionContextWithDynamicPrompt;
       }
 
-      const deviceSyncStatusPrompt = await buildHostedDeviceSyncStatusPrompt({
-        deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
-        reconnectTargets: resolveHostedWorkspaceDeviceReconnectTargets(input.runtime),
+      const cancellation = createHostedIdleDeviceSyncMaintenanceCancellation({
         signal: channelAbortController.signal,
+        shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
+        timeoutMs: null,
       });
-      assistantLaneExecutionContextWithDynamicPrompt =
-        withHostedAssistantDynamicContextPrompt({
-          executionContext,
-          prompt: deviceSyncStatusPrompt,
+
+      try {
+        const deviceSyncStatusPrompt = await buildHostedDeviceSyncStatusPrompt({
+          deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
+          reconnectTargets: resolveHostedWorkspaceDeviceReconnectTargets(input.runtime),
+          signal: cancellation.signal,
         });
+        if (input.shouldYieldBackgroundMaintenance?.() === true) {
+          return executionContext;
+        }
+
+        assistantLaneExecutionContextWithDynamicPrompt =
+          withHostedAssistantDynamicContextPrompt({
+            executionContext,
+            prompt: deviceSyncStatusPrompt,
+          });
+      } finally {
+        cancellation.dispose();
+      }
       return assistantLaneExecutionContextWithDynamicPrompt;
     };
     const shouldIncludeDeviceSyncStatusPrompt = async (options: {
