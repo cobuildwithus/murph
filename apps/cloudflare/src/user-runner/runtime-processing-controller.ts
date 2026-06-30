@@ -308,16 +308,13 @@ export class RuntimeProcessingController {
         record,
       });
     if (activeRuntimeState === "inactive") {
-      const recoveredCompletion =
-        await this.recoverActiveRuntimeFenceCompletion({
-          activeFence,
-          commandBudget: input.commandBudget,
-          input: inputAfterActiveWake,
-          record,
-        });
-      if (recoveredCompletion.kind === "completed") {
-        return this.createActiveRuntimeFenceCompletionResponse(activeFence);
-      }
+      return await this.replaceStartRequiredRuntimeFence({
+        activeFence,
+        commandBudget: input.commandBudget,
+        input: inputAfterActiveWake,
+        record,
+        runtimeWakeStartedAt: input.runtimeWakeStartedAt,
+      });
     }
 
     await this.syncRunnerAlarm(record);

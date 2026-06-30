@@ -444,7 +444,7 @@ export class RuntimeInvocationService {
         : await readStatus();
     } catch (error) {
       if (isRuntimeProcessingCommandBudgetTimeout(error)) {
-        return { kind: "not_completed" };
+        return { kind: "unknown" };
       }
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",

@@ -553,13 +553,23 @@ function createFailingInvokeContainerNamespace(input: {
     | (() => Promise<WorkerActiveRuntimeUserFenceResult>)
     | null;
 }): HostedExecutionContainerNamespaceLike {
+  const readActiveRuntimeUserFenceInput = input.readActiveRuntimeUserFence;
   const stub: HostedExecutionContainerStubLike = {
     destroyInstance: async () => {},
     invoke: async () => {
       throw new Error("container transport failed");
     },
-    ...(input.readActiveRuntimeUserFence
-      ? { readActiveRuntimeUserFence: input.readActiveRuntimeUserFence }
+    ...(readActiveRuntimeUserFenceInput
+      ? {
+          readActiveRuntimeUserFence: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+          >(
+            async function (this: HostedExecutionContainerStubLike) {
+              expect(this).toBe(stub);
+              return await readActiveRuntimeUserFenceInput.call(this);
+            },
+          ),
+        }
       : {}),
     smokeHealth: async () => ({
       ok: true,
@@ -571,6 +581,20 @@ function createFailingInvokeContainerNamespace(input: {
   return {
     getByName: () => stub,
   };
+}
+
+function createDirectOnlyRpcMethod<T extends (...args: never[]) => unknown>(
+  method: T,
+): T {
+  return new Proxy(method, {
+    get(target, property, receiver) {
+      if (property === "call" || property === "apply" || property === "bind") {
+        throw new TypeError("Cloudflare Durable Object RPC methods must be invoked directly on the stub.");
+      }
+
+      return Reflect.get(target, property, receiver);
+    },
+  });
 }
 
 function createHostedExecutionEnvironment() {
