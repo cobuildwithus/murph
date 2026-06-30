@@ -436,6 +436,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.promptProfile === 'conversation' &&
     input.sharedPlan.onboardingGuidanceOpen
   const assistantToolNameAliases = null
+  const assistantDynamicContextPrompts =
+    input.executionContext?.hosted?.dynamicContextPrompts ?? []
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
@@ -491,6 +493,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.promptProfile === 'notification-decision'
       ? buildAssistantNotificationDecisionSystemPromptWithCacheMetadata({
             assistantContextSnapshotPrompt,
+            assistantDynamicContextPrompts,
             assistantHostedDeviceConnectAvailable:
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:
@@ -505,6 +508,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : buildAssistantSystemPromptWithCacheMetadata({
             assistantCliContract: options.assistantCliContract,
             assistantContextSnapshotPrompt,
+            assistantDynamicContextPrompts,
             assistantHostedDeviceConnectAvailable:
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:

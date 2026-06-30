@@ -144,6 +144,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
         {
           connectionId: null,
+          limit: 4,
           provider: "oura",
         },
         "trusted-user",
@@ -151,6 +152,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ).toEqual({
       connectionId: null,
       includeCredentialMaterial: false,
+      limit: 4,
       provider: "oura",
       userId: "trusted-user",
     });

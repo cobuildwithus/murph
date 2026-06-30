@@ -79,17 +79,38 @@ function createSourceStore(seed: MutableConnectionSourceRecord[] = []) {
     return cloneSourceRecord(created);
   });
 
-  const findMany = vi.fn(async ({ where }: { where: { connectionId: string } }) =>
-    [...records.values()]
-      .filter((record) => record.connectionId === where.connectionId)
+  const findMany = vi.fn(async (input: {
+    take?: number;
+    where: {
+      connectionId: string;
+      sourceProviderSlug?: {
+        in: string[];
+      };
+      status?: {
+        not?: string;
+      };
+    };
+  }) => {
+    const sorted = [...records.values()]
+      .filter((record) => record.connectionId === input.where.connectionId)
+      .filter((record) =>
+        input.where.sourceProviderSlug?.in
+          ? input.where.sourceProviderSlug.in.includes(record.sourceProviderSlug)
+          : true
+      )
+      .filter((record) =>
+        input.where.status?.not ? record.status !== input.where.status.not : true
+      )
       .sort((left, right) =>
         right.lastSeenAt.getTime() - left.lastSeenAt.getTime()
         || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
         || left.sourceInstanceKey.localeCompare(right.sourceInstanceKey)
         || left.id.localeCompare(right.id),
-      )
-      .map(cloneSourceRecord),
-  );
+      );
+    const limited = input.take === undefined ? sorted : sorted.slice(0, input.take);
+
+    return limited.map(cloneSourceRecord);
+  });
 
   const updateMany = vi.fn(async (input: {
     where: {
@@ -296,6 +317,63 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
       ],
       where: {
         connectionId: "dsc_parent",
+      },
+    }));
+  });
+
+  it("lists runtime snapshot connection sources with a bounded provider projection", async () => {
+    const { findMany, store } = createSourceStore([
+      createSourceRecord({
+        id: "dcs_unrelated",
+        sourceInstanceKey: "src_garmin_a",
+        sourceProviderSlug: "garmin",
+        status: "error",
+        lastSeenAt: new Date("2026-03-25T04:00:00.000Z"),
+      }),
+      createSourceRecord({
+        id: "dcs_disconnected",
+        sourceInstanceKey: "src_whoop_disconnected",
+        sourceProviderSlug: "whoop_v2",
+        status: "disconnected",
+        lastSeenAt: new Date("2026-03-25T03:00:00.000Z"),
+      }),
+      createSourceRecord({
+        id: "dcs_whoop_error",
+        sourceInstanceKey: "src_whoop_error",
+        sourceProviderSlug: "whoop_v2",
+        status: "error",
+        lastErrorCode: "TOKEN_REFRESH_FAILED",
+        lastSeenAt: new Date("2026-03-25T02:00:00.000Z"),
+      }),
+      createSourceRecord({
+        id: "dcs_whoop_connected",
+        sourceInstanceKey: "src_whoop_connected",
+        sourceProviderSlug: "whoop_v2",
+        status: "connected",
+        lastSeenAt: new Date("2026-03-25T01:00:00.000Z"),
+      }),
+    ]);
+
+    await expect(store.listRuntimeSnapshotConnectionSources({
+      connectionId: "dsc_parent",
+      limit: 1,
+      sourceProviderSlugs: ["whoop", "whoop_v2", "whoop-v2"],
+    })).resolves.toEqual([
+      expect.objectContaining({
+        id: "dcs_whoop_error",
+        sourceProviderSlug: "whoop_v2",
+      }),
+    ]);
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: 1,
+      where: {
+        connectionId: "dsc_parent",
+        sourceProviderSlug: {
+          in: ["whoop", "whoop_v2", "whoop-v2"],
+        },
+        status: {
+          not: "disconnected",
+        },
       },
     }));
   });

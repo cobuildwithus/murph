@@ -189,6 +189,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSeed {
 export interface HostedExecutionDeviceSyncRuntimeSnapshotRequest {
   connectionId?: string | null;
   includeCredentialMaterial: boolean;
+  limit?: number | null;
   provider?: string | null;
   sourceProviderSlug?: string | null;
   userId: string;
@@ -561,6 +562,14 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
             record.includeCredentialMaterial,
             "Hosted device-sync runtime snapshot request includeCredentialMaterial",
           ),
+    ...(record.limit === undefined
+      ? {}
+      : {
+          limit: readNullablePositiveInteger(
+            record.limit,
+            "Hosted device-sync runtime snapshot request limit",
+          ),
+        }),
     ...(record.provider === undefined
       ? {}
       : { provider: readNullableStringValue(record.provider, "Hosted device-sync runtime snapshot request provider") }),
