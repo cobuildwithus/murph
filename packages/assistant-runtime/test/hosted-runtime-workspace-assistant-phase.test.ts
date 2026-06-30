@@ -4449,6 +4449,75 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it("drops an available post-delivery cron wake when it is the consumed workspace wake", async () => {
+    vi.useFakeTimers();
+    try {
+      const consumedWakeAt = "2026-05-08T16:00:00.000Z";
+      vi.setSystemTime(new Date("2026-05-08T16:00:00.100Z"));
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationCronProcessed: 1,
+        assistantAutomationProgressed: true,
+        deviceSyncProcessed: 0,
+        deviceSyncSkipped: true,
+        nextWakeAt: consumedWakeAt,
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+        redactedLogEntries: [],
+      });
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+        createDeliveryEffect(),
+      ]);
+      mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+        vi.setSystemTime(new Date("2026-05-08T16:00:01.000Z"));
+        mocks.getAssistantCronStatus.mockResolvedValueOnce({
+          dueJobs: 1,
+          enabledJobs: 1,
+          nextRunAt: consumedWakeAt,
+          runningJobs: 0,
+          totalJobs: 1,
+        });
+        return [createSentDeliveryOutcome()];
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        importedCount: 0,
+        now: () => consumedWakeAt,
+        workspace: {
+          checkpointedAt: "2026-05-08T15:59:50.000Z",
+          createdAt: "2026-05-08T15:00:00.000Z",
+          nextWakeAt: consumedWakeAt,
+          nextWakeReason: "assistant",
+          redactedStatus: null,
+          snapshotRef: null,
+          updatedAt: "2026-05-08T15:59:50.000Z",
+          userId: "member_synthetic_phase",
+          version: "8",
+        },
+      }));
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_sending",
+        nextWakeAt: null,
+        progressed: true,
+      }));
+
+      const postCheckpoint = await result.afterCheckpoint?.();
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+        nextWakeAt: null,
+        redactedStatus: expect.objectContaining({
+          hostedAssistantNextWakeAt: null,
+          hostedOutboxDeliveryAttempted: 1,
+          hostedOutboxDeliverySent: 1,
+          hostedOutboxPendingDeliveryEffects: 0,
+          nextWakeAt: null,
+        }),
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("drops the consumed assistant cron wake when system mailbox work is imported in the same pass", async () => {
     vi.useFakeTimers();
     try {
