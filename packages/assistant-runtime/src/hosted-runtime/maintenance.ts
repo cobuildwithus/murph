@@ -376,7 +376,20 @@ export async function runHostedAssistantAutomation(
       return result;
     },
     async refresh(refreshInput) {
-      return await baseInputSource.refresh(refreshInput);
+      const result = await baseInputSource.refresh(refreshInput);
+      if (
+        options?.deferActiveTurnInput === true
+        && selectedInputIds.mode === "background"
+        && result.progressed
+        && result.reason === "ingested_input"
+      ) {
+        activeTurnInputIngested = true;
+        throw new AssistantActiveTurnInputUnavailableError(
+          "same-conversation input arrived during a background dynamic-context turn; retry without dynamic context.",
+        );
+      }
+
+      return result;
     },
   };
   const beforeStateStartedAt = Date.now();
@@ -399,8 +412,9 @@ export async function runHostedAssistantAutomation(
     message: "Hosted assistant automation pass starting.",
     phase: "wake.running",
   }));
+  let passStartedAt: number | null = null;
   try {
-    const passStartedAt = Date.now();
+    passStartedAt = Date.now();
     const maxPerScan = selectedInputIds.mode === "foreground"
       ? Math.max(1, selectedInputIds.inputIds.length)
       : HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT;
@@ -550,6 +564,28 @@ export async function runHostedAssistantAutomation(
     };
   } catch (error) {
     if (
+      options?.deferActiveTurnInput === true
+      && isHostedAssistantActiveTurnInputUnavailableError(error)
+    ) {
+      return {
+        currentTurnDeliveryIntentIds: [],
+        nextWakeAt: null,
+        progressed: true,
+        redactedLogEntries,
+        replyFailed: 0,
+        timings: {
+          activeTurnInputIngested,
+          afterStateElapsedMs: 0,
+          beforeStateElapsedMs,
+          inputCandidateListed,
+          inputCandidateQueryCount,
+          passElapsedMs: passStartedAt === null ? 0 : elapsedSince(passStartedAt),
+          totalElapsedMs: elapsedSince(startedAt),
+        },
+      };
+    }
+
+    if (
       error
       && typeof error === "object"
       && "code" in error
@@ -589,6 +625,11 @@ export async function runHostedAssistantAutomation(
     attachHostedAssistantAutomationFailureLogEntries(error, redactedLogEntries);
     throw error;
   }
+}
+
+function isHostedAssistantActiveTurnInputUnavailableError(error: unknown): boolean {
+  return error instanceof AssistantActiveTurnInputUnavailableError
+    || (error instanceof Error && error.name === "AssistantActiveTurnInputUnavailableError");
 }
 
 function attachHostedAssistantAutomationFailureLogEntries(

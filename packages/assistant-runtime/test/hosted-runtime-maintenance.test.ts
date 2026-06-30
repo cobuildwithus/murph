@@ -726,6 +726,60 @@ describe("runHostedAssistantAutomation", () => {
     expect(listNewConversationInputs).toHaveBeenCalledTimes(1);
   });
 
+  it("defers refresh-ingested active-turn input before dynamic-context scanning", async () => {
+    const refresh = vi.fn(async () => ({
+      progressed: true,
+      reason: "ingested_input" as const,
+    }));
+    mocks.createHostedAssistantInputSource.mockReturnValueOnce({
+      listInputCandidates: vi.fn(async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      })),
+      listNewConversationInputs: vi.fn(async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      })),
+      refresh,
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await input.inputSource?.refresh({
+        signal: input.signal,
+      });
+      throw new Error("dynamic-context pass should stop during refresh.");
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_dynamic_context_refresh_input",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_dynamic_context_refresh_input",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      undefined,
+      undefined,
+      undefined,
+      {
+        deferActiveTurnInput: true,
+      },
+    );
+
+    expect(result.currentTurnDeliveryIntentIds).toEqual([]);
+    expect(result.progressed).toBe(true);
+    expect(result.timings?.activeTurnInputIngested).toBe(true);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   it("records metadata-only candidate query diagnostics for scanner misses", async () => {
     const candidate = {
       acceptedInput: {
