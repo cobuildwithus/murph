@@ -3491,7 +3491,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         }),
       ]),
     );
-    expect(assistantLaneCall?.signal).toEqual(expect.any(AbortSignal));
+    expect(assistantLaneCall?.signal).toBeUndefined();
     expect(assistantLaneCall).not.toHaveProperty("deferActiveTurnInputRefresh");
     expect(assistantLaneCall).not.toHaveProperty("suppressActiveTurnInputRefresh");
     expect(dynamicContextPrompts).toHaveLength(1);
@@ -3717,7 +3717,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(2);
     const firstCall = mocks.runHostedAssistantAutomationLane.mock.calls[0]?.[0];
     const secondCall = mocks.runHostedAssistantAutomationLane.mock.calls[1]?.[0];
-    expect(firstCall?.signal).toEqual(expect.any(AbortSignal));
+    expect(firstCall?.signal).toBeUndefined();
     expect(firstCall?.deferActiveTurnInput).toBe(true);
     expect(firstCall?.executionContext.hosted?.dynamicContextPrompts).toHaveLength(1);
     expect(secondCall).not.toHaveProperty("deferActiveTurnInput");

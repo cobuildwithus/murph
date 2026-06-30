@@ -415,13 +415,6 @@ export async function runHostedWorkspaceAssistantPhase(
           options.includeDeviceSyncStatusPrompt
           && assistantRuntimeState.assistantConfigured,
       });
-      const laneCancellation = automationExecutionContext.deviceSyncStatusPromptAttached
-        ? createHostedIdleDeviceSyncMaintenanceCancellation({
-            signal: channelAbortController.signal,
-            shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
-            timeoutMs: null,
-          })
-        : null;
       const assistantMetrics = await (async () => {
         try {
           return await runHostedAssistantAutomationLane({
@@ -442,7 +435,7 @@ export async function runHostedWorkspaceAssistantPhase(
             operatorHomeRoot: input.restored.operatorHomeRoot,
             runtimeAttemptId: input.request.attemptId,
             runtimeEnv: input.runtimeEnv,
-            signal: laneCancellation?.signal ?? input.signal ?? undefined,
+            signal: input.signal ?? undefined,
             vaultRoot: input.restored.vaultRoot,
             wake,
           });
@@ -462,8 +455,6 @@ export async function runHostedWorkspaceAssistantPhase(
             });
           }
           throw error;
-        } finally {
-          laneCancellation?.dispose();
         }
       })();
       assistantAutomationRedactedLogEntries.push(
