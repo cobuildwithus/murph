@@ -38,6 +38,16 @@ describe("Pulse Trial reset service", () => {
     );
   });
 
+  test("normalizes trial end to Stripe whole-second precision", () => {
+    assert.deepEqual(
+      buildHostedPulseTrialResetWindow(new Date("2026-06-30T17:21:24.169Z")),
+      {
+        trialEndsAt: new Date("2026-07-10T17:21:24.000Z"),
+        trialStartedAt: new Date("2026-06-30T17:21:24.169Z"),
+      },
+    );
+  });
+
   test("validates Stripe trialing subscription ownership before reset", () => {
     const candidate = makeCandidate();
     assert.deepEqual(
@@ -140,7 +150,7 @@ describe("Pulse Trial reset service", () => {
   });
 
   test("Prisma candidate updates reset billing and the matching AI usage period together", async () => {
-    const billingRefUpdate = vi.fn(async () => ({}));
+    const billingRefUpdate = vi.fn(async (args: unknown) => args);
     const usagePeriodUpsert = vi.fn(async (args: unknown) => args);
     const tx = {
       hostedAiUsagePeriod: {
@@ -156,7 +166,7 @@ describe("Pulse Trial reset service", () => {
       ),
     };
     const resetWindow = buildHostedPulseTrialResetWindow(
-      new Date("2026-06-30T12:00:00.000Z"),
+      new Date("2026-06-30T17:21:24.169Z"),
     );
 
     const result = await createPrismaHostedPulseTrialResetCandidateSource(
@@ -172,6 +182,23 @@ describe("Pulse Trial reset service", () => {
     assert.equal(prisma.$transaction.mock.calls.length, 1);
     assert.equal(billingRefUpdate.mock.calls.length, 1);
     assert.equal(usagePeriodUpsert.mock.calls.length, 1);
+    assert.deepEqual(billingRefUpdate.mock.calls[0]?.[0], {
+      data: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        currentPeriodEnd: new Date("2026-07-10T17:21:24.000Z"),
+        currentPeriodStart: new Date("2026-06-30T17:21:24.169Z"),
+        currentTrialEndsAt: new Date("2026-07-10T17:21:24.000Z"),
+        currentTrialStartedAt: new Date("2026-06-30T17:21:24.169Z"),
+        lastStripeEventCreatedAt: new Date("2026-06-30T17:21:24.169Z"),
+        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
+        pulseTrialRedeemedAt: new Date("2026-06-30T17:21:24.169Z"),
+      },
+      where: {
+        memberId: "member_123",
+      },
+    });
     assert.deepEqual(usagePeriodUpsert.mock.calls[0]?.[0], {
       create: {
         billingPlanCode: "launch_monthly",
@@ -180,8 +207,8 @@ describe("Pulse Trial reset service", () => {
         limitNoticeSentAt: null,
         limitUsdMicros: 4_500_000n,
         memberId: "member_123",
-        periodEnd: new Date("2026-07-10T12:00:00.000Z"),
-        periodStart: new Date("2026-06-30T12:00:00.000Z"),
+        periodEnd: new Date("2026-07-10T17:21:24.000Z"),
+        periodStart: new Date("2026-06-30T17:21:24.169Z"),
         spentUsdMicros: 0n,
       },
       update: {
@@ -190,13 +217,13 @@ describe("Pulse Trial reset service", () => {
         lastUsageAt: null,
         limitNoticeSentAt: null,
         limitUsdMicros: 4_500_000n,
-        periodEnd: new Date("2026-07-10T12:00:00.000Z"),
+        periodEnd: new Date("2026-07-10T17:21:24.000Z"),
         spentUsdMicros: 0n,
       },
       where: {
         memberId_periodStart: {
           memberId: "member_123",
-          periodStart: new Date("2026-06-30T12:00:00.000Z"),
+          periodStart: new Date("2026-06-30T17:21:24.169Z"),
         },
       },
     });

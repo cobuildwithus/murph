@@ -689,9 +689,18 @@ describe('assistant skill assets', () => {
       'Treat a delegated save as unresolved until the child completion or a direct vault read confirms the canonical records are present',
     )
     expect(raw).toContain(
-      'When their supplement answer requires ingredient lookup and canonical save work',
+      'When the user shares current supplements during onboarding, always use the delegated-save path above whenever a V2 spawn tool is available',
     )
     expect(raw).toContain(
+      'supplement ingestion is never reply-critical at this step, including small lists of two to four products where direct lookup might feel fast',
+    )
+    expect(raw).toContain(
+      'Do not weigh how many products, how clean the names look, or how quick the label match might be',
+    )
+    expect(raw).toContain(
+      'The only fallbacks to a synchronous save are when no V2 spawn tool is available or the user explicitly asks Murph to finish the supplement save before continuing',
+    )
+    expect(raw).not.toContain(
       'prefer the delegated-save path above if the result is not needed for the current visible reply',
     )
     expect(raw).toContain(
@@ -707,7 +716,7 @@ describe('assistant skill assets', () => {
       'fall back to web search for products or ingredients it misses',
     )
     expect(raw).toContain(
-      'If running synchronously instead of delegating, use at most one `send_progress_update` before the first lookup',
+      'If running synchronously under one of the fallbacks above, use at most one `send_progress_update` before the first lookup',
     )
     expect(raw).toContain(
       'do not use a progress update for a quick memory save or a single follow-up question',
@@ -730,16 +739,22 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('downloading results can be annoying')
     expect(raw).not.toContain('downloading results is annoying')
     expect(raw).toContain(
-      'If the user sends lab PDFs, Lab Results of Record documents, pasted lab results, or other blood-test documents',
+      'If the user sends lab PDFs, Lab Results of Record documents, pasted lab results, or other blood-test documents during onboarding, always use the delegated-save path above whenever a V2 spawn tool is available',
     )
     expect(raw).toContain(
-      'prefer the delegated-save path above',
+      'lab ingestion is never reply-critical at this step, including a single short panel or a quick-looking paste where direct parsing might feel fast',
+    )
+    expect(raw).toContain(
+      'The only fallbacks to a synchronous parse are when no V2 spawn tool is available or the user explicitly asks Murph to finish the lab save before continuing',
+    )
+    expect(raw).not.toContain(
+      'If synchronous inspection is needed for the current reply, call `send_progress_update` before reading the content or using file/import tools',
     )
     expect(raw).toContain(
       'save the full recoverable structure with `blood-test import-json` or typed blood-test save commands',
     )
     expect(raw).toContain(
-      'If synchronous inspection is needed for the current reply, call `send_progress_update` before reading the content or using file/import tools',
+      'If running synchronously under one of the fallbacks above, call `send_progress_update` before reading the content or using file/import tools',
     )
     expect(raw).toContain('Persist useful answers as they arrive, not at the end')
     expect(raw).toContain(
