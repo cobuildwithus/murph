@@ -2788,6 +2788,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         findMany: vi.fn().mockResolvedValue([]),
       },
       hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          pendingLinqChatLookupKey: pendingChatLookupKey,
+          pendingLinqLastInboundAt: null,
+        }),
         findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
           const pendingChatLookupKeys =
             (where.pendingLinqChatLookupKey as { in?: unknown[] } | undefined)?.in ?? [];
