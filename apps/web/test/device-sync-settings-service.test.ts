@@ -1,12 +1,18 @@
-import assert from "node:assert/strict";
-
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
+  findManyDeviceConnectionSources: vi.fn(),
+  findManyDeviceConnections: vi.fn(),
+  getPrisma: vi.fn(),
   listConnections: vi.fn(),
+  prismaClient: {} as {
+    deviceConnection: { findMany: ReturnType<typeof vi.fn> };
+    deviceConnectionSource: { findMany: ReturnType<typeof vi.fn> };
+  },
   readHostedDeviceSyncPublicBaseUrl: vi.fn(() => null),
   readHostedPublicBaseUrl: vi.fn(() => "https://murph.example"),
+  readHostedPublicOrigin: vi.fn(() => "https://murph.example"),
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
@@ -16,33 +22,40 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
 vi.mock("@/src/lib/hosted-web/public-url", () => ({
   readHostedDeviceSyncPublicBaseUrl: mocks.readHostedDeviceSyncPublicBaseUrl,
   readHostedPublicBaseUrl: mocks.readHostedPublicBaseUrl,
+  readHostedPublicOrigin: mocks.readHostedPublicOrigin,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: mocks.getPrisma,
 }));
 
 vi.mock("server-only", () => ({}));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv(
+    "HOSTED_DEVICE_ROUTING_INDEX_KEY",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  );
+  mocks.prismaClient.deviceConnection = {
+    findMany: mocks.findManyDeviceConnections,
+  };
+  mocks.prismaClient.deviceConnectionSource = {
+    findMany: mocks.findManyDeviceConnectionSources,
+  };
+  mocks.getPrisma.mockReturnValue(mocks.prismaClient);
+  mocks.findManyDeviceConnections.mockResolvedValue([]);
+  mocks.findManyDeviceConnectionSources.mockResolvedValue([]);
   mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
     listConnections: mocks.listConnections,
   });
 });
 
-test("buildHostedDeviceSyncSettingsResponse reads device sync connections server-side for the authenticated member", async () => {
-  mocks.listConnections.mockResolvedValue({
-    connections: [],
-    providers: [
-      {
-        callbackPath: "/oauth/oura/callback",
-        callbackUrl: "https://murph.example/api/device-sync/oauth/oura/callback",
-        defaultScopes: ["daily_read"],
-        provider: "oura",
-        supportsWebhooks: true,
-        webhookPath: "/webhooks/oura",
-        webhookUrl: "https://murph.example/api/device-sync/webhooks/oura",
-      },
-    ],
-  });
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
+test("buildHostedDeviceSyncSettingsResponse reads device sync connections server-side for the authenticated member", async () => {
   const { buildHostedDeviceSyncSettingsResponse } = await import("@/src/lib/device-sync/settings-service");
   const response = await buildHostedDeviceSyncSettingsResponse({
     member: {
@@ -52,11 +65,12 @@ test("buildHostedDeviceSyncSettingsResponse reads device sync connections server
     },
   });
 
-  expect(mocks.createHostedDeviceSyncControlPlane).toHaveBeenCalledTimes(1);
-  const syntheticRequest = mocks.createHostedDeviceSyncControlPlane.mock.calls[0]?.[0];
-  assert.ok(syntheticRequest instanceof Request);
-  assert.equal(syntheticRequest.url, "https://murph.example/settings");
-  expect(mocks.listConnections).toHaveBeenCalledWith("member_123");
+  expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+  expect(mocks.findManyDeviceConnections).toHaveBeenCalledWith(expect.objectContaining({
+    where: {
+      userId: "member_123",
+    },
+  }));
   expect(response.ok).toBe(true);
   expect(response.sources).toEqual([]);
 });
@@ -90,7 +104,12 @@ test("buildHostedDeviceSyncSettingsResponse allows a family-sponsored member wit
   });
 
   expect(response.ok).toBe(true);
-  expect(mocks.listConnections).toHaveBeenCalledWith("member_family");
+  expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+  expect(mocks.findManyDeviceConnections).toHaveBeenCalledWith(expect.objectContaining({
+    where: {
+      userId: "member_family",
+    },
+  }));
   expect(prisma.hostedAccountGroupMembership.findFirst).toHaveBeenCalledWith(expect.objectContaining({
     where: expect.objectContaining({
       memberId: "member_family",

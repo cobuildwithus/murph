@@ -6,16 +6,11 @@ import {
   readConfiguredDeviceSyncConnectTargetConfigs,
 } from "@murphai/device-syncd/connect-config";
 
-import { createHostedDeviceSyncControlPlane } from "./control-plane";
 import {
-  buildHostedDeviceSyncSettingsSources,
   type HostedDeviceSyncSettingsConnectTarget,
   type HostedDeviceSyncSettingsResponse,
 } from "./settings-surface";
-import {
-  readHostedDeviceSyncPublicBaseUrl,
-  readHostedPublicBaseUrl,
-} from "../hosted-web/public-url";
+import { buildHostedDeviceSyncSettingsSurfaceResponse } from "./sidebar-status-service";
 import {
   assertHostedMemberEffectiveActiveAccessAllowed,
 } from "../hosted-onboarding/family-plan";
@@ -29,40 +24,16 @@ export async function buildHostedDeviceSyncSettingsResponse(input: {
     member: input.member,
     prisma: input.prisma,
   });
-  const controlPlane = createHostedDeviceSyncControlPlane(
-    new Request(buildHostedDeviceSyncSyntheticRequestUrl()),
-  );
-  const { connectionSources, connections, providers } = await controlPlane.listConnections(input.member.id);
 
-  return {
-    generatedAt: new Date().toISOString(),
-    ok: true,
-    sources: buildHostedDeviceSyncSettingsSources({
-      connectionSources,
-      connections,
-      connectTargets: listConfiguredDeviceSyncReconnectTargets(
-        readConfiguredDeviceSyncConnectTargetConfigs(process.env),
-      ).map((target): HostedDeviceSyncSettingsConnectTarget => ({
-        connectSourceId: target.connectSourceId,
-        connectTarget: target.connectTarget,
-        provider: target.provider,
-        sourceProviderSlug: target.sourceProviderSlug ?? null,
-      })),
-      providers,
-    }),
-  };
-}
-
-function buildHostedDeviceSyncSyntheticRequestUrl(): string {
-  const deviceSyncBaseUrl = readHostedDeviceSyncPublicBaseUrl();
-  if (deviceSyncBaseUrl) {
-    return `${deviceSyncBaseUrl.replace(/\/+$/u, "")}/settings/device-sync`;
-  }
-
-  const hostedPublicBaseUrl = readHostedPublicBaseUrl();
-  if (hostedPublicBaseUrl) {
-    return `${hostedPublicBaseUrl.replace(/\/+$/u, "")}/settings`;
-  }
-
-  return "http://localhost/settings";
+  return buildHostedDeviceSyncSettingsSurfaceResponse({
+    connectTargets: listConfiguredDeviceSyncReconnectTargets(
+      readConfiguredDeviceSyncConnectTargetConfigs(process.env),
+    ).map((target): HostedDeviceSyncSettingsConnectTarget => ({
+      connectSourceId: target.connectSourceId,
+      connectTarget: target.connectTarget,
+      provider: target.provider,
+      sourceProviderSlug: target.sourceProviderSlug ?? null,
+    })),
+    memberId: input.member.id,
+  });
 }

@@ -62,6 +62,10 @@
       "types": "./dist/provider-match.d.ts",
       "default": "./dist/provider-match.js"
     },
+    "./public-provider-descriptors": {
+      "types": "./dist/public-provider-descriptors.d.ts",
+      "default": "./dist/public-provider-descriptors.js"
+    },
     "./runtime-config": {
       "types": "./dist/runtime-config.d.ts",
       "default": "./dist/runtime-config.js"

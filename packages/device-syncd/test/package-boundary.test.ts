@@ -33,6 +33,7 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     "./providers/strava",
     "./providers/whoop",
     "./public-ingress",
+    "./public-provider-descriptors",
     "./registry",
     "./runtime-config",
     "./service",
@@ -58,6 +59,10 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
   assert.deepEqual(packageManifest.exports?.["./provider-match"], {
     default: "./dist/provider-match.js",
     types: "./dist/provider-match.d.ts",
+  });
+  assert.deepEqual(packageManifest.exports?.["./public-provider-descriptors"], {
+    default: "./dist/public-provider-descriptors.js",
+    types: "./dist/public-provider-descriptors.d.ts",
   });
   assert.deepEqual(packageManifest.exports?.["./providers/junction-client"], {
     default: "./dist/providers/junction-client.js",

@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   createBrowserConnectionId: vi.fn(),
   diagnoseBackfill: vi.fn(),
   disconnectConnection: vi.fn(),
+  findManyDeviceConnectionSources: vi.fn(),
+  findManyDeviceConnections: vi.fn(),
   getConnectionForUser: vi.fn(),
   getPrisma: vi.fn(),
   getConnectionStatus: vi.fn(),
@@ -19,8 +21,10 @@ const mocks = vi.hoisted(() => ({
   listConnections: vi.fn(),
   listConnectionsForUser: vi.fn(),
   probeRest: vi.fn(),
-  prismaClient: {
-    label: "test-prisma",
+  prismaClient: {} as {
+    deviceConnection: { findMany: ReturnType<typeof vi.fn> };
+    deviceConnectionSource: { findMany: ReturnType<typeof vi.fn> };
+    label: string;
   },
   registryGet: vi.fn(),
   requireActivePrivyMemberAuth: vi.fn(),
@@ -62,6 +66,110 @@ let settingsDeviceSyncDisconnectRoute: SettingsDeviceSyncDisconnectRouteModule;
 let settingsDeviceSyncStatusRoute: SettingsDeviceSyncStatusRouteModule;
 let connectSourceStartRoute: ConnectSourceStartRouteModule;
 
+function buildDeviceConnectionRecord(overrides: Partial<{
+  accessTokenEncrypted: string | null;
+  accessTokenExpiresAt: Date | null;
+  connectedAt: Date;
+  createdAt: Date;
+  credentialKind: "oauth_tokens" | "provider_config" | "none";
+  credentialMetadataJson: Record<string, unknown>;
+  displayName: string | null;
+  externalAccountIdEncrypted: string | null;
+  id: string;
+  keyVersion: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastSyncCompletedAt: Date | null;
+  lastSyncErrorAt: Date | null;
+  lastSyncStartedAt: Date | null;
+  lastWebhookAt: Date | null;
+  metadataJson: Record<string, unknown>;
+  nextReconcileAt: Date | null;
+  provider: string;
+  providerAccountBlindIndex: string | null;
+  providerConfigKey: string | null;
+  refreshLeaseExpiresAt: Date | null;
+  refreshLeaseOwner: string | null;
+  refreshLeaseTokenVersion: number | null;
+  refreshTokenEncrypted: string | null;
+  scopesJson: string[];
+  setupExpiresAt: Date | null;
+  setupPhase: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
+  status: "active" | "reauthorization_required" | "disconnected";
+  tokenVersion: number | null;
+  updatedAt: Date;
+  userId: string;
+}> = {}) {
+  return {
+    accessTokenEncrypted: null,
+    accessTokenExpiresAt: null,
+    connectedAt: new Date("2026-04-01T08:00:00.000Z"),
+    createdAt: new Date("2026-04-01T08:00:00.000Z"),
+    credentialKind: "oauth_tokens" as const,
+    credentialMetadataJson: {},
+    displayName: null,
+    externalAccountIdEncrypted: null,
+    id: "dsc_123",
+    keyVersion: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSyncCompletedAt: null,
+    lastSyncErrorAt: null,
+    lastSyncStartedAt: null,
+    lastWebhookAt: null,
+    metadataJson: {},
+    nextReconcileAt: null,
+    provider: "oura",
+    providerAccountBlindIndex: null,
+    providerConfigKey: null,
+    refreshLeaseExpiresAt: null,
+    refreshLeaseOwner: null,
+    refreshLeaseTokenVersion: null,
+    refreshTokenEncrypted: null,
+    scopesJson: [],
+    setupExpiresAt: null,
+    setupPhase: null,
+    status: "active" as const,
+    tokenVersion: null,
+    updatedAt: new Date("2026-04-01T08:05:00.000Z"),
+    userId: "member_123",
+    ...overrides,
+  };
+}
+
+function buildDeviceConnectionSourceRecord(overrides: Partial<{
+  connectionId: string;
+  createdAt: Date;
+  displayName: string | null;
+  firstSeenAt: Date;
+  id: string;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastSeenAt: Date;
+  resourceAvailabilitySummaryJson: Record<string, unknown> | null;
+  sourceInstanceKey: string;
+  sourceProviderSlug: string;
+  status: "connected" | "disconnected" | "error" | "unavailable";
+  updatedAt: Date;
+}> = {}) {
+  return {
+    connectionId: "dsc_123",
+    createdAt: new Date("2026-04-01T08:00:00.000Z"),
+    displayName: null,
+    firstSeenAt: new Date("2026-04-01T08:00:00.000Z"),
+    id: "dcs_123",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: new Date("2026-04-03T07:01:00.000Z"),
+    resourceAvailabilitySummaryJson: null,
+    sourceInstanceKey: "source_123",
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+    updatedAt: new Date("2026-04-03T07:01:00.000Z"),
+    ...overrides,
+  };
+}
+
 describe("device sync settings routes", () => {
   beforeAll(async () => {
     settingsDeviceSyncRoute = await import("../app/api/settings/device-sync/route");
@@ -79,12 +187,23 @@ describe("device sync settings routes", () => {
     vi.clearAllMocks();
     vi.stubEnv("OURA_CLIENT_ID", "oura-client");
     vi.stubEnv("OURA_CLIENT_SECRET", "oura-secret");
+    vi.stubEnv(
+      "HOSTED_DEVICE_ROUTING_INDEX_KEY",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
     vi.stubEnv("JUNCTION_API_KEY", "");
     vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "");
     vi.stubEnv("JUNCTION_ENV", "");
     vi.stubEnv("JUNCTION_PROVIDER_FILTER", "");
     vi.stubEnv("JUNCTION_REGION", "");
     vi.stubEnv("DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED", "true");
+    mocks.prismaClient.deviceConnection = {
+      findMany: mocks.findManyDeviceConnections,
+    };
+    mocks.prismaClient.deviceConnectionSource = {
+      findMany: mocks.findManyDeviceConnectionSources,
+    };
+    mocks.prismaClient.label = "test-prisma";
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
@@ -136,6 +255,20 @@ describe("device sync settings routes", () => {
     mocks.getConnectionForUser.mockResolvedValue(null);
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(null);
     mocks.listConnectionsForUser.mockResolvedValue([]);
+    mocks.findManyDeviceConnections.mockResolvedValue([
+      buildDeviceConnectionRecord({
+        displayName: "Alice Oura",
+        id: "dsc_oura_123",
+        lastSyncCompletedAt: new Date("2026-04-03T07:00:00.000Z"),
+        lastSyncStartedAt: new Date("2026-04-03T06:55:00.000Z"),
+        lastWebhookAt: new Date("2026-04-03T07:01:00.000Z"),
+        nextReconcileAt: new Date("2026-04-03T16:00:00.000Z"),
+        provider: "oura",
+        scopesJson: ["daily"],
+        updatedAt: new Date("2026-04-03T07:05:00.000Z"),
+      }),
+    ]);
+    mocks.findManyDeviceConnectionSources.mockResolvedValue([]);
     mocks.diagnoseBackfill.mockResolvedValue({
       generatedAt: "2026-04-03T12:00:00.000Z",
       provider: "junction",
@@ -266,12 +399,17 @@ describe("device sync settings routes", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.listConnections).toHaveBeenCalledWith("member_123");
+    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+    expect(mocks.findManyDeviceConnections).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        userId: "member_123",
+      },
+    }));
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       sources: [
         {
-          connectionId: "dspc_oura_123",
+          connectionId: expect.stringMatching(/^dspc_/),
           headline: "Connected and syncing normally",
           provider: "oura",
           providerLabel: "Oura",
@@ -290,7 +428,12 @@ describe("device sync settings routes", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.listConnections).toHaveBeenCalledWith("member_123");
+    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+    expect(mocks.findManyDeviceConnections).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        userId: "member_123",
+      },
+    }));
     await expect(response.json()).resolves.toEqual({
       generatedAt: "2026-04-03T12:00:00.000Z",
       ok: true,
@@ -302,56 +445,43 @@ describe("device sync settings routes", () => {
   });
 
   it("returns a Junction upstream wearable label in the minimized sidebar status", async () => {
-    mocks.listConnections.mockResolvedValueOnce({
-      connectionSources: [
-        {
-          connectionId: "dspc_junction_123",
-          firstSeenAt: "2026-04-01T08:00:00.000Z",
-          lastSeenAt: "2026-04-03T07:01:00.000Z",
-          resourceCount: 3,
-          sourceProviderSlug: "garmin",
-          status: "connected",
+    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret-value");
+    vi.stubEnv("JUNCTION_ENV", "sandbox");
+    vi.stubEnv("JUNCTION_REGION", "us");
+    mocks.findManyDeviceConnections.mockResolvedValueOnce([
+      buildDeviceConnectionRecord({
+        credentialKind: "provider_config",
+        displayName: "Junction",
+        id: "dsc_junction_123",
+        lastSyncCompletedAt: new Date("2026-04-03T07:00:00.000Z"),
+        lastSyncStartedAt: new Date("2026-04-03T06:55:00.000Z"),
+        lastWebhookAt: new Date("2026-04-03T07:01:00.000Z"),
+        nextReconcileAt: new Date("2026-04-03T16:00:00.000Z"),
+        provider: "junction",
+        providerConfigKey: "junction",
+        scopesJson: [],
+        updatedAt: new Date("2026-04-03T07:05:00.000Z"),
+      }),
+    ]);
+    mocks.findManyDeviceConnectionSources.mockResolvedValueOnce([
+      buildDeviceConnectionSourceRecord({
+        connectionId: "dsc_junction_123",
+        resourceAvailabilitySummaryJson: {
+          sleep: true,
+          steps: true,
+          workouts: true,
         },
-      ],
-      connections: [
-        {
-          accessTokenExpiresAt: null,
-          connectedAt: "2026-04-01T08:00:00.000Z",
-          createdAt: "2026-04-01T08:00:00.000Z",
-          displayName: "Junction",
-          id: "dspc_junction_123",
-          lastErrorCode: null,
-          lastErrorMessage: null,
-          lastSyncCompletedAt: "2026-04-03T07:00:00.000Z",
-          lastSyncErrorAt: null,
-          lastSyncStartedAt: "2026-04-03T06:55:00.000Z",
-          lastWebhookAt: "2026-04-03T07:01:00.000Z",
-          metadata: {},
-          nextReconcileAt: "2026-04-03T16:00:00.000Z",
-          provider: "junction",
-          scopes: [],
-          status: "active",
-          updatedAt: "2026-04-03T07:05:00.000Z",
-        },
-      ],
-      providers: [
-        {
-          callbackPath: "/connect/junction/callback",
-          callbackUrl: "https://join.example.test/connect/junction/callback",
-          defaultScopes: [],
-          provider: "junction",
-          supportsWebhooks: true,
-          webhookPath: "/webhooks/junction",
-          webhookUrl: "https://join.example.test/webhooks/junction",
-        },
-      ],
-    });
+        sourceProviderSlug: "garmin",
+      }),
+    ]);
 
     const response = await settingsDeviceSyncSidebarStatusRoute.GET(
       new Request("https://join.example.test/api/settings/device-sync/sidebar-status"),
     );
 
     expect(response.status).toBe(200);
+    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       status: {
