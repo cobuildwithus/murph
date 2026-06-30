@@ -394,6 +394,23 @@ export async function startHostedLocalDevStack(input: {
       config,
       env: vercelEnv,
     });
+    if (linqWebhookSetup?.shouldRegister) {
+      const registrationResult = await registerHostedLocalLinqWebhookSubscription({
+        env: vercelEnv,
+        registrationCachePath: config.linqWebhookRegistrationCachePath,
+        setup: linqWebhookSetup,
+        stderrTarget: input.stderrTarget,
+      });
+      vercelEnv.LINQ_WEBHOOK_SECRET = registrationResult.webhookSecret;
+      if (registrationResult.webhookSecretSource !== "configured") {
+        await maybePersistHostedLocalLinqWebhookSecret({
+          envPath: webLocalEnvPath,
+          existingEnv: webLocalEnv,
+          stderrTarget: input.stderrTarget,
+          webhookSecret: registrationResult.webhookSecret,
+        });
+      }
+    }
     const oidcToken = await resolveVercelOidcToken(vercelEnv);
     throwIfAbortSignalAborted(input.abortSignal);
     const oidcIdentity = parseHostedExecutionOidcIdentity(oidcToken);
@@ -477,6 +494,7 @@ export async function startHostedLocalDevStack(input: {
       ...stripHostedLocalHostOnlyCodexEnv({
         ...runtimeEnv,
         ...cloudflareDevVars,
+        ...localOverrides,
       }),
       ...(hostedLocalCodexModelCatalogJson !== null
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: hostedLocalCodexModelCatalogJson }
@@ -1035,14 +1053,6 @@ export async function startHostedLocalDevStack(input: {
           }),
         ]);
         ensurePreparedRunnerContainerImageAlias(combineChildOutput(children));
-        if (linqWebhookSetup?.shouldRegister) {
-          await registerHostedLocalLinqWebhookSubscription({
-            env: runtimeEnv,
-            registrationCachePath: config.linqWebhookRegistrationCachePath,
-            setup: linqWebhookSetup,
-            stderrTarget: input.stderrTarget,
-          });
-        }
         if (workerRuntimeEnv !== null) {
           await maybeRunRunnerContainerSmoke({
             config,
@@ -1742,6 +1752,80 @@ async function symlinkIfPresent(sourcePath: string, targetPath: string): Promise
   }
 
   await symlink(sourcePath, targetPath, "dir");
+}
+
+async function maybePersistHostedLocalLinqWebhookSecret(input: {
+  envPath: string;
+  existingEnv: Readonly<Record<string, string | undefined>>;
+  stderrTarget?: NodeJS.WritableStream;
+  webhookSecret: string;
+}): Promise<void> {
+  if (normalizeOptionalEnvValue(input.existingEnv.LINQ_WEBHOOK_SECRET) === input.webhookSecret) {
+    return;
+  }
+
+  const currentText = await readOptionalTextFile(input.envPath);
+  const nextText = upsertSimpleEnvAssignment(
+    currentText ?? "",
+    "LINQ_WEBHOOK_SECRET",
+    input.webhookSecret,
+  );
+  await writePrivateTextFileAtomically(input.envPath, nextText);
+  (input.stderrTarget ?? process.stderr).write(
+    "[linq] Updated ignored apps/web/.env.local with the local Linq webhook signing secret.\n",
+  );
+}
+
+async function readOptionalTextFile(filePath: string): Promise<string | null> {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function upsertSimpleEnvAssignment(raw: string, key: string, value: string): string {
+  const assignment = `${key}=${quoteSimpleEnvValue(value)}`;
+  const lines = raw.length > 0 ? raw.split(/\r?\n/u) : [];
+  let replaced = false;
+  const nextLines = lines.map((line) => {
+    if (isSimpleEnvAssignmentForKey(line, key)) {
+      replaced = true;
+      return assignment;
+    }
+    return line;
+  });
+  if (!replaced) {
+    if (nextLines.length > 0 && nextLines[nextLines.length - 1] !== "") {
+      nextLines.push("");
+    }
+    nextLines.push(assignment);
+  }
+  return `${nextLines.join("\n").replace(/\n*$/u, "")}\n`;
+}
+
+function isSimpleEnvAssignmentForKey(line: string, key: string): boolean {
+  const trimmed = line.trimStart();
+  const withoutExport = trimmed.startsWith("export ") ? trimmed.slice("export ".length) : trimmed;
+  const match = /^([A-Za-z_][A-Za-z0-9_]*)\s*=/u.exec(withoutExport);
+  return match?.[1] === key;
+}
+
+function quoteSimpleEnvValue(value: string): string {
+  return `"${value
+    .replaceAll("\\", "\\\\")
+    .replaceAll("\"", "\\\"")
+    .replaceAll("\n", "\\n")
+    .replaceAll("\r", "\\r")
+    .replaceAll("\t", "\\t")}"`;
+}
+
+function normalizeOptionalEnvValue(value: string | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : null;
 }
 
 async function writePrivateTextFileAtomically(

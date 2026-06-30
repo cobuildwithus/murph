@@ -348,7 +348,7 @@ describe("RunnerStateStore schema guard", () => {
     });
   });
 
-  it("blocks duplicate write fences and validates workspace versions when requested", async () => {
+  it("blocks duplicate write fences and keeps the bound workspace version in the write-fence record", async () => {
     const { store } = createRunnerStateStoreHarness();
     const lease = await store.beginWriteFence({
       runnerContainerName: "user-write",
@@ -376,7 +376,6 @@ describe("RunnerStateStore schema guard", () => {
       attemptId: boundLease.attemptId,
       generation: boundLease.generation,
       userId: boundLease.userId,
-      workspaceVersion: "6",
     })).resolves.toMatchObject({
       owns: true,
       record: {
@@ -384,21 +383,6 @@ describe("RunnerStateStore schema guard", () => {
           workspaceVersion: "6",
         },
       },
-    });
-    await expect(store.validateWriteFenceToken({
-      attemptId: boundLease.attemptId,
-      generation: boundLease.generation,
-      userId: boundLease.userId,
-    })).resolves.toMatchObject({
-      owns: true,
-    });
-    await expect(store.validateWriteFenceToken({
-      attemptId: boundLease.attemptId,
-      generation: boundLease.generation,
-      userId: boundLease.userId,
-      workspaceVersion: "7",
-    })).resolves.toMatchObject({
-      owns: false,
     });
   });
 

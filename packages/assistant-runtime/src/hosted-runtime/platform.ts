@@ -1,5 +1,5 @@
 import type {
-  HostedExecutionExternalThreadRouteAuthority,
+  HostedExecutionLinqExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution";
 import type {
   HostedActionApprovalConsumeRequest,
@@ -184,6 +184,48 @@ export interface HostedRuntimeLinqSendResponse {
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
 
+export type HostedRuntimeLinqEngagementKind =
+  | "first_contact"
+  | "requires_recent_inbound";
+
+export interface HostedRuntimeLinqCurrentInboundProof {
+  dedupeKey: string;
+  eventId: string;
+  mailboxItemId: string;
+  occurredAt: string;
+  replyToMessageId: string;
+  target: string;
+}
+
+export interface HostedRuntimeLinqRecentInboundEngagementRequest {
+  currentInbound?: HostedRuntimeLinqCurrentInboundProof | null;
+  directRecipientPhoneNumber?: string | null;
+  engagementKind?: HostedRuntimeLinqEngagementKind | null;
+  fromPhoneNumber?: string | null;
+  idempotencyKey?: string | null;
+  intentId?: string | null;
+  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
+  target: string | null;
+  targetKind?: HostedRuntimeProviderTargetKind | null;
+}
+
+export interface HostedRuntimeLinqDeliveryOutcomeRequest {
+  acceptedAt?: string | null;
+  attemptedAt: string;
+  failedAt?: string | null;
+  failureCode?: string | null;
+  failureReason?: string | null;
+  fromPhoneNumber?: string | null;
+  idempotencyKey?: string | null;
+  intentId?: string | null;
+  providerMessageId?: string | null;
+  providerTarget?: string | null;
+  providerThreadId?: string | null;
+  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
+  target: string | null;
+  targetKind?: HostedRuntimeProviderTargetKind | null;
+}
+
 export interface HostedRuntimeWhatsAppSendRequest {
   message: string;
   replyToMessageId?: string | null;
@@ -227,8 +269,12 @@ type HostedRuntimeEffectsPortBase = {
   readAssistantDeliveryRecord?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
   ): Promise<HostedAssistantDeliveryRecord | null>;
-  assertLinqThreadRouteAuthority?(
-    authority: HostedExecutionExternalThreadRouteAuthority,
+  assertLinqRecentInboundEngagement?(
+    request: HostedRuntimeLinqRecentInboundEngagementRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<void>;
+  recordLinqDeliveryOutcome?(
+    request: HostedRuntimeLinqDeliveryOutcomeRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
   sendEmail(request: HostedEmailSendRequest): Promise<{ target: string } | void>;

@@ -8,15 +8,28 @@ import {
   releaseHostedAiUsageLimitNotice,
   type HostedAiUsageGateNoticeCode,
 } from "../hosted-execution/usage-allowance";
+import { sha256Hex } from "../primitives";
 import { hostedOnboardingError } from "./errors";
-import { sanitizeHostedOnboardingLogString } from "./http";
-import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
-import { buildHostedInviteUrl } from "./invite-service";
 import {
-  claimHostedLinqOnboardingLinkNotice,
+  claimHostedLinqDeliveryProviderDispatchTx,
+  markHostedLinqDeliveryAcceptedTx,
+  markHostedLinqDeliverySendFailedTx,
+  markHostedLinqDeliverySkippedTx,
+  recordHostedLinqDeliveryAttemptTx,
+} from "./linq-delivery-store";
+import {
+  assertHostedLinqRouteAuthorityMatchesTarget,
+  buildHostedLinqRecentInboundSkipReason,
+  readHostedLinqSideEffectRecentInboundDecision,
+} from "./linq-egress-engagement";
+import { sanitizeHostedOnboardingLogString } from "./http";
+import { buildHostedInviteUrl } from "./invite-service";
+import { normalizePhoneNumber } from "./phone";
+import {
   claimHostedLinqQuotaReplyNotice,
-  releaseHostedLinqOnboardingLinkNoticeClaim,
+  markHostedLinqOnboardingLinkNoticeSent,
   releaseHostedLinqQuotaReplyNoticeClaim,
+  resolveHostedLinqDayUtc,
 } from "./linq-daily-state";
 import {
   buildHostedDailyQuotaReply,
@@ -26,6 +39,7 @@ import {
 } from "./linq";
 import {
   assertHostedThreadRouteEgressAuthority,
+  type HostedThreadRouteSnapshot,
   type HostedLinqThreadRouteEgressAuthority,
 } from "../hosted-routing/thread-route-store";
 import {
@@ -34,11 +48,17 @@ import {
 } from "./logging";
 
 type HostedLinqTransportPersistenceClient = PrismaClient | Prisma.TransactionClient;
+type HostedLinqTransportPostResponseScheduler = (task: () => Promise<void>) => void;
+
+export type HostedLinqCurrentInboundReplyProof = {
+  chatId: string | null;
+  messageId: string | null;
+};
 
 export type HostedLinqConversationHomeRedirectPayload = {
   chatId: string;
-  homeRecipientPhone: string | null;
-  memberId: string | null;
+  homeRecipientPhone: string;
+  memberId: string;
   replyToMessageId: string | null;
   template: "conversation_home_redirect";
 };
@@ -117,7 +137,7 @@ export type HostedLinqMessageSideEffect = {
 export type CreateHostedWebhookLinqMessageSideEffectInput =
   | {
       chatId: string;
-      homeRecipientPhone?: string | null;
+      homeRecipientPhone: string;
       memberId: string;
       replyToMessageId?: string | null;
       sourceEventId: string;
@@ -181,7 +201,8 @@ function buildHostedWebhookLinqMessageEffectId(
   input: CreateHostedWebhookLinqMessageSideEffectInput,
 ): string {
   if (input.template === "invite_signup") {
-    return `linq-invite-signup:${input.inviteId}`;
+    const dayUtc = resolveHostedLinqDayUtc(input.occurredAt).toISOString();
+    return `linq-invite-signup:${input.memberId}:${dayUtc}`;
   }
 
   if (input.template === "ai_usage_quota" && input.claimToken) {
@@ -192,11 +213,43 @@ function buildHostedWebhookLinqMessageEffectId(
     });
   }
 
+  if (input.template === "conversation_home_redirect") {
+    return buildHostedLinqConversationHomeRedirectEffectId(input);
+  }
+
   return `linq-message:${input.sourceEventId}`;
 }
 
+// One redirect per wrong Linq chat + home line + member. If the member's home
+// line changes later, the new target hashes differently and is announced once.
+// Hashes normalized raw inputs directly; the contact-privacy lookup keys are
+// not stable across keyring rotation and would let a rotation re-send a duplicate.
+function buildHostedLinqConversationHomeRedirectEffectId(
+  input: Extract<
+    CreateHostedWebhookLinqMessageSideEffectInput,
+    { template: "conversation_home_redirect" }
+  >,
+): string {
+  const chatId = input.chatId.trim();
+  const homeRecipientPhone = normalizePhoneNumber(input.homeRecipientPhone);
+  const memberId = input.memberId.trim();
+
+  if (!chatId || !homeRecipientPhone || !memberId) {
+    return `linq-message:${input.sourceEventId}`;
+  }
+
+  const hash = sha256Hex(JSON.stringify({
+    chatId,
+    homeRecipientPhone,
+    memberId,
+  })).slice(0, 32);
+  return `linq-home-redirect:${hash}`;
+}
+
 export async function drainHostedLinqSideEffectsDirect(input: {
+  currentInboundReply?: HostedLinqCurrentInboundReplyProof | null;
   prisma: HostedLinqTransportPersistenceClient;
+  scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
   sideEffects: readonly HostedLinqMessageSideEffect[];
   signal?: AbortSignal;
 }): Promise<void> {
@@ -207,16 +260,24 @@ export async function drainHostedLinqSideEffectsDirect(input: {
     }
 
     try {
-      await sendHostedLinqSideEffect(effect, {
+      const result = await sendHostedLinqSideEffect(effect, {
+        currentInboundReply: input.currentInboundReply ?? null,
         prisma: input.prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
         signal: input.signal,
       });
+
+      if (result.status === "skipped") {
+        await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
+        continue;
+      }
     } catch (error) {
       await releaseHostedLinqNoticeClaimForSideEffect(effect, input.prisma);
       throw error;
     }
 
     if (isHostedInviteLinqMessagePayload(effect.payload)) {
+      await markHostedLinqNoticeSentForSideEffect(effect, input.prisma);
       await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
     }
   }
@@ -228,45 +289,224 @@ async function sendHostedLinqSideEffect(
     payload: HostedLinqMessagePayload;
   },
   options: {
+    currentInboundReply: HostedLinqCurrentInboundReplyProof | null;
     prisma: HostedLinqTransportPersistenceClient;
+    scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
     signal?: AbortSignal;
   },
-): Promise<void> {
+): Promise<{ status: "sent" | "skipped" }> {
   const startedAtMs = Date.now();
+  const deliveryAttemptTask = recordHostedLinqDeliveryAttemptBestEffort({
+    effect,
+    prisma: options.prisma,
+    startedAtMs,
+  });
 
   try {
-    await assertHostedLinqSideEffectRouteAuthority(effect, options.prisma);
-    await sendHostedLinqChatMessage({
+    const route = await assertHostedLinqSideEffectRouteAuthority(effect, options.prisma);
+    const currentInboundReply = isHostedLinqCurrentInboundSideEffect(
+      effect,
+      options.currentInboundReply,
+    );
+    if (!currentInboundReply) {
+      const engagementDecision = await readHostedLinqSideEffectRecentInboundDecision({
+        payload: effect.payload,
+        prisma: options.prisma,
+        route,
+      });
+      if (!engagementDecision.allowed) {
+        await deliveryAttemptTask;
+        await markHostedLinqDeliverySkippedBestEffort({
+          effect,
+          lastInboundAt: engagementDecision.lastInboundAt,
+          prisma: options.prisma,
+        });
+        console.warn("Hosted Linq side-effect skipped by recipient engagement policy.", {
+          effectIdSuffix: toHostedOnboardingLogIdSuffix(effect.effectId) ?? "unknown",
+          lastInboundAt: engagementDecision.lastInboundAt?.toISOString() ?? null,
+          reason: engagementDecision.reason,
+          template: effect.payload.template,
+        });
+        return { status: "skipped" };
+      }
+    }
+
+    const result = await sendHostedLinqChatMessage({
       chatId: effect.payload.chatId,
       idempotencyKey: effect.effectId,
       message: await buildHostedLinqSideEffectMessage(effect, options.prisma),
       replyToMessageId: effect.payload.replyToMessageId,
       signal: options.signal,
     });
+    scheduleHostedLinqDeliveryMilestoneAfterAttempt({
+      attemptTask: deliveryAttemptTask,
+      milestoneTask: () => markHostedLinqDeliveryAcceptedBestEffort({
+        chatId: result.chatId ?? effect.payload.chatId,
+        effect,
+        messageId: result.messageId,
+        prisma: options.prisma,
+      }),
+      scheduleAfterResponse: options.scheduleAfterResponse,
+    });
   } catch (error) {
+    if (effect.payload.template === "invite_signup") {
+      await deliveryAttemptTask;
+      await markHostedLinqDeliveryFailedBestEffort({
+        effect,
+        error,
+        prisma: options.prisma,
+      });
+    } else {
+      scheduleHostedLinqDeliveryMilestoneAfterAttempt({
+        attemptTask: deliveryAttemptTask,
+        milestoneTask: () => markHostedLinqDeliveryFailedBestEffort({
+          effect,
+          error,
+          prisma: options.prisma,
+        }),
+        scheduleAfterResponse: options.scheduleAfterResponse,
+      });
+    }
     console.error(
       "Hosted Linq side-effect delivery failed.",
       buildHostedLinqSideEffectLogDetails(effect, error, Date.now() - startedAtMs),
     );
     throw error;
   }
+
+  return { status: "sent" };
 }
 
 async function assertHostedLinqSideEffectRouteAuthority(
   effect: HostedLinqMessageSideEffect,
   prisma: HostedLinqTransportPersistenceClient,
-): Promise<void> {
+): Promise<HostedThreadRouteSnapshot | null> {
   const routeAuthority = "routeAuthority" in effect.payload
-    ? effect.payload.routeAuthority
+    ? effect.payload.routeAuthority ?? null
     : null;
   if (!routeAuthority) {
+    return null;
+  }
+
+  return await assertHostedThreadRouteEgressAuthority({
+    authority: assertHostedLinqRouteAuthorityMatchesTarget({
+      chatId: effect.payload.chatId,
+      memberId: "memberId" in effect.payload ? effect.payload.memberId : null,
+      routeAuthority,
+    }),
+    prisma,
+  });
+}
+
+function scheduleHostedLinqDeliveryMilestoneAfterAttempt(
+  input: {
+    attemptTask: Promise<void>;
+    milestoneTask: () => Promise<void>;
+    scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
+  },
+): void {
+  const task = async () => {
+    await input.attemptTask;
+    await input.milestoneTask();
+  };
+
+  if (input.scheduleAfterResponse) {
+    input.scheduleAfterResponse(task);
     return;
   }
 
-  await assertHostedThreadRouteEgressAuthority({
-    authority: routeAuthority,
-    prisma,
+  void task().catch((error) => {
+    console.warn("Hosted Linq delivery milestone recording failed.", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
   });
+}
+
+async function recordHostedLinqDeliveryAttemptBestEffort(input: {
+  effect: HostedLinqMessageSideEffect;
+  prisma: HostedLinqTransportPersistenceClient;
+  startedAtMs: number;
+}): Promise<void> {
+  const template = input.effect.payload.template;
+  try {
+    await recordHostedLinqDeliveryAttemptTx({
+      attemptedAt: new Date(input.startedAtMs),
+      idempotencyKey: input.effect.effectId,
+      linqChatId: input.effect.payload.chatId,
+      prisma: input.prisma,
+      source: "hosted_webhook_side_effect",
+      sourceRef: input.effect.effectId,
+      targetKind: "thread",
+      template: input.effect.payload.template,
+    });
+  } catch (error) {
+    console.warn("Hosted Linq delivery attempt recording failed.", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      template,
+    });
+  }
+}
+
+function isHostedLinqCurrentInboundSideEffect(
+  effect: HostedLinqMessageSideEffect,
+  currentInboundReply: HostedLinqCurrentInboundReplyProof | null,
+): boolean {
+  if (!currentInboundReply) {
+    return false;
+  }
+
+  const chatId = normalizeTransportText(effect.payload.chatId);
+  const replyToMessageId = normalizeTransportText(effect.payload.replyToMessageId);
+  return (
+    chatId !== null
+    && chatId === normalizeTransportText(currentInboundReply.chatId)
+    && replyToMessageId !== null
+    && replyToMessageId === normalizeTransportText(currentInboundReply.messageId)
+  );
+}
+
+function normalizeTransportText(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
+}
+
+async function markHostedLinqDeliveryAcceptedBestEffort(input: {
+  chatId: string;
+  effect: HostedLinqMessageSideEffect;
+  messageId: string | null;
+  prisma: HostedLinqTransportPersistenceClient;
+}): Promise<void> {
+  const template = input.effect.payload.template;
+  try {
+    await markHostedLinqDeliveryAcceptedTx({
+      idempotencyKey: input.effect.effectId,
+      linqChatId: input.chatId,
+      messageId: input.messageId,
+      prisma: input.prisma,
+    });
+  } catch (error) {
+    console.warn("Hosted Linq delivery accepted recording failed.", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      template,
+    });
+  }
+}
+
+async function markHostedLinqDeliveryFailedBestEffort(input: {
+  effect: HostedLinqMessageSideEffect;
+  error: unknown;
+  prisma: HostedLinqTransportPersistenceClient;
+}): Promise<void> {
+  try {
+    await markHostedLinqDeliverySendFailedTx({
+      failureCode: readHostedLinqSideEffectString(readErrorRecord(input.error), "code"),
+      failureReason: input.error instanceof Error ? input.error.message : null,
+      idempotencyKey: input.effect.effectId,
+      prisma: input.prisma,
+    });
+  } catch {
+    // Preserve the original delivery error. This telemetry update is non-critical.
+  }
 }
 
 function buildHostedLinqSideEffectLogDetails(
@@ -336,6 +576,10 @@ function readHostedLinqSideEffectString(
     : null;
 }
 
+function readErrorRecord(error: unknown): Record<string, unknown> | null {
+  return error && typeof error === "object" ? error as Record<string, unknown> : null;
+}
+
 async function buildHostedLinqSideEffectMessage(
   effect: HostedLinqMessageSideEffect,
   prisma: HostedLinqTransportPersistenceClient,
@@ -348,12 +592,12 @@ async function buildHostedLinqSideEffectMessage(
         seed: effect.effectId,
       });
     case "conversation_home_redirect": {
-      const homeRecipientPhone = await resolveHostedHomeRecipientPhone(effect.payload, prisma);
+      const homeRecipientPhone = normalizePhoneNumber(effect.payload.homeRecipientPhone);
 
       if (!homeRecipientPhone) {
         throw hostedOnboardingError({
           code: "LINQ_HOME_PHONE_REQUIRED",
-          message: `Hosted webhook side effect ${effect.effectId} requires a home recipient phone.`,
+          message: `Hosted webhook side effect ${effect.effectId} requires a valid home recipient phone.`,
           httpStatus: 500,
           retryable: false,
         });
@@ -372,24 +616,6 @@ async function buildHostedLinqSideEffectMessage(
         prisma,
       });
   }
-}
-
-async function resolveHostedHomeRecipientPhone(
-  payload: HostedLinqConversationHomeRedirectPayload,
-  prisma: HostedLinqTransportPersistenceClient,
-): Promise<string | null> {
-  if (payload.memberId) {
-    const routing = await readHostedMemberRoutingState({
-      memberId: payload.memberId,
-      prisma,
-    });
-
-    if (routing?.linqRecipientPhone) {
-      return routing.linqRecipientPhone;
-    }
-  }
-
-  return payload.homeRecipientPhone;
 }
 
 async function buildHostedInviteSideEffectMessage(input: {
@@ -473,7 +699,7 @@ function buildHostedWebhookLinqMessagePayload(
     case "conversation_home_redirect":
       return {
         chatId: input.chatId,
-        homeRecipientPhone: input.homeRecipientPhone ?? null,
+        homeRecipientPhone: input.homeRecipientPhone,
         memberId: input.memberId,
         replyToMessageId,
         template: input.template,
@@ -545,12 +771,18 @@ async function claimHostedLinqNoticeForSideEffect(
   prisma: HostedLinqTransportPersistenceClient,
 ): Promise<boolean> {
   switch (effect.payload.template) {
-    case "invite_signup":
-      return claimHostedLinqOnboardingLinkNotice({
-        memberId: effect.payload.memberId,
-        occurredAt: effect.payload.occurredAt,
+    case "invite_signup": {
+      const claim = await claimHostedLinqDeliveryProviderDispatchTx({
+        idempotencyKey: effect.effectId,
+        linqChatId: effect.payload.chatId,
         prisma,
+        source: "hosted_webhook_side_effect",
+        sourceRef: effect.effectId,
+        targetKind: "thread",
+        template: effect.payload.template,
       });
+      return claim.claimed;
+    }
     case "invite_signin":
       return true;
     case "ai_usage_quota":
@@ -573,11 +805,6 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
   try {
     switch (effect.payload.template) {
       case "invite_signup":
-        await releaseHostedLinqOnboardingLinkNoticeClaim({
-          memberId: effect.payload.memberId,
-          occurredAt: effect.payload.occurredAt,
-          prisma,
-        });
         return;
       case "daily_quota":
         await releaseHostedLinqQuotaReplyNoticeClaim({
@@ -606,5 +833,41 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
       "Hosted Linq side-effect notice claim release failed.",
       buildHostedLinqSideEffectLogDetails(effect, error, 0),
     );
+  }
+}
+
+async function markHostedLinqNoticeSentForSideEffect(
+  effect: HostedLinqMessageSideEffect,
+  prisma: HostedLinqTransportPersistenceClient,
+): Promise<void> {
+  if (effect.payload.template !== "invite_signup") {
+    return;
+  }
+
+  await markHostedLinqOnboardingLinkNoticeSent({
+    memberId: effect.payload.memberId,
+    occurredAt: effect.payload.occurredAt,
+    prisma,
+  });
+}
+
+async function markHostedLinqDeliverySkippedBestEffort(input: {
+  effect: HostedLinqMessageSideEffect;
+  lastInboundAt: Date | null;
+  prisma: HostedLinqTransportPersistenceClient;
+}): Promise<void> {
+  try {
+    await markHostedLinqDeliverySkippedTx({
+      idempotencyKey: input.effect.effectId,
+      linqChatId: input.effect.payload.chatId,
+      prisma: input.prisma,
+      reason: buildHostedLinqRecentInboundSkipReason(input.lastInboundAt),
+      source: "hosted_webhook_side_effect",
+      sourceRef: input.effect.effectId,
+      targetKind: "thread",
+      template: input.effect.payload.template,
+    });
+  } catch {
+    // Skip logging must never turn a protective no-send into a retrying send failure.
   }
 }

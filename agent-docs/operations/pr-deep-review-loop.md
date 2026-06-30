@@ -77,16 +77,26 @@ Skip it only for docs/process-only PRs, trivial copy-only changes, or explicit c
      complexity, or missing the required reproduction/proof. Note rejections
      briefly with the reason.
 
-   Before accepting any fix that introduces a new durable state owner, index,
-   lifecycle enum, queue, transaction layer, or reconciliation loop, run the
-   architecture pressure check explicitly: can the invariant be preserved by
-   deleting code, reordering existing durable writes, tightening an existing
-   owner boundary, or deriving from one existing source of truth? Reject or
-   defer the finding when the proposed cure is a broader state machine than the
-   confirmed bug justifies. When repeated findings cluster on one mechanism,
-   pause tactical patching and either collapse that mechanism to a simpler
-   ownership shape, split/abandon the PR, or explicitly reject the collapse
-   finding. ReviewGPT is strongest as an adversarial reviewer, not as the final
+   Review findings are adversarial signals, not implementation instructions.
+   Before accepting a finding, identify both the invariant it protects and any
+   product-critical flow it could break. Follow
+   `docs/contracts/00-invariants.md` § Product-Critical Flow Preservation:
+   reject or redesign fixes that remove a required onboarding, welcome,
+   current-reply, billing/access, auth, sync, privacy, or safety success path
+   without an explicitly designed and tested replacement.
+
+   Before accepting any fix that broadens architecture, run the architecture
+   pressure check explicitly: can the invariant be preserved by deleting code,
+   reordering existing durable writes, tightening an existing owner boundary,
+   deriving from one existing source of truth, or adding focused coverage around
+   the existing primitive? Reject, defer, or redesign the finding when the
+   proposed cure adds a new durable state owner, index, lifecycle enum, queue,
+   transaction layer, reconciliation loop, policy manager, or abstraction
+   without production-path proof that the simpler owner-boundary fix is
+   insufficient. When repeated findings cluster on one mechanism, pause
+   tactical patching and either collapse that mechanism to a simpler ownership
+   shape, split/abandon the PR, or explicitly reject the collapse finding.
+   ReviewGPT is strongest as an adversarial reviewer, not as the final
    architecture owner.
 4. Fix only accepted findings after the reproduction/proof above is in place,
    run the verification required by

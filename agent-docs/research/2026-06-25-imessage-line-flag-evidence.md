@@ -1,7 +1,7 @@
 # 2026-06-25 iMessage Line Flag Evidence
 
-Status: point-in-time investigation note  
-Updated: 2026-06-26  
+Status: point-in-time investigation note
+Updated: 2026-06-26
 Scope: hosted Linq/iMessage activity leading up to and after the reported line flag
 
 ## Privacy Boundary

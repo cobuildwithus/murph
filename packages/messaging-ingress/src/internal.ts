@@ -123,7 +123,13 @@ const SENSITIVE_STRING_PATTERNS = [
   /\b(authorization|cookie|set-cookie|access_token|refresh_token|api[_-]?key|session(?:[_-]?(?:id|token))?|secret)\b\s*[:=]\s*\S+/iu,
 ] as const;
 
+const ISO_TIMESTAMP_ZONE_SUFFIX = /(?:[Zz]|[+-]\d{2}:?\d{2})$/u;
+
 export function toIsoTimestamp(value: Date | string | number): string {
+  if (typeof value === "string" && !ISO_TIMESTAMP_ZONE_SUFFIX.test(value)) {
+    throw new TypeError(`Invalid ISO timestamp: ${value} (missing time zone)`);
+  }
+
   const date = value instanceof Date ? value : new Date(value);
 
   if (Number.isNaN(date.valueOf())) {

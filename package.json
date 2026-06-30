@@ -27,7 +27,7 @@
     "build:workspace:clean": "pnpm clean:build:workspace && pnpm exec tsc -b tsconfig.json --force --pretty false && pnpm --dir packages/importers build",
     "build:workspace:incremental": "pnpm exec tsc -b tsconfig.json --pretty false && pnpm --dir packages/importers build",
     "build:test-runtime": "pnpm clean:build:test-runtime && pnpm exec tsc -b tsconfig.test-runtime.json --pretty false && pnpm --dir packages/importers build",
-    "clean": "node scripts/rm-paths.mjs packages/*/dist packages/*/.dist-next packages/*/.dist-next.tsbuildinfo packages/*/.dist-publish-* packages/*/.dist-backup-* packages/*/.tsconfig.build-next.json packages/*/.next packages/*/.test-dist packages/*/.tsbuildinfo packages/*/*.tsbuildinfo apps/*/.next apps/*/.next-dev apps/*/.next-smoke apps/*/.tsbuildinfo apps/*/*.tsbuildinfo && pnpm workflow:clean-web-artifacts -- --quiet && pnpm clean:source-sidecars",
+    "clean": "node scripts/rm-paths.mjs packages/*/dist packages/*/.dist-next packages/*/.dist-next.tsbuildinfo packages/*/.dist-publish-* packages/*/.dist-backup-* packages/*/.tsconfig.build-next.json packages/*/.next packages/*/.test-dist packages/*/.tsbuildinfo packages/*/*.tsbuildinfo apps/*/.next apps/*/.next-dev apps/*/.next-smoke apps/*/.next-smoke-* apps/*/.tsbuildinfo apps/*/*.tsbuildinfo && pnpm workflow:clean-web-artifacts -- --quiet && pnpm clean:source-sidecars",
     "clean:source-sidecars": "tsx scripts/prune-generated-source-sidecars.ts --quiet",
     "workflow:clean-web-artifacts": "tsx scripts/clean-hosted-web-workflow-artifacts.ts",
     "deps:guard": "node scripts/verify-dependency-policy.mjs",

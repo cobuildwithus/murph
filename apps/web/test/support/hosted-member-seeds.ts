@@ -57,6 +57,7 @@ interface HostedActiveLinqMemberSeedInput extends HostedActiveMemberSeedInput {
   homePhone: string;
   memberPhone: string;
   privyUserId?: string | null;
+  recentInboundAt?: Date | string | null;
   walletAddress?: string | null;
 }
 
@@ -128,6 +129,15 @@ export interface HostedJunctionDeviceSyncReplayDrainStatus {
 interface HostedMemberSeedPrismaClient {
   $disconnect(): Promise<void>;
   $transaction<T>(callback: (tx: unknown) => Promise<T>): Promise<T>;
+}
+
+interface HostedMemberSeedRoutingTx {
+  hostedMemberRouting: {
+    updateMany(input: {
+      data: { linqLastInboundAt: Date };
+      where: { memberId: string };
+    }): Promise<unknown>;
+  };
 }
 
 interface HostedMemberSeedPrismaModule {
@@ -385,6 +395,16 @@ export async function seedHostedActiveLinqMember(
           prisma: tx,
           recipientPhone: input.homePhone,
         });
+        const recentInboundAt = input.recentInboundAt === undefined
+          ? null
+          : normalizeHostedMemberSeedDate(input.recentInboundAt);
+        if (recentInboundAt) {
+          await updateHostedMemberSeedLinqLastInboundAtTx({
+            memberId: input.memberId,
+            tx,
+            value: recentInboundAt,
+          });
+        }
       });
     } finally {
       await prisma.$disconnect();
@@ -392,10 +412,56 @@ export async function seedHostedActiveLinqMember(
   });
 }
 
+async function updateHostedMemberSeedLinqLastInboundAtTx(input: {
+  memberId: string;
+  tx: unknown;
+  value: Date;
+}): Promise<void> {
+  const prisma = requireHostedMemberSeedRoutingTx(input.tx);
+  await prisma.hostedMemberRouting.updateMany({
+    where: {
+      memberId: input.memberId,
+    },
+    data: {
+      linqLastInboundAt: input.value,
+    },
+  });
+}
+
+function requireHostedMemberSeedRoutingTx(value: unknown): HostedMemberSeedRoutingTx {
+  if (isHostedMemberSeedRoutingTx(value)) {
+    return value;
+  }
+
+  throw new Error("Hosted member Linq seed requires Prisma hostedMemberRouting access.");
+}
+
+function isHostedMemberSeedRoutingTx(value: unknown): value is HostedMemberSeedRoutingTx {
+  return typeof value === "object"
+    && value !== null
+    && "hostedMemberRouting" in value
+    && typeof value.hostedMemberRouting === "object"
+    && value.hostedMemberRouting !== null
+    && "updateMany" in value.hostedMemberRouting
+    && typeof value.hostedMemberRouting.updateMany === "function";
+}
+
+function normalizeHostedMemberSeedDate(value: Date | string | null | undefined): Date | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Hosted member Linq recent inbound seed timestamp must be valid.");
+  }
+  return date;
+}
+
 export async function bindHostedActiveLinqHomeChat(input: {
   chatId: string;
   environment?: NodeJS.ProcessEnv;
   memberId: string;
+  recentInboundAt?: Date | string | null;
   recipientPhone: string;
 }): Promise<void> {
   if (!input.memberId.trim() || !input.chatId.trim() || !input.recipientPhone.trim()) {
@@ -420,6 +486,16 @@ export async function bindHostedActiveLinqHomeChat(input: {
           prisma: tx,
           recipientPhone: input.recipientPhone,
         });
+        const recentInboundAt = input.recentInboundAt === undefined
+          ? null
+          : normalizeHostedMemberSeedDate(input.recentInboundAt);
+        if (recentInboundAt) {
+          await updateHostedMemberSeedLinqLastInboundAtTx({
+            memberId: input.memberId,
+            tx,
+            value: recentInboundAt,
+          });
+        }
       });
     } finally {
       await prisma.$disconnect();

@@ -27,6 +27,17 @@ export {
 export type { HostedLinqWebhookSubscription } from "./linq-client";
 
 export {
+  listHostedLinqContactCards,
+  reconcileHostedLinqContactCards,
+  setupHostedLinqContactCard,
+  updateHostedLinqContactCard,
+} from "./linq-contact-card";
+export type {
+  HostedLinqContactCard,
+  HostedLinqContactCardReconciliation,
+} from "./linq-contact-card";
+
+export {
   buildHostedDailyQuotaReply,
   buildHostedInviteReply,
   buildHostedLinqConversationHomeRedirectReply,

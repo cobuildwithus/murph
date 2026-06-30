@@ -297,50 +297,6 @@ export async function recordHostedLinqFirstContactAdmissionDecision(input: {
   return recorded;
 }
 
-// Cheap read-only check of whether the per-contact classifier budget is
-// already exhausted across distinct events. Webhook-service uses this as a
-// pre-flight gate so it can skip the OpenAI call for permanently-blocked
-// contacts. Same-event retries are NOT exhausted even when the contact's
-// total count is at the cap: an event-id that already holds a slot is still
-// eligible to re-run the classifier (e.g. after a transport failure), and
-// the eventual `claimHostedLinqFirstContactAdmissionBudget` call recognises
-// the existing row and reports the claim idempotently. Unlike that claim,
-// this read does not take the advisory lock or try to insert a row, so it
-// must not be used to authorize a slot — only to short-circuit when no slot
-// is available.
-export async function isHostedLinqFirstContactAdmissionBudgetExhausted(input: {
-  eventId: string;
-  participantContact: HostedLinqParticipantContact;
-  prisma: Pick<HostedLinqFirstContactAdmissionBudgetStore, "hostedLinqFirstContactAdmissionBudget">;
-}): Promise<boolean> {
-  const lookupKeyCandidates = createHostedLinqParticipantContactLookupKeyReadCandidates({
-    kind: input.participantContact.kind,
-    value: input.participantContact.value,
-  });
-  if (lookupKeyCandidates.length === 0) {
-    return false;
-  }
-  const alreadyCounted = await input.prisma.hostedLinqFirstContactAdmissionBudget.findFirst({
-    where: {
-      eventId: input.eventId,
-      participantContactLookupKey: {
-        in: lookupKeyCandidates,
-      },
-    },
-  });
-  if (alreadyCounted) {
-    return false;
-  }
-  const existingCount = await input.prisma.hostedLinqFirstContactAdmissionBudget.count({
-    where: {
-      participantContactLookupKey: {
-        in: lookupKeyCandidates,
-      },
-    },
-  });
-  return existingCount >= HOSTED_LINQ_FIRST_CONTACT_ADMISSION_MAX_ATTEMPTS;
-}
-
 export async function claimHostedLinqFirstContactAdmissionBudget(input: {
   eventId: string;
   participantContact: HostedLinqParticipantContact;

@@ -145,6 +145,7 @@ model DeviceWebhookTrace {
   @@map("device_webhook_trace")
 }
 
+
 model DeviceSyncSignal {
   id                   Int               @id @default(autoincrement())
   userId               String            @map("user_id")
@@ -586,11 +587,13 @@ model HostedMemberRouting {
   linqChatIdEncrypted                String?      @map("linq_chat_id_encrypted")
   linqRecipientPhoneLookupKey        String?      @map("linq_recipient_phone_lookup_key")
   linqRecipientPhoneEncrypted        String?      @map("linq_recipient_phone_encrypted")
+  linqLastInboundAt                  DateTime?    @map("linq_last_inbound_at")
   /// Pre-activation Linq acquisition/referral thread before a home line is chosen.
   pendingLinqChatLookupKey           String?      @unique @map("pending_linq_chat_lookup_key")
   pendingLinqChatIdEncrypted         String?      @map("pending_linq_chat_id_encrypted")
   pendingLinqRecipientPhoneLookupKey String?      @map("pending_linq_recipient_phone_lookup_key")
   pendingLinqRecipientPhoneEncrypted String?      @map("pending_linq_recipient_phone_encrypted")
+  pendingLinqLastInboundAt           DateTime?    @map("pending_linq_last_inbound_at")
   pendingLinqParticipantContactKind       String?   @map("pending_linq_participant_contact_kind")
   pendingLinqParticipantContactLookupKey  String?   @unique @map("pending_linq_participant_contact_lookup_key")
   pendingLinqParticipantContactEncrypted  String?   @map("pending_linq_participant_contact_encrypted")
@@ -604,6 +607,8 @@ model HostedMemberRouting {
 
   @@index([linqRecipientPhoneLookupKey])
   @@index([pendingLinqRecipientPhoneLookupKey])
+  @@index([linqLastInboundAt])
+  @@index([pendingLinqLastInboundAt])
   @@map("hosted_member_routing")
 }
 
@@ -845,7 +850,6 @@ model HostedLinqFirstContactAdmissionDecision {
   category            String?
   confidence          Float
   source              String
-  rejectedMessageText String?  @map("rejected_message_text") @ignore
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
@@ -956,6 +960,7 @@ model HostedThreadRoute {
   threadLookupKey         String                @map("thread_lookup_key")
   threadIdentityLookupKey String                @map("thread_identity_lookup_key")
   containerMemberId       String                @map("container_member_id")
+  lastInboundAt           DateTime?             @map("last_inbound_at")
   createdAt               DateTime              @default(now()) @map("created_at")
   updatedAt               DateTime              @default(now()) @updatedAt @map("updated_at")
   container               HostedThreadContainer @relation(fields: [containerMemberId], references: [memberId], onDelete: Cascade)
@@ -963,7 +968,155 @@ model HostedThreadRoute {
   @@id([channel, threadIdentityLookupKey])
   @@index([channel, threadLookupKey])
   @@index([containerMemberId])
+  @@index([channel, lastInboundAt])
   @@map("hosted_thread_route")
+}
+
+model HostedLinqLine {
+  phoneNumberLookupKey       String    @id @map("phone_number_lookup_key")
+  phoneNumberHint            String    @map("phone_number_hint")
+  source                     String    @default("unknown")
+  configuredAt               DateTime? @map("configured_at")
+  providerSeenAt             DateTime? @map("provider_seen_at")
+  healthStatus               String    @default("unknown") @map("health_status")
+  egressPolicy               String    @default("enabled") @map("egress_policy")
+  providerStatus             String?   @map("provider_status")
+  providerReason             String?   @map("provider_reason")
+  providerUpdatedAt          DateTime? @map("provider_updated_at")
+  lastStatusEventId          String?   @map("last_status_event_id")
+  lastOutboundAt             DateTime? @map("last_outbound_at")
+  lastDeliveredAt            DateTime? @map("last_delivered_at")
+  lastFailedAt               DateTime? @map("last_failed_at")
+  lastReceiptAt              DateTime? @map("last_receipt_at")
+  lastReceiptEventId         String?   @map("last_receipt_event_id")
+  lastFailureCode            String?   @map("last_failure_code")
+  lastFailureReason          String?   @map("last_failure_reason")
+  lastInboundAt              DateTime? @map("last_inbound_at")
+  consecutiveFailures        Int       @default(0) @map("consecutive_failures")
+  totalOutboundCount         Int       @default(0) @map("total_outbound_count")
+  totalDeliveredCount        Int       @default(0) @map("total_delivered_count")
+  totalFailedCount           Int       @default(0) @map("total_failed_count")
+  totalInboundCount          Int       @default(0) @map("total_inbound_count")
+  activeMemberLimit          Int?      @map("active_member_limit")
+  maxNewConversationsPerDay  Int?      @map("max_new_conversations_per_day")
+  maxOutboundPerDay          Int?      @map("max_outbound_per_day")
+  warmupStartedAt            DateTime? @map("warmup_started_at")
+  warmupEndsAt               DateTime? @map("warmup_ends_at")
+  assignmentWeight           Int       @default(100) @map("assignment_weight")
+  notes                      String?
+  createdAt                  DateTime  @default(now()) @map("created_at")
+  updatedAt                  DateTime  @updatedAt @map("updated_at")
+  providerEvents             HostedLinqProviderEvent[]
+  deliveries                 HostedLinqDelivery[]
+  alerts                     HostedLinqAlert[]
+
+  @@index([healthStatus, egressPolicy])
+  @@index([providerStatus])
+  @@index([lastFailedAt])
+  @@map("hosted_linq_line")
+}
+
+model HostedLinqProviderEvent {
+  eventId              String   @id @map("event_id")
+  eventType            String   @map("event_type")
+  apiVersion           String?  @map("api_version")
+  webhookVersion       String?  @map("webhook_version")
+  traceIdSuffix        String?  @map("trace_id_suffix")
+  providerCreatedAt    DateTime @map("provider_created_at")
+  receivedAt           DateTime @map("received_at")
+  phoneNumberLookupKey String?  @map("phone_number_lookup_key")
+  phoneNumberHint      String?  @map("phone_number_hint")
+  phoneNumberRole      String?  @map("phone_number_role")
+  linqChatLookupKey    String?  @map("linq_chat_lookup_key")
+  messageLookupKey     String?  @map("message_lookup_key")
+  messageIdSuffix      String?  @map("message_id_suffix")
+  direction            String?
+  service              String?
+  deliveryStatus       String?  @map("delivery_status")
+  failureCode          String?  @map("failure_code")
+  failureReason        String?  @map("failure_reason")
+  providerStatus       String?  @map("provider_status")
+  providerReason       String?  @map("provider_reason")
+  extractionVersion    Int      @default(1) @map("extraction_version")
+  extractionJson       Json?    @map("extraction_json")
+  payloadShapeJson     Json?    @map("payload_shape_json")
+  payloadSanitizedJson Json?    @map("payload_sanitized_json")
+  payloadHash          String?  @map("payload_hash")
+  createdAt            DateTime @default(now()) @map("created_at")
+  line                 HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
+  alerts               HostedLinqAlert[]
+
+  @@index([eventType, providerCreatedAt])
+  @@index([phoneNumberLookupKey, providerCreatedAt])
+  @@index([phoneNumberLookupKey, eventType, providerCreatedAt])
+  @@index([messageLookupKey, providerCreatedAt])
+  @@index([deliveryStatus, providerCreatedAt])
+  @@map("hosted_linq_provider_event")
+}
+
+model HostedLinqDelivery {
+  id                   String   @id
+  idempotencyKey       String?  @unique @map("idempotency_key")
+  source               String
+  sourceRef            String?  @map("source_ref")
+  template             String?
+  phoneNumberLookupKey String?  @map("phone_number_lookup_key")
+  phoneNumberHint      String?  @map("phone_number_hint")
+  targetKind           String?  @map("target_kind")
+  linqChatLookupKey    String?  @map("linq_chat_lookup_key")
+  messageLookupKey     String?  @unique @map("message_lookup_key")
+  messageIdSuffix      String?  @map("message_id_suffix")
+  service              String?
+  status               String   @default("attempted")
+  attemptedAt          DateTime @map("attempted_at")
+  acceptedAt           DateTime? @map("accepted_at")
+  deliveredAt          DateTime? @map("delivered_at")
+  failedAt             DateTime? @map("failed_at")
+  skippedAt            DateTime? @map("skipped_at")
+  lastReceiptAt        DateTime? @map("last_receipt_at")
+  lastProviderEventId  String?  @map("last_provider_event_id")
+  failureCode          String?  @map("failure_code")
+  failureReason        String?  @map("failure_reason")
+  skipReason           String?  @map("skip_reason")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+  line                 HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
+  alerts               HostedLinqAlert[]
+
+  @@index([phoneNumberLookupKey, attemptedAt])
+  @@index([status, attemptedAt])
+  @@index([linqChatLookupKey, attemptedAt])
+  @@index([lastReceiptAt])
+  @@map("hosted_linq_delivery")
+}
+
+model HostedLinqAlert {
+  id                   String   @id
+  kind                 String
+  status               String   @default("pending")
+  eventId              String?  @map("event_id")
+  deliveryId           String?  @map("delivery_id")
+  phoneNumberLookupKey String?  @map("phone_number_lookup_key")
+  phoneNumberHint      String?  @map("phone_number_hint")
+  subject              String
+  detailsJson          Json     @map("details_json")
+  claimedAt            DateTime @map("claimed_at")
+  lastAttemptedAt      DateTime? @map("last_attempted_at")
+  sentAt               DateTime? @map("sent_at")
+  providerMessageId    String?  @map("provider_message_id")
+  attemptCount         Int      @default(0) @map("attempt_count")
+  lastErrorCode        String?  @map("last_error_code")
+  lastProviderStatus   Int?     @map("last_provider_status")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+  event                HostedLinqProviderEvent? @relation(fields: [eventId], references: [eventId], onDelete: SetNull)
+  delivery             HostedLinqDelivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+  line                 HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
+
+  @@unique([kind, eventId])
+  @@index([status, claimedAt])
+  @@index([phoneNumberLookupKey, createdAt])
+  @@map("hosted_linq_alert")
 }
 
 model HostedAiUsage {

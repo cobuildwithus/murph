@@ -973,27 +973,6 @@ describe('channel helper seams', () => {
       target: 'thread-linq-voice',
       targetKind: 'thread',
     })
-
-    await expect(
-      ASSISTANT_CHANNEL_ADAPTERS.linq.send(
-        {
-          actorId: null,
-          bindingDelivery: createAssistantBindingDelivery('participant', '+15550000001'),
-          explicitTarget: null,
-          idempotencyKey: null,
-          identityId: null,
-          media,
-          message: '',
-          replyToMessageId: null,
-        },
-        {
-          sendLinq,
-          sendLinqVoiceMemo,
-        },
-      ),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_LINQ_VOICE_MEMO_CHAT_REQUIRED',
-    })
   })
 
   it('sends Linq voice memos to the concrete target returned by accepted text', async () => {

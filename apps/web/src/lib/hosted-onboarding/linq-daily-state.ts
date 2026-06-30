@@ -98,9 +98,18 @@ export async function claimHostedLinqOnboardingLinkNotice(input: {
   prisma: HostedLinqDailyStateClient;
   sentAt?: Date;
 }): Promise<boolean> {
+  return markHostedLinqOnboardingLinkNoticeSent(input);
+}
+
+export async function markHostedLinqOnboardingLinkNoticeSent(input: {
+  memberId: string;
+  occurredAt: Date | string;
+  prisma: HostedLinqDailyStateClient;
+  sentAt?: Date;
+}): Promise<boolean> {
   const sentAt = input.sentAt ?? new Date();
 
-  const claimed = await input.prisma.hostedLinqDailyState.updateMany({
+  const marked = await input.prisma.hostedLinqDailyState.updateMany({
     where: {
       dayUtc: resolveHostedLinqDayUtc(input.occurredAt),
       memberId: input.memberId,
@@ -111,7 +120,7 @@ export async function claimHostedLinqOnboardingLinkNotice(input: {
     },
   });
 
-  return claimed.count === 1;
+  return marked.count === 1;
 }
 
 export async function releaseHostedLinqOnboardingLinkNoticeClaim(input: {

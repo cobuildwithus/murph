@@ -27,6 +27,15 @@ import {
   verifyAndParseHostedWhatsAppWebhookRequest,
 } from "./whatsapp";
 import {
+  sendPendingHostedLinqAlertsBestEffort,
+} from "./linq-alert-email";
+import {
+  ingestHostedLinqProviderEventTx,
+} from "./linq-provider-event-store";
+import {
+  parseHostedLinqProviderEvent,
+} from "./linq-provider-events";
+import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
@@ -34,13 +43,13 @@ import {
 } from "./logging";
 import {
   drainHostedLinqSideEffectsDirect,
+  type HostedLinqCurrentInboundReplyProof,
 } from "./webhook-transport";
 import {
   buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision,
   claimHostedLinqFirstContactAdmissionBudget,
   classifyHostedLinqFirstContactAdmission,
   isHostedLinqFirstContactAdmissionClassifierUnavailableError,
-  isHostedLinqFirstContactAdmissionBudgetExhausted,
   readHostedLinqFirstContactAdmissionMode,
   readRecordedHostedLinqFirstContactAdmissionDecision,
   recordHostedLinqFirstContactAdmissionDecision,
@@ -52,6 +61,9 @@ import {
 import {
   assertHostedThreadRouteEgressAuthority,
 } from "../hosted-routing/thread-route-store";
+import {
+  assertHostedLinqRouteAuthorityMatchesTarget,
+} from "./linq-egress-engagement";
 
 export {
   handleHostedStripeWebhook,
@@ -117,9 +129,44 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       return response;
     }
 
-    if (event.event_type === "message.received") {
-      requireHostedLinqMessageReceivedEvent(event);
+    const providerEvent = parseHostedLinqProviderEvent({
+      event,
+      rawBody: input.rawBody,
+    });
+    if (providerEvent && event.event_type !== "message.received") {
+      const prisma = input.prisma ?? getPrisma();
+      const providerResult = await ingestHostedLinqProviderEventDirect({
+        event: providerEvent,
+        prisma,
+      });
+      await scheduleHostedLinqProviderAlertEmails({
+        alertIds: providerResult.alertIds,
+        prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
+      });
+      const response: HostedOnboardingLinqWebhookResponse = {
+        duplicate: providerResult.duplicate || undefined,
+        ignored: true,
+        ok: true,
+        reason: providerResult.duplicate
+          ? "duplicate-linq-provider-event"
+          : `recorded-linq-provider-event:${providerEvent.eventType}`,
+      };
+      responseReason = response.reason ?? null;
+      finishHostedOnboardingTiming(timing, "completed", {
+        alertCount: providerResult.alertIds.length,
+        duplicate: providerResult.duplicate,
+        eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
+        eventType,
+        responseReason,
+      });
+      return response;
     }
+
+    const currentInboundReply: HostedLinqCurrentInboundReplyProof | null =
+      event.event_type === "message.received"
+        ? buildHostedLinqCurrentInboundReplyProof(event)
+        : null;
 
     const prisma = input.prisma ?? getPrisma();
     const planTiming = startHostedOnboardingTiming(
@@ -189,24 +236,20 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               "Hosted Linq first-contact admission plan missing participant contact for budget claim.",
             );
           }
-          // Pre-flight: skip the classifier call entirely for contacts whose
-          // per-contact attempt cap is already burned. The cheap count-read
-          // here is the read-only side of the same budget guard; the
-          // authoritative claim still runs after classification or fallback
-          // admission under its advisory lock + composite-PK idempotency.
-          const budgetAlreadyExhausted = await isHostedLinqFirstContactAdmissionBudgetExhausted({
-            eventId: event.event_id,
-            participantContact: firstContactAdmissionParticipantContact,
+          const admissionBudget = await runHostedOnboardingWebhookTransaction(
             prisma,
-          });
-          if (budgetAlreadyExhausted) {
+            (transaction) =>
+              claimHostedLinqFirstContactAdmissionBudget({
+                eventId: event.event_id,
+                participantContact: firstContactAdmissionParticipantContact,
+                tx: transaction,
+              }),
+          );
+          if (admissionBudget.kind === "exhausted") {
             plan = buildBlockedHostedLinqFirstContactAdmissionPlan(
               "first-contact-admission-budget-exhausted",
             );
           } else {
-            // Classifier-unavailable failures fail open, but explicit classifier
-            // blocks still block. Persist budget + decision together so retries
-            // cannot get stuck with a counted event and no reusable decision.
             let classifiedAdmission: Awaited<ReturnType<typeof classifyHostedLinqFirstContactAdmission>>;
             try {
               classifiedAdmission = await classifyHostedLinqFirstContactAdmission({
@@ -220,54 +263,25 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               classifiedAdmission = buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision();
             }
             firstContactAdmissionClassified = true;
-            const persistedAdmission = await runHostedOnboardingWebhookTransaction(
+
+            const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecision({
+              decision: classifiedAdmission,
+              eventId: event.event_id,
               prisma,
-              async (transaction) => {
-                const admissionBudget = await claimHostedLinqFirstContactAdmissionBudget({
-                  eventId: event.event_id,
-                  participantContact: firstContactAdmissionParticipantContact,
-                  tx: transaction,
-                });
-                if (admissionBudget.kind === "exhausted") {
-                  return {
-                    admissionBudget,
-                    firstContactAdmission: null,
-                  };
-                }
-                return {
-                  admissionBudget,
-                  firstContactAdmission: await recordHostedLinqFirstContactAdmissionDecision({
-                    decision: classifiedAdmission,
-                    eventId: event.event_id,
+            });
+            if (firstContactAdmission.kind === "block") {
+              plan = buildBlockedHostedLinqFirstContactAdmissionPlan();
+            } else {
+              plan = await runHostedOnboardingWebhookTransaction(
+                prisma,
+                (transaction) =>
+                  planHostedOnboardingLinqWebhook({
+                    event,
+                    firstContactAdmitted: true,
+                    requireFirstContactAdmission,
                     prisma: transaction,
                   }),
-                };
-              },
-            );
-
-            if (persistedAdmission.admissionBudget.kind === "exhausted") {
-              plan = buildBlockedHostedLinqFirstContactAdmissionPlan(
-                "first-contact-admission-budget-exhausted",
               );
-            } else {
-              const firstContactAdmission = persistedAdmission.firstContactAdmission;
-              if (!firstContactAdmission) {
-                throw new Error("Hosted Linq first-contact admission was not persisted after a budget claim.");
-              }
-              if (firstContactAdmission.kind === "block") {
-                plan = buildBlockedHostedLinqFirstContactAdmissionPlan();
-              } else {
-                plan = await runHostedOnboardingWebhookTransaction(
-                  prisma,
-                  (transaction) =>
-                    planHostedOnboardingLinqWebhook({
-                      event,
-                      firstContactAdmitted: true,
-                      requireFirstContactAdmission,
-                      prisma: transaction,
-                    }),
-                );
-              }
             }
           }
         }
@@ -293,11 +307,19 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     if (plan.desiredSideEffects.length > 0) {
       await drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
         prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
         sideEffects: plan.desiredSideEffects,
         signal: input.signal,
       });
     }
+
+    scheduleHostedLinqProviderEventIngestionBestEffort({
+      event: providerEvent,
+      prisma,
+      scheduleAfterResponse: input.scheduleAfterResponse,
+    });
 
     responseReason = plan.response.reason ?? null;
     const wakeHandoff = await maybeHandoffHostedExecutionWebhookWake({
@@ -309,6 +331,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       userId: plan.wakeUserId,
     });
     const sendReadReceipt = () => maybeSendHostedLinqIngressReadReceipt({
+      currentInboundReply,
       plan,
       prisma,
       signal: input.signal,
@@ -344,6 +367,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 }
 
 async function maybeSendHostedLinqIngressReadReceipt(input: {
+  currentInboundReply: HostedLinqCurrentInboundReplyProof | null;
   plan: Awaited<ReturnType<typeof planHostedOnboardingLinqWebhook>>;
   prisma: PrismaClient;
   signal?: AbortSignal;
@@ -381,12 +405,28 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
     return;
   }
 
+  const routeAuthority = input.plan.linqReadReceiptRouteAuthority ?? null;
+  const currentInboundChatMatches =
+    normalizeHostedLinqReadReceiptChatId(chatId)
+      === normalizeHostedLinqReadReceiptChatId(input.currentInboundReply?.chatId);
   try {
-    if (input.plan.linqReadReceiptRouteAuthority) {
+    if (routeAuthority) {
       await assertHostedThreadRouteEgressAuthority({
-        authority: input.plan.linqReadReceiptRouteAuthority,
+        authority: assertHostedLinqRouteAuthorityMatchesTarget({
+          chatId,
+          routeAuthority,
+        }),
         prisma: input.prisma,
       });
+    } else if (!currentInboundChatMatches) {
+      finishHostedOnboardingTiming(readReceiptTiming, "skipped-missing-read-receipt-authority", {
+        responseReason,
+        signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
+        wakeHandoffReason,
+        wakeHandoffStarted,
+        wakeHandoffSignalAccepted,
+      });
+      return;
     }
 
     const result = await sendHostedLinqReadReceipt({
@@ -412,6 +452,90 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
       wakeHandoffSignalAccepted,
     });
   }
+}
+
+function normalizeHostedLinqReadReceiptChatId(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
+}
+
+function buildHostedLinqCurrentInboundReplyProof(
+  event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0],
+): HostedLinqCurrentInboundReplyProof {
+  const messageEvent = requireHostedLinqMessageReceivedEvent(event);
+  return {
+    chatId: messageEvent.data.chat_id,
+    messageId: messageEvent.data.message.id,
+  };
+}
+
+async function ingestHostedLinqProviderEventDirect(input: {
+  event: Parameters<typeof ingestHostedLinqProviderEventTx>[0]["event"];
+  prisma: PrismaClient;
+}): Promise<Awaited<ReturnType<typeof ingestHostedLinqProviderEventTx>>> {
+  return runHostedOnboardingWebhookTransaction(
+    input.prisma,
+    (transaction) => ingestHostedLinqProviderEventTx({
+      event: input.event,
+      prisma: transaction,
+    }),
+  );
+}
+
+function scheduleHostedLinqProviderEventIngestionBestEffort(input: {
+  event: Parameters<typeof ingestHostedLinqProviderEventTx>[0]["event"] | null;
+  prisma: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}): void {
+  if (!input.event) {
+    return;
+  }
+
+  const event = input.event;
+  const ingestProviderEvent = async () => {
+    try {
+      const providerResult = await ingestHostedLinqProviderEventDirect({
+        event,
+        prisma: input.prisma,
+      });
+      await scheduleHostedLinqProviderAlertEmails({
+        alertIds: providerResult.alertIds,
+        prisma: input.prisma,
+      });
+    } catch (error) {
+      console.warn("Hosted Linq provider event sidecar ingestion failed.", {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        eventIdSuffix: toHostedOnboardingLogIdSuffix(event.eventId),
+        eventType: event.eventType,
+      });
+    }
+  };
+
+  if (input.scheduleAfterResponse) {
+    input.scheduleAfterResponse(ingestProviderEvent);
+  }
+}
+
+async function scheduleHostedLinqProviderAlertEmails(input: {
+  alertIds: readonly string[];
+  prisma: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}): Promise<void> {
+  if (input.alertIds.length === 0) {
+    return;
+  }
+
+  const sendAlerts = () => sendPendingHostedLinqAlertsBestEffort({
+    alertIds: input.alertIds,
+    prisma: input.prisma,
+  });
+
+  if (input.scheduleAfterResponse) {
+    input.scheduleAfterResponse(sendAlerts);
+    return;
+  }
+
+  await sendAlerts();
 }
 
 function buildBlockedHostedLinqFirstContactAdmissionPlan(

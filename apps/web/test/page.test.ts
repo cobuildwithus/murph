@@ -18,8 +18,8 @@ const mocks = vi.hoisted(() => ({
       authenticated: boolean;
       context: "nav" | "hero" | "footer";
       authLabel: string;
-      leadingIcon?: React.ReactNode;
       signupLabel?: string;
+      leadingIcon?: React.ReactNode;
       splitUnauthenticated?: boolean;
       preloadAuthPanel?: boolean;
     }) =>
@@ -183,7 +183,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
   assert.match(markup, /<span class="block">Health is<\/span>/);
   assert.match(markup, /<span class="block">overwhelming\.<\/span>/);
   assert.match(markup, /Murph makes it easy\./);
-  assert.match(markup, /Murph is your personal health assistant\./);
+  assert.match(markup, /Murph is your personal health assistant\. Wearables, bloodwork/);
   assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
   assert.match(
     markup,
@@ -288,5 +288,6 @@ test("HomePage keeps the final CTA consistent for authenticated sessions", async
     undefined
   );
   assert.match(markup, /You’re already set up\./);
+  assert.match(markup, /data-root-landing-auth-actions-label="Go to dashboard"/);
   assert.match(markup, /Manage billing and connected wearables from one place\./);
 });

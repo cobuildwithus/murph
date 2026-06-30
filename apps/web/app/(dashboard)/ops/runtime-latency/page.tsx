@@ -125,6 +125,14 @@ export default async function RuntimeLatencyOpsPage({
             label={metricLabel("staged to provider p50", metricScope)}
             value={formatMs(dashboard.stageLatencyMs.stagedToProviderStartP50)}
           />
+          <StageMetric
+            label={metricLabel("Linq guard p50", metricScope)}
+            value={formatMs(dashboard.linqEgressGuardMs.p50)}
+          />
+          <StageMetric
+            label={metricLabel("Linq guard p95", metricScope)}
+            value={formatMs(dashboard.linqEgressGuardMs.p95)}
+          />
         </div>
       </section>
 

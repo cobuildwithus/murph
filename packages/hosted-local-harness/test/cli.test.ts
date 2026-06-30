@@ -31,6 +31,9 @@ const ensureHostedLocalWorktreeDatabase = vi.hoisted(() =>
 const formatHostedLocalWorktreeEnv = vi.hoisted(() =>
   vi.fn(() => "export MURPH_DEV_DATABASE_URL='[redacted]'\n"),
 );
+const prepareHostedLocalWorktreeLinqTunnelConfig = vi.hoisted(() =>
+  vi.fn(async () => undefined),
+);
 const removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing = vi.hoisted(() =>
   vi.fn(async () => ({ missingCryptoState: false, removed: false })),
 );
@@ -90,6 +93,7 @@ vi.mock("../src/dev-hosted-local/worktree.ts", () => ({
   acquireHostedLocalWorktreeLock,
   ensureHostedLocalWorktreeDatabase,
   formatHostedLocalWorktreeEnv,
+  prepareHostedLocalWorktreeLinqTunnelConfig,
   removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing,
   resolveHostedLocalWorktreeConfig,
 }));
@@ -146,6 +150,7 @@ describe("hosted-local run CLI", () => {
     ensureHostedLocalWorktreeDatabase.mockResolvedValue({ created: false });
     removeCreatedHostedLocalWorktreeDatabaseIfCryptoStateMissing
       .mockResolvedValue({ missingCryptoState: false, removed: false });
+    prepareHostedLocalWorktreeLinqTunnelConfig.mockResolvedValue(undefined);
     resolveHostedLocalWorktreeConfig.mockResolvedValue(createHostedLocalWorktreeConfig());
     formatHostedLocalWorktreeEnv.mockReturnValue("export MURPH_DEV_DATABASE_URL='[redacted]'\n");
     runDoctorCommand.mockImplementation((command: string, args: readonly string[]) => ({
@@ -278,6 +283,9 @@ describe("hosted-local run CLI", () => {
       expect.objectContaining({
         onCreated: expect.any(Function),
       }),
+    );
+    expect(prepareHostedLocalWorktreeLinqTunnelConfig).toHaveBeenCalledWith(
+      createHostedLocalWorktreeConfig(),
     );
     expect(startHostedLocalDevStack).toHaveBeenCalledWith(expect.objectContaining({
       env: expect.objectContaining({

@@ -1,9 +1,7 @@
 import type { HostedRuntimeEffectsPort } from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import type {
-  HostedExecutionExternalThreadRouteAuthority,
-} from "@murphai/hosted-execution";
 import {
-  HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
+  HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
+  HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
 } from "@murphai/hosted-execution/routes";
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
@@ -124,18 +122,33 @@ export function createCloudflareEffectsPort(input: {
     },
     ...(webControlTransport
       ? {
-          async assertLinqThreadRouteAuthority(
-            authority: HostedExecutionExternalThreadRouteAuthority,
-            context?: { signal?: AbortSignal | null },
-          ) {
+          async assertLinqRecentInboundEngagement(request, context) {
             await fetchHostedWebControlPlaneJson({
-              body: {
-                authority,
-              },
+              body: request,
               boundUserId: input.boundUserId,
-              description: "Hosted Linq thread route authority assertion",
+              description: "Hosted Linq recent inbound engagement assertion",
               fetchImpl: input.fetchImpl,
-              path: HOSTED_RUNTIME_THREAD_ROUTE_EGRESS_AUTHORITY_PATH,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description: "Hosted Linq recent inbound engagement assertion",
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
+              path: HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+          },
+          async recordLinqDeliveryOutcome(request, context) {
+            await fetchHostedWebControlPlaneJson({
+              body: request,
+              boundUserId: input.boundUserId,
+              description: "Hosted Linq delivery outcome recording",
+              fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description: "Hosted Linq delivery outcome recording",
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
+              path: HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,

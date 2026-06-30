@@ -77,6 +77,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'linqChatIdEncrypted String? @map("linq_chat_id_encrypted")',
     'linqRecipientPhoneLookupKey String? @map("linq_recipient_phone_lookup_key")',
     'linqRecipientPhoneEncrypted String? @map("linq_recipient_phone_encrypted")',
+    'linqLastInboundAt DateTime? @map("linq_last_inbound_at")',
     'pendingLinqChatLookupKey String? @unique @map("pending_linq_chat_lookup_key")',
     'pendingLinqChatIdEncrypted String? @map("pending_linq_chat_id_encrypted")',
     'pendingLinqParticipantContactKind String? @map("pending_linq_participant_contact_kind")',
@@ -85,6 +86,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'pendingLinqParticipantContactObservedAt DateTime? @map("pending_linq_participant_contact_observed_at")',
     'pendingLinqRecipientPhoneLookupKey String? @map("pending_linq_recipient_phone_lookup_key")',
     'pendingLinqRecipientPhoneEncrypted String? @map("pending_linq_recipient_phone_encrypted")',
+    'pendingLinqLastInboundAt DateTime? @map("pending_linq_last_inbound_at")',
     'replyAliasLookupKey String? @unique @map("reply_alias_lookup_key")',
     'telegramUserLookupKey String? @unique @map("telegram_user_lookup_key")',
     'telegramUserIdEncrypted String? @map("telegram_user_id_encrypted")',
@@ -391,6 +393,20 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedLinqObservabilityMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026062500_hosted_linq_observability/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedLinqEgressEngagementMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026062501_hosted_linq_egress_engagement/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const actionApprovalConsumedAtMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260625150000_hosted_action_approval_consumed_at/migration.sql",
@@ -436,6 +452,13 @@ describe("hosted Prisma baseline migration", () => {
     const linqFirstContactScrubRejectedMessageMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260628000000_linq_first_contact_scrub_rejected_message_text/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const linqFirstContactDropRejectedMessageMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260628010000_linq_first_contact_drop_rejected_message_text/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -505,6 +528,8 @@ describe("hosted Prisma baseline migration", () => {
       "20260624150000_hosted_sensitive_action_approval",
       "20260624200000_hosted_action_approval_return_contact_kind",
       "20260625000100_hosted_phone_calls",
+      "2026062500_hosted_linq_observability",
+      "2026062501_hosted_linq_egress_engagement",
       "20260625150000_hosted_action_approval_consumed_at",
       "20260626000000_linq_first_contact_admission_decision",
       "2026062600_computer_handoff_return_contact_kind",
@@ -512,6 +537,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260627210000_linq_first_contact_admission_drop_category",
       "20260627230000_linq_first_contact_rejected_message_text",
       "20260628000000_linq_first_contact_scrub_rejected_message_text",
+      "20260628010000_linq_first_contact_drop_rejected_message_text",
       "20260629160000_computer_handoff_viewport_session_hint",
       "migration_lock.toml",
     ]);
@@ -595,6 +621,33 @@ describe("hosted Prisma baseline migration", () => {
     expect(actionApprovalReturnContactKindMigrationSql).toContain(
       'ADD COLUMN "return_contact_kind" TEXT',
     );
+    expect(hostedLinqObservabilityMigrationSql).toContain('CREATE TABLE "hosted_linq_line"');
+    expect(hostedLinqObservabilityMigrationSql).toContain('CREATE TABLE "hosted_linq_provider_event"');
+    expect(hostedLinqObservabilityMigrationSql).toContain('CREATE TABLE "hosted_linq_delivery"');
+    expect(hostedLinqObservabilityMigrationSql).toContain('CREATE TABLE "hosted_linq_alert"');
+    expect(hostedLinqObservabilityMigrationSql).toContain('"payload_shape_json" JSONB');
+    expect(hostedLinqObservabilityMigrationSql).toContain('"payload_sanitized_json" JSONB');
+    expect(hostedLinqObservabilityMigrationSql).toContain('"provider_created_at" TIMESTAMP(3) NOT NULL');
+    expect(hostedLinqObservabilityMigrationSql).not.toContain('"phone_number" TEXT NOT NULL');
+    expect(hostedLinqObservabilityMigrationSql).not.toContain(
+      'hosted_linq_line_phone_number_key',
+    );
+    expect(hostedLinqObservabilityMigrationSql).not.toContain("raw_payload");
+    expect(hostedLinqEgressEngagementMigrationSql).toContain('"linq_last_inbound_at" TIMESTAMP(3)');
+    expect(hostedLinqEgressEngagementMigrationSql).toContain('"pending_linq_last_inbound_at" TIMESTAMP(3)');
+    expect(hostedLinqEgressEngagementMigrationSql).toContain('"last_inbound_at" TIMESTAMP(3)');
+    expect(hostedLinqEgressEngagementMigrationSql).not.toContain(
+      'SET "linq_last_inbound_at" = CURRENT_TIMESTAMP',
+    );
+    expect(hostedLinqEgressEngagementMigrationSql).not.toContain(
+      'SET "pending_linq_last_inbound_at" = CURRENT_TIMESTAMP',
+    );
+    expect(hostedLinqEgressEngagementMigrationSql).not.toContain(
+      'SET "last_inbound_at" = CURRENT_TIMESTAMP',
+    );
+    expect(hostedLinqObservabilityMigrationSql).toContain('"skipped_at" TIMESTAMP(3)');
+    expect(hostedLinqObservabilityMigrationSql).toContain('"skip_reason" TEXT');
+    expect(hostedLinqEgressEngagementMigrationSql).not.toContain("raw_payload");
     expect(actionApprovalConsumedAtMigrationSql).toContain(
       'ADD COLUMN "consumed_at" TIMESTAMP(3)',
     );
@@ -625,6 +678,11 @@ describe("hosted Prisma baseline migration", () => {
     expect(linqFirstContactAdmissionDecisionMigrationSql).not.toContain(
       "response",
     );
+    expect(linqFirstContactAdmissionDecisionMigrationSql).not.toContain(
+      "rejected_message_text",
+    );
+    expect(schema).not.toContain("rejectedMessageText");
+    expect(schema).not.toContain("rejected_message_text");
     expect(linqFirstContactAdmissionBudgetMigrationSql).toContain(
       'CREATE TABLE "hosted_linq_first_contact_admission_budget"',
     );
@@ -686,6 +744,21 @@ describe("hosted Prisma baseline migration", () => {
       "prompt",
     );
     expect(linqFirstContactScrubRejectedMessageMigrationSql).not.toContain(
+      "response",
+    );
+    expect(linqFirstContactDropRejectedMessageMigrationSql).toContain(
+      'SET "rejected_message_text" = NULL',
+    );
+    expect(linqFirstContactDropRejectedMessageMigrationSql).toContain(
+      'DROP CONSTRAINT IF EXISTS "hosted_linq_first_contact_admission_decision_rejected_message_check"',
+    );
+    expect(linqFirstContactDropRejectedMessageMigrationSql).toContain(
+      'DROP COLUMN IF EXISTS "rejected_message_text"',
+    );
+    expect(linqFirstContactDropRejectedMessageMigrationSql).not.toContain(
+      "prompt",
+    );
+    expect(linqFirstContactDropRejectedMessageMigrationSql).not.toContain(
       "response",
     );
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
