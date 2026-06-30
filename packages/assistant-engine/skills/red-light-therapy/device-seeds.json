@@ -1,0 +1,80 @@
+{
+  "schemaVersion": "murph.assistant.skill.red-light-device-seeds.v1",
+  "updatedDate": "2026-06-30",
+  "sourcePolicy": [
+    "Use these entries as skill-local manufacturer-claim examples, not as verified Health Commons evidence.",
+    "Prefer the user's manual, device irradiance chart, or current official manufacturer page over this file.",
+    "Use a listed irradiance only when the user's exact model and treatment distance match the reading.",
+    "Do not extrapolate to other distances from these entries."
+  ],
+  "devices": [
+    {
+      "brand": "Bestqool",
+      "model": "BQ60",
+      "aliases": ["Bestqool BQ60", "BQ60"],
+      "wavelengthsNm": [660, 850],
+      "irradianceReadings": [
+        {
+          "distanceCm": 7.62,
+          "distanceLabel": "3 in",
+          "irradianceMwPerCm2": 95.6,
+          "sourceType": "manufacturer_claim",
+          "sourceLabel": "Bestqool BQ60 official product page, checked 2026-06-30",
+          "sourceUrl": "https://www.bestqool.com/products/red-light-therapy-bq60"
+        }
+      ],
+      "notes": [
+        "Verify current manufacturer specs before making device-specific recommendations."
+      ]
+    },
+    {
+      "brand": "Bestqool",
+      "model": "Pro100",
+      "aliases": ["Bestqool Pro100", "Pro100", "Bestqool red light therapy Pro100"],
+      "wavelengthsNm": [630, 660, 850, 940],
+      "irradianceReadings": [
+        {
+          "distanceCm": 7.62,
+          "distanceLabel": "3 in",
+          "irradianceMwPerCm2": 109,
+          "sourceType": "manufacturer_claim",
+          "sourceLabel": "Bestqool Pro100 official product page, checked 2026-06-30",
+          "sourceUrl": "https://www.bestqool.com/products/red-light-therapy-pro100"
+        }
+      ],
+      "notes": [
+        "Do not infer other distances without a matching irradiance chart."
+      ]
+    },
+    {
+      "brand": "Bestqool",
+      "model": "Pro300",
+      "aliases": ["Bestqool Pro300", "Pro300", "Bestqool red light therapy Pro300"],
+      "wavelengthsNm": [630, 660, 850, 940],
+      "irradianceReadings": [
+        {
+          "distanceCm": 7.62,
+          "distanceLabel": "3 in",
+          "irradianceMwPerCm2": 106,
+          "sourceType": "manufacturer_claim",
+          "sourceLabel": "Bestqool Pro300 official product page, checked 2026-06-30",
+          "sourceUrl": "https://www.bestqool.com/products/full-body-red-light-therapy-pro300"
+        }
+      ],
+      "notes": [
+        "Panel geometry and body coverage still need user setup confirmation."
+      ]
+    }
+  ],
+  "brandsToCheckByOfficialModelPage": [
+    "Hooga",
+    "Mito Red Light",
+    "Joovv",
+    "PlatinumLED BioMax",
+    "Red Light Man",
+    "Bon Charge",
+    "Omnilux",
+    "CurrentBody",
+    "Solawave"
+  ]
+}
