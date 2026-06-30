@@ -32,7 +32,6 @@ const HOSTED_DEVICE_SYNC_RECONNECT_REQUIRED_SOURCE_ERROR_CODES = new Set([
   "TOKEN_REFRESH_FAILED",
 ]);
 const HOSTED_DEVICE_SYNC_RECONNECT_NOTICE_LIMIT = 4;
-const HOSTED_DEVICE_SYNC_RECONNECT_QUERY_TARGET_LIMIT = 4;
 
 export async function buildHostedDeviceSyncStatusPrompt(input: {
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined;
@@ -63,14 +62,12 @@ async function fetchHostedDeviceSyncReconnectStatusSnapshot(input: {
   reconnectTargets: readonly HostedDeviceSyncStatusPromptReconnectTarget[];
   signal: AbortSignal | null;
 }): Promise<HostedDeviceSyncRuntimeSnapshot | null> {
-  const reconnectTargets = input.reconnectTargets
-    .slice(0, HOSTED_DEVICE_SYNC_RECONNECT_QUERY_TARGET_LIMIT);
-  if (reconnectTargets.length === 0) {
+  if (input.reconnectTargets.length === 0) {
     return null;
   }
 
   const snapshots = await Promise.all(
-    reconnectTargets.map(async (target) => {
+    input.reconnectTargets.map(async (target) => {
       const sourceProviderSlug = normalizeHostedDeviceSyncKey(target.sourceProviderSlug);
       const provider = normalizeHostedDeviceSyncKey(target.provider);
       if (!sourceProviderSlug && !provider) {

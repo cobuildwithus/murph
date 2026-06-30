@@ -2271,7 +2271,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("continues the assistant lane when foreground input arrives during system mailbox preparation", async () => {
     let shouldYield = false;
+    let fetchSnapshotCalls = 0;
     const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      async fetchSnapshot() {
+        fetchSnapshotCalls += 1;
+        throw new Error("fetchSnapshot should not run after foreground preemption.");
+      },
+    } satisfies RuntimeDeviceSyncPort;
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(async () => {
       shouldYield = true;
       return {
@@ -2289,11 +2307,28 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["whoop_v2"],
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
       shouldYieldBackgroundMaintenance,
     }));
 
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(fetchSnapshotCalls).toBe(0);
     expectAssistantLaneCallWithoutDeviceSyncOptions();
+    expect(
+      mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0]
+        .executionContext.hosted?.dynamicContextPrompts,
+    ).toBeUndefined();
 
     await result.afterCheckpoint?.();
 
@@ -3341,7 +3376,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   });
 
   it("injects reconnect-required hosted device sync status as dynamic context for due cron lanes", async () => {
-    let fetchSnapshotCalls = 0;
+    const fetchSnapshotRequests: Array<Parameters<RuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),
       async applyUpdates() {
@@ -3355,13 +3390,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         throw new Error("createConnectLink should not be called.");
       },
       async fetchSnapshot(request) {
-        fetchSnapshotCalls += 1;
-        expect(request).toEqual({
-          includeCredentialMaterial: false,
-          limit: 4,
-          signal: expect.any(AbortSignal),
-          sourceProviderSlug: "whoop_v2",
-        });
+        fetchSnapshotRequests.push(request);
+        if (request?.sourceProviderSlug !== "whoop_v2") {
+          return {
+            connections: [],
+            generatedAt: "2026-04-29T00:00:00.000Z",
+            userId: "member_synthetic_phase",
+          };
+        }
+
         return {
           connections: [
             {
@@ -3424,7 +3461,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         providerConfigs: {
           junction: {
             environment: "sandbox",
-            providerFilter: ["whoop_v2"],
+            providerFilter: ["fitbit", "garmin", "oura", "withings", "whoop_v2"],
             region: "us",
           },
         },
@@ -3437,7 +3474,23 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
     const dynamicContextPrompts =
       assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts;
-    expect(fetchSnapshotCalls).toBe(1);
+    expect(fetchSnapshotRequests.map((request) => request?.sourceProviderSlug)).toEqual([
+      "fitbit",
+      "garmin",
+      "oura",
+      "withings",
+      "whoop_v2",
+    ]);
+    expect(fetchSnapshotRequests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          includeCredentialMaterial: false,
+          limit: 4,
+          signal: expect.any(AbortSignal),
+          sourceProviderSlug: "whoop_v2",
+        }),
+      ]),
+    );
     expect(dynamicContextPrompts).toHaveLength(1);
     expect(dynamicContextPrompts?.[0]).toContain("WHOOP currently needs reconnect");
     expect(dynamicContextPrompts?.[0]).toContain("source `whoop_v2`");

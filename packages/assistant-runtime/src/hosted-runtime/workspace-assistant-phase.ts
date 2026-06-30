@@ -322,7 +322,10 @@ export async function runHostedWorkspaceAssistantPhase(
     const resolveAssistantLaneExecutionContext = async (options: {
       includeDeviceSyncStatusPrompt: boolean;
     }): Promise<AssistantExecutionContext> => {
-      if (!options.includeDeviceSyncStatusPrompt) {
+      if (
+        !options.includeDeviceSyncStatusPrompt
+        || input.shouldYieldBackgroundMaintenance?.() === true
+      ) {
         return executionContext;
       }
       if (assistantLaneExecutionContextWithDynamicPrompt) {
@@ -341,16 +344,29 @@ export async function runHostedWorkspaceAssistantPhase(
         });
       return assistantLaneExecutionContextWithDynamicPrompt;
     };
-    const shouldIncludeDeviceSyncStatusPrompt = async (): Promise<boolean> => {
+    const shouldIncludeDeviceSyncStatusPrompt = async (options: {
+      managedAutomationsResult?: HostedWorkspaceRunnerAssistantPhaseResult | null;
+      systemMailboxMaintenance?: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
+    } = {}): Promise<boolean> => {
+      if (input.shouldYieldBackgroundMaintenance?.() === true) {
+        return false;
+      }
+
+      const candidateSystemMailboxMaintenance =
+        options.systemMailboxMaintenance ?? systemMailboxMaintenance;
+      const candidateManagedAutomationsResult =
+        options.managedAutomationsResult === undefined
+          ? managedAutomationsResult
+          : options.managedAutomationsResult;
       if (
-        systemMailboxMaintenance.continueAssistantLane
-        || managedAutomationsResult !== null
+        candidateSystemMailboxMaintenance.continueAssistantLane
+        || candidateManagedAutomationsResult !== null
       ) {
         return true;
       }
       if (
         hasFreshConversationInput
-        || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null
+        || candidateSystemMailboxMaintenance.pendingAssistantInputWakeAt !== null
       ) {
         return false;
       }
@@ -471,7 +487,10 @@ export async function runHostedWorkspaceAssistantPhase(
     }
     if (deferredPendingSystemMailboxMaintenance?.continueAssistantLane === true) {
       assistantMetrics = await runAutomationLane({
-        includeDeviceSyncStatusPrompt: true,
+        includeDeviceSyncStatusPrompt: await shouldIncludeDeviceSyncStatusPrompt({
+          managedAutomationsResult: null,
+          systemMailboxMaintenance: deferredPendingSystemMailboxMaintenance,
+        }),
       });
       currentTurnDeliveryIntentIds =
         assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
