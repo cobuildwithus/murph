@@ -68,21 +68,18 @@ export function IntegrationsSection({
 
             if (item === "murph") {
               return (
-                <div key="murph" className="flex flex-col items-center gap-3">
+                <div key="murph" className="flex flex-col items-center justify-center">
                   <div className="flex aspect-square w-full items-center justify-center">
-                    <div className="flex aspect-square w-[88%] animate-murph-heartbeat items-center justify-center rounded-full bg-[#FEFDF8] shadow-[0_2px_12px_rgba(45,52,54,0.06)] ring-1 ring-[rgba(196,168,130,0.18)]">
+                    <div className="flex aspect-square w-[92%] items-center justify-center rounded-full bg-[#FEFDF8] shadow-[0_2px_12px_rgba(45,52,54,0.06)] ring-1 ring-[rgba(196,168,130,0.18)]">
                       <Image
                         src="/icons/murph-mark.svg"
                         alt="Murph"
                         width={96}
                         height={96}
-                        className="h-10 w-auto max-w-full object-contain sm:h-12"
+                        className="h-12 w-auto max-w-full object-contain sm:h-14"
                       />
                     </div>
                   </div>
-                  <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#c4a882]">
-                    Murph
-                  </span>
                 </div>
               );
             }
