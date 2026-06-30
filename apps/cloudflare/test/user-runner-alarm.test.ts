@@ -2362,6 +2362,49 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
+  it("recovers a wake-unconfirmed runtime fence when web progress already committed", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "wake-unconfirmed" as const,
+        reason: "active-child-rejected" as const,
+      }),
+    );
+    const onStatusRead = vi.fn();
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      mailboxLag: [createMailboxLag({ lag: "0" })],
+      onStatusRead,
+      workspace: createWorkspaceState({ version: "8" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      startedAt: "2026-04-27T00:00:00.000Z",
+      workspaceVersion: "7",
+    });
+    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-recover-wake-unconfirmed",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "already_running",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
+      runtimeAttemptId: token.attemptId,
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(onStatusRead).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: null,
+      last_invocation_at: "2026-04-27T00:00:31.000Z",
+      wake_at: null,
+    });
+  });
+
   it("returns retry_later when active child wake exceeds the caller command budget", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
