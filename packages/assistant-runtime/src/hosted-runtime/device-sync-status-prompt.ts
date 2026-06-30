@@ -104,7 +104,13 @@ function mergeHostedDeviceSyncStatusSnapshots(
     generatedAt ??= snapshot.generatedAt;
     userId ??= snapshot.userId;
     for (const entry of snapshot.connections) {
-      connections.set(entry.connection.id, entry);
+      const existing = connections.get(entry.connection.id);
+      connections.set(
+        entry.connection.id,
+        existing
+          ? mergeHostedDeviceSyncStatusConnectionSnapshots(existing, entry)
+          : entry,
+      );
     }
   }
 
@@ -117,6 +123,51 @@ function mergeHostedDeviceSyncStatusSnapshots(
     generatedAt,
     userId,
   };
+}
+
+function mergeHostedDeviceSyncStatusConnectionSnapshots(
+  existing: HostedDeviceSyncRuntimeConnectionSnapshot,
+  next: HostedDeviceSyncRuntimeConnectionSnapshot,
+): HostedDeviceSyncRuntimeConnectionSnapshot {
+  return {
+    ...existing,
+    sources: mergeHostedDeviceSyncStatusSources(
+      existing.sources ?? [],
+      next.sources ?? [],
+    ),
+  };
+}
+
+function mergeHostedDeviceSyncStatusSources(
+  existingSources: readonly HostedDeviceSyncRuntimeConnectionSourceSnapshot[],
+  nextSources: readonly HostedDeviceSyncRuntimeConnectionSourceSnapshot[],
+): HostedDeviceSyncRuntimeConnectionSourceSnapshot[] {
+  const merged = new Map<string, HostedDeviceSyncRuntimeConnectionSourceSnapshot>();
+
+  for (const source of [...existingSources, ...nextSources]) {
+    const key = buildHostedDeviceSyncSourceMergeKey(source);
+    if (!merged.has(key)) {
+      merged.set(key, source);
+    }
+  }
+
+  return [...merged.values()];
+}
+
+function buildHostedDeviceSyncSourceMergeKey(
+  source: HostedDeviceSyncRuntimeConnectionSourceSnapshot,
+): string {
+  const sourceInstanceKey = normalizeHostedDeviceSyncMergeKey(source.sourceInstanceKey);
+  if (sourceInstanceKey) {
+    return `instance:${sourceInstanceKey}`;
+  }
+
+  return `provider:${normalizeHostedDeviceSyncMergeKey(source.sourceProviderSlug) ?? ""}`;
+}
+
+function normalizeHostedDeviceSyncMergeKey(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase();
+  return normalized ? normalized : null;
 }
 
 export function buildHostedDeviceSyncStatusPromptFromSnapshot(input: {

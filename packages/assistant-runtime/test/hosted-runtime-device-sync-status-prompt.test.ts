@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildHostedDeviceSyncStatusPrompt,
   buildHostedDeviceSyncStatusPromptFromSnapshot,
 } from "../src/hosted-runtime/device-sync-status-prompt.ts";
+import type { HostedRuntimeDeviceSyncPort } from "../src/hosted-runtime/platform.ts";
 
 type PromptSnapshot = Parameters<
   typeof buildHostedDeviceSyncStatusPromptFromSnapshot
@@ -61,6 +63,78 @@ function buildSnapshot(
 }
 
 describe("hosted device sync status prompt", () => {
+  it("merges source-scoped snapshots for the same Junction connection", async () => {
+    const requests: Array<Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
+    const baseSnapshot = buildSnapshot();
+    const baseConnection = baseSnapshot.connections[0]!;
+    const whoopSource = baseConnection.sources![0]!;
+    const withingsSource = {
+      ...whoopSource,
+      displayName: "Withings",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      sourceProviderSlug: "withings",
+      status: "connected" as const,
+    };
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ackDirtyStateProcessed: async () => {
+        throw new Error("not used");
+      },
+      applyUpdates: async () => {
+        throw new Error("not used");
+      },
+      createConnectLink: async () => {
+        throw new Error("not used");
+      },
+      fetchDirtyStates: async () => {
+        throw new Error("not used");
+      },
+      fetchSnapshot: async (request) => {
+        requests.push(request);
+
+        return {
+          ...baseSnapshot,
+          connections: [
+            {
+              ...baseConnection,
+              sources: request?.sourceProviderSlug === "withings"
+                ? [withingsSource]
+                : [whoopSource],
+            },
+          ],
+        };
+      },
+    };
+
+    const prompt = await buildHostedDeviceSyncStatusPrompt({
+      deviceSyncPort,
+      reconnectTargets: [
+        {
+          connectTarget: "whoop",
+          connectTargetCommandSafe: true,
+          label: "WHOOP",
+          provider: "junction",
+          sourceProviderSlug: "whoop_v2",
+        },
+        {
+          connectTarget: "withings",
+          connectTargetCommandSafe: true,
+          label: "Withings",
+          provider: "junction",
+          sourceProviderSlug: "withings",
+        },
+      ],
+    });
+
+    expect(requests.map((request) => request?.sourceProviderSlug)).toEqual([
+      "whoop_v2",
+      "withings",
+    ]);
+    expect(prompt).toContain("WHOOP currently needs reconnect");
+    expect(prompt).toContain("source `whoop_v2`");
+    expect(prompt).not.toContain("Withings currently needs reconnect");
+  });
+
   it("renders WHOOP token refresh failures as reconnect-required dynamic context", () => {
     const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
       reconnectTargets: [
