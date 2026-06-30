@@ -74,6 +74,10 @@ type AssistantAutomationLoopStateSnapshot = Pick<
   'autoReply'
 >
 
+type AssistantDynamicContextPromptBuilder = (input: {
+  signal?: AbortSignal
+}) => Promise<string | null>
+
 const SAFE_ATTACHMENT_EVIDENCE_ERROR_CODE_PATTERN =
   /^[A-Za-z0-9_.:-]{1,96}$/u
 const HOSTED_DEFERRED_CRON_CATCHUP_WAKE_DELAY_MS = 10_000
@@ -83,6 +87,7 @@ export interface RunAssistantAutomationInput {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   drainOutbox?: boolean
   executionContext?: AssistantExecutionContext | null
+  buildDynamicContextPrompt?: AssistantDynamicContextPromptBuilder
   inboxServices?: InboxServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
@@ -850,7 +855,7 @@ export async function runAssistantAutomationPass(
 ): Promise<AssistantAutomationPassResult> {
   const inboxServices = input.inboxServices ?? createIntegratedInboxServices()
   const applyCanonicalWrites = input.applyCanonicalWrites ?? true
-  const executionContext = normalizeAssistantExecutionContext(input.executionContext)
+  let executionContext = normalizeAssistantExecutionContext(input.executionContext)
   const inputSource =
     input.inputSource ??
     createStoreBackedAssistantInputSource({
@@ -895,11 +900,29 @@ export async function runAssistantAutomationPass(
         queued: 0,
         sent: 0,
       }
-  const inputRefreshResult = applyCanonicalWrites
-    ? await inputSource.refresh({
+  if (applyCanonicalWrites) {
+    const inputRefreshResult = await inputSource.refresh({
+      signal: input.signal,
+    })
+    if (
+      inputRefreshResult.reason !== 'ingested_input' &&
+      executionContext.hosted &&
+      input.buildDynamicContextPrompt
+    ) {
+      const dynamicContextPrompt = await input.buildDynamicContextPrompt({
         signal: input.signal,
       })
-    : null
+      const finalInputRefreshResult = await inputSource.refresh({
+        signal: input.signal,
+      })
+      if (finalInputRefreshResult.reason !== 'ingested_input') {
+        executionContext = appendHostedDynamicContextPrompt({
+          executionContext,
+          prompt: dynamicContextPrompt,
+        })
+      }
+    }
+  }
   let state = await readAssistantAutomationState(input.vault)
   const stateBeforeScan = snapshotAssistantAutomationLoopState(state)
 
@@ -1013,6 +1036,25 @@ export async function runAssistantAutomationPass(
     progressed,
     replies,
     routing: scanResult.routing,
+  }
+}
+
+function appendHostedDynamicContextPrompt(input: {
+  executionContext: AssistantExecutionContext
+  prompt: string | null
+}): AssistantExecutionContext {
+  if (!input.prompt || !input.executionContext.hosted) {
+    return input.executionContext
+  }
+
+  return {
+    hosted: {
+      ...input.executionContext.hosted,
+      dynamicContextPrompts: [
+        ...(input.executionContext.hosted.dynamicContextPrompts ?? []),
+        input.prompt,
+      ],
+    },
   }
 }
 

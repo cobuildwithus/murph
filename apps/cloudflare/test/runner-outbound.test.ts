@@ -680,10 +680,23 @@ describe("handleRunnerOutboundRequest", () => {
       const [url, init] = firstCall;
       expect(String(url)).toBe(`https://web.example.test${path}`);
       expect(init?.method).toBe("POST");
+      const snapshotIncludeCredentialMaterial = (() => {
+        if (
+          !body
+          || typeof body !== "object"
+          || !("includeCredentialMaterial" in body)
+        ) {
+          return true;
+        }
+
+        return typeof body.includeCredentialMaterial === "boolean"
+          ? body.includeCredentialMaterial
+          : true;
+      })();
       const expectedForwardedBody = path === "/api/internal/device-sync/runtime/snapshot"
         ? JSON.stringify({
             ...body,
-            includeCredentialMaterial: true,
+            includeCredentialMaterial: snapshotIncludeCredentialMaterial,
           })
         : body === undefined ? undefined : JSON.stringify(body);
       expect(init?.body).toBe(expectedForwardedBody);
@@ -1240,7 +1253,7 @@ describe("handleRunnerOutboundRequest", () => {
     const requestInit = fetchMock.mock.calls[0]?.[1];
     expect(requestInit?.body).toBe(JSON.stringify({
       connectionId: "conn_123",
-      includeCredentialMaterial: true,
+      includeCredentialMaterial: false,
       userId: "member_123",
     }));
     const headers = new Headers(requestInit?.headers);

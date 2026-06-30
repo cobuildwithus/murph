@@ -299,6 +299,8 @@ export interface HostedRuntimeDeviceSyncPort {
   }): Promise<HostedExecutionDeviceSyncConnectLinkResponse>;
   fetchSnapshot(input?: {
     connectionId?: string | null;
+    includeCredentialMaterial?: boolean | null;
+    limit?: number | null;
     provider?: string | null;
     signal?: AbortSignal | null;
     sourceProviderSlug?: string | null;

@@ -107,6 +107,7 @@ export interface AssistantHostedExecutionContext {
   connectedApps?: AssistantConnectedAppsPort | null
   defaultTarget?: AssistantModelTarget | null
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
+  dynamicContextPrompts?: readonly string[] | null
   issueDeviceConnectLink?(
     input: AssistantHostedDeviceConnectRequest,
   ): Promise<AssistantHostedDeviceConnectLink>
@@ -145,6 +146,9 @@ export function normalizeAssistantExecutionContext(
   )
   const deviceConnectProviders = normalizeAssistantHostedDeviceConnectProviders(
     hosted?.deviceConnectProviders,
+  )
+  const dynamicContextPrompts = normalizeAssistantDynamicContextPrompts(
+    hosted?.dynamicContextPrompts,
   )
   const generatedImageUploader = normalizeAssistantGeneratedImageUploader(
     hosted?.generatedImageUploader,
@@ -193,6 +197,11 @@ export function normalizeAssistantExecutionContext(
             deviceConnectProviders,
           }
         : {}),
+      ...(dynamicContextPrompts.length > 0
+        ? {
+            dynamicContextPrompts,
+          }
+        : {}),
       ...(productFeedbackRecorder ? { productFeedbackRecorder } : {}),
       ...(usageRecorder ? { usageRecorder } : {}),
       memberId,
@@ -214,6 +223,14 @@ export function normalizeAssistantExecutionContext(
           .filter((key): key is string => key !== null) ?? [],
     },
   }
+}
+
+function normalizeAssistantDynamicContextPrompts(
+  input: readonly string[] | null | undefined,
+): string[] {
+  return (input ?? [])
+    .map((prompt) => normalizeNullableString(prompt))
+    .filter((prompt): prompt is string => prompt !== null)
 }
 
 function normalizeAssistantActionApprovalPort(

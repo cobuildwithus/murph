@@ -76,6 +76,8 @@ export async function readHostedDeviceSyncRuntimeState(input: {
   const controlPlane = createHostedDeviceSyncControlPlane(input.request);
   const providerKeys = resolveDeviceProviderMatchKeys(parsed.provider);
   const sourceProviderKeys = resolveDeviceProviderMatchKeys(parsed.sourceProviderSlug);
+  const boundedSourceProviderKeys = sourceProviderKeys.length > 0 ? sourceProviderKeys : providerKeys;
+  const boundedSourceLimit = parsed.limit ?? null;
   const explicitBlankFilter = (
     parsed.provider !== undefined && parsed.provider !== null && providerKeys.length === 0
   ) || (
@@ -119,6 +121,7 @@ export async function readHostedDeviceSyncRuntimeState(input: {
         : {}),
     },
     orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    ...(parsed.limit ? { take: parsed.limit } : {}),
     ...hostedConnectionRecordArgs,
   });
 
@@ -131,7 +134,13 @@ export async function readHostedDeviceSyncRuntimeState(input: {
       const durableConnection = storedAccount
         ? null
         : await controlPlane.store.getConnectionForUser(input.trustedUserId, record.id);
-      const sources = await controlPlane.store.listConnectionSources(record.id);
+      const sources = boundedSourceLimit && boundedSourceProviderKeys.length > 0
+        ? await controlPlane.store.listRuntimeSnapshotConnectionSources({
+            connectionId: record.id,
+            limit: boundedSourceLimit,
+            sourceProviderSlugs: boundedSourceProviderKeys,
+          })
+        : await controlPlane.store.listConnectionSources(record.id);
 
       return buildHostedRuntimeConnectionSnapshot(
         record,

@@ -107,6 +107,10 @@ const HOSTED_RUNTIME_JUNCTION_PLATFORM_ENV_KEYS = [
   "JUNCTION_REGION",
 ] as const;
 
+type HostedBackgroundDynamicContextPromptBuilder = (input: {
+  signal?: AbortSignal;
+}) => Promise<string | null>;
+
 interface HostedAssistantAutomationReadiness {
   activeProfileId: string | null;
   activeProfileManagedBy: "member" | "platform" | null;
@@ -184,6 +188,7 @@ export async function runHostedAssistantAutomationLane(input: {
   operatorHomeRoot?: string | null;
   runtimeAttemptId?: string | null;
   assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
+  buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
   runtimeEnv?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
@@ -220,6 +225,8 @@ export async function runHostedAssistantAutomationLane(input: {
           vaultRoot: input.vaultRoot,
         }),
         {
+          buildBackgroundDynamicContextPrompt:
+            input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
         },
@@ -270,7 +277,8 @@ export async function runHostedAssistantAutomation(
   freshAssistantInputIds: readonly string[] = [],
   signal?: AbortSignal,
   turnEnvironment?: AssistantTurnEnvironment | null,
-  latencyTrace?: {
+  options?: {
+    buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     runtimeAttemptId?: string | null;
   },
@@ -372,6 +380,18 @@ export async function runHostedAssistantAutomation(
       }
       return result;
     },
+    async refresh(refreshInput) {
+      const result = await baseInputSource.refresh(refreshInput);
+      if (
+        selectedInputIds.mode === "background"
+        && result.progressed
+        && result.reason === "ingested_input"
+      ) {
+        activeTurnInputIngested = true;
+      }
+
+      return result;
+    },
   };
   const beforeStateStartedAt = Date.now();
   const beforeState = await readAssistantAutomationState(vaultRoot);
@@ -393,12 +413,22 @@ export async function runHostedAssistantAutomation(
     message: "Hosted assistant automation pass starting.",
     phase: "wake.running",
   }));
+  let passStartedAt: number | null = null;
   try {
-    const passStartedAt = Date.now();
+    passStartedAt = Date.now();
     const maxPerScan = selectedInputIds.mode === "foreground"
       ? Math.max(1, selectedInputIds.inputIds.length)
       : HOSTED_ASSISTANT_BACKGROUND_AUTOMATION_SCAN_LIMIT;
+    const buildBackgroundDynamicContextPrompt =
+      selectedInputIds.mode === "background"
+      && selectedInputIds.inputIds.length === 0
+        ? options?.buildBackgroundDynamicContextPrompt
+        : undefined;
+
     const result = await runAssistantAutomationPass({
+      ...(buildBackgroundDynamicContextPrompt
+        ? { buildDynamicContextPrompt: buildBackgroundDynamicContextPrompt }
+        : {}),
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
       executionContext,
@@ -431,8 +461,8 @@ export async function runHostedAssistantAutomation(
       onProviderRequestStarted: (event) => {
         recordHostedAssistantProviderStartLatencyTraceBestEffort({
           ...event,
-          latencyTracePort: latencyTrace?.latencyTracePort ?? null,
-          runtimeAttemptId: latencyTrace?.runtimeAttemptId ?? null,
+          latencyTracePort: options?.latencyTracePort ?? null,
+          runtimeAttemptId: options?.runtimeAttemptId ?? null,
         });
       },
       onTraceEvent: (event) => {
