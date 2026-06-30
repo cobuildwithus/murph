@@ -51,6 +51,7 @@ describe("hosted local runner warm reuse e2e", () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     const homePhone = buildLinqHomePhoneNumber(userId);
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
+    const typingPath = `/chats/${encodeURIComponent(chatId)}/typing`;
 
     await requireScenario().seedActiveHostedLinqMember({
       homePhone,
@@ -88,6 +89,7 @@ describe("hosted local runner warm reuse e2e", () => {
     const firstStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(firstStatus.lastErrorCode ?? null).toBeNull();
 
+    const requestCountBeforeSecondReply = requireLinqStub().observedRequests.length;
     const secondWebhookResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, chatId, {
         eventId: `evt_warm_reuse_second_${runId}`,
@@ -105,6 +107,19 @@ describe("hosted local runner warm reuse e2e", () => {
       userId,
     });
     expect(requireLinqStub().readObservedMessageText(secondReply)).toBe(secondReplyText);
+    const requestsAfterSecondInbound =
+      requireLinqStub().observedRequests.slice(requestCountBeforeSecondReply);
+    const secondReplyTypingStarts = requestsAfterSecondInbound.filter((request) =>
+      request.method === "POST" && request.url === typingPath
+    );
+    expect(secondReplyTypingStarts.length).toBeGreaterThanOrEqual(1);
+    const secondReplySendIndex = requestsAfterSecondInbound.indexOf(secondReply);
+    const secondReplyTypingStartIndex = requestsAfterSecondInbound.indexOf(
+      secondReplyTypingStarts[0]!,
+    );
+    expect(secondReplySendIndex).toBeGreaterThanOrEqual(0);
+    expect(secondReplyTypingStartIndex).toBeGreaterThanOrEqual(0);
+    expect(secondReplySendIndex).toBeGreaterThan(secondReplyTypingStartIndex);
 
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
