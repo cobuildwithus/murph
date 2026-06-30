@@ -17,6 +17,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'presentationBody String? @map("presentation_body")',
     'approvalStatus HostedSensitiveActionApprovalStatus? @map("approval_status")',
     'decidedAt DateTime? @map("decided_at")',
+    'consumedAt DateTime? @map("consumed_at")',
+    'consumedBy String? @map("consumed_by")',
     'returnContactKind String? @map("return_contact_kind")',
   ],
   HostedConnectedAppConnectIntent: [
@@ -139,6 +141,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedAiUsagePeriod",
   "HostedConsentEvent",
   "HostedConsentGrant",
+  "HostedThreadContainer",
   "HostedInvite",
   "HostedLinqDailyState",
   "HostedConnectedAppConnectIntent",
@@ -148,6 +151,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMemberEmailAuthorization",
   "HostedMemberIdentity",
   "HostedMemberRouting",
+  "HostedPhoneCall",
   "HostedProductFeedback",
   "HostedWebSession",
   "HostedMailboxItem",
@@ -363,6 +367,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedThreadRoutesMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260624120000_hosted_thread_routes/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const sensitiveActionApprovalMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260624150000_hosted_sensitive_action_approval/migration.sql",
@@ -373,6 +384,69 @@ describe("hosted Prisma baseline migration", () => {
     const actionApprovalReturnContactKindMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260624200000_hosted_action_approval_return_contact_kind/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedPhoneCallsMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260625000100_hosted_phone_calls/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const actionApprovalConsumedAtMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260625150000_hosted_action_approval_consumed_at/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const computerHandoffReturnContactKindMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/2026062600_computer_handoff_return_contact_kind/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const linqFirstContactAdmissionDecisionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260626000000_linq_first_contact_admission_decision/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const linqFirstContactAdmissionBudgetMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260626010000_linq_first_contact_admission_budget/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const linqFirstContactAdmissionDropCategoryMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260627210000_linq_first_contact_admission_drop_category/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const linqFirstContactRejectedMessageMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260627230000_linq_first_contact_rejected_message_text/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const linqFirstContactScrubRejectedMessageMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260628000000_linq_first_contact_scrub_rejected_message_text/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const computerHandoffViewportSessionHintMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260629160000_computer_handoff_viewport_session_hint/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -432,12 +506,49 @@ describe("hosted Prisma baseline migration", () => {
       "20260623193000_hosted_product_feedback_summary",
       "20260624000000_clear_hosted_codex_auth_connected",
       "20260624090000_hosted_sensitive_action_challenge",
+      "20260624120000_hosted_thread_routes",
       "20260624150000_hosted_sensitive_action_approval",
       "20260624200000_hosted_action_approval_return_contact_kind",
       "20260624210000_family_invite_telegram_username_lookup",
       "20260624230000_family_invite_email_lookup",
+      "20260625000100_hosted_phone_calls",
+      "20260625150000_hosted_action_approval_consumed_at",
+      "20260626000000_linq_first_contact_admission_decision",
+      "2026062600_computer_handoff_return_contact_kind",
+      "20260626010000_linq_first_contact_admission_budget",
+      "20260627210000_linq_first_contact_admission_drop_category",
+      "20260627230000_linq_first_contact_rejected_message_text",
+      "20260628000000_linq_first_contact_scrub_rejected_message_text",
+      "20260629160000_computer_handoff_viewport_session_hint",
       "migration_lock.toml",
     ]);
+    expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
+    expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_route"');
+    expect(hostedThreadRoutesMigrationSql).toContain(
+      'PRIMARY KEY ("channel", "thread_identity_lookup_key")',
+    );
+    expect(hostedThreadRoutesMigrationSql).toContain('"thread_lookup_key" TEXT NOT NULL');
+    expect(hostedThreadRoutesMigrationSql).toContain(
+      '"thread_identity_lookup_key" TEXT NOT NULL',
+    );
+    expect(hostedThreadRoutesMigrationSql).toContain(
+      '"hosted_thread_route_channel_thread_lookup_key_idx"',
+    );
+    expect(hostedThreadRoutesMigrationSql).toContain('"owner_member_id" TEXT NOT NULL');
+    expect(hostedThreadRoutesMigrationSql).toContain('"monthly_usage_limit_usd_micros" BIGINT NOT NULL DEFAULT 4500000');
+    expect(hostedThreadRoutesMigrationSql).toContain('REFERENCES "hosted_thread_container"("member_id")');
+    expect(hostedThreadRoutesMigrationSql).toContain(
+      'REFERENCES "hosted_member"("id")\n  ON DELETE CASCADE',
+    );
+    expect(hostedThreadRoutesMigrationSql).toContain(
+      'CONSTRAINT "hosted_thread_container_owner_member_id_fkey"',
+    );
+    expect(hostedThreadRoutesMigrationSql).toContain("ON DELETE RESTRICT");
+    expect(hostedThreadRoutesMigrationSql).not.toContain("group_chat");
+    expect(hostedThreadRoutesMigrationSql).not.toContain("linq_group");
+    expect(hostedThreadRoutesMigrationSql).not.toContain("thread_id_encrypted");
+    expect(hostedThreadRoutesMigrationSql).not.toContain('"source"');
+    expect(hostedThreadRoutesMigrationSql).not.toContain('"status"');
     expect(schema).not.toContain('profileKey                 String                         @map("profile_key")');
     expect(schema).not.toContain("@@index([memberId, profileKey, updatedAt])");
     expect(singleMemberComputerProfileMigrationSql).toContain(
@@ -455,6 +566,13 @@ describe("hosted Prisma baseline migration", () => {
     expect(generalizeProductFeedbackMigrationSql).toContain('ADD COLUMN "topic" TEXT');
     expect(generalizeProductFeedbackMigrationSql).not.toContain("NOT NULL");
     expect(generalizeProductFeedbackMigrationSql).not.toContain("feedback_tags_json");
+    expect(hostedPhoneCallsMigrationSql).toContain(
+      'CREATE UNIQUE INDEX "hosted_phone_call_member_id_request_key_key" ON "hosted_phone_call"("member_id", "request_key")',
+    );
+    expect(hostedPhoneCallsMigrationSql).toContain(
+      'REFERENCES "hosted_member"("id") ON DELETE CASCADE',
+    );
+    expect(hostedPhoneCallsMigrationSql).not.toMatch(/transcript|audio/iu);
     expect(productFeedbackSummaryMigrationSql).toContain('ADD COLUMN "summary" TEXT');
     expect(productFeedbackSummaryMigrationSql).toContain('DROP COLUMN "topic"');
     expect(productFeedbackSummaryMigrationSql).not.toContain("feedback_tags_json");
@@ -483,6 +601,99 @@ describe("hosted Prisma baseline migration", () => {
     expect(sensitiveActionApprovalMigrationSql).not.toContain("wallet_address");
     expect(actionApprovalReturnContactKindMigrationSql).toContain(
       'ADD COLUMN "return_contact_kind" TEXT',
+    );
+    expect(actionApprovalConsumedAtMigrationSql).toContain(
+      'ADD COLUMN "consumed_at" TIMESTAMP(3)',
+    );
+    expect(actionApprovalConsumedAtMigrationSql).toContain(
+      '"approval_status" = \'approved\'',
+    );
+    expect(computerHandoffReturnContactKindMigrationSql).toContain(
+      'ADD COLUMN "return_contact_kind" TEXT',
+    );
+    expect(computerHandoffReturnContactKindMigrationSql).toContain(
+      'ADD CONSTRAINT "hosted_computer_handoff_return_contact_kind_check"',
+    );
+    expect(computerHandoffViewportSessionHintMigrationSql).toContain(
+      'ADD COLUMN "computer_handoff_viewport_width" INTEGER',
+    );
+    expect(computerHandoffViewportSessionHintMigrationSql).toContain(
+      'ADD COLUMN "computer_handoff_viewport_height" INTEGER',
+    );
+    expect(linqFirstContactAdmissionDecisionMigrationSql).toContain(
+      'CREATE TABLE "hosted_linq_first_contact_admission_decision"',
+    );
+    expect(linqFirstContactAdmissionDecisionMigrationSql).toContain(
+      'PRIMARY KEY ("event_id")',
+    );
+    expect(linqFirstContactAdmissionDecisionMigrationSql).not.toContain(
+      "prompt",
+    );
+    expect(linqFirstContactAdmissionDecisionMigrationSql).not.toContain(
+      "response",
+    );
+    expect(linqFirstContactAdmissionBudgetMigrationSql).toContain(
+      'CREATE TABLE "hosted_linq_first_contact_admission_budget"',
+    );
+    expect(linqFirstContactAdmissionBudgetMigrationSql).toContain(
+      'PRIMARY KEY ("participant_contact_lookup_key", "event_id")',
+    );
+    expect(linqFirstContactAdmissionBudgetMigrationSql).not.toContain(
+      "prompt",
+    );
+    expect(linqFirstContactAdmissionBudgetMigrationSql).not.toContain(
+      "response",
+    );
+    expect(linqFirstContactAdmissionBudgetMigrationSql).not.toContain(
+      "phone_number",
+    );
+    expect(linqFirstContactAdmissionBudgetMigrationSql).not.toContain(
+      '"text"',
+    );
+    expect(linqFirstContactAdmissionDropCategoryMigrationSql).toContain(
+      'DROP CONSTRAINT IF EXISTS "hosted_linq_first_contact_admission_decision_category_check"',
+    );
+    expect(linqFirstContactAdmissionDropCategoryMigrationSql).toContain(
+      'ALTER COLUMN "category" DROP NOT NULL',
+    );
+    expect(linqFirstContactAdmissionDropCategoryMigrationSql).not.toContain(
+      "prompt",
+    );
+    expect(linqFirstContactAdmissionDropCategoryMigrationSql).not.toContain(
+      "response",
+    );
+    expect(linqFirstContactRejectedMessageMigrationSql).toContain(
+      'ADD COLUMN "rejected_message_text" TEXT',
+    );
+    expect(linqFirstContactRejectedMessageMigrationSql).toContain(
+      'char_length("rejected_message_text") <= 2000',
+    );
+    expect(linqFirstContactRejectedMessageMigrationSql).toContain(
+      '"decision" = \'block\'',
+    );
+    expect(linqFirstContactRejectedMessageMigrationSql).not.toContain(
+      "prompt",
+    );
+    expect(linqFirstContactRejectedMessageMigrationSql).not.toContain(
+      "response",
+    );
+    expect(linqFirstContactScrubRejectedMessageMigrationSql).toContain(
+      'UPDATE "hosted_linq_first_contact_admission_decision"',
+    );
+    expect(linqFirstContactScrubRejectedMessageMigrationSql).toContain(
+      'SET "rejected_message_text" = NULL',
+    );
+    expect(linqFirstContactScrubRejectedMessageMigrationSql).toContain(
+      'WHERE "rejected_message_text" IS NOT NULL',
+    );
+    expect(linqFirstContactScrubRejectedMessageMigrationSql).not.toContain(
+      "DROP COLUMN",
+    );
+    expect(linqFirstContactScrubRejectedMessageMigrationSql).not.toContain(
+      "prompt",
+    );
+    expect(linqFirstContactScrubRejectedMessageMigrationSql).not.toContain(
+      "response",
     );
     expect(baselineMigrationSql).toContain('CREATE TABLE "hosted_assistant_runtime_issue"');
     expect(baselineMigrationSql).toContain(

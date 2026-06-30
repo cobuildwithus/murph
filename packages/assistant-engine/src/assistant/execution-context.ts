@@ -15,6 +15,10 @@ import type {
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
 } from '@murphai/hosted-execution/runtime-control'
+import type {
+  HostedPhoneCallStartRequest,
+  HostedPhoneCallStartResponse,
+} from '@murphai/hosted-execution/phone-calls'
 import type { AssistantChannelDependencies } from './channel-adapters.js'
 import type { AssistantConnectedAppsPort } from './connected-apps-port.js'
 import { normalizeNullableString } from './shared.js'
@@ -67,6 +71,15 @@ export interface AssistantHostedFamilyPlanTool {
   ): Promise<HostedRuntimeFamilyPlanToolResponse>
 }
 
+export interface AssistantPhoneCallPort {
+  start(
+    request: HostedPhoneCallStartRequest,
+    context?: {
+      signal?: AbortSignal | null
+    },
+  ): Promise<HostedPhoneCallStartResponse>
+}
+
 export type AssistantGeneratedImageContentType =
   | 'image/jpeg'
   | 'image/png'
@@ -113,6 +126,7 @@ export interface AssistantHostedExecutionContext {
   progressDeliveryDependencies?: AssistantHostedProgressDeliveryDependencies
   productFeedbackRecorder?: AssistantHostedProductFeedbackRecorder | null
   providerFetch?: typeof fetch | null
+  phoneCalls?: AssistantPhoneCallPort | null
   publicInternetFetch?: typeof fetch | null
   usageRecorder?: AssistantUsageRecorder | null
   userEnvKeys: readonly string[]
@@ -145,6 +159,7 @@ export function normalizeAssistantExecutionContext(
     hosted?.generatedImageUploader,
   )
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
+  const phoneCalls = normalizeAssistantPhoneCallPort(hosted?.phoneCalls)
   const productFeedbackRecorder = normalizeAssistantProductFeedbackRecorder(
     hosted?.productFeedbackRecorder,
   )
@@ -197,6 +212,7 @@ export function normalizeAssistantExecutionContext(
             progressDeliveryDependencies,
           }
         : {}),
+      ...(phoneCalls ? { phoneCalls } : {}),
       ...(typeof hosted?.providerFetch === 'function'
         ? { providerFetch: hosted.providerFetch }
         : {}),
@@ -232,6 +248,18 @@ function normalizeAssistantConnectedAppsPort(
 
   return {
     request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantPhoneCallPort(
+  input: AssistantHostedExecutionContext['phoneCalls'] | undefined,
+): AssistantPhoneCallPort | undefined {
+  if (!input || typeof input.start !== 'function') {
+    return undefined
+  }
+
+  return {
+    start: input.start.bind(input),
   }
 }
 

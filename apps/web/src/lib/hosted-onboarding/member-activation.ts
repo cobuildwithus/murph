@@ -3,9 +3,6 @@ import {
   type Prisma,
 } from "@prisma/client";
 import {
-  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-} from "@murphai/contracts";
-import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionMemberActivatedWake,
   type HostedExecutionMemberActivationSignupWelcome,
@@ -23,6 +20,7 @@ import {
   hasHostedMailboxItemByKind,
   readHostedMailboxItemByDedupeKey,
 } from "../hosted-mailbox/store";
+import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
 import {
   deriveHostedEntitlement,
   isHostedAccessBlockedBillingStatus,
@@ -238,7 +236,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
     signupWelcomeRoute: linqRoute.welcomeRoute,
-    welcomeMessage: input.welcomeMessage ?? MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+    welcomeMessage: input.welcomeMessage,
   });
   const legacyWelcomeWake = buildHostedMemberSignupWelcomeNotificationWake({
     activationWake,
@@ -466,7 +464,7 @@ function buildHostedMemberActivationWakeForMember(input: {
   sourceEventId: string;
   sourceType: string;
   signupWelcomeRoute: HostedExecutionAssistantNotificationRoute | null;
-  welcomeMessage: string;
+  welcomeMessage?: string;
 }): HostedExecutionMemberActivatedWake {
   return buildHostedMemberActivationWake({
     emailLinked: input.emailLinked,
@@ -526,7 +524,8 @@ function buildHostedMemberActivationWake(input: {
     occurredAt: input.occurredAt,
     signupWelcome: buildHostedMemberSignupWelcomePayload({
       route: input.signupWelcomeRoute ?? null,
-      welcomeMessage: input.welcomeMessage ?? MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      welcomeMessage: input.welcomeMessage ?? null,
+      seed: buildHostedMemberSignupWelcomeMessageSeed(input),
     }),
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
   });
@@ -534,7 +533,8 @@ function buildHostedMemberActivationWake(input: {
 
 function buildHostedMemberSignupWelcomePayload(input: {
   route: HostedExecutionAssistantNotificationRoute | null;
-  welcomeMessage: string;
+  welcomeMessage: string | null;
+  seed: string;
 }): HostedExecutionMemberActivationSignupWelcome | null {
   if (!input.route) {
     return null;
@@ -542,8 +542,18 @@ function buildHostedMemberSignupWelcomePayload(input: {
 
   return {
     route: input.route,
-    text: input.welcomeMessage,
+    text: input.welcomeMessage ?? renderUserFacingMessage({
+      context: {},
+      key: "assistant.signup_welcome",
+      seed: input.seed,
+    }).text,
   };
+}
+
+function buildHostedMemberSignupWelcomeMessageSeed(input: {
+  memberId: string;
+}): string {
+  return buildHostedMemberSignupWelcomeDeliveryIdentity(input.memberId);
 }
 
 function buildHostedMemberSignupWelcomeNotificationWake(input: {
@@ -554,14 +564,15 @@ function buildHostedMemberSignupWelcomeNotificationWake(input: {
   if (!signupWelcome) {
     return null;
   }
+  const deliveryIdentity = buildHostedMemberSignupWelcomeDeliveryIdentity(input.activationWake.userId);
 
   return buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: buildHostedMemberSignupWelcomeNotificationEventId(input.activationWake),
     memberId: input.activationWake.userId,
     notification: {
-      deliveryDedupeToken: `signup-welcome:${input.activationWake.userId}`,
+      deliveryDedupeToken: deliveryIdentity,
       deliveryDispatchMode: "queue-only",
-      deliveryIdempotencyKey: `signup-welcome:${input.activationWake.userId}`,
+      deliveryIdempotencyKey: deliveryIdentity,
       firstContact: {
         markSeenOnDeliveryAccepted: true,
       },
@@ -574,6 +585,10 @@ function buildHostedMemberSignupWelcomeNotificationWake(input: {
     },
     occurredAt: input.occurredAt,
   });
+}
+
+function buildHostedMemberSignupWelcomeDeliveryIdentity(memberId: string): string {
+  return `signup-welcome:${memberId}`;
 }
 
 function buildHostedMemberSignupWelcomeInstructions(text: string): string {

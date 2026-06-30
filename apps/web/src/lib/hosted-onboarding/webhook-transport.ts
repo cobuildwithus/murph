@@ -25,6 +25,10 @@ import {
   sendHostedLinqChatMessage,
 } from "./linq";
 import {
+  assertHostedThreadRouteEgressAuthority,
+  type HostedLinqThreadRouteEgressAuthority,
+} from "../hosted-routing/thread-route-store";
+import {
   sanitizeHostedOnboardingStructuredLogDetails,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
@@ -44,6 +48,7 @@ export type HostedLinqDailyQuotaPayload = {
   memberId: string;
   occurredAt: string;
   replyToMessageId: string | null;
+  routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
   template: "daily_quota";
 };
 
@@ -63,6 +68,7 @@ type HostedLinqAiUsageQuotaBasePayload = {
   message: string;
   occurredAt: string;
   replyToMessageId: string | null;
+  routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
   sourceEventId: string;
   template: "ai_usage_quota";
 };
@@ -136,6 +142,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       noticeCode: HostedLinqUsageLimitNoticeCode;
       occurredAt: string;
       replyToMessageId?: string | null;
+      routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
       sourceEventId: string;
       template: "ai_usage_quota";
     }
@@ -147,6 +154,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       noticeCode: "trial_conversion_pending";
       occurredAt: string;
       replyToMessageId?: string | null;
+      routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
       sourceEventId: string;
       template: "ai_usage_quota";
     }
@@ -155,6 +163,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       memberId: string;
       occurredAt: string;
       replyToMessageId?: string | null;
+      routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
       sourceEventId: string;
       template: "daily_quota";
     }
@@ -246,6 +255,7 @@ async function sendHostedLinqSideEffect(
   const startedAtMs = Date.now();
 
   try {
+    await assertHostedLinqSideEffectRouteAuthority(effect, options.prisma);
     await sendHostedLinqChatMessage({
       chatId: effect.payload.chatId,
       idempotencyKey: effect.effectId,
@@ -260,6 +270,23 @@ async function sendHostedLinqSideEffect(
     );
     throw error;
   }
+}
+
+async function assertHostedLinqSideEffectRouteAuthority(
+  effect: HostedLinqMessageSideEffect,
+  prisma: HostedLinqTransportPersistenceClient,
+): Promise<void> {
+  const routeAuthority = "routeAuthority" in effect.payload
+    ? effect.payload.routeAuthority
+    : null;
+  if (!routeAuthority) {
+    return;
+  }
+
+  await assertHostedThreadRouteEgressAuthority({
+    authority: routeAuthority,
+    prisma,
+  });
 }
 
 function buildHostedLinqSideEffectLogDetails(
@@ -337,7 +364,9 @@ async function buildHostedLinqSideEffectMessage(
     case "ai_usage_quota":
       return effect.payload.message;
     case "daily_quota":
-      return buildHostedDailyQuotaReply();
+      return buildHostedDailyQuotaReply({
+        seed: effect.effectId,
+      });
     case "family_invite_reply":
       return effect.payload.message;
     case "conversation_home_redirect": {
@@ -354,6 +383,7 @@ async function buildHostedLinqSideEffectMessage(
 
       return buildHostedLinqConversationHomeRedirectReply({
         homeRecipientPhone,
+        seed: effect.effectId,
       });
     }
     case "invite_signup":
@@ -420,6 +450,7 @@ async function buildHostedInviteSideEffectMessage(input: {
 
   return buildHostedInviteReply({
     joinUrl: buildHostedInviteUrl(invite.inviteCode),
+    seed: input.effectId,
   });
 }
 
@@ -475,6 +506,7 @@ function buildHostedWebhookLinqMessagePayload(
         memberId: input.memberId,
         occurredAt: input.occurredAt,
         replyToMessageId,
+        ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
         template: input.template,
       };
     case "family_invite_reply":
@@ -509,6 +541,7 @@ function buildHostedLinqAiUsageQuotaPayload(
     message: input.message,
     occurredAt: input.occurredAt,
     replyToMessageId,
+    ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
     sourceEventId: input.sourceEventId,
     template: input.template,
   };

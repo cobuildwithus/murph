@@ -888,8 +888,7 @@ describe("resolveHostedAiUsageGate", () => {
       allowed: false,
       userNotice: {
         code: "pulse_upgrade_edge",
-        message:
-          "Hey, you've reached your usage limit for the month. Upgrade to Edge: https://withmurph.ai/home",
+        message: expect.stringContaining("https://withmurph.ai/home"),
       },
       reason: "ai_usage_limit_exceeded",
       retryAfter: new Date("2026-04-01T00:00:00.000Z"),
@@ -961,8 +960,7 @@ describe("resolveHostedAiUsageGate", () => {
       allowed: false,
       userNotice: {
         code: "edge_usage_limit_reached",
-        message:
-          "Hey, you've reached your usage limit for the month. Murph will resume when your included allowance resets: https://withmurph.ai/home",
+        message: expect.stringContaining("https://withmurph.ai/home"),
       },
     });
   });
@@ -1058,8 +1056,7 @@ describe("resolveHostedAiUsageGate", () => {
       retryAfter: new Date("2026-04-08T12:00:00.000Z"),
       userNotice: {
         code: "trial_usage_limit_reached",
-        message:
-          "You've reached the hosted AI usage included in your trial. Please finish checkout: https://withmurph.ai/home",
+        message: expect.stringContaining("https://withmurph.ai/home"),
       },
     });
   });
@@ -1146,7 +1143,7 @@ describe("resolveHostedAiUsageGate", () => {
       retryAfter: new Date("2026-04-08T12:15:01.000Z"),
       userNotice: {
         code: "trial_conversion_pending",
-        message: "Your trial has ended. Start Pulse to keep Murph replying: https://withmurph.ai/home",
+        message: expect.stringContaining("https://withmurph.ai/home"),
       },
     });
     expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
@@ -1217,6 +1214,52 @@ describe("resolveHostedAiUsageGate", () => {
     expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
   });
 
+  it("keeps pending Pulse Trial billing notices stable when no trial start exists", async () => {
+    const firstPrisma = createGatePrisma({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+      periodStart: new Date("2026-04-01T12:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      spentUsdMicros: 0n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: null,
+    });
+    const secondPrisma = createGatePrisma({
+      billingPhase: "trial",
+      checkoutOffer: "pulse_trial_7d",
+      periodEnd: new Date("2026-04-08T12:00:00.000Z"),
+      periodStart: new Date("2026-04-01T12:00:00.000Z"),
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      spentUsdMicros: 0n,
+      trialEndsAt: new Date("2026-04-08T12:00:00.000Z"),
+      trialStartedAt: null,
+    });
+
+    const first = await resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-03T12:00:00.000Z",
+      prisma: firstPrisma as never,
+    });
+    const second = await resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-03T12:05:00.000Z",
+      prisma: secondPrisma as never,
+    });
+
+    if (first.allowed || second.allowed) {
+      throw new Error("Expected stale Pulse Trial billing state to be denied.");
+    }
+
+    expect(first.userNotice).toMatchObject({
+      code: "trial_conversion_pending",
+    });
+    expect(second.userNotice).toMatchObject({
+      code: "trial_conversion_pending",
+    });
+    expect(first.userNotice?.message).toBe(second.userNotice?.message);
+  });
+
   it.each([
     [
       "unknown policy",
@@ -1266,7 +1309,7 @@ describe("resolveHostedAiUsageGate", () => {
       reason: "trial_expired_pending_billing",
       userNotice: {
         code: "trial_conversion_pending",
-        message: "Your trial has ended. Start Pulse to keep Murph replying: https://withmurph.ai/home",
+        message: expect.stringContaining("https://withmurph.ai/home"),
       },
     });
     expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
@@ -1683,6 +1726,50 @@ describe("readHostedAiUsageGate", () => {
     expect(aggregate).not.toHaveBeenCalled();
   });
 
+  it("uses a thread-container monthly cap instead of the normal member allowance", async () => {
+    const prisma = createGatePrisma({
+      spentUsdMicros: 1_000_000n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      remainingUsdMicros: 3_500_000n,
+      spentUsdMicros: 1_000_000n,
+    });
+
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+  });
+
+  it("denies thread-container usage when the owner authority is inactive", async () => {
+    const prisma = createGatePrisma({
+      spentUsdMicros: 1_000_000n,
+      threadContainerLimitUsdMicros: 4_500_000n,
+      threadContainerOwnerBillingStatus: HostedBillingStatus.paused,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      limitUsdMicros: 4_500_000n,
+      reason: "hosted_access_inactive",
+      remainingUsdMicros: 0n,
+      spentUsdMicros: 0n,
+    });
+
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+  });
+
   it("uses usage-period spend for billing periods before allowing", async () => {
     const aggregate = vi.fn(async () => ({
       _max: {
@@ -2096,6 +2183,9 @@ function createGatePrisma(input: {
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: string | null;
   spentUsdMicros: bigint;
+  threadContainerLimitUsdMicros?: bigint | null;
+  threadContainerOwnerBillingStatus?: HostedBillingStatus;
+  threadContainerOwnerSuspendedAt?: Date | null;
   trialEndsAt?: Date | null;
   trialStartedAt?: Date | null;
   suspendedAt?: Date | null;
@@ -2103,6 +2193,15 @@ function createGatePrisma(input: {
 }) {
   const periodStart = input.periodStart ?? new Date("2026-03-01T00:00:00.000Z");
   const periodEnd = input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z");
+  const threadContainer = input.threadContainerLimitUsdMicros == null
+    ? null
+    : {
+        monthlyUsageLimitUsdMicros: input.threadContainerLimitUsdMicros,
+        owner: {
+          billingStatus: input.threadContainerOwnerBillingStatus ?? HostedBillingStatus.active,
+          suspendedAt: input.threadContainerOwnerSuspendedAt ?? null,
+        },
+      };
   const defaultPeriod = {
     billingPlanCode: input.billingPlanCode ?? "launch_monthly",
     blockedAt: null,
@@ -2204,6 +2303,7 @@ function createGatePrisma(input: {
           },
           billingStatus: input.billingStatus ?? HostedBillingStatus.active,
           suspendedAt: input.suspendedAt ?? null,
+          threadContainer,
         })
         .mockResolvedValueOnce({
           billingRef: {
@@ -2222,6 +2322,7 @@ function createGatePrisma(input: {
           billingStatus: input.billingStatus ?? HostedBillingStatus.active,
           id: "member_123",
           suspendedAt: input.suspendedAt ?? null,
+          threadContainer,
         }),
     },
   };

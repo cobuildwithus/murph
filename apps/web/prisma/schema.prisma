@@ -319,6 +319,15 @@ enum HostedComputerHandoffStatus {
   expired
 }
 
+enum HostedPhoneCallStatus {
+  starting
+  calling
+  ended
+  completed
+  needs_user
+  failed
+}
+
 model HostedMember {
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
@@ -357,8 +366,11 @@ model HostedMember {
   codexAuthConnection            HostedCodexAuthConnection?
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
+  phoneCalls                     HostedPhoneCall[]
   productFeedback                HostedProductFeedback[]
   sensitiveActionChallenges      HostedSensitiveActionChallenge[]
+  threadContainer                HostedThreadContainer?          @relation("HostedThreadContainerMember")
+  ownedThreadContainers          HostedThreadContainer[]         @relation("HostedThreadContainerOwner")
 
   @@index([billingStatus])
   @@map("hosted_member")
@@ -400,6 +412,11 @@ model HostedWebSession {
   lastSeenAt   DateTime?    @map("last_seen_at")
   revokedAt    DateTime?    @map("revoked_at")
   revokeReason String?      @map("revoke_reason")
+
+  computerHandoffViewportWidth      Int?      @map("computer_handoff_viewport_width")
+  computerHandoffViewportHeight     Int?      @map("computer_handoff_viewport_height")
+  computerHandoffViewportObservedAt DateTime? @map("computer_handoff_viewport_observed_at")
+
   member       HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId])
@@ -424,6 +441,8 @@ model HostedSensitiveActionChallenge {
   presentationBody   String?                               @map("presentation_body")
   approvalStatus     HostedSensitiveActionApprovalStatus?  @map("approval_status")
   decidedAt          DateTime?                             @map("decided_at")
+  consumedAt         DateTime?                             @map("consumed_at")
+  consumedBy         String?                               @map("consumed_by")
   returnContactKind  String?                               @map("return_contact_kind")
   member             HostedMember                          @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
@@ -505,6 +524,7 @@ model HostedComputerHandoff {
   purpose        String
   status         HostedComputerHandoffStatus  @default(open)
   suggestedReply String?                      @map("suggested_reply")
+  returnContactKind String?                   @map("return_contact_kind")
   createdAt      DateTime                     @default(now()) @map("created_at")
   expiresAt      DateTime                     @map("expires_at")
   completedAt    DateTime?                    @map("completed_at")
@@ -516,6 +536,27 @@ model HostedComputerHandoff {
   @@index([runId, status])
   @@index([expiresAt])
   @@map("hosted_computer_handoff")
+}
+
+model HostedPhoneCall {
+  id             String                @id
+  memberId       String                @map("member_id")
+  requestKey     String                @map("request_key")
+  provider       String                @default("retell")
+  providerCallId String?               @unique @map("provider_call_id")
+  status         HostedPhoneCallStatus @default(starting)
+  briefJson      Json                  @map("brief_json")
+  resultJson     Json?                 @map("result_json")
+  endedAt        DateTime?             @map("ended_at")
+  analyzedAt     DateTime?             @map("analyzed_at")
+  createdAt      DateTime              @default(now()) @map("created_at")
+  updatedAt      DateTime              @updatedAt @map("updated_at")
+  member         HostedMember          @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, requestKey])
+  @@index([memberId, createdAt])
+  @@index([status, updatedAt])
+  @@map("hosted_phone_call")
 }
 
 model HostedMemberIdentity {
@@ -896,6 +937,30 @@ model HostedAccountGroupBillingRef {
   @@map("hosted_account_group_billing_ref")
 }
 
+model HostedLinqFirstContactAdmissionDecision {
+  eventId             String   @id @map("event_id")
+  decision            String
+  category            String?
+  confidence          Float
+  source              String
+  rejectedMessageText String?  @map("rejected_message_text") @ignore
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@map("hosted_linq_first_contact_admission_decision")
+}
+
+model HostedLinqFirstContactAdmissionBudget {
+  participantContactLookupKey String   @map("participant_contact_lookup_key")
+  eventId                     String   @map("event_id")
+  participantContactKind      String   @map("participant_contact_kind")
+  createdAt                   DateTime @default(now()) @map("created_at")
+
+  @@id([participantContactLookupKey, eventId])
+  @@index([createdAt])
+  @@map("hosted_linq_first_contact_admission_budget")
+}
+
 model HostedStripeEvent {
   eventId          String                  @id @map("event_id")
   type             String
@@ -969,6 +1034,34 @@ model HostedVaultShare {
 
   @@unique([grantorMemberId, projectionKind, destinationMemberId])
   @@map("hosted_vault_share")
+}
+
+model HostedThreadContainer {
+  memberId                   String              @id @map("member_id")
+  ownerMemberId              String              @map("owner_member_id")
+  monthlyUsageLimitUsdMicros BigInt              @default(4500000) @map("monthly_usage_limit_usd_micros")
+  createdAt                  DateTime            @default(now()) @map("created_at")
+  member                     HostedMember        @relation("HostedThreadContainerMember", fields: [memberId], references: [id], onDelete: Cascade)
+  owner                      HostedMember        @relation("HostedThreadContainerOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
+  routes                     HostedThreadRoute[]
+
+  @@index([ownerMemberId])
+  @@map("hosted_thread_container")
+}
+
+model HostedThreadRoute {
+  channel                 String
+  threadLookupKey         String                @map("thread_lookup_key")
+  threadIdentityLookupKey String                @map("thread_identity_lookup_key")
+  containerMemberId       String                @map("container_member_id")
+  createdAt               DateTime              @default(now()) @map("created_at")
+  updatedAt               DateTime              @default(now()) @updatedAt @map("updated_at")
+  container               HostedThreadContainer @relation(fields: [containerMemberId], references: [memberId], onDelete: Cascade)
+
+  @@id([channel, threadIdentityLookupKey])
+  @@index([channel, threadLookupKey])
+  @@index([containerMemberId])
+  @@map("hosted_thread_route")
 }
 
 model HostedAiUsage {

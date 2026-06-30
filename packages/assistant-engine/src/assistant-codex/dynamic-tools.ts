@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
@@ -29,6 +30,7 @@ import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 import type {
   AssistantHostedGeneratedImageUploader,
+  AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
 import type {
   AssistantHostedToolContext,
@@ -69,19 +71,25 @@ import {
   parseGenerateVoiceMemoArguments,
 } from './dynamic-tools/generate-voice-memo.js'
 import {
+  createPhoneCallRequestKey,
+  MURPH_CREATE_PHONE_CALL_TOOL,
+  readPhoneCallDynamicToolRequest,
+  type PhoneCallDynamicToolRequest,
+} from './dynamic-tools/phone-calls.js'
+import {
   executeGenerateSongDynamicTool,
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
 } from './dynamic-tools/generate-song.js'
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
-  'computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying Playwright code or taking another step'
+  'computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step'
 
 export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
   name: 'send_progress_update',
   description:
-    'Send a brief, natural user-visible progress update to the current conversation before longer, tool-heavy, or substantial user-content-inspection work. Use immediately as the first assistant action when the task may take more than a few seconds, require multiple tool steps, involve research or long vault scans, or recover substantial data from PDFs, lab reports, images, screenshots, CSVs, large pasted text, meal/product/supplement labels, workout exports, wearable exports, or health documents. If the turn remains long-running after substantial tool work, you may send another brief update so the user is not left hanging, up to three total progress updates in the turn. Skip automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed. Do not use for skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, one-shot logging/capture/memory saves that only need a straightforward write, or final conclusions.',
+    'Send a brief, natural user-visible progress update to the current conversation only when longer, tool-heavy, or substantial user-content-inspection work would otherwise leave the user waiting. Use as the first assistant action for genuinely long tasks that require multiple tool steps, involve research or long vault scans, or recover substantial data from PDFs, lab reports, images, screenshots, CSVs, large pasted text, meal/product/supplement labels, workout exports, wearable exports, or health documents. For work likely to finish in about a minute or less, send at most one progress update. If the turn becomes unusually long-running after substantial tool work, you may send one more brief update so the user is not left hanging; never send a third. Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage unless the update materially improves UX. Skip automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed. Do not use for individual tool loops, searches, reads, page checks, clicks, status churn, skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, one-shot logging/capture/memory saves that only need a straightforward write, or final conclusions.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -90,7 +98,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
         type: 'string',
         minLength: 1,
         description:
-          'One to three short conversational first-person sentences about the immediate next step, like a quick note to the user. Use contractions when natural. Avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works. No markdown links, final answers, lab interpretations, abnormalities, diagnoses, treatment recommendations, or claims not yet verified.',
+          'Prefer one short conversational first-person sentence about the immediate next step; use two only when needed to keep the quick note clear. Use contractions when natural. Avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works. No markdown links, final answers, lab interpretations, abnormalities, diagnoses, treatment recommendations, or claims not yet verified.',
       },
     },
     required: ['text'],
@@ -152,7 +160,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   namespace: 'murph',
   name: 'generate_image',
   description:
-    'Generate one image with GPT Image 2. Hosted runs attach the generated image to the final response; local runs save it under CODEX_HOME/generated_images.',
+    'Generate one image with GPT Image 2, optionally using ordered vault image references. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. Hosted runs attach the generated image to the final response; local runs save it under CODEX_HOME/generated_images.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -184,6 +192,18 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
         ],
         default: null,
       },
+      referenceImageRefs: {
+        type: 'array',
+        maxItems: 16,
+        default: [],
+        description:
+          'Optional ordered vault-relative JPG, PNG, or WebP image refs to use as visual references (up to 16). Use only refs the user attached as part of the current turn (other vault paths are rejected as unauthorized). Describe in the prompt how image 1, image 2, etc. should be used.',
+        items: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 1024,
+        },
+      },
     },
     required: ['prompt'],
   },
@@ -193,7 +213,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
   description:
-    'Record structured product feedback from explicit user feedback, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Prefix inferred summaries with "Speculative:" and assistant-observed summaries with "Murph-observed:". Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
+    'Record structured product feedback from explicit user feedback, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Prefix inferred summaries with "Speculative:" and assistant-observed summaries with "Murph-observed:". Related changelog ids are optional metadata, not required for product interest. Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -214,6 +234,8 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         minItems: 0,
         maxItems: 7,
         default: [],
+        description:
+          'Optional metadata for known shipped changelog item ids. Leave empty for general product interest, feature requests, frustrations, inferred workflow friction, or assistant-observed product/tool friction.',
         items: {
           type: 'string',
           maxLength: 120,
@@ -222,24 +244,6 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
       },
     },
     required: ['kind', 'summary'],
-    oneOf: [
-      {
-        properties: {
-          kind: { enum: ['feature_interest'] },
-          relatedChangelogItemIds: {
-            type: 'array',
-            minItems: 1,
-          },
-        },
-        required: ['kind', 'relatedChangelogItemIds'],
-      },
-      {
-        properties: {
-          kind: { enum: ['feature_request', 'frustration'] },
-        },
-        required: ['kind'],
-      },
-    ],
   },
 } as const
 
@@ -305,7 +309,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    "Securely send one existing file from the user's vault to the current iMessage conversation. Use a normalized vault-relative file path. This queues the exact file and destination behind passkey approval; it does not reveal file bytes to the model and does not support arbitrary recipients.",
+    "Securely prepare one existing file from the user's vault for the current iMessage conversation. Use a normalized vault-relative file path. When approval is pending, include the returned approval link in your normal reply. When approval is approved, this attaches the exact approved file to your normal reply. It does not reveal file bytes to the model, does not queue a separate delivery, and does not support arbitrary recipients.",
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -352,11 +356,11 @@ export const MURPH_REACT_TO_MESSAGE_TOOL = {
   },
 } as const
 
-export const MURPH_COMPUTER_START_RUN_TOOL = {
+export const MURPH_COMPUTER_OPEN_TOOL = {
   namespace: 'murph',
-  name: 'computer_start_run',
+  name: 'computer_open',
   description:
-    'Start or reuse a Kernel-backed browser run for website tasks such as checkout, appointment booking, login, payment, health/insurance forms, or general web automation.',
+    'Open the current Kernel-backed browser for website tasks. Creates, reuses, resumes, or reclaims the active browser run as needed, then returns the current URL, title, and visible page text. Use this before browser work and whenever browser control may have returned from a user handoff.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -366,21 +370,6 @@ export const MURPH_COMPUTER_START_RUN_TOOL = {
         default: null,
       },
     },
-  },
-} as const
-
-export const MURPH_COMPUTER_OBSERVE_TOOL = {
-  namespace: 'murph',
-  name: 'computer_observe',
-  description:
-    'Read the current browser state (URL, title, visible page text) for a computer run. Use only when starting or resuming a run, after an unknown-outcome failure or computer_os_control fallback, or when the previous computer_act could not return enough state. Do not routinely observe before or after every computer_act — a successful computer_act already returns the state needed for the next decision.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      runId: { type: 'string', minLength: 1 },
-    },
-    required: ['runId'],
   },
 } as const
 
@@ -447,7 +436,7 @@ export const MURPH_COMPUTER_ACT_TOOL = {
   namespace: 'murph',
   name: 'computer_act',
   description:
-    'Execute one coherent browser macro-step against the current Kernel page using bounded Playwright TypeScript/JavaScript. Combine navigation, inspection, waits, known form entry, selection, clicking or submission, and final verification in a single call whenever the next operation does not require new model judgment. Split into a second call only at: ambiguity in user intent, missing user data, sensitive input (passwords, payment details, one-time codes), irreversible confirmation, an unknown page transition, or the per-call timeout. Prefer locator.waitFor(), page.waitForURL(), and page.waitForLoadState() over fixed sleeps. Return compact JSON-serializable state (URL, title, relevant text, errors) so the next decision does not need a follow-up computer_observe.',
+    'Execute one coherent browser macro-step against the current Kernel page using bounded Playwright TypeScript/JavaScript. Combine navigation, inspection, waits, known form entry, selection, clicking or submission, and final verification in a single call whenever the next operation does not require new model judgment. Split into a second call only at: ambiguity in user intent, missing user data, sensitive input (passwords, payment details, one-time codes), irreversible confirmation, an unknown page transition, or the per-call timeout. Prefer locator.waitFor(), page.waitForURL(), and page.waitForLoadState() over fixed sleeps. Return compact JSON-serializable state (URL, title, relevant text, errors) so the next decision does not need another computer_open call.',
   inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
 } as const
 
@@ -455,7 +444,7 @@ export const MURPH_COMPUTER_OS_CONTROL_TOOL = {
   namespace: 'murph',
   name: 'computer_os_control',
   description:
-    'Fallback only: run one bounded OS-level mouse or keyboard action against the current Kernel browser when computer_act cannot operate the page. Prefer computer_act for normal browser automation. Do not use for passwords, payment details, one-time codes, tokens, or any sensitive private input. After an OS-level action with an unknown outcome, use computer_observe once to confirm the resulting page state.',
+    'Fallback only: run one bounded OS-level mouse or keyboard action against the current Kernel browser when computer_act cannot operate the page. Prefer computer_act for normal browser automation. Do not use for passwords, payment details, one-time codes, tokens, or any sensitive private input. After an OS-level action with an unknown outcome, use computer_open once to confirm the resulting page state.',
   inputSchema: MURPH_COMPUTER_OS_CONTROL_INPUT_SCHEMA,
 } as const
 
@@ -463,7 +452,7 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
   namespace: 'murph',
   name: 'computer_pause_for_user',
   description:
-    'Pause a computer run for missing user input, direct user takeover, or view-only screen inspection; store a durable checkpoint; and optionally create a secure browser handoff link. The tool does not send a user-visible message; use the normal final response to summarize the pause and include the returned handoffUrl when takeover or inspection is needed.',
+    'Pause a computer run for missing user input, direct user takeover, or browser inspection; store a durable checkpoint; and optionally create a secure browser handoff link. The tool does not send a user-visible message; use the normal final response to summarize the pause and include the returned handoffUrl when takeover or inspection is needed.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -479,7 +468,6 @@ export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
               'card',
               'captcha',
               'manual_browser_help',
-              'screen_inspection',
             ],
           },
           { type: 'null' },
@@ -527,11 +515,11 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SEND_VAULT_FILE_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
+  MURPH_CREATE_PHONE_CALL_TOOL,
 ] as const
 
 const MURPH_COMPUTER_DYNAMIC_TOOLS = [
-  MURPH_COMPUTER_START_RUN_TOOL,
-  MURPH_COMPUTER_OBSERVE_TOOL,
+  MURPH_COMPUTER_OPEN_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
   MURPH_COMPUTER_OS_CONTROL_TOOL,
   MURPH_COMPUTER_PAUSE_FOR_USER_TOOL,
@@ -554,6 +542,7 @@ export interface MurphDynamicToolAvailability {
   connectedAppsAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
+  phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
 }
@@ -584,6 +573,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
+    [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
       (tool) =>
         [tool, defaultOff((a) => a.computerToolsAvailable)] as const,
@@ -626,6 +616,10 @@ const generateImageArgumentsSchema = z
     outputFormat: z.enum(['webp', 'png', 'jpeg']).default('webp'),
     prompt: z.string().trim().min(1).max(4000),
     quality: z.enum(['low', 'medium', 'high']).default('medium'),
+    referenceImageRefs: z
+      .array(z.string().trim().min(1).max(1024))
+      .max(16)
+      .default([]),
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
   })
   .strict()
@@ -645,23 +639,14 @@ const submitProductFeedbackArgumentsSchema = z
       .string()
       .trim()
       .min(1)
-      .max(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH)
-      .transform((value) => value.replace(/\s+/gu, ' ')),
+      .transform(sanitizeHostedProductFeedbackSummary)
+      .pipe(z.string().min(1).max(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH)),
     relatedChangelogItemIds: z
       .array(z.string().trim().max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u))
       .max(7)
       .default([]),
   })
   .strict()
-  .superRefine((feedback, context) => {
-    if (feedback.kind === 'feature_interest' && feedback.relatedChangelogItemIds.length === 0) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'feature_interest requires relatedChangelogItemIds',
-        path: ['relatedChangelogItemIds'],
-      })
-    }
-  })
 
 const familyPlanArgumentsSchema = z
   .discriminatedUnion('action', [
@@ -704,7 +689,7 @@ const familyPlanArgumentsSchema = z
 
 const computerRunIdSchema = z.string().trim().min(1)
 
-const COMPUTER_START_RUN_ARGUMENT_ROOT_KEYS = [
+const COMPUTER_OPEN_ARGUMENT_ROOT_KEYS = [
   'startUrl',
 ] as const
 
@@ -714,15 +699,9 @@ const computerNavigationUrlSchema = z
   .min(1)
   .max(4_000)
 
-const computerStartRunArgumentsSchema = z
+const computerOpenArgumentsSchema = z
   .object({
     startUrl: computerNavigationUrlSchema.nullable().default(null),
-  })
-  .strict()
-
-const computerObserveArgumentsSchema = z
-  .object({
-    runId: computerRunIdSchema,
   })
   .strict()
 
@@ -871,18 +850,13 @@ type MurphDynamicToolRpcResult = {
   }>
 }
 
-type ComputerObserveToolArgs = {
-  runId: string
-}
-
-type ComputerStartRunToolArgs = z.infer<typeof computerStartRunArgumentsSchema>
+type ComputerOpenToolArgs = z.infer<typeof computerOpenArgumentsSchema>
 
 type HostedComputerToolPayloadSanitizer =
   | 'act'
   | 'finish'
-  | 'observe'
   | 'os-control'
-  | 'start'
+  | 'open'
 
 export interface MurphDynamicToolExecutionResult {
   computerRunPausedForUser?: boolean
@@ -918,12 +892,8 @@ export type MurphDynamicToolRequest =
       args: GenerateSongToolArgs
     }
   | {
-      kind: 'computer-start-run'
-      args: ComputerStartRunToolArgs
-    }
-  | {
-      kind: 'computer-observe'
-      args: ComputerObserveToolArgs
+      kind: 'computer-open'
+      args: ComputerOpenToolArgs
     }
   | {
       kind: 'computer-act'
@@ -941,6 +911,7 @@ export type MurphDynamicToolRequest =
       kind: 'computer-finish-run'
       args: HostedComputerFinishRunRequest & { runId: string }
     }
+  | PhoneCallDynamicToolRequest
   | {
       kind: 'send-vault-file'
       ref: string
@@ -1040,6 +1011,14 @@ export function readMurphDynamicToolRequest(
   })
   if (connectedAppsRequest) {
     return connectedAppsRequest
+  }
+
+  const phoneCallRequest = readPhoneCallDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (phoneCallRequest) {
+    return phoneCallRequest
   }
 
   switch (request.tool) {
@@ -1179,27 +1158,16 @@ export function readMurphDynamicToolRequest(
         reaction: parsed.reaction,
       }
     }
-    case MURPH_COMPUTER_START_RUN_TOOL.name: {
+    case MURPH_COMPUTER_OPEN_TOOL.name: {
       const parsed = parseComputerArguments({
         argumentsValue: request.arguments,
-        schema: computerStartRunArgumentsSchema,
-        schemaName: 'murph.computer_start_run.input',
-        schemaRootKeys: COMPUTER_START_RUN_ARGUMENT_ROOT_KEYS,
-        toolName: 'murph.computer_start_run',
+        schema: computerOpenArgumentsSchema,
+        schemaName: 'murph.computer_open.input',
+        schemaRootKeys: COMPUTER_OPEN_ARGUMENT_ROOT_KEYS,
+        toolName: 'murph.computer_open',
       })
       return parsed.ok
-        ? { kind: 'computer-start-run', args: parsed.args }
-        : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
-    }
-    case MURPH_COMPUTER_OBSERVE_TOOL.name: {
-      const parsed = parseComputerArguments({
-        argumentsValue: request.arguments,
-        schema: computerObserveArgumentsSchema,
-        schemaName: 'murph.computer_observe.input',
-        toolName: 'murph.computer_observe',
-      })
-      return parsed.ok
-        ? { kind: 'computer-observe', args: parsed.args }
+        ? { kind: 'computer-open', args: parsed.args }
         : { kind: 'invalid-computer-arguments', validationDigest: parsed.validationDigest }
     }
     case MURPH_COMPUTER_ACT_TOOL.name: {
@@ -1260,9 +1228,9 @@ export function isComputerDynamicToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
   switch (request.kind) {
-    case 'computer-start-run':
-    case 'computer-observe':
+    case 'computer-open':
     case 'computer-act':
+    case 'computer-os-control':
     case 'computer-pause-for-user':
     case 'computer-finish-run':
     case 'invalid-computer-arguments':
@@ -1276,9 +1244,9 @@ function isExecutableComputerDynamicToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
   switch (request.kind) {
-    case 'computer-start-run':
-    case 'computer-observe':
+    case 'computer-open':
     case 'computer-act':
+    case 'computer-os-control':
     case 'computer-pause-for-user':
     case 'computer-finish-run':
       return true
@@ -1314,18 +1282,23 @@ function currentHostedMailboxItemId(
 
 export async function executeMurphDynamicToolRequest(input: {
   abortSignal?: AbortSignal | null
+  loadAuthorizedReferenceImageRefs?:
+    | (() => Promise<ReadonlyMap<string, { sha256: string }>>)
+    | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext?: AssistantHostedToolContext | null
   hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
+  materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   progressDelivery: AssistantProgressDelivery | null
   publicFetchImpl?: typeof fetch | null
   request: MurphDynamicToolRequest
   requireHostedGeneratedImageUploader?: boolean | null
+  vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (
@@ -1363,9 +1336,17 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid response media arguments')
     case 'invalid-send-vault-file-arguments':
       return toolTextResult(false, 'invalid vault file arguments')
+    case 'invalid-phone-call-arguments':
+      return toolTextResult(false, 'invalid phone-call arguments')
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
-    case 'attach-response-media':
+    case 'attach-response-media': {
+      if (hasVaultFileResponseMedia(input.currentResponseMedia ?? [])) {
+        return toolTextResult(
+          false,
+          'response media cannot be changed after an approved vault file is attached',
+        )
+      }
       return {
         ...toolTextResult(
           true,
@@ -1378,6 +1359,7 @@ export async function executeMurphDynamicToolRequest(input: {
           op: 'replace',
         },
       }
+    }
     case 'send-progress-update':
       return await executeProgressUpdateTool({
         progressDelivery: input.progressDelivery,
@@ -1392,7 +1374,13 @@ export async function executeMurphDynamicToolRequest(input: {
       ) {
         return toolTextResult(
           false,
-          'secure vault-file sending is unavailable for this conversation',
+          'secure vault-file approval is unavailable for this conversation',
+        )
+      }
+      if ((input.currentResponseMedia ?? []).length > 0) {
+        return toolTextResult(
+          false,
+          'vault-file sending cannot be combined with other response media',
         )
       }
       try {
@@ -1400,13 +1388,28 @@ export async function executeMurphDynamicToolRequest(input: {
         switch (result.status) {
           case 'pending':
             return {
-              ...toolTextResult(true, 'secure approval requested'),
-              finalActionPatch: { kind: 'none' },
+              ...toolTextResult(
+                true,
+                JSON.stringify({
+                  approvalUrl: result.approvalUrl,
+                  filename: result.filename,
+                  status: result.status,
+                }),
+              ),
             }
           case 'approved':
             return {
-              ...toolTextResult(true, 'approved vault file queued for delivery'),
-              finalActionPatch: { kind: 'none' },
+              ...toolTextResult(
+                true,
+                JSON.stringify({
+                  filename: result.filename,
+                  status: result.status,
+                }),
+              ),
+              responseMediaPatch: {
+                media: [result.file],
+                op: 'append' as const,
+              },
             }
           case 'denied':
             return toolTextResult(false, 'vault-file delivery was denied')
@@ -1414,7 +1417,41 @@ export async function executeMurphDynamicToolRequest(input: {
             return toolTextResult(false, 'vault-file delivery approval expired')
         }
       } catch {
-        return toolTextResult(false, 'secure vault-file delivery could not be queued')
+        return toolTextResult(false, 'secure vault-file approval could not be prepared')
+      }
+    }
+    case 'create-phone-call': {
+      const hostedToolContext = input.hostedToolContext ?? null
+      const phoneCalls = hostedToolContext?.phoneCalls ?? null
+      if (!hostedToolContext || !phoneCalls) {
+        return toolTextResult(
+          false,
+          'phone calling is unavailable without hosted phone-call transport',
+        )
+      }
+
+      const requestKeyScope =
+        hostedToolContext.currentPhoneCallToolRequestKeyScope?.() ?? null
+      if (!requestKeyScope) {
+        return toolTextResult(
+          false,
+          'phone calling requires user-approved manual input for this turn',
+        )
+      }
+
+      try {
+        const result = await phoneCalls.start({
+          brief: input.request.brief,
+          requestKey: createPhoneCallRequestKey({
+            brief: input.request.brief,
+            scope: requestKeyScope,
+          }),
+        }, {
+          signal: input.abortSignal ?? null,
+        })
+        return toolTextResult(true, `phone call ${result.status}: ${result.phoneCallId}`)
+      } catch {
+        return toolTextResult(false, 'phone call could not be started')
       }
     }
     case 'submit-product-feedback':
@@ -1442,20 +1479,39 @@ export async function executeMurphDynamicToolRequest(input: {
         },
       }
     case 'generate-image': {
+      if (hasVaultFileResponseMedia(input.currentResponseMedia ?? [])) {
+        return toolTextResult(
+          false,
+          'image generation cannot be combined with an approved vault file',
+        )
+      }
       if (hasVoiceMemoResponseMedia(input.currentResponseMedia ?? [])) {
         return toolTextResult(false, 'image generation cannot be combined with a voice memo')
       }
 
+      // Only resolve the per-turn authority allowlist when the model is
+      // actually requesting reference images. A plain no-refs generate_image
+      // call must keep working even if the accepted-input journal is
+      // transiently unreadable; gating the loader keeps the existing
+      // /v1/images/generations path independent of attachment-runtime state.
+      const requestedRefs = input.request.args.referenceImageRefs ?? []
+      const authorizedRefs =
+        requestedRefs.length > 0 && input.loadAuthorizedReferenceImageRefs
+          ? await input.loadAuthorizedReferenceImageRefs()
+          : null
       const result = await executeGenerateImageTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
+        authorizedReferenceImageRefs: authorizedRefs,
         codexHome: input.codexHome ?? null,
         env: input.env,
         fetchImpl: input.fetchImpl,
         hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
+        materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
         providerRequestOrdinal: input.nextUsageOrdinal(),
         requireHostedGeneratedImageUploader:
           input.requireHostedGeneratedImageUploader ?? false,
+        vaultRoot: input.vaultRoot ?? null,
       })
       return {
         ...(result.responseMedia && result.responseMedia.length > 0
@@ -1510,26 +1566,14 @@ export async function executeMurphDynamicToolRequest(input: {
         request: input.request,
       })
     }
-    case 'computer-start-run': {
-      return await executeHostedComputerStartRunTool({
+    case 'computer-open': {
+      return await executeHostedComputerOpenTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         fetchImpl: input.fetchImpl,
         hostedToolContext: input.hostedToolContext ?? null,
       })
     }
-    case 'computer-observe':
-      return await executeHostedComputerApiTool({
-        abortSignal: input.abortSignal ?? null,
-        body: {},
-        fetchImpl: input.fetchImpl,
-        path: buildHostedComputerRunOperationPath({
-          operation: 'observe',
-          runId: input.request.args.runId,
-        }),
-        sanitizer: 'observe',
-        unknownOutcomeOnTransportError: false,
-      })
     case 'computer-act': {
       const { runId, ...body } = input.request.args
       return await executeHostedComputerApiTool({
@@ -1605,6 +1649,12 @@ function hasVoiceMemoResponseMedia(
   return media.some((item) => item.kind === 'voice_memo')
 }
 
+function hasVaultFileResponseMedia(
+  media: readonly AssistantResponseMedia[],
+): boolean {
+  return media.some((item) => item.kind === 'vault_file')
+}
+
 async function executeSubmitProductFeedbackTool(input: {
   feedback: Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'>
   productFeedbackRecorder: AssistantTurnProductFeedbackRecorder | null
@@ -1658,8 +1708,14 @@ async function executeProgressUpdateTool(input: {
     if (result.reason === 'limit') {
       return toolTextResult(false, 'progress update skipped: progress update limit reached')
     }
+    if (result.reason === 'too-soon') {
+      return toolTextResult(false, 'progress update skipped: progress update sent too recently')
+    }
     if (result.reason === 'duplicate') {
       return toolTextResult(false, 'progress update skipped: duplicate progress update')
+    }
+    if (result.reason === 'unavailable') {
+      return toolTextResult(false, 'progress update skipped: progress updates are not available for this turn')
     }
     return toolTextResult(false, 'progress update skipped: empty progress update')
   } catch {
@@ -1694,27 +1750,27 @@ async function executeHostedComputerPauseForUserTool(input: {
   )
 }
 
-async function executeHostedComputerStartRunTool(input: {
+async function executeHostedComputerOpenTool(input: {
   abortSignal: AbortSignal | null
-  args: ComputerStartRunToolArgs
+  args: ComputerOpenToolArgs
   fetchImpl: typeof fetch
   hostedToolContext: AssistantHostedToolContext | null
 }): Promise<MurphDynamicToolExecutionResult> {
   return await executeHostedComputerApiTool({
     abortSignal: input.abortSignal,
-    body: buildHostedComputerStartRunBody({
+    body: buildHostedComputerOpenBody({
       args: input.args,
       hostedToolContext: input.hostedToolContext,
     }),
     fetchImpl: input.fetchImpl,
     path: HOSTED_COMPUTER_RUNS_PATH,
-    sanitizer: 'start',
+    sanitizer: 'open',
     unknownOutcomeOnTransportError: true,
   })
 }
 
-function buildHostedComputerStartRunBody(input: {
-  args: ComputerStartRunToolArgs
+function buildHostedComputerOpenBody(input: {
+  args: ComputerOpenToolArgs
   hostedToolContext: AssistantHostedToolContext | null
 }): Record<string, unknown> {
   const { startUrl } = input.args
@@ -1992,29 +2048,21 @@ function sanitizeHostedComputerPayload(
   }
 
   switch (sanitizer) {
-    case 'start':
+    case 'open':
       return {
-        ...readStringField(record, 'awaitingReason'),
         ...readStringField(record, 'expiresAt'),
-        ...readStringField(record, 'lastTitle'),
-        ...readStringOrNullField(record, 'lastUrl'),
         ...readBooleanField(record, 'reused'),
         ...readStringField(record, 'runId'),
         ...readStringField(record, 'status'),
-      }
-    case 'observe':
-      return {
-        ...readStringField(record, 'runId'),
-        ...readStringField(record, 'status'),
         ...readStringField(record, 'title'),
-        ...readStringOrNullField(record, 'url'),
+        ...readSanitizedComputerUrlField(record, 'url'),
         visibleText: typeof record.visibleText === 'string' ? record.visibleText : '',
       }
     case 'act':
       return {
         result: record.result ?? null,
         ...readStringField(record, 'title'),
-        ...readStringOrNullField(record, 'url'),
+        ...readSanitizedComputerUrlField(record, 'url'),
       }
     case 'os-control':
       return {
@@ -2049,6 +2097,36 @@ function readStringOrNullField(
     return { [field]: null }
   }
   return typeof value === 'string' ? { [field]: value } : {}
+}
+
+function readSanitizedComputerUrlField(
+  record: Record<string, unknown>,
+  field: string,
+): Record<string, string | null> {
+  const value = record[field]
+  if (value === null) {
+    return { [field]: null }
+  }
+  if (typeof value !== 'string') {
+    return {}
+  }
+  return { [field]: sanitizeComputerDisplayUrl(value) }
+}
+
+function sanitizeComputerDisplayUrl(value: string): string | null {
+  if (!value.trim()) {
+    return null
+  }
+  try {
+    const url = new URL(value)
+    url.username = ''
+    url.password = ''
+    url.search = ''
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return null
+  }
 }
 
 function readBooleanField(

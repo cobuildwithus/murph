@@ -1,34 +1,80 @@
+import type {
+  Prisma,
+  PrismaClient,
+} from "@prisma/client";
+
 import {
   hasHostedMemberEffectiveActiveAccessForMember,
 } from "../hosted-onboarding/family-plan";
 import {
+  hasHostedMemberActiveAccess,
+} from "../hosted-onboarding/entitlement";
+import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
-import {
-  readHostedMemberCoreState,
-} from "../hosted-onboarding/hosted-member-store";
 import { getPrisma } from "../prisma";
 
-// Shared fail-closed gate for the internal hosted-mailbox runtime routes
-// (fetch and consume): only members with active hosted access may touch their
-// mailbox runtime surface.
-export async function requireHostedRuntimeMailboxActiveAccess(userId: string): Promise<void> {
-  const prisma = getPrisma();
-  const member = await readHostedMemberCoreState({
-    memberId: userId,
-    prisma,
+type HostedRuntimeActiveAccessClient = PrismaClient | Prisma.TransactionClient;
+
+interface HostedRuntimeActiveAccessOptions {
+  code?: string;
+  message?: string;
+  prisma?: HostedRuntimeActiveAccessClient;
+}
+
+// Shared fail-closed gate for runtime surfaces: only members with active hosted
+// access and, for thread containers, active owner authority may wake or touch
+// runtime state.
+export async function requireHostedRuntimeActiveAccess(
+  userId: string,
+  options: HostedRuntimeActiveAccessOptions = {},
+): Promise<void> {
+  const prisma = options.prisma ?? getPrisma();
+  const member = await prisma.hostedMember.findUnique({
+    where: {
+      id: userId,
+    },
+    select: {
+      id: true,
+      billingStatus: true,
+      suspendedAt: true,
+      threadContainer: {
+        select: {
+          owner: {
+            select: {
+              billingStatus: true,
+              suspendedAt: true,
+            },
+          },
+        },
+      },
+    },
   });
 
-  if (member && await hasHostedMemberEffectiveActiveAccessForMember({
-    member,
-    prisma,
-  })) {
+  if (
+    member
+    && await hasHostedMemberEffectiveActiveAccessForMember({
+      member,
+      prisma,
+    })
+    && (
+      !member.threadContainer
+      || hasHostedMemberActiveAccess(member.threadContainer.owner)
+    )
+  ) {
     return;
   }
 
   throw hostedOnboardingError({
-    code: "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE",
+    code: options.code ?? "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE",
     httpStatus: 403,
-    message: "Hosted runtime mailbox access is not active.",
+    message: options.message ?? "Hosted runtime mailbox access is not active.",
   });
+}
+
+export async function requireHostedRuntimeMailboxActiveAccess(
+  userId: string,
+  options: HostedRuntimeActiveAccessOptions = {},
+): Promise<void> {
+  await requireHostedRuntimeActiveAccess(userId, options);
 }

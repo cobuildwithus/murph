@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   checkpointHostedWorkspace: vi.fn(),
   fetchHostedMailboxItemsAfterLaneCursors: vi.fn(),
   fetchHostedMailboxPayload: vi.fn(),
+  hostedRuntimeMailboxMemberFindUnique: vi.fn(),
   getPrisma: vi.fn(),
   listHostedRuntimeLogs: vi.fn(),
   publishLegacySourceHashBrowserVaultReplicaRef: vi.fn(),
@@ -145,6 +146,9 @@ describe("hosted runtime internal web routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
+      buildRuntimeMailboxAccessRecord(),
+    );
     mocks.getPrisma.mockReturnValue(createPrismaClientStub());
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_routes_1");
     mocks.readHostedMailboxConsumedSeqByLane.mockImplementation((input: {
@@ -746,7 +750,7 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("rejects mailbox fetches for inactive members before reading mailbox state", async () => {
-    mocks.readHostedMemberCoreState.mockResolvedValueOnce(null);
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(null);
 
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
@@ -759,6 +763,36 @@ describe("hosted runtime internal web routes", () => {
         ],
         limitPerLane: 10,
         requestId: "request_mailbox_fetch_inactive",
+      },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(mocks.fetchHostedMailboxItemsAfterLaneCursors).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
+  });
+
+  it("rejects mailbox fetches for thread containers when the owner is inactive", async () => {
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(
+      buildRuntimeMailboxAccessRecord({
+        threadContainer: {
+          owner: buildRuntimeMailboxAccessRecord({
+            billingStatus: "paused",
+          }),
+        },
+      }),
+    );
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [
+          {
+            importedSeq: "11",
+            lane: "conversation",
+          },
+        ],
+        limitPerLane: 10,
+        requestId: "request_mailbox_fetch_thread_owner_inactive",
       },
     ));
 
@@ -1048,7 +1082,7 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("rejects mailbox payload fetches for inactive members", async () => {
-    mocks.readHostedMemberCoreState.mockResolvedValueOnce(buildActiveHostedMemberRecord({
+    mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValueOnce(buildRuntimeMailboxAccessRecord({
       suspendedAt: new Date("2026-04-26T00:00:00.000Z"),
     }));
 
@@ -2533,11 +2567,34 @@ function buildActiveHostedMemberRecord(overrides: Partial<{
 
 function createPrismaClientStub() {
   return {
+    hostedMember: {
+      findUnique: mocks.hostedRuntimeMailboxMemberFindUnique,
+    },
     hostedAccountGroupMembership: {
       count: vi.fn(async () => 0),
       findFirst: vi.fn(async (): Promise<unknown | null> => null),
     },
     kind: "prisma",
+  };
+}
+
+function buildRuntimeMailboxAccessRecord(overrides: Partial<{
+  id: string;
+  billingStatus: string;
+  suspendedAt: Date | null;
+  threadContainer: {
+    owner: {
+      billingStatus: string;
+      suspendedAt: Date | null;
+    };
+  } | null;
+}> = {}) {
+  return {
+    id: "member_routes_1",
+    billingStatus: "active",
+    suspendedAt: null,
+    threadContainer: null,
+    ...overrides,
   };
 }
 

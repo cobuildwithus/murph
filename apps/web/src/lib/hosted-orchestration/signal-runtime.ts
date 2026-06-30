@@ -21,14 +21,11 @@ import {
   type HostedMailboxItemCheckpointRecord,
 } from "../hosted-mailbox/store";
 import {
-  hasHostedMemberEffectiveActiveAccessForMember,
-} from "../hosted-onboarding/family-plan";
+  requireHostedRuntimeActiveAccess,
+} from "../hosted-mailbox/runtime-access";
 import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
-import {
-  readHostedMemberCoreState,
-} from "../hosted-onboarding/hosted-member-store";
 import {
   ensureHostedWorkspace,
   type HostedWorkspaceRecord,
@@ -93,6 +90,7 @@ export interface SignalHostedManualRunInput {
 export interface SignalHostedRuntimeRecheckInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
+  prisma?: PrismaClient;
   userId: string;
 }
 
@@ -206,10 +204,18 @@ export async function signalHostedManualRunRuntime(
 export async function signalHostedRuntimeRecheckRuntime(
   input: SignalHostedRuntimeRecheckInput,
 ): Promise<HostedRuntimeSignalResult> {
+  const prisma = input.prisma ?? getPrisma();
+  await requireHostedRuntimeActiveAccess(input.userId, {
+    code: "HOSTED_RUNTIME_USER_INACTIVE",
+    message: "Hosted runtime user is not active.",
+    prisma,
+  });
+
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
     environment: input.environment,
     ensureWorkspace: false,
+    prisma,
     signal: parseHostedRuntimeSignal({
       kind: "runtime_recheck_requested",
     }),
@@ -441,17 +447,11 @@ async function ensureHostedRuntimeWorkspaceForActiveUser(
   userId: string,
   prisma = getPrisma(),
 ): Promise<HostedWorkspaceRecord> {
-  const member = await readHostedMemberCoreState({
-    memberId: userId,
+  await requireHostedRuntimeActiveAccess(userId, {
+    code: "HOSTED_RUNTIME_USER_INACTIVE",
+    message: "Hosted runtime user is not active.",
     prisma,
   });
-
-  if (!member || !(await hasHostedMemberEffectiveActiveAccessForMember({
-    member,
-    prisma,
-  }))) {
-    throw new Error("Hosted runtime user is not active.");
-  }
 
   return await ensureHostedWorkspace({
     prisma,
