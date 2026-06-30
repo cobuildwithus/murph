@@ -165,6 +165,11 @@ carry forward the maintenance wake, dirty state, or retry metadata needed to
 finish later, but assistant admission, assistant automation, outbox intent
 creation, and reply delivery must stay independent of device-sync and
 maintenance completion.
+If an `inbox_media_retention` invocation is the active write-fenced child when
+foreground/default work arrives, the runner preempts that exact child through
+the existing container abort seam, clears the old fence by identity, and starts
+foreground work. Retention remains recoverable through the workspace's projected
+retention wake instead of becoming a second scheduler concern.
 
 The foreground-priority rule does not weaken correctness checks. Wrong-user
 authority, invalid auth, undecryptable mailbox payloads, stale leases, and
@@ -412,11 +417,13 @@ attempt has no durable committed progress yet and the local active-operation
 pointer is missing, the fence is preserved for the next identity-aware wake
 recheck instead of being cleared from the pointer alone; only the wake path may
 then replace the fence after it explicitly reports no active child. Inactive
-liveness is explicit no-active-child proof, so committed-progress recovery is a
-best-effort completion fast path before replacement rather than a dependency for
-clearing the fence. Mismatched liveness probes clear the fence because they prove
-the active child is not the fenced attempt; unsupported, error, and timeout probe
-outcomes preserve the accepted fence when durable progress is not visible yet.
+liveness is explicit no-active-child proof, so the controller clears and
+replaces that fence directly instead of asking web status to complete it first.
+Committed-progress recovery stays in the transport-failure adapter, where the
+transport outcome is the thing being reconciled. Mismatched liveness probes
+clear the fence because they prove the active child is not the fenced attempt;
+unsupported, error, and timeout probe outcomes preserve the accepted fence when
+durable progress is not visible yet.
 This prevents duplicate replacement while a live child may still be running and
 leaves replacement ownership in the exact identity-aware wake path.
 When the outer RunnerContainer active-operation pointer is missing, a container

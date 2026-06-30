@@ -1666,15 +1666,19 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("keeps default processing from waking active retention-only work", async () => {
+  it("preempts active retention-only work before starting default processing", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const abortWorkspaceInvocation = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
+    >(async () => {});
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
       async () => ({
         action: "woken" as const,
         kind: "accepted" as const,
       }),
     );
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
     let activeAttemptId = "";
     let activeGeneration = "";
     const readActiveRuntimeUserFence = vi.fn<
@@ -1686,7 +1690,9 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     }));
     const { invoke, runner, sql } = createRunnerHarness({
+      abortWorkspaceInvocation,
       ensureProcessing,
+      invocationResults: [invocationResult.promise],
       readActiveRuntimeUserFence,
       workspace: createWorkspaceState({ version: "7" }),
     });
@@ -1702,19 +1708,37 @@ describe("HostedUserRunner execution coordination", () => {
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt-default-behind-retention",
       userId: TEST_USER_ID,
-    })).resolves.toEqual({
-      kind: "retry_later",
-      retryAt: "2026-04-27T00:00:05.000Z",
+    })).resolves.toMatchObject({
+      action: "replaced",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-04-27T00:01:00.000Z",
+      runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
     expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
+      attemptId: token.attemptId,
+      leaseGeneration: String(token.generation),
+      userId: TEST_USER_ID,
+    });
     expect(ensureProcessing).not.toHaveBeenCalled();
-    expect(invoke).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: token.attemptId,
+      active_attempt_id: expect.not.stringMatching(token.attemptId),
       active_expires_at: null,
       wake_at: null,
     });
+
+    invocationResult.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await vi.waitFor(() =>
+      expect(readRunnerMeta(sql)).toMatchObject({
+        active_attempt_id: null,
+        last_invocation_at: expect.any(String),
+      })
+    );
   });
 
   it("keeps opposite-mode runtime busy when the active child identity does not match the fence", async () => {
@@ -1819,6 +1843,9 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const onStatusRead = vi.fn(() => {
+      throw new Error("Inactive fence replacement must not read hosted status.");
+    });
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
       async () => ({
         kind: "start-required" as const,
@@ -1834,6 +1861,7 @@ describe("HostedUserRunner execution coordination", () => {
     const { invoke, runner, sql } = createRunnerHarness({
       ensureProcessing,
       invocationResults: [invocationResult.promise],
+      onStatusRead,
       readActiveRuntimeUserFence,
       workspace: createWorkspaceState({ version: "7" }),
     });
@@ -1858,6 +1886,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(onStatusRead).not.toHaveBeenCalled();
     expect(ensureProcessing).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(readRunnerMeta(sql)).toMatchObject({
@@ -1882,6 +1911,9 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const onStatusRead = vi.fn(() => {
+      throw new Error("Inactive fence replacement must not read hosted status.");
+    });
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
       async () => ({
         kind: "start-required" as const,
@@ -1897,6 +1929,7 @@ describe("HostedUserRunner execution coordination", () => {
     const { invoke, runner, sql } = createRunnerHarness({
       ensureProcessing,
       invocationResults: [invocationResult.promise],
+      onStatusRead,
       readActiveRuntimeUserFence,
       workspace: createWorkspaceState({ version: "7" }),
     });
@@ -1920,6 +1953,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(onStatusRead).not.toHaveBeenCalled();
     expect(ensureProcessing).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(readRunnerMeta(sql)).toMatchObject({
@@ -2001,65 +2035,6 @@ describe("HostedUserRunner execution coordination", () => {
         last_invocation_at: expect.any(String),
       })
     );
-  });
-
-  it("clears a stale retention fence when inactive proof is followed by exhausted recovery budget", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
-      async () => {
-        await new Promise((resolve) => setTimeout(resolve, 20_000));
-        return {
-          kind: "start-required" as const,
-          reason: "no-active-child" as const,
-        };
-      },
-    );
-    const readActiveRuntimeUserFence = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
-    >(async () => ({
-      active: false,
-      reason: "no_active_runtime",
-    }));
-    const onStatusRead = vi.fn(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20_000));
-    });
-    const { invoke, runner, sql } = createRunnerHarness({
-      ensureProcessing,
-      mailboxLag: [createMailboxLag({ lag: "0" })],
-      onStatusRead,
-      readActiveRuntimeUserFence,
-      workspace: createWorkspaceState({ version: "8" }),
-    });
-    await runner.bindUser(TEST_USER_ID);
-    writeRuntimeFenceForTest(sql, {
-      processingMode: "inbox_media_retention",
-      runnerContainerName: TEST_USER_ID,
-      startedAt: "2026-04-27T00:00:00.000Z",
-      workspaceVersion: "7",
-    });
-    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
-
-    const response = runner.ensureRuntimeProcessingForUser({
-      commandTimeoutMs: 5_000,
-      orchestrationAttemptId: "test-orchestration-attempt-retention-inactive-budget",
-      processingMode: "inbox_media_retention",
-      userId: TEST_USER_ID,
-    });
-    await vi.waitFor(() => expect(onStatusRead).toHaveBeenCalledOnce());
-    await vi.advanceTimersByTimeAsync(4_000);
-
-    await expect(response).resolves.toMatchObject({
-      kind: "retry_later",
-    });
-    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
-    expect(ensureProcessing).not.toHaveBeenCalled();
-    expect(invoke).not.toHaveBeenCalled();
-    expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: null,
-      active_expires_at: null,
-      wake_at: null,
-    });
   });
 
   it("probes workspace wakes behind an active runtime write fence", async () => {
@@ -2259,50 +2234,7 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("records committed progress before replacing a non-wakeable accepted fence", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
-      async () => ({
-        kind: "start-required" as const,
-        reason: "no-active-child" as const,
-      }),
-    );
-    const onStatusRead = vi.fn();
-    const { invoke, runner, sql } = createRunnerHarness({
-      ensureProcessing,
-      mailboxLag: [createMailboxLag({ lag: "0" })],
-      onStatusRead,
-      workspace: createWorkspaceState({ version: "8" }),
-    });
-    await runner.bindUser(TEST_USER_ID);
-    const token = writeRuntimeFenceForTest(sql, {
-      startedAt: "2026-04-27T00:00:00.000Z",
-      workspaceVersion: "7",
-    });
-    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
-
-    await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-recover-committed",
-      userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "already_running",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
-      runtimeAttemptId: token.attemptId,
-    });
-
-    expect(ensureProcessing).toHaveBeenCalledOnce();
-    expect(onStatusRead).toHaveBeenCalledOnce();
-    expect(invoke).not.toHaveBeenCalled();
-    expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: null,
-      last_invocation_at: "2026-04-27T00:00:31.000Z",
-      wake_at: null,
-    });
-  });
-
-  it("replaces a non-wakeable accepted fence when committed-progress recovery is unknown", async () => {
+  it("replaces a non-wakeable accepted fence without web status recovery", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
@@ -2312,8 +2244,8 @@ describe("HostedUserRunner execution coordination", () => {
         reason: "no-active-child" as const,
       }),
     );
-    const onStatusRead = vi.fn(async () => {
-      throw new Error("status unavailable");
+    const onStatusRead = vi.fn(() => {
+      throw new Error("status recovery should not run during replacement");
     });
     const { invoke, runner, sql } = createRunnerHarness({
       ensureProcessing,
@@ -2329,7 +2261,7 @@ describe("HostedUserRunner execution coordination", () => {
     vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
 
     await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-recover-unknown",
+      orchestrationAttemptId: "test-orchestration-attempt-replace-without-status-recovery",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "replaced",
@@ -2339,7 +2271,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
-    expect(onStatusRead).toHaveBeenCalledOnce();
+    expect(onStatusRead).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token.attemptId),
@@ -2358,52 +2290,6 @@ describe("HostedUserRunner execution coordination", () => {
         last_invocation_at: expect.any(String),
       })
     );
-  });
-
-  it("clears a non-wakeable accepted fence when committed-progress recovery exhausts the command budget", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
-      async () => ({
-        kind: "start-required" as const,
-        reason: "no-active-child" as const,
-      }),
-    );
-    const onStatusRead = vi.fn(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20_000));
-    });
-    const { invoke, runner, sql } = createRunnerHarness({
-      ensureProcessing,
-      mailboxLag: [createMailboxLag({ lag: "0" })],
-      onStatusRead,
-      workspace: createWorkspaceState({ version: "8" }),
-    });
-    await runner.bindUser(TEST_USER_ID);
-    writeRuntimeFenceForTest(sql, {
-      startedAt: "2026-04-27T00:00:00.000Z",
-      workspaceVersion: "7",
-    });
-    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
-
-    const response = runner.ensureRuntimeProcessingForUser({
-      commandTimeoutMs: 5_000,
-      orchestrationAttemptId: "test-orchestration-attempt-recover-timeout-unknown",
-      userId: TEST_USER_ID,
-    });
-    await vi.waitFor(() => expect(onStatusRead).toHaveBeenCalledOnce());
-    await vi.advanceTimersByTimeAsync(4_000);
-
-    await expect(response).resolves.toMatchObject({
-      kind: "retry_later",
-    });
-    expect(ensureProcessing).toHaveBeenCalledOnce();
-    expect(invoke).not.toHaveBeenCalled();
-    expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: null,
-      active_expires_at: null,
-      backoff_until: null,
-      wake_at: null,
-    });
   });
 
   it("clears a non-wakeable accepted fence when replacement recovery has no remaining command budget", async () => {
@@ -2518,7 +2404,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("preserves a wake-unconfirmed runtime fence when committed progress belongs to a still-active child", async () => {
+  it("preserves a wake-unconfirmed runtime fence when liveness still matches the active child", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
@@ -2556,7 +2442,7 @@ describe("HostedUserRunner execution coordination", () => {
     vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
 
     await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-recover-wake-unconfirmed",
+      orchestrationAttemptId: "test-orchestration-attempt-preserve-matching-wake-unconfirmed",
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
@@ -2621,9 +2507,10 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("recovers a wake-unconfirmed runtime fence only after liveness confirms no active child", async () => {
+  it("replaces a wake-unconfirmed inactive fence after liveness confirms no active child", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
       async () => ({
         kind: "wake-unconfirmed" as const,
@@ -2636,119 +2523,16 @@ describe("HostedUserRunner execution coordination", () => {
       active: false,
       reason: "no_active_runtime",
     }));
-    const onStatusRead = vi.fn();
-    const { invoke, runner, sql } = createRunnerHarness({
-      ensureProcessing,
-      mailboxLag: [createMailboxLag({ lag: "0" })],
-      onStatusRead,
-      readActiveRuntimeUserFence,
-      workspace: createWorkspaceState({ version: "8" }),
+    const onStatusRead = vi.fn(() => {
+      throw new Error("status recovery should not run during replacement");
     });
-    await runner.bindUser(TEST_USER_ID);
-    const token = writeRuntimeFenceForTest(sql, {
-      runnerContainerName: TEST_USER_ID,
-      startedAt: "2026-04-27T00:00:00.000Z",
-      workspaceVersion: "7",
-    });
-    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
-
-    await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-recover-inactive-wake-unconfirmed",
-      userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "already_running",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
-      runtimeAttemptId: token.attemptId,
-    });
-
-    expect(ensureProcessing).toHaveBeenCalledOnce();
-    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
-    expect(onStatusRead).toHaveBeenCalledOnce();
-    expect(invoke).not.toHaveBeenCalled();
-    expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: null,
-      last_invocation_at: "2026-04-27T00:00:31.000Z",
-      wake_at: null,
-    });
-  });
-
-  it("recovers a wake-unconfirmed committed fence when the runner container is gone", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
-      async () => ({
-        kind: "wake-unconfirmed" as const,
-        reason: "container-rpc-error" as const,
-      }),
-    );
-    const readActiveRuntimeUserFence = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
-    >(async () => ({
-      active: false,
-      reason: "no_active_runtime",
-    }));
-    const onStatusRead = vi.fn();
-    const { invoke, runner, sql } = createRunnerHarness({
-      ensureProcessing,
-      mailboxLag: [createMailboxLag({ lag: "0" })],
-      onStatusRead,
-      readActiveRuntimeUserFence,
-      workspace: createWorkspaceState({ version: "8" }),
-    });
-    await runner.bindUser(TEST_USER_ID);
-    const token = writeRuntimeFenceForTest(sql, {
-      runnerContainerName: TEST_USER_ID,
-      startedAt: "2026-04-27T00:00:00.000Z",
-      workspaceVersion: "7",
-    });
-    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
-
-    await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-recover-gone-container",
-      userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
-      action: "already_running",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
-      runtimeAttemptId: token.attemptId,
-    });
-
-    expect(ensureProcessing).toHaveBeenCalledOnce();
-    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
-    expect(onStatusRead).toHaveBeenCalledOnce();
-    expect(invoke).not.toHaveBeenCalled();
-    expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: null,
-      last_invocation_at: "2026-04-27T00:00:31.000Z",
-      wake_at: null,
-    });
-  });
-
-  it("replaces a wake-unconfirmed inactive fence when committed progress is not durable", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(FIXED_NOW));
-    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
-    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
-      async () => ({
-        kind: "wake-unconfirmed" as const,
-        reason: "container-rpc-error" as const,
-      }),
-    );
-    const readActiveRuntimeUserFence = vi.fn<
-      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
-    >(async () => ({
-      active: false,
-      reason: "no_active_runtime",
-    }));
-    const onStatusRead = vi.fn();
     const { invoke, runner, sql } = createRunnerHarness({
       ensureProcessing,
       invocationResults: [invocationResult.promise],
       mailboxLag: [createMailboxLag({ lag: "0" })],
       onStatusRead,
       readActiveRuntimeUserFence,
-      workspace: createWorkspaceState({ version: "7" }),
+      workspace: createWorkspaceState({ version: "8" }),
     });
     await runner.bindUser(TEST_USER_ID);
     const token = writeRuntimeFenceForTest(sql, {
@@ -2770,7 +2554,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
     expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
-    expect(onStatusRead).toHaveBeenCalledOnce();
+    expect(onStatusRead).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token.attemptId),
@@ -2790,7 +2574,74 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("does not run committed-progress recovery after the active wake spends the caller command budget", async () => {
+  it("replaces a wake-unconfirmed inactive fence when the runner container is gone", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "wake-unconfirmed" as const,
+        reason: "container-rpc-error" as const,
+      }),
+    );
+    const readActiveRuntimeUserFence = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+    >(async () => ({
+      active: false,
+      reason: "no_active_runtime",
+    }));
+    const onStatusRead = vi.fn(() => {
+      throw new Error("status recovery should not run during replacement");
+    });
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureProcessing,
+      invocationResults: [invocationResult.promise],
+      mailboxLag: [createMailboxLag({ lag: "0" })],
+      onStatusRead,
+      readActiveRuntimeUserFence,
+      workspace: createWorkspaceState({ version: "8" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      runnerContainerName: TEST_USER_ID,
+      startedAt: "2026-04-27T00:00:00.000Z",
+      workspaceVersion: "7",
+    });
+    vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-replace-gone-container",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "replaced",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
+      runtimeAttemptId: expect.not.stringMatching(token.attemptId),
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(onStatusRead).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: expect.not.stringMatching(token.attemptId),
+      active_expires_at: null,
+      wake_at: null,
+    });
+
+    invocationResult.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await vi.waitFor(() =>
+      expect(readRunnerMeta(sql)).toMatchObject({
+        active_attempt_id: null,
+        last_invocation_at: expect.any(String),
+      })
+    );
+  });
+
+  it("does not probe inactive liveness after the active wake spends the caller command budget", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
@@ -3674,6 +3525,7 @@ describe("HostedUserRunner execution coordination", () => {
 
 function createRunnerHarness(input: {
   alarmDeleteError?: Error;
+  abortWorkspaceInvocation?: HostedExecutionContainerStubLike["abortWorkspaceInvocation"];
   bucket?: MemoryEncryptedR2Bucket;
   destroyInstance?: HostedExecutionContainerStubLike["destroyInstance"];
   ensureReadyForProcessing?: HostedExecutionContainerStubLike["ensureReadyForProcessing"] | null;
@@ -3703,6 +3555,7 @@ function createRunnerHarness(input: {
     },
   );
   const readActiveRuntimeUserFenceInput = input.readActiveRuntimeUserFence;
+  const abortWorkspaceInvocationInput = input.abortWorkspaceInvocation;
   const ensureReadyForProcessing = input.ensureReadyForProcessing === null
     ? null
     : createDirectOnlyRpcMethod<NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>>(
@@ -3715,6 +3568,21 @@ function createRunnerHarness(input: {
       );
   const stub: HostedExecutionContainerStubLike = {
     destroyInstance: input.destroyInstance ?? (async () => {}),
+    ...(abortWorkspaceInvocationInput
+      ? {
+          abortWorkspaceInvocation: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
+          >(
+            async function (
+              this: HostedExecutionContainerStubLike,
+              abortInput,
+            ) {
+              expect(this).toBe(stub);
+              return await abortWorkspaceInvocationInput.call(this, abortInput);
+            },
+          ),
+        }
+      : {}),
     ...(ensureReadyForProcessing ? { ensureReadyForProcessing } : {}),
     ...(input.ensureProcessing
       ? {
