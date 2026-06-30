@@ -1777,7 +1777,13 @@ describe('assistant Murph onboarding guidance', () => {
     )
     expect(prompt).toContain('collaboration.spawn_agent')
     expect(prompt).toContain(
-      'The child must work from durable source evidence, call the relevant `vault-cli` save/import commands, avoid duplicates, and return saved record ids or blockers',
+      'Spawn it as a fresh thread with `fork_turns: "none"`',
+    )
+    expect(prompt).toContain(
+      'make the spawn message self-contained with durable source evidence, needed user/vault context, duplicate-avoidance instructions, and the expected completion format',
+    )
+    expect(prompt).toContain(
+      'The child must call the relevant `vault-cli` save/import commands, avoid duplicates, and return saved record ids or blockers',
     )
     expect(prompt).toContain(
       'The parent may continue the visible onboarding flow and incorporate the result on the next turn',

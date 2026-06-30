@@ -669,6 +669,10 @@ describe('assistant skill assets', () => {
       'Use a V2 subagent for slow lab or supplement ingestion when the full parse/lookup is not needed for the current visible reply',
     )
     expect(raw).toContain('collaboration.spawn_agent')
+    expect(raw).toContain('fork_turns: "none"')
+    expect(raw).toContain(
+      'The spawn message must be self-contained',
+    )
     expect(raw).toContain(
       'The child owns the full canonical save, not a staging summary',
     )
