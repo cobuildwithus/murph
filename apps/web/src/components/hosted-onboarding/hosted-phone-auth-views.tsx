@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
+import { MurphPulseMark } from "@/src/components/ui/murph-pulse-mark";
 
 import {
   HostedCodeEntryStep,
@@ -151,10 +152,22 @@ export function HostedAuthenticatedPhoneAuthState({
 }: AuthenticatedStateProps) {
   if (view === "loading") {
     return (
-      <Alert className="rounded-[2rem] border-stone-200 bg-stone-50">
-        <AlertTitle>{title}</AlertTitle>
-        <AlertDescription>{body}</AlertDescription>
-      </Alert>
+      <div
+        aria-busy="true"
+        aria-live="polite"
+        role="status"
+        className="flex items-center gap-4 rounded-xl bg-[#1A1F16]/[0.035] px-4 py-3.5"
+      >
+        <MurphPulseMark className="h-9 w-auto shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="font-serif text-[15px] font-medium leading-tight text-[#1A1F16]">
+            {title}
+          </p>
+          <p className="mt-1 text-xs leading-snug text-pretty text-[#7A7870]">
+            {body}
+          </p>
+        </div>
+      </div>
     );
   }
 
