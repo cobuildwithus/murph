@@ -426,9 +426,13 @@ export async function runHostedAssistantAutomation(
       inputSourceAlreadyRefreshed = true;
 
       if (inputRefreshResult.reason !== "ingested_input") {
-        const prompt = await buildBackgroundDynamicContextPrompt({
+        let prompt = await buildBackgroundDynamicContextPrompt({
           signal,
         });
+        const finalInputRefreshResult = await inputSource.refresh({ signal });
+        if (finalInputRefreshResult.reason === "ingested_input") {
+          prompt = null;
+        }
         executionContextForPass = withHostedAssistantDynamicContextPrompt({
           executionContext,
           prompt,

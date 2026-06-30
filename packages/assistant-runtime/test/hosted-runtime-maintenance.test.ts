@@ -756,6 +756,78 @@ describe("runHostedAssistantAutomation", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it("drops background dynamic context when input arrives after the prompt read", async () => {
+    const buildBackgroundDynamicContextPrompt = vi.fn(async () =>
+      "Background wearable reconnect context."
+    );
+    const refresh = vi.fn()
+      .mockResolvedValueOnce({
+        progressed: false,
+        reason: "no_new_input" as const,
+      })
+      .mockResolvedValueOnce({
+        progressed: true,
+        reason: "ingested_input" as const,
+      });
+    mocks.createHostedAssistantInputSource.mockReturnValueOnce({
+      listInputCandidates: vi.fn(async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      })),
+      listNewConversationInputs: vi.fn(async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      })),
+      refresh,
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      expect(input.inputSourceAlreadyRefreshed).toBe(true);
+      expect(input.executionContext?.hosted?.dynamicContextPrompts).toBeUndefined();
+      return {
+        currentTurnDeliveryIntentIds: ["foreground-intent"],
+        nextWakeAt: null,
+        progressed: true,
+        replies: {
+          considered: 1,
+          failed: 0,
+          replied: 1,
+          skipped: 0,
+        },
+      };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_dynamic_context_late_input",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_dynamic_context_late_input",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      undefined,
+      undefined,
+      undefined,
+      {
+        buildBackgroundDynamicContextPrompt,
+      },
+    );
+
+    expect(result.currentTurnDeliveryIntentIds).toEqual(["foreground-intent"]);
+    expect(result.progressed).toBe(true);
+    expect(result.timings?.activeTurnInputIngested).toBe(true);
+    expect(buildBackgroundDynamicContextPrompt).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
   it("skips background dynamic context when background selection already owns pending input", async () => {
     const buildBackgroundDynamicContextPrompt = vi.fn(async () =>
       "Background wearable reconnect context."
