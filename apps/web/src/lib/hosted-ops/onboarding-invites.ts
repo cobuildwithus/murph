@@ -6,7 +6,10 @@ import { createHash } from "node:crypto";
 
 import { getPrisma } from "../prisma";
 import { readHostedPhoneHint } from "../hosted-onboarding/contact-privacy";
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "../hosted-onboarding/errors";
 import {
   buildHostedInviteUrl,
   issueHostedInviteTx,
@@ -271,18 +274,35 @@ async function sendHostedOpsOnboardingVoiceFirstNewChat(input: {
     throw error;
   }
 
-  const createdChat = await createHostedLinqMediaChat({
-    attachmentId: attachment.attachmentId,
-    from: input.request.linqFromPhoneNumber,
-    // Linq idempotency is on the chat message send. Attachment creation has no
-    // stable idempotency field, so retries may re-upload while this key restores
-    // the accepted chat/message and lets us restore the pending binding.
-    idempotencyKey: prepared.newChatReservationKey,
-    to: [input.request.recipientPhoneNumber],
-  });
+  let createdChat: Awaited<ReturnType<typeof createHostedLinqMediaChat>>;
+  try {
+    createdChat = await createHostedLinqMediaChat({
+      attachmentId: attachment.attachmentId,
+      from: input.request.linqFromPhoneNumber,
+      // Linq idempotency is on the chat message send. Attachment creation has no
+      // stable idempotency field, so retries may re-upload while this key restores
+      // the accepted chat/message and lets us restore the pending binding.
+      idempotencyKey: prepared.newChatReservationKey,
+      to: [input.request.recipientPhoneNumber],
+    });
+  } catch (error) {
+    if (shouldClearHostedOpsOnboardingNewChatReservationAfterCreateFailure(error)) {
+      await clearHostedOpsOnboardingPendingLinqNewChatReservationBestEffort({
+        memberId,
+        prisma: input.prisma,
+        reservationKey: prepared.newChatReservationKey,
+      });
+    }
+    throw error;
+  }
   const chatId = normalizeNullableString(createdChat.chatId);
 
   if (!chatId) {
+    await clearHostedOpsOnboardingPendingLinqNewChatReservationBestEffort({
+      memberId,
+      prisma: input.prisma,
+      reservationKey: prepared.newChatReservationKey,
+    });
     throw hostedOnboardingError({
       code: "HOSTED_OPS_ONBOARDING_CHAT_CREATE_FAILED",
       httpStatus: 502,
@@ -396,6 +416,12 @@ async function clearHostedOpsOnboardingPendingLinqNewChatReservationBestEffort(i
     // Preserve the upload error. The same request can retry with the same
     // reservation key, and a conflicting sender still fails before egress.
   }
+}
+
+function shouldClearHostedOpsOnboardingNewChatReservationAfterCreateFailure(
+  error: unknown,
+): boolean {
+  return isHostedOnboardingError(error) && !error.retryable;
 }
 
 export function resolveHostedOpsOnboardingVoiceMemoContentType(input: {

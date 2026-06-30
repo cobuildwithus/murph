@@ -1,5 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
@@ -663,6 +665,99 @@ describe("hosted ops onboarding invites", () => {
       mocks.reserveHostedMemberPendingLinqNewChatTx,
     );
     expect(mocks.createHostedLinqMediaChat).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
+    expect(mocks.clearHostedMemberPendingLinqNewChatReservationTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: tx,
+      reservationKey,
+    });
+  });
+
+  it("clears the new-chat reservation when media chat creation definitively fails after upload", async () => {
+    mocks.createHostedLinqMediaChat.mockRejectedValue(hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      httpStatus: 502,
+      message: "Linq outbound media chat creation failed with HTTP 400.",
+      retryable: false,
+    }));
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-create-failure",
+      voiceMemo: {
+        bytes: new Uint8Array([1]),
+        contentType: "audio/x-m4a",
+        extension: "m4a",
+        sizeBytes: 1,
+      },
+    })).rejects.toThrow("Linq outbound media chat creation failed with HTTP 400.");
+
+    const reservationKey = readReservationKey(
+      mocks.reserveHostedMemberPendingLinqNewChatTx,
+    );
+    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(1);
+    expect(mocks.createHostedLinqMediaChat).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
+    expect(mocks.clearHostedMemberPendingLinqNewChatReservationTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: tx,
+      reservationKey,
+    });
+  });
+
+  it("keeps the new-chat reservation when media chat creation has an ambiguous retryable failure", async () => {
+    mocks.createHostedLinqMediaChat.mockRejectedValue(hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      httpStatus: 502,
+      message: "Linq outbound media chat creation timed out.",
+      retryable: true,
+    }));
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-create-timeout",
+      voiceMemo: {
+        bytes: new Uint8Array([1]),
+        contentType: "audio/x-m4a",
+        extension: "m4a",
+        sizeBytes: 1,
+      },
+    })).rejects.toThrow("Linq outbound media chat creation timed out.");
+
+    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(1);
+    expect(mocks.createHostedLinqMediaChat).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
+    expect(mocks.clearHostedMemberPendingLinqNewChatReservationTx).not.toHaveBeenCalled();
+  });
+
+  it("clears the new-chat reservation when media chat creation returns no chat id", async () => {
+    mocks.createHostedLinqMediaChat.mockResolvedValue({
+      chatId: null,
+      messageId: "message_without_chat",
+    });
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-create-missing-chat",
+      voiceMemo: {
+        bytes: new Uint8Array([1]),
+        contentType: "audio/x-m4a",
+        extension: "m4a",
+        sizeBytes: 1,
+      },
+    })).rejects.toThrow("Linq did not return a chat id for the onboarding voice memo.");
+
+    const reservationKey = readReservationKey(
+      mocks.reserveHostedMemberPendingLinqNewChatTx,
+    );
+    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(1);
+    expect(mocks.createHostedLinqMediaChat).toHaveBeenCalledTimes(1);
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.clearHostedMemberPendingLinqNewChatReservationTx).toHaveBeenCalledWith({
       memberId: "member_123",
