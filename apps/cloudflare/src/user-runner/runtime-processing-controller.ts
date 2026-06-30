@@ -350,13 +350,6 @@ export class RuntimeProcessingController {
     if (recoveredCompletion.kind === "completed") {
       return this.createActiveRuntimeFenceCompletionResponse(activeFence);
     }
-    if (recoveredCompletion.kind === "unknown") {
-      await this.syncRunnerAlarm(record);
-      return createRuntimeProcessingRetryLater({
-        reason: "container_rpc_error",
-        userId: input.input.userId,
-      });
-    }
 
     const cleared = await this.input.stateStore.clearWriteFenceForReplacement({
       attemptId: activeFence.attemptId,
@@ -368,6 +361,12 @@ export class RuntimeProcessingController {
     if (!cleared.cleared) {
       return createRuntimeProcessingRetryLater({
         reason: "stale_fence_replacement_race",
+        userId: input.input.userId,
+      });
+    }
+    if (!this.hasRuntimeProcessingCommandBudgetRemaining(input.commandBudget)) {
+      return createRuntimeProcessingRetryLater({
+        reason: "container_rpc_timeout",
         userId: input.input.userId,
       });
     }
@@ -420,6 +419,12 @@ export class RuntimeProcessingController {
       commandBudget: input.commandBudget,
       workspaceVersion: activeFence.workspaceVersion,
     });
+  }
+
+  private hasRuntimeProcessingCommandBudgetRemaining(
+    commandBudget: RuntimeProcessingCommandBudget,
+  ): boolean {
+    return Date.now() < commandBudget.deadlineAtMs;
   }
 
   private async readActiveRuntimeFenceWithoutWake(input: {

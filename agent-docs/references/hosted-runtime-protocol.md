@@ -411,12 +411,14 @@ keeps its fence so wakes keep routing to the live invocation. If that accepted
 attempt has no durable committed progress yet and the local active-operation
 pointer is missing, the fence is preserved for the next identity-aware wake
 recheck instead of being cleared from the pointer alone; only the wake path may
-then replace the fence after it explicitly reports no active child. Mismatched
-liveness probes clear the fence because they prove the active child is not the
-fenced attempt; unsupported, error, timeout, and inactive probe outcomes preserve
-the accepted fence when durable progress is not visible yet. This prevents
-duplicate replacement while a live child may still be running and leaves
-replacement ownership in the exact identity-aware wake path.
+then replace the fence after it explicitly reports no active child. Inactive
+liveness is explicit no-active-child proof, so committed-progress recovery is a
+best-effort completion fast path before replacement rather than a dependency for
+clearing the fence. Mismatched liveness probes clear the fence because they prove
+the active child is not the fenced attempt; unsupported, error, and timeout probe
+outcomes preserve the accepted fence when durable progress is not visible yet.
+This prevents duplicate replacement while a live child may still be running and
+leaves replacement ownership in the exact identity-aware wake path.
 When the outer RunnerContainer active-operation pointer is missing, a container
 wake response must carry explicit identity-checked wake metadata before an
 accepted wake is trusted; identity-blind accepted responses from deploy-skewed
