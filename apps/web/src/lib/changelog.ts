@@ -56,11 +56,92 @@ export interface ChangelogQuery {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-06-30",
+    publishedOn: "2026-06-30",
+    title: "Family launches, Pulse Trial gets three more days",
+    summary:
+      "Sponsor Murph for the people in your house — 2 to 6 private seats with their own monthly allowance. Pulse Trial now runs 10 days. Murph checks whether a wearable needs reconnect before answering about sleep or recovery, and shares its contact card on first outbound so people can save the number.",
+    items: [
+      {
+        id: "hosted-family-plan-mvp",
+        kind: "feature",
+        priority: 5,
+        title: "Sponsor Murph for the people in your house",
+        summary:
+          "Buy 2 to 6 Family seats at $7 per sponsored person per month. Each sponsored member gets a private account with its own Pulse-level monthly allowance — no shared pool, and the owner can't read their chats, vault, or health data.",
+        details:
+          "Invite by Telegram username, phone, or verified email. Invites consume already-paid seats; creating one never silently adds a Stripe charge.",
+        relevanceTags: ["billing", "family", "plans"],
+        sourcePullRequests: [222],
+        tryIt: {
+          label: "Set up Family",
+          prompt: "Set up Family for me and my partner.",
+        },
+      },
+      {
+        id: "linq-contact-card-share",
+        kind: "feature",
+        priority: 4,
+        title: "Murph shares its contact card after the first text",
+        summary:
+          "After Murph's first successful direct iMessage in a Linq chat, it best-effort shares the configured contact card so the recipient can save the name and number before the thread fills up.",
+        details:
+          "Only one share attempt every 48 hours per chat, and only when the outbound was real direct iMessage delivery.",
+        relevanceTags: ["linq", "messaging", "polish"],
+        sourcePullRequests: [337],
+      },
+      {
+        id: "pulse-trial-10-days",
+        kind: "feature",
+        priority: 4,
+        title: "Pulse Trial runs 10 days, not 7",
+        summary:
+          "Every new Pulse Trial now lasts 10 days instead of 7. Trials already in flight keep their original length; fresh signups land on the new policy.",
+        relevanceTags: ["pulse", "billing", "trial"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "device-sync-reconnect-context",
+        kind: "improvement",
+        priority: 4,
+        title: "Murph notices when a wearable needs reconnect before answering",
+        summary:
+          "Ask about sleep, recovery, activity, or workouts and Murph now sees which connected source needs reconnect, so it flags the gap and points you to the fix instead of treating the silence as the truth.",
+        relevanceTags: ["wearables", "assistant", "data"],
+        sourcePullRequests: [341],
+        tryIt: {
+          label: "Ask about a sleep gap",
+          prompt: "Why was my sleep so short last night?",
+        },
+      },
+      {
+        id: "onboarding-delegate-slow-saves",
+        kind: "improvement",
+        priority: 3,
+        title: "Onboarding keeps talking while it saves your supplements and labs",
+        summary:
+          "Slow saves during onboarding — supplement regimens and lab panels — now run in a fresh background subagent so the chat keeps moving instead of stalling while writes finish.",
+        relevanceTags: ["onboarding", "performance"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "homepage-editorial-refresh",
+        kind: "improvement",
+        priority: 3,
+        title: "Fresh homepage — new hero, editorial asks, honest trust pillars",
+        summary:
+          "Rebuilt the public homepage with a new clock-in hero, an asymmetric editorial layout for the asks-Murph-handles section, and a flat trust band rewritten to match what the security FAQ actually claims.",
+        relevanceTags: ["landing", "design"],
+        sourcePullRequests: [],
+      },
+    ],
+  },
+  {
     id: "2026-06-29",
     publishedOn: "2026-06-29",
     title: "Garmin sleep through Junction, and a smoother phone sign-in",
     summary:
-      "Garmin sleep, cycles, and hypnograms imported through Junction now arrive as real records. The phone-number sign-in stops freezing right after the verification code lands.",
+      "Garmin sleep, cycles, and hypnograms imported through Junction now arrive as real records. The phone-number sign-in stops freezing right after the verification code lands. Plus quiet reliability fixes on Linq read receipts and scheduled-reminder wakes.",
     items: [
       {
         id: "garmin-junction-sleep-records",
@@ -80,6 +161,26 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Closed a state bug where the hosted phone-number sign-in could land on a blank step right after the SMS code was accepted.",
         relevanceTags: ["auth", "sign-in"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "linq-read-receipts-restore",
+        kind: "improvement",
+        priority: 3,
+        title: "Read receipts came back for active-member Linq chats",
+        summary:
+          "Restored the read indicator on inbound Linq messages from active members. Closes a regression where receipts had stopped firing on the active-member webhook path.",
+        relevanceTags: ["linq", "polish"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "linq-reminder-wake-no-replay",
+        kind: "improvement",
+        priority: 3,
+        title: "Scheduled Linq reminders don't fire twice on rewind",
+        summary:
+          "A consumed scheduled-reminder wake no longer replays when the cron loop reprocesses the same window. Closed a small path that could deliver the same reminder ping twice.",
+        relevanceTags: ["reliability", "reminders", "linq"],
         sourcePullRequests: [],
       },
     ],
