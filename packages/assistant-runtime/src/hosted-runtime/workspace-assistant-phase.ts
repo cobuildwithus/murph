@@ -321,18 +321,12 @@ export async function runHostedWorkspaceAssistantPhase(
     const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
     const resolveAssistantLaneExecutionContext = async (options: {
       includeDeviceSyncStatusPrompt: boolean;
-    }): Promise<{
-      executionContext: AssistantExecutionContext;
-      suppressActiveTurnInputRefresh: boolean;
-    }> => {
+    }): Promise<AssistantExecutionContext> => {
       if (
         !options.includeDeviceSyncStatusPrompt
         || input.shouldYieldBackgroundMaintenance?.() === true
       ) {
-        return {
-          executionContext,
-          suppressActiveTurnInputRefresh: false,
-        };
+        return executionContext;
       }
 
       const cancellation = createHostedIdleDeviceSyncMaintenanceCancellation({
@@ -351,19 +345,13 @@ export async function runHostedWorkspaceAssistantPhase(
           input.shouldYieldBackgroundMaintenance?.() === true
           || !deviceSyncStatusPrompt
         ) {
-          return {
-            executionContext,
-            suppressActiveTurnInputRefresh: false,
-          };
+          return executionContext;
         }
 
-        return {
-          executionContext: withHostedAssistantDynamicContextPrompt({
-            executionContext,
-            prompt: deviceSyncStatusPrompt,
-          }),
-          suppressActiveTurnInputRefresh: true,
-        };
+        return withHostedAssistantDynamicContextPrompt({
+          executionContext,
+          prompt: deviceSyncStatusPrompt,
+        });
       } finally {
         cancellation.dispose();
       }
@@ -419,7 +407,7 @@ export async function runHostedWorkspaceAssistantPhase(
         try {
           return await runHostedAssistantAutomationLane({
             assistantRuntimeState,
-            executionContext: automationExecutionContext.executionContext,
+            executionContext: automationExecutionContext,
             freshAssistantInputIds,
             requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
             runtime: {
@@ -433,9 +421,6 @@ export async function runHostedWorkspaceAssistantPhase(
             runtimeAttemptId: input.request.attemptId,
             runtimeEnv: input.runtimeEnv,
             signal: input.signal ?? undefined,
-            ...(automationExecutionContext.suppressActiveTurnInputRefresh
-              ? { suppressActiveTurnInputRefresh: true }
-              : {}),
             vaultRoot: input.restored.vaultRoot,
             wake,
           });

@@ -3491,9 +3491,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         }),
       ]),
     );
-    expect(assistantLaneCall).toEqual(expect.objectContaining({
-      suppressActiveTurnInputRefresh: true,
-    }));
+    expect(assistantLaneCall).not.toHaveProperty("suppressActiveTurnInputRefresh");
     expect(dynamicContextPrompts).toHaveLength(1);
     expect(dynamicContextPrompts?.[0]).toContain("WHOOP currently needs reconnect");
     expect(dynamicContextPrompts?.[0]).toContain("source `whoop_v2`");
