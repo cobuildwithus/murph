@@ -90,7 +90,6 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_product_feedback",
   "prisma.hosted_linq_daily_state",
   "prisma.hosted_invite",
-  "prisma.hosted_ops_onboarding_voice_memo_attempt",
   "prisma.hosted_consent_event",
   "prisma.hosted_consent_grant",
   "prisma.hosted_vault_share",
