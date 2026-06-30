@@ -17,7 +17,6 @@ import {
   type AssistantInputCandidateQuery,
   type AssistantInputSource,
   type AssistantRunEvent,
-  type AssistantTurnInputRefreshResult,
   type AssistantTurnEnvironment,
   type AssistantTurnConversationInputQuery,
   readAssistantAutomationState,
@@ -419,34 +418,30 @@ export async function runHostedAssistantAutomation(
       && selectedInputIds.inputIds.length === 0
         ? options?.buildBackgroundDynamicContextPrompt
         : undefined;
-    const resolveExecutionContextAfterInputRefresh =
-      buildBackgroundDynamicContextPrompt
-        ? async (refreshContext: {
-          executionContext: AssistantExecutionContext | null;
-          inputRefreshResult: AssistantTurnInputRefreshResult | null;
-          signal?: AbortSignal;
-        }): Promise<AssistantExecutionContext | null> => {
-          if (
-            activeTurnInputIngested
-            || refreshContext.inputRefreshResult?.reason === "ingested_input"
-          ) {
-            return refreshContext.executionContext;
-          }
+    let executionContextForPass = executionContext;
+    let inputSourceAlreadyRefreshed = false;
 
-          const prompt = await buildBackgroundDynamicContextPrompt({
-            signal: refreshContext.signal,
-          });
-          return withHostedAssistantDynamicContextPrompt({
-            executionContext: refreshContext.executionContext,
-            prompt,
-          });
-        }
-        : undefined;
+    if (buildBackgroundDynamicContextPrompt) {
+      const inputRefreshResult = await inputSource.refresh({ signal });
+      inputSourceAlreadyRefreshed = true;
+
+      if (inputRefreshResult.reason !== "ingested_input") {
+        const prompt = await buildBackgroundDynamicContextPrompt({
+          signal,
+        });
+        executionContextForPass = withHostedAssistantDynamicContextPrompt({
+          executionContext,
+          prompt,
+        });
+      }
+    }
+
     const result = await runAssistantAutomationPass({
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
-      executionContext,
+      executionContext: executionContextForPass,
       inboxServices,
+      ...(inputSourceAlreadyRefreshed ? { inputSourceAlreadyRefreshed: true } : {}),
       onEvent: (event) => {
         automationEventCounts.set(
           event.type,
@@ -510,7 +505,6 @@ export async function runHostedAssistantAutomation(
       requestId,
       signal,
       inputSource,
-      resolveExecutionContextAfterInputRefresh,
       turnEnvironment: turnEnvironment ?? null,
       vault: vaultRoot,
     });
@@ -646,9 +640,9 @@ function attachHostedAssistantAutomationFailureLogEntries(
 }
 
 function withHostedAssistantDynamicContextPrompt(input: {
-  executionContext: AssistantExecutionContext | null;
+  executionContext: AssistantExecutionContext;
   prompt: string | null;
-}): AssistantExecutionContext | null {
+}): AssistantExecutionContext {
   if (!input.prompt || !input.executionContext?.hosted) {
     return input.executionContext;
   }

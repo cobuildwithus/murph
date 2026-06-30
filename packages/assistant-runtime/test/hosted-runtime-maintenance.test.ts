@@ -642,17 +642,8 @@ describe("runHostedAssistantAutomation", () => {
       "Background wearable reconnect context."
     );
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
-      const inputRefreshResult = await input.inputSource?.refresh({
-        signal: input.signal,
-      }) ?? null;
-      const resolvedExecutionContext =
-        await input.resolveExecutionContextAfterInputRefresh?.({
-          executionContext: input.executionContext ?? null,
-          inputRefreshResult,
-          signal: input.signal,
-        }) ?? input.executionContext;
-
-      expect(resolvedExecutionContext?.hosted?.dynamicContextPrompts).toEqual([
+      expect(input.inputSourceAlreadyRefreshed).toBe(true);
+      expect(input.executionContext?.hosted?.dynamicContextPrompts).toEqual([
         "Background wearable reconnect context.",
       ]);
       return {
@@ -718,17 +709,8 @@ describe("runHostedAssistantAutomation", () => {
       refresh,
     });
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
-      const inputRefreshResult = await input.inputSource?.refresh({
-        signal: input.signal,
-      }) ?? null;
-      const resolvedExecutionContext =
-        await input.resolveExecutionContextAfterInputRefresh?.({
-          executionContext: input.executionContext ?? null,
-          inputRefreshResult,
-          signal: input.signal,
-        }) ?? input.executionContext;
-
-      expect(resolvedExecutionContext?.hosted?.dynamicContextPrompts).toBeUndefined();
+      expect(input.inputSourceAlreadyRefreshed).toBe(true);
+      expect(input.executionContext?.hosted?.dynamicContextPrompts).toBeUndefined();
       return {
         currentTurnDeliveryIntentIds: ["foreground-intent"],
         nextWakeAt: null,
@@ -784,7 +766,8 @@ describe("runHostedAssistantAutomation", () => {
       pendingInputIds: ["pending-input-1"],
     });
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
-      expect(input.resolveExecutionContextAfterInputRefresh).toBeUndefined();
+      expect(input.inputSourceAlreadyRefreshed).toBeUndefined();
+      expect(input.executionContext?.hosted?.dynamicContextPrompts).toBeUndefined();
       return {
         currentTurnDeliveryIntentIds: ["foreground-intent"],
         nextWakeAt: null,

@@ -35,9 +35,6 @@ import {
   createStoreBackedAssistantInputSource,
   type AssistantInputSource,
 } from '../input-source.js'
-import type {
-  AssistantTurnInputRefreshResult,
-} from '../turn-input.js'
 import {
   listAssistantInputEvents,
   ASSISTANT_INPUT_EVENT_TEXT_MAX_LENGTH,
@@ -86,12 +83,8 @@ export interface RunAssistantAutomationInput {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   drainOutbox?: boolean
   executionContext?: AssistantExecutionContext | null
-  resolveExecutionContextAfterInputRefresh?: (input: {
-    executionContext: AssistantExecutionContext | null
-    inputRefreshResult: AssistantTurnInputRefreshResult | null
-    signal?: AbortSignal
-  }) => AssistantExecutionContext | null | undefined | Promise<AssistantExecutionContext | null | undefined>
   inboxServices?: InboxServices
+  inputSourceAlreadyRefreshed?: boolean
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
@@ -903,19 +896,10 @@ export async function runAssistantAutomationPass(
         queued: 0,
         sent: 0,
       }
-  const inputRefreshResult = applyCanonicalWrites
-    ? await inputSource.refresh({
-        signal: input.signal,
-      })
-    : null
-  const resolvedExecutionContext =
-    await input.resolveExecutionContextAfterInputRefresh?.({
-      executionContext,
-      inputRefreshResult,
+  if (applyCanonicalWrites && input.inputSourceAlreadyRefreshed !== true) {
+    await inputSource.refresh({
       signal: input.signal,
     })
-  if (resolvedExecutionContext !== undefined) {
-    executionContext = normalizeAssistantExecutionContext(resolvedExecutionContext)
   }
   let state = await readAssistantAutomationState(input.vault)
   const stateBeforeScan = snapshotAssistantAutomationLoopState(state)
