@@ -35,12 +35,13 @@ import {
 const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
-const scheduledReminderLeadMs = 90_000;
-const setupLeadText = "about ninety seconds";
+const scheduledReminderLeadMs = 30_000;
+const setupLeadText = "about thirty seconds";
 const setupReplyText = `Done - I will remind you here in ${setupLeadText}.`;
 const setupRequestText = `Remind me here in ${setupLeadText} to go to sleep.`;
-const scheduledReminderMinimumRunwayMs = 10_000;
-const scheduledReminderSendWaitMs = 90_000;
+const scheduledReminderMinimumRunwayMs = 5_000;
+const scheduledReminderSendWaitMs = 60_000;
+const scheduledReminderCompletionWaitMs = 60_000;
 const productionLikeAssistantModel = "gpt-5.5";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -153,7 +154,9 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 
     expect(sendRequest.method).toBe("POST");
     expect(requireLinqStub().readObservedMessageText(sendRequest)).toBe(reminderText);
-    const reminderStatus = await requireScenario().waitForHostedCompletion(userId);
+    const reminderStatus = await requireScenario().waitForHostedCompletion(userId, {
+      timeoutMs: scheduledReminderCompletionWaitMs,
+    });
     expect(reminderStatus.lastErrorCode ?? null).toBeNull();
     const providerRequestTokenPricingBasis =
       await resolveScheduledReminderCronProviderRequestTokenPricingBasis({
@@ -169,11 +172,11 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 });
 
 describe("hosted local Linq scheduled reminder timing helpers", () => {
-  it("uses a ninety-second lead", () => {
+  it("uses a thirty-second lead", () => {
     const now = new Date("2026-06-18T12:00:00.000Z");
 
     expect(resolveScheduledReminderTimes(now)).toEqual({
-      dueAtIso: "2026-06-18T12:01:30.000Z",
+      dueAtIso: "2026-06-18T12:00:30.000Z",
     });
     expect(scheduledReminderLeadMs).toBeGreaterThan(scheduledReminderMinimumRunwayMs);
   });
@@ -287,7 +290,7 @@ async function startScenario(): Promise<void> {
     additionalEnv: {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
-      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "30000",
+      HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS: "10000",
       HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
         buildLinqRecipientPhoneNumber(userId),
       LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
