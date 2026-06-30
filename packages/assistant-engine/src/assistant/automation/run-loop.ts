@@ -74,6 +74,10 @@ type AssistantAutomationLoopStateSnapshot = Pick<
   'autoReply'
 >
 
+type AssistantDynamicContextPromptBuilder = (input: {
+  signal?: AbortSignal
+}) => Promise<string | null>
+
 const SAFE_ATTACHMENT_EVIDENCE_ERROR_CODE_PATTERN =
   /^[A-Za-z0-9_.:-]{1,96}$/u
 const HOSTED_DEFERRED_CRON_CATCHUP_WAKE_DELAY_MS = 10_000
@@ -83,6 +87,7 @@ export interface RunAssistantAutomationInput {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   drainOutbox?: boolean
   executionContext?: AssistantExecutionContext | null
+  buildDynamicContextPrompt?: AssistantDynamicContextPromptBuilder
   inboxServices?: InboxServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
@@ -900,14 +905,21 @@ export async function runAssistantAutomationPass(
       signal: input.signal,
     })
     if (
-      inputRefreshResult.reason === 'ingested_input' &&
-      executionContext.hosted?.dynamicContextPrompts &&
-      executionContext.hosted.dynamicContextPrompts.length > 0
+      inputRefreshResult.reason !== 'ingested_input' &&
+      executionContext.hosted &&
+      input.buildDynamicContextPrompt
     ) {
-      const hostedWithoutDynamicContext = { ...executionContext.hosted }
-      delete hostedWithoutDynamicContext.dynamicContextPrompts
-      executionContext = {
-        hosted: hostedWithoutDynamicContext,
+      const dynamicContextPrompt = await input.buildDynamicContextPrompt({
+        signal: input.signal,
+      })
+      const finalInputRefreshResult = await inputSource.refresh({
+        signal: input.signal,
+      })
+      if (finalInputRefreshResult.reason !== 'ingested_input') {
+        executionContext = appendHostedDynamicContextPrompt({
+          executionContext,
+          prompt: dynamicContextPrompt,
+        })
       }
     }
   }
@@ -1024,6 +1036,25 @@ export async function runAssistantAutomationPass(
     progressed,
     replies,
     routing: scanResult.routing,
+  }
+}
+
+function appendHostedDynamicContextPrompt(input: {
+  executionContext: AssistantExecutionContext
+  prompt: string | null
+}): AssistantExecutionContext {
+  if (!input.prompt || !input.executionContext.hosted) {
+    return input.executionContext
+  }
+
+  return {
+    hosted: {
+      ...input.executionContext.hosted,
+      dynamicContextPrompts: [
+        ...(input.executionContext.hosted.dynamicContextPrompts ?? []),
+        input.prompt,
+      ],
+    },
   }
 }
 

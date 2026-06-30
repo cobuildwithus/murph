@@ -418,26 +418,14 @@ export async function runHostedAssistantAutomation(
       && selectedInputIds.inputIds.length === 0
         ? options?.buildBackgroundDynamicContextPrompt
         : undefined;
-    let executionContextForPass = executionContext;
-
-    if (buildBackgroundDynamicContextPrompt) {
-      const inputRefreshResult = await inputSource.refresh({ signal });
-
-      if (inputRefreshResult.reason !== "ingested_input") {
-        const prompt = await buildBackgroundDynamicContextPrompt({
-          signal,
-        });
-        executionContextForPass = withHostedAssistantDynamicContextPrompt({
-          executionContext,
-          prompt,
-        });
-      }
-    }
 
     const result = await runAssistantAutomationPass({
+      ...(buildBackgroundDynamicContextPrompt
+        ? { buildDynamicContextPrompt: buildBackgroundDynamicContextPrompt }
+        : {}),
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
-      executionContext: executionContextForPass,
+      executionContext,
       inboxServices,
       onEvent: (event) => {
         automationEventCounts.set(
@@ -634,25 +622,6 @@ function attachHostedAssistantAutomationFailureLogEntries(
     enumerable: false,
     value: [...redactedLogEntries],
   });
-}
-
-function withHostedAssistantDynamicContextPrompt(input: {
-  executionContext: AssistantExecutionContext;
-  prompt: string | null;
-}): AssistantExecutionContext {
-  if (!input.prompt || !input.executionContext?.hosted) {
-    return input.executionContext;
-  }
-
-  return {
-    hosted: {
-      ...input.executionContext.hosted,
-      dynamicContextPrompts: [
-        ...(input.executionContext.hosted.dynamicContextPrompts ?? []),
-        input.prompt,
-      ],
-    },
-  };
 }
 
 function recordHostedAssistantProviderStartLatencyTraceBestEffort(input: {

@@ -5222,7 +5222,7 @@ describe('assistant auto-reply runtime', () => {
       )
   })
 
-  it('drops optional hosted dynamic context when the canonical refresh ingests input', async () => {
+  it('skips dynamic context builder when the canonical refresh ingests input', async () => {
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')
     >('../src/assistant/automation/run-loop.ts')
@@ -5240,15 +5240,18 @@ describe('assistant auto-reply runtime', () => {
         reason: 'ingested_input' as const,
       })),
     }
+    const buildDynamicContextPrompt = vi.fn(async () =>
+      'Background wearable reconnect context.'
+    )
     const executionContext = {
       hosted: {
-        dynamicContextPrompts: ['Background wearable reconnect context.'],
         memberId: 'member-1',
         userEnvKeys: [],
       },
     }
 
     await runLoop.runAssistantAutomationPass({
+      buildDynamicContextPrompt,
       executionContext,
       inputSource,
       requestId: 'request-context-after-refresh',
@@ -5262,10 +5265,111 @@ describe('assistant auto-reply runtime', () => {
       .toBeLessThan(
         runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0]!,
       )
+    expect(buildDynamicContextPrompt).not.toHaveBeenCalled()
+    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionContext,
+      }),
+    )
+  })
+
+  it('drops built dynamic context when input arrives after the builder', async () => {
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+    const inputSource: AssistantInputSource = {
+      listInputCandidates: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      refresh: vi.fn()
+        .mockResolvedValueOnce({
+          progressed: false,
+          reason: 'no_new_input' as const,
+        })
+        .mockResolvedValueOnce({
+          progressed: true,
+          reason: 'ingested_input' as const,
+        }),
+    }
+    const buildDynamicContextPrompt = vi.fn(async () =>
+      'Background wearable reconnect context.'
+    )
+    const executionContext = {
+      hosted: {
+        memberId: 'member-1',
+        userEnvKeys: [],
+      },
+    }
+
+    await runLoop.runAssistantAutomationPass({
+      buildDynamicContextPrompt,
+      executionContext,
+      inputSource,
+      requestId: 'request-context-after-builder',
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(inputSource.refresh).toHaveBeenCalledTimes(2)
+    expect(buildDynamicContextPrompt).toHaveBeenCalledWith({
+      signal: undefined,
+    })
+    expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionContext,
+      }),
+    )
+  })
+
+  it('appends built dynamic context when refreshes stay background', async () => {
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+    const inputSource: AssistantInputSource = {
+      listInputCandidates: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      refresh: vi.fn(async () => ({
+        progressed: false,
+        reason: 'no_new_input' as const,
+      })),
+    }
+    const buildDynamicContextPrompt = vi.fn(async () =>
+      'Background wearable reconnect context.'
+    )
+    const executionContext = {
+      hosted: {
+        memberId: 'member-1',
+        userEnvKeys: [],
+      },
+    }
+
+    await runLoop.runAssistantAutomationPass({
+      buildDynamicContextPrompt,
+      executionContext,
+      inputSource,
+      requestId: 'request-context-background',
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(inputSource.refresh).toHaveBeenCalledTimes(2)
+    expect(buildDynamicContextPrompt).toHaveBeenCalledWith({
+      signal: undefined,
+    })
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
       expect.objectContaining({
         executionContext: {
           hosted: {
+            dynamicContextPrompts: ['Background wearable reconnect context.'],
             memberId: 'member-1',
             userEnvKeys: [],
           },
