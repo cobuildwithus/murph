@@ -115,7 +115,7 @@ describe("applyStripeCheckoutCompleted", () => {
         currentTrialEndsAt: new Date("2025-04-19T00:00:00.000Z"),
         currentTrialStartedAt: new Date("2025-04-12T00:00:00.000Z"),
         memberId: "member_123",
-        pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
         pulseTrialRedeemedAt: new Date("2025-04-12T00:00:00.000Z"),
         stripeCustomerId: "cus_123",
         stripeSubscriptionId: "sub_123",
@@ -221,7 +221,7 @@ describe("applyStripeCheckoutCompleted", () => {
       currentTrialEndsAt: new Date("2025-04-19T00:00:00.000Z"),
       currentTrialStartedAt: new Date("2025-04-12T00:00:00.000Z"),
       freshnessPolicy: "trial-checkout-entitlement",
-      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
       pulseTrialRedeemedAt: new Date("2025-04-12T00:00:00.000Z"),
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
@@ -235,6 +235,35 @@ describe("applyStripeCheckoutCompleted", () => {
       prisma: {},
       skipIfBillingAlreadyActive: false,
     });
+  });
+
+  it("accepts legacy seven-day Pulse Trial checkout metadata for in-flight sessions", async () => {
+    await expect(
+      applyStripeCheckoutCompleted(
+        {
+          ...makePulseTrialCheckoutSession(),
+          metadata: {
+            billingPlanCode: "launch_monthly",
+            checkoutOffer: "pulse_trial_7d",
+            memberId: "member_123",
+            trialDurationDays: "7",
+            trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+            trialUsageLimitUsdMicros: "4500000",
+          },
+        } as never,
+        {} as never,
+      ),
+    ).resolves.toEqual({
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "wake_123",
+      welcomeEmailMemberId: "member_123",
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
+      currentBillingPhase: "trial",
+      pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      stripeSubscriptionId: "sub_123",
+    }));
   });
 
   it("activates Pulse Trial checkout with the pre-resolved subscription from event processing", async () => {
@@ -351,7 +380,9 @@ describe("applyStripeCheckoutCompleted", () => {
           billingPlanCode: "launch_monthly",
           checkoutOffer: "pulse_trial_7d",
           memberId: "member_123",
+          trialDurationDays: "10",
           trialPolicyVersion: "old-policy",
+          trialUsageLimitUsdMicros: "4500000",
         },
       },
     ],
@@ -363,7 +394,9 @@ describe("applyStripeCheckoutCompleted", () => {
           billingPlanCode: "launch_monthly",
           checkoutOffer: "pulse_trial_7d",
           memberId: "member_456",
-          trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+          trialDurationDays: "10",
+          trialPolicyVersion: "pulse-trial-2026-06-30-v2",
+          trialUsageLimitUsdMicros: "4500000",
         },
       },
     ],
@@ -506,7 +539,9 @@ function makePulseTrialCheckoutSession(): Record<string, unknown> {
       billingPlanCode: "launch_monthly",
       checkoutOffer: "pulse_trial_7d",
       memberId: "member_123",
-      trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+      trialDurationDays: "10",
+      trialPolicyVersion: "pulse-trial-2026-06-30-v2",
+      trialUsageLimitUsdMicros: "4500000",
     },
     mode: "subscription",
     status: "complete",

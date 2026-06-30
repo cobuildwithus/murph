@@ -34,12 +34,20 @@ export const HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED_ENV =
   "HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED";
 export const HOSTED_AUTO_PULSE_TRIAL_ENABLED_ENV =
   "HOSTED_AUTO_PULSE_TRIAL_ENABLED";
-export const HOSTED_PULSE_TRIAL_DAYS = 7;
+export const HOSTED_PULSE_TRIAL_DAYS = 10;
 export const HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS = 4_500_000n;
-export const HOSTED_PULSE_TRIAL_POLICY_VERSION =
+export const HOSTED_PULSE_TRIAL_STARTED_AT_OVERRIDE_METADATA_KEY =
+  "trialStartedAtOverride";
+export const HOSTED_PULSE_TRIAL_LEGACY_POLICY_VERSION =
   "pulse-trial-2026-05-05-v1";
+export const HOSTED_PULSE_TRIAL_POLICY_VERSION =
+  "pulse-trial-2026-06-30-v2";
 
 export const HOSTED_PULSE_TRIAL_POLICIES = {
+  [HOSTED_PULSE_TRIAL_LEGACY_POLICY_VERSION]: {
+    durationDays: 7,
+    usageLimitUsdMicros: HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
+  },
   [HOSTED_PULSE_TRIAL_POLICY_VERSION]: {
     durationDays: HOSTED_PULSE_TRIAL_DAYS,
     usageLimitUsdMicros: HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
@@ -239,6 +247,15 @@ export function requireHostedPulseTrialPolicy(
   }
 
   return HOSTED_PULSE_TRIAL_POLICIES[policyVersion as HostedPulseTrialPolicyVersion];
+}
+
+export function parseHostedPulseTrialPolicyVersion(
+  policyVersion: unknown,
+): HostedPulseTrialPolicyVersion | null {
+  return typeof policyVersion === "string" &&
+    Object.prototype.hasOwnProperty.call(HOSTED_PULSE_TRIAL_POLICIES, policyVersion)
+    ? policyVersion as HostedPulseTrialPolicyVersion
+    : null;
 }
 
 export function listHostedBillingPlanPresentations(input?: {
