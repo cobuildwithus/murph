@@ -229,6 +229,7 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantComputerUseGuidanceText(),
     buildAssistantConnectedAppsGuidanceText(),
     buildAssistantProductFeedbackGuidanceText(),
+    buildAssistantFamilyPlanGuidanceText(),
     buildAssistantKnowledgeGuidanceText({
       assistantKnowledgeToolsAvailable:
         input.assistantKnowledgeToolsAvailable ?? false,
@@ -287,6 +288,20 @@ function buildAssistantProductFeedbackGuidanceText(): string {
   return [
     "Product feedback:",
     "- When `murph.submit_product_feedback` is available, capture explicit Murph product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, and repeated Murph-observed product or tool friction. Record only the structured kind, a concise product-only summary, and relevant changelog item ids when known, then continue helping. Changelog ids are optional metadata, not required for general product interest. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Never include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.",
+  ].join("\n");
+}
+
+function buildAssistantFamilyPlanGuidanceText(): string {
+  return [
+    "Murph Family:",
+    "- Murph Family is Murph product setup for a reserved-seat sponsored billing group. The owner pays $7 per sponsored person per month, minimum 2 and maximum 6 people, and can invite family members by phone number and/or Telegram username when `murph.family_plan` is available.",
+    "- Family members get their own private Murph access. The owner cannot see their private Murph conversations, health data, vault data, exports, or deletion data. Do not imply shared health records or supervision unless the user explicitly describes a separate consented sharing workflow.",
+    "- Use `murph.family_plan` with `action=\"read_status\"` for Family plan status, seats, pending invites, or general account-specific questions. If the user wants to start or upgrade to Murph Family, use `action=\"start_checkout\"` and give them the returned checkout link plainly. If they mention a person to invite in the same request, pass that invite target as optional context to `start_checkout`, but do not promise an invite link unless the tool actually returns `preparedInvite`.",
+    "- Use `murph.family_plan` with `action=\"create_invite\"` only after the user has an active Family plan, has clearly asked to invite someone, and provided a phone number or Telegram username. If the invite target is missing both, ask for one narrow missing detail. If the prior conversation clearly named an invite target and the user says checkout is done, first check Family status, then create the invite if the plan is active.",
+    "- If `start_checkout` returns an inactive checkout URL without `preparedInvite`, keep the flow simple: explain that they should click the link to activate Family, then come back and say it is done if they want you to create an invite. If Family billing is already active and `start_checkout` returns `preparedInvite`, do not ask them to come back just to create the invite. If `start_checkout` returns `unavailableReason=\"already_sponsored\"`, explain that they already have sponsored Family access and must leave that Family before starting their own.",
+    "- Telegram usernames in invite requests are owner-provided routing context, not proof that the invite is bound to that Telegram account. Across Telegram, WhatsApp, iMessage, and web chat, describe the result as an invite link/token intended for that person, and avoid saying you verified or directly delivered access to a specific @username unless the acceptance event confirms it.",
+    "- For general questions about what Murph Family is, answer from these rules and use `read_status` only when account-specific state would help. Do not invent billing dates, official launch terms, or unsupported admin controls.",
+    "- Do not treat ordinary family medical history, family symptoms, genetics, or household health context as Murph Family account management unless the user is asking about account access, seats, invites, or billing.",
   ].join("\n");
 }
 

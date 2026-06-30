@@ -98,7 +98,7 @@ describe("hosted orchestration reconciliation facts", () => {
     vi.setSystemTime(new Date(FIXED_NOW));
     vi.clearAllMocks();
     consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
-    mocks.getPrisma.mockReturnValue({ kind: "prisma" });
+    mocks.getPrisma.mockReturnValue(createPrismaClientStub());
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(MEMBER_ID);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
@@ -267,7 +267,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.readHostedMailboxPendingSystemItemsNeedAiUsageGate)
       .toHaveBeenCalledWith({
         afterSeq: "0",
-        prisma: { kind: "prisma" },
+        prisma: expect.objectContaining({ kind: "prisma" }),
         userId: MEMBER_ID,
       });
     expect(mocks.readHostedMailboxFirstPendingConversationItem).not.toHaveBeenCalled();
@@ -527,17 +527,17 @@ describe("hosted orchestration reconciliation facts", () => {
     });
     expect(mocks.readHostedMailboxFirstPendingConversationItem).toHaveBeenCalledWith({
       afterSeq: "2",
-      prisma: { kind: "prisma" },
+      prisma: expect.objectContaining({ kind: "prisma" }),
       userId: MEMBER_ID,
     });
     expect(mocks.claimHostedAiUsageLimitNotice).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       periodStart: deniedDecision.periodStart,
-      prisma: { kind: "prisma" },
+      prisma: expect.objectContaining({ kind: "prisma" }),
       sentAt: new Date(FIXED_NOW),
     });
     expect(mocks.drainHostedLinqSideEffectsDirect).toHaveBeenCalledWith({
-      prisma: { kind: "prisma" },
+      prisma: expect.objectContaining({ kind: "prisma" }),
       sideEffects: [
         expect.objectContaining({
           payload: expect.objectContaining({
@@ -597,7 +597,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.claimHostedAiUsageLimitNotice).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       periodStart: deniedDecision.periodStart,
-      prisma: { kind: "prisma" },
+      prisma: expect.objectContaining({ kind: "prisma" }),
       sentAt: new Date(FIXED_NOW),
     });
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
@@ -671,7 +671,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.releaseHostedAiUsageLimitNotice).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       periodStart: deniedDecision.periodStart,
-      prisma: { kind: "prisma" },
+      prisma: expect.objectContaining({ kind: "prisma" }),
       sentAt: new Date(FIXED_NOW),
     });
   });
@@ -800,7 +800,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.readHostedMailboxPendingSystemItemsNeedAiUsageGate)
       .toHaveBeenCalledWith({
         afterSeq: "0",
-        prisma: { kind: "prisma" },
+        prisma: expect.objectContaining({ kind: "prisma" }),
         userId: MEMBER_ID,
       });
     expect(mocks.readHostedMailboxFirstPendingConversationItem).not.toHaveBeenCalled();
@@ -854,7 +854,7 @@ describe("hosted orchestration reconciliation facts", () => {
     });
     expect(mocks.readHostedMailboxFirstPendingConversationItem).toHaveBeenCalledWith({
       afterSeq: "250",
-      prisma: { kind: "prisma" },
+      prisma: expect.objectContaining({ kind: "prisma" }),
       userId: MEMBER_ID,
     });
   });
@@ -1118,6 +1118,16 @@ function buildActiveMemberRecord(overrides: Partial<{
     suspendedAt: null,
     updatedAt: new Date(FIXED_NOW),
     ...overrides,
+  };
+}
+
+function createPrismaClientStub() {
+  return {
+    hostedAccountGroupMembership: {
+      count: vi.fn(async () => 0),
+      findFirst: vi.fn(async () => null),
+    },
+    kind: "prisma",
   };
 }
 

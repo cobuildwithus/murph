@@ -18,6 +18,7 @@ export function deriveHostedOnboardingStage(input: {
   activationPending?: boolean;
   billingStatus: HostedBillingStatus;
   expiresAt: Date;
+  familyAccessActive?: boolean;
   now: Date;
   sessionMatchesInvite: boolean;
   suspendedAt?: Date | null;
@@ -34,7 +35,7 @@ export function deriveHostedOnboardingStage(input: {
     return "blocked";
   }
 
-  if (hasHostedMemberActiveAccess(input)) {
+  if (hasHostedMemberActiveAccess(input) || input.familyAccessActive === true) {
     return resolveHostedAccessibleOnboardingStage(input.activationPending);
   }
 
@@ -48,13 +49,14 @@ export function deriveHostedOnboardingStage(input: {
 export function deriveHostedPostVerificationStage(input: {
   activationPending?: boolean;
   billingStatus: HostedBillingStatus;
+  familyAccessActive?: boolean;
   suspendedAt?: Date | null;
 }): HostedPostVerificationStage {
   if (isHostedMemberSuspended(input.suspendedAt)) {
     return "blocked";
   }
 
-  if (input.billingStatus === HostedBillingStatus.active) {
+  if (hasHostedMemberActiveAccess(input) || input.familyAccessActive === true) {
     return resolveHostedAccessibleOnboardingStage(input.activationPending);
   }
 

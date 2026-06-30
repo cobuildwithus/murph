@@ -29,6 +29,7 @@ describe("evaluateHostedLocalStripeCheckoutEnv", () => {
     expect(
       evaluateHostedLocalStripeCheckoutEnv({
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_replace_me",
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: "price_replace_me",
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_replace_me",
         STRIPE_SECRET_KEY: "sk_test_replace_me",
       }),
@@ -37,6 +38,7 @@ describe("evaluateHostedLocalStripeCheckoutEnv", () => {
       missingFlatPriceKeys: [
         "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
         "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
+        "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
       ],
       secretMode: "placeholder",
     });
@@ -50,6 +52,8 @@ describe("writeHostedLocalStripeCheckoutDiagnostics", () => {
     const diagnostics = writeHostedLocalStripeCheckoutDiagnostics({
       env: {
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_edge_secretish",
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY:
+          "price_family_secretish",
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_monthly_secretish",
         STRIPE_SECRET_KEY: "sk_test_secretish",
       },
@@ -57,12 +61,13 @@ describe("writeHostedLocalStripeCheckoutDiagnostics", () => {
       stripeListenerWillCaptureSecret: true,
     });
 
-    expect(diagnostics.configuredPlanLabels).toEqual(["monthly", "edge"]);
+    expect(diagnostics.configuredPlanLabels).toEqual(["monthly", "edge", "family"]);
     expect(stderrTarget.text()).toContain("Stripe test checkout env ready");
     expect(stderrTarget.text()).toContain("Stripe webhook signing secret will be injected");
     expect(stderrTarget.text()).not.toContain("sk_test_secretish");
     expect(stderrTarget.text()).not.toContain("price_monthly_secretish");
     expect(stderrTarget.text()).not.toContain("price_edge_secretish");
+    expect(stderrTarget.text()).not.toContain("price_family_secretish");
   });
 
   it("blocks live Stripe keys by default", () => {

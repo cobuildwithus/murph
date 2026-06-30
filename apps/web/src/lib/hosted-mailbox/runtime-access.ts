@@ -4,6 +4,9 @@ import type {
 } from "@prisma/client";
 
 import {
+  hasHostedMemberEffectiveActiveAccessForMember,
+} from "../hosted-onboarding/family-plan";
+import {
   hasHostedMemberActiveAccess,
 } from "../hosted-onboarding/entitlement";
 import {
@@ -32,6 +35,7 @@ export async function requireHostedRuntimeActiveAccess(
       id: userId,
     },
     select: {
+      id: true,
       billingStatus: true,
       suspendedAt: true,
       threadContainer: {
@@ -49,7 +53,10 @@ export async function requireHostedRuntimeActiveAccess(
 
   if (
     member
-    && hasHostedMemberActiveAccess(member)
+    && await hasHostedMemberEffectiveActiveAccessForMember({
+      member,
+      prisma,
+    })
     && (
       !member.threadContainer
       || hasHostedMemberActiveAccess(member.threadContainer.owner)

@@ -4,6 +4,7 @@ import {
   readHostedDomainRootEnvelopeByRootKeyIdOrThrow,
 } from "@/src/lib/hosted-crypto/domain-root-store";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { hasHostedMemberEffectiveActiveAccessForMember } from "@/src/lib/hosted-onboarding/family-plan";
 import { jsonError, jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -17,10 +18,13 @@ export const POST = withJsonError(async (request: Request) => {
   const body = parseHostedRuntimeCryptoRootRequest(await request.json());
   const prisma = getPrisma();
   const member = await prisma.hostedMember.findUnique({
-    select: { billingStatus: true, suspendedAt: true },
+    select: { billingStatus: true, id: true, suspendedAt: true },
     where: { id: userId },
   });
-  if (!member || member.billingStatus !== "active" || member.suspendedAt !== null) {
+  if (!member || !await hasHostedMemberEffectiveActiveAccessForMember({
+    member,
+    prisma,
+  })) {
     return Response.json({ error: "hosted_member_not_active" }, { status: 403 });
   }
   const workspace = await prisma.hostedWorkspace.findUnique({

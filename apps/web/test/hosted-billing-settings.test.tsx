@@ -91,7 +91,7 @@ describe("HostedBillingSettings", () => {
     });
   });
 
-  test("renders the self-serve billing portal action", async () => {
+  test("renders the plan grid with the current plan, Family, and portal link", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
@@ -100,13 +100,17 @@ describe("HostedBillingSettings", () => {
       currentBillingPlanCode: "launch_monthly",
     }));
 
-    assert.match(markup, /Manage subscription/);
     assert.match(markup, /Pulse/);
-    assert.doesNotMatch(markup, /Upgrade to Edge/);
-    assert.doesNotMatch(markup, /You&#x27;re on a free trial/);
+    assert.match(markup, /Edge/);
+    assert.match(markup, /Family/);
+    assert.match(markup, /\$7\/person/);
+    assert.match(markup, /\$20/);
+    assert.match(markup, /Current plan/);
+    assert.match(markup, /Choose Edge/);
+    assert.match(markup, /Manage billing/);
   });
 
-  test("shows the Pulse trial plan and start action for Pulse trial members", async () => {
+  test("shows the Pulse trial start action inline for Pulse trial members", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
@@ -118,9 +122,7 @@ describe("HostedBillingSettings", () => {
       currentBillingPlanCode: "launch_monthly",
     }));
 
-    assert.match(markup, /Manage subscription/);
-    assert.match(markup, /Pulse trial/);
-    assert.doesNotMatch(markup, /Start Pulse plan/);
+    assert.match(markup, /Start Pulse plan/);
     assert.doesNotMatch(markup, /Upgrade to Edge/);
   });
 
@@ -136,34 +138,71 @@ describe("HostedBillingSettings", () => {
       currentBillingPlanCode: "launch_monthly",
     }));
 
-    assert.match(markup, /Manage subscription/);
     assert.match(markup, /Pulse/);
-    assert.doesNotMatch(markup, /Pulse trial/);
+    assert.match(markup, /Current plan/);
     assert.doesNotMatch(markup, /Start Pulse plan/);
-    assert.doesNotMatch(markup, /You&#x27;re on a free trial/);
   });
 
-  test("renders the free trial note beneath the billing action row", async () => {
-    const { HostedBillingSettingsAction } = await import("@/src/components/settings/hosted-billing-settings-action");
-    const rendered = await renderClientComponent(createElement(HostedBillingSettingsAction, {
-      helperText: "You're on a free trial",
+  test("shows the Family card as current for the family owner", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      familyState: "owner",
+      currentBillingPlanCode: "launch_monthly",
     }));
 
-    const root = rendered.container.firstElementChild;
-    assert.ok(root);
-    assert.equal(root.tagName, "DIV");
-    const [manageButton, helperRow] = [...root.children];
-    assert.ok(manageButton);
-    assert.equal(manageButton.tagName, "BUTTON");
-    assert.ok(helperRow);
-    assert.equal(helperRow.tagName, "P");
-    assert.match(manageButton.textContent ?? "", /Manage subscription/);
-    assert.equal(helperRow.textContent, "You're on a free trial");
-
-    await rendered.cleanup();
+    assert.match(markup, /Family/);
+    assert.match(markup, /Current plan/);
+    assert.doesNotMatch(markup, /Start Family/);
   });
 
-  test("omits the Edge upgrade action when settings already sees an Edge plan", async () => {
+  test("routes Family owners through Family billing before choosing individual plans", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canSwitchToPulse: true,
+      canUpgradeToEdge: true,
+      familyState: "owner",
+      currentBillingPlanCode: "launch_edge_monthly",
+    }));
+
+    assert.match(markup, /Manage Family billing/);
+    assert.match(markup, /Switching away from Family ends sponsored access/);
+    assert.match(markup, /Move to an individual plan only after/);
+    assert.doesNotMatch(markup, /Choose Pulse/);
+    assert.doesNotMatch(markup, /Choose Edge/);
+  });
+
+  test("does not offer billing management to sponsored Family members", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      familyState: "sponsored",
+      currentBillingPlanCode: "launch_monthly",
+    }));
+
+    assert.match(markup, /Sponsored/);
+    assert.match(markup, /Billing is managed by your Family plan owner/);
+    assert.doesNotMatch(markup, /Manage billing/);
+  });
+
+  test("offers the Family start action to an eligible member", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      canStartFamily: true,
+      familyState: "none",
+      currentBillingPlanCode: "launch_monthly",
+    }));
+
+    assert.match(markup, /Choose Family/);
+  });
+
+  test("shows the switch-to-Pulse action on the Pulse card for Edge members", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
@@ -175,25 +214,10 @@ describe("HostedBillingSettings", () => {
       currentPeriodEnd: new Date("2026-05-06T12:00:00.000Z"),
     }));
 
-    assert.doesNotMatch(markup, /Upgrade to Edge/);
     assert.match(markup, /Edge/);
-    assert.match(markup, /Manage subscription/);
-    assert.doesNotMatch(markup, /Switch to Pulse/);
-    assert.doesNotMatch(markup, /You&#x27;re on a free trial/);
-  });
-
-  test("omits the Edge upgrade action when billing state is not eligible", async () => {
-    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
-
-    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
-      authenticated: true,
-      canUpgradeToEdge: false,
-      currentBillingPlanCode: "launch_monthly",
-    }));
-
+    assert.match(markup, /Current plan/);
+    assert.match(markup, /Choose Pulse/);
     assert.doesNotMatch(markup, /Upgrade to Edge/);
-    assert.match(markup, /Pulse/);
-    assert.match(markup, /Manage subscription/);
   });
 
   test("renders a pending Pulse switch without another switch action", async () => {
@@ -210,10 +234,10 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.match(markup, /Edge/);
-    assert.match(markup, /Pulse starts May 6, 2026 at \$8 \/ month/);
-    assert.match(markup, /Manage subscription/);
+    assert.match(markup, /Scheduled to start May 6, 2026/);
+    assert.match(markup, /Switching to Pulse on May 6, 2026/);
     assert.match(markup, /Want to keep Edge\? Contact support/);
-    assert.doesNotMatch(markup, /Switch to Pulse/);
+    assert.doesNotMatch(markup, /Switch to Pulse</);
   });
 
   test("posts the Edge upgrade request and refreshes on success", async () => {
@@ -330,36 +354,6 @@ describe("HostedBillingSettings", () => {
     await rendered.cleanup();
   });
 
-  test("keeps the Settings Start Pulse modal open while billing is pending", async () => {
-    mocks.requestHostedPulseTrialStartPaid.mockResolvedValueOnce({
-      status: "billing_pending",
-    });
-    const { HostedBillingSettingsAction } = await import("@/src/components/settings/hosted-billing-settings-action");
-    const rendered = await renderClientComponent(createElement(HostedBillingSettingsAction, {
-      showStartPaidPulse: true,
-    }));
-    const manageButton = findButtonByText(rendered.window.document, "Manage subscription", rendered.window);
-
-    await act(async () => {
-      manageButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-    const startPlanButton = findButtonByText(rendered.window.document, "Start Pulse plan", rendered.window);
-    await act(async () => {
-      startPlanButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-    const confirmButton = findLastButtonByText(rendered.window.document, "Start Pulse", rendered.window);
-    await act(async () => {
-      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-
-    assert.match(rendered.window.document.body.textContent ?? "", /Billing is still finishing/);
-    assert.match(rendered.window.document.body.textContent ?? "", /Check status/);
-    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
-    assert.equal(rendered.assign.mock.calls.length, 0);
-
-    await rendered.cleanup();
-  });
-
   test("redirects to the hosted invoice when Start Pulse needs payment confirmation", async () => {
     mocks.requestHostedPulseTrialStartPaid.mockResolvedValueOnce({
       status: "redirecting",
@@ -407,46 +401,6 @@ describe("HostedBillingSettings", () => {
 
     await rendered.cleanup();
   });
-
-  test("keeps the upgrade confirmation request pending until the API resolves", async () => {
-    const pendingUpgrade = createDeferred<{
-      billingPlanCode: "launch_edge_monthly";
-      status: "upgraded";
-    }>();
-    mocks.requestHostedOnboardingJson.mockReturnValueOnce(pendingUpgrade.promise);
-    const { HostedBillingSettingsAction } = await import("@/src/components/settings/hosted-billing-settings-action");
-    const rendered = await renderClientComponent(createElement(HostedBillingSettingsAction, {
-      showUpgrade: true,
-    }));
-    const manageButton = findButtonByText(rendered.window.document, "Manage subscription", rendered.window);
-
-    await act(async () => {
-      manageButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-
-    const upgradeButton = findLastButtonByText(rendered.window.document, "Upgrade to Edge", rendered.window);
-    assert.ok(upgradeButton instanceof rendered.window.HTMLButtonElement);
-
-    await act(async () => {
-      upgradeButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-    const confirmButton = findLastButtonByText(rendered.window.document, "Upgrade to Edge", rendered.window);
-    await act(async () => {
-      confirmButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-
-    assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 1);
-    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
-
-    pendingUpgrade.resolve({
-      billingPlanCode: "launch_edge_monthly",
-      status: "upgraded",
-    });
-    await act(async () => {
-      await pendingUpgrade.promise;
-    });
-    await rendered.cleanup();
-  });
 });
 
 function findButtonByText(
@@ -470,19 +424,4 @@ function findLastButtonByText(
     .at(-1);
   assert.ok(button instanceof window.HTMLButtonElement);
   return button;
-}
-
-function createDeferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<T>((promiseResolve, promiseReject) => {
-    resolve = promiseResolve;
-    reject = promiseReject;
-  });
-
-  return {
-    promise,
-    reject,
-    resolve,
-  };
 }

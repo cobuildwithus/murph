@@ -3,7 +3,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   deliverHostedVaultShareRecords: vi.fn(),
   findActiveHostedVaultShares: vi.fn(),
-  hasHostedMemberActiveAccess: vi.fn(),
+  getPrisma: vi.fn(),
+  hasHostedMemberEffectiveActiveAccessForMember: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
@@ -18,8 +19,9 @@ vi.mock("@/src/lib/hosted-mailbox/vault-share-store", () => ({
   findActiveHostedVaultShares: mocks.findActiveHostedVaultShares,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/entitlement", () => ({
-  hasHostedMemberActiveAccess: mocks.hasHostedMemberActiveAccess,
+vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
+  hasHostedMemberEffectiveActiveAccessForMember:
+    mocks.hasHostedMemberEffectiveActiveAccessForMember,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -31,7 +33,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: () => ({}),
+  getPrisma: mocks.getPrisma,
 }));
 
 type DeliverRouteModule =
@@ -109,8 +111,9 @@ describe("vault-share deliver route", () => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_grantor");
     mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE]);
+    mocks.getPrisma.mockReturnValue({ kind: "prisma" });
     mocks.readHostedMemberCoreState.mockResolvedValue({ id: "member_referee" });
-    mocks.hasHostedMemberActiveAccess.mockReturnValue(true);
+    mocks.hasHostedMemberEffectiveActiveAccessForMember.mockResolvedValue(true);
     mocks.deliverHostedVaultShareRecords.mockResolvedValue({
       lastAppendedMailboxItemId: "mailbox_item_1",
     });
@@ -148,7 +151,7 @@ describe("vault-share deliver route", () => {
   });
 
   it("treats an inactive destination exactly like a missing grant", async () => {
-    mocks.hasHostedMemberActiveAccess.mockReturnValue(false);
+    mocks.hasHostedMemberEffectiveActiveAccessForMember.mockResolvedValue(false);
 
     const response = await deliverRoute.POST(buildRequest(VALID_BODY));
 
@@ -174,7 +177,7 @@ describe("vault-share deliver route", () => {
   it("keeps an all-stale offer indistinguishable when the destination is inactive", async () => {
     // The status must be a function of share configuration alone: a grantor probing with
     // stale records learns nothing finer than the normal active/no-active-share split.
-    mocks.hasHostedMemberActiveAccess.mockReturnValue(false);
+    mocks.hasHostedMemberEffectiveActiveAccessForMember.mockResolvedValue(false);
 
     const response = await deliverRoute.POST(
       buildRequest({

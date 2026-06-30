@@ -1,4 +1,5 @@
 import {
+  HostedBillingStatus,
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
@@ -50,6 +51,7 @@ import {
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "./shared";
+import { hasActiveHostedFamilyAccess } from "./family-plan";
 import type { HostedPostVerificationStage } from "./stage";
 import {
   hostedOnboardingError,
@@ -209,9 +211,13 @@ export async function completeHostedPrivyVerification(input: {
       memberId: member.id,
       prisma,
     });
-    const activationPending = member.billingStatus === "active"
+    const familyAccessActive = await hasActiveHostedFamilyAccess({
+      memberId: member.id,
+      prisma,
+    });
+    const activationPending = member.billingStatus === HostedBillingStatus.active || familyAccessActive
       ? await isHostedMemberActivationPending({
-          billingStatus: member.billingStatus,
+          billingStatus: HostedBillingStatus.active,
           memberId: member.id,
           prisma,
         })
@@ -219,6 +225,7 @@ export async function completeHostedPrivyVerification(input: {
     const stage = deriveHostedPostVerificationStage({
       activationPending,
       billingStatus: member.billingStatus,
+      familyAccessActive,
       suspendedAt: member.suspendedAt,
     });
     const messagingSetupRequired = isHostedMemberMessagingSetupRequired({

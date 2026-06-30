@@ -18,6 +18,7 @@ import {
   applyStripeInvoicePaymentFailed,
   applyStripeRefundCreated,
   applyStripeSubscriptionUpdated,
+  type HostedStripeActivatedMemberOutcome,
   type HostedSubscriptionCancellationEmailCandidate,
 } from "./stripe-billing-events";
 import { resolveStripeCustomerContext } from "./stripe-billing-lookup";
@@ -77,6 +78,7 @@ const STRIPE_EVENT_SAFE_PRISMA_META_KEYS = new Set([
 
 export type HostedStripeEventReconcileResult = {
   activatedMemberId: string | null;
+  activatedMembers?: HostedStripeActivatedMemberOutcome[];
   eventId: string;
   hostedExecutionEventId: string | null;
   status: "completed" | "failed";
@@ -225,6 +227,7 @@ async function processHostedStripeEventRecord(
   prisma: Prisma.TransactionClient,
 ): Promise<{
   activatedMemberId: string | null;
+  activatedMembers: HostedStripeActivatedMemberOutcome[];
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -553,14 +556,18 @@ async function processClaimedHostedStripeEvent(
     });
     finishHostedOnboardingTiming(timing, "completed", {
       activatedMember: Boolean(result.activatedMemberId),
+      activatedMemberCount: result.activatedMembers?.length ?? 0,
       hostedExecutionEventScheduled: Boolean(result.hostedExecutionEventId),
       subscriptionCancellationEmailCandidate:
         Boolean(result.subscriptionCancellationEmail),
       welcomeEmailCandidate: Boolean(result.welcomeEmailMemberId),
     });
 
+    const activatedMembers = result.activatedMembers ?? [];
+
     return {
       activatedMemberId: result.activatedMemberId,
+      ...(activatedMembers.length > 0 ? { activatedMembers } : {}),
       eventId: claimed.eventId,
       hostedExecutionEventId: result.hostedExecutionEventId,
       status: "completed",
@@ -755,17 +762,20 @@ function buildDueHostedStripeEventWhere(now: Date): Prisma.HostedStripeEventWher
 function mapHostedStripeActivationOutcome(
   outcome: {
     activatedMemberId: string | null;
+    activatedMembers?: HostedStripeActivatedMemberOutcome[];
     hostedExecutionEventId: string | null;
     welcomeEmailMemberId?: string | null;
   },
 ): {
   activatedMemberId: string | null;
+  activatedMembers: HostedStripeActivatedMemberOutcome[];
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
 } {
   return {
     activatedMemberId: outcome.activatedMemberId,
+    activatedMembers: outcome.activatedMembers ?? [],
     hostedExecutionEventId: outcome.hostedExecutionEventId,
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: outcome.welcomeEmailMemberId ?? null,
@@ -774,31 +784,39 @@ function mapHostedStripeActivationOutcome(
 
 function mapHostedStripeSubscriptionUpdateOutcome(
   outcome: {
+    activatedMemberId?: string | null;
+    activatedMembers?: HostedStripeActivatedMemberOutcome[];
+    hostedExecutionEventId?: string | null;
     subscriptionCancellationEmail?: HostedSubscriptionCancellationEmailCandidate | null;
+    welcomeEmailMemberId?: string | null;
   } | null | undefined,
 ): {
   activatedMemberId: string | null;
+  activatedMembers: HostedStripeActivatedMemberOutcome[];
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
 } {
   return {
-    activatedMemberId: null,
-    hostedExecutionEventId: null,
+    activatedMemberId: outcome?.activatedMemberId ?? null,
+    activatedMembers: outcome?.activatedMembers ?? [],
+    hostedExecutionEventId: outcome?.hostedExecutionEventId ?? null,
     subscriptionCancellationEmail:
       outcome?.subscriptionCancellationEmail ?? null,
-    welcomeEmailMemberId: null,
+    welcomeEmailMemberId: outcome?.welcomeEmailMemberId ?? null,
   };
 }
 
 function buildEmptyHostedStripeEventProcessingResult(): {
   activatedMemberId: string | null;
+  activatedMembers: HostedStripeActivatedMemberOutcome[];
   hostedExecutionEventId: string | null;
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
 } {
   return {
     activatedMemberId: null,
+    activatedMembers: [],
     hostedExecutionEventId: null,
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: null,

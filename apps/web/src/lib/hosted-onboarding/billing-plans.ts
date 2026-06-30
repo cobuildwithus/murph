@@ -105,6 +105,19 @@ export const HOSTED_AI_USAGE_MONTHLY_ALLOWANCE_USD_MICROS = {
   launch_monthly: 10_000_000n,
 } as const satisfies Record<HostedBillingPlanCode, bigint>;
 
+export const HOSTED_FAMILY_MIN_SEATS = 2;
+export const HOSTED_FAMILY_MAX_SEATS = 6;
+export const HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS = 700;
+export const HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS = 10_000_000n;
+
+export const HOSTED_FAMILY_PLAN_DISPLAY = {
+  displayName: "Family",
+  maxSeats: HOSTED_FAMILY_MAX_SEATS,
+  minSeats: HOSTED_FAMILY_MIN_SEATS,
+  recurringAmountUsdCentsPerSeat: HOSTED_FAMILY_SEAT_RECURRING_AMOUNT_USD_CENTS,
+  sponsoredUsageAllowanceUsdMicros: HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS,
+} as const;
+
 export function getHostedBillingPlanDefinition(
   code: HostedBillingPlanCode
 ): HostedBillingPlanDefinition {

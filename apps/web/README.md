@@ -315,6 +315,8 @@ Hosted onboarding extras:
 - `MURPH_TELEGRAM_USERNAME_OVERRIDE` optionally overrides user-facing Murph Telegram links. It is not a secret and is exposed to the browser bundle so local Vercel dev can point links at a development bot, for example `@murphdevelopment_bot`.
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY`
+- `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY`
+- `HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID` optionally selects a dedicated Family Billing Portal configuration.
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 - `LINQ_API_TOKEN`
@@ -418,6 +420,7 @@ the flow without moving real money:
    - `STRIPE_SECRET_KEY=sk_test_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY=price_...`
+   - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY=price_...`
 2. Install and log in to the Stripe CLI once with `stripe login`.
 3. Run root `pnpm dev` without `MURPH_DEV_SKIP_STRIPE_LISTEN=1`; the dev
    orchestrator starts `stripe listen` and injects the captured

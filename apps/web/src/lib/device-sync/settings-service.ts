@@ -16,14 +16,18 @@ import {
   readHostedDeviceSyncPublicBaseUrl,
   readHostedPublicBaseUrl,
 } from "../hosted-web/public-url";
-import { assertHostedMemberActiveAccessAllowed } from "../hosted-onboarding/entitlement";
+import {
+  assertHostedMemberEffectiveActiveAccessAllowed,
+} from "../hosted-onboarding/family-plan";
+import type { HostedOnboardingReadClient } from "../hosted-onboarding/shared";
 
 export async function buildHostedDeviceSyncSettingsResponse(input: {
   member: Pick<HostedMember, "billingStatus" | "id" | "suspendedAt">;
+  prisma?: HostedOnboardingReadClient;
 }): Promise<HostedDeviceSyncSettingsResponse> {
-  assertHostedMemberActiveAccessAllowed({
-    billingStatus: input.member.billingStatus,
-    suspendedAt: input.member.suspendedAt,
+  await assertHostedMemberEffectiveActiveAccessAllowed({
+    member: input.member,
+    prisma: input.prisma,
   });
   const controlPlane = createHostedDeviceSyncControlPlane(
     new Request(buildHostedDeviceSyncSyntheticRequestUrl()),

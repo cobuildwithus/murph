@@ -13,6 +13,7 @@ import type {
   AssistantConnectedAppsPort,
 } from './connected-apps-port.js'
 import type {
+  AssistantHostedFamilyPlanTool,
   AssistantPhoneCallPort,
 } from './execution-context.js'
 import {
@@ -50,6 +51,7 @@ export type AssistantHostedVaultFileSendResult =
 
 export interface AssistantHostedToolContext {
   readonly connectedApps?: AssistantConnectedAppsPort | null
+  readonly familyPlanTool?: AssistantHostedFamilyPlanTool | null
   readonly phoneCalls?: AssistantPhoneCallPort | null
   currentHostedDeliveryContext(): AssistantHostedDeliveryContext | null
   currentHostedMailboxItemIds(): readonly string[]
@@ -66,6 +68,7 @@ type AssistantHostedToolDeliveryContext = {
 
 export function createAssistantHostedToolContext(input: {
   connectedApps?: AssistantConnectedAppsPort | null
+  familyPlanTool?: AssistantHostedFamilyPlanTool | null
   computerToolsAvailable?: boolean
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
   getPhoneCallAcceptedInputIds?: () => readonly string[]
@@ -93,6 +96,7 @@ export function createAssistantHostedToolContext(input: {
 
   return {
     connectedApps: input.connectedApps ?? null,
+    familyPlanTool: input.familyPlanTool ?? null,
     phoneCalls: input.phoneCalls ?? null,
     computerToolsAvailable: input.computerToolsAvailable === true,
     currentHostedDeliveryContext: () => {

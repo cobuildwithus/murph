@@ -28,6 +28,11 @@ const HOSTED_STRIPE_WEBHOOK_WORKFLOW_MAX_RETRY_AFTER_SECONDS = 60 * 60;
 
 export type HostedStripeWebhookReconciliationResult = {
   activatedMemberId: string | null;
+  activatedMembers?: Array<{
+    activatedMemberId: string | null;
+    hostedExecutionEventId: string | null;
+    hostedExecutionMailboxItemId?: string | null;
+  }>;
   eventId: string;
   eventType: string;
   hostedExecutionEventId: string | null;
@@ -136,8 +141,11 @@ export async function reconcileRecordedHostedStripeWebhookEvent(input: {
     });
   }
 
+  const activatedMembers = reconciled.activatedMembers ?? [];
+
   return {
     activatedMemberId: reconciled.activatedMemberId ?? null,
+    ...(activatedMembers.length > 0 ? { activatedMembers } : {}),
     eventId: reconciled.eventId,
     eventType: storedEvent.type,
     hostedExecutionEventId: reconciled.hostedExecutionEventId ?? null,
@@ -164,6 +172,11 @@ export async function processRecordedHostedStripeWebhookEvent(input: {
 
 export async function signalHostedStripeWebhookActivationRuntimeWake(input: {
   activatedMemberId: string | null;
+  activatedMembers?: Array<{
+    activatedMemberId: string | null;
+    hostedExecutionEventId: string | null;
+    hostedExecutionMailboxItemId?: string | null;
+  }>;
   eventId: string;
   eventType: string;
   hostedExecutionEventId: string | null;
@@ -171,31 +184,59 @@ export async function signalHostedStripeWebhookActivationRuntimeWake(input: {
   prisma?: PrismaClient;
   timeoutMs?: number;
 }): Promise<HostedStripeWebhookRuntimeWakeResult> {
-  const hostedExecutionEventId = input.hostedExecutionEventId ?? null;
-  const hostedExecutionMemberId = input.activatedMemberId ?? null;
+  const activationTargets = resolveHostedStripeWebhookActivationTargets(input);
 
-  if (!hostedExecutionEventId || !hostedExecutionMemberId) {
+  if (activationTargets.length === 0) {
     return {
       accepted: true,
       required: false,
     };
   }
 
+  let accepted = true;
+  for (const activationTarget of activationTargets) {
+    const result = await signalHostedStripeWebhookActivationRuntimeWakeTarget({
+      ...activationTarget,
+      eventId: input.eventId,
+      eventType: input.eventType,
+      hostedExecutionMailboxItemId:
+        activationTarget.hostedExecutionMailboxItemId ?? input.hostedExecutionMailboxItemId ?? null,
+      prisma: input.prisma,
+      timeoutMs: input.timeoutMs,
+    });
+    accepted = accepted && result.accepted;
+  }
+
+  return {
+    accepted,
+    required: true,
+  };
+}
+
+async function signalHostedStripeWebhookActivationRuntimeWakeTarget(input: {
+  eventId: string;
+  eventType: string;
+  hostedExecutionEventId: string;
+  hostedExecutionMailboxItemId: string | null;
+  memberId: string;
+  prisma?: PrismaClient;
+  timeoutMs?: number;
+}): Promise<{ accepted: boolean }> {
   const runtimeWakeTiming = startHostedOnboardingTiming(
     "hosted-onboarding.stripe.runtime-wake",
     {
       eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
       eventType: input.eventType,
       hostedExecutionEventIdPresent: true,
-      hostedExecutionEventIdSuffix: toHostedOnboardingLogIdSuffix(hostedExecutionEventId),
+      hostedExecutionEventIdSuffix: toHostedOnboardingLogIdSuffix(input.hostedExecutionEventId),
       hostedExecutionMemberIdPresent: true,
-      hostedExecutionMemberIdSuffix: toHostedOnboardingLogIdSuffix(hostedExecutionMemberId),
+      hostedExecutionMemberIdSuffix: toHostedOnboardingLogIdSuffix(input.memberId),
     },
   );
   const result = await signalHostedMemberActivationRuntimeWakeBestEffortResult({
-    hostedExecutionEventId,
-    mailboxItemId: input.hostedExecutionMailboxItemId ?? null,
-    memberId: hostedExecutionMemberId,
+    hostedExecutionEventId: input.hostedExecutionEventId,
+    mailboxItemId: input.hostedExecutionMailboxItemId,
+    memberId: input.memberId,
     prisma: input.prisma,
     source: "stripe.webhook.activation",
     timeoutMs: input.timeoutMs,
@@ -211,8 +252,45 @@ export async function signalHostedStripeWebhookActivationRuntimeWake(input: {
 
   return {
     accepted: result.accepted,
-    required: true,
   };
+}
+
+function resolveHostedStripeWebhookActivationTargets(input: {
+  activatedMemberId: string | null;
+  activatedMembers?: Array<{
+    activatedMemberId: string | null;
+    hostedExecutionEventId: string | null;
+    hostedExecutionMailboxItemId?: string | null;
+  }>;
+  hostedExecutionEventId: string | null;
+}): Array<{ hostedExecutionEventId: string; hostedExecutionMailboxItemId?: string | null; memberId: string }> {
+  const explicitTargets = (input.activatedMembers ?? [])
+    .filter((activation): activation is {
+      activatedMemberId: string;
+      hostedExecutionEventId: string;
+      hostedExecutionMailboxItemId?: string | null;
+    } =>
+      typeof activation.activatedMemberId === "string" &&
+      activation.activatedMemberId.length > 0 &&
+      typeof activation.hostedExecutionEventId === "string" &&
+      activation.hostedExecutionEventId.length > 0
+    )
+    .map((activation) => ({
+      hostedExecutionEventId: activation.hostedExecutionEventId,
+      hostedExecutionMailboxItemId: activation.hostedExecutionMailboxItemId ?? null,
+      memberId: activation.activatedMemberId,
+    }));
+
+  if (explicitTargets.length > 0) {
+    return explicitTargets;
+  }
+
+  return input.activatedMemberId && input.hostedExecutionEventId
+    ? [{
+        hostedExecutionEventId: input.hostedExecutionEventId,
+        memberId: input.activatedMemberId,
+      }]
+    : [];
 }
 
 async function readHostedStripeWebhookEventReceipt(
@@ -284,15 +362,21 @@ async function resolveCompletedHostedStripeWebhookActivationResult(input: {
   eventType: string;
   prisma: PrismaClient;
 }): Promise<HostedStripeWebhookReconciliationResult> {
-  const activation = await readHostedStripeActivationMailboxItemForCompletedEvent(input);
+  const activations = await readHostedStripeActivationMailboxItemsForCompletedEvent(input);
+  const firstActivation = activations[0] ?? null;
 
-  return activation
+  return firstActivation
     ? {
-      activatedMemberId: activation.userId,
+      activatedMemberId: firstActivation.userId,
+      activatedMembers: activations.map((activation) => ({
+        activatedMemberId: activation.userId,
+        hostedExecutionEventId: activation.dedupeKey,
+        hostedExecutionMailboxItemId: activation.id,
+      })),
       eventId: input.eventId,
       eventType: input.eventType,
-      hostedExecutionEventId: activation.dedupeKey,
-      hostedExecutionMailboxItemId: activation.id,
+      hostedExecutionEventId: firstActivation.dedupeKey,
+      hostedExecutionMailboxItemId: firstActivation.id,
     }
     : {
       activatedMemberId: null,
@@ -303,13 +387,18 @@ async function resolveCompletedHostedStripeWebhookActivationResult(input: {
     };
 }
 
-async function readHostedStripeActivationMailboxItemForCompletedEvent(input: {
+async function readHostedStripeActivationMailboxItemsForCompletedEvent(input: {
   eventId: string;
   eventType: string;
   prisma: PrismaClient;
-}): Promise<{ dedupeKey: string; id: string; userId: string } | null> {
+}): Promise<Array<{ dedupeKey: string; id: string; userId: string }>> {
+  const activations = new Map<string, { dedupeKey: string; id: string; userId: string }>();
+
   for (const sourceEventId of await resolveHostedStripeActivationSourceEventIds(input.eventId)) {
-    const activation = await input.prisma.hostedMailboxItem.findFirst({
+    const sourceType = sourceEventId.startsWith("family-subscription:")
+      ? "hosted.family.sponsorship"
+      : normalizeHostedStripeDispatchSourceType(input.eventType);
+    const sourceActivations = await input.prisma.hostedMailboxItem.findMany({
       orderBy: {
         createdAt: "desc",
       },
@@ -321,23 +410,30 @@ async function readHostedStripeActivationMailboxItemForCompletedEvent(input: {
       where: {
         dedupeKey: {
           endsWith: `:${sourceEventId}`,
-          startsWith: `member.activated:${normalizeHostedStripeDispatchSourceType(input.eventType)}:`,
+          startsWith: `member.activated:${sourceType}:`,
         },
         kind: "member.activated",
       },
     });
 
-    if (activation) {
-      return activation;
+    for (const activation of sourceActivations) {
+      if (!activations.has(activation.dedupeKey)) {
+        activations.set(activation.dedupeKey, activation);
+      }
     }
   }
 
-  return null;
+  return [...activations.values()];
 }
 
 async function resolveHostedStripeActivationSourceEventIds(eventId: string): Promise<string[]> {
   const stripeEvent = await requireHostedStripeApi().events.retrieve(eventId);
   const sourceEventIds = [eventId];
+  const subscriptionId = readHostedStripeEventPayloadSubscriptionId(stripeEvent);
+
+  if (subscriptionId) {
+    sourceEventIds.unshift(`family-subscription:${subscriptionId}`);
+  }
 
   if (stripeEvent.type === "invoice.paid") {
     const invoiceId = readHostedStripeEventPayloadObjectId(stripeEvent);
@@ -348,6 +444,37 @@ async function resolveHostedStripeActivationSourceEventIds(eventId: string): Pro
   }
 
   return sourceEventIds;
+}
+
+function readHostedStripeEventPayloadSubscriptionId(event: {
+  data?: {
+    object?: unknown;
+  };
+  type?: string;
+}): string | null {
+  const value = event.data?.object;
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  if (event.type?.startsWith("customer.subscription.")) {
+    const objectId = Reflect.get(value, "id");
+    if (typeof objectId === "string" && objectId.length > 0) {
+      return objectId;
+    }
+  }
+
+  const subscription = Reflect.get(value, "subscription");
+  if (typeof subscription === "string" && subscription.length > 0) {
+    return subscription;
+  }
+
+  if (!subscription || typeof subscription !== "object") {
+    return null;
+  }
+
+  const id = Reflect.get(subscription, "id");
+  return typeof id === "string" && id.length > 0 ? id : null;
 }
 
 function readHostedStripeEventPayloadObjectId(event: {

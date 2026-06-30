@@ -61,8 +61,51 @@ test("buildHostedDeviceSyncSettingsResponse reads device sync connections server
   expect(response.sources).toEqual([]);
 });
 
+test("buildHostedDeviceSyncSettingsResponse allows a family-sponsored member without direct active billing", async () => {
+  mocks.listConnections.mockResolvedValue({
+    connections: [],
+    providers: [],
+  });
+  const prisma = createFamilyAccessPrisma({
+    activeMembershipCount: 2,
+    billedSeatCount: 2,
+    membership: {
+      group: {
+        billingStatus: "active",
+        suspendedAt: null,
+      },
+      groupId: "hbag_family",
+      status: "active",
+    },
+  });
+
+  const { buildHostedDeviceSyncSettingsResponse } = await import("@/src/lib/device-sync/settings-service");
+  const response = await buildHostedDeviceSyncSettingsResponse({
+    member: {
+      billingStatus: "not_started",
+      id: "member_family",
+      suspendedAt: null,
+    },
+    prisma: prisma as never,
+  });
+
+  expect(response.ok).toBe(true);
+  expect(mocks.listConnections).toHaveBeenCalledWith("member_family");
+  expect(prisma.hostedAccountGroupMembership.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+    where: expect.objectContaining({
+      memberId: "member_family",
+      status: "active",
+    }),
+  }));
+});
+
 test("buildHostedDeviceSyncSettingsResponse explains canceled access before reading connections", async () => {
   const { buildHostedDeviceSyncSettingsResponse } = await import("@/src/lib/device-sync/settings-service");
+  const prisma = createFamilyAccessPrisma({
+    activeMembershipCount: 0,
+    billedSeatCount: null,
+    membership: null,
+  });
 
   await expect(buildHostedDeviceSyncSettingsResponse({
     member: {
@@ -70,11 +113,50 @@ test("buildHostedDeviceSyncSettingsResponse explains canceled access before read
       id: "member_123",
       suspendedAt: null,
     },
+    prisma: prisma as never,
   })).rejects.toMatchObject({
     code: "HOSTED_ACCESS_REQUIRED",
     message: "Your subscription is canceled. Open billing to resume access.",
   });
 
+  expect(prisma.hostedAccountGroupMembership.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+    where: expect.objectContaining({
+      memberId: "member_123",
+      status: "active",
+    }),
+  }));
   expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
   expect(mocks.listConnections).not.toHaveBeenCalled();
 });
+
+function createFamilyAccessPrisma(input: {
+  activeMembershipCount: number;
+  billedSeatCount: number | null;
+  membership: null | {
+    group: {
+      billingStatus: string;
+      suspendedAt: Date | null;
+    };
+    groupId: string;
+    status: string;
+  };
+}) {
+  return {
+    hostedAccountGroupBillingRef: {
+      findUnique: vi.fn(async () =>
+        input.billedSeatCount === null
+          ? null
+          : {
+              billedSeatCount: input.billedSeatCount,
+            }
+      ),
+    },
+    hostedAccountGroupMembership: {
+      count: vi.fn(async () => input.activeMembershipCount),
+      findFirst: vi.fn(async () => input.membership),
+    },
+    hostedAccountGroupInvite: {
+      count: vi.fn(async () => 0),
+    },
+  };
+}

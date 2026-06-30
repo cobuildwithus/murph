@@ -6,6 +6,7 @@ import {
   type HostedAiUsageGateDecision,
 } from "@/src/lib/hosted-execution/usage-allowance";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   createHostedExternalThreadLookupKey,
   createHostedPhoneLookupKey,
@@ -16,7 +17,6 @@ import {
   requireHostedLinqMessageReceivedEvent,
 } from "@/src/lib/hosted-onboarding/linq";
 import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
-import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { hostedLinqFirstContactContainsBlockedContent } from "@/src/lib/hosted-onboarding/webhook-provider-linq-shared";
 import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
 
@@ -182,6 +182,8 @@ const mocks = vi.hoisted(() => {
         },
       };
     }),
+    acceptHostedFamilyInviteFromPhoneTx: vi.fn(),
+    buildHostedFamilyInviteAcceptedReplyText: vi.fn(() => "Welcome to Murph Family."),
   };
 
   return state;
@@ -302,6 +304,18 @@ vi.mock("../src/lib/hosted-onboarding/linq", async () => {
   };
 });
 
+vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/family-plan")>(
+    "@/src/lib/hosted-onboarding/family-plan",
+  );
+
+  return {
+    ...actual,
+    acceptHostedFamilyInviteFromPhoneTx: mocks.acceptHostedFamilyInviteFromPhoneTx,
+    buildHostedFamilyInviteAcceptedReplyText: mocks.buildHostedFamilyInviteAcceptedReplyText,
+  };
+});
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
     "@/src/lib/hosted-onboarding/runtime",
@@ -352,6 +366,7 @@ type MockedFunction = ReturnType<typeof vi.fn>;
 type HostedOnboardingLinqWebhookInput = Parameters<typeof handleHostedOnboardingLinqWebhookImpl>[0];
 
 type HostedInviteFixture = {
+  create?: MockedFunction;
   findFirst?: (input: {
     where?: Record<string, unknown>;
     select?: Record<string, unknown>;
@@ -403,6 +418,7 @@ type HostedLinqFirstContactAdmissionBudgetFixture = {
 };
 
 type HostedMemberFixture = {
+  create?: MockedFunction;
   findUnique?: (input: {
     where?: Record<string, unknown>;
     include?: Record<string, unknown>;
@@ -458,10 +474,15 @@ type HostedWebhookReceiptSideEffectFixture = {
   upsert?: MockedFunction;
 };
 
+type HostedAccountGroupMembershipFixture = {
+  findFirst?: MockedFunction;
+};
+
 type PrismaFixtureBase = {
   $executeRaw?: MockedFunction;
   $queryRaw?: MockedFunction;
   $transaction?: MockedFunction;
+  hostedAccountGroupMembership?: HostedAccountGroupMembershipFixture;
   hostedInvite?: HostedInviteFixture;
   hostedLinqAlert?: HostedLinqAlertFixture;
   hostedLinqDailyState?: HostedLinqDailyStateFixture;
@@ -520,6 +541,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
       outboundCount: 1,
     }));
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValue(null);
+    mocks.buildHostedFamilyInviteAcceptedReplyText.mockReturnValue("Welcome to Murph Family.");
     mocks.readHostedLinqDailyState.mockResolvedValue(null);
     mocks.hostedOnboardingEnvironment.linqLocalAllowedInboundPhoneNumbers = undefined;
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "off";
@@ -2173,6 +2196,299 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("accepts a phone-bound Family invite token from inbound iMessage", async () => {
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValueOnce({
+      groupId: "group_family",
+      memberId: "member_family",
+      role: "member",
+      status: "active",
+    });
+
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        create: vi.fn(),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            {
+              type: "text",
+              value: "family_phone_token",
+            },
+          ],
+        },
+        eventId: "evt_family_linq",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "family-invite-accepted",
+    });
+    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
+      now: new Date("2026-03-26T12:00:00.000Z"),
+      phoneNumber: "+15551234567",
+      text: "family_phone_token",
+      tx: prisma,
+    });
+    const hostedMemberRouting = prisma.hostedMemberRouting;
+    if (!hostedMemberRouting) {
+      throw new Error("Expected hosted member routing fixture.");
+    }
+    expect(hostedMemberRouting.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        linqChatLookupKey: expect.stringContaining("hbidx:linq-chat:v1:"),
+        linqRecipientPhoneLookupKey: expect.stringContaining("hbidx:phone:v1:"),
+        memberId: "member_family",
+        pendingLinqChatLookupKey: null,
+      }),
+      update: expect.objectContaining({
+        linqChatLookupKey: expect.stringContaining("hbidx:linq-chat:v1:"),
+        linqRecipientPhoneLookupKey: expect.stringContaining("hbidx:phone:v1:"),
+        pendingLinqChatLookupKey: null,
+      }),
+      where: {
+        memberId: "member_family",
+      },
+    }));
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
+      memberId: "member_family",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      idempotencyKey: "linq-message:evt_family_linq",
+      message: "Welcome to Murph Family.",
+      replyToMessageId: "msg_123",
+      signal: undefined,
+    });
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
+  it("does not send a generic signup link for unaccepted Family invite tokens", async () => {
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        create: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            {
+              type: "text",
+              value: "family_expired_or_wrong_line",
+            },
+          ],
+        },
+        eventId: "evt_family_linq_unaccepted",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "family-invite-not-accepted",
+    });
+    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
+      now: new Date("2026-03-26T12:00:00.000Z"),
+      phoneNumber: "+15551234567",
+      text: "family_expired_or_wrong_line",
+      tx: prisma,
+    });
+    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("retries the Family welcome reply when the first Linq send fails after acceptance", async () => {
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValue({
+      groupId: "group_family",
+      memberId: "member_family",
+      role: "member",
+      status: "active",
+    });
+    mocks.sendHostedLinqChatMessage.mockRejectedValueOnce(new Error("linq send failed"));
+
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        create: vi.fn(),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+    const rawBody = buildHostedLinqWebhookBody({
+      data: {
+        parts: [
+          {
+            type: "text",
+            value: "family_retry_token",
+          },
+        ],
+      },
+      eventId: "evt_family_linq_retry",
+      service: "iMessage",
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).rejects.toThrow("linq send failed");
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "family-invite-accepted",
+    });
+    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledTimes(2);
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenLastCalledWith({
+      chatId: "chat_123",
+      idempotencyKey: "linq-message:evt_family_linq_retry",
+      message: "Welcome to Murph Family.",
+      replyToMessageId: "msg_123",
+      signal: undefined,
+    });
+  });
+
+  it("ignores wrong-phone Family invite tokens without failing Linq", async () => {
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
+      httpStatus: 403,
+      message: "This family invite was sent to a different phone number.",
+    }));
+
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        create: vi.fn(),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            {
+              type: "text",
+              value: "family_wrong_phone",
+            },
+          ],
+        },
+        eventId: "evt_family_linq_wrong_phone",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "family-invite-not-accepted",
+    });
+    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
+      now: new Date("2026-03-26T12:00:00.000Z"),
+      phoneNumber: "+15551234567",
+      text: "family_wrong_phone",
+      tx: prisma,
+    });
+    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("sends the signup link on the first inbound Linq message", async () => {
@@ -5947,6 +6263,15 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
       value: {
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
         upsert: vi.fn().mockResolvedValue({}),
+      },
+    });
+  }
+
+  if (!prisma.hostedAccountGroupMembership?.findFirst) {
+    Object.defineProperty(prisma, "hostedAccountGroupMembership", {
+      configurable: true,
+      value: {
+        findFirst: vi.fn().mockResolvedValue(null),
       },
     });
   }

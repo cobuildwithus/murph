@@ -212,6 +212,10 @@ describe("hosted onboarding member channel sync", () => {
 
   it("skips active channel dispatch when the current locked member is not active", async () => {
     const tx = {
+      hostedAccountGroupMembership: {
+        count: vi.fn(async () => 0),
+        findFirst: vi.fn(async () => null),
+      },
       label: "test-prisma-tx",
     };
     mocks.readHostedMemberSnapshot.mockResolvedValue({
@@ -241,6 +245,74 @@ describe("hosted onboarding member channel sync", () => {
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(tx, "member_123");
     expect(mocks.readHostedMemberEmailAuthorization).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("derives channel snapshots for sponsored Family members", async () => {
+    const tx = {
+      hostedAccountGroupBillingRef: {
+        findUnique: vi.fn(async () => ({
+          billedSeatCount: 2,
+        })),
+      },
+      hostedAccountGroupMembership: {
+        count: vi.fn(async () => 2),
+        findFirst: vi.fn(async () => ({
+          group: {
+            billingStatus: "active",
+            id: "hbag_family",
+            ownerMemberId: "member_owner",
+            suspendedAt: null,
+          },
+          groupId: "hbag_family",
+          memberId: "member_123",
+          role: "member",
+          status: "active",
+        })),
+      },
+      hostedAccountGroupInvite: {
+        count: vi.fn(async () => 0),
+      },
+      label: "test-prisma-tx",
+    };
+    mocks.readHostedMemberSnapshot.mockResolvedValue({
+      ...makeMemberSnapshot(),
+      core: {
+        ...makeMemberSnapshot().core,
+        billingStatus: "not_started",
+      },
+    });
+
+    await expect(
+      enqueueHostedMemberChannelsUpdatedForActiveMemberTx({
+        linkedAccounts: [
+          {
+            address: "user@example.test",
+            latest_verified_at: 1743064200,
+            type: "email",
+          },
+        ],
+        memberId: "member_123",
+        occurredAt: "2026-04-15T00:00:00.000Z",
+        prisma: tx as never,
+        sourceType: "settings.telegram.sync",
+      }),
+    ).resolves.toEqual({
+      mailboxItemId: "mailbox_member_channels_1",
+    });
+
+    expect(tx.hostedAccountGroupMembership.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        memberId: "member_123",
+        status: "active",
+      }),
+    }));
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "member.channels.updated",
+        userId: "member_123",
+      }),
+      tx,
+    });
   });
 
   it("keeps the returned producer envelope stable when the mailbox append is a duplicate", async () => {

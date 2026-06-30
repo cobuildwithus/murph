@@ -2874,7 +2874,6 @@ function buildHostedContainerRunnerJobErrorMetadata(
   if (safeErrorName) {
     details.errorName = safeErrorName;
   }
-
   const errorCodeDetail = readHostedContainerSafeCodeProperty(error, "code")
     ?? readHostedContainerSafeCodeProperty(error, "errorCode");
   if (errorCodeDetail) {

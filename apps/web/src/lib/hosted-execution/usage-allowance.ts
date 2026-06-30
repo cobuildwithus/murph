@@ -23,6 +23,7 @@ import {
 import {
   HOSTED_PULSE_TRIAL_OFFER,
   HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
+  HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS,
   getHostedAiUsageMonthlyAllowanceUsdMicros,
   getHostedDefaultBillingPlanCode,
   parseHostedBillingPlanCode,
@@ -31,6 +32,10 @@ import {
   requireHostedPulseTrialPolicy,
   type HostedBillingPlanCode,
 } from "../hosted-onboarding/billing-plans";
+import {
+  HOSTED_FAMILY_BILLING_PLAN_CODE,
+  readHostedFamilyAccessForMember,
+} from "../hosted-onboarding/family-plan";
 import {
   hasHostedMemberActiveAccess,
 } from "../hosted-onboarding/entitlement";
@@ -47,6 +52,7 @@ export type HostedAiUsageGateDeniedReason =
 
 export type HostedAiUsageGateNoticeCode =
   | "edge_usage_limit_reached"
+  | "family_usage_limit_reached"
   | "pulse_upgrade_edge"
   | "trial_usage_limit_reached"
   | "trial_conversion_pending";
@@ -99,6 +105,11 @@ interface HostedAiUsageAllowancePricingModelResolution {
   source: HostedAiUsageAllowancePricingModelSource | null;
 }
 
+type HostedAiUsageAllowanceSourceKind =
+  | "direct_paid_member_plan"
+  | "direct_trial"
+  | "family_sponsored_pulse";
+
 interface HostedAiUsageAllowanceTokenPricingBasisConfig {
   multiplierDenominator: bigint;
   multiplierNumerator: bigint;
@@ -125,6 +136,7 @@ type HostedAiUsageAllowanceTokenPricingBasisResolution =
   };
 
 interface HostedAiUsageAllowancePeriod {
+  allowanceSource: HostedAiUsageAllowanceSourceKind;
   billingPlanCode: HostedBillingPlanCode;
   limitUsdMicros: bigint;
   periodEnd: Date;
@@ -142,6 +154,7 @@ type HostedAiUsageAllowancePeriodResult =
 type HostedAiUsageAllowancePeriodResolution =
   | ({
     kind: "period";
+    allowanceSource: HostedAiUsageAllowanceSourceKind;
     source: "billing" | "calendar" | "trial";
   } & Omit<HostedAiUsageAllowancePeriod, "spentUsdMicros">)
   | {
@@ -159,6 +172,7 @@ type HostedAiUsageAllowancePeriodResolution =
   };
 
 interface HostedAiUsageAllowanceBillingRef {
+  allowanceSource?: "family_sponsored_pulse" | null;
   currentBillingPhase: string | null;
   currentBillingPlanCode: string | null;
   currentCheckoutOffer: string | null;
@@ -168,6 +182,104 @@ interface HostedAiUsageAllowanceBillingRef {
   currentTrialStartedAt: Date | null;
   pulseTrialPolicyVersion: string | null;
   pulseTrialRedeemedAt: Date | null;
+  usageLimitUsdMicrosOverride?: bigint | null;
+}
+
+async function resolveHostedAiUsageAllowanceBillingRefForMember(input: {
+  at: Date;
+  billingRef: HostedAiUsageAllowanceBillingRef | null;
+  billingStatus: HostedBillingStatus;
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<{
+  billingRef: HostedAiUsageAllowanceBillingRef | null;
+  familyAccessActive: boolean;
+}> {
+  if (
+    input.billingStatus === HostedBillingStatus.active &&
+    parseHostedBillingPhase(input.billingRef?.currentBillingPhase) === "paid"
+  ) {
+    return {
+      billingRef: input.billingRef,
+      familyAccessActive: false,
+    };
+  }
+
+  const familyBillingRef = await readHostedFamilySponsoredBillingRefForMember({
+    at: input.at,
+    memberId: input.memberId,
+    tx: input.tx,
+  });
+  if (familyBillingRef) {
+    return {
+      billingRef: familyBillingRef,
+      familyAccessActive: true,
+    };
+  }
+
+  return {
+    billingRef: input.billingRef,
+    familyAccessActive: false,
+  };
+}
+
+async function readHostedFamilySponsoredBillingRefForMember(input: {
+  at: Date;
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedAiUsageAllowanceBillingRef | null> {
+  const familyAccess = await readHostedFamilyAccessForMember({
+    memberId: input.memberId,
+    now: input.at,
+    prisma: input.tx,
+  });
+  if (!familyAccess) {
+    return null;
+  }
+
+  const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
+    select: {
+      currentBillingPlanCode: true,
+      currentBillingPhase: true,
+      currentPeriodEnd: true,
+      currentPeriodStart: true,
+    },
+    where: {
+      groupId: familyAccess.groupId,
+    },
+  });
+  if (
+    billingRef?.currentBillingPlanCode !== HOSTED_FAMILY_BILLING_PLAN_CODE ||
+    billingRef.currentBillingPhase !== "paid"
+  ) {
+    return null;
+  }
+
+  const currentPeriodStart = billingRef.currentPeriodStart;
+  const currentPeriodEnd = billingRef.currentPeriodEnd;
+  if (
+    !currentPeriodStart ||
+    !currentPeriodEnd ||
+    currentPeriodStart.getTime() >= currentPeriodEnd.getTime() ||
+    input.at.getTime() < currentPeriodStart.getTime() ||
+    input.at.getTime() >= currentPeriodEnd.getTime()
+  ) {
+    return null;
+  }
+
+  return {
+    allowanceSource: "family_sponsored_pulse",
+    currentBillingPhase: "paid",
+    currentBillingPlanCode: "launch_monthly",
+    currentCheckoutOffer: null,
+    currentPeriodEnd,
+    currentPeriodStart,
+    currentTrialEndsAt: null,
+    currentTrialStartedAt: null,
+    pulseTrialPolicyVersion: null,
+    pulseTrialRedeemedAt: null,
+    usageLimitUsdMicrosOverride: HOSTED_FAMILY_SPONSORED_USAGE_ALLOWANCE_USD_MICROS,
+  };
 }
 
 interface HostedAiUsageAllowanceThreadContainerRef {
@@ -419,10 +531,61 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const now = input.now ?? new Date();
+  const at = normalizeHostedAiUsageAllowanceDate(input.record.occurredAt);
+  const memberState = await input.tx.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    select: {
+      billingRef: {
+        select: {
+          currentBillingPhase: true,
+          currentBillingPlanCode: true,
+          currentCheckoutOffer: true,
+          currentPeriodEnd: true,
+          currentPeriodStart: true,
+          currentTrialEndsAt: true,
+          currentTrialStartedAt: true,
+          pulseTrialPolicyVersion: true,
+          pulseTrialRedeemedAt: true,
+        },
+      },
+      threadContainer: {
+        select: {
+          monthlyUsageLimitUsdMicros: true,
+          owner: {
+            select: {
+              billingStatus: true,
+              suspendedAt: true,
+            },
+          },
+        },
+      },
+      billingStatus: true,
+      suspendedAt: true,
+    },
+  });
+  if (!memberState) {
+    throw new TypeError("Hosted AI usage allowance member does not exist.");
+  }
+  const allowanceAccess = memberState.suspendedAt === null
+    ? await resolveHostedAiUsageAllowanceBillingRefForMember({
+        at,
+        billingRef: memberState.billingRef,
+        billingStatus: memberState.billingStatus,
+        memberId: input.memberId,
+        tx: input.tx,
+      })
+    : {
+        billingRef: memberState.billingRef,
+        familyAccessActive: false,
+      };
   const period = await ensureHostedAiUsageAllowancePeriodTx({
-    at: normalizeHostedAiUsageAllowanceDate(input.record.occurredAt),
+    at,
+    billingRef: allowanceAccess.billingRef,
     memberId: input.memberId,
     now,
+    threadContainer: memberState.threadContainer,
     tx: input.tx,
   });
   if (period.kind === "denied") {
@@ -549,13 +712,31 @@ export async function resolveHostedAiUsageGate(input: {
       throw new TypeError("Hosted AI usage allowance member does not exist.");
     }
 
+    const allowanceAccess = memberState.suspendedAt === null
+      ? await resolveHostedAiUsageAllowanceBillingRefForMember({
+          at: now,
+          billingRef: memberState.billingRef,
+          billingStatus: memberState.billingStatus,
+          memberId: input.memberId,
+          tx,
+        })
+      : {
+          billingRef: memberState.billingRef,
+          familyAccessActive: false,
+        };
+    const allowanceBillingRef = allowanceAccess.billingRef;
+    const familyAccessActive = allowanceAccess.familyAccessActive;
+
     if (
-      memberState.billingStatus !== HostedBillingStatus.active ||
-      memberState.suspendedAt !== null
+      memberState.suspendedAt !== null ||
+      (
+        memberState.billingStatus !== HostedBillingStatus.active &&
+        !familyAccessActive
+      )
     ) {
       return resolveHostedAiUsageInactiveGateDecision({
         at: now,
-        billingRef: memberState.billingRef,
+        billingRef: allowanceBillingRef,
         memberId: input.memberId,
         threadContainer: memberState.threadContainer,
       });
@@ -563,8 +744,10 @@ export async function resolveHostedAiUsageGate(input: {
 
     const period = await ensureHostedAiUsageAllowancePeriodTx({
       at: now,
+      billingRef: allowanceBillingRef,
       memberId: input.memberId,
       now,
+      threadContainer: memberState.threadContainer,
       tx,
     });
     if (period.kind === "denied") {
@@ -628,13 +811,31 @@ export async function readHostedAiUsageGate(input: {
       throw new TypeError("Hosted AI usage allowance member does not exist.");
     }
 
+    const allowanceAccess = memberState.suspendedAt === null
+      ? await resolveHostedAiUsageAllowanceBillingRefForMember({
+          at: now,
+          billingRef: memberState.billingRef,
+          billingStatus: memberState.billingStatus,
+          memberId: input.memberId,
+          tx,
+        })
+      : {
+          billingRef: memberState.billingRef,
+          familyAccessActive: false,
+        };
+    const allowanceBillingRef = allowanceAccess.billingRef;
+    const familyAccessActive = allowanceAccess.familyAccessActive;
+
     if (
-      memberState.billingStatus !== HostedBillingStatus.active ||
-      memberState.suspendedAt !== null
+      memberState.suspendedAt !== null ||
+      (
+        memberState.billingStatus !== HostedBillingStatus.active &&
+        !familyAccessActive
+      )
     ) {
       return resolveHostedAiUsageInactiveGateDecision({
         at: now,
-        billingRef: memberState.billingRef,
+        billingRef: allowanceBillingRef,
         memberId: input.memberId,
         threadContainer: memberState.threadContainer,
       });
@@ -642,7 +843,7 @@ export async function readHostedAiUsageGate(input: {
 
     const period = await readHostedAiUsageAllowancePeriodTx({
       at: now,
-      billingRef: memberState.billingRef,
+      billingRef: allowanceBillingRef,
       memberId: input.memberId,
       threadContainer: memberState.threadContainer,
       tx,
@@ -827,6 +1028,7 @@ function buildHostedAiUsageGateDecision(input: {
       retryAfter: period.periodEnd,
       spentUsdMicros: period.spentUsdMicros,
       userNotice: buildHostedAiUsageGateLimitNotice({
+        allowanceSource: period.allowanceSource,
         billingPlanCode: period.billingPlanCode,
         limitUsdMicros: period.limitUsdMicros,
         memberId: input.memberId,
@@ -849,52 +1051,17 @@ function buildHostedAiUsageGateDecision(input: {
 
 async function ensureHostedAiUsageAllowancePeriodTx(input: {
   at: Date;
+  billingRef: HostedAiUsageAllowanceBillingRef | null;
   memberId: string;
   now: Date;
+  threadContainer?: HostedAiUsageAllowanceThreadContainerRef | null;
   tx: Prisma.TransactionClient;
 }): Promise<HostedAiUsageAllowancePeriodResult> {
-  const member = await input.tx.hostedMember.findUnique({
-    where: {
-      id: input.memberId,
-    },
-    select: {
-      billingRef: {
-        select: {
-          currentBillingPhase: true,
-          currentBillingPlanCode: true,
-          currentCheckoutOffer: true,
-          currentPeriodEnd: true,
-          currentPeriodStart: true,
-          currentTrialEndsAt: true,
-          currentTrialStartedAt: true,
-          pulseTrialPolicyVersion: true,
-          pulseTrialRedeemedAt: true,
-        },
-      },
-      threadContainer: {
-        select: {
-          monthlyUsageLimitUsdMicros: true,
-          owner: {
-            select: {
-              billingStatus: true,
-              suspendedAt: true,
-            },
-          },
-        },
-      },
-      id: true,
-    },
-  });
-
-  if (!member) {
-    throw new TypeError("Hosted AI usage allowance member does not exist.");
-  }
-
   const resolved = resolveHostedAiUsageAllowancePeriod({
     at: input.at,
-    billingRef: member.billingRef,
+    billingRef: input.billingRef,
     memberId: input.memberId,
-    threadContainer: member.threadContainer,
+    threadContainer: input.threadContainer ?? null,
   });
   if (resolved.kind === "denied") {
     return {
@@ -983,6 +1150,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
 
     return {
       kind: "period",
+      allowanceSource: resolved.allowanceSource,
       billingPlanCode: currentBillingPlanCode,
       limitUsdMicros: current.limitUsdMicros,
       periodEnd: current.periodEnd,
@@ -1025,6 +1193,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
 
   return {
     kind: "period",
+    allowanceSource: resolved.allowanceSource,
     billingPlanCode: parseHostedBillingPlanCode(upgraded.billingPlanCode)
       ?? resolved.billingPlanCode,
     limitUsdMicros: upgraded.limitUsdMicros,
@@ -1088,6 +1257,7 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
 
     return {
       kind: "period",
+      allowanceSource: resolved.allowanceSource,
       billingPlanCode: periodMatches ? currentBillingPlanCode : resolved.billingPlanCode,
       limitUsdMicros,
       periodEnd: periodMatches ? current.periodEnd : resolved.periodEnd,
@@ -1098,6 +1268,7 @@ async function readHostedAiUsageAllowancePeriodTx(input: {
 
   return {
     kind: "period",
+    allowanceSource: resolved.allowanceSource,
     billingPlanCode: resolved.billingPlanCode,
     limitUsdMicros: resolved.limitUsdMicros,
     periodEnd: resolved.periodEnd,
@@ -1177,6 +1348,7 @@ function resolveHostedAiUsageAllowancePeriod(input: {
     }
 
     return {
+      allowanceSource: "direct_paid_member_plan",
       billingPlanCode,
       kind: "period",
       limitUsdMicros: threadContainerLimitUsdMicros,
@@ -1216,9 +1388,15 @@ function resolveHostedAiUsageAllowancePeriod(input: {
   });
 
   return {
+    allowanceSource:
+      input.billingRef?.allowanceSource === "family_sponsored_pulse"
+        ? "family_sponsored_pulse"
+        : "direct_paid_member_plan",
     billingPlanCode,
     kind: "period",
-    limitUsdMicros: getHostedAiUsageMonthlyAllowanceUsdMicros(billingPlanCode),
+    limitUsdMicros:
+      input.billingRef?.usageLimitUsdMicrosOverride ??
+      getHostedAiUsageMonthlyAllowanceUsdMicros(billingPlanCode),
     periodEnd: period.periodEnd,
     periodStart: period.periodStart,
     source: period.source,
@@ -1302,6 +1480,7 @@ function resolveHostedPulseTrialAllowancePeriod(input: {
   }
 
   return {
+    allowanceSource: "direct_trial",
     billingPlanCode: "launch_monthly",
     kind: "period",
     limitUsdMicros: trialPolicy.usageLimitUsdMicros,
@@ -1885,6 +2064,7 @@ function buildHostedAiUsageAllowanceModelSnapshot(
 }
 
 function buildHostedAiUsageGateLimitNotice(input: {
+  allowanceSource: HostedAiUsageAllowanceSourceKind;
   billingPlanCode: HostedBillingPlanCode;
   limitUsdMicros: bigint;
   memberId: string;
@@ -1902,6 +2082,15 @@ function buildHostedAiUsageGateLimitNotice(input: {
         noticeCode: "trial_usage_limit_reached",
         periodStart: input.periodStart,
       }),
+    };
+  }
+
+  const base = "Hey, you've reached your usage limit for the month.";
+
+  if (input.allowanceSource === "family_sponsored_pulse") {
+    return {
+      code: "family_usage_limit_reached",
+      message: `${base} Murph will resume when your Family usage resets.`,
     };
   }
 

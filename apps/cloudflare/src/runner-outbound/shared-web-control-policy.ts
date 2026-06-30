@@ -18,6 +18,7 @@ import {
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
+  HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
@@ -60,6 +61,7 @@ export type HostedRunnerWebControlOperation =
   | "device_sync_pending_dirty_state"
   | "device_sync_runtime_apply"
   | "device_sync_runtime_snapshot"
+  | "family_plan_tool"
   | "mailbox_consume"
   | "mailbox_fetch"
   | "mailbox_payload_decode"
@@ -95,6 +97,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH, "linq_contact_card_share_after_outbound"],
   [HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH, "browser_vault_replica_publish"],
   [HOSTED_RUNTIME_CODEX_AUTH_PATH, "codex_auth_update"],
+  [HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH, "family_plan_tool"],
   [HOSTED_RUNTIME_MAILBOX_CONSUME_PATH, "mailbox_consume"],
   [HOSTED_RUNTIME_MAILBOX_FETCH_PATH, "mailbox_fetch"],
   [HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH, "mailbox_payload_fetch"],
