@@ -819,6 +819,8 @@ export async function markAssistantOutboxIntentMirrorSending(input: {
 export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
   deliveryIdempotencyKey?: string | null
   deliveryTransportIdempotent: boolean
+  externalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
+  externalThreadService?: AssistantOutboxIntent['externalThreadService']
   intent: AssistantOutboxIntent
   intentPath: string
   preparedDispatchToken?: string | null
@@ -901,6 +903,12 @@ export async function markAssistantOutboxIntentMirrorSendingPrepared(input: {
         deliveryConfirmationPending: false,
         deliveryIdempotencyKey,
         deliveryTransportIdempotent: input.deliveryTransportIdempotent,
+        ...(input.externalThreadRouteAuthority === undefined
+          ? {}
+          : { externalThreadRouteAuthority: input.externalThreadRouteAuthority }),
+        ...(input.externalThreadService === undefined
+          ? {}
+          : { externalThreadService: input.externalThreadService }),
         updatedAt: input.startedAt,
         lastAttemptAt: input.startedAt,
         nextAttemptAt: null,

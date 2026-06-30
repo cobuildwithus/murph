@@ -18,6 +18,7 @@ export type {
 export {
   createHostedLinqChat,
   createHostedLinqWebhookSubscription,
+  shareHostedLinqContactCard,
   startHostedLinqTypingIndicator,
   sendHostedLinqReadReceipt,
   sendHostedLinqChatMessage,

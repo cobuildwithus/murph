@@ -38,9 +38,12 @@ import {
   sendHostedLinqChatMessage,
 } from "./linq";
 import {
+  maybeShareHostedLinqContactCardAfterOutboundForRuntime,
+} from "./linq-contact-card-share";
+import {
   assertHostedThreadRouteEgressAuthority,
-  type HostedThreadRouteSnapshot,
   type HostedLinqThreadRouteEgressAuthority,
+  type HostedThreadRouteSnapshot,
 } from "../hosted-routing/thread-route-store";
 import {
   sanitizeHostedOnboardingStructuredLogDetails,
@@ -60,6 +63,8 @@ export type HostedLinqConversationHomeRedirectPayload = {
   homeRecipientPhone: string;
   memberId: string;
   replyToMessageId: string | null;
+  service?: string | null;
+  threadIsDirect?: boolean | null;
   template: "conversation_home_redirect";
 };
 
@@ -69,6 +74,8 @@ export type HostedLinqDailyQuotaPayload = {
   occurredAt: string;
   replyToMessageId: string | null;
   routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
+  service?: string | null;
+  threadIsDirect?: boolean | null;
   template: "daily_quota";
 };
 
@@ -89,7 +96,9 @@ type HostedLinqAiUsageQuotaBasePayload = {
   occurredAt: string;
   replyToMessageId: string | null;
   routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
+  service?: string | null;
   sourceEventId: string;
+  threadIsDirect?: boolean | null;
   template: "ai_usage_quota";
 };
 
@@ -109,6 +118,8 @@ export type HostedLinqInviteSignupMessagePayload = {
   memberId: string;
   occurredAt: string;
   replyToMessageId: string | null;
+  service?: string | null;
+  threadIsDirect?: boolean | null;
   template: "invite_signup";
 };
 
@@ -116,6 +127,8 @@ export type HostedLinqInviteSigninMessagePayload = {
   chatId: string;
   inviteId: string;
   replyToMessageId: string | null;
+  service?: string | null;
+  threadIsDirect?: boolean | null;
   template: "invite_signin";
 };
 
@@ -151,7 +164,9 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       homeRecipientPhone: string;
       memberId: string;
       replyToMessageId?: string | null;
+      service?: string | null;
       sourceEventId: string;
+      threadIsDirect?: boolean | null;
       template: "conversation_home_redirect";
     }
   | {
@@ -163,7 +178,9 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       occurredAt: string;
       replyToMessageId?: string | null;
       routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
+      service?: string | null;
       sourceEventId: string;
+      threadIsDirect?: boolean | null;
       template: "ai_usage_quota";
     }
   | {
@@ -175,7 +192,9 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       occurredAt: string;
       replyToMessageId?: string | null;
       routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
+      service?: string | null;
       sourceEventId: string;
+      threadIsDirect?: boolean | null;
       template: "ai_usage_quota";
     }
   | {
@@ -184,7 +203,9 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       occurredAt: string;
       replyToMessageId?: string | null;
       routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
+      service?: string | null;
       sourceEventId: string;
+      threadIsDirect?: boolean | null;
       template: "daily_quota";
     }
   | {
@@ -202,7 +223,9 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       memberId: string;
       occurredAt: string;
       replyToMessageId?: string | null;
+      service?: string | null;
       sourceEventId: string;
+      threadIsDirect?: boolean | null;
       template: "invite_signup";
     };
 
@@ -358,6 +381,18 @@ async function sendHostedLinqSideEffect(
       replyToMessageId: effect.payload.replyToMessageId,
       signal: options.signal,
     });
+    const memberId = readHostedLinqSideEffectMemberId(effect.payload);
+    if (memberId) {
+      queueHostedLinqContactCardSideEffectShare({
+        effect,
+        memberId,
+        prisma: options.prisma,
+        routeAuthority: "routeAuthority" in effect.payload
+          ? effect.payload.routeAuthority ?? null
+          : null,
+        signal: options.signal,
+      });
+    }
     scheduleHostedLinqDeliveryMilestoneAfterAttempt({
       attemptTask: deliveryAttemptTask,
       milestoneTask: () => markHostedLinqDeliveryAcceptedBestEffort({
@@ -395,6 +430,41 @@ async function sendHostedLinqSideEffect(
   }
 
   return { status: "sent" };
+}
+
+function queueHostedLinqContactCardSideEffectShare(share: {
+  effect: {
+    effectId: string;
+    payload: HostedLinqMessagePayload;
+  };
+  memberId: string;
+  prisma: HostedLinqTransportPersistenceClient;
+  routeAuthority: HostedLinqThreadRouteEgressAuthority | null;
+  signal?: AbortSignal;
+}): void {
+  const service = "service" in share.effect.payload
+    ? share.effect.payload.service ?? null
+    : null;
+  const threadIsDirect = "threadIsDirect" in share.effect.payload
+    ? share.effect.payload.threadIsDirect ?? null
+    : null;
+
+  void maybeShareHostedLinqContactCardAfterOutboundForRuntime({
+    authority: share.routeAuthority,
+    boundUserId: share.memberId,
+    chatId: share.effect.payload.chatId,
+    eligibility: {
+      service,
+      threadIsDirect,
+    },
+    prisma: share.prisma,
+    ...(share.signal ? { signal: share.signal } : {}),
+  }).catch((error: unknown) => {
+    console.warn(
+      "Hosted Linq contact-card side-effect share failed.",
+      buildHostedLinqContactCardSideEffectLogDetails(share.effect, error),
+    );
+  });
 }
 
 async function assertHostedLinqSideEffectRouteAuthority(
@@ -577,6 +647,32 @@ function buildHostedLinqSideEffectTraceLogDetails(
   };
 }
 
+function buildHostedLinqContactCardSideEffectLogDetails(
+  effect: HostedLinqMessageSideEffect,
+  error: unknown,
+): Record<string, boolean | number | string | null> {
+  const errorRecord = error && typeof error === "object" ? error as Record<string, unknown> : null;
+  const nestedDetails = errorRecord?.details && typeof errorRecord.details === "object"
+    ? errorRecord.details as Record<string, unknown>
+    : null;
+
+  return sanitizeHostedOnboardingStructuredLogDetails({
+    chatIdSuffix: toHostedOnboardingLogIdSuffix(effect.payload.chatId),
+    errorCode: readHostedLinqSideEffectString(errorRecord, "code"),
+    errorMessage:
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : null,
+    errorName: error instanceof Error ? error.name : null,
+    operation: "share_contact_card",
+    provider: "linq",
+    ...(nestedDetails ?? {}),
+    template: effect.payload.template,
+  });
+}
+
 function readHostedLinqSideEffectRetryable(error: unknown): boolean {
   return Boolean(
     error
@@ -593,6 +689,14 @@ function readHostedLinqSideEffectString(
 ): string | null {
   return record && typeof record[key] === "string"
     ? record[key] as string
+    : null;
+}
+
+function readHostedLinqSideEffectMemberId(
+  payload: HostedLinqMessagePayload,
+): string | null {
+  return "memberId" in payload && typeof payload.memberId === "string"
+    ? payload.memberId
     : null;
 }
 
@@ -724,6 +828,7 @@ function buildHostedWebhookLinqMessagePayload(
         homeRecipientPhone: input.homeRecipientPhone,
         memberId: input.memberId,
         replyToMessageId,
+        ...buildHostedLinqContactCardShareEligibilityPayload(input),
         template: input.template,
       };
     case "daily_quota":
@@ -733,6 +838,7 @@ function buildHostedWebhookLinqMessagePayload(
         occurredAt: input.occurredAt,
         replyToMessageId,
         ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
+        ...buildHostedLinqContactCardShareEligibilityPayload(input),
         template: input.template,
       };
     case "family_invite_reply":
@@ -752,6 +858,7 @@ function buildHostedWebhookLinqMessagePayload(
         memberId: input.memberId,
         occurredAt: input.occurredAt,
         replyToMessageId,
+        ...buildHostedLinqContactCardShareEligibilityPayload(input),
         template: input.template,
       };
   }
@@ -768,6 +875,7 @@ function buildHostedLinqAiUsageQuotaPayload(
     occurredAt: input.occurredAt,
     replyToMessageId,
     ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
+    ...buildHostedLinqContactCardShareEligibilityPayload(input),
     sourceEventId: input.sourceEventId,
     template: input.template,
   };
@@ -795,6 +903,19 @@ function buildHostedLinqAiUsageQuotaPayload(
     ...basePayload,
     claimToken: input.claimToken,
     noticeCode: input.noticeCode,
+  };
+}
+
+function buildHostedLinqContactCardShareEligibilityPayload(input: {
+  service?: string | null;
+  threadIsDirect?: boolean | null;
+}): {
+  service?: string | null;
+  threadIsDirect?: boolean | null;
+} {
+  return {
+    ...(input.service === undefined ? {} : { service: input.service }),
+    ...(input.threadIsDirect === undefined ? {} : { threadIsDirect: input.threadIsDirect }),
   };
 }
 

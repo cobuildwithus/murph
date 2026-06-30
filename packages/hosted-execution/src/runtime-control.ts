@@ -16,6 +16,7 @@ import type {
 import type {
   HostedBrowserVaultReplicaCursorRef,
   HostedBrowserVaultReplicaRef,
+  HostedExecutionLinqExternalThreadRouteAuthority,
 } from "./contracts.ts";
 import {
   HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
@@ -708,6 +709,13 @@ export interface HostedRuntimeUsageRecordRequest {
 export interface HostedRuntimeUsageRecordResponse {
   recorded: boolean;
   usageId: string;
+}
+
+export interface HostedRuntimeLinqContactCardShareAfterOutboundRequest {
+  authority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
+  chatId: string;
+  service: string | null;
+  threadIsDirect: boolean | null;
 }
 
 export const HOSTED_PRODUCT_FEEDBACK_KINDS = [

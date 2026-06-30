@@ -386,7 +386,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
           homeRecipientPhone: routeDecision.homeRecipientPhone,
           memberId: existingMember.id,
           messageId: summary.messageId,
+          service: messageEvent.data.service ?? null,
           sourceEventId: input.event.event_id,
+          threadIsDirect: isHostedLinqDirectChatAttested(messageEvent),
         }),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {
           existingMemberActive: existingMemberEffectiveActive,
@@ -426,6 +428,13 @@ export async function planHostedOnboardingLinqWebhook(input: {
       );
     }
 
+    const homeBindingRecipientPhone = resolveHostedLinqHomeBindingRecipientPhone({
+      homeChatId: homeRoute?.linqChatId ?? null,
+      homeRecipientPhone: homeRoute?.linqRecipientPhone ?? null,
+      incomingChatId: summary.chatId,
+      incomingRecipientPhone: recipientPhoneNumber,
+    });
+
     const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
       dedupeKey: input.event.event_id,
       prisma: input.prisma,
@@ -462,12 +471,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       memberId: existingMember.id,
       occurredAt,
       prisma: input.prisma,
-      recipientPhone: resolveHostedLinqHomeBindingRecipientPhone({
-        homeChatId: homeRoute?.linqChatId ?? null,
-        homeRecipientPhone: homeRoute?.linqRecipientPhone ?? null,
-        incomingChatId: summary.chatId,
-        incomingRecipientPhone: recipientPhoneNumber,
-      }),
+      recipientPhone: homeBindingRecipientPhone,
     });
 
     // Read-first: the webhook only needs the gate decision for quota notices;
@@ -512,6 +516,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           parts: messageEvent.data.message.parts,
           service: messageEvent.data.service ?? null,
         }),
+        threadIsDirect: isHostedLinqDirectChatAttested(messageEvent),
         ...(messageEvent.data.message.reply_to?.message_id === undefined
           ? {}
           : { replyToMessageId: messageEvent.data.message.reply_to.message_id }),
@@ -674,7 +679,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
       memberId: member.id,
       messageId: summary.messageId,
       occurredAt,
+      service: messageEvent.data.service ?? null,
       sourceEventId: input.event.event_id,
+      threadIsDirect: isHostedLinqDirectChatAttested(messageEvent),
     }),
     buildHostedLinqWebhookPlannerDetails(input.event, context, {
       chatDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
@@ -997,7 +1004,9 @@ async function planHostedLinqInboundAdmissionDenied(input: {
         noticeCode: deniedUsageGate.userNotice.code,
         occurredAt: input.context.occurredAt,
         routeAuthority: input.routeAuthority ?? null,
+        service: input.context.messageEvent.data.service ?? null,
         sourceEventId: input.event.event_id,
+        threadIsDirect: isHostedLinqDirectChatAttested(input.context.messageEvent),
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
         ...input.logDetails,
@@ -1034,7 +1043,9 @@ async function planHostedLinqInboundAdmissionDenied(input: {
         messageId: input.context.summary.messageId,
         occurredAt: input.context.occurredAt,
         routeAuthority: input.routeAuthority ?? null,
+        service: input.context.messageEvent.data.service ?? null,
         sourceEventId: input.event.event_id,
+        threadIsDirect: isHostedLinqDirectChatAttested(input.context.messageEvent),
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
         ...input.logDetails,

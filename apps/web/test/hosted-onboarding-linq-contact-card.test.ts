@@ -315,4 +315,72 @@ describe("hosted Linq contact card client", () => {
     });
   });
 
+  it("treats Linq-hosted contact-card image URLs as current", async () => {
+    const observedAt = new Date("2026-06-25T12:30:00.000Z");
+    runtimeMocks.getHostedOnboardingEnvironment.mockReturnValue({
+      contactPrivacyKeyring: {
+        currentVersion: "v1",
+        keysByVersion: {
+          v1: Buffer.alloc(32),
+        },
+        readVersions: ["v1"],
+      },
+      linqConversationPhoneNumbers: ["+15550000001"],
+      linqMaxActiveMembersPerConversationPhone: 1000,
+      publicBaseUrl: "https://app.example.test",
+    });
+    const lookupKey = createHostedPhoneLookupKey("+15550000001");
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        phoneNumberLookupKey: lookupKey,
+        providerStatus: "HEALTHY",
+      },
+    ]);
+    const prisma = {
+      hostedLinqLine: {
+        findMany,
+      },
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof URL ? input : new URL(String(input));
+
+      if (url.pathname.endsWith("/contact_card")
+        && url.searchParams.get("phone_number") === "+15550000001"
+        && init?.method === "GET") {
+        return createJsonResponse({
+          contact_cards: [
+            {
+              first_name: "Murph",
+              image_url: "https://cdn.linqapp.com/example/contact-card/sample/image-current.png",
+              is_active: true,
+              phone_number: "+15550000001",
+            },
+          ],
+        });
+      }
+
+      if (url.pathname.endsWith("/contact_card") && init?.method === "PATCH") {
+        throw new Error("Linq-hosted contact card image should not be updated.");
+      }
+
+      throw new Error(`Unexpected Linq URL ${url.pathname}${url.search}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(reconcileHostedLinqContactCards({
+      observedAt,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      activeCards: 1,
+      atRiskLines: 0,
+      createdCards: 0,
+      criticalLines: 0,
+      inactiveCards: 0,
+      lineCount: 1,
+      updatedCards: 0,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
 });

@@ -21,6 +21,7 @@ import {
   HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
+  HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_LOG_PATH,
@@ -68,6 +69,7 @@ export type HostedRunnerWebControlOperation =
   | "linq_delivery_outcome"
   | "linq_egress_engagement"
   | "phone_call_start"
+  | "linq_contact_card_share_after_outbound"
   | "runtime_latency_trace"
   | "runtime_log_write"
   | "product_feedback_recording"
@@ -92,6 +94,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH, "device_sync_runtime_snapshot"],
   [HOSTED_RUNTIME_LOG_PATH, "runtime_log_write"],
   [HOSTED_RUNTIME_LATENCY_TRACE_PATH, "runtime_latency_trace"],
+  [HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH, "linq_contact_card_share_after_outbound"],
   [HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH, "browser_vault_replica_publish"],
   [HOSTED_RUNTIME_CODEX_AUTH_PATH, "codex_auth_update"],
   [HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH, "family_plan_tool"],

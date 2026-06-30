@@ -263,7 +263,21 @@ export async function assertHostedThreadRouteEgressAuthority(input: {
     return route;
   }
 
-  throw hostedOnboardingError({
+  throw buildHostedThreadRouteEgressUnauthorizedError();
+}
+
+export async function assertHostedLinqRouteEgressAuthority(input: {
+  authority: HostedLinqThreadRouteEgressAuthority;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedThreadRouteSnapshot> {
+  return await assertHostedThreadRouteEgressAuthority({
+    authority: input.authority,
+    prisma: input.prisma,
+  });
+}
+
+function buildHostedThreadRouteEgressUnauthorizedError() {
+  return hostedOnboardingError({
     code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
     httpStatus: 403,
     message: "External thread route egress is no longer authorized.",

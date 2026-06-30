@@ -33,6 +33,7 @@ import type {
   HostedWorkspaceCheckpointResponse,
   HostedWorkspaceReadResponse,
   HostedBrowserVaultReplicaPublishResponse,
+  HostedRuntimeLinqContactCardShareAfterOutboundRequest,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   AssistantUsageRecord,
@@ -255,6 +256,13 @@ export interface HostedRuntimeLinqDeleteMessagesRequest {
   messageIds: readonly string[];
 }
 
+type HostedRuntimeLinqContactCardShareAfterOutboundEffectsRequest = Omit<
+  HostedRuntimeLinqContactCardShareAfterOutboundRequest,
+  "authority"
+> & {
+  authority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
+};
+
 type HostedRuntimeEffectsPortBase = {
   deletePreparedAssistantDelivery?(
     input: Pick<HostedAssistantDeliverySideEffect, "effectId" | "fingerprint">,
@@ -273,6 +281,10 @@ type HostedRuntimeEffectsPortBase = {
   ): Promise<HostedAssistantDeliveryRecord | null>;
   assertLinqRecentInboundEngagement?(
     request: HostedRuntimeLinqRecentInboundEngagementRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<void>;
+  maybeShareLinqContactCardAfterOutbound?(
+    request: HostedRuntimeLinqContactCardShareAfterOutboundEffectsRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
   recordLinqDeliveryOutcome?(

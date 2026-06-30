@@ -5132,6 +5132,56 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      method: "GET",
+      path: "/contact_card",
+    },
+    {
+      method: "POST",
+      path: "/contact_card",
+    },
+    {
+      method: "PATCH",
+      path: "/contact_card",
+    },
+    {
+      method: "POST",
+      path: "/chats/chat_1/contact_card",
+    },
+    {
+      method: "POST",
+      path: "/chats/chat_1/share_contact_card",
+    },
+    {
+      method: "POST",
+      path: "/chats/chat_1/share_contact_card/extra",
+    },
+  ] as const)("blocks non-allowlisted Linq contact-card route $method $path", async (route) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request(`https://api.linqapp.com/api/partner/v3${route.path}`, {
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+        },
+        method: route.method,
+      }),
+      createInterceptEnv({
+        LINQ_API_TOKEN: "linq-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(403);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("preserves the hosted-local container host alias for configured Linq origins", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
     vi.stubGlobal("fetch", fetchMock);

@@ -6756,7 +6756,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       fromPhoneNumber: "+15550000002",
       replyToMessageId: "linq-message-1",
       routeAuthority: null,
+      service: null,
       target: "linq-thread-1",
+      threadIsDirect: null,
     };
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -6784,7 +6786,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       fromPhoneNumber: "+15550000002",
       replyToMessageId: "linq-message-1",
       routeAuthority: null,
+      service: null,
       target: "linq-thread-1",
+      threadIsDirect: null,
     };
     const effect = createDeliveryEffect();
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([effect]);
@@ -8472,7 +8476,9 @@ function createPhaseInput(input: {
     fromPhoneNumber: string | null;
     replyToMessageId: string | null;
     routeAuthority: null;
+    service: string | null;
     target: string | null;
+    threadIsDirect: boolean | null;
   };
   logRequests?: HostedRuntimeLogRequest[];
   now?: () => string;
