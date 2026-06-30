@@ -489,8 +489,9 @@ describe('assistant skill assets', () => {
       'mark onboarding complete with the declined reason',
     )
     expect(murphOnboardingSkill.triggerHint).toContain(
-      'files, labs, supplement labels, wearable data, medications, meals, workouts, symptoms, or setup answers',
+      'files, labs, supplement labels, wearable data, medications, meals, workouts, symptoms, setup answers, or slow lab/supplement saves',
     )
+    expect(murphOnboardingSkill.triggerHint).toContain('delegated to a V2 subagent')
 
     expect(raw).toContain(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)
     expect(raw).toContain(
@@ -663,14 +664,34 @@ describe('assistant skill assets', () => {
       'Supplements: mention that they can send a photo of supplement bottles or labels if that is easier',
     )
     expect(raw).toContain('Follow the supplement input affordance')
+    expect(raw).toContain('## Delegating slow onboarding saves')
     expect(raw).toContain(
-      'When their supplement answer will require ingredient lookup',
+      'Use a V2 subagent for slow lab or supplement ingestion when the full parse/lookup is not needed for the current visible reply',
+    )
+    expect(raw).toContain('collaboration.spawn_agent')
+    expect(raw).toContain(
+      'The child owns the full canonical save, not a staging summary',
     )
     expect(raw).toContain(
-      'use at most one `send_progress_update` before the first lookup',
+      'Do not use a child for urgent or safety-sensitive replies, user-facing messages, approvals, voice memos, progress updates, or any Murph dynamic/server-request tool',
     )
     expect(raw).toContain(
-      'Default to `vault-cli supplement search-labels` for one supplement or `vault-cli supplement search-labels-batch` for several',
+      'If the result is reply-critical or the user explicitly asks Murph to finish the save before continuing',
+    )
+    expect(raw).toContain(
+      'If no V2 spawn tool is available and the save is not reply-critical, preserve durable evidence, save only obvious high-value structure needed now, and continue the visible reply with the remaining parse/import state clear',
+    )
+    expect(raw).toContain(
+      'Treat a delegated save as unresolved until the child completion or a direct vault read confirms the canonical records are present',
+    )
+    expect(raw).toContain(
+      'When their supplement answer requires ingredient lookup and canonical save work',
+    )
+    expect(raw).toContain(
+      'prefer the delegated-save path above if the result is not needed for the current visible reply',
+    )
+    expect(raw).toContain(
+      'The supplement child should default to `vault-cli supplement search-labels` for one supplement or `vault-cli supplement search-labels-batch` for several',
     )
     expect(raw).toContain(
       'For batch lookup, pass one repeated `--query` flag per product; do not pass product names as positional arguments',
@@ -682,10 +703,13 @@ describe('assistant skill assets', () => {
       'fall back to web search for products or ingredients it misses',
     )
     expect(raw).toContain(
-      'Do not use a progress update for a quick memory save or a single follow-up question',
+      'If running synchronously instead of delegating, use at most one `send_progress_update` before the first lookup',
     )
     expect(raw).toContain(
-      'After lookup when useful, save every current supplement product through `vault-cli supplement save`',
+      'do not use a progress update for a quick memory save or a single follow-up question',
+    )
+    expect(raw).toContain(
+      'After delegated or synchronous lookup when useful, every current supplement product should be saved through `vault-cli supplement save`',
     )
     expect(raw).toContain(
       'ask one short follow-up for duration or start timing after the structured save or on the next onboarding turn',
@@ -705,7 +729,13 @@ describe('assistant skill assets', () => {
       'If the user sends lab PDFs, Lab Results of Record documents, pasted lab results, or other blood-test documents',
     )
     expect(raw).toContain(
-      'call `send_progress_update` before reading the content or using file/import tools',
+      'prefer the delegated-save path above',
+    )
+    expect(raw).toContain(
+      'save the full recoverable structure with `blood-test import-json` or typed blood-test save commands',
+    )
+    expect(raw).toContain(
+      'If synchronous inspection is needed for the current reply, call `send_progress_update` before reading the content or using file/import tools',
     )
     expect(raw).toContain('Persist useful answers as they arrive, not at the end')
     expect(raw).toContain(

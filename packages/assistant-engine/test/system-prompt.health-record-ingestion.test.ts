@@ -30,13 +30,14 @@ describe('assistant system prompt health record ingestion invariant', () => {
     expect(prompt).toContain('blood-test for labs and panels')
   })
 
-  it('makes large record bundles responsive without pretending turn-local subagents can finish post-reply writes', () => {
+  it('makes large record bundles responsive while assigning canonical writes to durable workers', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain('For a large or heterogeneous record bundle')
     expect(prompt).toContain('do not make the user wait for exhaustive extraction')
-    expect(prompt).toContain('runtime-supported non-blocking background job or subagent')
-    expect(prompt).toContain('Do not rely on a turn-local subagent that may outlive the parent turn for required vault writes')
+    expect(prompt).toContain('runtime-supported non-blocking background job or Subagent V2 child')
+    expect(prompt).toContain('the background worker owns the canonical writes, not merely extraction')
+    expect(prompt).toContain('saved record ids or the exact reason saving could not finish')
     expect(prompt).toContain('say the full structured extraction did not finish rather than implying it is running')
   })
 })
