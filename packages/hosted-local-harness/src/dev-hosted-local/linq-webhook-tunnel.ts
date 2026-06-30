@@ -238,15 +238,11 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
       (input.stderrTarget ?? process.stderr).write(
         [
           `[linq] Local webhook target ${input.setup.targetUrl} is already registered for ${phoneNumberLabel},`,
-          "but Linq did not return its signing secret; using the configured local LINQ_WEBHOOK_SECRET.",
-          "If webhook callbacks fail signature verification, recreate the Linq webhook subscription for this environment.",
+          "but Linq did not return its signing secret, so the configured local LINQ_WEBHOOK_SECRET cannot be verified.",
+          "Registering an exact local subscription so this worktree can use the matching signing secret.",
           "\n",
         ].join(" "),
       );
-      return {
-        webhookSecret: configuredWebhookSecret,
-        webhookSecretSource: "configured",
-      };
     } else if (existingRegistration.secretStatus === "unavailable") {
       (input.stderrTarget ?? process.stderr).write(
         [

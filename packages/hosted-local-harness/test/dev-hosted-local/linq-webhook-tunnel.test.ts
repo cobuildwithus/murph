@@ -567,7 +567,7 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
     }
   });
 
-  it("continues without caching when Linq does not expose an existing signing secret", async () => {
+  it("creates a local registration when Linq does not expose an existing signing secret", async () => {
     const { registerHostedLocalLinqWebhookSubscription } = await import(
       "../../src/dev-hosted-local/linq-webhook-tunnel.ts"
     );
@@ -608,14 +608,27 @@ describe("registerHostedLocalLinqWebhookSubscription", () => {
         stderrTarget,
       });
 
-      expect(createLinqWebhookSubscription).not.toHaveBeenCalled();
+      expect(createLinqWebhookSubscription).toHaveBeenCalledWith(
+        {
+          phoneNumbers: ["+15550000001"],
+          subscribedEvents: ["message.received"],
+          targetUrl: "https://tunnel.example.test/api/hosted-onboarding/linq/webhook",
+        },
+        {
+          env: {
+            LINQ_API_TOKEN: "linq-token",
+          },
+        },
+      );
       expect(result).toEqual({
         webhookSecret: "linq-webhook-secret",
-        webhookSecretSource: "configured",
+        webhookSecretSource: "created",
       });
-      await expect(readFile(registrationCachePath, "utf8")).rejects.toThrow();
+      const cacheText = await readFile(registrationCachePath, "utf8");
+      expect(cacheText).toContain("\"secretVerified\": true");
+      expect(cacheText).not.toContain("linq-webhook-secret");
       expect(stderrTarget.writeMock).toHaveBeenCalledWith(expect.stringContaining(
-        "using the configured local LINQ_WEBHOOK_SECRET",
+        "configured local LINQ_WEBHOOK_SECRET cannot be verified",
       ));
     } finally {
       await rm(tempDir, { force: true, recursive: true });
