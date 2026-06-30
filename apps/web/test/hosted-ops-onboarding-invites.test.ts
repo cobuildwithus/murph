@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqChatId: vi.fn(),
+  readHostedMemberRoutingState: vi.fn(),
   requireHostedOpsRequestAccess: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   sendHostedLinqVoiceMemo: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   lookupHostedMemberRoutingByHomeLinqChatId: mocks.lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqChatId: mocks.lookupHostedMemberRoutingByPendingLinqChatId,
+  readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
   upsertHostedMemberPendingLinqBindingTx: mocks.upsertHostedMemberPendingLinqBindingTx,
 }));
 
@@ -129,6 +131,7 @@ describe("hosted ops onboarding invites", () => {
       },
     });
     mocks.lookupHostedMemberRoutingByPendingLinqChatId.mockResolvedValue(null);
+    mocks.readHostedMemberRoutingState.mockResolvedValue(null);
     mocks.sendHostedLinqChatMessage.mockResolvedValue(undefined);
     mocks.createHostedLinqMediaChat.mockResolvedValue({
       chatId: "chat_created",
@@ -304,6 +307,10 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqVoiceMemo).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: tx,
+    });
     const openIdempotencyKey = readIdempotencyKey(mocks.createHostedLinqMediaChat);
     expect(openIdempotencyKey).not.toContain("+15557654321");
     expect(openIdempotencyKey).not.toContain("+15551234567");
@@ -341,6 +348,49 @@ describe("hosted ops onboarding invites", () => {
       },
     });
     expect(JSON.stringify(result)).not.toContain("+15557654321");
+  });
+
+  it("rejects a second unresolved new chat for the same member before remote side effects", async () => {
+    mocks.readHostedMemberRoutingState
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        memberId: "member_123",
+        pendingLinqChatId: "chat_created",
+      });
+
+    await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-first",
+      voiceMemo: {
+        bytes: new Uint8Array([1]),
+        contentType: "audio/x-m4a",
+        extension: "m4a",
+        sizeBytes: 1,
+      },
+    });
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-second",
+      voiceMemo: {
+        bytes: new Uint8Array([2]),
+        contentType: "audio/x-m4a",
+        extension: "m4a",
+        sizeBytes: 1,
+      },
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_PENDING_LINQ_CHAT_EXISTS",
+    });
+
+    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(1);
+    expect(mocks.createHostedLinqMediaChat).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(1);
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("rejects a new chat without a voice memo before creating remote side effects", async () => {

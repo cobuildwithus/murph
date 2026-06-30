@@ -20,6 +20,7 @@ import {
 import {
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqChatId,
+  readHostedMemberRoutingState,
   upsertHostedMemberPendingLinqBindingTx,
 } from "../hosted-onboarding/hosted-member-routing-store";
 import { ensureHostedMemberForPhoneTx } from "../hosted-onboarding/member-identity-service";
@@ -246,7 +247,7 @@ async function sendHostedOpsOnboardingVoiceFirstNewChat(input: {
   request: NormalizedHostedOpsOnboardingNewChatInviteInput;
 }): Promise<HostedOpsOnboardingInviteResult> {
   const voiceMemo = input.request.voiceMemo;
-  const memberId = await ensureHostedOpsOnboardingNewChatMemberId({
+  const memberId = await prepareHostedOpsOnboardingNewChatMemberId({
     prisma: input.prisma,
     request: input.request,
   });
@@ -314,16 +315,31 @@ async function sendHostedOpsOnboardingVoiceFirstNewChat(input: {
   };
 }
 
-async function ensureHostedOpsOnboardingNewChatMemberId(input: {
+async function prepareHostedOpsOnboardingNewChatMemberId(input: {
   prisma: PrismaClient;
   request: NormalizedHostedOpsOnboardingNewChatInviteInput;
 }): Promise<string> {
-  return input.prisma.$transaction(async (tx) => (
-    await ensureHostedMemberForPhoneTx({
+  return input.prisma.$transaction(async (tx) => {
+    const member = await ensureHostedMemberForPhoneTx({
       phoneNumber: input.request.recipientPhoneNumber,
       prisma: tx,
-    })
-  ).id, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    });
+    const routing = await readHostedMemberRoutingState({
+      memberId: member.id,
+      prisma: tx,
+    });
+
+    if (routing?.pendingLinqChatId) {
+      throw hostedOnboardingError({
+        code: "HOSTED_OPS_ONBOARDING_PENDING_LINQ_CHAT_EXISTS",
+        httpStatus: 409,
+        message: "This recipient already has a pending voice-first onboarding chat. Use the existing chat or wait for their reply before sending another.",
+        retryable: false,
+      });
+    }
+
+    return member.id;
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export function resolveHostedOpsOnboardingVoiceMemoContentType(input: {
