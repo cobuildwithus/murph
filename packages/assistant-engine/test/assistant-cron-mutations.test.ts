@@ -513,6 +513,7 @@ function createAutomationSource(
     createdAt: '2026-04-08T07:00:00.000Z',
     instructions: 'Send the reminder.',
     kind: 'automation',
+    assistantTargetOverride: null,
     route: {
       channel: 'telegram',
       deliverySource: null,

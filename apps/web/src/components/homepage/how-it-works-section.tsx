@@ -146,10 +146,6 @@ function ConnectCard() {
           </div>
         </div>
       </div>
-
-      <p className="text-[0.8125rem] leading-[1.6] text-[#736a58]">
-        Wearables, meals, labs — Murph connects it all.
-      </p>
     </div>
   );
 }
@@ -192,9 +188,6 @@ function BrowseCard() {
           ))}
         </div>
       </div>
-      <p className="text-[0.8125rem] leading-[1.6] text-[#736a58]">
-        Every protocol cites the research behind it.
-      </p>
     </div>
   );
 }
@@ -252,9 +245,6 @@ function RunCard() {
           </p>
         </div>
       </div>
-      <p className="text-[0.8125rem] leading-[1.6] text-[#736a58]">
-        Murph texts reminders. No app to open.
-      </p>
     </div>
   );
 }
@@ -330,9 +320,6 @@ function LearnCard() {
           </svg>
         </div>
       </div>
-      <p className="text-[0.8125rem] leading-[1.6] text-[#736a58]">
-        Baseline vs experiment. What moved, what didn&apos;t.
-      </p>
     </div>
   );
 }

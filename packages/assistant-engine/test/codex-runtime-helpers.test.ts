@@ -71,6 +71,9 @@ import type {
   AssistantProviderTurnExecutionResult,
 } from '../src/assistant/providers/types.ts'
 import type { AssistantProviderTraceEvent } from '../src/assistant/provider-traces.ts'
+import {
+  HOSTED_RUNTIME_PROCESS_ENV_MARKER,
+} from '../src/assistant-cli-access.ts'
 
 const TEST_FRESH_THREAD_FALLBACK = {
   turnContextPrompt: 'Fresh thread runtime context.',
@@ -2411,6 +2414,43 @@ describe('Codex assistant registry helpers', () => {
         'model_providers.venice.wire_api="responses"',
         'model_providers.venice.requires_openai_auth=false',
         'shell_environment_policy.ignore_default_excludes=false',
+      ]),
+    )
+  })
+
+  it('passes hosted MultiAgent V2 as a Codex app-server process override', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Completed hosted turn.',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'hosted-thread',
+      stderr: '',
+      stdout: '',
+      threadId: 'hosted-thread',
+      turnId: 'turn-hosted',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      env: {
+        [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: '1',
+        OPENAI_API_KEY: 'test-key',
+        PATH: '/usr/bin',
+      },
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'hosted-model',
+        modelProvider: 'openai',
+      }),
+      userPrompt: 'Run hosted turn.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    const appServerInput = codexAppServerMocks.executeCodexAppServerTurn.mock
+      .calls[0]?.[0]
+    expect(appServerInput?.configOverrides).toEqual(
+      expect.arrayContaining([
+        'features.multi_agent_v2=true',
       ]),
     )
   })

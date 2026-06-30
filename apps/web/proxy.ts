@@ -7,7 +7,7 @@ export const config = {
   matcher: "/.well-known/workflow/v1/webhook/:path*",
 };
 
-export function middleware(request: NextRequest): NextResponse {
+export function proxy(request: NextRequest): NextResponse {
   return rejectMalformedWorkflowWebhookToken(request.nextUrl.pathname) ?? NextResponse.next();
 }
 

@@ -205,6 +205,7 @@ export function resolveAssistantProviderPrompt(
 }
 
 export function mergeCodexConfigOverrides(input: {
+  enableMultiAgentV2?: boolean
   modelProvider?: string | null
   showThinkingTraces: boolean
 }): readonly string[] | undefined {
@@ -260,6 +261,13 @@ export function mergeCodexConfigOverrides(input: {
       overrides,
       'shell_environment_policy.ignore_default_excludes',
       'false',
+    )
+  }
+  if (input.enableMultiAgentV2) {
+    upsertCodexConfigOverride(
+      overrides,
+      'features.multi_agent_v2',
+      'true',
     )
   }
 

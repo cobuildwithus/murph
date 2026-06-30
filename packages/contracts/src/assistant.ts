@@ -5,3 +5,13 @@ Text me anything health-related — meals, supplements, workouts, symptoms, ques
 I'm especially good at running small health experiments — cold plunge, sauna, a new exercise routine, a supplement — and helping you understand if it makes you healthier.
 
 Ready to get started?`;
+
+export const assistantReasoningEffortValues = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const;
+
+export type AssistantReasoningEffort =
+  (typeof assistantReasoningEffortValues)[number];

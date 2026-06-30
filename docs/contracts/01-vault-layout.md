@@ -92,7 +92,7 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - When materialized, export-pack directories under `exports/packs/<packId>/` are derived, read-only outputs. Current pack ids are path-safe names derived from scope rather than canonical record ids.
 - `bank/memory.md` is the durable freeform current-state document for user-facing context that should stay small enough to read whole.
 - `bank/preferences.json` is the canonical typed preferences singleton for compact machine-readable defaults such as workout units.
-- `bank/automations/*.md` stores canonical assistant automation definitions, including schedule, route, and continuity policy frontmatter alongside the authored prompt body.
+- `bank/automations/*.md` stores canonical assistant automation definitions, including schedule, route, optional assistant target override, and continuity policy frontmatter alongside the authored prompt body.
 - `bank/scheduled-logs/*.md` stores canonical scheduled log definitions that later mint canonical events when the schedule executes.
 - `bank/goals`, `bank/conditions`, `bank/allergies`, `bank/foods`, `bank/recipes`, `bank/providers`, `bank/workout-formats`, `bank/family`, and `bank/genetics` store one Markdown document per canonical record id or slug-safe alias or saved-default lookup key.
 - `bank/library/**/*.md` is the stable health reference layer for reusable entities such as biomarkers, domains, protocol variants, and source artifacts. It is durable reference context, not the user-specific synthesized wiki.

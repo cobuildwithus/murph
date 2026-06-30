@@ -25,6 +25,7 @@ import {
   writeAssistantCronStore,
 } from './cron/store.js'
 import {
+  assistantDeviceActivityAuthorityKeyMatches,
   appendAssistantDeviceActivityCronJobMetadata,
   buildAssistantDeviceActivityAuthorityKey,
   readAssistantDeviceActivityCronJobMetadata,
@@ -438,7 +439,10 @@ async function scheduleDeviceActivityAutomationNotification(input: {
       if (
         existingMetadata?.occurrenceKey === occurrenceKey &&
         existingMetadata?.parentAutomationId === input.automation.automationId &&
-        existingMetadata.authorityKey === authorityKey &&
+        assistantDeviceActivityAuthorityKeyMatches({
+          authorityKey: existingMetadata.authorityKey,
+          automation: input.automation,
+        }) &&
         deviceActivityOccurrenceJobHasCoverage(existing)
       ) {
         const cursor = await advanceDeviceActivityAutomationCursor(input)

@@ -186,6 +186,7 @@ test("automation scaffold payload uses the canonical default shape", () => {
       participantId: null,
       threadId: null,
     },
+    assistantTargetOverride: null,
     instructions: "Write the scheduled assistant instructions here.",
     summary: "Weekly scheduled assistant notification instructions.",
     tags: ["assistant", "scheduled"],
@@ -216,6 +217,7 @@ test("automation record schema accepts the canonical automation shape", () => {
       participantId: null,
       threadId: null,
     },
+    assistantTargetOverride: null,
     continuityPolicy: "preserve",
     tags: ["assistant", "scheduled"],
     createdAt: "2026-04-06T00:00:00.000Z",
@@ -350,6 +352,9 @@ test("automation save and edit schemas expose typed fields while automation impo
     "identityId",
     "participantId",
     "threadId",
+    "assistantTargetOverrideModel",
+    "assistantTargetOverrideModelProvider",
+    "assistantTargetOverrideReasoningEffort",
   ]) {
     assert.equal(field in saveSchema.options.properties, true, field);
   }
@@ -359,7 +364,16 @@ test("automation save and edit schemas expose typed fields while automation impo
   assert.equal("input" in editSchema.options.properties, false);
   assert.equal(editSchema.options.required?.includes("instructions") ?? false, false);
   assert.equal(editSchema.options.required?.includes("channel") ?? false, false);
-  for (const field of ["title", "continuityPolicy", "instructions", "channel"]) {
+  for (const field of [
+    "title",
+    "continuityPolicy",
+    "instructions",
+    "channel",
+    "assistantTargetOverrideModel",
+    "assistantTargetOverrideModelProvider",
+    "assistantTargetOverrideReasoningEffort",
+    "clearAssistantTargetOverride",
+  ]) {
     assert.equal(field in editSchema.options.properties, true, field);
   }
 
@@ -372,6 +386,193 @@ test("automation save and edit schemas expose typed fields while automation impo
   assert.deepEqual(setStatusSchema.args.required, ["lookup"]);
   assert.equal("status" in setStatusSchema.options.properties, true);
   assert.equal(setStatusSchema.options.required?.includes("status") ?? false, true);
+});
+
+test("automation save and edit manage assistant target overrides from typed fields", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-target-");
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+
+    const invalidReasoningEffort = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Invalid target override reminder",
+      "--slug",
+      "invalid-target-override-reminder",
+      "--instructions",
+      "This should fail before writing.",
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "08:30",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "telegram_thread_real",
+      "--assistant-target-override-reasoning-effort",
+      "hihg",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(invalidReasoningEffort.exitCode, 1);
+    assert.equal(invalidReasoningEffort.envelope.ok, false);
+    assert.match(
+      invalidReasoningEffort.envelope.ok
+        ? ""
+        : invalidReasoningEffort.envelope.error.message ?? "",
+      /assistantTargetOverrideReasoningEffort|reasoning effort|low|medium|high|xhigh/u,
+    );
+
+    const saved = await runInProcessJsonCli<{
+      automationId: string;
+      created: boolean;
+      lookupId: string;
+    }>(cli, [
+      "automation",
+      "save",
+      "Target override reminder",
+      "--slug",
+      "target-override-reminder",
+      "--instructions",
+      "Run the higher-effort automation turn.",
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "08:30",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "telegram_thread_real",
+      "--assistant-target-override-model",
+      "gpt-5.5",
+      "--assistant-target-override-model-provider",
+      "vercel-ai-gateway",
+      "--assistant-target-override-reasoning-effort",
+      "high",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        assistantTargetOverride: {
+          model?: string;
+          modelProvider?: string;
+          reasoningEffort?: string;
+        } | null;
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "target-override-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.deepEqual(shown.envelope.data?.automation?.assistantTargetOverride, {
+      model: "gpt-5.5",
+      modelProvider: "vercel-ai-gateway",
+      reasoningEffort: "high",
+    });
+
+    const edited = await runInProcessJsonCli<{
+      automationId: string;
+      created: boolean;
+    }>(cli, [
+      "automation",
+      "edit",
+      "target-override-reminder",
+      "--assistant-target-override-reasoning-effort",
+      "medium",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(edited.exitCode, null);
+    assert.equal(edited.envelope.ok, true);
+    assert.equal(edited.envelope.data?.automationId, saved.envelope.data?.automationId);
+    assert.equal(edited.envelope.data?.created, false);
+
+    const editedShown = await runInProcessJsonCli<{
+      automation: {
+        assistantTargetOverride: {
+          model?: string;
+          modelProvider?: string;
+          reasoningEffort?: string;
+        } | null;
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "target-override-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(editedShown.exitCode, null);
+    assert.equal(editedShown.envelope.ok, true);
+    assert.deepEqual(editedShown.envelope.data?.automation?.assistantTargetOverride, {
+      model: "gpt-5.5",
+      modelProvider: "vercel-ai-gateway",
+      reasoningEffort: "medium",
+    });
+
+    const conflictingClear = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      "target-override-reminder",
+      "--clear-assistant-target-override",
+      "--assistant-target-override-reasoning-effort",
+      "low",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(conflictingClear.exitCode, 1);
+    assert.equal(conflictingClear.envelope.ok, false);
+    assert.match(
+      conflictingClear.envelope.ok ? "" : conflictingClear.envelope.error.message ?? "",
+      /cannot be combined/u,
+    );
+
+    const cleared = await runInProcessJsonCli<{
+      automationId: string;
+      created: boolean;
+    }>(cli, [
+      "automation",
+      "edit",
+      "target-override-reminder",
+      "--clear-assistant-target-override",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(cleared.exitCode, null);
+    assert.equal(cleared.envelope.ok, true);
+    assert.equal(cleared.envelope.data?.automationId, saved.envelope.data?.automationId);
+    assert.equal(cleared.envelope.data?.created, false);
+
+    const clearedShown = await runInProcessJsonCli<{
+      automation: {
+        assistantTargetOverride: unknown;
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "target-override-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(clearedShown.exitCode, null);
+    assert.equal(clearedShown.envelope.ok, true);
+    assert.equal(clearedShown.envelope.data?.automation?.assistantTargetOverride, null);
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
 });
 
 test("automation save guidance keeps examples shell-copyable", async () => {
