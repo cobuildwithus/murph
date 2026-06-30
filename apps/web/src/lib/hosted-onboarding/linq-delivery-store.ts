@@ -14,8 +14,11 @@ import {
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
   createHostedLinqDeliverySourceRefLookupKey,
-  createHostedLinqProviderEventLookupKey,
 } from "./linq-observability-identifiers";
+import {
+  compareHostedLinqProviderEventProgress,
+  createHostedLinqProviderEventProgress,
+} from "./linq-provider-event-progress";
 import {
   sanitizeHostedOnboardingPersistedErrorCode,
   sanitizeHostedOnboardingPersistedErrorMessage,
@@ -766,10 +769,7 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
   const updated = await input.prisma.hostedLinqDelivery.updateMany({
     where: {
       id: delivery.id,
-      OR: buildReceiptOrderingWhere({
-        deliveryStatus: input.event.deliveryStatus,
-        providerCreatedAt: input.event.providerCreatedAt,
-      }),
+      OR: buildReceiptOrderingWhere(input.event),
     },
     data: buildReceiptUpdate(input.event),
   });
@@ -823,7 +823,7 @@ function buildReceiptUpdate(event: ParsedHostedLinqProviderEvent): Prisma.Hosted
 
   return buildReceiptUpdateFromData({
     deliveryStatus: event.deliveryStatus,
-    eventId: createHostedLinqProviderEventLookupKey(event.eventId),
+    eventId: event.eventId,
     failureCode: event.failureCode,
     failureReason: event.failureReason,
     providerCreatedAt: event.providerCreatedAt,
@@ -834,8 +834,12 @@ function buildReceiptUpdate(event: ParsedHostedLinqProviderEvent): Prisma.Hosted
 function buildReceiptUpdateFromData(
   receipt: HostedLinqDeliveryReceiptData,
 ): Prisma.HostedLinqDeliveryUpdateInput {
+  const progress = createHostedLinqProviderEventProgress({
+    eventId: receipt.eventId,
+    providerCreatedAt: receipt.providerCreatedAt,
+  });
   const base = {
-    lastProviderEventId: createHostedLinqProviderEventLookupKey(receipt.eventId),
+    lastProviderEventId: progress.eventLookupKey,
     lastReceiptAt: receipt.providerCreatedAt,
     service: receipt.service,
   } satisfies Prisma.HostedLinqDeliveryUpdateInput;
@@ -887,6 +891,7 @@ async function applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx(input: {
     },
     orderBy: [
       { providerCreatedAt: "desc" },
+      { eventId: "desc" },
     ],
     select: {
       deliveryStatus: true,
@@ -948,22 +953,24 @@ async function readHostedLinqOutboundEchoForAcceptedMessageTx(input: {
 }
 
 function buildReceiptOrderingWhere(
-  receipt: Pick<HostedLinqDeliveryReceiptData, "deliveryStatus" | "providerCreatedAt">,
+  receipt: Pick<HostedLinqDeliveryReceiptData, "eventId" | "providerCreatedAt">,
 ): Prisma.HostedLinqDeliveryWhereInput[] {
+  const progress = createHostedLinqProviderEventProgress({
+    eventId: receipt.eventId,
+    providerCreatedAt: receipt.providerCreatedAt,
+  });
   const orderingWhere: Prisma.HostedLinqDeliveryWhereInput[] = [
     { lastReceiptAt: null },
-    { lastReceiptAt: { lt: receipt.providerCreatedAt } },
+    { lastReceiptAt: { lt: progress.providerCreatedAt } },
   ];
 
-  if (receipt.deliveryStatus === "failed") {
-    orderingWhere.push({
-      lastReceiptAt: receipt.providerCreatedAt,
-      OR: [
-        { failedAt: null },
-        { failedAt: { not: receipt.providerCreatedAt } },
-      ],
-    });
-  }
+  orderingWhere.push({
+    lastReceiptAt: progress.providerCreatedAt,
+    OR: [
+      { lastProviderEventId: null },
+      { lastProviderEventId: { lt: progress.eventLookupKey } },
+    ],
+  });
 
   return orderingWhere;
 }
@@ -1013,17 +1020,16 @@ function compareHostedLinqReceiptProgress(
   left: HostedLinqDeliveryReceiptData,
   right: HostedLinqDeliveryReceiptData,
 ): number {
-  const createdAtDelta = left.providerCreatedAt.getTime() - right.providerCreatedAt.getTime();
-  if (createdAtDelta !== 0) {
-    return createdAtDelta;
-  }
-
-  return rankHostedLinqReceiptStatus(left.deliveryStatus)
-    - rankHostedLinqReceiptStatus(right.deliveryStatus);
-}
-
-function rankHostedLinqReceiptStatus(status: HostedLinqDeliveryReceiptData["deliveryStatus"]): number {
-  return status === "failed" ? 2 : 1;
+  return compareHostedLinqProviderEventProgress(
+    createHostedLinqProviderEventProgress({
+      eventId: left.eventId,
+      providerCreatedAt: left.providerCreatedAt,
+    }),
+    createHostedLinqProviderEventProgress({
+      eventId: right.eventId,
+      providerCreatedAt: right.providerCreatedAt,
+    }),
+  );
 }
 
 function isHostedLinqDeliveryLifecycleFinal(input: {

@@ -85,30 +85,14 @@ export async function ingestHostedLinqProviderEventTx(input: {
     ?? deliveryReceipt.phoneNumberLookupKey
     ?? outboundEchoDelivery?.phoneNumberLookupKey
     ?? null;
-  const lineProjectionAdvanced = staleDeliveryReceipt
-    ? false
-    : outboundEchoDelivery?.runtimeOwned
-      ? true
-      : await projectHostedLinqLineForProviderEventTx({
-        event: input.event,
-        lineLookupKey: projectionLineLookupKey,
-        prisma: input.prisma,
-      });
-  const staleLineReceipt = isStaleLineReceiptProjection({
-    event: input.event,
-    lineLookupKey: projectionLineLookupKey,
-    lineProjectionAdvanced,
-  });
-  const staleUnownedLineReceipt = staleLineReceipt && deliveryReceipt.deliveryId === null;
-  if (
-    staleDeliveryReceipt
-    || staleUnownedLineReceipt
-    || isStaleStatusProjection(input.event, lineProjectionAdvanced)
-  ) {
-    return {
-      alertIds: [],
-      duplicate: false,
-    };
+  // Delivery/line projections are monotonic derived state. The provider-event
+  // ledger remains the duplicate gate for event-scoped alerting below.
+  if (!staleDeliveryReceipt && !outboundEchoDelivery?.runtimeOwned) {
+    await projectHostedLinqLineForProviderEventTx({
+      event: input.event,
+      lineLookupKey: projectionLineLookupKey,
+      prisma: input.prisma,
+    });
   }
 
   const alertIds = await claimHostedLinqAlertsForProviderEventTx({
@@ -131,23 +115,6 @@ function isHostedRuntimeOwnedOutboundEcho(
   return event.eventType === "message.received"
     && event.direction === "outbound"
     && event.messageLookupKey !== null;
-}
-
-function isStaleLineReceiptProjection(input: {
-  event: ParsedHostedLinqProviderEvent;
-  lineLookupKey: string | null;
-  lineProjectionAdvanced: boolean;
-}): boolean {
-  return input.event.deliveryStatus !== null
-    && input.lineLookupKey !== null
-    && !input.lineProjectionAdvanced;
-}
-
-function isStaleStatusProjection(
-  event: ParsedHostedLinqProviderEvent,
-  lineProjectionAdvanced: boolean,
-): boolean {
-  return event.eventType === "phone_number.status_updated" && !lineProjectionAdvanced;
 }
 
 async function claimHostedLinqAlertsForProviderEventTx(input: {

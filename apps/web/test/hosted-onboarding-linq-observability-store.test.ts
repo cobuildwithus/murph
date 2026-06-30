@@ -143,7 +143,7 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("does not regress projections or alerts for stale delivery receipts", async () => {
+  it("does not regress projections but still claims event-scoped alerts for stale delivery receipts", async () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryFindFirst.mockResolvedValue({
       id: "hld_attempt_123",
@@ -168,7 +168,7 @@ describe("hosted Linq observability stores", () => {
       event,
       prisma: fixture.prisma as never,
     })).resolves.toEqual({
-      alertIds: [],
+      alertIds: [expect.stringMatching(/^hla_message_failed_[a-f0-9]{32}$/u)],
       duplicate: false,
     });
 
@@ -188,10 +188,19 @@ describe("hosted Linq observability stores", () => {
     );
     expect(fixture.hostedLinqLineUpdateMany).not.toHaveBeenCalled();
     expect(fixture.hostedLinqLineUpdate).not.toHaveBeenCalled();
-    expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqAlertCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          deliveryId: "hld_attempt_123",
+          eventId: createHostedLinqProviderEventLookupKey("evt_failed_older"),
+          kind: "message_failed",
+        }),
+        skipDuplicates: true,
+      }),
+    );
   });
 
-  it("does not claim a failed-message alert when only the line receipt projection is stale", async () => {
+  it("claims a failed-message alert when only the line receipt projection is stale", async () => {
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqLineUpdateMany.mockResolvedValueOnce({ count: 0 });
     const event = requireParsedProviderEvent(buildProviderEvent({
@@ -213,7 +222,7 @@ describe("hosted Linq observability stores", () => {
       event,
       prisma: fixture.prisma as never,
     })).resolves.toEqual({
-      alertIds: [],
+      alertIds: [expect.stringMatching(/^hla_message_failed_[a-f0-9]{32}$/u)],
       duplicate: false,
     });
 
@@ -226,7 +235,15 @@ describe("hosted Linq observability stores", () => {
       }),
     );
     expect(fixture.hostedLinqLineUpdate).not.toHaveBeenCalled();
-    expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqAlertCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventId: createHostedLinqProviderEventLookupKey("evt_failed_stale_line"),
+          kind: "message_failed",
+        }),
+        skipDuplicates: true,
+      }),
+    );
   });
 
   it("claims a failed-message alert when the delivery advances but the line receipt projection is stale", async () => {
@@ -283,6 +300,79 @@ describe("hosted Linq observability stores", () => {
           kind: "message_failed",
         }),
         skipDuplicates: true,
+      }),
+    );
+  });
+
+  it("claims event-scoped alerts for distinct same-timestamp failed provider events", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const firstEvent = requireParsedProviderEvent(buildProviderEvent({
+      createdAt: "2026-03-26T12:00:00.000Z",
+      data: {
+        error: {
+          code: "30007",
+          message: "carrier filtered",
+        },
+        message_id: "msg_failed_same_timestamp_1",
+        phone_number: "+15550000000",
+        service: "sms",
+      },
+      eventId: "evt_failed_same_timestamp_1",
+      eventType: "message.failed",
+    }));
+    const secondEvent = requireParsedProviderEvent(buildProviderEvent({
+      createdAt: "2026-03-26T12:00:00.000Z",
+      data: {
+        error: {
+          code: "30007",
+          message: "carrier filtered",
+        },
+        message_id: "msg_failed_same_timestamp_2",
+        phone_number: "+15550000000",
+        service: "sms",
+      },
+      eventId: "evt_failed_same_timestamp_2",
+      eventType: "message.failed",
+    }));
+
+    const first = await ingestHostedLinqProviderEventTx({
+      event: firstEvent,
+      prisma: fixture.prisma as never,
+    });
+    const second = await ingestHostedLinqProviderEventTx({
+      event: secondEvent,
+      prisma: fixture.prisma as never,
+    });
+
+    expect(first).toEqual({
+      alertIds: [expect.stringMatching(/^hla_message_failed_[a-f0-9]{32}$/u)],
+      duplicate: false,
+    });
+    expect(second).toEqual({
+      alertIds: [expect.stringMatching(/^hla_message_failed_[a-f0-9]{32}$/u)],
+      duplicate: false,
+    });
+    expect(first.alertIds[0]).not.toBe(second.alertIds[0]);
+    expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledTimes(2);
+    expect(fixture.hostedLinqAlertCreateMany).toHaveBeenCalledTimes(2);
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            {
+              OR: [
+                { lastReceiptEventId: null },
+                {
+                  lastReceiptEventId: {
+                    lt: createHostedLinqProviderEventLookupKey("evt_failed_same_timestamp_1"),
+                  },
+                },
+              ],
+              lastReceiptAt: new Date("2026-03-26T12:00:00.000Z"),
+            },
+          ]),
+        }),
       }),
     );
   });
@@ -447,9 +537,10 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
   });
 
-  it("does not re-advance delivery rows for same-timestamp delivered receipts", async () => {
+  it("advances delivery rows for same-timestamp delivered receipts only by provider event id", async () => {
     const fixture = createObservabilityPrismaFixture();
     const providerCreatedAt = new Date("2026-03-26T12:00:00.000Z");
+    const eventLookupKey = createHostedLinqProviderEventLookupKey("evt_delivered_same_timestamp");
     fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
       id: "hld_delivered_same_timestamp",
       phoneNumberLookupKey: null,
@@ -475,15 +566,23 @@ describe("hosted Linq observability stores", () => {
           OR: [
             { lastReceiptAt: null },
             { lastReceiptAt: { lt: providerCreatedAt } },
+            {
+              lastReceiptAt: providerCreatedAt,
+              OR: [
+                { lastProviderEventId: null },
+                { lastProviderEventId: { lt: eventLookupKey } },
+              ],
+            },
           ],
         }),
       }),
     );
   });
 
-  it("does not re-advance line totals for same-timestamp delivered receipts", async () => {
+  it("advances line totals for same-timestamp delivered receipts only by provider event id", async () => {
     const fixture = createObservabilityPrismaFixture();
     const providerCreatedAt = new Date("2026-03-26T12:00:00.000Z");
+    const eventLookupKey = createHostedLinqProviderEventLookupKey("evt_delivered_line_same_timestamp");
     const event = requireParsedProviderEvent(buildProviderEvent({
       data: {
         message_id: "msg_delivered_line_same_timestamp",
@@ -507,6 +606,13 @@ describe("hosted Linq observability stores", () => {
           OR: [
             { lastReceiptAt: null },
             { lastReceiptAt: { lt: providerCreatedAt } },
+            {
+              OR: [
+                { lastReceiptEventId: null },
+                { lastReceiptEventId: { lt: eventLookupKey } },
+              ],
+              lastReceiptAt: providerCreatedAt,
+            },
           ],
         }),
       }),
@@ -692,6 +798,7 @@ describe("hosted Linq observability stores", () => {
       eventId: "evt_status_older",
       eventType: "phone_number.status_updated",
     }));
+    const eventLookupKey = createHostedLinqProviderEventLookupKey("evt_status_older");
 
     await ingestHostedLinqProviderEventTx({
       event,
@@ -716,6 +823,14 @@ describe("hosted Linq observability stores", () => {
                 notIn: ["disabled", "avoid_new_assignments"],
               },
               providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
+            },
+            {
+              egressPolicy: "avoid_new_assignments",
+              providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
+              OR: [
+                { lastStatusEventId: null },
+                { lastStatusEventId: { lt: eventLookupKey } },
+              ],
             },
           ],
         },
@@ -1557,6 +1672,7 @@ describe("hosted Linq observability stores", () => {
       expect.objectContaining({
         orderBy: [
           { providerCreatedAt: "desc" },
+          { eventId: "desc" },
         ],
         take: 20,
         where: expect.objectContaining({
@@ -1593,8 +1709,79 @@ describe("hosted Linq observability stores", () => {
             {
               lastReceiptAt: new Date("2026-03-26T12:00:05.000Z"),
               OR: [
-                { failedAt: null },
-                { failedAt: { not: new Date("2026-03-26T12:00:05.000Z") } },
+                { lastProviderEventId: null },
+                {
+                  lastProviderEventId: {
+                    lt: createHostedLinqProviderEventLookupKey("evt_failed_123"),
+                  },
+                },
+              ],
+            },
+          ]),
+        }),
+      }),
+    );
+  });
+
+  it("backfills equal-timestamp same-status receipts by provider event id", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const receiptAt = new Date("2026-03-26T12:00:05.000Z");
+    const receipts = [
+      {
+        deliveryStatus: "failed",
+        eventId: "evt_failed_same_status_a",
+        failureCode: "30007-a",
+        failureReason: "[redacted-a]",
+        providerCreatedAt: receiptAt,
+        service: "sms",
+      },
+      {
+        deliveryStatus: "failed",
+        eventId: "evt_failed_same_status_b",
+        failureCode: "30007-b",
+        failureReason: "[redacted-b]",
+        providerCreatedAt: receiptAt,
+        service: "sms",
+      },
+    ] as const;
+    const latest = [...receipts].sort((left, right) =>
+      createHostedLinqProviderEventLookupKey(left.eventId)
+        < createHostedLinqProviderEventLookupKey(right.eventId) ? -1 : 1,
+    ).at(-1);
+    if (!latest) {
+      throw new Error("Expected same-status receipt fixture.");
+    }
+    fixture.hostedLinqProviderEventFindMany.mockResolvedValueOnce(receipts);
+
+    await markHostedLinqDeliveryAcceptedTx({
+      idempotencyKey: "linq-message:event-123",
+      linqChatId: "chat_123",
+      messageId: "provider_message_123",
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          failedAt: receiptAt,
+          failureCode: latest.failureCode,
+          failureReason: latest.failureReason,
+          lastProviderEventId: createHostedLinqProviderEventLookupKey(latest.eventId),
+          lastReceiptAt: receiptAt,
+          status: "failed",
+        }),
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            {
+              lastReceiptAt: receiptAt,
+              OR: [
+                { lastProviderEventId: null },
+                {
+                  lastProviderEventId: {
+                    lt: createHostedLinqProviderEventLookupKey(latest.eventId),
+                  },
+                },
               ],
             },
           ]),
