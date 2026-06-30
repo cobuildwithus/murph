@@ -5222,7 +5222,7 @@ describe('assistant auto-reply runtime', () => {
       )
   })
 
-  it('can skip input refresh when a hosted caller already refreshed the input source', async () => {
+  it('drops optional hosted dynamic context when the canonical refresh ingests input', async () => {
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')
     >('../src/assistant/automation/run-loop.ts')
@@ -5236,12 +5236,13 @@ describe('assistant auto-reply runtime', () => {
         nextCursor: null,
       })),
       refresh: vi.fn(async () => ({
-        progressed: false,
-        reason: 'no_new_input' as const,
+        progressed: true,
+        reason: 'ingested_input' as const,
       })),
     }
     const executionContext = {
       hosted: {
+        dynamicContextPrompts: ['Background wearable reconnect context.'],
         memberId: 'member-1',
         userEnvKeys: [],
       },
@@ -5250,15 +5251,25 @@ describe('assistant auto-reply runtime', () => {
     await runLoop.runAssistantAutomationPass({
       executionContext,
       inputSource,
-      inputSourceAlreadyRefreshed: true,
       requestId: 'request-context-after-refresh',
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(inputSource.refresh).not.toHaveBeenCalled()
+    expect(inputSource.refresh).toHaveBeenCalledWith({
+      signal: undefined,
+    })
+    expect(vi.mocked(inputSource.refresh).mock.invocationCallOrder[0]!)
+      .toBeLessThan(
+        runLoopMocks.scanAssistantAutomationOnce.mock.invocationCallOrder[0]!,
+      )
     expect(runLoopMocks.scanAssistantAutomationOnce).toHaveBeenCalledWith(
       expect.objectContaining({
-        executionContext,
+        executionContext: {
+          hosted: {
+            memberId: 'member-1',
+            userEnvKeys: [],
+          },
+        },
       }),
     )
   })

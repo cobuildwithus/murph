@@ -84,7 +84,6 @@ export interface RunAssistantAutomationInput {
   drainOutbox?: boolean
   executionContext?: AssistantExecutionContext | null
   inboxServices?: InboxServices
-  inputSourceAlreadyRefreshed?: boolean
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
@@ -896,10 +895,21 @@ export async function runAssistantAutomationPass(
         queued: 0,
         sent: 0,
       }
-  if (applyCanonicalWrites && input.inputSourceAlreadyRefreshed !== true) {
-    await inputSource.refresh({
+  if (applyCanonicalWrites) {
+    const inputRefreshResult = await inputSource.refresh({
       signal: input.signal,
     })
+    if (
+      inputRefreshResult.reason === 'ingested_input' &&
+      executionContext.hosted?.dynamicContextPrompts &&
+      executionContext.hosted.dynamicContextPrompts.length > 0
+    ) {
+      const hostedWithoutDynamicContext = { ...executionContext.hosted }
+      delete hostedWithoutDynamicContext.dynamicContextPrompts
+      executionContext = {
+        hosted: hostedWithoutDynamicContext,
+      }
+    }
   }
   let state = await readAssistantAutomationState(input.vault)
   const stateBeforeScan = snapshotAssistantAutomationLoopState(state)

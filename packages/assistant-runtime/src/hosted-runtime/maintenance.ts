@@ -419,20 +419,14 @@ export async function runHostedAssistantAutomation(
         ? options?.buildBackgroundDynamicContextPrompt
         : undefined;
     let executionContextForPass = executionContext;
-    let inputSourceAlreadyRefreshed = false;
 
     if (buildBackgroundDynamicContextPrompt) {
       const inputRefreshResult = await inputSource.refresh({ signal });
-      inputSourceAlreadyRefreshed = true;
 
       if (inputRefreshResult.reason !== "ingested_input") {
-        let prompt = await buildBackgroundDynamicContextPrompt({
+        const prompt = await buildBackgroundDynamicContextPrompt({
           signal,
         });
-        const finalInputRefreshResult = await inputSource.refresh({ signal });
-        if (finalInputRefreshResult.reason === "ingested_input") {
-          prompt = null;
-        }
         executionContextForPass = withHostedAssistantDynamicContextPrompt({
           executionContext,
           prompt,
@@ -445,7 +439,6 @@ export async function runHostedAssistantAutomation(
       drainOutbox: false,
       executionContext: executionContextForPass,
       inboxServices,
-      ...(inputSourceAlreadyRefreshed ? { inputSourceAlreadyRefreshed: true } : {}),
       onEvent: (event) => {
         automationEventCounts.set(
           event.type,

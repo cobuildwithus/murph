@@ -637,12 +637,12 @@ describe("runHostedAssistantAutomation", () => {
     expect(mocks.initInboxRuntime).not.toHaveBeenCalled();
   });
 
-  it("appends background dynamic context after input refresh keeps the pass background", async () => {
+  it("passes background dynamic context with the engine refresh still enabled", async () => {
     const buildBackgroundDynamicContextPrompt = vi.fn(async () =>
       "Background wearable reconnect context."
     );
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
-      expect(input.inputSourceAlreadyRefreshed).toBe(true);
+      expect(input).not.toHaveProperty("inputSourceAlreadyRefreshed");
       expect(input.executionContext?.hosted?.dynamicContextPrompts).toEqual([
         "Background wearable reconnect context.",
       ]);
@@ -709,7 +709,7 @@ describe("runHostedAssistantAutomation", () => {
       refresh,
     });
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
-      expect(input.inputSourceAlreadyRefreshed).toBe(true);
+      expect(input).not.toHaveProperty("inputSourceAlreadyRefreshed");
       expect(input.executionContext?.hosted?.dynamicContextPrompts).toBeUndefined();
       return {
         currentTurnDeliveryIntentIds: ["foreground-intent"],
@@ -756,19 +756,14 @@ describe("runHostedAssistantAutomation", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("drops background dynamic context when input arrives after the prompt read", async () => {
+  it("leaves final input refresh to the engine after reading background dynamic context", async () => {
     const buildBackgroundDynamicContextPrompt = vi.fn(async () =>
       "Background wearable reconnect context."
     );
-    const refresh = vi.fn()
-      .mockResolvedValueOnce({
-        progressed: false,
-        reason: "no_new_input" as const,
-      })
-      .mockResolvedValueOnce({
-        progressed: true,
-        reason: "ingested_input" as const,
-      });
+    const refresh = vi.fn(async () => ({
+      progressed: false,
+      reason: "no_new_input" as const,
+    }));
     mocks.createHostedAssistantInputSource.mockReturnValueOnce({
       listInputCandidates: vi.fn(async (query) => ({
         inputs: [],
@@ -781,17 +776,19 @@ describe("runHostedAssistantAutomation", () => {
       refresh,
     });
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
-      expect(input.inputSourceAlreadyRefreshed).toBe(true);
-      expect(input.executionContext?.hosted?.dynamicContextPrompts).toBeUndefined();
+      expect(input).not.toHaveProperty("inputSourceAlreadyRefreshed");
+      expect(input.executionContext?.hosted?.dynamicContextPrompts).toEqual([
+        "Background wearable reconnect context.",
+      ]);
       return {
-        currentTurnDeliveryIntentIds: ["foreground-intent"],
+        currentTurnDeliveryIntentIds: [],
         nextWakeAt: null,
         progressed: true,
         replies: {
           considered: 1,
           failed: 0,
-          replied: 1,
-          skipped: 0,
+          replied: 0,
+          skipped: 1,
         },
       };
     });
@@ -821,11 +818,11 @@ describe("runHostedAssistantAutomation", () => {
       },
     );
 
-    expect(result.currentTurnDeliveryIntentIds).toEqual(["foreground-intent"]);
+    expect(result.currentTurnDeliveryIntentIds).toEqual([]);
     expect(result.progressed).toBe(true);
-    expect(result.timings?.activeTurnInputIngested).toBe(true);
+    expect(result.timings?.activeTurnInputIngested).toBe(false);
     expect(buildBackgroundDynamicContextPrompt).toHaveBeenCalledTimes(1);
-    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("skips background dynamic context when background selection already owns pending input", async () => {
@@ -838,7 +835,7 @@ describe("runHostedAssistantAutomation", () => {
       pendingInputIds: ["pending-input-1"],
     });
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
-      expect(input.inputSourceAlreadyRefreshed).toBeUndefined();
+      expect(input).not.toHaveProperty("inputSourceAlreadyRefreshed");
       expect(input.executionContext?.hosted?.dynamicContextPrompts).toBeUndefined();
       return {
         currentTurnDeliveryIntentIds: ["foreground-intent"],
