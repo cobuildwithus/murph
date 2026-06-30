@@ -235,6 +235,9 @@
       "@murphai/device-syncd/provider-credential-policy": [
         "packages/device-syncd/src/provider-credential-policy.ts"
       ],
+      "@murphai/device-syncd/provider-configs": [
+        "packages/device-syncd/src/provider-configs.ts"
+      ],
       "@murphai/device-syncd/provider-match": [
         "packages/device-syncd/src/provider-match.ts"
       ],
