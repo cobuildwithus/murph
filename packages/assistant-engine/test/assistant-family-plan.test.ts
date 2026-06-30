@@ -82,12 +82,8 @@ describe("assistant family plan tool", () => {
       familyPlanTool,
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
-      requiredUserMessageDeliveryAvailable: false,
-      sendRequiredUserMessage: async () => ({
-        kind: "failed",
-        source: "model",
-      }),
       sendVaultFile: vi.fn(async () => ({
+        approvalUrl: "https://murph.test/approve/unused",
         filename: "unused.pdf",
         status: "pending" as const,
       })),
@@ -213,12 +209,8 @@ describe("assistant family plan tool", () => {
       familyPlanTool,
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
-      requiredUserMessageDeliveryAvailable: false,
-      sendRequiredUserMessage: async () => ({
-        kind: "failed",
-        source: "model",
-      }),
       sendVaultFile: vi.fn(async () => ({
+        approvalUrl: "https://murph.test/approve/unused",
         filename: "unused.pdf",
         status: "pending" as const,
       })),
