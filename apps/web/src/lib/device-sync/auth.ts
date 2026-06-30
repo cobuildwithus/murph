@@ -314,7 +314,7 @@ function resolveAllowedBrowserOrigins(
 
   if (configuredOrigin) {
     allowedOrigins.add(configuredOrigin);
-  } else {
+  } else if (!env.isProduction) {
     allowedOrigins.add(new URL(request.url).origin);
   }
 

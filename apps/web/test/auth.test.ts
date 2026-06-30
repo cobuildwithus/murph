@@ -235,6 +235,27 @@ describe("assertBrowserMutationOrigin", () => {
       403,
     );
   });
+
+  it("rejects request-host origins in production when no canonical public origin is configured", async () => {
+    await expectDeviceSyncError(
+      async () =>
+        assertBrowserMutationOrigin(
+          new Request("https://control.example.test/api/device-sync/agents/pair", {
+            method: "POST",
+            headers: {
+              origin: "https://control.example.test",
+            },
+          }),
+          {
+            ...BASE_ENVIRONMENT,
+            isProduction: true,
+            publicBaseUrl: null,
+          },
+        ),
+      "CSRF_ORIGIN_INVALID",
+      403,
+    );
+  });
 });
 
 function createSignedRequest(input: {
