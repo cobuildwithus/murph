@@ -319,10 +319,31 @@ export async function runHostedWorkspaceAssistantPhase(
     const freshAssistantInputIds =
       input.initialMailboxImport.importResult.assistantInputIds ?? [];
     const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
-    const buildBackgroundDeviceSyncStatusPrompt = async (): Promise<string | null> => {
+    const shouldReadDeviceSyncStatusPromptForBackgroundWork = async (options: {
+      managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
+      systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
+    }): Promise<boolean> => {
       if (input.shouldYieldBackgroundMaintenance?.() === true) {
+        return false;
+      }
+
+      if (
+        options.systemMailboxMaintenance.continueAssistantLane
+        || options.managedAutomationsResult !== null
+      ) {
+        return true;
+      }
+
+      return await hasDueHostedAssistantCronJob(input);
+    };
+    const buildBackgroundDeviceSyncStatusPrompt = (options: {
+      managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
+      systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
+    }) => async (): Promise<string | null> => {
+      if (!await shouldReadDeviceSyncStatusPromptForBackgroundWork(options)) {
         return null;
       }
+
       const cancellation = createHostedIdleDeviceSyncMaintenanceCancellation({
         signal: channelAbortController.signal,
         shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
@@ -347,37 +368,9 @@ export async function runHostedWorkspaceAssistantPhase(
         cancellation.dispose();
       }
     };
-    const shouldIncludeDeviceSyncStatusPrompt = async (options: {
-      managedAutomationsResult?: HostedWorkspaceRunnerAssistantPhaseResult | null;
-      systemMailboxMaintenance?: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
-    } = {}): Promise<boolean> => {
-      if (input.shouldYieldBackgroundMaintenance?.() === true) {
-        return false;
-      }
-
-      const candidateSystemMailboxMaintenance =
-        options.systemMailboxMaintenance ?? systemMailboxMaintenance;
-      const candidateManagedAutomationsResult =
-        options.managedAutomationsResult === undefined
-          ? managedAutomationsResult
-          : options.managedAutomationsResult;
-      if (
-        hasFreshConversationInput
-        || candidateSystemMailboxMaintenance.pendingAssistantInputWakeAt !== null
-      ) {
-        return false;
-      }
-      if (
-        candidateSystemMailboxMaintenance.continueAssistantLane
-        || candidateManagedAutomationsResult !== null
-      ) {
-        return true;
-      }
-
-      return await hasDueHostedAssistantCronJob(input);
-    };
     const runAutomationLane = async (options: {
-      includeDeviceSyncStatusPrompt: boolean;
+      managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
+      systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
     }) => {
       const automationLaneStartedAt = Date.now();
       const assistantRuntimeState = await prepareHostedAssistantAutomationForWake(
@@ -390,9 +383,11 @@ export async function runHostedWorkspaceAssistantPhase(
         },
       );
       const buildBackgroundDynamicContextPrompt =
-        options.includeDeviceSyncStatusPrompt
-        && assistantRuntimeState.assistantConfigured
-          ? buildBackgroundDeviceSyncStatusPrompt
+        assistantRuntimeState?.assistantConfigured === true
+          ? buildBackgroundDeviceSyncStatusPrompt({
+            managedAutomationsResult: options.managedAutomationsResult,
+            systemMailboxMaintenance: options.systemMailboxMaintenance,
+          })
           : undefined;
       const assistantMetrics = await (async () => {
         try {
@@ -455,7 +450,8 @@ export async function runHostedWorkspaceAssistantPhase(
       };
     };
     let assistantMetrics = await runAutomationLane({
-      includeDeviceSyncStatusPrompt: await shouldIncludeDeviceSyncStatusPrompt(),
+      managedAutomationsResult,
+      systemMailboxMaintenance,
     });
     let currentTurnDeliveryIntentIds =
       assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
@@ -493,10 +489,8 @@ export async function runHostedWorkspaceAssistantPhase(
     }
     if (deferredPendingSystemMailboxMaintenance?.continueAssistantLane === true) {
       assistantMetrics = await runAutomationLane({
-        includeDeviceSyncStatusPrompt: await shouldIncludeDeviceSyncStatusPrompt({
-          managedAutomationsResult: null,
-          systemMailboxMaintenance: deferredPendingSystemMailboxMaintenance,
-        }),
+        managedAutomationsResult: null,
+        systemMailboxMaintenance: deferredPendingSystemMailboxMaintenance,
       });
       currentTurnDeliveryIntentIds =
         assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];

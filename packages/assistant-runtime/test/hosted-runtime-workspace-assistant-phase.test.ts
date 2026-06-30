@@ -3614,7 +3614,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(prompt).not.toContain("vault-cli device connect oura --format json");
   });
 
-  it("omits hosted device sync dynamic context when mailbox maintenance discovers pending assistant input", async () => {
+  it("leaves pending-input device context suppression to the automation lane", async () => {
     const fetchSnapshot = vi.fn(async () => ({
       connections: [],
       generatedAt: "2026-04-29T00:00:00.000Z",
@@ -3675,7 +3675,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
-    expect(assistantLaneCall).not.toHaveProperty("buildBackgroundDynamicContextPrompt");
+    expect(assistantLaneCall).toHaveProperty("buildBackgroundDynamicContextPrompt");
     expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
     expect(fetchSnapshot).not.toHaveBeenCalled();
   });
