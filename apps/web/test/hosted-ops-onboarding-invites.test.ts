@@ -517,7 +517,7 @@ describe("hosted ops onboarding invites", () => {
     const response = await route.POST(new Request("https://app.example.test/api/ops/onboarding-invites", {
       body: "",
       headers: {
-        "content-length": String(route.HOSTED_OPS_ONBOARDING_FORM_BODY_MAX_BYTES + 1),
+        "content-length": String(oversizedOpsOnboardingFormBodyLength()),
         "content-type": "multipart/form-data; boundary=oversized",
       },
       method: "POST",
@@ -531,7 +531,7 @@ describe("hosted ops onboarding invites", () => {
 
   it("rejects streamed oversized onboarding invite forms before parsing multipart data", async () => {
     const response = await route.POST(new Request("https://app.example.test/api/ops/onboarding-invites", {
-      body: createBodyStream(route.HOSTED_OPS_ONBOARDING_FORM_BODY_MAX_BYTES + 1),
+      body: createBodyStream(oversizedOpsOnboardingFormBodyLength()),
       headers: {
         "content-type": "multipart/form-data; boundary=oversized",
       },
@@ -567,6 +567,12 @@ function createBodyStream(byteLength: number): ReadableStream<Uint8Array> {
       controller.close();
     },
   });
+}
+
+function oversizedOpsOnboardingFormBodyLength(): number {
+  return service.HOSTED_OPS_ONBOARDING_VOICE_MEMO_MAX_BYTES
+    + (256 * 1024)
+    + 1;
 }
 
 function readIdempotencyKey(
