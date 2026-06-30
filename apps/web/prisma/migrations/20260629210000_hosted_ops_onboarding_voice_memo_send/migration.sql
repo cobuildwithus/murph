@@ -3,11 +3,8 @@ CREATE TABLE "hosted_ops_onboarding_voice_memo_send" (
   "member_id" TEXT NOT NULL,
   "dedupe_key" TEXT NOT NULL,
   "request_id" TEXT NOT NULL,
-  "sent_at" TIMESTAMP(3),
-  "send_attempted_at" TIMESTAMP(3),
-  "failed_at" TIMESTAMP(3),
+  "sent_at" TIMESTAMP(3) NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "updated_at" TIMESTAMP(3) NOT NULL,
 
   CONSTRAINT "hosted_ops_onboarding_voice_memo_send_pkey" PRIMARY KEY ("id")
 );

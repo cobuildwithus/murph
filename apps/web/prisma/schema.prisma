@@ -845,11 +845,8 @@ model HostedOpsOnboardingVoiceMemoSend {
   memberId          String       @map("member_id")
   dedupeKey         String       @unique(map: "hosted_ops_onboarding_voice_memo_dedupe_key") @map("dedupe_key")
   requestId         String       @map("request_id")
-  sentAt            DateTime?    @map("sent_at")
-  sendAttemptedAt   DateTime?    @map("send_attempted_at")
-  failedAt          DateTime?    @map("failed_at")
+  sentAt            DateTime     @map("sent_at")
   createdAt         DateTime     @default(now()) @map("created_at")
-  updatedAt         DateTime     @updatedAt @map("updated_at")
   member            HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId, createdAt], map: "hosted_ops_onboarding_voice_memo_member_created_at_idx")

@@ -34,7 +34,6 @@ export const HOSTED_OPS_ONBOARDING_VOICE_MEMO_MAX_BYTES = 10 * 1024 * 1024;
 
 const HOSTED_OPS_ONBOARDING_INVITE_MESSAGE_MAX_LENGTH = 1_800;
 const HOSTED_OPS_ONBOARDING_NEW_CHAT_OPENER_MAX_LENGTH = 320;
-const HOSTED_OPS_ONBOARDING_VOICE_MEMO_STALE_CLAIM_MS = 2 * 60_000;
 const HOSTED_OPS_ONBOARDING_REQUEST_ID_PATTERN = /^[A-Za-z0-9_.:-]{8,128}$/u;
 const HOSTED_OPS_ONBOARDING_LINQ_CHAT_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,256}$/u;
 const HOSTED_OPS_ONBOARDING_URLISH_PATTERN =
@@ -356,28 +355,36 @@ async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
     };
   }
 
-  const claim = await claimHostedOpsOnboardingVoiceMemoSend({
+  const dedupeKey = buildHostedOpsOnboardingVoiceMemoDedupeKey({
     chatId: input.chatId,
     memberId: input.memberId,
-    prisma: input.prisma,
     requestId: input.request.requestId,
   });
 
-  if (claim.status !== "claimed") {
-    return claim.status === "already_sent"
-      ? {
-          error: null,
-          requested: true,
-          sent: true,
-        }
-      : {
-          error: "Voice memo delivery is already pending for this setup link request.",
-          requested: true,
-          sent: false,
-        };
-  }
+  try {
+    const existingSent = await input.prisma.hostedOpsOnboardingVoiceMemoSend.findUnique({
+      select: {
+        id: true,
+      },
+      where: {
+        dedupeKey,
+      },
+    });
 
-  let sendAttempted = false;
+    if (existingSent) {
+      return {
+        error: null,
+        requested: true,
+        sent: true,
+      };
+    }
+  } catch {
+    return {
+      error: "Voice memo delivery failed after the setup link was sent.",
+      requested: true,
+      sent: false,
+    };
+  }
 
   try {
     const attachment = await uploadHostedLinqAttachment({
@@ -389,81 +396,46 @@ async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
       sizeBytes: input.request.voiceMemo.sizeBytes,
     });
 
-    await input.prisma.hostedOpsOnboardingVoiceMemoSend.update({
-      data: {
-        failedAt: null,
-        sendAttemptedAt: new Date(),
-      },
-      where: {
-        id: claim.id,
-      },
-    });
-    sendAttempted = true;
-
     await sendHostedLinqVoiceMemo({
       attachmentId: attachment.attachmentId,
       chatId: input.chatId,
     });
-
-    await input.prisma.hostedOpsOnboardingVoiceMemoSend.update({
-      data: {
-        failedAt: null,
-        sentAt: new Date(),
-      },
-      where: {
-        id: claim.id,
-      },
-    });
-
-    return {
-      error: null,
-      requested: true,
-      sent: true,
-    };
   } catch {
-    await input.prisma.hostedOpsOnboardingVoiceMemoSend.updateMany({
-      data: {
-        failedAt: new Date(),
-      },
-      where: {
-        id: claim.id,
-        ...(sendAttempted
-          ? {
-              sendAttemptedAt: {
-                not: null,
-              },
-            }
-          : {
-              sendAttemptedAt: null,
-            }),
-        sentAt: null,
-      },
-    });
-
     return {
       error: "Voice memo delivery failed after the setup link was sent.",
       requested: true,
       sent: false,
     };
   }
+
+  try {
+    await input.prisma.hostedOpsOnboardingVoiceMemoSend.createMany({
+      data: {
+        dedupeKey,
+        id: randomUUID(),
+        memberId: input.memberId,
+        requestId: input.request.requestId,
+        sentAt: new Date(),
+      },
+      skipDuplicates: true,
+    });
+  } catch {
+    // The Linq send already succeeded. This marker only suppresses later same-request replays.
+  }
+
+  return {
+    error: null,
+    requested: true,
+    sent: true,
+  };
 }
 
-type HostedOpsOnboardingVoiceMemoSendClaim =
-  | {
-      id: string;
-      status: "claimed";
-    }
-  | {
-      status: "already_claimed" | "already_sent";
-    };
-
-async function claimHostedOpsOnboardingVoiceMemoSend(input: {
+function buildHostedOpsOnboardingVoiceMemoDedupeKey(input: {
   chatId: string;
   memberId: string;
-  prisma: PrismaClient;
   requestId: string;
-}): Promise<HostedOpsOnboardingVoiceMemoSendClaim> {
-  const dedupeKey = buildHostedOpsOnboardingIdempotencyKey({
+}): string {
+  return buildHostedOpsOnboardingIdempotencyKey({
     requestId: input.requestId,
     step: "voice",
     targetParts: [
@@ -471,97 +443,6 @@ async function claimHostedOpsOnboardingVoiceMemoSend(input: {
       input.chatId,
     ],
   });
-
-  const id = randomUUID();
-  const created = await input.prisma.hostedOpsOnboardingVoiceMemoSend.createMany({
-    data: {
-      dedupeKey,
-      id,
-      memberId: input.memberId,
-      requestId: input.requestId,
-    },
-    skipDuplicates: true,
-  });
-
-  if (created.count === 1) {
-    return {
-      id,
-      status: "claimed",
-    };
-  }
-
-  const existing = await input.prisma.hostedOpsOnboardingVoiceMemoSend.findFirst({
-    select: {
-      failedAt: true,
-      id: true,
-      sendAttemptedAt: true,
-      sentAt: true,
-      updatedAt: true,
-    },
-    where: {
-      dedupeKey,
-      memberId: input.memberId,
-      requestId: input.requestId,
-    },
-  });
-
-  if (!existing) {
-    return {
-      status: "already_claimed",
-    };
-  }
-
-  if (existing.sentAt) {
-    return {
-      status: "already_sent",
-    };
-  }
-
-  if (existing.sendAttemptedAt) {
-    return {
-      status: "already_claimed",
-    };
-  }
-
-  const staleBefore = new Date(Date.now() - HOSTED_OPS_ONBOARDING_VOICE_MEMO_STALE_CLAIM_MS);
-  const canReclaim = Boolean(existing.failedAt) || existing.updatedAt < staleBefore;
-
-  if (canReclaim) {
-    const reclaimed = await input.prisma.hostedOpsOnboardingVoiceMemoSend.updateMany({
-      data: {
-        failedAt: null,
-        updatedAt: new Date(),
-      },
-      where: {
-        id: existing.id,
-        sendAttemptedAt: null,
-        sentAt: null,
-        OR: [
-          {
-            failedAt: {
-              not: null,
-            },
-          },
-          {
-            updatedAt: {
-              lt: staleBefore,
-            },
-          },
-        ],
-      },
-    });
-
-    if (reclaimed.count === 1) {
-      return {
-        id: existing.id,
-        status: "claimed",
-      };
-    }
-  }
-
-  return {
-    status: "already_claimed",
-  };
 }
 
 async function assertHostedOpsOnboardingExistingLinqChatAuthority(input: {
