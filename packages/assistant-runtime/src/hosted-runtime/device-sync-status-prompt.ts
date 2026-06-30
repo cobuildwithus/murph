@@ -12,13 +12,16 @@ type HostedDeviceSyncRuntimeConnectionSourceSnapshot = NonNullable<
 >[number];
 
 export interface HostedDeviceSyncStatusPromptReconnectTarget {
+  connectTarget: string;
+  connectTargetAmbiguous?: boolean | null;
   label: string;
   provider: string;
   sourceProviderSlug?: string | null;
 }
 
 interface HostedDeviceSyncReconnectNotice {
-  commandProvider: string | null;
+  commandConnectTarget: string | null;
+  commandConnectTargetAmbiguous: boolean;
   errorCode: string;
   label: string;
   sourceProviderSlug: string | null;
@@ -195,7 +198,8 @@ function buildHostedDeviceSyncSourceReconnectNotice(input: {
   });
 
   return {
-    commandProvider: reconnectTarget?.provider ?? null,
+    commandConnectTarget: reconnectTarget?.connectTarget ?? null,
+    commandConnectTargetAmbiguous: reconnectTarget?.connectTargetAmbiguous === true,
     errorCode,
     label: reconnectTarget?.label
       ?? input.source.displayName
@@ -229,7 +233,8 @@ function buildHostedDeviceSyncAccountReconnectNotice(input: {
   ) ?? "REAUTHORIZATION_REQUIRED";
 
   return {
-    commandProvider: reconnectTarget?.provider ?? null,
+    commandConnectTarget: reconnectTarget?.connectTarget ?? null,
+    commandConnectTargetAmbiguous: reconnectTarget?.connectTargetAmbiguous === true,
     errorCode,
     label: reconnectTarget?.label
       ?? input.connection.connection.displayName
@@ -244,7 +249,7 @@ function addHostedDeviceSyncReconnectNotice(
   notice: HostedDeviceSyncReconnectNotice,
 ): void {
   const key = [
-    normalizeHostedDeviceSyncKey(notice.commandProvider) ?? "",
+    normalizeHostedDeviceSyncKey(notice.commandConnectTarget) ?? "",
     normalizeHostedDeviceSyncKey(notice.sourceProviderSlug) ?? "",
     normalizeHostedDeviceSyncErrorCode(notice.errorCode) ?? "",
     notice.label.trim().toLowerCase(),
@@ -263,8 +268,10 @@ function renderHostedDeviceSyncReconnectNoticeLine(
   const subjectText = notice.sourceProviderSlug
     ? `source \`${notice.sourceProviderSlug}\` is`
     : "account is";
-  const reconnectText = notice.commandProvider
-    ? ` To send a reconnect link, run \`vault-cli device connect ${notice.commandProvider} --format json\` and use the returned \`connectUrl\`.`
+  const reconnectText = notice.commandConnectTarget && !notice.commandConnectTargetAmbiguous
+    ? ` To send a reconnect link, run \`vault-cli device connect ${notice.commandConnectTarget} --format json\` and use the returned \`connectUrl\`.`
+    : notice.commandConnectTargetAmbiguous
+      ? " A reconnect target is configured, but the generic device-connect command is ambiguous for this wearable/source; use an exact reconnect flow instead of `vault-cli device connect`."
     : " No hosted reconnect target is configured for this wearable/source in this turn.";
 
   return `- ${notice.label} currently needs reconnect: ${subjectText} in error state \`${notice.errorCode}\`. Murph may not see newer ${notice.label} data until reconnect completes.${reconnectText}`;

@@ -321,12 +321,20 @@ export async function runHostedWorkspaceAssistantPhase(
     const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
     const resolveAssistantLaneExecutionContext = async (options: {
       includeDeviceSyncStatusPrompt: boolean;
-    }): Promise<AssistantExecutionContext> => {
+    }): Promise<{
+      deferActiveTurnInputRefresh: boolean;
+      deviceSyncStatusPromptAttached: boolean;
+      executionContext: AssistantExecutionContext;
+    }> => {
       if (
         !options.includeDeviceSyncStatusPrompt
         || input.shouldYieldBackgroundMaintenance?.() === true
       ) {
-        return executionContext;
+        return {
+          deferActiveTurnInputRefresh: false,
+          deviceSyncStatusPromptAttached: false,
+          executionContext,
+        };
       }
 
       const cancellation = createHostedIdleDeviceSyncMaintenanceCancellation({
@@ -345,13 +353,21 @@ export async function runHostedWorkspaceAssistantPhase(
           input.shouldYieldBackgroundMaintenance?.() === true
           || !deviceSyncStatusPrompt
         ) {
-          return executionContext;
+          return {
+            deferActiveTurnInputRefresh: false,
+            deviceSyncStatusPromptAttached: false,
+            executionContext,
+          };
         }
 
-        return withHostedAssistantDynamicContextPrompt({
-          executionContext,
-          prompt: deviceSyncStatusPrompt,
-        });
+        return {
+          deferActiveTurnInputRefresh: true,
+          deviceSyncStatusPromptAttached: true,
+          executionContext: withHostedAssistantDynamicContextPrompt({
+            executionContext,
+            prompt: deviceSyncStatusPrompt,
+          }),
+        };
       } finally {
         cancellation.dispose();
       }
@@ -407,7 +423,10 @@ export async function runHostedWorkspaceAssistantPhase(
         try {
           return await runHostedAssistantAutomationLane({
             assistantRuntimeState,
-            executionContext: automationExecutionContext,
+            ...(automationExecutionContext.deferActiveTurnInputRefresh
+              ? { deferActiveTurnInputRefresh: true }
+              : {}),
+            executionContext: automationExecutionContext.executionContext,
             freshAssistantInputIds,
             requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
             runtime: {
@@ -455,14 +474,31 @@ export async function runHostedWorkspaceAssistantPhase(
       });
       return {
         ...assistantMetrics,
+        deviceSyncStatusPromptAttached:
+          automationExecutionContext.deviceSyncStatusPromptAttached,
         ...(assistantAutomationRedactedLogEntries.length === 0
           ? {}
           : { redactedLogEntries: [...assistantAutomationRedactedLogEntries] }),
       };
     };
+    const rerunWithoutDeviceSyncContextAfterActiveTurn = async (
+      metrics: Awaited<ReturnType<typeof runAutomationLane>>,
+    ): Promise<Awaited<ReturnType<typeof runAutomationLane>>> => {
+      if (
+        metrics.deviceSyncStatusPromptAttached !== true
+        || metrics.activeTurnInputIngested !== true
+      ) {
+        return metrics;
+      }
+
+      return await runAutomationLane({
+        includeDeviceSyncStatusPrompt: false,
+      });
+    };
     let assistantMetrics = await runAutomationLane({
       includeDeviceSyncStatusPrompt: await shouldIncludeDeviceSyncStatusPrompt(),
     });
+    assistantMetrics = await rerunWithoutDeviceSyncContextAfterActiveTurn(assistantMetrics);
     let currentTurnDeliveryIntentIds =
       assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
     let foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
@@ -504,6 +540,7 @@ export async function runHostedWorkspaceAssistantPhase(
           systemMailboxMaintenance: deferredPendingSystemMailboxMaintenance,
         }),
       });
+      assistantMetrics = await rerunWithoutDeviceSyncContextAfterActiveTurn(assistantMetrics);
       currentTurnDeliveryIntentIds =
         assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
       foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
@@ -4687,9 +4724,20 @@ function resolveHostedWorkspaceDeviceReconnectTargets(
     return [];
   }
 
-  return listConfiguredDeviceSyncReconnectTargets(providerConfigs).map((target) => ({
+  const targets = listConfiguredDeviceSyncReconnectTargets(providerConfigs);
+  const connectTargetCounts = new Map<string, number>();
+  for (const target of targets) {
+    connectTargetCounts.set(
+      target.connectTarget,
+      (connectTargetCounts.get(target.connectTarget) ?? 0) + 1,
+    );
+  }
+
+  return targets.map((target) => ({
+    connectTarget: target.connectTarget,
+    connectTargetAmbiguous: (connectTargetCounts.get(target.connectTarget) ?? 0) > 1,
     label: target.label,
-    provider: target.connectTarget,
+    provider: target.provider,
     ...(target.sourceProviderSlug
       ? { sourceProviderSlug: target.sourceProviderSlug }
       : {}),

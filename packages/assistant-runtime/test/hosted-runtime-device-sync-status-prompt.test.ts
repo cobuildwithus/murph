@@ -65,6 +65,7 @@ describe("hosted device sync status prompt", () => {
     const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
       reconnectTargets: [
         {
+          connectTarget: "whoop",
           label: "WHOOP",
           provider: "whoop",
           sourceProviderSlug: "whoop_v2",
@@ -86,6 +87,7 @@ describe("hosted device sync status prompt", () => {
     const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
       reconnectTargets: [
         {
+          connectTarget: "whoop",
           label: "WHOOP",
           provider: "whoop",
           sourceProviderSlug: "whoop_v2",
@@ -117,6 +119,7 @@ describe("hosted device sync status prompt", () => {
     const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
       reconnectTargets: [
         {
+          connectTarget: "whoop",
           label: "WHOOP",
           provider: "whoop",
           sourceProviderSlug: "whoop_v2",
@@ -151,10 +154,60 @@ describe("hosted device sync status prompt", () => {
     expect(prompt).not.toContain("No hosted reconnect target");
   });
 
+  it("does not render ambiguous generic commands for duplicate WHOOP reconnect targets", () => {
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [
+        {
+          connectTarget: "whoop",
+          connectTargetAmbiguous: true,
+          label: "WHOOP",
+          provider: "whoop",
+        },
+        {
+          connectTarget: "whoop",
+          connectTargetAmbiguous: true,
+          label: "WHOOP",
+          provider: "junction",
+          sourceProviderSlug: "whoop_v2",
+        },
+      ],
+      snapshot: buildSnapshot({
+        connection: {
+          accessTokenExpiresAt: null,
+          connectedAt: "2026-06-01T00:00:00.000Z",
+          createdAt: "2026-06-01T00:00:00.000Z",
+          displayName: "WHOOP",
+          externalAccountId: "external-account-id",
+          id: "connection-id",
+          metadata: {},
+          provider: "whoop",
+          scopes: [],
+          status: "reauthorization_required",
+        },
+        localState: {
+          lastErrorCode: "TOKEN_REFRESH_FAILED",
+          lastErrorMessage: null,
+          lastSyncCompletedAt: "2026-06-08T00:00:00.000Z",
+          lastSyncErrorAt: "2026-06-29T00:00:00.000Z",
+          lastSyncStartedAt: "2026-06-29T00:00:00.000Z",
+          lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
+        sources: [],
+      }),
+    });
+
+    expect(prompt).toContain("WHOOP currently needs reconnect");
+    expect(prompt).toContain("account is in error state `TOKEN_REFRESH_FAILED`");
+    expect(prompt).toContain("generic device-connect command is ambiguous");
+    expect(prompt).not.toContain("vault-cli device connect whoop --format json");
+  });
+
   it("does not render when sources are connected", () => {
     const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
       reconnectTargets: [
         {
+          connectTarget: "whoop",
           label: "WHOOP",
           provider: "whoop",
           sourceProviderSlug: "whoop_v2",

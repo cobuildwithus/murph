@@ -3491,6 +3491,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         }),
       ]),
     );
+    expect(assistantLaneCall).toEqual(expect.objectContaining({
+      deferActiveTurnInputRefresh: true,
+    }));
     expect(assistantLaneCall).not.toHaveProperty("suppressActiveTurnInputRefresh");
     expect(dynamicContextPrompts).toHaveLength(1);
     expect(dynamicContextPrompts?.[0]).toContain("WHOOP currently needs reconnect");
@@ -3501,6 +3504,124 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
     expect(dynamicContextPrompts?.[0]).not.toContain("synthetic-external-account");
     expect(dynamicContextPrompts?.[0]).not.toContain("refresh failed");
+  });
+
+  it("reruns without hosted device sync dynamic context when active-turn input is admitted", async () => {
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      async fetchSnapshot() {
+        return {
+          connections: [
+            {
+              connection: {
+                accessTokenExpiresAt: null,
+                connectedAt: "2026-04-29T00:00:00.000Z",
+                createdAt: "2026-04-29T00:00:00.000Z",
+                displayName: null,
+                externalAccountId: "synthetic-external-account",
+                id: "conn_synthetic_whoop",
+                metadata: {},
+                provider: "junction",
+                scopes: [],
+                status: "active",
+              },
+              credential: {
+                credentialMetadata: {},
+                kind: "provider_config",
+                providerConfigKey: "junction",
+              },
+              localState: {
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSyncCompletedAt: "2026-04-22T00:00:00.000Z",
+                lastSyncErrorAt: null,
+                lastSyncStartedAt: "2026-04-29T00:00:00.000Z",
+                lastWebhookAt: null,
+                nextReconcileAt: null,
+              },
+              sources: [
+                {
+                  displayName: null,
+                  firstSeenAt: "2026-04-22T00:00:00.000Z",
+                  lastErrorCode: "TOKEN_REFRESH_FAILED",
+                  lastErrorMessage: "refresh failed",
+                  lastSeenAt: "2026-04-29T00:00:00.000Z",
+                  resourceCount: 0,
+                  sourceProviderSlug: "whoop_v2",
+                  status: "error",
+                },
+              ],
+            },
+          ],
+          generatedAt: "2026-04-29T00:00:00.000Z",
+          userId: "member_synthetic_phase",
+        };
+      },
+    } satisfies RuntimeDeviceSyncPort;
+
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: null,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+    mocks.runHostedAssistantAutomationLane
+      .mockResolvedValueOnce({
+        activeTurnInputIngested: true,
+        assistantAutomationCurrentTurnDeliveryIntentIds: ["dynamic-context-intent"],
+        assistantAutomationProgressed: true,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      })
+      .mockResolvedValueOnce({
+        activeTurnInputIngested: true,
+        assistantAutomationCurrentTurnDeliveryIntentIds: ["foreground-intent"],
+        assistantAutomationProgressed: true,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["whoop_v2"],
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
+    }));
+
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(2);
+    const firstCall = mocks.runHostedAssistantAutomationLane.mock.calls[0]?.[0];
+    const secondCall = mocks.runHostedAssistantAutomationLane.mock.calls[1]?.[0];
+    expect(firstCall).toEqual(expect.objectContaining({
+      deferActiveTurnInputRefresh: true,
+    }));
+    expect(firstCall?.executionContext.hosted?.dynamicContextPrompts).toHaveLength(1);
+    expect(secondCall).not.toHaveProperty("deferActiveTurnInputRefresh");
+    expect(secondCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
+      expect.objectContaining({
+        includeBackgroundDueIntents: false,
+        preferredIntentIds: ["foreground-intent"],
+      }),
+    );
   });
 
   it("aborts in-flight hosted device sync status reads after foreground preemption", async () => {

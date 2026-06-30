@@ -181,6 +181,7 @@ export async function runHostedAssistantAutomationLane(input: {
   operatorHomeRoot?: string | null;
   runtimeAttemptId?: string | null;
   assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
+  deferActiveTurnInputRefresh?: boolean;
   runtimeEnv?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
@@ -217,6 +218,7 @@ export async function runHostedAssistantAutomationLane(input: {
           vaultRoot: input.vaultRoot,
         }),
         {
+          deferActiveTurnInputRefresh: input.deferActiveTurnInputRefresh ?? false,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
         },
@@ -266,6 +268,7 @@ export async function runHostedAssistantAutomation(
   signal?: AbortSignal,
   turnEnvironment?: AssistantTurnEnvironment | null,
   options?: {
+    deferActiveTurnInputRefresh?: boolean | null;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     runtimeAttemptId?: string | null;
   },
@@ -367,6 +370,16 @@ export async function runHostedAssistantAutomation(
       return result;
     },
     async refresh(refreshInput) {
+      if (
+        selectedInputIds.mode === "background"
+        && options?.deferActiveTurnInputRefresh === true
+      ) {
+        return {
+          progressed: false,
+          reason: "source_unavailable",
+        };
+      }
+
       return await baseInputSource.refresh(refreshInput);
     },
   };

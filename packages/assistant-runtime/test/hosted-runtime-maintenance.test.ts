@@ -637,6 +637,79 @@ describe("runHostedAssistantAutomation", () => {
     expect(mocks.initInboxRuntime).not.toHaveBeenCalled();
   });
 
+  it("defers active-turn input refresh for background-only dynamic context", async () => {
+    const refresh = vi.fn(async () => ({
+      progressed: true,
+      reason: "ingested_input",
+    }));
+    const listNewConversationInputs = vi.fn(async (query) => ({
+      inputs: [
+        {
+          acceptedInput: {
+            id: "late-request",
+            source: "assistant-input",
+          },
+          event: {
+            inputId: "late-request",
+          },
+        },
+      ],
+      nextCursor: query.afterCursor ?? null,
+    }));
+    mocks.createHostedAssistantInputSource.mockReturnValueOnce({
+      listInputCandidates: vi.fn(async (query) => ({
+        inputs: [],
+        nextCursor: query.afterCursor ?? null,
+      })),
+      listNewConversationInputs,
+      refresh,
+    });
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      await expect(input.inputSource?.refresh({
+        signal: undefined,
+      })).resolves.toEqual({
+        progressed: false,
+        reason: "source_unavailable",
+      });
+      return {
+        nextWakeAt: "2026-04-23T00:00:30.000Z",
+        progressed: true,
+      };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_deferred_turn_input",
+      {
+        hosted: {
+          issueDeviceConnectLink: vi.fn(),
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_deferred_turn_input",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-23T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      [],
+      undefined,
+      null,
+      {
+        deferActiveTurnInputRefresh: true,
+      },
+    );
+
+    expect(result.timings).toEqual(expect.objectContaining({
+      activeTurnInputIngested: false,
+    }));
+    expect(refresh).not.toHaveBeenCalled();
+    expect(listNewConversationInputs).not.toHaveBeenCalled();
+    expect(result.nextWakeAt).toBe("2026-04-23T00:00:30.000Z");
+  });
+
   it("records metadata-only candidate query diagnostics for scanner misses", async () => {
     const candidate = {
       acceptedInput: {
