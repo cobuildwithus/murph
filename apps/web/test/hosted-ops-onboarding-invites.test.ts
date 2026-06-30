@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  clearHostedMemberPendingLinqBindingTx: vi.fn(),
   createHostedLinqChatLookupKey: vi.fn(),
   createHostedLinqMediaChat: vi.fn(),
   ensureHostedMemberForPhoneTx: vi.fn(),
@@ -51,6 +52,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  clearHostedMemberPendingLinqBindingTx: mocks.clearHostedMemberPendingLinqBindingTx,
   lookupHostedMemberRoutingByHomeLinqChatId: mocks.lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqChatId: mocks.lookupHostedMemberRoutingByPendingLinqChatId,
   readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
@@ -137,6 +139,7 @@ describe("hosted ops onboarding invites", () => {
       chatId: "chat_created",
       messageId: "message_audio",
     });
+    mocks.clearHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
     mocks.uploadHostedLinqAttachment.mockResolvedValue({ attachmentId: "attachment_123" });
     mocks.sendHostedLinqVoiceMemo.mockResolvedValue(undefined);
@@ -314,13 +317,30 @@ describe("hosted ops onboarding invites", () => {
     const openIdempotencyKey = readIdempotencyKey(mocks.createHostedLinqMediaChat);
     expect(openIdempotencyKey).not.toContain("+15557654321");
     expect(openIdempotencyKey).not.toContain("+15551234567");
-    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledWith({
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenNthCalledWith(1, {
       existingChatPolicy: "fail",
+      linqChatId: expect.stringMatching(/^ops-onboarding-pending:[a-f0-9]{64}$/u),
+      memberId: "member_123",
+      prisma: tx,
+      recipientPhone: "+15557654321",
+    });
+    const pendingClaimChatId = readPendingLinqChatId(
+      mocks.upsertHostedMemberPendingLinqBindingTx,
+      0,
+    );
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenNthCalledWith(2, {
+      existingChatPolicy: "fail",
+      expectedExistingLinqChatId: pendingClaimChatId,
       linqChatId: "chat_created",
       memberId: "member_123",
       prisma: tx,
       recipientPhone: "+15557654321",
     });
+    expect(
+      mocks.upsertHostedMemberPendingLinqBindingTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.uploadHostedLinqAttachment.mock.invocationCallOrder[0],
+    );
     expect(
       mocks.uploadHostedLinqAttachment.mock.invocationCallOrder[0],
     ).toBeLessThan(
@@ -329,7 +349,7 @@ describe("hosted ops onboarding invites", () => {
     expect(
       mocks.createHostedLinqMediaChat.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.upsertHostedMemberPendingLinqBindingTx.mock.invocationCallOrder[0] ?? 0,
+      mocks.upsertHostedMemberPendingLinqBindingTx.mock.invocationCallOrder[1] ?? 0,
     );
     expect(result).toMatchObject({
       chatId: "chat_created",
@@ -389,7 +409,7 @@ describe("hosted ops onboarding invites", () => {
 
     expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(1);
     expect(mocks.createHostedLinqMediaChat).toHaveBeenCalledTimes(1);
-    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(2);
     expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
@@ -541,6 +561,11 @@ describe("hosted ops onboarding invites", () => {
     expect(secondKey).not.toBe(firstKey);
     expect(firstKey).not.toContain("+15551234567");
     expect(secondKey).not.toContain("+15559876543");
+    expect(mocks.clearHostedMemberPendingLinqBindingTx).toHaveBeenCalledWith({
+      linqChatId: readPendingLinqChatId(mocks.upsertHostedMemberPendingLinqBindingTx, 0),
+      memberId: "member_123",
+      prisma: tx,
+    });
   });
 
   it("restores the pending binding when the same new-chat audio request is retried after chat creation", async () => {
@@ -551,9 +576,11 @@ describe("hosted ops onboarding invites", () => {
       chatId: "chat_replayed",
       messageId: "message_replayed",
     });
-    mocks.upsertHostedMemberPendingLinqBindingTx.mockRejectedValueOnce(
-      new Error("database went away"),
-    );
+    mocks.upsertHostedMemberPendingLinqBindingTx
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("database went away"))
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined);
     const request = {
       deliveryMode: "new_chat" as const,
       linqFromPhoneNumber: "+15557654321",
@@ -584,9 +611,22 @@ describe("hosted ops onboarding invites", () => {
       attachmentId: "attachment_retry",
       idempotencyKey: firstKey,
     }));
-    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(2);
+    const pendingClaimChatId = readPendingLinqChatId(
+      mocks.upsertHostedMemberPendingLinqBindingTx,
+      0,
+    );
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(4);
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenNthCalledWith(2, {
+      existingChatPolicy: "fail",
+      expectedExistingLinqChatId: pendingClaimChatId,
+      linqChatId: "chat_replayed",
+      memberId: "member_123",
+      prisma: tx,
+      recipientPhone: "+15557654321",
+    });
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenLastCalledWith({
       existingChatPolicy: "fail",
+      expectedExistingLinqChatId: pendingClaimChatId,
       linqChatId: "chat_replayed",
       memberId: "member_123",
       prisma: tx,
@@ -835,4 +875,19 @@ function readIdempotencyKey(
   }
 
   return input.idempotencyKey;
+}
+
+function readPendingLinqChatId(
+  mock: { mock: { calls: Array<Array<unknown>> } },
+  callIndex = 0,
+): string {
+  const input = mock.mock.calls[callIndex]?.[0] as {
+    linqChatId?: unknown;
+  } | undefined;
+
+  if (typeof input?.linqChatId !== "string") {
+    throw new Error("Expected mocked call to include a pending Linq chat id.");
+  }
+
+  return input.linqChatId;
 }

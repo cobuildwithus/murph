@@ -22,6 +22,7 @@ import { type HostedOnboardingReadClient } from "./shared";
 
 export async function upsertHostedMemberPendingLinqBindingTx(input: {
   existingChatPolicy?: "replace" | "fail";
+  expectedExistingLinqChatId?: string | null;
   linqChatId: string;
   memberId: string;
   participantContact?: HostedLinqParticipantContact | null;
@@ -32,6 +33,7 @@ export async function upsertHostedMemberPendingLinqBindingTx(input: {
   await writeHostedMemberLinqBindingTx({
     clearPending: false,
     existingChatPolicy: input.existingChatPolicy ?? "replace",
+    expectedExistingLinqChatId: input.expectedExistingLinqChatId ?? null,
     kind: "pending",
     linqChatId: input.linqChatId,
     memberId: input.memberId,
@@ -39,6 +41,43 @@ export async function upsertHostedMemberPendingLinqBindingTx(input: {
     participantContactObservedAt: input.participantContactObservedAt ?? null,
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
+  });
+}
+
+export async function clearHostedMemberPendingLinqBindingTx(input: {
+  linqChatId: string;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.linqChatId);
+
+  if (linqChatLookupKeys.length === 0) {
+    throw new TypeError("Hosted Linq routing requires a non-empty chat id.");
+  }
+
+  await acquireHostedLinqRoutingWriteLockTx({
+    lockValue: input.memberId,
+    namespace: "member",
+    tx: input.prisma,
+  });
+  await input.prisma.hostedMemberRouting.updateMany({
+    where: {
+      memberId: input.memberId,
+      pendingLinqChatLookupKey: {
+        in: [...linqChatLookupKeys],
+      },
+    },
+    data: {
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      pendingLinqLastInboundAt: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+    },
   });
 }
 
@@ -180,6 +219,7 @@ export async function upsertHostedMemberHomeLinqBindingTx(input: {
   await writeHostedMemberLinqBindingTx({
     clearPending: input.clearPending ?? false,
     existingChatPolicy: "replace",
+    expectedExistingLinqChatId: null,
     kind: "home",
     linqChatId: input.linqChatId,
     memberId: input.memberId,
@@ -336,6 +376,7 @@ export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
 async function writeHostedMemberLinqBindingTx(input: {
   clearPending: boolean;
   existingChatPolicy: "replace" | "fail";
+  expectedExistingLinqChatId: string | null;
   kind: "home" | "pending";
   linqChatId: string;
   memberId: string;
@@ -346,9 +387,15 @@ async function writeHostedMemberLinqBindingTx(input: {
 }): Promise<void> {
   const linqChatLookupKey = createHostedLinqChatLookupKey(input.linqChatId);
   const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.linqChatId);
+  const expectedExistingLinqChatLookupKeys = input.expectedExistingLinqChatId
+    ? createHostedLinqChatLookupKeyReadCandidates(input.expectedExistingLinqChatId)
+    : [];
 
   if (!linqChatLookupKey || linqChatLookupKeys.length === 0) {
     throw new TypeError("Hosted Linq routing requires a non-empty chat id.");
+  }
+  if (input.expectedExistingLinqChatId && expectedExistingLinqChatLookupKeys.length === 0) {
+    throw new TypeError("Hosted Linq routing requires a non-empty expected existing chat id.");
   }
 
   if (input.kind === "pending" && input.existingChatPolicy === "fail") {
@@ -380,13 +427,19 @@ async function writeHostedMemberLinqBindingTx(input: {
       if (linqChatLookupKeys.includes(existingRouting.pendingLinqChatLookupKey)) {
         return;
       }
+      const canReplaceExpectedPendingChat =
+        expectedExistingLinqChatLookupKeys.includes(
+          existingRouting.pendingLinqChatLookupKey,
+        );
 
-      throw hostedOnboardingError({
-        code: "HOSTED_LINQ_PENDING_CHAT_CONFLICT",
-        httpStatus: 409,
-        message: "Hosted Linq routing already has a different pending chat for this member.",
-        retryable: false,
-      });
+      if (!canReplaceExpectedPendingChat) {
+        throw hostedOnboardingError({
+          code: "HOSTED_LINQ_PENDING_CHAT_CONFLICT",
+          httpStatus: 409,
+          message: "Hosted Linq routing already has a different pending chat for this member.",
+          retryable: false,
+        });
+      }
     }
   }
 
