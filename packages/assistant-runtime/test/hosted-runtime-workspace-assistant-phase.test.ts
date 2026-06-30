@@ -2271,7 +2271,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("continues the assistant lane when foreground input arrives during system mailbox preparation", async () => {
     let shouldYield = false;
+    let fetchSnapshotCalls = 0;
     const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      async fetchSnapshot() {
+        fetchSnapshotCalls += 1;
+        throw new Error("fetchSnapshot should not run after foreground preemption.");
+      },
+    } satisfies RuntimeDeviceSyncPort;
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(async () => {
       shouldYield = true;
       return {
@@ -2289,11 +2307,28 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["whoop_v2"],
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
       shouldYieldBackgroundMaintenance,
     }));
 
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(fetchSnapshotCalls).toBe(0);
     expectAssistantLaneCallWithoutDeviceSyncOptions();
+    expect(
+      mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0]
+        .executionContext.hosted?.dynamicContextPrompts,
+    ).toBeUndefined();
 
     await result.afterCheckpoint?.();
 
@@ -3338,6 +3373,419 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ]);
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("connect.example.test");
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("synthetic-whoop-secret");
+  });
+
+  it("injects reconnect-required hosted device sync status as dynamic context for due cron lanes", async () => {
+    const fetchSnapshotRequests: Array<Parameters<RuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      async fetchSnapshot(request) {
+        fetchSnapshotRequests.push(request);
+        if (request?.sourceProviderSlug !== "whoop_v2") {
+          return {
+            connections: [],
+            generatedAt: "2026-04-29T00:00:00.000Z",
+            userId: "member_synthetic_phase",
+          };
+        }
+
+        return {
+          connections: [
+            {
+              connection: {
+                accessTokenExpiresAt: null,
+                connectedAt: "2026-04-29T00:00:00.000Z",
+                createdAt: "2026-04-29T00:00:00.000Z",
+                displayName: null,
+                externalAccountId: "synthetic-external-account",
+                id: "conn_synthetic_whoop",
+                metadata: {},
+                provider: "junction",
+                scopes: [],
+                status: "active",
+              },
+              credential: {
+                credentialMetadata: {},
+                kind: "provider_config",
+                providerConfigKey: "junction",
+              },
+              localState: {
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSyncCompletedAt: "2026-04-22T00:00:00.000Z",
+                lastSyncErrorAt: null,
+                lastSyncStartedAt: "2026-04-29T00:00:00.000Z",
+                lastWebhookAt: null,
+                nextReconcileAt: null,
+              },
+              sources: [
+                {
+                  displayName: null,
+                  firstSeenAt: "2026-04-22T00:00:00.000Z",
+                  lastErrorCode: "TOKEN_REFRESH_FAILED",
+                  lastErrorMessage: "refresh failed",
+                  lastSeenAt: "2026-04-29T00:00:00.000Z",
+                  resourceCount: 0,
+                  sourceProviderSlug: "whoop_v2",
+                  status: "error",
+                },
+              ],
+            },
+          ],
+          generatedAt: "2026-04-29T00:00:00.000Z",
+          userId: "member_synthetic_phase",
+        };
+      },
+    } satisfies RuntimeDeviceSyncPort;
+
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: null,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["fitbit", "garmin", "oura", "withings", "whoop_v2"],
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
+    }));
+
+    const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    expect(fetchSnapshotRequests).toEqual([]);
+    const dynamicContextPrompt =
+      await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
+    expect(fetchSnapshotRequests.map((request) => request?.sourceProviderSlug)).toEqual([
+      "fitbit",
+      "garmin",
+      "oura",
+      "withings",
+      "whoop_v2",
+    ]);
+    expect(fetchSnapshotRequests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          includeCredentialMaterial: false,
+          limit: 4,
+          signal: expect.any(AbortSignal),
+          sourceProviderSlug: "whoop_v2",
+        }),
+      ]),
+    );
+    expect(assistantLaneCall?.signal).toBeUndefined();
+    expect(assistantLaneCall).not.toHaveProperty("suppressActiveTurnInputRefresh");
+    expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts)
+      .toBeUndefined();
+    expect(dynamicContextPrompt).toContain("WHOOP currently needs reconnect");
+    expect(dynamicContextPrompt).toContain("source `whoop_v2`");
+    expect(dynamicContextPrompt).toContain("`TOKEN_REFRESH_FAILED`");
+    expect(dynamicContextPrompt).toContain(
+      "vault-cli device connect whoop --format json",
+    );
+    expect(dynamicContextPrompt).not.toContain("synthetic-external-account");
+    expect(dynamicContextPrompt).not.toContain("refresh failed");
+  });
+
+  it("omits Junction source commands when the public connect target resolves direct", async () => {
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      async fetchSnapshot(request) {
+        if (request?.sourceProviderSlug !== "oura") {
+          return {
+            connections: [],
+            generatedAt: "2026-04-29T00:00:00.000Z",
+            userId: "member_synthetic_phase",
+          };
+        }
+
+        return {
+          connections: [
+            {
+              connection: {
+                accessTokenExpiresAt: null,
+                connectedAt: "2026-04-29T00:00:00.000Z",
+                createdAt: "2026-04-29T00:00:00.000Z",
+                displayName: null,
+                externalAccountId: "synthetic-external-account",
+                id: "conn_synthetic_oura_junction",
+                metadata: {},
+                provider: "junction",
+                scopes: [],
+                status: "active",
+              },
+              credential: {
+                credentialMetadata: {},
+                kind: "provider_config",
+                providerConfigKey: "junction",
+              },
+              localState: {
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSyncCompletedAt: "2026-04-22T00:00:00.000Z",
+                lastSyncErrorAt: null,
+                lastSyncStartedAt: "2026-04-29T00:00:00.000Z",
+                lastWebhookAt: null,
+                nextReconcileAt: null,
+              },
+              sources: [
+                {
+                  displayName: null,
+                  firstSeenAt: "2026-04-22T00:00:00.000Z",
+                  lastErrorCode: "TOKEN_REFRESH_FAILED",
+                  lastErrorMessage: "refresh failed",
+                  lastSeenAt: "2026-04-29T00:00:00.000Z",
+                  resourceCount: 0,
+                  sourceProviderSlug: "oura",
+                  status: "error",
+                },
+              ],
+            },
+          ],
+          generatedAt: "2026-04-29T00:00:00.000Z",
+          userId: "member_synthetic_phase",
+        };
+      },
+    } satisfies RuntimeDeviceSyncPort;
+
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: null,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["oura"],
+            region: "us",
+          },
+          oura: {
+            clientId: "synthetic-oura-client",
+            clientSecret: "synthetic-oura-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
+    }));
+
+    const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    const prompt =
+      await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({}) ?? "";
+
+    expect(prompt).toContain("Oura currently needs reconnect");
+    expect(prompt).toContain("source `oura`");
+    expect(prompt).toContain("generic device-connect command is ambiguous");
+    expect(prompt).not.toContain("vault-cli device connect oura --format json");
+  });
+
+  it("leaves pending-input device context suppression to the automation lane", async () => {
+    const fetchSnapshot = vi.fn(async () => ({
+      connections: [],
+      generatedAt: "2026-04-29T00:00:00.000Z",
+      userId: "member_synthetic_phase",
+    }));
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      fetchSnapshot,
+    } satisfies RuntimeDeviceSyncPort;
+
+    mocks.resolveHostedPendingAssistantInputWakeAt
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce("2026-04-29T00:00:00.000Z");
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createSystemMailboxItem(),
+      itemId: "system_mailbox_item_processed",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: null,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["whoop_v2"],
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
+    }));
+
+    const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    expect(assistantLaneCall).toHaveProperty("buildBackgroundDynamicContextPrompt");
+    expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
+    expect(fetchSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("skips lazy hosted device sync status reads after foreground preemption", async () => {
+    let shouldYield = false;
+    const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      async fetchSnapshot() {
+        throw new Error("fetchSnapshot should not run after foreground preemption.");
+      },
+    } satisfies RuntimeDeviceSyncPort;
+
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: null,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["whoop_v2"],
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
+      shouldYieldBackgroundMaintenance,
+    }));
+
+    const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    shouldYield = true;
+    const prompt = await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
+    expect(prompt).toBeNull();
+    expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
+  });
+
+  it("uses an abortable signal for optional hosted device sync status reads before scheduled assistant work", async () => {
+    let fetchSnapshotCalls = 0;
+    let fetchSnapshotSignal: AbortSignal | null | undefined;
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      async fetchSnapshot(request) {
+        fetchSnapshotCalls += 1;
+        fetchSnapshotSignal = request?.signal;
+        return {
+          connections: [],
+          generatedAt: "2026-04-29T00:00:00.000Z",
+          userId: "member_synthetic_phase",
+        };
+      },
+    } satisfies RuntimeDeviceSyncPort;
+
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: null,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["whoop_v2"],
+            region: "us",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
+    }));
+
+    const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    const prompt = await assistantLaneCall?.buildBackgroundDynamicContextPrompt?.({});
+    expect(fetchSnapshotCalls).toBe(1);
+    expect(fetchSnapshotSignal).toBeInstanceOf(AbortSignal);
+    expect(prompt).toBeNull();
+    expect(assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts).toBeUndefined();
   });
 
   it("logs hosted device connect helper failures without leaking response details", async () => {

@@ -259,6 +259,12 @@ function createAuthorityHarness(input: {
         sourceInstanceKey: source.sourceInstanceKey ?? source.sourceProviderSlug,
       }))
     ),
+    listRuntimeSnapshotConnectionSources: vi.fn(async () =>
+      (input.connectionSources ?? []).map((source) => ({
+        ...source,
+        sourceInstanceKey: source.sourceInstanceKey ?? source.sourceProviderSlug,
+      }))
+    ),
     persistStoredConnectionTokenBundle,
     prisma: {
       deviceConnection: {
@@ -1277,6 +1283,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     await readHostedDeviceSyncRuntimeState({
       request: new Request("https://example.test/device-sync/runtime/snapshot", {
         body: JSON.stringify({
+          limit: 4,
           provider: "whoop",
           sourceProviderSlug: "fitbit",
           userId: "user_123",
@@ -1288,6 +1295,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
 
     expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        take: 4,
         where: expect.objectContaining({
           OR: [
             { provider: { in: ["whoop", "whoop_v2", "whoop-v2"] } },
@@ -1314,6 +1322,56 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         }),
       }),
     );
+  });
+
+  it("uses a bounded source projection for limited provider-scoped hosted snapshots", async () => {
+    const harness = createAuthorityHarness({
+      connectionSources: [
+        {
+          connectionId: "conn_123",
+          displayName: "WHOOP",
+          firstSeenAt: "2026-04-06T09:00:00.000Z",
+          lastErrorCode: "TOKEN_REFRESH_FAILED",
+          lastErrorMessage: null,
+          lastSeenAt: "2026-04-06T10:00:00.000Z",
+          resourceAvailabilitySummary: {},
+          sourceProviderSlug: "whoop_v2",
+          status: "error",
+        },
+      ],
+      record: buildHostedRecord({
+        provider: "junction",
+      }),
+    });
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue([harness.record]);
+
+    const response = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          limit: 4,
+          sourceProviderSlug: "whoop",
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(harness.store.listRuntimeSnapshotConnectionSources).toHaveBeenCalledWith({
+      connectionId: "conn_123",
+      limit: 4,
+      sourceProviderSlugs: ["whoop", "whoop_v2", "whoop-v2"],
+    });
+    expect(harness.store.listConnectionSources).not.toHaveBeenCalled();
+    expect(response.connections[0]?.sources).toEqual([
+      expect.objectContaining({
+        sourceProviderSlug: "whoop_v2",
+      }),
+    ]);
   });
 
   it("keeps explicit blank hosted snapshot filters fail-closed", async () => {
