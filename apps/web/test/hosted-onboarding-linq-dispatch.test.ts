@@ -2692,6 +2692,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         pendingLinqNewChatReservationKey: {
           not: null,
         },
+        pendingLinqNewChatReservedAt: {
+          gte: expect.any(Date),
+        },
         pendingLinqRecipientPhoneLookupKey: {
           in: [createHostedPhoneLookupKey("+15550000000")],
         },
@@ -2798,6 +2801,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         pendingLinqNewChatReservationKey: {
           not: null,
         },
+        pendingLinqNewChatReservedAt: {
+          gte: expect.any(Date),
+        },
         pendingLinqRecipientPhoneLookupKey: {
           in: [createHostedPhoneLookupKey("+15550000000")],
         },
@@ -2901,6 +2907,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       where: {
         pendingLinqNewChatReservationKey: {
           not: null,
+        },
+        pendingLinqNewChatReservedAt: {
+          gte: expect.any(Date),
         },
         pendingLinqRecipientPhoneLookupKey: {
           in: [createHostedPhoneLookupKey("+15550000000")],

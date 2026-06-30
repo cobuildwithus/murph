@@ -4,6 +4,7 @@ import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption"
 import {
   createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import * as barrel from "@/src/lib/hosted-onboarding/member-service";
 import {
@@ -27,6 +28,7 @@ import {
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import {
   clearHostedMemberPendingLinqNewChatReservationTx,
+  hasHostedMemberPendingLinqNewChatReservation,
   reserveHostedMemberPendingLinqNewChatTx,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberPendingLinqBindingTx,
@@ -911,6 +913,38 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
 
     expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("bounds pending Linq new-chat webhook reservations to the send-to-bind window", async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+    const prisma = asRootPrisma({
+      hostedMemberRouting: {
+        findFirst,
+      },
+    });
+
+    await expect(hasHostedMemberPendingLinqNewChatReservation({
+      now: new Date("2026-06-30T12:10:00.000Z"),
+      prisma: prisma as never,
+      recipientPhone: "+15550100001",
+    })).resolves.toBe(false);
+
+    expect(findFirst).toHaveBeenCalledWith({
+      select: {
+        memberId: true,
+      },
+      where: {
+        pendingLinqNewChatReservationKey: {
+          not: null,
+        },
+        pendingLinqNewChatReservedAt: {
+          gte: new Date("2026-06-30T12:00:00.000Z"),
+        },
+        pendingLinqRecipientPhoneLookupKey: {
+          in: createHostedPhoneLookupKeyReadCandidates("+15550100001"),
+        },
+      },
+    });
   });
 
   it("clears only the owned pending Linq new-chat reservation", async () => {

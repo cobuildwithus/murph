@@ -27,6 +27,9 @@ export type HostedMemberPendingLinqNewChatReservationOutcome =
   | "reservation_conflict"
   | "reserved";
 
+const HOSTED_MEMBER_PENDING_LINQ_NEW_CHAT_RESERVATION_WEBHOOK_GUARD_MS =
+  10 * 60 * 1000;
+
 export async function upsertHostedMemberPendingLinqBindingTx(input: {
   existingChatPolicy?: "replace" | "fail";
   expectedNewChatReservationKey?: string | null;
@@ -180,6 +183,7 @@ export async function clearHostedMemberPendingLinqNewChatReservationTx(input: {
 }
 
 export async function hasHostedMemberPendingLinqNewChatReservation(input: {
+  now?: Date;
   prisma: HostedOnboardingReadClient;
   recipientPhone: string | null;
 }): Promise<boolean> {
@@ -190,11 +194,21 @@ export async function hasHostedMemberPendingLinqNewChatReservation(input: {
   if (recipientPhoneLookupKeys.length === 0) {
     return false;
   }
+  const now = input.now ?? new Date();
+  if (Number.isNaN(now.getTime())) {
+    throw new TypeError("Hosted Linq new-chat reservation guard time must be valid.");
+  }
+  const reservedAfter = new Date(
+    now.getTime() - HOSTED_MEMBER_PENDING_LINQ_NEW_CHAT_RESERVATION_WEBHOOK_GUARD_MS,
+  );
 
   const reservation = await input.prisma.hostedMemberRouting.findFirst({
     where: {
       pendingLinqNewChatReservationKey: {
         not: null,
+      },
+      pendingLinqNewChatReservedAt: {
+        gte: reservedAfter,
       },
       pendingLinqRecipientPhoneLookupKey: {
         in: recipientPhoneLookupKeys,
