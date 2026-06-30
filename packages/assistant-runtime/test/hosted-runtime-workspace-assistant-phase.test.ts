@@ -3505,6 +3505,114 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(dynamicContextPrompts?.[0]).not.toContain("refresh failed");
   });
 
+  it("omits Junction source commands when the public connect target resolves direct", async () => {
+    const deviceSyncPort = {
+      ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+      async applyUpdates() {
+        return {
+          appliedAt: "2026-04-29T00:00:00.000Z",
+          updates: [],
+          userId: "member_synthetic_phase",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called.");
+      },
+      async fetchSnapshot(request) {
+        if (request?.sourceProviderSlug !== "oura") {
+          return {
+            connections: [],
+            generatedAt: "2026-04-29T00:00:00.000Z",
+            userId: "member_synthetic_phase",
+          };
+        }
+
+        return {
+          connections: [
+            {
+              connection: {
+                accessTokenExpiresAt: null,
+                connectedAt: "2026-04-29T00:00:00.000Z",
+                createdAt: "2026-04-29T00:00:00.000Z",
+                displayName: null,
+                externalAccountId: "synthetic-external-account",
+                id: "conn_synthetic_oura_junction",
+                metadata: {},
+                provider: "junction",
+                scopes: [],
+                status: "active",
+              },
+              credential: {
+                credentialMetadata: {},
+                kind: "provider_config",
+                providerConfigKey: "junction",
+              },
+              localState: {
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSyncCompletedAt: "2026-04-22T00:00:00.000Z",
+                lastSyncErrorAt: null,
+                lastSyncStartedAt: "2026-04-29T00:00:00.000Z",
+                lastWebhookAt: null,
+                nextReconcileAt: null,
+              },
+              sources: [
+                {
+                  displayName: null,
+                  firstSeenAt: "2026-04-22T00:00:00.000Z",
+                  lastErrorCode: "TOKEN_REFRESH_FAILED",
+                  lastErrorMessage: "refresh failed",
+                  lastSeenAt: "2026-04-29T00:00:00.000Z",
+                  resourceCount: 0,
+                  sourceProviderSlug: "oura",
+                  status: "error",
+                },
+              ],
+            },
+          ],
+          generatedAt: "2026-04-29T00:00:00.000Z",
+          userId: "member_synthetic_phase",
+        };
+      },
+    } satisfies RuntimeDeviceSyncPort;
+
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: null,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      resolvedDeviceSync: {
+        providerConfigs: {
+          junction: {
+            environment: "sandbox",
+            providerFilter: ["oura"],
+            region: "us",
+          },
+          oura: {
+            clientId: "synthetic-oura-client",
+            clientSecret: "synthetic-oura-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      runtimeDeviceSyncPort: deviceSyncPort,
+    }));
+
+    const assistantLaneCall = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    const prompt =
+      assistantLaneCall?.executionContext.hosted?.dynamicContextPrompts?.[0] ?? "";
+
+    expect(prompt).toContain("Oura currently needs reconnect");
+    expect(prompt).toContain("source `oura`");
+    expect(prompt).toContain("generic device-connect command is ambiguous");
+    expect(prompt).not.toContain("vault-cli device connect oura --format json");
+  });
+
   it("defers active-turn input before hosted device sync dynamic context can commit delivery", async () => {
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),

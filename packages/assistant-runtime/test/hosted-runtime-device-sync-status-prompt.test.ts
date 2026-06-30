@@ -215,6 +215,7 @@ describe("hosted device sync status prompt", () => {
         {
           connectTarget: "whoop",
           connectTargetAmbiguous: true,
+          connectTargetCommandSafe: true,
           label: "WHOOP",
           provider: "junction",
           sourceProviderSlug: "whoop_v2",
@@ -227,6 +228,97 @@ describe("hosted device sync status prompt", () => {
     expect(prompt).toContain("source `whoop_v2`");
     expect(prompt).toContain("vault-cli device connect whoop --format json");
     expect(prompt).not.toContain("generic device-connect command is ambiguous");
+  });
+
+  it("does not render a source-specific Junction command when the public target resolves elsewhere", () => {
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [
+        {
+          connectTarget: "oura",
+          connectTargetAmbiguous: true,
+          connectTargetCommandSafe: true,
+          label: "Oura",
+          provider: "oura",
+        },
+        {
+          connectTarget: "oura",
+          connectTargetAmbiguous: true,
+          connectTargetCommandSafe: false,
+          label: "Oura",
+          provider: "junction",
+          sourceProviderSlug: "oura",
+        },
+      ],
+      snapshot: buildSnapshot({
+        sources: [
+          {
+            displayName: null,
+            firstSeenAt: "2026-06-01T00:00:00.000Z",
+            lastErrorCode: "TOKEN_REFRESH_FAILED",
+            lastErrorMessage: null,
+            lastSeenAt: "2026-06-29T00:00:00.000Z",
+            resourceCount: 0,
+            sourceProviderSlug: "oura",
+            status: "error",
+          },
+        ],
+      }),
+    });
+
+    expect(prompt).toContain("Oura currently needs reconnect");
+    expect(prompt).toContain("source `oura`");
+    expect(prompt).toContain("generic device-connect command is ambiguous");
+    expect(prompt).not.toContain("vault-cli device connect oura --format json");
+  });
+
+  it("maps Junction account reauthorization through the connection source before provider fallback", () => {
+    const snapshot = buildSnapshot();
+    const entry = snapshot.connections[0]!;
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [
+        {
+          connectTarget: "whoop",
+          label: "WHOOP",
+          provider: "junction",
+          sourceProviderSlug: "whoop_v2",
+        },
+        {
+          connectTarget: "garmin",
+          label: "Garmin",
+          provider: "junction",
+          sourceProviderSlug: "garmin",
+        },
+      ],
+      snapshot: {
+        ...snapshot,
+        connections: [
+          {
+            ...entry,
+            connection: {
+              ...entry.connection,
+              provider: "junction",
+              status: "reauthorization_required",
+            },
+            sources: [
+              {
+                displayName: null,
+                firstSeenAt: "2026-06-01T00:00:00.000Z",
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSeenAt: "2026-06-29T00:00:00.000Z",
+                resourceCount: 0,
+                sourceProviderSlug: "garmin",
+                status: "connected",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(prompt).toContain("Garmin currently needs reconnect");
+    expect(prompt).toContain("vault-cli device connect garmin --format json");
+    expect(prompt).not.toContain("WHOOP currently needs reconnect");
   });
 
   it("does not render when sources are connected", () => {

@@ -4714,6 +4714,12 @@ function resolveHostedWorkspaceDeviceReconnectTargets(
   }
 
   const targets = listConfiguredDeviceSyncReconnectTargets(providerConfigs);
+  const publicTargetsByConnectTarget = new Map(
+    listConfiguredDeviceSyncConnectTargets(providerConfigs).map((target) => [
+      target.connectTarget,
+      target,
+    ]),
+  );
   const connectTargetCounts = new Map<string, number>();
   for (const target of targets) {
     connectTargetCounts.set(
@@ -4725,12 +4731,42 @@ function resolveHostedWorkspaceDeviceReconnectTargets(
   return targets.map((target) => ({
     connectTarget: target.connectTarget,
     connectTargetAmbiguous: (connectTargetCounts.get(target.connectTarget) ?? 0) > 1,
+    connectTargetCommandSafe: sameHostedDeviceSyncConnectTarget(
+      target,
+      publicTargetsByConnectTarget.get(target.connectTarget) ?? null,
+    ),
     label: target.label,
     provider: target.provider,
     ...(target.sourceProviderSlug
       ? { sourceProviderSlug: target.sourceProviderSlug }
       : {}),
   }));
+}
+
+type HostedDeviceSyncConnectTarget = ReturnType<
+  typeof listConfiguredDeviceSyncConnectTargets
+>[number];
+
+function sameHostedDeviceSyncConnectTarget(
+  left: HostedDeviceSyncConnectTarget,
+  right: HostedDeviceSyncConnectTarget | null,
+): boolean {
+  if (!right) {
+    return false;
+  }
+
+  return normalizeHostedDeviceSyncConnectTargetKey(left.provider)
+      === normalizeHostedDeviceSyncConnectTargetKey(right.provider)
+    && normalizeHostedDeviceSyncConnectTargetKey(left.sourceProviderSlug)
+      === normalizeHostedDeviceSyncConnectTargetKey(right.sourceProviderSlug);
+}
+
+function normalizeHostedDeviceSyncConnectTargetKey(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim().toLowerCase().replace(/[^a-z0-9_]+/gu, "_")
+    .replace(/^_+|_+$/gu, "");
+  return normalized ? normalized : null;
 }
 
 function withHostedAssistantDynamicContextPrompt(input: {

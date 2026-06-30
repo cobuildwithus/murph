@@ -14,6 +14,7 @@ type HostedDeviceSyncRuntimeConnectionSourceSnapshot = NonNullable<
 export interface HostedDeviceSyncStatusPromptReconnectTarget {
   connectTarget: string;
   connectTargetAmbiguous?: boolean | null;
+  connectTargetCommandSafe?: boolean | null;
   label: string;
   provider: string;
   sourceProviderSlug?: string | null;
@@ -21,7 +22,7 @@ export interface HostedDeviceSyncStatusPromptReconnectTarget {
 
 interface HostedDeviceSyncReconnectNotice {
   commandConnectTarget: string | null;
-  commandConnectTargetAmbiguous: boolean;
+  commandConnectTargetSafe: boolean;
   errorCode: string;
   label: string;
   sourceProviderSlug: string | null;
@@ -197,16 +198,10 @@ function buildHostedDeviceSyncSourceReconnectNotice(input: {
     sourceProviderSlug: input.source.sourceProviderSlug,
   });
   const sourceProviderSlug = normalizeHostedDeviceSyncKey(input.source.sourceProviderSlug);
-  const matchedBySourceProviderSlug = Boolean(
-    sourceProviderSlug
-      && normalizeHostedDeviceSyncKey(reconnectTarget?.sourceProviderSlug) === sourceProviderSlug,
-  );
 
   return {
     commandConnectTarget: reconnectTarget?.connectTarget ?? null,
-    commandConnectTargetAmbiguous:
-      reconnectTarget?.connectTargetAmbiguous === true
-      && !matchedBySourceProviderSlug,
+    commandConnectTargetSafe: isHostedDeviceSyncReconnectCommandSafe(reconnectTarget),
     errorCode,
     label: reconnectTarget?.label
       ?? input.source.displayName
@@ -228,11 +223,11 @@ function buildHostedDeviceSyncAccountReconnectNotice(input: {
     return null;
   }
 
-  const reconnectTarget = resolveHostedDeviceSyncReconnectTargetForProvider({
-    provider,
-    reconnectTargets: input.reconnectTargets,
-  }) ?? resolveHostedDeviceSyncReconnectTargetForConnectionSources({
+  const reconnectTarget = resolveHostedDeviceSyncReconnectTargetForConnectionSources({
     connection: input.connection,
+    reconnectTargets: input.reconnectTargets,
+  }) ?? resolveHostedDeviceSyncReconnectTargetForProvider({
+    provider,
     reconnectTargets: input.reconnectTargets,
   });
   const errorCode = normalizeHostedDeviceSyncErrorCode(
@@ -241,7 +236,7 @@ function buildHostedDeviceSyncAccountReconnectNotice(input: {
 
   return {
     commandConnectTarget: reconnectTarget?.connectTarget ?? null,
-    commandConnectTargetAmbiguous: reconnectTarget?.connectTargetAmbiguous === true,
+    commandConnectTargetSafe: isHostedDeviceSyncReconnectCommandSafe(reconnectTarget),
     errorCode,
     label: reconnectTarget?.label
       ?? input.connection.connection.displayName
@@ -275,9 +270,9 @@ function renderHostedDeviceSyncReconnectNoticeLine(
   const subjectText = notice.sourceProviderSlug
     ? `source \`${notice.sourceProviderSlug}\` is`
     : "account is";
-  const reconnectText = notice.commandConnectTarget && !notice.commandConnectTargetAmbiguous
+  const reconnectText = notice.commandConnectTarget && notice.commandConnectTargetSafe
     ? ` To send a reconnect link, run \`vault-cli device connect ${notice.commandConnectTarget} --format json\` and use the returned \`connectUrl\`.`
-    : notice.commandConnectTargetAmbiguous
+    : notice.commandConnectTarget
       ? " A reconnect target is configured, but the generic device-connect command is ambiguous for this wearable/source; use an exact reconnect flow instead of `vault-cli device connect`."
     : " No hosted reconnect target is configured for this wearable/source in this turn.";
 
@@ -331,7 +326,26 @@ function resolveHostedDeviceSyncReconnectTargetForProvider(input: {
 
   return input.reconnectTargets.find((target) =>
     normalizeHostedDeviceSyncKey(target.provider) === provider
+    && normalizeHostedDeviceSyncKey(target.sourceProviderSlug) === null
   ) ?? null;
+}
+
+function isHostedDeviceSyncReconnectCommandSafe(
+  reconnectTarget: HostedDeviceSyncStatusPromptReconnectTarget | null,
+): boolean {
+  if (!reconnectTarget) {
+    return false;
+  }
+
+  if (reconnectTarget.connectTargetCommandSafe === true) {
+    return true;
+  }
+
+  if (reconnectTarget.connectTargetCommandSafe === false) {
+    return false;
+  }
+
+  return reconnectTarget.connectTargetAmbiguous !== true;
 }
 
 function normalizeHostedDeviceSyncErrorCode(
