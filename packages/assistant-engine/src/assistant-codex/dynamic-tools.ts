@@ -2276,28 +2276,6 @@ function parseSubmitProductFeedbackArguments(
       }),
     }
   }
-  if (
-    parsed.data.kind === 'feature_interest' &&
-    parsed.data.relatedChangelogItemIds.length === 0
-  ) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error: new z.ZodError([
-          {
-            code: z.ZodIssueCode.custom,
-            message: 'Feature interest feedback requires at least one related changelog item id.',
-            path: ['relatedChangelogItemIds'],
-          },
-        ]),
-        rawInput: value,
-        schemaName: 'murph.submit_product_feedback.input',
-        schemaRootKeys: readZodObjectRootKeys(submitProductFeedbackArgumentsSchema),
-        toolName: 'murph.submit_product_feedback',
-      }),
-    }
-  }
-
   return {
     feedback: parsed.data,
     ok: true,
