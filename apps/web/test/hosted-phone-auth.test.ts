@@ -2354,6 +2354,7 @@ describe("HostedPhoneAuth", () => {
       expect(mocks.loginWithCode).toHaveBeenCalledWith({ code: "123456" });
       expect(finalizeHostedPrivyVerification).toHaveBeenCalledTimes(1);
       assert.match(container.textContent ?? "", /Finishing setup/);
+      assert.ok(container.querySelector("[data-murph-pulse-mark]"));
       assert.doesNotMatch(container.textContent ?? "", /Phone child flow/);
       assert.doesNotMatch(container.textContent ?? "", /Code child flow/);
     } finally {
