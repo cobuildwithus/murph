@@ -339,6 +339,10 @@ model HostedMember {
   createdAt                      DateTime                        @default(now()) @map("created_at")
   updatedAt                      DateTime                        @updatedAt @map("updated_at")
   invites                        HostedInvite[]
+  accountGroupsOwned             HostedAccountGroup[]            @relation("HostedAccountGroupOwner")
+  accountGroupMemberships        HostedAccountGroupMembership[]   @relation("HostedAccountGroupMember")
+  accountGroupInvitesSent        HostedAccountGroupInvite[]       @relation("HostedAccountGroupInviteSender")
+  accountGroupInvitesAccepted    HostedAccountGroupInvite[]       @relation("HostedAccountGroupInviteAcceptor")
   aiUsage                        HostedAiUsage[]
   linqDailyStates                HostedLinqDailyState[]
   identity                       HostedMemberIdentity?
@@ -842,6 +846,100 @@ model HostedInvite {
   @@index([memberId, createdAt])
   @@index([expiresAt])
   @@map("hosted_invite")
+}
+
+model HostedAccountGroup {
+  id             String                         @id
+  displayName    String?                        @map("display_name")
+  ownerMemberId  String                         @unique @map("owner_member_id")
+  billingStatus  HostedBillingStatus            @default(not_started) @map("billing_status")
+  suspendedAt    DateTime?                      @map("suspended_at")
+  createdAt      DateTime                       @default(now()) @map("created_at")
+  updatedAt      DateTime                       @updatedAt @map("updated_at")
+  owner          HostedMember                   @relation("HostedAccountGroupOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
+  memberships    HostedAccountGroupMembership[]
+  invites        HostedAccountGroupInvite[]
+  billingRef     HostedAccountGroupBillingRef?
+
+  @@index([billingStatus])
+  @@map("hosted_account_group")
+}
+
+model HostedAccountGroupMembership {
+  id          String             @id
+  groupId     String             @map("group_id")
+  memberId    String             @map("member_id")
+  role        String
+  status      String             @default("active")
+  joinedAt    DateTime?          @map("joined_at")
+  removedAt   DateTime?          @map("removed_at")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+  group       HostedAccountGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  member      HostedMember       @relation("HostedAccountGroupMember", fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, memberId])
+  @@index([memberId, status])
+  @@index([groupId, status])
+  @@map("hosted_account_group_membership")
+}
+
+model HostedAccountGroupInvite {
+  id                              String              @id
+  groupId                         String              @map("group_id")
+  inviteCode                      String              @unique @map("invite_code")
+  invitedByMemberId               String              @map("invited_by_member_id")
+  acceptedByMemberId              String?             @map("accepted_by_member_id")
+  targetLabel                     String?             @map("target_label")
+  targetPhoneLookupKey            String?             @map("target_phone_lookup_key")
+  targetPhoneNumberEncrypted      String?             @map("target_phone_number_encrypted")
+  targetTelegramUsernameLookupKey String?             @map("target_telegram_username_lookup_key")
+  targetTelegramUsernameEncrypted String?             @map("target_telegram_username_encrypted")
+  targetEmailLookupKey            String?             @map("target_email_lookup_key")
+  targetEmailEncrypted            String?             @map("target_email_encrypted")
+  channel                         String              @default("family")
+  status                          String              @default("pending")
+  acceptedAt                      DateTime?           @map("accepted_at")
+  expiresAt                       DateTime            @map("expires_at")
+  createdAt                       DateTime            @default(now()) @map("created_at")
+  updatedAt                       DateTime            @updatedAt @map("updated_at")
+  group                           HostedAccountGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  invitedBy                       HostedMember        @relation("HostedAccountGroupInviteSender", fields: [invitedByMemberId], references: [id], onDelete: Cascade)
+  acceptedBy                      HostedMember?       @relation("HostedAccountGroupInviteAcceptor", fields: [acceptedByMemberId], references: [id], onDelete: SetNull)
+
+  @@index([groupId, status, createdAt])
+  @@index([targetPhoneLookupKey])
+  @@index([targetTelegramUsernameLookupKey], map: "hagi_target_telegram_username_lookup_key_idx")
+  @@index([targetEmailLookupKey], map: "hagi_target_email_lookup_key_idx")
+  @@index([acceptedByMemberId])
+  @@index([expiresAt])
+  @@map("hosted_account_group_invite")
+}
+
+model HostedAccountGroupBillingRef {
+  groupId                       String              @unique @map("group_id")
+  stripeCustomerLookupKey       String?             @unique @map("stripe_customer_lookup_key")
+  stripeCustomerIdEncrypted     String?             @map("stripe_customer_id_encrypted")
+  stripeSubscriptionLookupKey   String?             @unique @map("stripe_subscription_lookup_key")
+  stripeSubscriptionIdEncrypted String?             @map("stripe_subscription_id_encrypted")
+  stripeSubscriptionItemLookupKey   String?         @unique @map("stripe_subscription_item_lookup_key")
+  stripeSubscriptionItemIdEncrypted String?         @map("stripe_subscription_item_id_encrypted")
+  stripeCheckoutSessionLookupKey    String?         @unique @map("stripe_checkout_session_lookup_key")
+  stripeCheckoutSessionIdEncrypted  String?         @map("stripe_checkout_session_id_encrypted")
+  checkoutAttemptId                 String?         @map("checkout_attempt_id")
+  checkoutSeatCount                 Int?            @map("checkout_seat_count")
+  checkoutCreatedAt                 DateTime?       @map("checkout_created_at")
+  billedSeatCount                   Int?            @map("billed_seat_count")
+  currentBillingPlanCode        String?             @map("current_billing_plan_code")
+  currentBillingPhase           String?             @map("current_billing_phase")
+  currentPeriodStart            DateTime?           @map("current_period_start")
+  currentPeriodEnd              DateTime?           @map("current_period_end")
+  lastStripeEventCreatedAt      DateTime?           @map("last_stripe_event_created_at")
+  createdAt                     DateTime            @default(now()) @map("created_at")
+  updatedAt                     DateTime            @updatedAt @map("updated_at")
+  group                         HostedAccountGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@map("hosted_account_group_billing_ref")
 }
 
 model HostedLinqFirstContactAdmissionDecision {

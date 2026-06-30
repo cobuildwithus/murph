@@ -5,6 +5,7 @@ import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-pr
 import { HostedAccountSettingsCards } from "@/src/components/settings/hosted-account-settings-cards";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data-privacy-settings";
+import { HostedFamilySettings } from "@/src/components/settings/hosted-family-settings";
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
 import { Watch } from "lucide-react";
 import Link from "next/link";
@@ -17,7 +18,12 @@ import {
   canStartHostedPulseTrialPaidPlan,
   canSwitchHostedBillingPlanToPulse,
   canUpgradeHostedBillingPlanToEdge,
+  parseHostedBillingPhase,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  readHostedFamilyAccessForMember,
+  readHostedFamilyOwnerSnapshotForMember,
+} from "@/src/lib/hosted-onboarding/family-plan";
 import { readHostedMemberStripeBillingRef } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
@@ -39,22 +45,42 @@ export default async function SettingsPage() {
   }
 
   const prisma = getPrisma();
-  const [routing, account, billingRef, freshPrivySession] = authenticatedMember
-    ? await Promise.all([
-        readHostedMemberRoutingState({
-          memberId: authenticatedMember.id,
-          prisma,
-        }),
-        readHostedAccountSettingsSnapshot({
-          memberId: authenticatedMember.id,
-        }),
-        readHostedMemberStripeBillingRef({
-          memberId: authenticatedMember.id,
-          prisma,
-        }),
-        getHostedPrivySession().catch(() => null),
-      ])
-    : [null, null, null, null];
+  const [routing, account, billingRef, freshPrivySession, familyOwner, familyAccess] =
+    authenticatedMember
+      ? await Promise.all([
+          readHostedMemberRoutingState({
+            memberId: authenticatedMember.id,
+            prisma,
+          }),
+          readHostedAccountSettingsSnapshot({
+            memberId: authenticatedMember.id,
+          }),
+          readHostedMemberStripeBillingRef({
+            memberId: authenticatedMember.id,
+            prisma,
+          }),
+          getHostedPrivySession().catch(() => null),
+          readHostedFamilyOwnerSnapshotForMember({
+            memberId: authenticatedMember.id,
+            prisma,
+          }),
+          readHostedFamilyAccessForMember({
+            memberId: authenticatedMember.id,
+            prisma,
+          }),
+        ])
+      : [null, null, null, null, null, null];
+  const activeFamilyOwner = familyOwner?.billingActive === true;
+  const sponsoredMember = familyAccess !== null && familyOwner === null;
+  const directPaidMember =
+    authenticatedMember?.billingStatus === "active" &&
+    parseHostedBillingPhase(billingRef?.currentBillingPhase) === "paid";
+  const canStartFamily =
+    authenticatedMember != null &&
+    !activeFamilyOwner &&
+    !sponsoredMember &&
+    !directPaidMember &&
+    !authenticatedMember.suspendedAt;
   const privySessionMatchesAppSession =
     freshPrivySession !== null && freshPrivySession.identity.userId === session?.privyUserId;
   const serverApprovedPrivyLinkedAccounts = privySessionMatchesAppSession
@@ -79,10 +105,13 @@ export default async function SettingsPage() {
 
       <section className="flex flex-col gap-4">
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Billing
+          Subscription
         </div>
         <HostedBillingSettings
           authenticated={authenticated}
+          billingStatus={authenticatedMember?.billingStatus}
+          canStartFamily={canStartFamily}
+          familyState={activeFamilyOwner ? "owner" : sponsoredMember ? "sponsored" : "none"}
           canStartPaidPulse={canStartHostedPulseTrialPaidPlan({
             billingStatus: authenticatedMember?.billingStatus,
             currentBillingPhase: billingRef?.currentBillingPhase,
@@ -113,6 +142,15 @@ export default async function SettingsPage() {
           scheduledBillingPlanCode={billingRef?.scheduledBillingPlanCode}
         />
       </section>
+
+      {familyOwner ? (
+        <section className="flex flex-col gap-4">
+          <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Family
+          </div>
+          <HostedFamilySettings ownerSnapshot={familyOwner} />
+        </section>
+      ) : null}
 
       <section className="flex flex-col gap-4">
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">

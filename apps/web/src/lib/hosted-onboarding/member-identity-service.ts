@@ -63,17 +63,20 @@ export type { HostedMemberPrivyIdentityLookup };
 export async function ensureHostedMemberForPhone(input: {
   phoneNumber: string;
   prisma?: PrismaClient;
+  phoneNumberVerifiedAt?: Date | null;
 }): Promise<HostedMemberCoreState> {
   const prisma = input.prisma ?? getPrisma();
 
   return prisma.$transaction((tx) => ensureHostedMemberForPhoneTx({
     phoneNumber: input.phoneNumber,
+    phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
     prisma: tx,
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export async function ensureHostedMemberForPhoneTx(input: {
   phoneNumber: string;
+  phoneNumberVerifiedAt?: Date | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberCoreState> {
   const phoneLookupKey = createHostedPhoneLookupKey(input.phoneNumber);
@@ -96,11 +99,15 @@ export async function ensureHostedMemberForPhoneTx(input: {
       currentIdentity: existingIdentity.identity,
       member: existingIdentity.core,
       phoneNumber: input.phoneNumber,
+      phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
       prisma: input.prisma,
     });
   }
 
-  const phoneIdentityFields = buildHostedMemberPhoneIdentityFields(input.phoneNumber);
+  const phoneIdentityFields = {
+    ...buildHostedMemberPhoneIdentityFields(input.phoneNumber),
+    phoneNumberVerifiedAt: input.phoneNumberVerifiedAt ?? null,
+  };
   const memberId = generateHostedMemberId();
 
   const createdMember = await createHostedMember({
@@ -137,6 +144,7 @@ export async function ensureHostedMemberForPhoneTx(input: {
       currentIdentity: concurrentIdentity.identity,
       member: concurrentIdentity.core,
       phoneNumber: input.phoneNumber,
+      phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,
       prisma: input.prisma,
     });
   }
@@ -248,13 +256,15 @@ async function refreshHostedMemberForPhoneTx(input: {
   currentIdentity: HostedMemberIdentityLookup["identity"] | null;
   member: HostedMemberCoreState;
   phoneNumber: string;
+  phoneNumberVerifiedAt?: Date | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberCoreState> {
   assertHostedMemberNotSuspended(input.member);
   await upsertHostedMemberIdentity({
     ...buildHostedMemberPhoneIdentityFields(input.phoneNumber),
     memberId: input.member.id,
-    phoneNumberVerifiedAt: input.currentIdentity?.phoneNumberVerifiedAt ?? null,
+    phoneNumberVerifiedAt:
+      input.phoneNumberVerifiedAt ?? input.currentIdentity?.phoneNumberVerifiedAt ?? null,
     prisma: input.prisma,
     privyUserId: input.currentIdentity?.privyUserId ?? null,
     signupPhoneCodeSendAttemptId: null,

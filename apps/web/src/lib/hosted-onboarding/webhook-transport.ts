@@ -123,10 +123,21 @@ export type HostedLinqInviteMessagePayload =
   | HostedLinqInviteSigninMessagePayload
   | HostedLinqInviteSignupMessagePayload;
 
+export type HostedLinqFamilyInviteReplyPayload = {
+  chatId: string;
+  memberId: string;
+  message: string;
+  occurredAt: string;
+  replyToMessageId: string | null;
+  sourceEventId: string;
+  template: "family_invite_reply";
+};
+
 export type HostedLinqMessagePayload =
   | HostedLinqAiUsageQuotaPayload
   | HostedLinqConversationHomeRedirectPayload
   | HostedLinqDailyQuotaPayload
+  | HostedLinqFamilyInviteReplyPayload
   | HostedLinqInviteMessagePayload;
 
 export type HostedLinqMessageSideEffect = {
@@ -175,6 +186,15 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
       sourceEventId: string;
       template: "daily_quota";
+    }
+  | {
+      chatId: string;
+      memberId: string;
+      message: string;
+      occurredAt: string;
+      replyToMessageId?: string | null;
+      sourceEventId: string;
+      template: "family_invite_reply";
     }
   | {
       chatId: string;
@@ -591,6 +611,8 @@ async function buildHostedLinqSideEffectMessage(
       return buildHostedDailyQuotaReply({
         seed: effect.effectId,
       });
+    case "family_invite_reply":
+      return effect.payload.message;
     case "conversation_home_redirect": {
       const homeRecipientPhone = normalizePhoneNumber(effect.payload.homeRecipientPhone);
 
@@ -713,6 +735,16 @@ function buildHostedWebhookLinqMessagePayload(
         ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
         template: input.template,
       };
+    case "family_invite_reply":
+      return {
+        chatId: input.chatId,
+        memberId: input.memberId,
+        message: input.message,
+        occurredAt: input.occurredAt,
+        replyToMessageId,
+        sourceEventId: input.sourceEventId,
+        template: input.template,
+      };
     case "invite_signup":
       return {
         chatId: input.chatId,
@@ -794,6 +826,7 @@ async function claimHostedLinqNoticeForSideEffect(
         prisma,
       });
     case "conversation_home_redirect":
+    case "family_invite_reply":
       return true;
   }
 }
@@ -826,6 +859,7 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
         return;
       case "invite_signin":
       case "conversation_home_redirect":
+      case "family_invite_reply":
         return;
     }
   } catch (error) {

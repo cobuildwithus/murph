@@ -573,6 +573,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       input.hostedToolContext?.computerToolsAvailable === true,
     progressUpdatesAvailable: input.progressDelivery != null,
     connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
+    familyPlanAvailable: input.hostedToolContext?.familyPlanTool != null,
     productFeedbackAvailable:
       productFeedbackAcceptedInputIds.length > 0 &&
       typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',

@@ -15,6 +15,7 @@ import {
 } from "@/src/components/ui/dialog";
 import { getHostedBillingPlanDefinition } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedBillingPlanUpgradeResult } from "@/src/lib/hosted-onboarding/billing-plan-change-service";
+import { cn } from "@/src/lib/utils";
 
 import { PlanFeatureCard } from "./plan-feature-card";
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
@@ -30,6 +31,7 @@ const EDGE_FEATURES = [
 ];
 
 export function UpgradeToEdgeButton(props: {
+  block?: boolean;
   children?: ReactNode;
   disabled?: boolean;
   onPendingChange?: (pending: boolean) => void;
@@ -98,8 +100,14 @@ export function UpgradeToEdgeButton(props: {
   }
 
   return (
-    <div className="flex flex-col items-start gap-2 sm:items-end">
-      <Button type="button" onClick={() => setConfirmationOpen(true)} disabled={disabled}>
+    <div className={cn("flex flex-col gap-2", props.block ? "items-stretch" : "items-start sm:items-end")}>
+      <Button
+        type="button"
+        variant={props.block ? "secondary" : "default"}
+        onClick={() => setConfirmationOpen(true)}
+        disabled={disabled}
+        className={props.block ? "w-full" : undefined}
+      >
         {label}
       </Button>
       <EdgeUpgradeConfirmationDialog

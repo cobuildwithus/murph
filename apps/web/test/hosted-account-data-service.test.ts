@@ -56,9 +56,7 @@ import {
 import {
   buildHostedMemberBillingPrivateColumns,
   buildHostedMemberIdentityPrivateColumns,
-  buildHostedMemberRoutingPrivateColumns,
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
-import { encryptHostedMailboxPayloadString } from "@/src/lib/hosted-mailbox/encryption";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 import {
   deleteHostedAccountData,
@@ -76,6 +74,10 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_member_billing_ref",
   "prisma.hosted_connected_app_connect_intent",
   "prisma.hosted_connected_apps_session",
+  "prisma.hosted_account_group",
+  "prisma.hosted_account_group_membership",
+  "prisma.hosted_account_group_invite",
+  "prisma.hosted_account_group_billing_ref",
   "prisma.hosted_mailbox_item",
   "prisma.hosted_mailbox_payload",
   "prisma.hosted_mailbox_lane_counter",
@@ -234,7 +236,7 @@ describe("HOSTED_ACCOUNT_DATA_STORE_COVERAGE", () => {
 
 
 describe("deleteHostedAccountData", () => {
-  it("suspends before Temporal cleanup and terminates again after Cloudflare cleanup", async () => {
+  it("suspends before Temporal cleanup and terminates around local and Cloudflare cleanup", async () => {
     const order: string[] = [];
     serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockImplementation(async () => {
       order.push("temporal");
@@ -259,7 +261,7 @@ describe("deleteHostedAccountData", () => {
       request: new Request("https://join.example.test/settings"),
     });
 
-    expect(order).toEqual(["prisma", "temporal", "prisma", "cloudflare", "temporal"]);
+    expect(order).toEqual(["prisma", "temporal", "prisma", "temporal", "cloudflare", "temporal"]);
     expect(result.cloudflare.deleted).toBe(true);
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
       1,
@@ -274,6 +276,13 @@ describe("deleteHostedAccountData", () => {
     });
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
       2,
+      {
+        reason: "account-deleted",
+        userId: "member_123",
+      },
+    );
+    expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).toHaveBeenNthCalledWith(
+      3,
       {
         reason: "account-deleted",
         userId: "member_123",
@@ -404,6 +413,48 @@ describe("deleteHostedAccountData", () => {
       privyUser: { errorCode: null, status: "completed" },
       stripeCustomer: { errorCode: null, status: "completed" },
       stripeSubscription: { errorCode: null, status: "completed" },
+    });
+  });
+
+  it("deletes direct and owned Family Stripe customers during account deletion", async () => {
+    const stripe = {
+      customers: {
+        del: vi.fn(async () => ({ deleted: true })),
+      },
+      subscriptions: {
+        cancel: vi.fn(async () => ({ status: "canceled" })),
+        retrieve: vi.fn(async () => ({ status: "active" })),
+      },
+    };
+    serviceMocks.getHostedOnboardingStripe.mockReturnValue(stripe);
+    serviceMocks.deleteHostedPrivyUser.mockImplementation(async () => true);
+    const vendorRows = await makeVendorAccountRowsForTest("member_123");
+    const familyBillingRefRecord = await makeFamilyBillingRefRowForTest({
+      groupId: "family_group_123",
+      ownerMemberId: "member_123",
+      stripeCustomerId: "cus_family_123",
+      stripeSubscriptionId: "sub_family_123",
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      ...vendorRows,
+      familyBillingRefRecords: [familyBillingRefRecord],
+      familyGroups: [{ id: "family_group_123" }],
+      onTransaction: () => undefined,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_delete_123");
+    expect(stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_family_123");
+    expect(stripe.customers.del).toHaveBeenCalledWith("cus_delete_123");
+    expect(stripe.customers.del).toHaveBeenCalledWith("cus_family_123");
+    expect(result.vendorAccounts.stripeCustomer).toEqual({
+      errorCode: null,
+      status: "completed",
     });
   });
 
@@ -1383,6 +1434,8 @@ function createHostedAccountDeletionPrismaForTest(input: {
     sources?: { sourceProviderSlug: string; status: string }[];
   }>;
   hostedComputerRunRows?: Record<string, unknown>[];
+  familyBillingRefRecords?: Record<string, unknown>[];
+  familyGroups?: Array<{ id: string }>;
   ownedThreadContainerMemberIds?: string[];
   identityRecord?: Record<string, unknown> | null;
   onTransaction: () => void;
@@ -1462,6 +1515,13 @@ function createHostedAccountDeletionPrismaForTest(input: {
   const fakePrisma: unknown = {
     deviceConnection: {
       findMany: async () => input.deviceConnections ?? [],
+    },
+    hostedAccountGroup: {
+      findMany: async () => input.familyGroups ?? [],
+    },
+    hostedAccountGroupBillingRef: {
+      findUnique: async (args: { where: { groupId: string } }) =>
+        input.familyBillingRefRecords?.find((record) => record.groupId === args.where.groupId) ?? null,
     },
     hostedMember: {
       findUnique: async () => ({ id: "member_123" }),
@@ -1561,6 +1621,43 @@ async function makeVendorAccountRowsForTest(memberId: string, overrides?: {
   };
 }
 
+async function makeFamilyBillingRefRowForTest(input: {
+  groupId: string;
+  ownerMemberId: string;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+}): Promise<Record<string, unknown>> {
+  const [stripeCustomerIdEncrypted, stripeSubscriptionIdEncrypted] = await Promise.all([
+    encryptHostedWebNullableString({
+      field: "hosted-account-group-billing-ref.stripe-customer-id",
+      memberId: input.ownerMemberId,
+      value: input.stripeCustomerId,
+    }),
+    encryptHostedWebNullableString({
+      field: "hosted-account-group-billing-ref.stripe-subscription-id",
+      memberId: input.ownerMemberId,
+      value: input.stripeSubscriptionId,
+    }),
+  ]);
+
+  return {
+    currentBillingPhase: "paid",
+    currentBillingPlanCode: "launch_family_monthly",
+    currentPeriodEnd: new Date("2026-05-23T00:00:00.000Z"),
+    currentPeriodStart: new Date("2026-04-23T00:00:00.000Z"),
+    group: {
+      billingStatus: "active",
+      id: input.groupId,
+      ownerMemberId: input.ownerMemberId,
+      suspendedAt: null,
+    },
+    groupId: input.groupId,
+    lastStripeEventCreatedAt: new Date("2026-04-23T00:00:00.000Z"),
+    stripeCustomerIdEncrypted,
+    stripeSubscriptionIdEncrypted,
+  };
+}
+
 type HostedAccountDeletionPrismaDeleteCall = {
   model: string;
   where: unknown;
@@ -1614,20 +1711,4 @@ function makeCloudflareDeletionResult() {
     r2UserScopedSkipReason: null,
     runnerStateDeleted: true,
   };
-}
-
-function requireRecord(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Expected a record.");
-  }
-
-  return value as Record<string, unknown>;
-}
-
-function requireArray(value: unknown): unknown[] {
-  if (!Array.isArray(value)) {
-    throw new TypeError("Expected an array.");
-  }
-
-  return value;
 }

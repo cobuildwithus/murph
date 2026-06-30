@@ -918,20 +918,17 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("preserves the run if pause transport outcome is unknown before user delivery", async () => {
+  it("does not cancel the run if pause transport outcome is unknown before user delivery", async () => {
     const controller = new AbortController();
     controller.abort();
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
     ): Promise<Response> => {
-      expect(String(url)).toBe(
-        "http://web-control.worker/api/internal/computer/runs/run_123/pause-for-user",
-      );
-      if (!String(url).endsWith("/pause-for-user")) {
-        throw new Error("unexpected finish call");
+      if (String(url).endsWith("/pause-for-user")) {
+        throw new Error("network timeout");
       }
 
-      throw new Error("network timeout");
+      throw new Error(`unexpected computer API call: ${String(url)}`);
     });
     const hostedToolContext = createHostedToolContext();
 
@@ -955,6 +952,7 @@ describe("murph computer dynamic tools", () => {
     });
 
     expect(result.rpcResult.success).toBe(false);
+    expect(result.computerRunPausedForUser).toBe(true);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
       "computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step",
     );

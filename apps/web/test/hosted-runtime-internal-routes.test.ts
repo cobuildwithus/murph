@@ -149,12 +149,7 @@ describe("hosted runtime internal web routes", () => {
     mocks.hostedRuntimeMailboxMemberFindUnique.mockResolvedValue(
       buildRuntimeMailboxAccessRecord(),
     );
-    mocks.getPrisma.mockReturnValue({
-      hostedMember: {
-        findUnique: mocks.hostedRuntimeMailboxMemberFindUnique,
-      },
-      kind: "prisma",
-    });
+    mocks.getPrisma.mockReturnValue(createPrismaClientStub());
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_routes_1");
     mocks.readHostedMailboxConsumedSeqByLane.mockImplementation((input: {
       lanes?: readonly string[];
@@ -1640,6 +1635,40 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
+  it("reads workspace state for sponsored Family members", async () => {
+    const prisma = createPrismaClientStub();
+    prisma.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
+      group: {
+        billingStatus: "active",
+        id: "hbag_family",
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      },
+      groupId: "hbag_family",
+      memberId: "member_routes_1",
+      role: "member",
+      status: "active",
+    });
+    prisma.hostedAccountGroupMembership.count.mockResolvedValueOnce(2);
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMemberCoreState.mockResolvedValueOnce(buildActiveHostedMemberRecord({
+      billingStatus: "not_started",
+    }));
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({ version: "4" }));
+
+    const response = await workspaceRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-workspace",
+      { method: "GET" },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(parseHostedWorkspaceReadResponse(await response.json()).workspace)
+      .toMatchObject({
+        userId: "member_routes_1",
+        version: "4",
+      });
+  });
+
   it("accepts old runner checkpoint payloads without browser-vault replica refs", async () => {
     mocks.checkpointHostedWorkspace.mockResolvedValue({
       status: "updated",
@@ -2536,7 +2565,21 @@ function buildActiveHostedMemberRecord(overrides: Partial<{
   };
 }
 
+function createPrismaClientStub() {
+  return {
+    hostedMember: {
+      findUnique: mocks.hostedRuntimeMailboxMemberFindUnique,
+    },
+    hostedAccountGroupMembership: {
+      count: vi.fn(async () => 0),
+      findFirst: vi.fn(async (): Promise<unknown | null> => null),
+    },
+    kind: "prisma",
+  };
+}
+
 function buildRuntimeMailboxAccessRecord(overrides: Partial<{
+  id: string;
   billingStatus: string;
   suspendedAt: Date | null;
   threadContainer: {
@@ -2547,6 +2590,7 @@ function buildRuntimeMailboxAccessRecord(overrides: Partial<{
   } | null;
 }> = {}) {
   return {
+    id: "member_routes_1",
     billingStatus: "active",
     suspendedAt: null,
     threadContainer: null,

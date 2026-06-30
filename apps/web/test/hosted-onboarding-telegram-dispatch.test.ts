@@ -4,6 +4,9 @@ import {
   buildHostedMemberRoutingPrivateColumns,
   readHostedMemberRoutingTelegramPrivateState,
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
+import {
+  createHostedTelegramUsernameLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => {
   const state = {
@@ -333,6 +336,123 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(readHostedWebhookSideEffectUpsertCalls(prisma)).toEqual([]);
   });
 
+  it("routes Murph Family questions to the assistant", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedMemberRoutingFindUnique = vi.fn(async (args?: { where?: { memberId?: string } }) => {
+      if (args?.where?.memberId) {
+        return null;
+      }
+
+      return {
+        member: {
+          billingStatus: HostedBillingStatus.active,
+          id: "member_telegram_123",
+          suspendedAt: null,
+        },
+        memberId: "member_telegram_123",
+      };
+    });
+    const prisma = withPrismaTransaction({
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 2,
+          text: "wiesz cos o family planie?",
+        },
+        update_id: 322,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          eventId: "telegram:update:322",
+          kind: "conversation.message",
+          message: expect.objectContaining({
+            telegramMessage: expect.objectContaining({
+              text: "wiesz cos o family planie?",
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("ignores Telegram family invite tokens that are not acceptable for the sender", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedAccountGroupInviteFindUnique = vi.fn().mockResolvedValue({
+      expiresAt: new Date("2026-07-01T12:00:00.000Z"),
+      status: "pending",
+      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Alice_User"),
+    });
+    const hostedMemberRoutingFindUnique = vi.fn();
+    const prisma = withPrismaTransaction({
+      hostedAccountGroupInvite: {
+        findUnique: hostedAccountGroupInviteFindUnique,
+      },
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Bob",
+            id: 456,
+            username: "bob_user",
+          },
+          message_id: 3,
+          text: "/start family_invite_telegram",
+        },
+        update_id: 323,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "family-invite-not-accepted",
+    });
+
+    expect(hostedAccountGroupInviteFindUnique).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        inviteCode: "invite_telegram",
+      },
+    }));
+    expect(hostedMemberRoutingFindUnique).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("refreshes the persisted Telegram routing target when the inbound direct thread carries business context", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
@@ -488,6 +608,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
   });
 
   it("fails closed when Telegram lookup resolves to multiple members across rotated blind-index candidates", async () => {
+    const previousContactPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+    const previousContactPrivacyCurrentVersion =
+      process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     mocks.runtimeEnv.contactPrivacyKeyring = {
       currentVersion: "v2",
@@ -497,6 +620,11 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       },
       readVersions: ["v2", "v1"],
     };
+    process.env.HOSTED_CONTACT_PRIVACY_KEYS = [
+      `v1:${Buffer.alloc(32, 7).toString("base64url")}`,
+      `v2:${Buffer.alloc(32, 8).toString("base64url")}`,
+    ].join(",");
+    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
     const hostedMemberRoutingFindMany = vi.fn().mockResolvedValue([
       {
         member: {
@@ -536,67 +664,75 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       },
     });
 
-    const response = await handleHostedOnboardingTelegramWebhook({
-      prisma,
-      rawBody: JSON.stringify({
-        message: {
-          chat: {
-            id: 123,
-            type: "private",
+    try {
+      const response = await handleHostedOnboardingTelegramWebhook({
+        prisma,
+        rawBody: JSON.stringify({
+          message: {
+            chat: {
+              id: 123,
+              type: "private",
+            },
+            date: 1_774_522_600,
+            from: {
+              first_name: "Alice",
+              id: 456,
+            },
+            message_id: 1,
+            text: "hello",
           },
-          date: 1_774_522_600,
-          from: {
-            first_name: "Alice",
-            id: 456,
-          },
-          message_id: 1,
-          text: "hello",
-        },
-        update_id: 321,
-      }),
-      secretToken: "telegram-secret",
-    });
+          update_id: 321,
+        }),
+        secretToken: "telegram-secret",
+      });
 
-    expect(response).toEqual({
-      ignored: true,
-      ok: true,
-      reason: "ambiguous-telegram-binding",
-    });
-    expect(hostedMemberRoutingFindMany).toHaveBeenCalledWith({
-      select: {
-        linqChatIdEncrypted: true,
-        linqRecipientPhoneEncrypted: true,
-        member: {
-          select: {
-            billingStatus: true,
-            createdAt: true,
-            id: true,
-            suspendedAt: true,
-            updatedAt: true,
+      expect(response).toEqual({
+        ignored: true,
+        ok: true,
+        reason: "ambiguous-telegram-binding",
+      });
+      expect(hostedMemberRoutingFindMany).toHaveBeenCalledWith({
+        select: {
+          linqChatIdEncrypted: true,
+          linqRecipientPhoneEncrypted: true,
+          member: {
+            select: {
+              billingStatus: true,
+              createdAt: true,
+              id: true,
+              suspendedAt: true,
+              updatedAt: true,
+            },
+          },
+          memberId: true,
+          pendingLinqChatIdEncrypted: true,
+          pendingLinqParticipantContactEncrypted: true,
+          pendingLinqParticipantContactKind: true,
+          pendingLinqParticipantContactLookupKey: true,
+          pendingLinqParticipantContactObservedAt: true,
+          pendingLinqRecipientPhoneEncrypted: true,
+          replyAliasLookupKey: true,
+          telegramUserIdEncrypted: true,
+          telegramUserLookupKey: true,
+        },
+        where: {
+          telegramUserLookupKey: {
+            in: expect.arrayContaining([
+              expect.stringMatching(/^hbidx:telegram-user:v2:/u),
+              expect.stringMatching(/^hbidx:telegram-user:v1:/u),
+            ]),
           },
         },
-        memberId: true,
-        pendingLinqChatIdEncrypted: true,
-        pendingLinqParticipantContactEncrypted: true,
-        pendingLinqParticipantContactKind: true,
-        pendingLinqParticipantContactLookupKey: true,
-        pendingLinqParticipantContactObservedAt: true,
-        pendingLinqRecipientPhoneEncrypted: true,
-        replyAliasLookupKey: true,
-        telegramUserIdEncrypted: true,
-        telegramUserLookupKey: true,
-      },
-      where: {
-        telegramUserLookupKey: {
-          in: expect.arrayContaining([
-            expect.stringMatching(/^hbidx:telegram-user:v2:/u),
-            expect.stringMatching(/^hbidx:telegram-user:v1:/u),
-          ]),
-        },
-      },
-    });
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-    expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+      });
+      expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+      expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
+    } finally {
+      restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousContactPrivacyKeys);
+      restoreEnvValue(
+        "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION",
+        previousContactPrivacyCurrentVersion,
+      );
+    }
   });
 
   it("bounds hosted Telegram replyContextPreview before writing the hosted wake payload", async () => {
@@ -1598,4 +1734,13 @@ function normalizeHostedWebhookSideEffectRecord(value: unknown): Record<string, 
     ...record,
     dispatchPayloadJson: record.kind === "hosted_execution_dispatch" ? record.payloadJson ?? null : null,
   };
+}
+
+function restoreEnvValue(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
 }

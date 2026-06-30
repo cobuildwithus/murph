@@ -305,6 +305,10 @@ type UsageResetPrismaFixture = {
     update: MockedFunction;
     updateMany: MockedFunction;
   };
+  hostedAccountGroupMembership: {
+    count: MockedFunction;
+    findFirst: MockedFunction;
+  };
   hostedLinqAlert: {
     createMany: MockedFunction;
   };
@@ -736,6 +740,10 @@ function createUsageResetPrismaFixture(input: {
         periods.set(periodKey(period.periodStart), period);
         return { count: 1 };
       }),
+    },
+    hostedAccountGroupMembership: {
+      count: vi.fn(async () => 0),
+      findFirst: vi.fn(async () => null),
     },
     hostedLinqAlert: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),

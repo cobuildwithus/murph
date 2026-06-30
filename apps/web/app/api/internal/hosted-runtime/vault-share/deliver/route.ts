@@ -8,8 +8,8 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
-  hasHostedMemberActiveAccess,
-} from "@/src/lib/hosted-onboarding/entitlement";
+  hasHostedMemberEffectiveActiveAccessForMember,
+} from "@/src/lib/hosted-onboarding/family-plan";
 import {
   readHostedMemberCoreState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
@@ -66,7 +66,10 @@ export const POST = withJsonError(async (request: Request) => {
       prisma,
     });
 
-    if (destination && hasHostedMemberActiveAccess(destination)) {
+    if (destination && await hasHostedMemberEffectiveActiveAccessForMember({
+      member: destination,
+      prisma,
+    })) {
       activeShares.push(share);
     }
   }

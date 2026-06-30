@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   parseHostedExecutionEvent,
   parseHostedExecutionWake,
+  parseHostedRuntimeFamilyPlanToolRequest,
+  parseHostedRuntimeFamilyPlanToolResponse,
 } from "../src/parsers.ts";
 
 describe("parseHostedExecutionEvent", () => {
@@ -455,6 +457,204 @@ describe("parseHostedExecutionEvent", () => {
         userId: "user-1",
       }),
     ).toThrow(/Unsupported hosted execution event kind/i);
+  });
+});
+
+describe("parseHostedRuntimeFamilyPlanTool", () => {
+  it("parses checkout and create-invite requests and rejects missing invite routes", () => {
+    expect(parseHostedRuntimeFamilyPlanToolRequest({
+      action: "start_checkout",
+    })).toEqual({
+      action: "start_checkout",
+    });
+    expect(parseHostedRuntimeFamilyPlanToolRequest({
+      action: "start_checkout",
+      invite: {
+        targetLabel: "dad",
+        targetPhoneNumber: null,
+        targetTelegramUsername: "dad_username",
+      },
+    })).toEqual({
+      action: "start_checkout",
+      invite: {
+        targetLabel: "dad",
+        targetPhoneNumber: null,
+        targetTelegramUsername: "dad_username",
+      },
+    });
+
+    expect(parseHostedRuntimeFamilyPlanToolRequest({
+      action: "create_invite",
+      invite: {
+        targetEmail: "dad@example.com",
+        targetLabel: "dad",
+        targetPhoneNumber: null,
+        targetTelegramUsername: null,
+      },
+    })).toEqual({
+      action: "create_invite",
+      invite: {
+        targetEmail: "dad@example.com",
+        targetLabel: "dad",
+        targetPhoneNumber: null,
+        targetTelegramUsername: null,
+      },
+    });
+
+    expect(() =>
+      parseHostedRuntimeFamilyPlanToolRequest({
+        action: "start_checkout",
+        invite: {
+          targetLabel: "dad",
+        },
+      })
+    ).toThrow(/phone number, Telegram username, or email/u);
+
+    expect(() =>
+      parseHostedRuntimeFamilyPlanToolRequest({
+        action: "create_invite",
+        invite: {
+          targetLabel: "dad",
+        },
+      })
+    ).toThrow(/phone number, Telegram username, or email/u);
+  });
+
+  it("parses family plan status responses with sanitized member and invite fields", () => {
+    expect(parseHostedRuntimeFamilyPlanToolResponse({
+      action: "read_status",
+      result: {
+        billingActive: true,
+        billingStatus: "active",
+        members: [
+          {
+            isOwner: true,
+            label: null,
+            role: "owner",
+            status: "active",
+          },
+        ],
+        owner: true,
+        pendingInvites: [
+          {
+            acceptUrl: null,
+            expiresAt: "2026-06-25T00:00:00.000Z",
+            status: "pending",
+            targetLabel: "dad",
+            targetPhoneHint: "+48 *** *** 000",
+            telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
+          },
+        ],
+        seats: {
+          active: 1,
+          billed: 2,
+          invited: 1,
+          max: 6,
+          min: 2,
+          remaining: 0,
+          used: 2,
+        },
+      },
+    })).toMatchObject({
+      action: "read_status",
+      result: {
+        billingActive: true,
+        seats: {
+          billed: 2,
+          max: 6,
+          min: 2,
+          remaining: 0,
+        },
+      },
+    });
+  });
+
+  it("parses family plan checkout responses", () => {
+    expect(parseHostedRuntimeFamilyPlanToolResponse({
+      action: "start_checkout",
+      result: {
+        alreadyActive: false,
+        billingActive: false,
+        billingStatus: "not_started",
+        checkoutUrl: "https://checkout.stripe.test/family",
+        owner: true,
+        preparedInvite: {
+          acceptUrl: null,
+          expiresAt: "2026-06-25T00:00:00.000Z",
+          status: "pending",
+          targetLabel: "Adam",
+          targetPhoneHint: null,
+          telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
+        },
+        preparedInviteReplyText: "Done. I prepared a Murph Family invite for Adam.",
+        seats: {
+          active: 1,
+          billed: 2,
+          invited: 0,
+          max: 6,
+          min: 2,
+          remaining: 1,
+          used: 1,
+        },
+        unavailableReason: null,
+      },
+    })).toEqual({
+      action: "start_checkout",
+      result: {
+        alreadyActive: false,
+        billingActive: false,
+        billingStatus: "not_started",
+        checkoutUrl: "https://checkout.stripe.test/family",
+        owner: true,
+        preparedInvite: {
+          acceptUrl: null,
+          expiresAt: "2026-06-25T00:00:00.000Z",
+          status: "pending",
+          targetLabel: "Adam",
+          targetPhoneHint: null,
+          telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
+        },
+        preparedInviteReplyText: "Done. I prepared a Murph Family invite for Adam.",
+        seats: {
+          active: 1,
+          billed: 2,
+          invited: 0,
+          max: 6,
+          min: 2,
+          remaining: 1,
+          used: 1,
+        },
+        unavailableReason: null,
+      },
+    });
+
+    expect(parseHostedRuntimeFamilyPlanToolResponse({
+      action: "start_checkout",
+      result: {
+        alreadyActive: false,
+        billingActive: false,
+        billingStatus: "none",
+        checkoutUrl: null,
+        owner: false,
+        preparedInvite: null,
+        preparedInviteReplyText: null,
+        seats: {
+          active: 0,
+          billed: 2,
+          invited: 0,
+          max: 6,
+          min: 2,
+          remaining: 2,
+          used: 0,
+        },
+        unavailableReason: "already_sponsored",
+      },
+    })).toMatchObject({
+      action: "start_checkout",
+      result: {
+        unavailableReason: "already_sponsored",
+      },
+    });
   });
 });
 

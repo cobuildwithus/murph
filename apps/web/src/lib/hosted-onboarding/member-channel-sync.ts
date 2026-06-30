@@ -7,7 +7,7 @@ import {
 import { getPrisma } from "../prisma";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { hostedOnboardingError } from "./errors";
-import { hasHostedMemberActiveAccess } from "./entitlement";
+import { hasHostedMemberEffectiveActiveAccessForMember } from "./family-plan";
 import {
   readHostedMemberEmailAuthorization,
   readHostedMemberSnapshot,
@@ -133,7 +133,10 @@ export async function enqueueHostedMemberChannelsUpdatedForActiveMemberTx(input:
     });
   }
 
-  if (!hasHostedMemberActiveAccess(member.core)) {
+  if (!await hasHostedMemberEffectiveActiveAccessForMember({
+    member: member.core,
+    prisma: input.prisma,
+  })) {
     return null;
   }
 

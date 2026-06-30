@@ -63,7 +63,7 @@ export async function requestHostedOnboardingJson<T>(input: {
   credentials?: RequestCredentials;
   headers?: Record<string, string>;
   keepalive?: boolean;
-  method?: "DELETE" | "GET" | "POST";
+  method?: "DELETE" | "GET" | "PATCH" | "POST";
   payload?: Record<string, unknown>;
   url: string;
 }): Promise<T> {

@@ -3,6 +3,7 @@ import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   sanitizeHostedProductFeedbackSummary,
+  type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -246,6 +247,64 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   },
 } as const
 
+export const MURPH_FAMILY_PLAN_TOOL = {
+  namespace: 'murph',
+  name: 'family_plan',
+  description:
+    'Read or manage the current hosted user\'s Murph Family plan. Use for Murph Family plan questions, seat/status checks, starting Family checkout, and requests to invite a family member. Do not use for family medical history.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['read_status', 'start_checkout', 'create_invite'],
+      },
+      invite: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          targetEmail: {
+            anyOf: [
+              { type: 'string', minLength: 3, maxLength: 320 },
+              { type: 'null' },
+            ],
+            default: null,
+            description: 'Email address for an email-bound web invite when the user provided one.',
+          },
+          targetLabel: {
+            anyOf: [
+              { type: 'string', minLength: 1, maxLength: 80 },
+              { type: 'null' },
+            ],
+            default: null,
+            description: 'Optional natural label such as mom, dad, brother, or a first name.',
+          },
+          targetPhoneNumber: {
+            anyOf: [
+              { type: 'string', minLength: 1, maxLength: 40 },
+              { type: 'null' },
+            ],
+            default: null,
+            description: 'Phone number for a phone-bound invite when the user provided one.',
+          },
+          targetTelegramUsername: {
+            anyOf: [
+              { type: 'string', minLength: 5, maxLength: 32 },
+              { type: 'null' },
+            ],
+            default: null,
+            description: 'Telegram username without @ when the user provided one.',
+          },
+        },
+        description:
+          'Invite target for create_invite. Optional context for start_checkout when the user mentions the person they want to invite; no invite token is created until Family billing is active.',
+      },
+    },
+    required: ['action'],
+  },
+} as const
+
 export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
@@ -450,6 +509,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
+  MURPH_FAMILY_PLAN_TOOL,
   MURPH_GENERATE_SONG_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
@@ -480,6 +540,7 @@ export interface MurphDynamicToolAvailability {
   computerToolsAvailable?: boolean | null
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
+  familyPlanAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
@@ -508,6 +569,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.allowMessageReactions)],
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
+    [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
@@ -585,6 +647,45 @@ const submitProductFeedbackArgumentsSchema = z
       .default([]),
   })
   .strict()
+
+const familyPlanArgumentsSchema = z
+  .discriminatedUnion('action', [
+    z.object({
+      action: z.literal('read_status'),
+    }).strict(),
+    z.object({
+      action: z.literal('start_checkout'),
+      invite: z.object({
+        targetEmail: z.string().trim().email().max(320).nullable().default(null),
+        targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
+        targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
+        targetTelegramUsername: z.string().trim().min(5).max(32).nullable().default(null),
+      }).strict().nullable().default(null),
+    }).strict(),
+    z.object({
+      action: z.literal('create_invite'),
+      invite: z.object({
+        targetEmail: z.string().trim().email().max(320).nullable().default(null),
+        targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
+        targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
+        targetTelegramUsername: z.string().trim().min(5).max(32).nullable().default(null),
+      }).strict(),
+    }).strict(),
+  ])
+  .superRefine((value, context) => {
+    const invite = value.action === 'create_invite'
+      ? value.invite
+      : value.action === 'start_checkout'
+        ? value.invite
+        : null
+    if (invite && !invite.targetPhoneNumber && !invite.targetTelegramUsername && !invite.targetEmail) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Family invite requires a phone number, Telegram username, or email.',
+        path: ['invite'],
+      })
+    }
+  })
 
 const computerRunIdSchema = z.string().trim().min(1)
 
@@ -856,6 +957,14 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-family-plan-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'family-plan'
+      request: HostedRuntimeFamilyPlanToolRequest
+    }
+  | {
       kind: 'submit-product-feedback'
       feedback: Omit<HostedRuntimeProductFeedbackRecord, 'idempotencyKey'>
     }
@@ -1007,6 +1116,19 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'submit-product-feedback',
         feedback: parsed.feedback,
+      }
+    }
+    case MURPH_FAMILY_PLAN_TOOL.name: {
+      const parsed = parseFamilyPlanArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-family-plan-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'family-plan',
+        request: parsed.request,
       }
     }
     case MURPH_FINISH_WITHOUT_REPLY_TOOL.name: {
@@ -1206,6 +1328,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid reaction arguments')
     case 'invalid-product-feedback-arguments':
       return toolTextResult(false, 'invalid product feedback arguments')
+    case 'invalid-family-plan-arguments':
+      return toolTextResult(false, 'invalid family plan arguments')
     case 'invalid-finish-without-reply-arguments':
       return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-media-arguments':
@@ -1334,6 +1458,11 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executeSubmitProductFeedbackTool({
         feedback: input.request.feedback,
         productFeedbackRecorder: input.productFeedbackRecorder ?? null,
+      })
+    case 'family-plan':
+      return await executeFamilyPlanTool({
+        hostedToolContext: input.hostedToolContext ?? null,
+        request: input.request.request,
       })
     case 'finish-without-reply':
       return {
@@ -1484,6 +1613,10 @@ export async function executeMurphDynamicToolRequest(input: {
           ),
         } satisfies HostedComputerPauseForUserRequest,
         fetchImpl: input.fetchImpl,
+        finishPath: buildHostedComputerRunOperationPath({
+          operation: 'finish',
+          runId,
+        }),
         path: buildHostedComputerRunOperationPath({
           operation: 'pause-for-user',
           runId,
@@ -1540,6 +1673,23 @@ async function executeSubmitProductFeedbackTool(input: {
   }
 }
 
+async function executeFamilyPlanTool(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  request: HostedRuntimeFamilyPlanToolRequest
+}): Promise<MurphDynamicToolExecutionResult> {
+  const familyPlanTool = input.hostedToolContext?.familyPlanTool ?? null
+  if (!familyPlanTool) {
+    return toolTextResult(false, 'family plan tools are unavailable for this turn')
+  }
+
+  try {
+    const result = await familyPlanTool.request(input.request)
+    return toolTextResult(true, safeToolPayloadText(result))
+  } catch {
+    return toolTextResult(false, 'family plan tool request failed')
+  }
+}
+
 async function executeProgressUpdateTool(input: {
   progressDelivery: AssistantProgressDelivery | null
   text: string
@@ -1577,6 +1727,7 @@ async function executeHostedComputerPauseForUserTool(input: {
   abortSignal: AbortSignal | null
   body: HostedComputerPauseForUserRequest
   fetchImpl: typeof fetch
+  finishPath: string
   path: string
 }): Promise<MurphDynamicToolExecutionResult> {
   const apiResult = await callHostedComputerApi({
@@ -2125,10 +2276,76 @@ function parseSubmitProductFeedbackArguments(
       }),
     }
   }
-
   return {
     feedback: parsed.data,
     ok: true,
+  }
+}
+
+function parseFamilyPlanArguments(
+  value: unknown,
+):
+  | {
+      request: HostedRuntimeFamilyPlanToolRequest
+      ok: true
+    }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = familyPlanArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.family_plan.input',
+        schemaRootKeys: ['action', 'invite'],
+        toolName: 'murph.family_plan',
+      }),
+    }
+  }
+
+  if (parsed.data.action === 'read_status') {
+    return {
+      ok: true,
+      request: {
+        action: 'read_status',
+      },
+    }
+  }
+  if (parsed.data.action === 'start_checkout') {
+    return {
+      ok: true,
+      request: parsed.data.invite
+        ? {
+            action: 'start_checkout',
+            invite: {
+              ...(parsed.data.invite.targetEmail
+                ? { targetEmail: parsed.data.invite.targetEmail }
+                : {}),
+              targetLabel: parsed.data.invite.targetLabel,
+              targetPhoneNumber: parsed.data.invite.targetPhoneNumber,
+              targetTelegramUsername: parsed.data.invite.targetTelegramUsername,
+            },
+          }
+        : {
+            action: 'start_checkout',
+          },
+    }
+  }
+
+  return {
+    ok: true,
+    request: {
+      action: 'create_invite',
+      invite: {
+        ...(parsed.data.invite.targetEmail
+          ? { targetEmail: parsed.data.invite.targetEmail }
+          : {}),
+        targetLabel: parsed.data.invite.targetLabel,
+        targetPhoneNumber: parsed.data.invite.targetPhoneNumber,
+        targetTelegramUsername: parsed.data.invite.targetTelegramUsername,
+      },
+    },
   }
 }
 

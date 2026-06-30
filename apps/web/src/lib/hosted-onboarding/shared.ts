@@ -53,6 +53,22 @@ export function generateHostedInviteId(): string {
   return `hbi_${randomBytes(12).toString("base64url")}`;
 }
 
+export function generateHostedAccountGroupId(): string {
+  return `hbag_${randomBytes(12).toString("base64url")}`;
+}
+
+export function generateHostedAccountGroupMembershipId(): string {
+  return `hbagm_${randomBytes(12).toString("base64url")}`;
+}
+
+export function generateHostedAccountGroupInviteId(): string {
+  return `hbagi_${randomBytes(12).toString("base64url")}`;
+}
+
+export function generateHostedFamilyCheckoutAttemptId(): string {
+  return `hbfca_${randomBytes(12).toString("base64url")}`;
+}
+
 export function generateHostedInviteCode(): string {
   return randomBytes(15).toString("base64url");
 }

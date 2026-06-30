@@ -3243,6 +3243,7 @@ describe("hosted local dev stack", () => {
     const environmentModule = await import("../../src/dev-hosted-local/environment.ts");
     vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce({
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_vercel_edge",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: "price_vercel_family",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_vercel_monthly",
       STRIPE_SECRET_KEY: "sk_test_vercel",
     });
@@ -3265,6 +3266,7 @@ describe("hosted local dev stack", () => {
       expect.any(Array),
       expect.objectContaining({
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: undefined,
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: undefined,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_local_monthly",
         STRIPE_SECRET_KEY: "sk_test_local",
       }),
@@ -3289,6 +3291,7 @@ describe("hosted local dev stack", () => {
       });
     vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce({
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_vercel_edge",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: "price_vercel_family",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_vercel_monthly",
     });
 
@@ -3306,6 +3309,7 @@ describe("hosted local dev stack", () => {
       expect.any(Array),
       expect.objectContaining({
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: undefined,
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: undefined,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: undefined,
         STRIPE_SECRET_KEY: "sk_test_web_local",
       }),
@@ -3329,6 +3333,7 @@ describe("hosted local dev stack", () => {
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_local_edge",
       });
     vi.mocked(environmentModule.readSimpleEnvFile).mockResolvedValueOnce({
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: "price_vercel_family",
       HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_vercel_monthly",
       STRIPE_SECRET_KEY: "sk_test_vercel",
     });
@@ -3347,6 +3352,7 @@ describe("hosted local dev stack", () => {
       expect.any(Array),
       expect.objectContaining({
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_local_edge",
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: undefined,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: undefined,
         STRIPE_SECRET_KEY: undefined,
       }),

@@ -6,6 +6,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  acceptHostedFamilyInviteFromPhoneTx: vi.fn(async (
+    _input?: unknown,
+  ): Promise<{ memberId: string } | null> => {
+    void _input;
+    return null;
+  }),
   appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
     envelope?: { eventId?: string };
   }) => ({
@@ -79,9 +85,21 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/family-plan")>(
+    "@/src/lib/hosted-onboarding/family-plan",
+  );
+
+  return {
+    ...actual,
+    acceptHostedFamilyInviteFromPhoneTx: mocks.acceptHostedFamilyInviteFromPhoneTx,
+  };
+});
+
 import {
   handleHostedOnboardingWhatsAppWebhook as handleHostedOnboardingWhatsAppWebhookImpl,
 } from "@/src/lib/hosted-onboarding/webhook-service";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   grantHostedWhatsAppMessagingConsentTx,
   revokeHostedWhatsAppMessagingConsentTx,
@@ -94,6 +112,7 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("WHATSAPP_APP_SECRET", "whatsapp-app-secret");
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValue(null);
     mocks.readHostedMailboxItemOwnerById.mockImplementation(async (input: {
       mailboxItemId: string;
     }) => ({
@@ -565,6 +584,40 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
     });
   });
 
+  it("routes Murph Family questions to the assistant", async () => {
+    const prisma = createWhatsAppPrismaHarness({
+      consentGranted: true,
+      memberId: "member_whatsapp_123",
+    });
+    const rawBody = buildWhatsAppInboundTextBody("wiesz cos o family planie?");
+
+    await expect(handleHostedOnboardingWhatsAppWebhook({
+      prisma,
+      rawBody,
+      signature: signWhatsAppBody(rawBody),
+    })).resolves.toEqual({
+      commandHandledCount: 0,
+      ignored: false,
+      inboundTextCount: 1,
+      ok: true,
+      reason: "wake-appended-active-member",
+      routedTextCount: 1,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        eventId: "whatsapp:message:wamid.test-message-1",
+        kind: "conversation.message",
+        message: expect.objectContaining({
+          whatsappMessage: expect.objectContaining({
+            text: "wiesz cos o family planie?",
+          }),
+        }),
+      }),
+      tx: prisma,
+    });
+  });
+
   it("signals the hosted user runtime for opted-in WhatsApp texts", async () => {
     mocks.nudgeHostedRunnerUserBestEffortResult.mockResolvedValueOnce({
       accepted: false,
@@ -598,6 +651,91 @@ describe("handleHostedOnboardingWhatsAppWebhook", () => {
       expectedUserId: "member_whatsapp_123",
       mailboxItemId: "mailbox_whatsapp:message:wamid.test-message-1",
     });
+  });
+
+  it("sends WhatsApp family invite acceptance confirmations through WhatsApp routing", async () => {
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockImplementationOnce(async (input: unknown) => {
+      const familyInput = input as {
+        onAcceptedMemberValidated?: (accepted: {
+          acceptedMemberId: string;
+          invite: unknown;
+        }) => Promise<void>;
+      };
+      await familyInput.onAcceptedMemberValidated?.({
+        acceptedMemberId: "member_whatsapp_family",
+        invite: {},
+      });
+      return {
+        memberId: "member_whatsapp_family",
+      };
+    });
+    const prisma = createWhatsAppPrismaHarness();
+    const rawBody = buildWhatsAppInboundTextBody("family_invite_token");
+
+    await expect(handleHostedOnboardingWhatsAppWebhook({
+      prisma,
+      rawBody,
+      signature: signWhatsAppBody(rawBody),
+    })).resolves.toEqual({
+      commandHandledCount: 1,
+      ignored: false,
+      inboundTextCount: 1,
+      ok: true,
+      reason: "wake-appended-active-member",
+      routedTextCount: 1,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
+    const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0]?.envelope;
+    expect(envelope).toMatchObject({
+      kind: "assistant.notification.requested",
+      notification: {
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: expect.stringContaining("The Family owner cannot see them."),
+        },
+        route: {
+          channel: "whatsapp",
+          delivery: {
+            kind: "explicit",
+            target: "15550100001",
+          },
+          threadId: "15550100001",
+          threadIsDirect: true,
+        },
+      },
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_whatsapp_family",
+      mailboxItemId: expect.stringContaining("assistant.notification.requested:family-chat"),
+    });
+  });
+
+  it("ignores WhatsApp family invite tokens that are not acceptable for the sender", async () => {
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
+      httpStatus: 403,
+      message: "This Family invite is bound to a different phone number.",
+    }));
+    const prisma = createWhatsAppPrismaHarness();
+    const rawBody = buildWhatsAppInboundTextBody("family_invite_wrong_phone");
+
+    await expect(handleHostedOnboardingWhatsAppWebhook({
+      prisma,
+      rawBody,
+      signature: signWhatsAppBody(rawBody),
+    })).resolves.toEqual({
+      commandHandledCount: 0,
+      ignored: true,
+      inboundTextCount: 1,
+      ok: true,
+      reason: "family-invite-not-accepted",
+      routedTextCount: 0,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.findMany).not.toHaveBeenCalled();
   });
 
   it("dedupes repeated WhatsApp message ids through the hosted mailbox append", async () => {

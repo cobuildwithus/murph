@@ -7,6 +7,7 @@ import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption"
 import { createHostedEmailLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 import {
+  ensureHostedMemberForPhoneTx,
   reconcileHostedPrivyIdentityOnMember,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
@@ -117,6 +118,39 @@ describe("hosted-onboarding member-identity-service", () => {
         signupPhoneNumberEncrypted: null,
       }),
     }));
+  });
+
+  it("can persist a provider-verified phone identity while ensuring a phone member", async () => {
+    const createdMember = makeMember({
+      id: "member_created",
+    });
+    const identityCreateMany = vi.fn(async () => ({ count: 1 }));
+    const prisma = asRootPrisma({
+      hostedMember: {
+        create: vi.fn().mockResolvedValue(createdMember),
+        delete: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        createMany: identityCreateMany,
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn(),
+      },
+    });
+
+    await expect(ensureHostedMemberForPhoneTx({
+      phoneNumber: "+1 555 123 4567",
+      phoneNumberVerifiedAt: NOW,
+      prisma: prisma as never,
+    })).resolves.toEqual(createdMember);
+
+    expect(identityCreateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        memberId: expect.stringMatching(/^hbm_/u),
+        phoneNumberVerifiedAt: NOW,
+        signupPhoneNumberEncrypted: expect.stringMatching(/^hsb-test:/u),
+      }),
+      skipDuplicates: true,
+    });
   });
 
   it("blocks a suspended member before reconciling any identity fields", async () => {

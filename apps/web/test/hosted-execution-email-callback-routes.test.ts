@@ -316,6 +316,44 @@ describe("hosted execution email callback routes", () => {
     });
   });
 
+  it("resolves signed aliases for sponsored Family members", async () => {
+    mocks.readHostedMemberIdByReplyAliasLookupKey.mockResolvedValue("member_123");
+    mocks.readHostedMemberCoreState.mockResolvedValue(createHostedMemberCoreState({
+      billingStatus: HostedBillingStatus.not_started,
+      id: "member_123",
+    }));
+    prismaClient.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
+      group: {
+        billingStatus: HostedBillingStatus.active,
+        id: "hbag_family",
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      },
+      groupId: "hbag_family",
+      memberId: "member_123",
+      role: "member",
+      status: "active",
+    });
+    prismaClient.hostedAccountGroupMembership.count.mockResolvedValueOnce(2);
+    prismaClient.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce({
+      billedSeatCount: 2,
+    });
+
+    const response = await resolveRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({
+        aliasKey: VALID_REPLY_ALIAS_KEY,
+      }),
+      path: HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
+      privateJwkJson: currentPrivateJwkJson,
+      userId: HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      userId: "member_123",
+    });
+  });
+
   it.each([
     {
       billingStatus: HostedBillingStatus.active,
@@ -519,6 +557,9 @@ describe("hosted execution email callback routes", () => {
 function createPrismaMock() {
   const consumedNonces = new Set<string>();
   const transactionClient = {
+    hostedAccountGroupInvite: {
+      count: vi.fn(async () => 0),
+    },
     hostedWebInternalRequestNonce: {
       create: vi.fn(async (input: {
         data: {
@@ -552,6 +593,16 @@ function createPrismaMock() {
     $transaction: vi.fn(async (callback: (transaction: typeof transactionClient) => Promise<unknown>) =>
       callback(transactionClient)
     ),
+    hostedAccountGroupMembership: {
+      count: vi.fn(async () => 0),
+      findFirst: vi.fn(async (): Promise<unknown | null> => null),
+    },
+    hostedAccountGroupInvite: {
+      count: vi.fn(async () => 0),
+    },
+    hostedAccountGroupBillingRef: {
+      findUnique: vi.fn(async (): Promise<unknown | null> => null),
+    },
     transactionClient,
   };
 }

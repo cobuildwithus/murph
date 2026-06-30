@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import { getHostedOnboardingEnvironment } from "./runtime";
+import { readHostedContactPrivacyKeyring } from "./env";
 import { maskPhoneNumber, normalizePhoneNumber } from "./phone";
 
 const HOSTED_BLIND_INDEX_PREFIX = "hbidx";
@@ -21,7 +21,9 @@ export type HostedBlindIndexKind =
   | "stripe-checkout-session"
   | "stripe-customer"
   | "stripe-subscription"
+  | "stripe-subscription-item"
   | "stripe-subscription-schedule"
+  | "telegram-username"
   | "telegram-user"
   | "wallet-address";
 
@@ -50,6 +52,38 @@ export function createHostedTelegramUserLookupKeyReadCandidates(
   value: string | null | undefined,
 ): string[] {
   return createHostedLookupKeyReadCandidates("telegram-user", normalizeHostedOpaqueInput(value));
+}
+
+export function normalizeHostedTelegramUsernameForLookup(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeHostedOpaqueInput(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const username = normalized.startsWith("@") ? normalized.slice(1) : normalized;
+
+  return /^[A-Za-z0-9_]{5,32}$/u.test(username) ? username.toLowerCase() : null;
+}
+
+export function createHostedTelegramUsernameLookupKey(
+  value: string | null | undefined,
+): string | null {
+  return createHostedLookupKey(
+    "telegram-username",
+    normalizeHostedTelegramUsernameForLookup(value),
+  );
+}
+
+export function createHostedTelegramUsernameLookupKeyReadCandidates(
+  value: string | null | undefined,
+): string[] {
+  return createHostedLookupKeyReadCandidates(
+    "telegram-username",
+    normalizeHostedTelegramUsernameForLookup(value),
+  );
 }
 
 export function createHostedEmailLookupKey(value: string | null | undefined): string | null {
@@ -173,6 +207,21 @@ export function createHostedStripeSubscriptionLookupKeyReadCandidates(
 ): string[] {
   return createHostedLookupKeyReadCandidates(
     "stripe-subscription",
+    normalizeHostedOpaqueInput(value),
+  );
+}
+
+export function createHostedStripeSubscriptionItemLookupKey(
+  value: string | null | undefined,
+): string | null {
+  return createHostedLookupKey("stripe-subscription-item", normalizeHostedOpaqueInput(value));
+}
+
+export function createHostedStripeSubscriptionItemLookupKeyReadCandidates(
+  value: string | null | undefined,
+): string[] {
+  return createHostedLookupKeyReadCandidates(
+    "stripe-subscription-item",
     normalizeHostedOpaqueInput(value),
   );
 }
@@ -413,5 +462,5 @@ function readHostedPrivacyKeyring(): {
   keysByVersion: Readonly<Record<string, Buffer>>;
   readVersions: readonly string[];
 } {
-  return getHostedOnboardingEnvironment().contactPrivacyKeyring;
+  return readHostedContactPrivacyKeyring(process.env);
 }

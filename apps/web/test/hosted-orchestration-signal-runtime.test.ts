@@ -26,6 +26,10 @@ const mocks = vi.hoisted(() => {
       hostedMember: {
         findUnique: hostedMemberFindUnique,
       },
+      hostedAccountGroupMembership: {
+        count: vi.fn(async () => 0),
+        findFirst: vi.fn(async () => null),
+      },
       kind: "prisma",
     },
     readHostedMailboxItemCheckpointById: vi.fn(),
@@ -559,6 +563,10 @@ describe("hosted runtime Temporal signaling", () => {
       $transaction: vi.fn(async (callback: (tx: unknown) => unknown) =>
         await callback({ kind: "explicit-tx" })
       ),
+      hostedAccountGroupMembership: {
+        count: vi.fn(async () => 0),
+        findFirst: vi.fn(async () => null),
+      },
       hostedMember: {
         findUnique: explicitHostedMemberFindUnique,
       },
@@ -771,6 +779,7 @@ function expectHostedRuntimeActiveAccessRead(
   expect(findUnique).toHaveBeenCalledWith({
     select: {
       billingStatus: true,
+      id: true,
       suspendedAt: true,
       threadContainer: {
         select: {
@@ -790,6 +799,7 @@ function expectHostedRuntimeActiveAccessRead(
 }
 
 function buildActiveMemberRecord(overrides: Partial<{
+  id: string;
   billingStatus: string;
   suspendedAt: Date | null;
   threadContainer: {
@@ -800,6 +810,7 @@ function buildActiveMemberRecord(overrides: Partial<{
   } | null;
 }> = {}) {
   return {
+    id: "member_123",
     billingStatus: "active",
     suspendedAt: null,
     threadContainer: null,

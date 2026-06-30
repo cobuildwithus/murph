@@ -62,6 +62,9 @@ type HostedMemberActivationSnapshot = HostedMemberSnapshot & {
   core: HostedMemberActivationCoreState;
 };
 
+export const MURPH_ASSISTANT_FAMILY_WELCOME_MESSAGE =
+  "You are in. Your Murph access is paid through a Family plan, but your Murph conversations, health data, vault data, exports, and deletion controls stay private to you. The Family owner cannot see them.";
+
 export async function activateHostedMemberForPositiveSourceTx(input: {
   dispatchContext: HostedStripeDispatchContext;
   emailLinked?: boolean;
@@ -94,15 +97,41 @@ export async function activateHostedMemberForPositiveSourceTx(input: {
   }
 }
 
+export async function activateHostedMemberForFamilySponsorshipTx(input: {
+  memberId: string;
+  occurredAt: Date;
+  prisma: Prisma.TransactionClient;
+  sourceEventId: string;
+}): Promise<HostedMemberActivationResult> {
+  return activateHostedMemberForPositiveSourceTxInner({
+    dispatchContext: {
+      eventCreatedAt: input.occurredAt,
+      occurredAt: input.occurredAt.toISOString(),
+      sourceEventId: input.sourceEventId,
+      sourceType: "hosted.family.sponsorship",
+    },
+    familyAccessActive: true,
+    memberId: input.memberId,
+    preserveBillingStatus: true,
+    prisma: input.prisma,
+    skipIfPreviouslyActivated: true,
+    welcomeMessage: MURPH_ASSISTANT_FAMILY_WELCOME_MESSAGE,
+  });
+}
+
 async function activateHostedMemberForPositiveSourceTxInner(input: {
   dispatchContext: HostedStripeDispatchContext;
   emailLinked?: boolean;
+  familyAccessActive?: boolean;
   memberId: string;
+  preserveBillingStatus?: boolean;
   prisma: Prisma.TransactionClient;
   skipIfBillingAlreadyActive?: boolean;
   skipIfPreviouslyActivated?: boolean;
+  welcomeMessage?: string;
 }): Promise<HostedMemberActivationResult> {
   const currentMember = await readActivationReadyHostedMemberTx({
+    familyAccessActive: input.familyAccessActive ?? false,
     memberId: input.memberId,
     prisma: input.prisma,
   });
@@ -172,7 +201,10 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     }
   }
 
-  if (currentMember.core.billingStatus !== HostedBillingStatus.active) {
+  if (
+    !input.preserveBillingStatus &&
+    currentMember.core.billingStatus !== HostedBillingStatus.active
+  ) {
     await updateHostedMemberCoreState({
       billingStatus: HostedBillingStatus.active,
       memberId: currentMember.core.id,
@@ -204,6 +236,7 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     sourceEventId: input.dispatchContext.sourceEventId,
     sourceType: input.dispatchContext.sourceType,
     signupWelcomeRoute: linqRoute.welcomeRoute,
+    welcomeMessage: input.welcomeMessage,
   });
   const legacyWelcomeWake = buildHostedMemberSignupWelcomeNotificationWake({
     activationWake,
@@ -303,6 +336,7 @@ async function resolveHostedMemberActivationWelcomeLinqRoute(input: {
 }
 
 async function readActivationReadyHostedMemberTx(input: {
+  familyAccessActive?: boolean;
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberActivationSnapshot | null> {
@@ -313,12 +347,19 @@ async function readActivationReadyHostedMemberTx(input: {
     prisma: input.prisma,
   });
 
-  if (!currentMember || isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)) {
+  if (
+    !currentMember ||
+    (
+      input.familyAccessActive !== true &&
+      isHostedAccessBlockedBillingStatus(currentMember.core.billingStatus)
+    )
+  ) {
     return null;
   }
 
   const entitlement = deriveHostedEntitlement({
-    billingStatus: HostedBillingStatus.active,
+    billingStatus: currentMember.core.billingStatus,
+    familyAccessActive: input.familyAccessActive ?? false,
     suspendedAt: currentMember.core.suspendedAt,
   });
 
@@ -423,6 +464,7 @@ function buildHostedMemberActivationWakeForMember(input: {
   sourceEventId: string;
   sourceType: string;
   signupWelcomeRoute: HostedExecutionAssistantNotificationRoute | null;
+  welcomeMessage?: string;
 }): HostedExecutionMemberActivatedWake {
   return buildHostedMemberActivationWake({
     emailLinked: input.emailLinked,
@@ -440,6 +482,7 @@ function buildHostedMemberActivationWakeForMember(input: {
     sourceType: input.sourceType,
     signupWelcomeRoute: input.signupWelcomeRoute,
     timeZone: input.member.core.pendingActivationTimeZone,
+    welcomeMessage: input.welcomeMessage,
   });
 }
 
@@ -460,6 +503,7 @@ function buildHostedMemberActivationWake(input: {
   sourceType: string;
   signupWelcomeRoute?: HostedExecutionAssistantNotificationRoute | null;
   timeZone?: string | null;
+  welcomeMessage?: string;
 }): HostedExecutionMemberActivatedWake {
   return buildHostedExecutionMemberActivatedWake({
     eventId: buildHostedMemberActivationEventId(input),
@@ -480,6 +524,7 @@ function buildHostedMemberActivationWake(input: {
     occurredAt: input.occurredAt,
     signupWelcome: buildHostedMemberSignupWelcomePayload({
       route: input.signupWelcomeRoute ?? null,
+      welcomeMessage: input.welcomeMessage ?? null,
       seed: buildHostedMemberSignupWelcomeMessageSeed(input),
     }),
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
@@ -488,6 +533,7 @@ function buildHostedMemberActivationWake(input: {
 
 function buildHostedMemberSignupWelcomePayload(input: {
   route: HostedExecutionAssistantNotificationRoute | null;
+  welcomeMessage: string | null;
   seed: string;
 }): HostedExecutionMemberActivationSignupWelcome | null {
   if (!input.route) {
@@ -496,7 +542,7 @@ function buildHostedMemberSignupWelcomePayload(input: {
 
   return {
     route: input.route,
-    text: renderUserFacingMessage({
+    text: input.welcomeMessage ?? renderUserFacingMessage({
       context: {},
       key: "assistant.signup_welcome",
       seed: input.seed,

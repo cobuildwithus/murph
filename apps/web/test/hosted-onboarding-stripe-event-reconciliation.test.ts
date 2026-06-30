@@ -158,7 +158,12 @@ describe("hosted Stripe event reconciliation", () => {
     });
     mocks.applyStripeInvoicePaymentFailed.mockResolvedValue(undefined);
     mocks.applyStripeRefundCreated.mockResolvedValue(undefined);
-    mocks.applyStripeSubscriptionUpdated.mockResolvedValue(undefined);
+    mocks.applyStripeSubscriptionUpdated.mockResolvedValue({
+      activatedMemberId: null,
+      activatedMembers: [],
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
     mocks.clearHostedBillingPlanSwitchToPulsePendingFieldsForScheduleTx.mockResolvedValue(undefined);
     mocks.refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx.mockResolvedValue(undefined);
     mocks.resolveStripeCustomerContext.mockResolvedValue({
@@ -472,6 +477,21 @@ describe("hosted Stripe event reconciliation", () => {
     });
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
+    mocks.applyStripeSubscriptionUpdated.mockResolvedValueOnce({
+      activatedMemberId: "member_family_owner",
+      activatedMembers: [
+        {
+          activatedMemberId: "member_family_owner",
+          hostedExecutionEventId: "member.activated:family:owner",
+        },
+        {
+          activatedMemberId: "member_family_child",
+          hostedExecutionEventId: "member.activated:family:child",
+        },
+      ],
+      hostedExecutionEventId: "member.activated:family:owner",
+      welcomeEmailMemberId: null,
+    });
 
     await recordHostedStripeEvent({
       event,
@@ -484,9 +504,19 @@ describe("hosted Stripe event reconciliation", () => {
         prisma: prisma.client,
       }),
     ).resolves.toEqual({
-      activatedMemberId: null,
+      activatedMemberId: "member_family_owner",
+      activatedMembers: [
+        {
+          activatedMemberId: "member_family_owner",
+          hostedExecutionEventId: "member.activated:family:owner",
+        },
+        {
+          activatedMemberId: "member_family_child",
+          hostedExecutionEventId: "member.activated:family:child",
+        },
+      ],
       eventId: event.id,
-      hostedExecutionEventId: null,
+      hostedExecutionEventId: "member.activated:family:owner",
       status: "completed",
     });
 

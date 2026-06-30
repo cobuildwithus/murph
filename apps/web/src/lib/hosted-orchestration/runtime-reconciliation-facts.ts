@@ -44,8 +44,8 @@ import {
   drainHostedLinqSideEffectsDirect,
 } from "../hosted-onboarding/webhook-transport";
 import {
-  hasHostedMemberActiveAccess,
-} from "../hosted-onboarding/entitlement";
+  hasHostedMemberEffectiveActiveAccessForMember,
+} from "../hosted-onboarding/family-plan";
 import {
   readHostedMemberCoreState,
 } from "../hosted-onboarding/hosted-member-store";
@@ -91,7 +91,10 @@ export async function readHostedRuntimeReconciliationFacts(
   ]);
   const projectedWorkspace = projectHostedRuntimeReconciliationWorkspace(workspace);
 
-  if (!member || !hasHostedMemberActiveAccess(member)) {
+  if (!member || !(await hasHostedMemberEffectiveActiveAccessForMember({
+    member,
+    prisma,
+  }))) {
     const facts = buildHostedRuntimeBlockedFacts({
       mailboxLag: [],
       reason: "user_not_active",

@@ -138,6 +138,8 @@ export {
   parseHostedRuntimeLogResponse,
   parseHostedRuntimeUsageRecordRequest,
   parseHostedRuntimeUsageRecordResponse,
+  parseHostedRuntimeFamilyPlanToolRequest,
+  parseHostedRuntimeFamilyPlanToolResponse,
   parseHostedRuntimeProductFeedbackRecordRequest,
   parseHostedRuntimeProductFeedbackRecordResponse,
   parseHostedRuntimeWebStatusResponse,

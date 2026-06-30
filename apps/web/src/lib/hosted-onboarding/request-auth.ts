@@ -10,8 +10,8 @@ import {
   type HostedMemberCoreState,
 } from "./hosted-member-store";
 import {
-  assertHostedMemberActiveAccessAllowed,
-} from "./entitlement";
+  assertHostedMemberEffectiveActiveAccessAllowed,
+} from "./family-plan";
 import { hostedOnboardingError } from "./errors";
 import {
   lookupHostedMemberForPrivyPrincipal,
@@ -189,7 +189,10 @@ export async function requireActivePrivyMemberAuth(
   prisma: PrismaClient = getPrisma(),
 ): Promise<AuthenticatedPrivyMemberAuthContext> {
   const context = await requirePrivyMemberAuth(request, prisma);
-  assertHostedMemberActiveAccessAllowed(context.member);
+  await assertHostedMemberEffectiveActiveAccessAllowed({
+    member: context.member,
+    prisma,
+  });
   return context;
 }
 
@@ -229,7 +232,10 @@ export async function requireActivePrivyMemberAuthFromBearerToken(
     });
   }
 
-  assertHostedMemberActiveAccessAllowed(member);
+  await assertHostedMemberEffectiveActiveAccessAllowed({
+    member,
+    prisma,
+  });
 
   return {
     identity: session.identity,
@@ -272,7 +278,15 @@ export async function requireFreshActivePrivyMemberAuthForHostedAppSession(
   freshPrivy: AuthenticatedPrivyMemberAuthContext;
 }> {
   const context = await requireFreshPrivyMemberAuthForHostedAppSession(request, prisma);
-  assertHostedMemberActiveAccessAllowed(context.appSession.member);
-  assertHostedMemberActiveAccessAllowed(context.freshPrivy.member);
+  await Promise.all([
+    assertHostedMemberEffectiveActiveAccessAllowed({
+      member: context.appSession.member,
+      prisma,
+    }),
+    assertHostedMemberEffectiveActiveAccessAllowed({
+      member: context.freshPrivy.member,
+      prisma,
+    }),
+  ]);
   return context;
 }

@@ -12,6 +12,8 @@ import type {
 import type {
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
+  HostedRuntimeFamilyPlanToolRequest,
+  HostedRuntimeFamilyPlanToolResponse,
 } from '@murphai/hosted-execution/runtime-control'
 import type {
   HostedPhoneCallStartRequest,
@@ -63,6 +65,12 @@ export interface AssistantHostedProductFeedbackRecorder {
   ): Promise<HostedRuntimeProductFeedbackRecordResponse>
 }
 
+export interface AssistantHostedFamilyPlanTool {
+  request(
+    request: HostedRuntimeFamilyPlanToolRequest,
+  ): Promise<HostedRuntimeFamilyPlanToolResponse>
+}
+
 export interface AssistantPhoneCallPort {
   start(
     request: HostedPhoneCallStartRequest,
@@ -107,6 +115,7 @@ export interface AssistantHostedExecutionContext {
   connectedApps?: AssistantConnectedAppsPort | null
   defaultTarget?: AssistantModelTarget | null
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
+  familyPlanTool?: AssistantHostedFamilyPlanTool | null
   dynamicContextPrompts?: readonly string[] | null
   issueDeviceConnectLink?(
     input: AssistantHostedDeviceConnectRequest,
@@ -153,6 +162,7 @@ export function normalizeAssistantExecutionContext(
   const generatedImageUploader = normalizeAssistantGeneratedImageUploader(
     hosted?.generatedImageUploader,
   )
+  const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
   const phoneCalls = normalizeAssistantPhoneCallPort(hosted?.phoneCalls)
   const productFeedbackRecorder = normalizeAssistantProductFeedbackRecorder(
     hosted?.productFeedbackRecorder,
@@ -174,6 +184,7 @@ export function normalizeAssistantExecutionContext(
           }
         : {}),
       ...(generatedImageUploader ? { generatedImageUploader } : {}),
+      ...(familyPlanTool ? { familyPlanTool } : {}),
       ...(hosted?.generatedImageUploaderRequired === true
         ? { generatedImageUploaderRequired: true }
         : {}),
@@ -278,6 +289,18 @@ function normalizeAssistantProductFeedbackRecorder(
 
   return {
     recordProductFeedback: input.recordProductFeedback,
+  }
+}
+
+function normalizeAssistantFamilyPlanTool(
+  input: AssistantHostedExecutionContext['familyPlanTool'] | undefined,
+): AssistantHostedFamilyPlanTool | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
   }
 }
 

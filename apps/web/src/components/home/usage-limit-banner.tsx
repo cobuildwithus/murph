@@ -13,6 +13,7 @@ interface UsageLimitBannerProps {
 
 const resettableMonthlyNoticeCodes = new Set<HostedAiUsageGateNoticeCode>([
   "edge_usage_limit_reached",
+  "family_usage_limit_reached",
   "pulse_upgrade_edge",
 ]);
 
@@ -30,6 +31,11 @@ const usageLimitBannerCopy: Record<
     action: "View settings",
     body: "Murph will start replying again when your plan resets.",
     title: "You've hit this month's limit",
+  },
+  family_usage_limit_reached: {
+    action: "View settings",
+    body: "Murph will start replying again when your Family usage resets.",
+    title: "You've hit this month's Family limit",
   },
   pulse_upgrade_edge: {
     action: "Upgrade to Edge",
