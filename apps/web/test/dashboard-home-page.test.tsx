@@ -127,7 +127,7 @@ const PULSE_TRIAL_BILLING_REF = {
   currentTrialStartedAt: new Date("2026-05-25T00:00:00.000Z"),
   lastStripeEventCreatedAt: new Date("2026-05-25T00:00:00.000Z"),
   memberId: MEMBER.id,
-  pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+  pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
   pulseTrialRedeemedAt: new Date("2026-05-25T00:00:00.000Z"),
   stripeCustomerId: "cus_trial",
   stripeSubscriptionId: "sub_trial",

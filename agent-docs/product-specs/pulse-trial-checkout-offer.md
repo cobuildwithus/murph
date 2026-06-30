@@ -1,12 +1,12 @@
 # Pulse Trial Checkout Offer Implementation Plan
 
-Last verified: 2026-05-05
+Last verified: 2026-06-30
 
 Status: Implemented locally
 
 ## Purpose
 
-This plan specifies how to add a seven-day Pulse Trial on top of the current hosted Murph billing and hosted AI usage allowance system.
+This plan specifies how to add a ten-day Pulse Trial on top of the current hosted Murph billing and hosted AI usage allowance system.
 
 The durable decision is:
 
@@ -18,13 +18,18 @@ HostedBillingCheckoutOffer =
   | "pulse_trial_7d";
 ```
 
+The persisted offer id remains `pulse_trial_7d` for compatibility; the current
+trial policy is ten days as of `pulse-trial-2026-06-30-v2`. The previous
+seven-day policy remains readable for historical rows and in-flight Stripe
+events.
+
 Pulse Trial is a checkout offer for Pulse. It is not a third hosted plan, not a free plan, and not a separate usage-budget system.
 
 Success means:
 
 - The hosted plan registry still has only Pulse and Edge.
 - The join page no longer presents self-hosted Murph as a hosted "Free" plan.
-- The Pulse Trial CTA creates a Stripe Checkout subscription for the existing Pulse price with a seven-day trial.
+- The Pulse Trial CTA creates a Stripe Checkout subscription for the existing Pulse price with a ten-day trial.
 - Trial activation is metadata-gated and idempotent.
 - The hosted billing ref records the current billing phase and trial boundaries.
 - The existing hosted AI usage allowance resolver returns a 4.50 USD trial allowance during the trial and the normal Pulse allowance after Stripe converts the subscription to a paid cycle.
@@ -116,10 +121,10 @@ Do not add:
 Replace the current self-hosted "Free" card with a Pulse Trial card:
 
 - Name: `Pulse Trial`
-- Price: `$0 for 7 days`
+- Price: `$0 for 10 days`
 - Price detail: `Then $8/month`
 - Billing disclosure: `Card required. Then $8/month unless canceled.`
-- CTA: `Start 7-day trial`
+- CTA: `Start 10-day trial`
 
 Keep the existing Pulse and Edge paid cards:
 
@@ -200,12 +205,18 @@ export const HOSTED_BILLING_PHASES = [
 export type HostedBillingPhase = (typeof HOSTED_BILLING_PHASES)[number];
 
 export const HOSTED_PULSE_TRIAL_OFFER = "pulse_trial_7d" as const;
-export const HOSTED_PULSE_TRIAL_DAYS = 7;
+export const HOSTED_PULSE_TRIAL_DAYS = 10;
 export const HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS = 4_500_000n;
-export const HOSTED_PULSE_TRIAL_POLICY_VERSION =
+export const HOSTED_PULSE_TRIAL_LEGACY_POLICY_VERSION =
   "pulse-trial-2026-05-05-v1";
+export const HOSTED_PULSE_TRIAL_POLICY_VERSION =
+  "pulse-trial-2026-06-30-v2";
 
 export const HOSTED_PULSE_TRIAL_POLICIES = {
+  [HOSTED_PULSE_TRIAL_LEGACY_POLICY_VERSION]: {
+    durationDays: 7,
+    usageLimitUsdMicros: HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
+  },
   [HOSTED_PULSE_TRIAL_POLICY_VERSION]: {
     durationDays: HOSTED_PULSE_TRIAL_DAYS,
     usageLimitUsdMicros: HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
@@ -309,8 +320,8 @@ const checkoutMetadata = {
   memberId,
   billingPlanCode: "launch_monthly",
   checkoutOffer: "pulse_trial_7d",
-  trialPolicyVersion: "pulse-trial-2026-05-05-v1",
-  trialDurationDays: "7",
+  trialPolicyVersion: "pulse-trial-2026-06-30-v2",
+  trialDurationDays: "10",
   trialUsageLimitUsdMicros: "4500000",
 };
 ```
@@ -345,7 +356,7 @@ await stripe.checkout.sessions.create({
   payment_method_types: ["card"],
   subscription_data: {
     metadata: checkoutMetadata,
-    trial_period_days: 7,
+    trial_period_days: 10,
   },
   success_url,
 }, {
@@ -353,7 +364,7 @@ await stripe.checkout.sessions.create({
 });
 ```
 
-Keep `payment_method_types: ["card"]`. Do not set `payment_method_collection: "if_required"` for this offer because the intended product behavior is automatic conversion to paid Pulse after seven days.
+Keep `payment_method_types: ["card"]`. Do not set `payment_method_collection: "if_required"` for this offer because the intended product behavior is automatic conversion to paid Pulse after ten days.
 
 ### Idempotency Key
 
@@ -445,7 +456,7 @@ await writeHostedMemberStripeBillingTx({
   currentPeriodEnd,
   currentTrialStartedAt,
   currentTrialEndsAt,
-  pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+  pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
   pulseTrialRedeemedAt: currentTrialStartedAt,
   dispatchContext,
   member,
@@ -662,7 +673,7 @@ Focused tests to add or update:
   - confirms plan codes remain exactly Pulse and Edge
 - `hosted-onboarding-billing-service.test.ts`
   - standard Pulse request has no `trial_period_days`
-  - Pulse Trial request includes trial metadata and `trial_period_days: 7`
+  - Pulse Trial request includes trial metadata and `trial_period_days: 10`
   - Edge trial is rejected
   - prior trial redemption is rejected from immutable `pulseTrialRedeemedAt`, even after cancellation or replacement subscription
   - idempotency key differs between standard Pulse and Pulse Trial

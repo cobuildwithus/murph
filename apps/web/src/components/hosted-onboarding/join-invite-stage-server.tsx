@@ -43,7 +43,7 @@ const MURPH_CONTACT_DOWNLOAD_FILENAME = "Murph.vcf";
 const MURPH_GITHUB_URL = "https://github.com/cobuildwithus/murph";
 
 const PULSE_TRIAL_FEATURES = [
-  "Full Pulse access for 7 days",
+  "Full Pulse access for 10 days",
   "Card required. Then $8/month unless canceled.",
   "Cancel anytime",
 ];
@@ -280,9 +280,9 @@ function JoinInviteCheckoutPanel({
         <PricingTierCard
           tier="free"
           name="Pulse Trial"
-          description="Try Murph for 7 days, no charge."
+          description="Try Murph for 10 days, no charge."
           price="$0"
-          priceUnit="for 7 days"
+          priceUnit="for 10 days"
           features={PULSE_TRIAL_FEATURES}
           cta={
             <JoinInviteCheckoutPlanButtonIsland
@@ -290,7 +290,7 @@ function JoinInviteCheckoutPanel({
               checkoutOffer="pulse_trial_7d"
               className={buttonClassName}
               disabledLabel="Trial unavailable"
-              idleLabel="Start 7-day trial"
+              idleLabel="Start 10-day trial"
               inviteCode={inviteCode}
               planCode={pulsePlan?.code ?? null}
             />

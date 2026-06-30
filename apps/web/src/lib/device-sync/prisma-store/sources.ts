@@ -72,6 +72,13 @@ export interface MarkHostedDeviceConnectionSourcesDisconnectedInput {
   tx?: HostedPrismaTransactionClient;
 }
 
+export interface ListHostedRuntimeSnapshotConnectionSourcesInput {
+  connectionId: string;
+  limit: number;
+  sourceProviderSlugs: readonly string[];
+  tx?: HostedPrismaTransactionClient;
+}
+
 const SAFE_SOURCE_INSTANCE_KEY_PATTERN = /^[a-z0-9][a-z0-9_-]*$/u;
 const SAFE_SOURCE_PROVIDER_SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]*$/u;
 const SAFE_ERROR_CODE_PATTERN = /^[A-Z0-9_][A-Z0-9_-]*$/u;
@@ -205,6 +212,39 @@ export class PrismaHostedConnectionSourceStore {
 
     return records.map(mapHostedConnectionSourceRecord);
   }
+
+  async listRuntimeSnapshotConnectionSources(
+    input: ListHostedRuntimeSnapshotConnectionSourcesInput,
+  ): Promise<HostedDeviceConnectionSource[]> {
+    const prisma = input.tx ?? this.prisma;
+    const sourceProviderSlugs = normalizeSourceProviderSlugList(input.sourceProviderSlugs);
+
+    if (sourceProviderSlugs.length === 0) {
+      return [];
+    }
+
+    const records = await prisma.deviceConnectionSource.findMany({
+      where: {
+        connectionId: requireConnectionId(input.connectionId),
+        sourceProviderSlug: {
+          in: sourceProviderSlugs,
+        },
+        status: {
+          not: "disconnected",
+        },
+      },
+      orderBy: [
+        { lastSeenAt: "desc" },
+        { sourceProviderSlug: "asc" },
+        { sourceInstanceKey: "asc" },
+        { id: "asc" },
+      ],
+      take: requireSourceProjectionLimit(input.limit),
+      ...hostedConnectionSourceRecordArgs,
+    });
+
+    return records.map(mapHostedConnectionSourceRecord);
+  }
 }
 
 export function mapHostedConnectionSourceRecord(
@@ -271,6 +311,34 @@ function normalizeSourceProviderSlug(value: string): string {
   }
 
   return normalized;
+}
+
+function normalizeSourceProviderSlugList(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const normalizedValues: string[] = [];
+
+  for (const value of values) {
+    const normalized = normalizeSourceProviderSlug(value);
+    if (seen.has(normalized)) {
+      continue;
+    }
+
+    seen.add(normalized);
+    normalizedValues.push(normalized);
+  }
+
+  return normalizedValues;
+}
+
+function requireSourceProjectionLimit(value: number): number {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw sourceContractError(
+      "CONNECTION_SOURCE_LIST_LIMIT_INVALID",
+      "Hosted device connection source snapshot limits must be positive integers.",
+    );
+  }
+
+  return value;
 }
 
 function hasOwnInputProperty<T extends object>(

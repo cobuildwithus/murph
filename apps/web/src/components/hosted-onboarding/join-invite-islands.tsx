@@ -20,10 +20,9 @@ import type {
 } from "@/src/lib/hosted-onboarding/types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 
-import { HostedLegalConsentCard } from "../legal/hosted-legal-consent-card";
+import { ConsentSkeleton, HostedLegalConsentCard } from "../legal/hosted-legal-consent-card";
 import { ConnectTelegram } from "../settings/hosted-telegram-settings";
 import { requestHostedBillingCheckout } from "./client-api";
-import { HostedAuthFinishingNotice } from "./hosted-auth-shared";
 import { HostedEmailAuthButton } from "./hosted-email-auth-button";
 import { logoutHostedAppSession } from "./hosted-app-session-client";
 import { HostedInvitePhoneAuth } from "./hosted-invite-phone-auth";
@@ -122,7 +121,11 @@ export function JoinInvitePhoneVerificationIsland({
 
   if (verificationMode === "invite_email") {
     if (emailAuthCompletion.completingMethod) {
-      return <HostedAuthFinishingNotice />;
+      return (
+        <div aria-busy="true" aria-live="polite" role="status">
+          <ConsentSkeleton />
+        </div>
+      );
     }
 
     return (

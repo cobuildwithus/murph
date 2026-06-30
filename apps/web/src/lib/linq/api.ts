@@ -11,11 +11,18 @@ export async function fetchLinqApi(input: {
   apiBaseUrl: string;
   apiToken: string;
   body?: BodyInit | null;
+  headers?: HeadersInit;
   method?: string;
   path: string;
   signal?: AbortSignal;
   timeoutMs?: number;
 }): Promise<Response> {
+  const headers = new Headers(input.headers);
+  headers.set("authorization", `Bearer ${input.apiToken}`);
+  if (input.body && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+
   const { didTimeout, signal, clearTimeout } = createTimedAbortSignal({
     signal: input.signal,
     timeoutMs: input.timeoutMs ?? DEFAULT_LINQ_API_TIMEOUT_MS,
@@ -24,14 +31,7 @@ export async function fetchLinqApi(input: {
   try {
     return await fetch(new URL(input.path, `${input.apiBaseUrl}/`), {
       method: input.method ?? "GET",
-      headers: {
-        authorization: `Bearer ${input.apiToken}`,
-        ...(input.body
-          ? {
-              "content-type": "application/json",
-            }
-          : {}),
-      },
+      headers,
       body: input.body ?? undefined,
       signal,
     });

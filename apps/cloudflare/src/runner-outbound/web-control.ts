@@ -393,7 +393,10 @@ function forceHostedRunnerRuntimeSnapshotCredentialMaterial(body: string): strin
 
   return JSON.stringify({
     ...payload,
-    includeCredentialMaterial: true,
+    includeCredentialMaterial:
+      typeof payload.includeCredentialMaterial === "boolean"
+        ? payload.includeCredentialMaterial
+        : true,
   });
 }
 

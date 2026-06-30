@@ -36,6 +36,7 @@ import {
 } from "@murphai/assistant-engine/assistant-automation";
 import {
   listConfiguredDeviceSyncConnectTargets,
+  listConfiguredDeviceSyncReconnectTargets,
 } from "@murphai/device-syncd/config";
 import type {
   AssistantCurrentDeliveryRoute,
@@ -71,6 +72,10 @@ import {
 import type {
   HostedMailboxImportLoopResult,
 } from "./mailbox-import.ts";
+import {
+  buildHostedDeviceSyncStatusPrompt,
+  type HostedDeviceSyncStatusPromptReconnectTarget,
+} from "./device-sync-status-prompt.ts";
 import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
@@ -159,6 +164,7 @@ const HOSTED_MANAGED_AUTOMATION_SETUP_RETRY_DELAY_MS = 30_000;
 const HOSTED_SKIPPED_DEVICE_SYNC_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEFERRED_PENDING_ASSISTANT_INPUT_RETRY_DELAY_MS = 30_000;
 const HOSTED_IDLE_DEVICE_SYNC_PREEMPTION_POLL_MS = 25;
+const HOSTED_DEVICE_SYNC_STATUS_PROMPT_TIMEOUT_MS = 1_000;
 const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-update"] as const;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
@@ -297,7 +303,6 @@ export async function runHostedWorkspaceAssistantPhase(
       runtimeEnv: input.runtimeEnv,
     },
   );
-
   try {
     const hasFreshConversationInput = hasFreshHostedConversationInput(input);
     const pendingAssistantInputWakeAt = await resolveInitialPendingAssistantInputWakeAt({
@@ -353,7 +358,59 @@ export async function runHostedWorkspaceAssistantPhase(
     const freshAssistantInputIds =
       input.initialMailboxImport.importResult.assistantInputIds ?? [];
     const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
-    const runAutomationLane = async () => {
+    const shouldReadDeviceSyncStatusPromptForBackgroundWork = async (options: {
+      managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
+      systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
+    }): Promise<boolean> => {
+      if (input.shouldYieldBackgroundMaintenance?.() === true) {
+        return false;
+      }
+
+      if (
+        options.systemMailboxMaintenance.continueAssistantLane
+        || options.managedAutomationsResult !== null
+      ) {
+        return true;
+      }
+
+      return await hasDueHostedAssistantCronJob(input);
+    };
+    const buildBackgroundDeviceSyncStatusPrompt = (options: {
+      managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
+      systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
+    }) => async (): Promise<string | null> => {
+      if (!await shouldReadDeviceSyncStatusPromptForBackgroundWork(options)) {
+        return null;
+      }
+
+      const cancellation = createHostedIdleDeviceSyncMaintenanceCancellation({
+        signal: channelAbortController.signal,
+        shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
+        timeoutMs: HOSTED_DEVICE_SYNC_STATUS_PROMPT_TIMEOUT_MS,
+      });
+
+      try {
+        const deviceSyncStatusPrompt = await buildHostedDeviceSyncStatusPrompt({
+          deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
+          reconnectTargets: resolveHostedWorkspaceDeviceReconnectTargets(input.runtime),
+          signal: cancellation.signal,
+        });
+        if (
+          input.shouldYieldBackgroundMaintenance?.() === true
+          || !deviceSyncStatusPrompt
+        ) {
+          return null;
+        }
+
+        return deviceSyncStatusPrompt;
+      } finally {
+        cancellation.dispose();
+      }
+    };
+    const runAutomationLane = async (options: {
+      managedAutomationsResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
+      systemMailboxMaintenance: Awaited<ReturnType<typeof runSystemMailboxMaintenancePhase>>;
+    }) => {
       const automationLaneStartedAt = Date.now();
       const assistantRuntimeState = await prepareHostedAssistantAutomationForWake(
         input.restored.vaultRoot,
@@ -364,10 +421,20 @@ export async function runHostedWorkspaceAssistantPhase(
           operatorHomeRoot: input.restored.operatorHomeRoot,
         },
       );
+      const buildBackgroundDynamicContextPrompt =
+        assistantRuntimeState?.assistantConfigured === true
+          ? buildBackgroundDeviceSyncStatusPrompt({
+            managedAutomationsResult: options.managedAutomationsResult,
+            systemMailboxMaintenance: options.systemMailboxMaintenance,
+          })
+          : undefined;
       const assistantMetrics = await (async () => {
         try {
           return await runHostedAssistantAutomationLane({
             assistantRuntimeState,
+            ...(buildBackgroundDynamicContextPrompt
+              ? { buildBackgroundDynamicContextPrompt }
+              : {}),
             executionContext,
             freshAssistantInputIds,
             requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
@@ -421,7 +488,10 @@ export async function runHostedWorkspaceAssistantPhase(
           : { redactedLogEntries: [...assistantAutomationRedactedLogEntries] }),
       };
     };
-    let assistantMetrics = await runAutomationLane();
+    let assistantMetrics = await runAutomationLane({
+      managedAutomationsResult,
+      systemMailboxMaintenance,
+    });
     let currentTurnDeliveryIntentIds =
       assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
     let foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
@@ -457,7 +527,10 @@ export async function runHostedWorkspaceAssistantPhase(
         || deferredPendingSystemMailboxMaintenance.deviceSyncMaintenanceRan;
     }
     if (deferredPendingSystemMailboxMaintenance?.continueAssistantLane === true) {
-      assistantMetrics = await runAutomationLane();
+      assistantMetrics = await runAutomationLane({
+        managedAutomationsResult: null,
+        systemMailboxMaintenance: deferredPendingSystemMailboxMaintenance,
+      });
       currentTurnDeliveryIntentIds =
         assistantMetrics.assistantAutomationCurrentTurnDeliveryIntentIds ?? [];
       foregroundAssistantPass = isHostedForegroundAssistantDeliveryPass({
@@ -4663,6 +4736,78 @@ function resolveHostedWorkspaceDeviceConnectProviders(
     label: target.label,
     provider: target.connectTarget,
   }));
+}
+
+function resolveHostedWorkspaceDeviceReconnectTargets(
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "resolvedConfig">,
+): HostedDeviceSyncStatusPromptReconnectTarget[] {
+  const providerConfigs = runtime.resolvedConfig.deviceSync?.providerConfigs ?? null;
+  if (!providerConfigs) {
+    return [];
+  }
+
+  const targets = listConfiguredDeviceSyncReconnectTargets(providerConfigs);
+  const publicTargetsByConnectTarget = new Map(
+    listConfiguredDeviceSyncConnectTargets(providerConfigs).map((target) => [
+      target.connectTarget,
+      target,
+    ]),
+  );
+  const connectTargetCounts = new Map<string, number>();
+  for (const target of targets) {
+    connectTargetCounts.set(
+      target.connectTarget,
+      (connectTargetCounts.get(target.connectTarget) ?? 0) + 1,
+    );
+  }
+
+  return targets.map((target) => ({
+    connectTarget: target.connectTarget,
+    connectTargetAmbiguous: (connectTargetCounts.get(target.connectTarget) ?? 0) > 1,
+    connectTargetCommandSafe: sameHostedDeviceSyncConnectTarget(
+      target,
+      publicTargetsByConnectTarget.get(target.connectTarget) ?? null,
+    ),
+    label: target.label,
+    provider: target.provider,
+    ...(target.sourceProviderSlug
+      ? { sourceProviderSlug: target.sourceProviderSlug }
+      : {}),
+  }));
+}
+
+type HostedDeviceSyncConnectTarget = ReturnType<
+  typeof listConfiguredDeviceSyncConnectTargets
+>[number];
+
+function sameHostedDeviceSyncConnectTarget(
+  left: HostedDeviceSyncConnectTarget,
+  right: HostedDeviceSyncConnectTarget | null,
+): boolean {
+  if (!right) {
+    return false;
+  }
+
+  return normalizeHostedDeviceSyncConnectTargetKey(left.provider)
+      === normalizeHostedDeviceSyncConnectTargetKey(right.provider)
+    && normalizeHostedDeviceSyncConnectTargetKey(left.sourceProviderSlug)
+      === normalizeHostedDeviceSyncConnectTargetKey(right.sourceProviderSlug);
+}
+
+function normalizeHostedDeviceSyncConnectTargetKey(
+  value: string | null | undefined,
+): string | null {
+  const normalized = value?.trim().toLowerCase().replace(/[^a-z0-9_]+/gu, "_")
+    .replace(/^_+|_+$/gu, "");
+  return normalized ? normalized : null;
+}
+
+async function hasDueHostedAssistantCronJob(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): Promise<boolean> {
+  const cronStatus = await getAssistantCronStatus(input.restored.vaultRoot)
+    .catch(() => null);
+  return (cronStatus?.dueJobs ?? 0) > 0;
 }
 
 function resolveHostedWorkspaceIssueDeviceConnectLink(input: {

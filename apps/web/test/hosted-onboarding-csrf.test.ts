@@ -186,6 +186,7 @@ function createHostedOnboardingEnvironment(
     },
     inviteTtlHours: 168,
     isProduction: false,
+    linqAttachmentUploadAllowedHosts: [],
     linqApiBaseUrl: "https://linq.example.test",
     linqApiToken: null,
     linqConversationPhoneNumbers: [],
