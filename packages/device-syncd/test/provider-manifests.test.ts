@@ -17,6 +17,7 @@ import {
   readConfiguredDeviceSyncProviderConfigs,
 } from "@murphai/device-syncd/config";
 import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
+import { listConfiguredDeviceSyncPublicProviderDescriptors } from "@murphai/device-syncd/public-provider-descriptors";
 import {
   configuredDeviceSyncProviderKeys as rootConfiguredDeviceSyncProviderKeys,
   deviceSyncProviderManifests as rootDeviceSyncProviderManifests,
@@ -214,6 +215,60 @@ describe("deviceSyncProviderManifests", () => {
       "activity:read",
       "profile:read_all",
     ]);
+  });
+
+  it("keeps public provider descriptors aligned with runtime provider descriptors", () => {
+    const configs = readConfiguredDeviceSyncProviderConfigs({
+      OURA_CLIENT_ID: "oura-client-id",
+      OURA_CLIENT_SECRET: "<REDACTED_OURA_CLIENT_SECRET>",
+      OURA_SCOPES: "daily,spo2,extapi:heartrate",
+      STRAVA_CLIENT_ID: "strava-client-id",
+      STRAVA_CLIENT_SECRET: "<REDACTED_STRAVA_CLIENT_SECRET>",
+      STRAVA_SCOPES: "activity:read, profile:read_all",
+      WHOOP_CLIENT_ID: "whoop-client-id",
+      WHOOP_CLIENT_SECRET: "<REDACTED_WHOOP_CLIENT_SECRET>",
+      WHOOP_SCOPES: "read:sleep, read:recovery",
+    });
+
+    const publicDescriptors = listConfiguredDeviceSyncPublicProviderDescriptors(configs);
+    const runtimeProviders = createConfiguredDeviceSyncProvidersFromConfigs(configs);
+
+    for (const runtimeProvider of runtimeProviders) {
+      const connection = resolveDeviceProviderConnectionDescriptor(runtimeProvider.descriptor);
+      expect(
+        publicDescriptors.find((descriptor) => descriptor.provider === runtimeProvider.provider),
+      ).toMatchObject({
+        defaultScopes: [
+          ...(runtimeProvider.descriptor.oauth?.defaultScopes ?? connection.defaultScopes ?? []),
+        ],
+        provider: runtimeProvider.provider,
+      });
+    }
+
+    const ouraDescriptor = publicDescriptors.find((descriptor) => descriptor.provider === "oura");
+    const whoopDescriptor = publicDescriptors.find((descriptor) => descriptor.provider === "whoop");
+
+    expect(ouraDescriptor?.defaultScopes).not.toContain("extapi:heartrate");
+    expect(whoopDescriptor?.defaultScopes).toEqual([
+      "offline",
+      "read:profile",
+      "read:sleep",
+      "read:recovery",
+    ]);
+  });
+
+  it("rejects public provider descriptors when runtime provider config is invalid", () => {
+    const configs = readConfiguredDeviceSyncProviderConfigs({
+      JUNCTION_API_KEY: "sk_us_test_manifest",
+      JUNCTION_CLIENT_USER_ID_SECRET: "short",
+      JUNCTION_ENV: "sandbox",
+      JUNCTION_REGION: "us",
+    });
+
+    expect(() => createConfiguredDeviceSyncProvidersFromConfigs(configs))
+      .toThrow(/JUNCTION_CLIENT_USER_ID_SECRET must be at least 16 characters/u);
+    expect(() => listConfiguredDeviceSyncPublicProviderDescriptors(configs))
+      .toThrow(/JUNCTION_CLIENT_USER_ID_SECRET must be at least 16 characters/u);
   });
 
   it("round-trips serializable provider configs through manifest field specs", () => {

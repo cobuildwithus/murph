@@ -1,6 +1,7 @@
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
 import { resolveDeviceSyncProviderCredentialPolicy } from "./provider-credential-policy.ts";
+import { resolvePublicProviderDefaultScopes } from "./public-provider-descriptor-shared.ts";
 import {
   normalizeConfiguredDeviceSyncJobInput,
 } from "./provider-job-definitions.ts";
@@ -471,7 +472,7 @@ export class DeviceSyncPublicIngress {
       webhookPath,
       webhookUrl: webhookPath ? joinUrl(this.publicBaseUrl, webhookPath) : null,
       supportsWebhooks: Boolean(webhookPath && resolveProviderWebhookVerifier(provider)),
-      defaultScopes: [...(connection.defaultScopes ?? [])],
+      defaultScopes: resolvePublicProviderDefaultScopes(provider.descriptor, connection),
     };
   }
 

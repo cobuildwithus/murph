@@ -18,6 +18,11 @@ import {
 } from "../shared.ts";
 import { formatDeviceSyncAccountLabel } from "../provider-label.ts";
 import {
+  buildStravaDeviceSyncRuntimeDescriptor,
+  buildStravaDeviceSyncScopes,
+  normalizeStravaDeviceSyncScopes,
+} from "../configured-provider-runtime-descriptors.ts";
+import {
   buildOAuthConnectUrl,
   buildProviderApiError,
   buildScheduledReconcileJobs,
@@ -78,7 +83,6 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_BACKFILL_DAYS = STRAVA_SYNC.windows.backfillDays;
 const DEFAULT_RECONCILE_DAYS = STRAVA_SYNC.windows.reconcileDays;
 const DEFAULT_RECONCILE_INTERVAL_MS = STRAVA_SYNC.windows.reconcileIntervalMs;
-const STRAVA_DEFAULT_SCOPES = Object.freeze([...STRAVA_OAUTH.defaultScopes]);
 const STRAVA_PAGED_ACTIVITY_SIZE = 200;
 const STRAVA_MAX_ACTIVITY_PAGES = 100;
 const STRAVA_MAX_ACTIVITY_RECORDS = 25_000;
@@ -153,36 +157,6 @@ export interface StravaDeviceSyncProviderConfig {
 interface StravaWebhookSignatureHeader {
   timestamp: string;
   signatures: string[];
-}
-
-function normalizeStravaScopes(value: unknown): string[] {
-  if (!Array.isArray(value) && typeof value !== "string") {
-    return [];
-  }
-
-  const rawScopes = Array.isArray(value) ? value : [value];
-  const deduped = new Set<string>();
-
-  for (const entry of rawScopes) {
-    if (typeof entry !== "string") {
-      continue;
-    }
-
-    for (const scope of entry.split(/[\s,]+/u)) {
-      const normalized = scope.trim();
-
-      if (normalized) {
-        deduped.add(normalized);
-      }
-    }
-  }
-
-  return [...deduped];
-}
-
-function buildStravaScopes(input: string[] | undefined): string[] {
-  const scopes = normalizeStravaScopes(input);
-  return scopes.length > 0 ? scopes : [...STRAVA_DEFAULT_SCOPES];
 }
 
 function epochSecondsToIso(value: unknown): string | undefined {
@@ -303,8 +277,10 @@ function hasAcceptedActivityScope(scopes: readonly string[]): boolean {
 }
 
 function resolveAccountScopes(callbackGrantedScopes: readonly string[], tokenScopePayload: unknown): string[] {
-  const tokenScopes = normalizeStravaScopes(tokenScopePayload);
-  const scopes = tokenScopes.length > 0 ? tokenScopes : normalizeStravaScopes(callbackGrantedScopes);
+  const tokenScopes = normalizeStravaDeviceSyncScopes(tokenScopePayload);
+  const scopes = tokenScopes.length > 0
+    ? tokenScopes
+    : normalizeStravaDeviceSyncScopes(callbackGrantedScopes);
 
   if (!hasAcceptedActivityScope(scopes)) {
     throw buildRequiredActivityScopeError();
@@ -565,7 +541,7 @@ export function createStravaDeviceSyncProvider(
   const fetchImpl = config.fetchImpl ?? fetch;
   const authBaseUrl = (config.authBaseUrl ?? STRAVA_AUTH_BASE_URL).replace(/\/+$/u, "");
   const apiBaseUrl = (config.apiBaseUrl ?? STRAVA_API_BASE_URL).replace(/\/+$/u, "");
-  const scopes = buildStravaScopes(config.scopes);
+  const scopes = buildStravaDeviceSyncScopes(config.scopes);
   const backfillDays = Math.max(1, config.backfillDays ?? DEFAULT_BACKFILL_DAYS);
   const reconcileDays = Math.max(1, config.reconcileDays ?? DEFAULT_RECONCILE_DAYS);
   const reconcileIntervalMs = Math.max(60_000, config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS);
@@ -576,21 +552,7 @@ export function createStravaDeviceSyncProvider(
     config.webhookTimestampToleranceMs ?? DEFAULT_WEBHOOK_TOLERANCE_MS,
   );
   const webhookVerifyToken = normalizeString(config.webhookVerifyToken) ?? null;
-  const descriptor = {
-    ...STRAVA_PROVIDER_DESCRIPTOR,
-    oauth: {
-      ...STRAVA_OAUTH,
-      defaultScopes: [...scopes],
-    },
-    sync: {
-      ...STRAVA_SYNC,
-      windows: {
-        backfillDays,
-        reconcileDays,
-        reconcileIntervalMs,
-      },
-    },
-  };
+  const descriptor = buildStravaDeviceSyncRuntimeDescriptor(config);
   let webhookSubscriptionClient: StravaWebhookSubscriptionClient | null = null;
 
   async function postTokenRequest(
@@ -982,7 +944,7 @@ export function createStravaDeviceSyncProvider(
         authorizePath: STRAVA_AUTHORIZE_PATH,
         clientId: config.clientId,
         callbackUrl: context.callbackUrl,
-        scopes: normalizeStravaScopes(context.scopes.length > 0 ? context.scopes : scopes),
+        scopes: normalizeStravaDeviceSyncScopes(context.scopes.length > 0 ? context.scopes : scopes),
         state: context.state,
         scopeDelimiter: ",",
         extraSearchParams: {

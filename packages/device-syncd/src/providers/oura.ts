@@ -9,6 +9,10 @@ import {
 
 import { deviceSyncError } from "../errors.ts";
 import {
+  buildOuraDeviceSyncRuntimeDescriptor,
+  buildOuraDeviceSyncScopes,
+} from "../configured-provider-runtime-descriptors.ts";
+import {
   addMilliseconds,
   coerceRecord,
   normalizeIdentifier,
@@ -78,7 +82,6 @@ const DEFAULT_WEBHOOK_TOLERANCE_MS = 5 * 60_000;
 const OURA_SECONDS_TIMESTAMP_THRESHOLD = 10_000_000_000;
 const OURA_WEBHOOK_RESOURCE_PRIORITY = 90;
 const OURA_WEBHOOK_DELETE_PRIORITY = 95;
-const OURA_DEFAULT_SCOPES = Object.freeze([...OURA_OAUTH.defaultScopes]);
 const OURA_MAX_PAGINATION_PAGES = 500;
 const OURA_OAUTH_TOKEN_ENDPOINT_KIND = "oura_oauth_token";
 
@@ -161,19 +164,6 @@ export interface OuraDeviceSyncProviderConfig {
   webhookTimestampToleranceMs?: number;
   webhookVerificationToken?: string;
   fetchImpl?: typeof fetch;
-}
-
-function buildOuraScopes(input: string[] | undefined): string[] {
-  const requested = [...OURA_DEFAULT_SCOPES, ...(input ?? [])];
-  return [...new Set(
-    requested
-      .map((scope) => scope.trim())
-      .filter((scope) => scope && !isDeprecatedOuraScope(scope)),
-  )];
-}
-
-function isDeprecatedOuraScope(scope: string): boolean {
-  return scope.replace(/^extapi:/u, "") === "heartrate";
 }
 
 function hasOuraScope(account: DeviceSyncAccount, scope: string): boolean {
@@ -624,28 +614,14 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
   const fetchImpl = config.fetchImpl ?? fetch;
   const authBaseUrl = (config.authBaseUrl ?? OURA_AUTH_BASE_URL).replace(/\/+$/u, "");
   const apiBaseUrl = (config.apiBaseUrl ?? OURA_API_BASE_URL).replace(/\/+$/u, "");
-  const scopes = buildOuraScopes(config.scopes);
+  const scopes = buildOuraDeviceSyncScopes(config.scopes);
   const backfillDays = Math.max(1, config.backfillDays ?? DEFAULT_BACKFILL_DAYS);
   const reconcileDays = Math.max(1, config.reconcileDays ?? DEFAULT_RECONCILE_DAYS);
   const reconcileIntervalMs = Math.max(60_000, config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS);
   const timeoutMs = Math.max(1_000, config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
   const webhookTimestampToleranceMs = Math.max(1_000, config.webhookTimestampToleranceMs ?? DEFAULT_WEBHOOK_TOLERANCE_MS);
   const webhookVerificationToken = normalizeString(config.webhookVerificationToken) ?? null;
-  const descriptor = {
-    ...OURA_PROVIDER_DESCRIPTOR,
-    oauth: {
-      ...OURA_OAUTH,
-      defaultScopes: [...scopes],
-    },
-    sync: {
-      ...OURA_SYNC,
-      windows: {
-        backfillDays,
-        reconcileDays,
-        reconcileIntervalMs,
-      },
-    },
-  };
+  const descriptor = buildOuraDeviceSyncRuntimeDescriptor(config);
   let webhookSubscriptionClient: OuraWebhookSubscriptionClient | null = null;
 
   async function postTokenRequest(
