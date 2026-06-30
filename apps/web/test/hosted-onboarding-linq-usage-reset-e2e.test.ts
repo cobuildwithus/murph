@@ -335,6 +335,7 @@ type UsageResetPrismaFixture = {
     findUnique: MockedFunction;
   };
   hostedMemberRouting: {
+    findMany: MockedFunction;
     updateMany: MockedFunction;
   };
   hostedThreadRoute: {
@@ -781,6 +782,7 @@ function createUsageResetPrismaFixture(input: {
       })),
     },
     hostedMemberRouting: {
+      findMany: vi.fn().mockResolvedValue([]),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     hostedThreadRoute: {

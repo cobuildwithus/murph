@@ -245,6 +245,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
   const existingPendingLinqChatLookup = existingPendingLinqChatLookupCandidate?.core
     ? existingPendingLinqChatLookupCandidate
     : null;
+  const existingHomeLinqChatLookup = existingPendingLinqChatLookup
+    ? null
+    : await lookupHostedMemberRoutingByHomeLinqChatId({
+        linqChatId: summary.chatId,
+        prisma: input.prisma,
+      });
   const existingMemberLookup = participantContact.kind === "phone"
     ? await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
         phoneNumber: participantContact.value,
@@ -260,20 +266,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
         contact: participantContact,
         prisma: input.prisma,
       });
-  const existingHomeLinqChatLookup =
-    existingMemberLookup
-      || existingPendingLinqContactLookup
-      || existingPendingLinqChatLookup
-    ? null
-    : await lookupHostedMemberRoutingByHomeLinqChatId({
-        linqChatId: summary.chatId,
-        prisma: input.prisma,
-      });
   const existingMember =
-    existingMemberLookup?.core
-    ?? existingPendingLinqContactLookup?.core
-    ?? existingPendingLinqChatLookup?.core
+    existingPendingLinqChatLookup?.core
     ?? existingHomeLinqChatLookup?.core
+    ?? existingMemberLookup?.core
+    ?? existingPendingLinqContactLookup?.core
     ?? null;
   const existingMemberMatch = resolveHostedLinqExistingMemberMatch({
     existingHomeLinqChatLookupPresent: Boolean(existingHomeLinqChatLookup),
@@ -1198,20 +1195,20 @@ function resolveHostedLinqExistingMemberMatch(input: {
   existingPendingLinqContactLookupPresent: boolean;
   participantContactKind: HostedLinqParticipantContact["kind"];
 }): HostedLinqExistingMemberMatch {
-  if (input.existingMemberLookupPresent) {
-    return input.participantContactKind === "phone" ? "phone-identity" : "verified-email";
-  }
-
-  if (input.existingPendingLinqContactLookupPresent) {
-    return "pending-contact";
-  }
-
   if (input.existingPendingLinqChatLookupPresent) {
     return "pending-linq-chat";
   }
 
   if (input.existingHomeLinqChatLookupPresent) {
     return "home-linq-chat";
+  }
+
+  if (input.existingMemberLookupPresent) {
+    return input.participantContactKind === "phone" ? "phone-identity" : "verified-email";
+  }
+
+  if (input.existingPendingLinqContactLookupPresent) {
+    return "pending-contact";
   }
 
   return "none";
