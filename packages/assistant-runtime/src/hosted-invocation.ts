@@ -9,6 +9,10 @@ import {
   type HostedAssistantWorkspaceRuntimeJobResult,
   type RuntimeWakeSignal,
 } from "./hosted-runtime.ts";
+import {
+  consumePendingRuntimeWakeUnlessShuttingDown,
+} from "./hosted-runtime/runtime-wake.ts";
+export { drainHostedRuntimeDeferredUsageCompletionsBestEffort } from "./hosted-runtime.ts";
 export {
   consumeHostedCliRuntimeBridgeOffInvocationViolation,
   stopHostedCliRuntimeBridge,
@@ -19,10 +23,15 @@ import type {
 import {
   drainHostedRuntimeLogWritesBestEffort,
 } from "./hosted-runtime/runtime-logs.ts";
+import {
+  drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
+} from "./hosted-runtime/callbacks.ts";
 // Re-exported so the container entrypoint's process-fatal handler can flush
-// queued info-log writes (bounded by its exit backstop) before the process
-// dies — the crash tail is exactly the diagnostics worth keeping durable.
+// queued diagnostics (bounded by its exit backstop) before the process dies.
 export { drainHostedRuntimeLogWritesBestEffort } from "./hosted-runtime/runtime-logs.ts";
+export {
+  drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
+} from "./hosted-runtime/callbacks.ts";
 import {
   createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
   createHostedWorkspaceRuntimeBridgeJobOptions,
@@ -70,9 +79,10 @@ export async function runHostedWorkspaceInvocation(
     // R2 upload and starts a doomed turn). The unconsumed wake stays durable in
     // the mailbox; reconciliation re-derives it for the replacement container.
     consumePendingRuntimeWake: () =>
-      input.shutdownSignal?.aborted === true
-        ? null
-        : runtimeWakeSignal.consumePending(),
+      consumePendingRuntimeWakeUnlessShuttingDown({
+        runtimeWakeSignal,
+        shutdownSignal: input.shutdownSignal ?? null,
+      }),
     decodeMailboxPayload: input.mailboxPayloadDecoder,
     platform: input.platform,
     readCurrentLease,
@@ -92,6 +102,9 @@ export async function runHostedWorkspaceInvocation(
       signal: input.signal ?? null,
     });
   } finally {
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort({
+      timeoutMs: 2_000,
+    });
     // Info-level runtime log writes are queued off the reply hot path; flush
     // them before the invocation result commits so a normal container stop
     // never drops queued diagnostics. Bounded so a degraded log endpoint

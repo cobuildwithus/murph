@@ -7,6 +7,9 @@ import {
   buildHostedExecutionRuntimeTimerWake,
 } from "@murphai/hosted-execution";
 import type {
+  HostedRuntimeLatencyTraceRequest,
+} from "@murphai/hosted-execution/runtime-control";
+import type {
   AssistantOutboxPreparedDispatchState,
 } from "@murphai/assistant-engine";
 import {
@@ -117,6 +120,7 @@ vi.mock("@murphai/operator-config/telegram-runtime", () => ({
 
 import {
   collectHostedAssistantDeliverySideEffects,
+  drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
   resolveHostedAssistantOutboxNextWakeAt,
@@ -205,6 +209,12 @@ function createDelivery(overrides: Record<string, unknown> = {}) {
     targetKind: "participant" as const,
     ...overrides,
   };
+}
+
+async function flushHostedRuntimeCallbackTestMicrotasks(): Promise<void> {
+  for (let index = 0; index < 8; index += 1) {
+    await Promise.resolve();
+  }
 }
 
 function createMirrorState(
@@ -4566,6 +4576,354 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
+  it("records hosted runtime Linq delivery outcomes after provider acceptance", async () => {
+    const effect = createEffect({
+      actorId: "ain_blinded_member_phone",
+      bindingDeliveryTarget: "+15550100001",
+      channel: "linq",
+      idempotencyKey: "signup-welcome:member_123",
+      message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+      transportIdempotent: false,
+    });
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "participant" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber: "+15550100099",
+        idempotencyKey: "signup-welcome:member_123",
+        message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+        replyToMessageId: null,
+        target: "+15550100001",
+        targetKind: "participant",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          idempotencyKey: "signup-welcome:member_123",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
+
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: expect.stringMatching(/Z$/u),
+        attemptedAt: expect.stringMatching(/Z$/u),
+        failureCode: null,
+        failureReason: null,
+        fromPhoneNumber: "+15550100099",
+        idempotencyKey: "signup-welcome:member_123",
+        intentId: "intent_123",
+        providerMessageId: "linq_message_sent",
+        providerTarget: null,
+        providerThreadId: "linq_chat_123",
+        routeAuthority: null,
+        target: null,
+        targetKind: "participant",
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it("keeps Linq sends successful when delivery outcome recording fails", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      transportIdempotent: false,
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const recordDeliveryOutcome = vi.fn(async () => {
+      throw new Error("web callback unavailable");
+    });
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendLinq({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "reply",
+        replyToMessageId: null,
+        target: "linq_chat_123",
+        targetKind: "thread",
+      });
+
+      return createDispatchResult({
+        delivery: createDelivery({
+          channel: "linq",
+          providerMessageId: delivery.providerMessageId,
+          providerThreadId: delivery.providerThreadId,
+          target: delivery.target,
+          targetKind: delivery.targetKind,
+        }),
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "linq",
+        deliveryStatus: "sent",
+        providerMessageId: "linq_message_sent",
+      }),
+    ]);
+    expect(recordDeliveryOutcome).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Hosted Linq delivery outcome recording failed.",
+      { errorName: "Error" },
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("does not let one hung Linq outcome write block later outcome writes", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const recordDeliveryOutcome = vi.fn<
+        NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+      >()
+        .mockImplementationOnce(async () => await new Promise<void>(() => {}))
+        .mockResolvedValueOnce(undefined);
+      const effectsPort = createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      });
+
+      mocks.sendLinqMessage.mockResolvedValueOnce({
+        providerMessageId: "linq_message_first",
+        providerThreadId: "linq_chat_1",
+        target: "linq_chat_1",
+        targetKind: "thread" as const,
+      });
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+        const delivery = await dependencies.sendLinq({
+          idempotencyKey: "assistant-outbox:intent_1",
+          message: "first",
+          replyToMessageId: null,
+          target: "linq_chat_1",
+          targetKind: "thread",
+        });
+
+        return createDispatchResult({
+          delivery: createDelivery({
+            channel: "linq",
+            providerMessageId: delivery.providerMessageId,
+            providerThreadId: delivery.providerThreadId,
+            target: delivery.target,
+            targetKind: delivery.targetKind,
+          }),
+          status: "sent",
+        });
+      });
+
+      await drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [createEffect({
+          bindingDeliveryTarget: "linq_chat_1",
+          channel: "linq",
+          explicitTarget: "linq_chat_1",
+          transportIdempotent: false,
+        })],
+        effectsPort,
+        forwardedEnv: {
+          LINQ_API_TOKEN: "linq-token",
+        },
+        platformEnv: {},
+        providerFetch: vi.fn<typeof fetch>(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+      await flushHostedRuntimeCallbackTestMicrotasks();
+      expect(recordDeliveryOutcome).toHaveBeenCalledTimes(1);
+
+      mocks.sendLinqMessage.mockResolvedValueOnce({
+        providerMessageId: "linq_message_second",
+        providerThreadId: "linq_chat_2",
+        target: "linq_chat_2",
+        targetKind: "thread" as const,
+      });
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+        const delivery = await dependencies.sendLinq({
+          idempotencyKey: "assistant-outbox:intent_2",
+          message: "second",
+          replyToMessageId: null,
+          target: "linq_chat_2",
+          targetKind: "thread",
+        });
+
+        return createDispatchResult({
+          delivery: createDelivery({
+            channel: "linq",
+            providerMessageId: delivery.providerMessageId,
+            providerThreadId: delivery.providerThreadId,
+            target: delivery.target,
+            targetKind: delivery.targetKind,
+          }),
+          status: "sent",
+        });
+      });
+
+      await drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [createEffect({
+          bindingDeliveryTarget: "linq_chat_2",
+          channel: "linq",
+          explicitTarget: "linq_chat_2",
+          transportIdempotent: false,
+        })],
+        effectsPort,
+        forwardedEnv: {
+          LINQ_API_TOKEN: "linq-token",
+        },
+        platformEnv: {},
+        providerFetch: vi.fn<typeof fetch>(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+      await flushHostedRuntimeCallbackTestMicrotasks();
+
+      expect(recordDeliveryOutcome).toHaveBeenCalledTimes(2);
+      expect(recordDeliveryOutcome.mock.calls[1]?.[0]).toEqual(
+        expect.objectContaining({
+          providerMessageId: "linq_message_second",
+        }),
+      );
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Hosted Linq delivery outcome recording timed out.",
+        { timeoutMs: 2_000 },
+      );
+    } finally {
+      vi.useRealTimers();
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("records Linq provider send failures without raw provider details", async () => {
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      transportIdempotent: false,
+    });
+    const providerError = Object.assign(
+      new Error("provider_msg_private failed for +15550109999 with private reply text"),
+      { code: "LINQ_PROVIDER_FAILED" },
+    );
+    const recordDeliveryOutcome = vi.fn<
+      NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+    >(async () => undefined);
+    mocks.sendLinqMessage.mockRejectedValueOnce(providerError);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendLinq({
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "private reply text",
+          replyToMessageId: null,
+          target: "linq_chat_123",
+          targetKind: "thread",
+        });
+      } catch {
+        return createDispatchResult({
+          delivery: null,
+          status: "failed",
+        }, {
+          code: "LINQ_PROVIDER_FAILED",
+          message: "Provider send failed.",
+        });
+      }
+
+      throw new Error("Expected Linq send to fail.");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "LINQ_PROVIDER_FAILED",
+        deliveryStatus: "failed",
+      }),
+    ]);
+    const outcomeRequest = recordDeliveryOutcome.mock.calls[0]?.[0];
+    expect(outcomeRequest).toEqual(
+      expect.objectContaining({
+        attemptedAt: expect.stringMatching(/Z$/u),
+        failedAt: expect.stringMatching(/Z$/u),
+        failureCode: "LINQ_PROVIDER_FAILED",
+        failureReason: null,
+        idempotencyKey: "assistant-outbox:intent_123",
+        providerMessageId: null,
+        providerThreadId: null,
+        target: "linq_chat_123",
+        targetKind: "thread",
+      }),
+    );
+    expect(outcomeRequest).not.toHaveProperty("acceptedAt");
+    expect(recordDeliveryOutcome.mock.calls[0]?.[1]).toEqual({
+      signal: expect.any(AbortSignal),
+    });
+    const recordedOutcome = JSON.stringify(outcomeRequest);
+    expect(recordedOutcome).not.toContain("provider_msg_private");
+    expect(recordedOutcome).not.toContain("+15550109999");
+    expect(recordedOutcome).not.toContain("private reply text");
+  });
+
   it("requires recent inbound proof for signup welcome Linq sends into existing threads", async () => {
     const effect = createEffect({
       actorId: "ain_blinded_member_phone",
@@ -5229,6 +5587,110 @@ describe("hosted runtime callbacks", () => {
         deliveryStatus: "sent",
       }),
     ]);
+  });
+
+  it("records Linq egress guard latency without blocking provider egress", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-29T12:00:00.000Z"));
+    try {
+      const effect = createEffect({
+        actorId: "ain_hashed_actor",
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: "linq_chat_current",
+        channel: "linq",
+        explicitTarget: "linq_chat_current",
+        replyToMessageId: "linq_message_current",
+        transportIdempotent: true,
+      });
+      const assertRecentInbound = vi.fn(async () => {
+        vi.setSystemTime(new Date("2026-06-29T12:00:00.017Z"));
+      });
+      const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
+      const latencyTraceRecord = vi.fn(async (request: HostedRuntimeLatencyTraceRequest) => {
+        latencyTraceRequests.push(request);
+        return {
+          matchedCount: 1,
+          recorded: true,
+          unmatchedCount: 0,
+        };
+      });
+      mocks.sendLinqMessage.mockResolvedValueOnce({
+        providerMessageId: "linq_message_sent",
+        providerThreadId: "linq_chat_current",
+        target: "linq_chat_current",
+        targetKind: "thread" as const,
+      });
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+        const delivery = await dependencies.sendLinq({
+          directRecipientPhoneNumber: null,
+          fromPhoneNumber: null,
+          idempotencyKey: "assistant-outbox:intent_hashed_target",
+          message: "hello from hosted",
+          replyToMessageId: "linq_message_current",
+          target: "linq_chat_current",
+          targetKind: "thread",
+        });
+
+        return createDispatchResult({
+          delivery: createDelivery({
+            channel: "linq",
+            providerMessageId: delivery.providerMessageId,
+            providerThreadId: delivery.providerThreadId,
+            target: delivery.target,
+            targetKind: delivery.targetKind,
+          }),
+          status: "sent",
+        });
+      });
+
+      const outcomes = await drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertLinqRecentInboundEngagement: assertRecentInbound,
+        }),
+        linqEgressLatencyTrace: {
+          assistantInputIds: ["input_latency_1"],
+          latencyTracePort: {
+            record: latencyTraceRecord,
+          },
+          runtimeAttemptId: "attempt_latency_1",
+        },
+        providerFetch: vi.fn<typeof fetch>(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      });
+
+      expect(latencyTraceRequests).toEqual([
+        {
+          event: {
+            assistantInputIds: ["input_latency_1"],
+            at: "2026-06-29T12:00:00.017Z",
+            phaseBreakdown: {
+              provider: {
+                linqEgressGuardMs: 17,
+              },
+              schemaVersion: 1,
+            },
+            providerRequestOrdinal: 0,
+            runtimeAttemptId: "attempt_latency_1",
+            source: "linq",
+            type: "provider_started",
+          },
+        },
+      ]);
+      expect(assertRecentInbound.mock.invocationCallOrder[0] ?? 0)
+        .toBeLessThan(latencyTraceRecord.mock.invocationCallOrder[0] ?? 0);
+      expect(latencyTraceRecord.mock.invocationCallOrder[0] ?? 0)
+        .toBeLessThan(mocks.sendLinqMessage.mock.invocationCallOrder[0] ?? 0);
+      expect(outcomes).toEqual([
+        expect.objectContaining({
+          deliveryChannel: "linq",
+          deliveryStatus: "sent",
+        }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("selects routed Linq authority from the matching delivery context", async () => {

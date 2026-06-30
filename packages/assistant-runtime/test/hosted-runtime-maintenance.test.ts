@@ -3087,7 +3087,17 @@ describe("runHostedAssistantAutomationLane", () => {
       startedAt: "2026-04-08T00:00:02.000Z",
     });
     await Promise.resolve();
-    expect(latencyTraceRecord).toHaveBeenCalledTimes(1);
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(2);
+    expect(latencyTraceRecord).toHaveBeenLastCalledWith({
+      event: {
+        assistantInputIds: ["input_2"],
+        at: "2026-04-08T00:00:02.000Z",
+        providerRequestOrdinal: 0,
+        runtimeAttemptId: "attempt_123",
+        source: "telegram",
+        type: "provider_started",
+      },
+    });
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 

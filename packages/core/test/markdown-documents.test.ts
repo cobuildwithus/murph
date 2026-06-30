@@ -55,6 +55,25 @@ afterEach(async () => {
 });
 
 describe("markdown document primitives", () => {
+  it("rejects invalid automation assistant reasoning effort before writing", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const invalidInput = JSON.parse(JSON.stringify({
+      vaultRoot,
+      ...createAutomationPayload(),
+    }));
+    invalidInput.assistantTargetOverride = {
+      reasoningEffort: "hihg",
+    };
+
+    await expect(upsertAutomation(invalidInput)).rejects.toThrow(
+      /assistantTargetOverride\.reasoningEffort must be one of low, medium, high, xhigh/u,
+    );
+    await expect(listAutomations({ vaultRoot })).resolves.toEqual({
+      count: 0,
+      items: [],
+    });
+  });
+
   it("keeps the existing slug by default and only renames when explicitly allowed", () => {
     const existingRecord = {
       recordId: "goal_01",
@@ -274,6 +293,9 @@ describe("markdown document primitives", () => {
     const created = await upsertAutomation({
       vaultRoot,
       ...createAutomationPayload({
+        assistantTargetOverride: {
+          reasoningEffort: "low",
+        },
         continuityPolicy: "preserve",
         instructions: "Ask about walks.",
         schedule: {
@@ -310,6 +332,9 @@ describe("markdown document primitives", () => {
       source: "whoop",
     });
     expect(advanced.record.instructions).toBe(created.record.instructions);
+    expect(advanced.record.assistantTargetOverride).toEqual({
+      reasoningEffort: "low",
+    });
     expect(advanced.record.tags).toEqual(["device"]);
 
     const stale = await advanceAutomationDeviceActivityCursor({
@@ -328,6 +353,42 @@ describe("markdown document primitives", () => {
 
     expect(stale.advanced).toBe(false);
     expect(stale.record.schedule).toEqual(advanced.record.schedule);
+
+    const targetEdited = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      assistantTargetOverride: {
+        reasoningEffort: "high",
+      },
+      now: new Date("2026-06-07T12:01:45.000Z"),
+    });
+
+    const targetAdvanced = await advanceAutomationDeviceActivityCursor({
+      vaultRoot,
+      lookup: created.record.automationId,
+      after: "2026-06-07T12:30:00.000Z",
+      afterOccurredAt: "2026-06-07T12:15:00.000Z",
+      afterEntityId: "evt_target_edit",
+      expectedActivityKind: "walk",
+      expectedContinuityPolicy: created.record.continuityPolicy,
+      expectedInstructions: created.record.instructions,
+      expectedRoute: created.record.route,
+      expectedSource: "whoop",
+      now: new Date("2026-06-07T12:02:00.000Z"),
+    });
+
+    expect(targetAdvanced.advanced).toBe(true);
+    expect(targetAdvanced.record.assistantTargetOverride).toEqual(
+      targetEdited.record.assistantTargetOverride,
+    );
+    expect(targetAdvanced.record.schedule).toEqual({
+      kind: "deviceActivity",
+      after: "2026-06-07T12:30:00.000Z",
+      afterOccurredAt: "2026-06-07T12:15:00.000Z",
+      afterEntityId: "evt_target_edit",
+      activityKind: "walk",
+      source: "whoop",
+    });
 
     const retargeted = await patchAutomation({
       vaultRoot,

@@ -410,6 +410,11 @@ model HostedWebSession {
   lastSeenAt   DateTime?    @map("last_seen_at")
   revokedAt    DateTime?    @map("revoked_at")
   revokeReason String?      @map("revoke_reason")
+
+  computerHandoffViewportWidth      Int?      @map("computer_handoff_viewport_width")
+  computerHandoffViewportHeight     Int?      @map("computer_handoff_viewport_height")
+  computerHandoffViewportObservedAt DateTime? @map("computer_handoff_viewport_observed_at")
+
   member       HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId])

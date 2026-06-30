@@ -40,7 +40,7 @@ import {
 } from './runtime-state.js'
 import { runScheduledLogCronJob } from './scheduled-log.js'
 import {
-  buildAssistantDeviceActivityAuthorityKey,
+  assistantDeviceActivityAuthorityKeyMatches,
   buildAssistantDeviceActivityDeliveryIdempotencyKey,
   readAssistantDeviceActivityCronJobMetadata,
 } from '../device-activity-cron-tags.js'
@@ -306,7 +306,7 @@ export async function executeClaimedAssistantCronJob(input: {
       })
     }
 
-    const deviceActivityAuthorityError = await resolveDeviceActivityParentAuthorityError({
+    const deviceActivityAuthority = await resolveDeviceActivityParentAuthority({
       job: input.job,
       vault: input.vault,
     })
@@ -319,9 +319,9 @@ export async function executeClaimedAssistantCronJob(input: {
           })
         : null
 
-    if (deviceActivityAuthorityError !== null) {
+    if (deviceActivityAuthority.error !== null) {
       status = 'skipped'
-      errorText = deviceActivityAuthorityError
+      errorText = deviceActivityAuthority.error
     } else if (staleError) {
       status = 'skipped'
       errorText = staleError
@@ -355,6 +355,9 @@ export async function executeClaimedAssistantCronJob(input: {
           job: claimedJob,
         })
         const automationTurn = buildAssistantAutomationTurnEnvelope({
+          assistantTargetOverride:
+            resolveAssistantCronAutomationTargetOverride(input.job) ??
+            deviceActivityAuthority.assistantTargetOverride,
           deliveryDispatchMode: input.deliveryDispatchMode,
           executionContext: input.executionContext,
           serviceTier,
@@ -656,6 +659,14 @@ function resolveAssistantCronTurnServiceTier(input: {
   return input.job.state.consecutiveFailures === 0 ? 'flex' : null
 }
 
+function resolveAssistantCronAutomationTargetOverride(
+  job: ResolvedAssistantCronJob,
+): AutomationQueryRecord['assistantTargetOverride'] | null {
+  return job.kind === 'canonical' && job.source.kind === 'automation'
+    ? job.source.assistantTargetOverride
+    : null
+}
+
 function resolveAssistantCronNotificationResponsePolicy(
   job: ResolvedAssistantCronJob,
 ): { kind: 'require_send' } | null {
@@ -884,17 +895,26 @@ function assistantCronJobHasStableSessionLocator(job: AssistantCronJob): boolean
   )
 }
 
-async function resolveDeviceActivityParentAuthorityError(input: {
+async function resolveDeviceActivityParentAuthority(input: {
   job: ResolvedAssistantCronJob
   vault: string
-}): Promise<string | null> {
+}): Promise<{
+  assistantTargetOverride: AutomationQueryRecord['assistantTargetOverride'] | null
+  error: string | null
+}> {
   if (input.job.kind !== 'local') {
-    return null
+    return {
+      assistantTargetOverride: null,
+      error: null,
+    }
   }
 
   const metadata = readAssistantDeviceActivityCronJobMetadata(input.job.job.name)
   if (!metadata) {
-    return null
+    return {
+      assistantTargetOverride: null,
+      error: null,
+    }
   }
 
   const parentAutomation = await readAssistantDeviceActivityParentAutomation({
@@ -902,24 +922,44 @@ async function resolveDeviceActivityParentAuthorityError(input: {
     vault: input.vault,
   })
   if (!parentAutomation || parentAutomation.status !== 'active') {
-    return ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
+    return {
+      assistantTargetOverride: null,
+      error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
+    }
   }
   if (parentAutomation.schedule.kind !== 'deviceActivity') {
-    return ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
+    return {
+      assistantTargetOverride: null,
+      error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
+    }
   }
   if (!assistantCronTargetMatchesAutomationRoute(input.job.job.target, parentAutomation.route)) {
-    return ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
+    return {
+      assistantTargetOverride: null,
+      error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
+    }
   }
 
-  return buildAssistantDeviceActivityAuthorityKey({
-    ...parentAutomation,
-    schedule: {
-      activityKind: parentAutomation.schedule.activityKind,
-      source: parentAutomation.schedule.source,
+  const authorityMatches = assistantDeviceActivityAuthorityKeyMatches({
+    authorityKey: metadata.authorityKey,
+    automation: {
+      ...parentAutomation,
+      schedule: {
+        activityKind: parentAutomation.schedule.activityKind,
+        source: parentAutomation.schedule.source,
+      },
     },
-  }) === metadata.authorityKey
-    ? null
-    : ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR
+  })
+
+  return authorityMatches
+    ? {
+        assistantTargetOverride: parentAutomation.assistantTargetOverride,
+        error: null,
+      }
+    : {
+        assistantTargetOverride: null,
+        error: ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR,
+      }
 }
 
 function assistantCronTargetMatchesAutomationRoute(

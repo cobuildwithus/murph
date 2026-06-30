@@ -19,6 +19,9 @@ import {
   buildHostedRunnerContainerCaEnv,
 } from "./runner-container-ca-env.ts";
 import {
+  HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+} from "./runner-container-error-codes.ts";
+import {
   readHostedRunnerContainerIdentity,
   resolveHostedExecutionRunnerContainerName as resolveHostedExecutionRunnerContainerNameFromIdentity,
   type HostedRunnerContainerIdentitySource,
@@ -73,6 +76,7 @@ const HOSTED_RUNNER_CONTAINER_SAFE_ERROR_MESSAGES = new Set([
   "Hosted execution rejected an invalid request.",
   "Hosted execution runtime failed.",
   "Hosted execution timed out.",
+  "Hosted runner is shutting down.",
   "Invalid request.",
   "Request body too large.",
 ]);
@@ -142,6 +146,23 @@ export class HostedExecutionConfigurationError extends Error {
     this.details = options.details ?? null;
     this.name = "HostedExecutionConfigurationError";
     this.statusCode = options.statusCode ?? null;
+  }
+}
+
+class HostedRunnerContainerShuttingDownError extends Error {
+  readonly code = HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE;
+  readonly details: HostedExecutionStructuredLogDetails | null;
+  readonly statusCode: number;
+
+  constructor(input: {
+    details: HostedExecutionStructuredLogDetails | null;
+    message: string;
+    statusCode: number;
+  }) {
+    super(input.message);
+    this.details = input.details;
+    this.name = "HostedRunnerContainerShuttingDownError";
+    this.statusCode = input.statusCode;
   }
 }
 
@@ -532,11 +553,21 @@ export class RunnerContainer extends Container {
       };
     }
 
-    return {
-      action: startAction,
-      kind: "accepted",
-      result: await this.invoke(input.invoke),
-    };
+    try {
+      return {
+        action: startAction,
+        kind: "accepted",
+        result: await this.invoke(input.invoke),
+      };
+    } catch (error) {
+      if (error instanceof HostedRunnerContainerShuttingDownError) {
+        return {
+          kind: "start-required",
+          reason: "no-active-child",
+        };
+      }
+      throw error;
+    }
   }
 
   async wakeRuntime(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult> {
@@ -1016,6 +1047,7 @@ export class RunnerContainer extends Container {
     const operationAbortController = new AbortController();
     let activeOperationAcquired = false;
     let cleanupWarmContainerOnFailure = false;
+    let invokeFailure: unknown = null;
     let preserveActiveOperationAfterTransportFailure = false;
     let stopRunnerActivityRenewal: (() => void) | null = null;
     this.workspaceInvocationAbortController = operationAbortController;
@@ -1139,6 +1171,7 @@ export class RunnerContainer extends Container {
       completedSuccessfully = true;
       return result;
     } catch (error) {
+      invokeFailure = error;
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -1172,7 +1205,7 @@ export class RunnerContainer extends Container {
           if (!completedSuccessfully) {
             if (!preserveActiveOperationAfterTransportFailure) {
               await this.stopWarmContainer({
-                failClosed: true,
+                failClosed: !(invokeFailure instanceof HostedRunnerContainerShuttingDownError),
                 reason: "invoke-failure",
               });
             }
@@ -2287,6 +2320,14 @@ async function classifyHostedRunnerContainerErrorResponse(
     ? codeErrorName
     : payloadErrorName ?? codeErrorName;
 
+  if (response.status === 503 && code === HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE) {
+    return new HostedRunnerContainerShuttingDownError({
+      details,
+      message,
+      statusCode: response.status,
+    });
+  }
+
   if (response.status === 503) {
     return new HostedExecutionConfigurationError(message, code, {
       details,
@@ -2600,12 +2641,24 @@ async function invokeRunnerContainerProcessing(
     return await container.invoke(invokeRequest);
   }
 
-  const ensured = await container.ensureProcessing({
-    invoke: invokeRequest,
-    userId: invokeRequest.userId,
-  });
+  const ensure = async () =>
+    await container.ensureProcessing!({
+      invoke: invokeRequest,
+      userId: invokeRequest.userId,
+    });
+
+  const ensured = await ensure();
   if (ensured.kind === "accepted" && ensured.result) {
     return ensured.result;
+  }
+  if (ensured.kind === "start-required" && ensured.reason === "no-active-child") {
+    const retried = await ensure();
+    if (retried.kind === "accepted" && retried.result) {
+      return retried.result;
+    }
+    throw new Error(
+      `Hosted runner container replacement retry returned ${retried.kind} without invoking work.`,
+    );
   }
 
   throw new Error(`Hosted runner container ensureProcessing returned ${ensured.kind} without invoking work.`);

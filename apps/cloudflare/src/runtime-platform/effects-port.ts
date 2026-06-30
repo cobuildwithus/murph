@@ -1,6 +1,7 @@
 import type { HostedRuntimeEffectsPort } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
+  HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
 } from "@murphai/hosted-execution/routes";
 
@@ -154,6 +155,22 @@ export function createCloudflareEffectsPort(input: {
                   }
                 : {}),
               path: HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+          },
+          async recordLinqDeliveryOutcome(request, context) {
+            await fetchHostedWebControlPlaneJson({
+              body: request,
+              boundUserId: input.boundUserId,
+              description: "Hosted Linq delivery outcome recording",
+              fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description: "Hosted Linq delivery outcome recording",
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
+              path: HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,

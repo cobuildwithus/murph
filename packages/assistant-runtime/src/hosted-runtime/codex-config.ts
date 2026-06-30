@@ -515,6 +515,7 @@ export function buildHostedCodexConfigToml(input: {
     "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
     "[features]",
     "plugins = false",
+    "multi_agent_v2 = true",
     "",
     "# Keep Codex skill file instructions out of hosted prompts. Their temporary",
     "# runner paths change on each wake and break provider prefix caching.",

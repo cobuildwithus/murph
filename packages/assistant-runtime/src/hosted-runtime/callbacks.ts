@@ -72,7 +72,10 @@ import type {
 import type {
   HostedRuntimeActionApprovalPort,
   HostedRuntimeEffectsPort,
+  HostedRuntimeLinqDeliveryOutcomeRequest,
   HostedRuntimeLinqEngagementKind,
+  HostedRuntimeLinqSendResponse,
+  HostedRuntimePlatform,
   HostedRuntimeProviderTargetKind,
 } from "./platform.ts";
 import {
@@ -109,10 +112,17 @@ const HOSTED_MAX_FOREGROUND_APPROVAL_RECONCILE = 4;
 const HOSTED_ASSISTANT_DELIVERY_BOUNDARY = "hosted_runtime_outbox";
 const HOSTED_NON_IDEMPOTENT_CONFIRMATION_GRACE_MS = 2 * 60 * 1000;
 const HOSTED_SENDING_STALE_RECONCILIATION_MS = 10 * 60 * 1000;
+const HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS = 2_000;
 const HOSTED_TELEGRAM_VOICE_MEMO_DELIVERY_OPERATION =
   "Hosted assistant Telegram voice memo delivery";
 
 type HostedAssistantDeliveryDetails = Record<string, boolean | number | null | string>;
+
+export interface HostedAssistantLinqEgressLatencyTrace {
+  assistantInputIds: readonly string[];
+  latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
+  runtimeAttemptId?: string | null;
+}
 
 interface HostedAssistantDeliveryBoundaryFields {
   actorId: string | null;
@@ -1109,10 +1119,14 @@ function buildHostedAssistantLinqDeliveryContextFromPreparedIntent(input: {
 }
 
 export function createHostedAssistantProgressDeliveryDependencies(input: {
-  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement" | "sendEmail"> | null;
+  effectsPort?: Pick<
+    HostedRuntimeEffectsPort,
+    "assertLinqRecentInboundEngagement" | "recordLinqDeliveryOutcome" | "sendEmail"
+  > | null;
   forwardedEnv?: Readonly<Record<string, string>>;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
+  linqEgressLatencyTrace?: HostedAssistantLinqEgressLatencyTrace | null;
   platformEnv?: Readonly<Record<string, string>>;
   providerFetch?: typeof fetch | null;
   signal?: AbortSignal | null;
@@ -1149,6 +1163,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       effectsPort: input.effectsPort ?? null,
       linqEnv,
       linqDeliveryContexts,
+      linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
       providerFetch: input.providerFetch ?? null,
       signal: input.signal ?? null,
     }),
@@ -1156,6 +1171,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       effectsPort: input.effectsPort ?? null,
       linqEnv,
       linqDeliveryContexts,
+      linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
       providerFetch: input.providerFetch ?? null,
       signal: input.signal ?? null,
     }),
@@ -1406,6 +1422,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   forwardedEnv?: Readonly<Record<string, string>>;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
+  linqEgressLatencyTrace?: HostedAssistantLinqEgressLatencyTrace | null;
   platformEnv?: Readonly<Record<string, string>>;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
@@ -1490,6 +1507,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         signal: input.signal ?? null,
         linqEnv,
         linqDeliveryContexts,
+        linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
         preparedDispatch: ownsPreparedDispatch ? preparedDispatch : null,
         telegramEnv,
         telegramVoiceMemoEnv,
@@ -1624,6 +1642,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   signal: AbortSignal | null;
   linqEnv: NodeJS.ProcessEnv;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  linqEgressLatencyTrace: HostedAssistantLinqEgressLatencyTrace | null;
   preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   telegramEnv: NodeJS.ProcessEnv;
   telegramVoiceMemoEnv: NodeJS.ProcessEnv;
@@ -1769,6 +1788,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           intentId: input.assistantDeliveryEffect.effectId,
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
+          linqEgressLatencyTrace: input.linqEgressLatencyTrace,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
@@ -1781,6 +1801,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           effectsPort: input.effectsPort,
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
+          linqEgressLatencyTrace: input.linqEgressLatencyTrace,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
@@ -1802,6 +1823,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
             idempotencyKey: input.assistantDeliveryEffect.payload.idempotencyKey ?? null,
             intentId: input.assistantDeliveryEffect.effectId,
+            linqEgressLatencyTrace: input.linqEgressLatencyTrace,
             replyToMessageId: request.targetMessageId,
             signal: input.signal,
             target: request.target,
@@ -2071,10 +2093,14 @@ function resolveHostedAssistantLinqDeliveryContexts(input: {
 function createHostedAssistantLinqSendDependency(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   assertLiveness?: () => Promise<void>;
-  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
+  effectsPort?: Pick<
+    HostedRuntimeEffectsPort,
+    "assertLinqRecentInboundEngagement" | "recordLinqDeliveryOutcome"
+  > | null;
   expectedDedupeKey?: string | null;
   intentId?: string | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
+  linqEgressLatencyTrace?: HostedAssistantLinqEgressLatencyTrace | null;
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
@@ -2104,6 +2130,7 @@ function createHostedAssistantLinqSendDependency(input: {
       fromPhoneNumber,
       idempotencyKey: request.idempotencyKey ?? null,
       intentId: input.intentId ?? null,
+      linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
       replyToMessageId: request.replyToMessageId ?? null,
       signal: signal ?? null,
       target: request.target,
@@ -2121,34 +2148,74 @@ function createHostedAssistantLinqSendDependency(input: {
       media: request.media ?? [],
       vaultRoot: input.vaultRoot ?? null,
     });
+    const attemptedAt = new Date();
     input.onProviderDispatchEntered?.();
-    const result = await sendHostedProviderLinqMessage({
-      directRecipientPhoneNumber,
-      fromPhoneNumber,
-      idempotencyKey: request.idempotencyKey ?? null,
-      media: request.media ?? null,
-      message: request.message,
-      replyToMessageId: request.replyToMessageId ?? null,
-      target: providerTarget,
-      targetKind: request.targetKind ?? null,
-    }, {
-      ...dependencies,
-      ...(verifiedVaultFiles.size > 0
-        ? {
-            loadVaultFile: async (media) => {
-              const bytes = verifiedVaultFiles.get(
-                buildHostedVaultFileMediaIdentity(media),
-              );
-              if (!bytes) {
-                throw new VaultCliError(
-                  "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
-                  "The prepared vault file no longer matches the approved action.",
+    let result: HostedRuntimeLinqSendResponse;
+    try {
+      result = await sendHostedProviderLinqMessage({
+        directRecipientPhoneNumber,
+        fromPhoneNumber,
+        idempotencyKey: request.idempotencyKey ?? null,
+        media: request.media ?? null,
+        message: request.message,
+        replyToMessageId: request.replyToMessageId ?? null,
+        target: providerTarget,
+        targetKind: request.targetKind ?? null,
+      }, {
+        ...dependencies,
+        ...(verifiedVaultFiles.size > 0
+          ? {
+              loadVaultFile: async (media) => {
+                const bytes = verifiedVaultFiles.get(
+                  buildHostedVaultFileMediaIdentity(media),
                 );
-              }
-              return bytes;
-            },
-          }
-        : {}),
+                if (!bytes) {
+                  throw new VaultCliError(
+                    "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
+                    "The prepared vault file no longer matches the approved action.",
+                  );
+                }
+                return bytes;
+              },
+            }
+          : {}),
+      });
+    } catch (error) {
+      queueHostedAssistantLinqDeliveryOutcomeWrite({
+        effectsPort: input.effectsPort ?? null,
+        outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+          attemptedAt,
+          deliveryContext,
+          failedAt: new Date(),
+          failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
+          failureReason: null,
+          fromPhoneNumber,
+          idempotencyKey: request.idempotencyKey ?? null,
+          intentId: input.intentId ?? null,
+          providerTarget,
+          providerThreadId: null,
+          result: null,
+          target: request.target,
+          targetKind: request.targetKind ?? null,
+        }),
+      });
+      throw error;
+    }
+    queueHostedAssistantLinqDeliveryOutcomeWrite({
+      effectsPort: input.effectsPort ?? null,
+      outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+        acceptedAt: new Date(),
+        attemptedAt,
+        deliveryContext,
+        fromPhoneNumber,
+        idempotencyKey: request.idempotencyKey ?? null,
+        intentId: input.intentId ?? null,
+        providerTarget,
+        providerThreadId: result.providerThreadId ?? null,
+        result,
+        target: request.target,
+        targetKind: request.targetKind ?? null,
+      }),
     });
     await assertHostedDeliveryLiveNow(input);
     return result;
@@ -2274,9 +2341,13 @@ function buildHostedVaultFileMediaIdentity(input: {
 
 function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   assertLiveness?: () => Promise<void>;
-  effectsPort?: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement"> | null;
+  effectsPort?: Pick<
+    HostedRuntimeEffectsPort,
+    "assertLinqRecentInboundEngagement" | "recordLinqDeliveryOutcome"
+  > | null;
   intentId?: string | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
+  linqEgressLatencyTrace?: HostedAssistantLinqEgressLatencyTrace | null;
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
@@ -2304,19 +2375,193 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
       idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
       intentId: input.intentId ?? null,
+      linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
       replyToMessageId: deliveryContext?.replyToMessageId ?? null,
       signal: signal ?? null,
       target: providerTarget,
       targetKind: "thread",
     });
+    const attemptedAt = new Date();
     input.onProviderDispatchEntered?.();
-    const result = await sendHostedProviderLinqVoiceMemo({
-      attachmentId: request.attachmentId,
-      target: providerTarget,
-    }, dependencies);
+    let result: HostedRuntimeLinqSendResponse;
+    try {
+      result = await sendHostedProviderLinqVoiceMemo({
+        attachmentId: request.attachmentId,
+        target: providerTarget,
+      }, dependencies);
+    } catch (error) {
+      queueHostedAssistantLinqDeliveryOutcomeWrite({
+        effectsPort: input.effectsPort ?? null,
+        outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+          attemptedAt,
+          deliveryContext,
+          failedAt: new Date(),
+          failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
+          failureReason: null,
+          fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+          idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
+          intentId: input.intentId ?? null,
+          providerTarget,
+          providerThreadId: null,
+          result: null,
+          target: providerTarget,
+          targetKind: "thread",
+        }),
+      });
+      throw error;
+    }
+    queueHostedAssistantLinqDeliveryOutcomeWrite({
+      effectsPort: input.effectsPort ?? null,
+      outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+        acceptedAt: new Date(),
+        attemptedAt,
+        deliveryContext,
+        fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+        idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
+        intentId: input.intentId ?? null,
+        providerTarget,
+        providerThreadId: result.providerThreadId ?? null,
+        result,
+        target: providerTarget,
+        targetKind: "thread",
+      }),
+    });
     await assertHostedDeliveryLiveNow(input);
     return result;
   };
+}
+
+function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
+  acceptedAt?: Date | null;
+  attemptedAt: Date;
+  deliveryContext: HostedAssistantLinqDeliveryContext | null;
+  failedAt?: Date | null;
+  failureCode?: string | null;
+  failureReason?: string | null;
+  fromPhoneNumber: string | null;
+  idempotencyKey: string | null;
+  intentId: string | null;
+  providerTarget: string | null;
+  providerThreadId: string | null;
+  result: HostedRuntimeLinqSendResponse | null;
+  target: string | null;
+  targetKind: HostedRuntimeProviderTargetKind | null;
+}): HostedRuntimeLinqDeliveryOutcomeRequest {
+  return {
+    ...(input.acceptedAt ? { acceptedAt: input.acceptedAt.toISOString() } : {}),
+    attemptedAt: input.attemptedAt.toISOString(),
+    ...(input.failedAt ? { failedAt: input.failedAt.toISOString() } : {}),
+    failureCode: input.failureCode ?? null,
+    failureReason: input.failureReason ?? null,
+    fromPhoneNumber: input.fromPhoneNumber,
+    idempotencyKey: input.idempotencyKey,
+    intentId: input.intentId,
+    providerMessageId: input.result?.providerMessageId ?? null,
+    providerTarget: input.targetKind === "participant" ? null : input.providerTarget,
+    providerThreadId: input.result?.providerThreadId ?? input.providerThreadId,
+    routeAuthority: input.deliveryContext?.routeAuthority ?? null,
+    target: input.targetKind === "participant" ? null : input.target,
+    targetKind: input.targetKind,
+  };
+}
+
+const pendingHostedAssistantLinqDeliveryOutcomeWrites = new Set<Promise<void>>();
+
+function queueHostedAssistantLinqDeliveryOutcomeWrite(input: {
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "recordLinqDeliveryOutcome"> | null;
+  outcome: HostedRuntimeLinqDeliveryOutcomeRequest;
+}): void {
+  const recordOutcome = input.effectsPort?.recordLinqDeliveryOutcome;
+  if (!recordOutcome) {
+    return;
+  }
+
+  const write = Promise.resolve().then(async () => {
+    const abortController = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      const record = recordOutcome(input.outcome, { signal: abortController.signal });
+      void record.catch(() => undefined);
+      const timeout = new Promise<"timed_out">((resolve) => {
+        timer = setTimeout(() => {
+          abortController.abort();
+          resolve("timed_out");
+        }, HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS);
+        timer.unref?.();
+      });
+      const result = await Promise.race([
+        record.then(() => "recorded" as const),
+        timeout,
+      ]);
+      if (result === "timed_out") {
+        console.warn("Hosted Linq delivery outcome recording timed out.", {
+          timeoutMs: HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS,
+        });
+      }
+    } catch (error) {
+      console.warn("Hosted Linq delivery outcome recording failed.", {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+    } finally {
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      pendingHostedAssistantLinqDeliveryOutcomeWrites.delete(write);
+    }
+  });
+  pendingHostedAssistantLinqDeliveryOutcomeWrites.add(write);
+}
+
+export async function drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort(
+  options?: { timeoutMs?: number },
+): Promise<void> {
+  const timeoutMs = options?.timeoutMs;
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = timeoutMs === undefined
+    ? null
+    : new Promise<void>((resolve) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          resolve();
+        }, timeoutMs);
+        timer.unref?.();
+      });
+
+  try {
+    let observed: Promise<void>[];
+    do {
+      observed = Array.from(pendingHostedAssistantLinqDeliveryOutcomeWrites);
+      if (observed.length === 0) {
+        return;
+      }
+      const observedSettled = Promise.allSettled(observed).then(() => undefined);
+      await (timeout ? Promise.race([observedSettled, timeout]) : observedSettled);
+      if (timedOut) {
+        console.warn(
+          "Hosted Linq delivery outcome drain timed out; queued writes continue in the background.",
+          { timeoutMs },
+        );
+        return;
+      }
+    } while (observed.some((write) => pendingHostedAssistantLinqDeliveryOutcomeWrites.has(write)));
+  } finally {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+function readHostedAssistantLinqDeliveryFailureCode(error: unknown): string {
+  if (error && typeof error === "object" && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string" && code.trim()) {
+      return code.trim();
+    }
+  }
+  return error instanceof Error && error.name !== "Error"
+    ? error.name
+    : "HOSTED_LINQ_PROVIDER_SEND_FAILED";
 }
 
 async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
@@ -2326,6 +2571,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   fromPhoneNumber: string | null;
   idempotencyKey: string | null;
   intentId: string | null;
+  linqEgressLatencyTrace?: HostedAssistantLinqEgressLatencyTrace | null;
   replyToMessageId: string | null;
   signal: AbortSignal | null;
   target: string;
@@ -2341,6 +2587,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   }
   const targetKind = normalizeHostedAssistantLinqTargetKind(input.targetKind);
   const currentInbound = input.deliveryContext?.currentInbound ?? null;
+  const startedAtMs = Date.now();
   await assertRecentInbound({
     ...(currentInbound ? { currentInbound } : {}),
     directRecipientPhoneNumber: input.directRecipientPhoneNumber,
@@ -2357,6 +2604,44 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   }, {
     signal: input.signal,
   });
+  recordHostedAssistantLinqEgressGuardLatencyBestEffort({
+    durationMs: Math.max(0, Date.now() - startedAtMs),
+    latencyTrace: input.linqEgressLatencyTrace ?? null,
+  });
+}
+
+function recordHostedAssistantLinqEgressGuardLatencyBestEffort(input: {
+  durationMs: number;
+  latencyTrace: HostedAssistantLinqEgressLatencyTrace | null;
+}): void {
+  const latencyTracePort = input.latencyTrace?.latencyTracePort ?? null;
+  const assistantInputIds = input.latencyTrace?.assistantInputIds ?? [];
+  if (!latencyTracePort || assistantInputIds.length === 0) {
+    return;
+  }
+
+  try {
+    void latencyTracePort.record({
+      event: {
+        assistantInputIds: [...assistantInputIds],
+        at: new Date().toISOString(),
+        phaseBreakdown: {
+          provider: {
+            linqEgressGuardMs: input.durationMs,
+          },
+          schemaVersion: 1,
+        },
+        providerRequestOrdinal: 0,
+        runtimeAttemptId: input.latencyTrace?.runtimeAttemptId ?? null,
+        source: "linq",
+        type: "provider_started",
+      },
+    }).catch(() => {
+      // Latency traces are diagnostic-only and must not affect delivery.
+    });
+  } catch {
+    // Latency traces are diagnostic-only and must not affect delivery.
+  }
 }
 
 function normalizeHostedAssistantLinqTargetKind(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 
 import {
   AuthDialog,
@@ -18,15 +18,17 @@ import { cn } from "@/src/lib/utils";
 
 type LandingAuthContext = "nav" | "hero" | "footer";
 
-function LandingAuthDialogButton({
+export function LandingAuthDialogButton({
   buttonClassName,
   buttonLabel,
+  leadingIcon,
   requireLaunchConsentOnCompletion = false,
   showArrow = false,
   showPassiveLegalNotice = false,
 }: {
   buttonClassName: string;
   buttonLabel: string;
+  leadingIcon?: ReactNode;
   requireLaunchConsentOnCompletion?: boolean;
   showArrow?: boolean;
   showPassiveLegalNotice?: boolean;
@@ -43,6 +45,11 @@ function LandingAuthDialogButton({
         onPointerEnter={preloadHostedAuthPanelIsland}
         onClick={() => setOpen(true)}
       >
+        {leadingIcon ? (
+          <span aria-hidden="true" className="inline-flex shrink-0">
+            {leadingIcon}
+          </span>
+        ) : null}
         <span>{buttonLabel}</span>
         {showArrow ? (
           <span
@@ -87,7 +94,7 @@ function getLandingAuthClasses(context: LandingAuthContext) {
       return {
         container: "flex items-center gap-2 sm:gap-3",
         login:
-          "inline-flex items-center justify-center rounded-lg border border-white/25 bg-white/8 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:border-white/40 hover:bg-white/14 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60",
+          "inline-flex items-center justify-center rounded-lg border border-[#2d3436]/20 bg-transparent px-4 py-2.5 text-sm font-semibold text-[#2d3436] transition-colors hover:border-[#2d3436]/40 hover:bg-[#2d3436]/[0.06] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2d3436]/40",
         settings:
           "inline-flex items-center rounded-lg bg-[#5a6e32] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#4d5f2a]",
         signup:
@@ -120,6 +127,7 @@ export function LandingAuthActions({
   authLabel,
   authenticated,
   context,
+  leadingIcon,
   loginLabel = "Log in",
   preloadAuthPanel = false,
   splitUnauthenticated = false,
@@ -128,6 +136,7 @@ export function LandingAuthActions({
   authLabel: string;
   authenticated: boolean;
   context: LandingAuthContext;
+  leadingIcon?: ReactNode;
   loginLabel?: string;
   preloadAuthPanel?: boolean;
   splitUnauthenticated?: boolean;
@@ -140,7 +149,15 @@ export function LandingAuthActions({
   if (authenticated) {
     return (
       <div className={styles.container}>
-        <a href="/home" className={styles.settings}>
+        <a
+          href="/home"
+          className={cn(styles.settings, leadingIcon ? "gap-2" : null)}
+        >
+          {leadingIcon ? (
+            <span aria-hidden="true" className="inline-flex shrink-0">
+              {leadingIcon}
+            </span>
+          ) : null}
           {authLabel}
         </a>
       </div>
@@ -157,6 +174,7 @@ export function LandingAuthActions({
             "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5a6e32]"
           )}
           buttonLabel={authLabel}
+          leadingIcon={leadingIcon}
           requireLaunchConsentOnCompletion
           showArrow={context !== "nav"}
         />

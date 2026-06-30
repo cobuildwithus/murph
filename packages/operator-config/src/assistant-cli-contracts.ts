@@ -1,6 +1,7 @@
 import { isIP } from 'node:net'
 import { z } from 'zod'
 import {
+  assistantReasoningEffortValues as contractAssistantReasoningEffortValues,
   automationRouteSchema,
   automationScheduleAtSchema,
   automationScheduleCronSchema,
@@ -41,12 +42,7 @@ export const assistantSandboxValues = [
 ] as const
 
 export const assistantApprovalPolicyValues = ['never'] as const
-export const assistantReasoningEffortValues = [
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-] as const
+export const assistantReasoningEffortValues = contractAssistantReasoningEffortValues
 
 export const assistantChatProviderValues = ['codex-cli'] as const
 export const assistantChannelNameValues = ['telegram', 'linq', 'email', 'whatsapp'] as const

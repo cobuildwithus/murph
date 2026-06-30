@@ -91,7 +91,7 @@ describe("hosted computer runtime logs", () => {
 
     await expect(runtimeLogModule.withHostedComputerToolFailureRuntimeLog({
       memberId: "member_123",
-      operation: "start-run",
+      operation: "open",
       run,
     })).rejects.toBe(error);
 
@@ -103,7 +103,7 @@ describe("hosted computer runtime logs", () => {
       level: "warn",
       phase: "error",
       redacted: {
-        computerOperationKind: "start-run",
+        computerOperationKind: "open",
         kernelErrorPresent: false,
         kernelStderrPresent: false,
         kernelStdoutPresent: false,

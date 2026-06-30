@@ -804,10 +804,22 @@ export interface HostedRuntimeIssueExportResponse {
 
 export const HOSTED_INGRESS_LATENCY_SOURCES = [
   "linq",
+  "telegram",
 ] as const;
 
 export type HostedIngressLatencySource =
   (typeof HOSTED_INGRESS_LATENCY_SOURCES)[number];
+
+export function readHostedIngressLatencySource(
+  value: unknown,
+): HostedIngressLatencySource | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  return (HOSTED_INGRESS_LATENCY_SOURCES as readonly string[]).includes(value)
+    ? value as HostedIngressLatencySource
+    : null;
+}
 
 export const HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS = 64;
 export const HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES = 32 * 1024;
@@ -886,6 +898,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     promptBuildMs?: number;
     admissionMs?: number;
     preProviderSetupMs?: number;
+    linqEgressGuardMs?: number;
   };
 }
 
@@ -960,6 +973,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "promptBuildMs",
     "admissionMs",
     "preProviderSetupMs",
+    "linqEgressGuardMs",
   ],
 } as const;
 

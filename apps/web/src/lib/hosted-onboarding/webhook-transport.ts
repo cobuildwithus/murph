@@ -11,6 +11,7 @@ import {
 import { sha256Hex } from "../primitives";
 import { hostedOnboardingError } from "./errors";
 import {
+  claimHostedLinqDeliveryProviderDispatchTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
@@ -28,6 +29,7 @@ import {
   claimHostedLinqQuotaReplyNotice,
   markHostedLinqOnboardingLinkNoticeSent,
   releaseHostedLinqQuotaReplyNoticeClaim,
+  resolveHostedLinqDayUtc,
 } from "./linq-daily-state";
 import {
   buildHostedDailyQuotaReply,
@@ -222,7 +224,8 @@ function buildHostedWebhookLinqMessageEffectId(
   input: CreateHostedWebhookLinqMessageSideEffectInput,
 ): string {
   if (input.template === "invite_signup") {
-    return `linq-invite-signup:${input.inviteId}`;
+    const dayUtc = resolveHostedLinqDayUtc(input.occurredAt).toISOString();
+    return `linq-invite-signup:${input.memberId}:${dayUtc}`;
   }
 
   if (input.template === "ai_usage_quota" && input.claimToken) {
@@ -381,15 +384,24 @@ async function sendHostedLinqSideEffect(
       scheduleAfterResponse: options.scheduleAfterResponse,
     });
   } catch (error) {
-    scheduleHostedLinqDeliveryMilestoneAfterAttempt({
-      attemptTask: deliveryAttemptTask,
-      milestoneTask: () => markHostedLinqDeliveryFailedBestEffort({
+    if (effect.payload.template === "invite_signup") {
+      await deliveryAttemptTask;
+      await markHostedLinqDeliveryFailedBestEffort({
         effect,
         error,
         prisma: options.prisma,
-      }),
-      scheduleAfterResponse: options.scheduleAfterResponse,
-    });
+      });
+    } else {
+      scheduleHostedLinqDeliveryMilestoneAfterAttempt({
+        attemptTask: deliveryAttemptTask,
+        milestoneTask: () => markHostedLinqDeliveryFailedBestEffort({
+          effect,
+          error,
+          prisma: options.prisma,
+        }),
+        scheduleAfterResponse: options.scheduleAfterResponse,
+      });
+    }
     console.error(
       "Hosted Linq side-effect delivery failed.",
       buildHostedLinqSideEffectLogDetails(effect, error, Date.now() - startedAtMs),
@@ -873,7 +885,18 @@ async function claimHostedLinqNoticeForSideEffect(
   prisma: HostedLinqTransportPersistenceClient,
 ): Promise<boolean> {
   switch (effect.payload.template) {
-    case "invite_signup":
+    case "invite_signup": {
+      const claim = await claimHostedLinqDeliveryProviderDispatchTx({
+        idempotencyKey: effect.effectId,
+        linqChatId: effect.payload.chatId,
+        prisma,
+        source: "hosted_webhook_side_effect",
+        sourceRef: effect.effectId,
+        targetKind: "thread",
+        template: effect.payload.template,
+      });
+      return claim.claimed;
+    }
     case "invite_signin":
       return true;
     case "ai_usage_quota":

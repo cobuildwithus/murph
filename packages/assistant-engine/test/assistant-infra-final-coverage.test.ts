@@ -73,8 +73,17 @@ describe('assistant infra final coverage', () => {
 
   it('covers session-resolution wrappers and undefined field fallbacks', async () => {
     const resolveAssistantSession = vi.fn(async (input) => ({
-      resolved: true,
-      input,
+      created: false,
+      paths: {
+        indexesDirectory: '/tmp/indexes',
+        rootDirectory: '/tmp/root',
+        sessionsDirectory: '/tmp/sessions',
+        statusDirectory: '/tmp/status',
+        transcriptsDirectory: '/tmp/transcripts',
+      },
+      session: createSession({
+        sessionId: input.sessionId ?? 'session-alpha',
+      }),
     }))
 
     vi.doMock('../src/assistant/store.js', async () => {
@@ -114,6 +123,10 @@ describe('assistant infra final coverage', () => {
     expect(minimal).not.toHaveProperty('threadId')
     expect(minimal.threadIsDirect).toBeUndefined()
 
+    resolveAssistantSession.mockRejectedValueOnce(
+      new VaultCliError('ASSISTANT_SESSION_NOT_FOUND', 'session missing'),
+    )
+
     await sessionResolution.resolveAssistantSessionForMessage({
       defaults: null,
       message: {
@@ -124,7 +137,21 @@ describe('assistant infra final coverage', () => {
       },
     })
 
-    expect(resolveAssistantSession).toHaveBeenCalledWith(
+    expect(resolveAssistantSession).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        createIfMissing: false,
+        vault: '/tmp/vault-session-resolution',
+      }),
+    )
+    expect(resolveAssistantSession.mock.calls[0]?.[0]).not.toHaveProperty(
+      'model',
+    )
+    expect(resolveAssistantSession.mock.calls[0]?.[0]).not.toHaveProperty(
+      'provider',
+    )
+    expect(resolveAssistantSession).toHaveBeenNthCalledWith(
+      2,
       expect.objectContaining({
         model: 'gpt-5-codex',
         provider: 'codex-cli',

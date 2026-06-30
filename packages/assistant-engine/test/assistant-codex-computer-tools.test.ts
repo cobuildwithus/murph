@@ -27,8 +27,7 @@ describe("murph computer dynamic tools", () => {
     const computerToolNames = computerTools.map((tool) => tool.name);
 
     expect(computerToolNames).toEqual([
-      "computer_start_run",
-      "computer_observe",
+      "computer_open",
       "computer_act",
       "computer_os_control",
       "computer_pause_for_user",
@@ -61,21 +60,21 @@ describe("murph computer dynamic tools", () => {
     expect(MURPH_COMPUTER_ACT_TOOL.inputSchema).toBe(actTool?.inputSchema);
     expect(JSON.stringify(pauseTool?.inputSchema)).toContain("final_confirmation");
     expect(JSON.stringify(pauseTool?.inputSchema)).toContain("managed_login");
-    const startTool = computerTools.find((tool) =>
-      tool.name === "computer_start_run"
+    const openTool = computerTools.find((tool) =>
+      tool.name === "computer_open"
     );
-    expect(JSON.stringify(startTool?.inputSchema)).not.toContain(
+    expect(JSON.stringify(openTool?.inputSchema)).not.toContain(
       "resumeAfterUserReply",
     );
-    expect(JSON.stringify(startTool?.inputSchema)).not.toContain("resumeEvidence");
-    expect(JSON.stringify(startTool?.inputSchema)).not.toContain(
+    expect(JSON.stringify(openTool?.inputSchema)).not.toContain("resumeEvidence");
+    expect(JSON.stringify(openTool?.inputSchema)).not.toContain(
       "resumeAfterMailboxItemId",
     );
-    expect(JSON.stringify(startTool?.inputSchema)).not.toContain(
+    expect(JSON.stringify(openTool?.inputSchema)).not.toContain(
       "resumeDeliveryContext",
     );
-    expect(JSON.stringify(startTool?.inputSchema)).not.toContain("resumeRunId");
-    expect(JSON.stringify(startTool?.inputSchema)).not.toContain("profileKey");
+    expect(JSON.stringify(openTool?.inputSchema)).not.toContain("resumeRunId");
+    expect(JSON.stringify(openTool?.inputSchema)).not.toContain("profileKey");
     expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain(
       "pauseDeliveryContext",
     );
@@ -83,19 +82,19 @@ describe("murph computer dynamic tools", () => {
     expect(JSON.stringify(pauseTool?.inputSchema)).not.toContain("awaitingMessage");
   });
 
-  it("instructs the model toward macro-step computer_act calls and gated computer_observe", () => {
+  it("instructs the model toward computer_open and macro-step computer_act calls", () => {
     // The 2026-06-24 rollout analysis showed the assistant burning ~$1+ per
     // turn by running 20-30 single-action computer_act calls plus an observe
     // before/after each one. The tool descriptions are the only surface that
-    // teaches Codex how to batch those into coherent macro-steps. If this
+    // teaches Codex to open once and batch actions into coherent macro-steps. If this
     // copy drifts back toward "one click per call" wording the fingerprint
-    // gate alone won't save us — pin the macro-step + gated-observe wording
+    // gate alone won't save us — pin the open + macro-step wording
     // here and force the team to think about it on any future rewrite.
     const actTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_act");
-    const observeTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_observe");
+    const openTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_open");
     const osControlTool = MURPH_DYNAMIC_TOOLS.find((tool) => tool.name === "computer_os_control");
     const actDescription = actTool?.description ?? "";
-    const observeDescription = observeTool?.description ?? "";
+    const openDescription = openTool?.description ?? "";
     const osControlDescription = osControlTool?.description ?? "";
 
     // computer_act must teach the macro-step contract.
@@ -103,22 +102,18 @@ describe("murph computer dynamic tools", () => {
     expect(actDescription).toMatch(/combine.*verification/iu);
     expect(actDescription).toMatch(/locator\.waitFor|waitForURL|waitForLoadState/u);
     expect(actDescription).toMatch(/return\s+compact/iu);
-    // The pre-2026-06-24 wording is now an anti-pattern — it taught the model
-    // to call computer_observe before AND after every computer_act, which is
-    // how we got to 20+ round-trips per turn.
-    expect(actDescription).not.toMatch(/computer_observe.*before.*after/iu);
+    // The pre-2026-06-24 wording is now an anti-pattern; it taught the model
+    // to split every action with redundant state reads.
+    expect(actDescription).not.toMatch(/computer_open.*before.*after/iu);
 
-    // computer_observe must teach the gated-use contract — only at run
-    // start/resume, after an unknown-outcome failure, or when an act
-    // couldn't return enough state.
-    expect(observeDescription).toMatch(/starting or resuming/iu);
-    expect(observeDescription).toMatch(/(unknown.outcome|could not return)/iu);
-    expect(observeDescription).toMatch(/do not routinely observe/iu);
+    expect(openDescription).toMatch(/creates, reuses, resumes, or reclaims/iu);
+    expect(openDescription).toMatch(/visible page text/iu);
+    expect(openDescription).toMatch(/user handoff/iu);
 
-    // computer_os_control must reflect the new gating too: only observe
-    // AFTER an OS-level action with an unknown outcome, not routinely.
+    // computer_os_control must use the same open primitive for unknown outcomes.
     expect(osControlDescription).toMatch(/unknown outcome/iu);
-    expect(osControlDescription).not.toMatch(/computer_observe.*before.*after/iu);
+    expect(osControlDescription).toMatch(/computer_open/iu);
+    expect(osControlDescription).not.toMatch(/computer_open.*before.*after/iu);
   });
 
   it("advertises computer tools only when execution transport is available", () => {
@@ -132,8 +127,7 @@ describe("murph computer dynamic tools", () => {
     }).map((tool) => tool.name);
     expect(availableToolNames).toContain("send_progress_update");
     expect(availableToolNames.filter((name) => name.startsWith("computer_"))).toEqual([
-      "computer_start_run",
-      "computer_observe",
+      "computer_open",
       "computer_act",
       "computer_os_control",
       "computer_pause_for_user",
@@ -141,7 +135,7 @@ describe("murph computer dynamic tools", () => {
     ]);
   });
 
-  it("keeps start-run profile keys off the model surface while sending fresh starts", async () => {
+  it("keeps open profile keys off the model surface while sending fresh opens", async () => {
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -155,13 +149,13 @@ describe("murph computer dynamic tools", () => {
       });
 
       return jsonResponse({
-        awaitingReason: null,
         expiresAt: "2026-06-17T13:00:00.000Z",
-        lastTitle: null,
-        lastUrl: null,
         reused: true,
         runId: "run_123",
         status: "running",
+        title: null,
+        url: null,
+        visibleText: "",
       });
     });
 
@@ -169,11 +163,11 @@ describe("murph computer dynamic tools", () => {
       argumentsValue: {
         startUrl: null,
       },
-      tool: "computer_start_run",
+      tool: "computer_open",
     }));
 
-    if (!request || request.kind !== "computer-start-run") {
-      throw new Error("Expected computer_start_run request.");
+    if (!request || request.kind !== "computer-open") {
+      throw new Error("Expected computer_open request.");
     }
 
     expect(request.args).toEqual({
@@ -211,13 +205,13 @@ describe("murph computer dynamic tools", () => {
       });
 
       return jsonResponse({
-        awaitingReason: null,
         expiresAt: "2026-06-17T13:00:00.000Z",
-        lastTitle: "Checkout",
-        lastUrl: "https://shop.example.test/checkout",
         reused: true,
         runId: "run_123",
         status: "running",
+        title: "Checkout",
+        url: "https://shop.example.test/checkout",
+        visibleText: "Ready to check out",
       });
     });
 
@@ -225,11 +219,11 @@ describe("murph computer dynamic tools", () => {
       argumentsValue: {
         startUrl: "https://shop.example.test/checkout",
       },
-      tool: "computer_start_run",
+      tool: "computer_open",
     }));
 
-    if (!request || request.kind !== "computer-start-run") {
-      throw new Error("Expected computer_start_run request.");
+    if (!request || request.kind !== "computer-open") {
+      throw new Error("Expected computer_open request.");
     }
 
     const result = await executeMurphDynamicToolRequest({
@@ -263,11 +257,11 @@ describe("murph computer dynamic tools", () => {
         recipientKey: "model-authored-recipient",
       },
     },
-  ])("rejects stale start-run profile field %# before execution", async (argumentsValue) => {
+  ])("rejects stale open profile field %# before execution", async (argumentsValue) => {
     const fetchImpl = vi.fn(async (): Promise<Response> => jsonResponse({}));
     const request = readMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue,
-      tool: "computer_start_run",
+      tool: "computer_open",
     }));
 
     if (!request) {
@@ -320,7 +314,7 @@ describe("murph computer dynamic tools", () => {
         args: {
           startUrl: null,
         },
-        kind: "computer-start-run",
+        kind: "computer-open",
       },
     });
 
@@ -340,11 +334,11 @@ describe("murph computer dynamic tools", () => {
   });
 
   it.each([
-    ["computer-start-run", {
+    ["computer-open", {
       args: {
         startUrl: null,
       },
-      kind: "computer-start-run" as const,
+      kind: "computer-open" as const,
     } satisfies MurphDynamicToolRequest],
     ["computer-os-control", {
       args: {
@@ -376,11 +370,13 @@ describe("murph computer dynamic tools", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("returns observed browser text without content redaction", async () => {
+  it("returns opened browser text with sanitized URL and raw visible text", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({
         runId: "run_123",
         status: "running",
+        expiresAt: "2026-06-17T13:00:00.000Z",
+        reused: true,
         title: "API key: visible-title-canary",
         url: "https://shop.example.test/checkout?token=secret#frag",
         visibleText: [
@@ -401,8 +397,8 @@ describe("murph computer dynamic tools", () => {
       nextUsageOrdinal: () => 1,
       progressDelivery: createProgressDelivery(),
       request: {
-        args: { runId: "run_123" },
-        kind: "computer-observe",
+        args: { startUrl: null },
+        kind: "computer-open",
       },
     });
 
@@ -416,11 +412,11 @@ describe("murph computer dynamic tools", () => {
     expect(text).toContain("Verification code: 123456");
     expect(text).toContain("Loose secret prefix visible-loose-canary");
     expect(text).toContain("visible-title-canary");
-    expect(text).toContain("token=secret");
-    expect(text).toContain("#frag");
+    expect(text).not.toContain("token=secret");
+    expect(text).not.toContain("#frag");
   });
 
-  it("surfaces coded start-run configuration failures", async () => {
+  it("surfaces coded open configuration failures", async () => {
     const fetchImpl = vi.fn(async (): Promise<Response> =>
       jsonResponse({
         error: {
@@ -440,7 +436,7 @@ describe("murph computer dynamic tools", () => {
         args: {
           startUrl: "https://shop.example.test",
         },
-        kind: "computer-start-run",
+        kind: "computer-open",
       },
     });
 
@@ -492,8 +488,9 @@ describe("murph computer dynamic tools", () => {
     expect(payload).toEqual({
       result: { clicked: true },
       title: "Checkout",
-      url: "https://shop.example.test/order?secret=raw",
+      url: "https://shop.example.test/order",
     });
+    expect(result.rpcResult.contentItems[0]!.text).not.toContain("secret=raw");
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("session_id");
     expect(result.rpcResult.contentItems[0]!.text).not.toContain("#step");
   });
@@ -640,7 +637,7 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying Playwright code or taking another step",
+      "computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step",
     );
   });
 
@@ -675,7 +672,7 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      `computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying Playwright code or taking another step; backend error: ${code}: Computer browser evaluation failed.`,
+      `computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step; backend error: ${code}: Computer browser evaluation failed.`,
     );
   });
 
@@ -720,7 +717,7 @@ describe("murph computer dynamic tools", () => {
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
       [
-        "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying Playwright code or taking another step; backend error: HOSTED_COMPUTER_EVAL_FAILED: Computer browser evaluation failed.",
+        "computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step; backend error: HOSTED_COMPUTER_EVAL_FAILED: Computer browser evaluation failed.",
         "backend details:",
         "codeHash: abc123",
         "timeoutMs: 20000",
@@ -959,7 +956,7 @@ describe("murph computer dynamic tools", () => {
 
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]!.text).toBe(
-      "computer API outcome is unknown after a transport or browser execution failure; observe the computer run state before retrying Playwright code or taking another step",
+      "computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step",
     );
     expect(result.computerRunPausedForUser).toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(1);

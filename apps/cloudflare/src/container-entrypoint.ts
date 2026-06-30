@@ -35,7 +35,9 @@ import {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   consumeHostedCliRuntimeBridgeOffInvocationViolation,
+  drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
   drainHostedRuntimeLogWritesBestEffort,
+  drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   stopHostedCliRuntimeBridge,
 } from "@murphai/assistant-runtime/hosted-invocation";
 import {
@@ -57,6 +59,9 @@ import {
 import {
   HOSTED_RUNNER_CONTAINER_CA_ENV_KEYS,
 } from "./runner-container-ca-env.ts";
+import {
+  HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+} from "./runner-container-error-codes.ts";
 import {
   runHostedWorkspaceInvocation as runHostedWorkspaceInvocationDirect,
 } from "./hosted-workspace-invocation.ts";
@@ -107,6 +112,7 @@ const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS = 160;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_CHUNK_BYTES = 1024 * 1024;
+const HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS = 5_000;
 const HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH =
   "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 const HOSTED_CONTAINER_CODEX_SMOKE_HOME_DIRECTORY = ".codex-deploy-smoke";
@@ -426,6 +432,43 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (request.method === "POST" && requestUrl.pathname === HOSTED_CONTAINER_RUNTIME_WAKE_PATH) {
+        const rejectRuntimeWakeAfterShutdown = (): boolean => {
+          if (!containerShutdownController.signal.aborted) {
+            return false;
+          }
+
+          const advertiseAbsent =
+            activeHostedRunnerJobCount === 0
+            && activeRuntimeWake === null
+            && !activeRuntimeWakePending
+            && activeRuntimeWakePendingAttemptId === null
+            && activeWorkspaceInvocationAbort === null;
+          discardUnreadRequestBody(request);
+          emitHostedExecutionStructuredLog({
+            component: "container",
+            details: {
+              activeHostedRunnerJobCount,
+              runtimeWakeAbsent: advertiseAbsent,
+              workspaceAttemptId: activeRuntimeWakeAttemptId,
+              workspacePendingAttemptId: activeRuntimeWakePendingAttemptId,
+            },
+            level: "warn",
+            message: "Hosted container entrypoint rejected a runtime wake after shutdown started.",
+            phase: "failed",
+          });
+          response.setHeader("x-runtime-wake-accepted", "0");
+          if (advertiseAbsent) {
+            response.setHeader("x-runtime-wake-absent", "1");
+          }
+          response.statusCode = 204;
+          response.end();
+          return true;
+        };
+
+        if (rejectRuntimeWakeAfterShutdown()) {
+          return;
+        }
+
         let wakeRequest: HostedContainerRuntimeWakeRequest | null;
         try {
           wakeRequest = await readHostedContainerRuntimeWakeRequest(request);
@@ -439,6 +482,9 @@ export async function startHostedContainerEntrypoint(input: {
           });
           const classified = classifyRequestDecodeError(error);
           writeJsonResponse(response, classified.statusCode, classified.payload);
+          return;
+        }
+        if (rejectRuntimeWakeAfterShutdown()) {
           return;
         }
         const wake = activeRuntimeWake;
@@ -615,6 +661,21 @@ export async function startHostedContainerEntrypoint(input: {
           accepted ? "accepted" : queued ? "queued" : "stale",
         );
         response.end();
+        return;
+      }
+
+      if (containerShutdownController.signal.aborted) {
+        discardUnreadRequestBody(request);
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          level: "warn",
+          message: "Hosted container entrypoint rejected a runner request after shutdown started.",
+          phase: "failed",
+        });
+        writeJsonResponse(response, 503, {
+          code: HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
+          error: "Hosted runner is shutting down.",
+        });
         return;
       }
 
@@ -898,26 +959,35 @@ export async function startHostedContainerEntrypoint(input: {
       response.setHeader("content-type", "application/json; charset=utf-8");
       response.end(JSON.stringify(result));
     } catch (error) {
-      if (requestAbort.signal.aborted || response.destroyed) {
-        return;
-      }
+      const responseUnavailable = requestAbort.signal.aborted || response.destroyed;
 
-      emitHostedExecutionStructuredLog({
-        component: "container",
-        details: buildHostedContainerRunnerJobErrorMetadata(error),
-        level: "error",
-        message: "Hosted container entrypoint failed a runner job.",
-        phase: "failed",
-        userId: null,
-      });
+      if (!responseUnavailable || error instanceof HostedRunnerShellIsolationError) {
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          details: buildHostedContainerRunnerJobErrorMetadata(error),
+          level: "error",
+          message: "Hosted container entrypoint failed a runner job.",
+          phase: "failed",
+          userId: null,
+        });
+      }
       if (error instanceof HostedRunnerShellIsolationError) {
         hostedContainerPoisoned = true;
-        await reportHostedContainerFatalBestEffort({
-          boundUserId: job ? readHostedExecutionRunnerJobUserId(job) : null,
-          error,
-          stage: "shell_isolation_poison",
-        });
+        await Promise.allSettled([
+          reportHostedContainerFatalBestEffort({
+            boundUserId: job ? readHostedExecutionRunnerJobUserId(job) : null,
+            error,
+            stage: "shell_isolation_poison",
+          }),
+          drainHostedRuntimeDeferredUsageCompletionsBestEffort({
+            closeActiveCaptures: true,
+            timeoutMs: HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS,
+          }),
+        ]);
         runtime.exitScheduler();
+      }
+      if (responseUnavailable) {
+        return;
       }
       const classified = classifyRunnerJobError(error);
       writeJsonResponse(response, classified.statusCode, classified.payload);
@@ -977,26 +1047,35 @@ export async function startHostedContainerEntrypoint(input: {
     });
   });
 
+  let containerShutdownExitStarted = false;
   const maybeExitAfterContainerShutdownDrain = () => {
     if (
       !containerShutdownController.signal.aborted
       || activeHostedRunnerJobCount > 0
+      || containerShutdownExitStarted
     ) {
       return;
     }
-    emitHostedExecutionStructuredLog({
-      component: "container",
-      level: "warn",
-      message: "Hosted container entrypoint drained after shutdown signal; exiting cleanly.",
-      phase: "wake.running",
-    });
-    server.close(() => {
-      process.exit(0);
-    });
-    // Lingering keep-alive sockets must not hold the doomed container open.
-    setTimeout(() => {
-      process.exit(0);
-    }, 5_000).unref();
+    containerShutdownExitStarted = true;
+    void (async () => {
+      await drainHostedRuntimeDeferredUsageCompletionsBestEffort({
+        timeoutMs: HOSTED_CONTAINER_SHUTDOWN_POST_SAFE_POINT_DRAIN_TIMEOUT_MS,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        level: "warn",
+        message: "Hosted container entrypoint drained after shutdown signal; exiting cleanly.",
+        phase: "wake.running",
+      });
+      const cleanExitBackstop = setTimeout(() => {
+        process.exit(0);
+      }, 5_000);
+      cleanExitBackstop.unref();
+      server.close(() => {
+        clearTimeout(cleanExitBackstop);
+        process.exit(0);
+      });
+    })();
   };
   const handleContainerShutdownSignal = () => {
     if (containerShutdownController.signal.aborted) {
@@ -1144,7 +1223,12 @@ function installHostedContainerProcessFatalHandlers(): void {
       // both. Neither promise ever rejects.
       void Promise.allSettled([
         reportHostedContainerFatalBestEffort({ error, stage }),
+        drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort(),
         drainHostedRuntimeLogWritesBestEffort(),
+        drainHostedRuntimeDeferredUsageCompletionsBestEffort({
+          closeActiveCaptures: true,
+          timeoutMs: HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS,
+        }),
       ]).then(() => {
         process.exitCode = 1;
         process.exit(1);
@@ -1942,6 +2026,7 @@ function buildHostedContainerCodexShellSmokeConfig(model: string): string {
     "",
     "[features]",
     "plugins = false",
+    "multi_agent_v2 = true",
     "",
     '[model_providers."hosted-shell-smoke"]',
     'name = "OpenAI"',

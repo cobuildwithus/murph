@@ -18,6 +18,17 @@ export interface RuntimeWakeSignal {
   wait(signal?: AbortSignal | null): Promise<RuntimeWakeNotification>;
 }
 
+export function consumePendingRuntimeWakeUnlessShuttingDown(input: {
+  runtimeWakeSignal: RuntimeWakeSignal | null | undefined;
+  shutdownSignal?: AbortSignal | null;
+}): RuntimeWakeNotification | null {
+  if (input.shutdownSignal?.aborted === true) {
+    return null;
+  }
+
+  return input.runtimeWakeSignal?.consumePending() ?? null;
+}
+
 export function createCoalescingRuntimeWakeSignal(): RuntimeWakeSignal {
   let pendingNotifyAtEpochMs: number | null = null;
   let pendingOrchestration: HostedRuntimeOrchestrationLatencyDiagnostics | null = null;

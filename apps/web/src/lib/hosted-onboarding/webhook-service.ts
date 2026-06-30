@@ -236,57 +236,39 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               "Hosted Linq first-contact admission plan missing participant contact for budget claim.",
             );
           }
-          const persistedAdmission = await runHostedOnboardingWebhookTransaction(
+          const admissionBudget = await runHostedOnboardingWebhookTransaction(
             prisma,
-            async (transaction) => {
-              const admissionBudget = await claimHostedLinqFirstContactAdmissionBudget({
+            (transaction) =>
+              claimHostedLinqFirstContactAdmissionBudget({
                 eventId: event.event_id,
                 participantContact: firstContactAdmissionParticipantContact,
                 tx: transaction,
-              });
-              if (admissionBudget.kind === "exhausted") {
-                return {
-                  firstContactAdmission: null,
-                  kind: "exhausted" as const,
-                };
-              }
-
-              // Keep the budget row and terminal decision in one transaction:
-              // a failed or aborted classifier attempt must not commit an
-              // orphaned finite-budget row that can block a later real signup.
-              let classifiedAdmission: Awaited<ReturnType<typeof classifyHostedLinqFirstContactAdmission>>;
-              try {
-                classifiedAdmission = await classifyHostedLinqFirstContactAdmission({
-                  request: firstContactAdmissionRequest,
-                  signal: input.signal,
-                });
-              } catch (error) {
-                if (!isHostedLinqFirstContactAdmissionClassifierUnavailableError(error)) {
-                  throw error;
-                }
-                classifiedAdmission = buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision();
-              }
-              firstContactAdmissionClassified = true;
-
-              return {
-                firstContactAdmission: await recordHostedLinqFirstContactAdmissionDecision({
-                  decision: classifiedAdmission,
-                  eventId: event.event_id,
-                  prisma: transaction,
-                }),
-                kind: "recorded" as const,
-              };
-            },
+              }),
           );
-          if (persistedAdmission.kind === "exhausted") {
+          if (admissionBudget.kind === "exhausted") {
             plan = buildBlockedHostedLinqFirstContactAdmissionPlan(
               "first-contact-admission-budget-exhausted",
             );
           } else {
-            const firstContactAdmission = persistedAdmission.firstContactAdmission;
-            if (!firstContactAdmission) {
-              throw new Error("Hosted Linq first-contact admission was not persisted after a budget claim.");
+            let classifiedAdmission: Awaited<ReturnType<typeof classifyHostedLinqFirstContactAdmission>>;
+            try {
+              classifiedAdmission = await classifyHostedLinqFirstContactAdmission({
+                request: firstContactAdmissionRequest,
+                signal: input.signal,
+              });
+            } catch (error) {
+              if (!isHostedLinqFirstContactAdmissionClassifierUnavailableError(error)) {
+                throw error;
+              }
+              classifiedAdmission = buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision();
             }
+            firstContactAdmissionClassified = true;
+
+            const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecision({
+              decision: classifiedAdmission,
+              eventId: event.event_id,
+              prisma,
+            });
             if (firstContactAdmission.kind === "block") {
               plan = buildBlockedHostedLinqFirstContactAdmissionPlan();
             } else {

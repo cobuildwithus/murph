@@ -91,6 +91,22 @@ export async function projectHostedLinqLineForProviderEventTx(input: {
   }
 }
 
+export async function projectHostedLinqLineForDeliveryReceiptTx(input: {
+  deliveryStatus: "delivered" | "failed";
+  eventId: string;
+  failureCode: string | null;
+  failureReason: string | null;
+  lineLookupKey: string;
+  prisma: HostedLinqLineClient;
+  providerCreatedAt: Date;
+}): Promise<boolean> {
+  if (input.deliveryStatus === "delivered") {
+    return projectMessageDelivered(input.prisma, input.lineLookupKey, input);
+  }
+
+  return projectMessageFailed(input.prisma, input.lineLookupKey, input);
+}
+
 export async function ensureHostedLinqLineForProviderEventTx(input: {
   event: ParsedHostedLinqProviderEvent;
   prisma: HostedLinqLineClient;
@@ -172,23 +188,20 @@ async function projectMessageReceived(
 async function projectMessageDelivered(
   prisma: HostedLinqLineClient,
   phoneNumberLookupKey: string,
-  event: ParsedHostedLinqProviderEvent,
+  event: Pick<ParsedHostedLinqProviderEvent, "eventId" | "providerCreatedAt">,
 ): Promise<boolean> {
-  await prisma.hostedLinqLine.update({
-    where: { phoneNumberLookupKey },
-    data: {
-      totalDeliveredCount: { increment: 1 },
-    },
-  });
-
   const updated = await prisma.hostedLinqLine.updateMany({
-    where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, event),
+    where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, {
+      deliveryStatus: "delivered",
+      providerCreatedAt: event.providerCreatedAt,
+    }),
     data: {
       consecutiveFailures: 0,
       healthStatus: "healthy",
       lastDeliveredAt: event.providerCreatedAt,
       lastReceiptAt: event.providerCreatedAt,
       lastReceiptEventId: createHostedLinqProviderEventLookupKey(event.eventId),
+      totalDeliveredCount: { increment: 1 },
     },
   });
   return updated.count === 1;
@@ -197,17 +210,16 @@ async function projectMessageDelivered(
 async function projectMessageFailed(
   prisma: HostedLinqLineClient,
   phoneNumberLookupKey: string,
-  event: ParsedHostedLinqProviderEvent,
+  event: Pick<
+    ParsedHostedLinqProviderEvent,
+    "eventId" | "failureCode" | "failureReason" | "providerCreatedAt"
+  >,
 ): Promise<boolean> {
-  await prisma.hostedLinqLine.update({
-    where: { phoneNumberLookupKey },
-    data: {
-      totalFailedCount: { increment: 1 },
-    },
-  });
-
   const updated = await prisma.hostedLinqLine.updateMany({
-    where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, event),
+    where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, {
+      deliveryStatus: "failed",
+      providerCreatedAt: event.providerCreatedAt,
+    }),
     data: {
       consecutiveFailures: { increment: 1 },
       healthStatus: "warning",
@@ -216,6 +228,7 @@ async function projectMessageFailed(
       lastFailureReason: event.failureReason,
       lastReceiptAt: event.providerCreatedAt,
       lastReceiptEventId: createHostedLinqProviderEventLookupKey(event.eventId),
+      totalFailedCount: { increment: 1 },
     },
   });
   return updated.count === 1;
@@ -244,27 +257,35 @@ async function projectPhoneNumberStatusUpdated(
 
 function buildMessageReceiptLineProjectionWhere(
   phoneNumberLookupKey: string,
-  event: ParsedHostedLinqProviderEvent,
+  event: {
+    deliveryStatus: "delivered" | "failed";
+    providerCreatedAt: Date;
+  },
 ): Prisma.HostedLinqLineWhereInput {
+  const orderingWhere: Prisma.HostedLinqLineWhereInput[] = [
+    {
+      lastReceiptAt: null,
+    },
+    {
+      lastReceiptAt: {
+        lt: event.providerCreatedAt,
+      },
+    },
+  ];
+
+  if (event.deliveryStatus === "failed") {
+    orderingWhere.push({
+      lastReceiptAt: event.providerCreatedAt,
+      OR: [
+        { lastFailedAt: null },
+        { lastFailedAt: { not: event.providerCreatedAt } },
+      ],
+    });
+  }
+
   return {
     phoneNumberLookupKey,
-    OR: [
-      {
-        lastReceiptAt: null,
-      },
-      {
-        lastReceiptAt: {
-          lt: event.providerCreatedAt,
-        },
-      },
-      {
-        lastReceiptAt: event.providerCreatedAt,
-        OR: [
-          { lastFailedAt: null },
-          { lastFailedAt: { not: event.providerCreatedAt } },
-        ],
-      },
-    ],
+    OR: orderingWhere,
   };
 }
 

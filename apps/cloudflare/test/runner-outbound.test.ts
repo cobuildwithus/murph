@@ -71,6 +71,7 @@ import {
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
+  HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
@@ -232,6 +233,19 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123",
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread",
+    },
+    name: "hosted Linq delivery outcome",
+    path: HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
+  },
+  {
+    body: {
       lanes: [
         {
           importedSeq: "0",
@@ -338,19 +352,12 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   {
     body: {
       goal: "Book a dentist appointment.",
+      resumeAfterMailboxItemId: null,
+      resumeDeliveryContext: null,
       startUrl: "https://example.test",
-      taskKind: "appointment",
     },
-    name: "hosted computer start run",
+    name: "hosted computer open",
     path: HOSTED_COMPUTER_RUNS_PATH,
-  },
-  {
-    body: {},
-    name: "hosted computer observe",
-    path: buildHostedComputerRunOperationPath({
-      operation: "observe",
-      runId: "run_123",
-    }),
   },
   {
     body: {
@@ -647,6 +654,7 @@ describe("handleRunnerOutboundRequest", () => {
                   ...(path === "/api/internal/hosted-workspace/checkpoint"
                     || path === HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
                     || path === HOSTED_RUNTIME_LATENCY_TRACE_PATH
+                    || path === HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH
                     || path === HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH
                     || path === HOSTED_RUNTIME_CODEX_AUTH_PATH
                     || path === HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH
@@ -834,6 +842,45 @@ describe("handleRunnerOutboundRequest", () => {
         body: JSON.stringify({
           engagementKind: "requires_recent_inbound",
           target: "chat_123",
+          targetKind: "thread",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+        USER_RUNNER: {
+          getByName() {
+            return {
+              validateRuntimeWriteFence,
+            };
+          },
+        },
+      }),
+      "member_123" ,
+    );
+
+    expect(response.status).toBe(401);
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects Linq delivery outcomes without the active runtime fence", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(`http://web-control.worker${HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH}`, {
+        body: JSON.stringify({
+          acceptedAt: "2026-04-26T00:00:04.000Z",
+          attemptedAt: "2026-04-26T00:00:03.000Z",
+          idempotencyKey: "assistant-outbox:intent_123",
+          providerMessageId: "linq_message_sent",
+          providerThreadId: "linq_chat_123",
+          target: "linq_chat_123",
           targetKind: "thread",
         }),
         headers: createRunnerProxyHeaders({

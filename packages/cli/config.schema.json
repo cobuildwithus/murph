@@ -1292,6 +1292,28 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "assistantTargetOverrideModel": {
+                          "description": "Optional assistant model override for scheduled turns.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "assistantTargetOverrideModelProvider": {
+                          "description": "Optional assistant model provider override for scheduled turns.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "assistantTargetOverrideReasoningEffort": {
+                          "description": "Optional assistant reasoning effort override for scheduled turns.",
+                          "type": "string",
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh"
+                          ]
+                        },
                         "instructions": {
                           "type": "string",
                           "minLength": 1,
@@ -1467,10 +1489,36 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "assistantTargetOverrideModel": {
+                          "description": "Optional assistant model override for scheduled turns.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "assistantTargetOverrideModelProvider": {
+                          "description": "Optional assistant model provider override for scheduled turns.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "assistantTargetOverrideReasoningEffort": {
+                          "description": "Optional assistant reasoning effort override for scheduled turns.",
+                          "type": "string",
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh"
+                          ]
+                        },
                         "instructions": {
                           "description": "Optional automation instructions.",
                           "type": "string",
                           "minLength": 1
+                        },
+                        "clearAssistantTargetOverride": {
+                          "description": "Clear the stored assistant target override.",
+                          "type": "boolean"
                         }
                       }
                     }

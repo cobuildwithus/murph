@@ -31,13 +31,32 @@ vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
   }),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", () => ({
-  claimHostedLinqOnboardingLinkNotice: vi.fn().mockResolvedValue(true),
-  claimHostedLinqQuotaReplyNotice: vi.fn().mockResolvedValue(true),
-  markHostedLinqOnboardingLinkNoticeSent: vi.fn().mockResolvedValue(true),
-  releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn().mockResolvedValue(undefined),
-  releaseHostedLinqQuotaReplyNoticeClaim: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/linq-daily-state")
+  >("@/src/lib/hosted-onboarding/linq-daily-state");
+  return {
+    ...actual,
+    claimHostedLinqOnboardingLinkNotice: vi.fn().mockResolvedValue(true),
+    claimHostedLinqQuotaReplyNotice: vi.fn().mockResolvedValue(true),
+    markHostedLinqOnboardingLinkNoticeSent: vi.fn().mockResolvedValue(true),
+    releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn().mockResolvedValue(undefined),
+    releaseHostedLinqQuotaReplyNoticeClaim: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/linq-delivery-store")
+  >("@/src/lib/hosted-onboarding/linq-delivery-store");
+  return {
+    ...actual,
+    claimHostedLinqDeliveryProviderDispatchTx: vi.fn().mockResolvedValue({
+      claimed: true,
+      id: "hld_claimed",
+    }),
+  };
+});
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
   const actual = await vi.importActual<
@@ -73,6 +92,9 @@ import {
 import {
   maybeShareHostedLinqContactCardAfterOutboundForRuntime,
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
+import {
+  claimHostedLinqDeliveryProviderDispatchTx,
+} from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
@@ -699,6 +721,40 @@ describe("hosted Linq webhook transport", () => {
     });
   });
 
+  it("keys invite signup replies by member/day notice identity", () => {
+    const firstEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-invite-1",
+      template: "invite_signup",
+    });
+    const sameDayEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T23:59:59.000Z",
+      replyToMessageId: "message-2",
+      sourceEventId: "event-invite-2",
+      template: "invite_signup",
+    });
+    const laterEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-27T12:00:00.000Z",
+      replyToMessageId: "message-3",
+      sourceEventId: "event-invite-3",
+      template: "invite_signup",
+    });
+
+    expect(firstEffect.effectId).toBe("linq-invite-signup:member-1:2026-03-26T00:00:00.000Z");
+    expect(sameDayEffect.effectId).toBe(firstEffect.effectId);
+    expect(laterEffect.effectId).toBe("linq-invite-signup:member-1:2026-03-27T00:00:00.000Z");
+  });
+
   it("releases AI usage quota notice claims when delivery fails", async () => {
     vi.mocked(sendHostedLinqChatMessage).mockRejectedValueOnce(new Error("send failed"));
     const effect = createHostedWebhookLinqMessageSideEffect({
@@ -1108,10 +1164,136 @@ describe("hosted Linq webhook transport", () => {
       }),
     ).rejects.toThrow("send failed");
 
+    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith({
+      idempotencyKey: effect.effectId,
+      linqChatId: "chat-1",
+      prisma,
+      source: "hosted_webhook_side_effect",
+      sourceRef: effect.effectId,
+      targetKind: "thread",
+      template: "invite_signup",
+    });
     expect(claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(markHostedLinqOnboardingLinkNoticeSent).not.toHaveBeenCalled();
     expect(releaseHostedLinqOnboardingLinkNoticeClaim).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
+  });
+
+  it("fails invite signup delivery rows before throwing so webhook retries can send", async () => {
+    const scheduledTasks: Array<() => Promise<void>> = [];
+    let providerDispatchFailed = false;
+    let providerDispatchAttempted = false;
+    vi.mocked(claimHostedLinqDeliveryProviderDispatchTx).mockImplementation(async () => {
+      if (providerDispatchAttempted && !providerDispatchFailed) {
+        return {
+          claimed: false,
+          id: "hld_claimed",
+        };
+      }
+
+      providerDispatchAttempted = true;
+      providerDispatchFailed = false;
+      return {
+        claimed: true,
+        id: "hld_claimed",
+      };
+    });
+    vi.mocked(sendHostedLinqChatMessage)
+      .mockRejectedValueOnce(new Error("send failed"))
+      .mockResolvedValueOnce({
+        chatId: "chat-1",
+        messageId: "provider-message-retry",
+      });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue({
+          inviteCode: "invite-code",
+        }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      hostedLinqDelivery: {
+        create: vi.fn().mockResolvedValue({ id: "hld_claimed" }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockImplementation((input: { data?: { status?: string } }) => {
+          if (input.data?.status === "failed") {
+            providerDispatchFailed = true;
+          }
+          return Promise.resolve({ count: 1 });
+        }),
+      },
+      hostedLinqProviderEvent: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-1",
+      template: "invite_signup",
+    });
+
+    try {
+      await expect(
+        drainHostedLinqSideEffectsDirect({
+          currentInboundReply,
+          prisma: prisma as never,
+          scheduleAfterResponse: (task) => {
+            scheduledTasks.push(task);
+          },
+          sideEffects: [effect],
+        }),
+      ).rejects.toThrow("send failed");
+
+      expect(providerDispatchFailed).toBe(true);
+      expect(prisma.hostedLinqDelivery.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: "failed",
+          }),
+          where: expect.objectContaining({
+            idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(effect.effectId),
+          }),
+        }),
+      );
+      expect(scheduledTasks).toHaveLength(0);
+
+      await expect(
+        drainHostedLinqSideEffectsDirect({
+          currentInboundReply,
+          prisma: prisma as never,
+          scheduleAfterResponse: (task) => {
+            scheduledTasks.push(task);
+          },
+          sideEffects: [effect],
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+      expect(sendHostedLinqChatMessage).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          idempotencyKey: effect.effectId,
+          message: "invite-reply",
+        }),
+      );
+      expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
+        data: {
+          sentAt: expect.any(Date),
+        },
+        where: {
+          id: "invite-1",
+        },
+      });
+    } finally {
+      errorSpy.mockRestore();
+      vi.mocked(claimHostedLinqDeliveryProviderDispatchTx).mockResolvedValue({
+        claimed: true,
+        id: "hld_claimed",
+      });
+    }
   });
 });
 

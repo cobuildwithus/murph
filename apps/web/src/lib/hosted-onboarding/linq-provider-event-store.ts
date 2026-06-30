@@ -1,6 +1,9 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
-import { applyHostedLinqDeliveryReceiptTx } from "./linq-delivery-store";
+import {
+  applyHostedLinqDeliveryReceiptTx,
+  readHostedLinqDeliveryForProviderMessageTx,
+} from "./linq-delivery-store";
 import {
   ensureHostedLinqLineForProviderEventTx,
   projectHostedLinqLineForProviderEventTx,
@@ -70,17 +73,30 @@ export async function ingestHostedLinqProviderEventTx(input: {
     event: input.event,
     prisma: input.prisma,
   });
+  const outboundEchoDelivery = isHostedRuntimeOwnedOutboundEcho(input.event)
+    ? await readHostedLinqDeliveryForProviderMessageTx({
+        messageLookupKey: input.event.messageLookupKey,
+        messageLookupKeyCandidates: input.event.messageLookupKeyReadCandidates,
+        prisma: input.prisma,
+      })
+    : null;
   const staleDeliveryReceipt = deliveryReceipt.deliveryId !== null && !deliveryReceipt.advanced;
+  const projectionLineLookupKey = lineLookupKey
+    ?? deliveryReceipt.phoneNumberLookupKey
+    ?? outboundEchoDelivery?.phoneNumberLookupKey
+    ?? null;
   const lineProjectionAdvanced = staleDeliveryReceipt
     ? false
-    : await projectHostedLinqLineForProviderEventTx({
-      event: input.event,
-      lineLookupKey,
-      prisma: input.prisma,
-    });
+    : outboundEchoDelivery?.runtimeOwned
+      ? true
+      : await projectHostedLinqLineForProviderEventTx({
+        event: input.event,
+        lineLookupKey: projectionLineLookupKey,
+        prisma: input.prisma,
+      });
   const staleLineReceipt = isStaleLineReceiptProjection({
     event: input.event,
-    lineLookupKey,
+    lineLookupKey: projectionLineLookupKey,
     lineProjectionAdvanced,
   });
   const staleUnownedLineReceipt = staleLineReceipt && deliveryReceipt.deliveryId === null;
@@ -96,10 +112,10 @@ export async function ingestHostedLinqProviderEventTx(input: {
   }
 
   const alertIds = await claimHostedLinqAlertsForProviderEventTx({
-    deliveryId: deliveryReceipt.deliveryId,
+    deliveryId: deliveryReceipt.deliveryId ?? outboundEchoDelivery?.deliveryId ?? null,
     event: input.event,
     eventLookupKey,
-    lineLookupKey,
+    lineLookupKey: projectionLineLookupKey,
     prisma: input.prisma,
   });
 
@@ -107,6 +123,14 @@ export async function ingestHostedLinqProviderEventTx(input: {
     alertIds,
     duplicate: false,
   };
+}
+
+function isHostedRuntimeOwnedOutboundEcho(
+  event: ParsedHostedLinqProviderEvent,
+): boolean {
+  return event.eventType === "message.received"
+    && event.direction === "outbound"
+    && event.messageLookupKey !== null;
 }
 
 function isStaleLineReceiptProjection(input: {

@@ -210,6 +210,23 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   targetKind?: HostedRuntimeProviderTargetKind | null;
 }
 
+export interface HostedRuntimeLinqDeliveryOutcomeRequest {
+  acceptedAt?: string | null;
+  attemptedAt: string;
+  failedAt?: string | null;
+  failureCode?: string | null;
+  failureReason?: string | null;
+  fromPhoneNumber?: string | null;
+  idempotencyKey?: string | null;
+  intentId?: string | null;
+  providerMessageId?: string | null;
+  providerTarget?: string | null;
+  providerThreadId?: string | null;
+  routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
+  target: string | null;
+  targetKind?: HostedRuntimeProviderTargetKind | null;
+}
+
 export interface HostedRuntimeWhatsAppSendRequest {
   message: string;
   replyToMessageId?: string | null;
@@ -266,6 +283,10 @@ type HostedRuntimeEffectsPortBase = {
   ): Promise<void>;
   maybeShareLinqContactCardAfterOutbound?(
     request: HostedRuntimeLinqContactCardShareAfterOutboundEffectsRequest,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<void>;
+  recordLinqDeliveryOutcome?(
+    request: HostedRuntimeLinqDeliveryOutcomeRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
   sendEmail(request: HostedEmailSendRequest): Promise<{ target: string } | void>;

@@ -201,6 +201,40 @@ describe("hosted webhook Temporal handoff", () => {
     ).not.toHaveBeenCalled();
   });
 
+  it("schedules the Telegram accepted trace before rethrowing a Temporal signal failure", async () => {
+    signalMocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
+      new Error("Temporal unavailable"),
+    );
+
+    await expect(
+      maybeHandoffHostedExecutionWebhookWake({
+        eventId: "evt_telegram_signal_failure",
+        mailboxItemId: "mailbox_telegram_123",
+        response: {
+          ok: true,
+          reason: "wake-appended-active-member",
+        },
+        scheduleAfterResponse: schedulerMocks.scheduleAfterResponse,
+        source: "telegram",
+        userId: "user-123",
+      }),
+    ).rejects.toThrow("Temporal unavailable");
+
+    expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    expect(schedulerMocks.scheduleAfterResponse).toHaveBeenCalledTimes(1);
+    expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).not.toHaveBeenCalled();
+
+    await flushScheduledAfterCallbacks();
+
+    expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_telegram_123",
+      source: "telegram",
+    });
+    expect(
+      latencyStoreMocks.recordHostedIngressTemporalSignalAccepted,
+    ).not.toHaveBeenCalled();
+  });
+
   it("rethrows the original signal failure even when the scheduler itself throws", async () => {
     signalMocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
       new Error("Temporal unavailable"),
@@ -366,7 +400,7 @@ describe("hosted webhook Temporal handoff", () => {
     });
   });
 
-  it("signals Temporal for Telegram handoff", async () => {
+  it("signals Temporal and records latency traces for Telegram handoff", async () => {
     await expect(maybeHandoffHostedExecutionWebhookWake({
       eventId: "evt_inline_gap",
       mailboxItemId: "mailbox_123",
@@ -388,6 +422,36 @@ describe("hosted webhook Temporal handoff", () => {
       expectedUserId: "user-123",
       mailboxItemId: "mailbox_123",
     });
+    expect(schedulerMocks.scheduleAfterResponse).not.toHaveBeenCalled();
+    expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(latencyStoreMocks.recordHostedIngressTemporalSignalAccepted).toHaveBeenCalledWith(
+        expect.objectContaining({
+          expectedUserId: "user-123",
+          mailboxItemId: "mailbox_123",
+          source: "telegram",
+        }),
+      );
+    });
+  });
+
+  it("does not record ingress latency traces for WhatsApp handoff", async () => {
+    await expect(maybeHandoffHostedExecutionWebhookWake({
+      eventId: "evt_whatsapp_handoff",
+      mailboxItemId: "mailbox_whatsapp_123",
+      response: {
+        ok: true,
+        reason: "wake-appended-active-member",
+      },
+      scheduleAfterResponse: schedulerMocks.scheduleAfterResponse,
+      source: "whatsapp",
+      userId: "user-123",
+    })).resolves.toMatchObject({
+      reason: "temporal-signaled",
+      workflowId: "hosted-user-runtime:user-123",
+    });
+
+    expect(signalMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
     expect(schedulerMocks.scheduleAfterResponse).not.toHaveBeenCalled();
     expect(latencyStoreMocks.recordHostedIngressAcceptedFromMailboxItem).not.toHaveBeenCalled();
     expect(

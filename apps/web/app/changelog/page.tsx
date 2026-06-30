@@ -43,6 +43,229 @@ import {
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
+  "garmin-junction-sleep-records": (
+    <DeviceList
+      devices={[
+        { name: "Garmin", initial: "G", color: "#0078b8", status: "connected" },
+        { name: "WHOOP", initial: "W", color: "#2d3436", status: "connected" },
+        { name: "Oura", initial: "O", color: "#5a6e32", status: "connected" },
+      ]}
+    />
+  ),
+  "first-contact-classifier-fail-open": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "hey is this Murph? can it help with sleep?" },
+        {
+          from: "murph",
+          body: "Yes — here's your signup link. (Classifier was offline; we still let real people through.)",
+        },
+      ]}
+    />
+  ),
+  "weekly-insight-framing-refresh": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        {
+          from: "murph",
+          body: (
+            <div className="space-y-1">
+              <p className="font-semibold">This week, one pattern stands out</p>
+              <p>
+                Your worst sleep nights all followed late training — stress
+                regulation, not volume, is the lever.
+              </p>
+            </div>
+          ),
+        },
+      ]}
+    />
+  ),
+  "safety-critical-context-snapshot": (
+    <GoalsRegimenCard
+      entries={[
+        { kind: "habit", text: "Active: lisinopril 10mg, daily" },
+        { kind: "goal", text: "Allergy: penicillin (anaphylaxis)" },
+        { kind: "ramp", text: "Condition: hypertension, active" },
+      ]}
+    />
+  ),
+  "image-gen-reference-images": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        {
+          from: "user",
+          body: "Use that fridge photo and add fresh produce on the middle shelf",
+        },
+        {
+          from: "murph",
+          bare: true,
+          body: (
+            <ImagePreview
+              alt="Generated image based on a reference photo"
+              caption="Built on image 1"
+            />
+          ),
+        },
+      ]}
+    />
+  ),
+  "durable-progress-photo-captures": (
+    <PrivacyTimeline
+      events={[
+        { day: 0, label: "Send a progress photo", tone: "neutral" },
+        { day: 0, label: "Saved as a vault capture", tone: "neutral" },
+        { day: 90, label: "Still there — compare the series", tone: "neutral" },
+      ]}
+      caption="Bytes live in captures, not inbox."
+    />
+  ),
+  "weekly-digest-substance-gate": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        {
+          from: "murph",
+          body: "Your WHOOP hasn't sent data in 8 days — want to reconnect? I'll skip Sunday's recap until then.",
+        },
+      ]}
+    />
+  ),
+  "first-contact-classifier-budget": (
+    <ChecklistMock
+      label="When an unknown number texts"
+      items={[
+        { label: "Mentions Murph or asks Murph a question → admit", done: true },
+        { label: "Obvious spam or unrelated → block", done: true },
+        { label: "Cap of 4 classifier attempts per contact", done: true },
+      ]}
+    />
+  ),
+  "home-redirect-notice-dedup": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "I keep texting the wrong line" },
+        {
+          from: "murph",
+          body: "We'll talk over at +1 (555) 010-7740. (Told once — not on every reply.)",
+        },
+      ]}
+    />
+  ),
+  "retell-phone-call-authority-fix": (
+    <StatBlock
+      label="Phone-call path"
+      before="Stale callbacks"
+      after="Fail-closed"
+      caption="hardened on the Retell seam"
+    />
+  ),
+  "retell-phone-calls": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "Call my pharmacy — is my prescription ready?" },
+        {
+          from: "murph",
+          body: "Calling now. I'll text you when I hang up.",
+        },
+        {
+          from: "murph",
+          body: "Pharmacy said your refill is ready, pickup window 9–7. Want me to add a reminder for after work?",
+        },
+      ]}
+    />
+  ),
+  "uploaded-health-records-vault": (
+    <ChecklistMock
+      label="What Murph does with a lab PDF"
+      items={[
+        { label: "Save raw evidence to your vault", done: true },
+        { label: "Extract values into a blood test record", done: true },
+        { label: "Link relevant conditions and meds", done: true },
+        { label: "Tell you what stands out", done: true },
+      ]}
+    />
+  ),
+  "onboarding-name-free-text": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "murph", body: "What should I call you?" },
+        { from: "user", body: "just Sam" },
+        { from: "murph", body: "Got it, Sam. Age and a quick gender ask are optional — skip either anytime." },
+      ]}
+    />
+  ),
+  "handoff-return-to-source-channel": (
+    <ChecklistMock
+      label="Return where you started"
+      items={[
+        { label: "Text-origin handoff → reply on text", done: true },
+        { label: "Telegram-origin → reply on Telegram", done: true },
+        { label: "Email-origin → same email thread", done: true },
+      ]}
+    />
+  ),
+  "whoop-junction-local-day": (
+    <StatBlock
+      label="WHOOP / Junction days"
+      before="UTC drift"
+      after="Local day"
+      caption="records line up with your calendar"
+    />
+  ),
+  "assistant-progress-cap": (
+    <StatBlock
+      label="Mid-turn progress updates"
+      before="Up to 5"
+      after="2 max"
+      caption="spaced apart, only when silence hurts"
+    />
+  ),
+  "preflight-outbox-no-churn": (
+    <StatBlock
+      label="Pre-provider retries"
+      before="97 churned attempts"
+      after="0"
+      caption="parked until approval lands"
+    />
+  ),
+  "message-variants-deliverability": (
+    <ChecklistMock
+      label="Refreshed system replies"
+      items={[
+        { label: "Welcome & signup", done: true },
+        { label: "Daily quota", done: true },
+        { label: "Home-line redirect", done: true },
+        { label: "AI usage notices", done: true },
+      ]}
+    />
+  ),
+  "linq-typing-cadence": (
+    <StatBlock
+      label="Linq typing refresh"
+      before="Every 2 sec"
+      after="Per-turn"
+      caption="no high-frequency keepalive"
+    />
+  ),
+  "device-activity-listener-handoff": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "Did three WHOOP workouts today — all back-to-back" },
+        {
+          from: "murph",
+          body: "Sent your recovery prompt after each one. Listener stays on for tomorrow.",
+        },
+      ]}
+    />
+  ),
   "coach-skills-six-new": (
     <ChecklistMock
       label="New coach skills"
@@ -365,9 +588,9 @@ const VISUALS: Record<string, ReactNode> = {
   "handoff-viewport-match": (
     <StatBlock
       label="Handoff browser"
-      before="Desktop"
-      after="Phone-shaped"
-      caption="from the first frame"
+      before="Default"
+      after="Session-sized"
+      caption="remembered per device"
     />
   ),
   "handoff-mobile-takeover-overlay": (

@@ -40,7 +40,8 @@ const setupLeadText = "about ninety seconds";
 const setupReplyText = `Done - I will remind you here in ${setupLeadText}.`;
 const setupRequestText = `Remind me here in ${setupLeadText} to go to sleep.`;
 const scheduledReminderMinimumRunwayMs = 10_000;
-const scheduledReminderSendWaitMs = 240_000;
+const scheduledReminderSendWaitMs = 90_000;
+const scheduledReminderCompletionWaitMs = 60_000;
 const productionLikeAssistantModel = "gpt-5.5";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -153,7 +154,9 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 
     expect(sendRequest.method).toBe("POST");
     expect(requireLinqStub().readObservedMessageText(sendRequest)).toBe(reminderText);
-    const reminderStatus = await requireScenario().waitForHostedCompletion(userId);
+    const reminderStatus = await requireScenario().waitForHostedCompletion(userId, {
+      timeoutMs: scheduledReminderCompletionWaitMs,
+    });
     expect(reminderStatus.lastErrorCode ?? null).toBeNull();
     const providerRequestTokenPricingBasis =
       await resolveScheduledReminderCronProviderRequestTokenPricingBasis({

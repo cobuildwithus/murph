@@ -8,13 +8,13 @@ Last verified: 2026-04-20
 
 **Seam:** `packages/contracts/src/automation.ts`, `packages/core/src/automation.ts`, `packages/query/src/automation.ts`, `packages/cli/src/commands/automation.ts`
 
-The automation schedule, route, status, continuity-policy, schema-version, and doc-type shapes were being restated in four places.
+The automation schedule, route, status, assistant-target override, continuity-policy, schema-version, and doc-type shapes were being restated in four places.
 That made one product concept look local to each layer even though the contract package already owns the canonical write shape.
 
 This patch:
 
 - reuses `AUTOMATION_SCHEMA_VERSION`, `AUTOMATION_DOC_TYPE`, `automationStatusValues`, `automationContinuityPolicyValues`, and `automationScheduleKindValues` from `packages/contracts/src/automation.ts`
-- reuses the contract `AutomationSchedule`, `AutomationRoute`, `AutomationStatus`, `AutomationContinuityPolicy`, and `AutomationScaffoldPayload` types in `packages/core/src/automation.ts`
+- reuses the contract `AutomationSchedule`, `AutomationRoute`, `AutomationStatus`, `AutomationAssistantTargetOverride`, `AutomationContinuityPolicy`, and `AutomationScaffoldPayload` types in `packages/core/src/automation.ts`
 - reuses the same contract types/constants in `packages/query/src/automation.ts`
 - reuses `automationRouteSchema`, `automationScheduleSchema`, `automationScaffoldPayloadSchema`, and the shared status/continuity enums in `packages/cli/src/commands/automation.ts`
 

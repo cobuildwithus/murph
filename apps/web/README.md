@@ -144,18 +144,20 @@ The hosted Prisma schema keeps ownership sharp and nested:
   own member-scoped Kernel profile names, resumable run state, and durable
   `awaiting_user` checkpoints. Assistant dynamic tools receive only run handles;
   `apps/web` owns Kernel lifecycle and encrypted browser capabilities. Awaiting
-  runs resume when normal `computer_start_run` selects the member's active
-  awaiting run and `apps/web` verifies a newer hosted `conversation.message`
-  mailbox item for the same member and delivery context; model-supplied run ids
-  or confirmation text are not proof.
+  runs open through `computer_open`, which creates, reuses, resumes, or safely
+  reclaims completed or stale-checkpointed active runs and returns current page
+  state. `apps/web` verifies newer
+  hosted `conversation.message` mailbox items and delivery context when reply
+  proof is required; model-supplied run ids or confirmation text are not proof.
   `computer_act` runs bounded raw Playwright code against the current Kernel
   page, and `computer_os_control` is a bounded mouse/keyboard fallback for page
   surfaces that cannot be operated through Playwright. The agent explicitly
   selects `managed_login` for Kernel Hosted UI plus a durable profile/domain
   connection, or `login` for the existing Live View takeover; CAPTCHA,
-  payment, missing-detail, and direct takeover handoffs remain Live View. Each authenticated
-  handoff matches the active browser viewport to the opening screen before
-  showing the live view.
+  payment, missing-detail, and direct takeover handoffs remain Live View. Authenticated
+  handoffs reuse the current hosted web session's last measured takeover surface
+  as a fast browser-viewport hint, then correct from the live client surface in
+  the background without blocking takeover.
 - `hosted_user_crypto_envelope` stores signed wrapped per-user/per-domain root
   envelopes; plaintext roots are never stored
 - `hosted_user_crypto_audit` records hosted crypto authority events
@@ -501,6 +503,8 @@ deploys `apps/web`. Production is the minimum.
 - Set `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET` to the same value used by the
   trusted auth edge that signs browser assertions for lower-level device-sync
   bridge routes.
+- Set `DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED=true` when admin
+  device-sync diagnostics should be available outside localhost.
 
 ## Browser auth contract
 
@@ -655,8 +659,8 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `GET /api/internal/hosted-workspace`
 - `POST /api/internal/hosted-workspace/checkpoint`
 - `POST /api/internal/computer/runs`
-- `POST /api/internal/computer/runs/:runId/observe`
 - `POST /api/internal/computer/runs/:runId/act`
+- `POST /api/internal/computer/runs/:runId/os-control`
 - `POST /api/internal/computer/runs/:runId/pause-for-user`
 - `POST /api/internal/computer/runs/:runId/finish`
 - `GET /api/internal/hosted-onboarding/stripe/cron`

@@ -1,6 +1,6 @@
 {
   "name": "@murphai/hosted-execution",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": false,
   "type": "module",
   "license": "Apache-2.0",
@@ -138,6 +138,7 @@
     "node": ">=24.14.1"
   },
   "dependencies": {
+    "@junction-api/sdk": "1.2.0",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/device-syncd": "workspace:*",

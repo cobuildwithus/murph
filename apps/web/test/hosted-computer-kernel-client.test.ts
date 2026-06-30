@@ -96,23 +96,23 @@ describe("KernelComputerClient", () => {
     });
   });
 
-  it("updates only when the requested viewport preset differs", async () => {
+  it("updates only when the requested concrete viewport differs", async () => {
     kernelSdkMocks.browserRetrieve
       .mockResolvedValueOnce({
-        viewport: { height: 844, width: 390 },
+        viewport: { height: 844, refresh_rate: 60, width: 390 },
       })
       .mockResolvedValueOnce({
-        viewport: { height: 844, width: 390 },
+        viewport: { height: 844, refresh_rate: 60, width: 390 },
       });
     const client = new KernelComputerClient({ apiKey: "test-kernel-key" });
 
     await client.ensureBrowserViewport({
-      preset: "mobile",
       sessionId: "kernel-session-1",
+      viewport: { height: 844, refresh_rate: 60, width: 390 },
     });
     await client.ensureBrowserViewport({
-      preset: "desktop",
       sessionId: "kernel-session-1",
+      viewport: { height: 1080, refresh_rate: 25, width: 1920 },
     });
 
     expect(kernelSdkMocks.browserRetrieve).toHaveBeenNthCalledWith(
@@ -137,6 +137,30 @@ describe("KernelComputerClient", () => {
     );
   });
 
+  it("updates when only the requested refresh rate differs", async () => {
+    kernelSdkMocks.browserRetrieve.mockResolvedValueOnce({
+      viewport: { height: 844, refresh_rate: 25, width: 390 },
+    });
+    const client = new KernelComputerClient({ apiKey: "test-kernel-key" });
+
+    await client.ensureBrowserViewport({
+      sessionId: "kernel-session-1",
+      viewport: { height: 844, refresh_rate: 60, width: 390 },
+    });
+
+    expect(kernelSdkMocks.browserUpdate).toHaveBeenCalledWith(
+      "kernel-session-1",
+      {
+        viewport: {
+          force: true,
+          height: 844,
+          refresh_rate: 60,
+          width: 390,
+        },
+      },
+    );
+  });
+
   it("sanitizes viewport SDK failures", async () => {
     kernelSdkMocks.browserRetrieve.mockRejectedValueOnce(
       new Error("upstream error for kernel-session-secret"),
@@ -144,8 +168,8 @@ describe("KernelComputerClient", () => {
     const client = new KernelComputerClient({ apiKey: "test-kernel-key" });
 
     await expect(client.ensureBrowserViewport({
-      preset: "desktop",
       sessionId: "kernel-session-secret",
+      viewport: { height: 1080, refresh_rate: 25, width: 1920 },
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_VIEWPORT_UPDATE_FAILED",
       message: "Computer browser viewport update failed.",
