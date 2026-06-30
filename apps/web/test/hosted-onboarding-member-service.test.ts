@@ -23,7 +23,6 @@ import {
   ensureHostedMemberForPhone,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import {
-  clearHostedMemberPendingLinqBindingTx,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberPendingLinqBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
@@ -838,81 +837,6 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     });
     expect(updateMany).not.toHaveBeenCalled();
     expect(upsert).not.toHaveBeenCalled();
-  });
-
-  it("replaces an expected pending Linq claim with the accepted provider chat", async () => {
-    const pendingLookupKey = createHostedLinqChatLookupKey("claim_chat");
-    if (!pendingLookupKey) {
-      throw new Error("Expected test Linq chat id to produce a lookup key.");
-    }
-    const executeRaw = vi.fn().mockResolvedValue(0);
-    const findUnique = vi.fn()
-      .mockResolvedValueOnce({
-        linqChatLookupKey: null,
-        pendingLinqChatLookupKey: pendingLookupKey,
-      })
-      .mockResolvedValue(null);
-    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
-    const upsert = vi.fn().mockResolvedValue({});
-    const prisma = asRootPrisma({
-      $executeRaw: executeRaw,
-      hostedMemberRouting: {
-        findUnique,
-        updateMany,
-        upsert,
-      },
-    });
-
-    await upsertHostedMemberPendingLinqBindingTx({
-      existingChatPolicy: "fail",
-      expectedExistingLinqChatId: "claim_chat",
-      linqChatId: "chat_new",
-      memberId: "member_123",
-      prisma: prisma as never,
-      recipientPhone: "+15550100001",
-    });
-
-    expect(executeRaw).toHaveBeenCalledTimes(2);
-    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
-      update: expect.objectContaining({
-        pendingLinqChatIdEncrypted: expect.stringMatching(/^hsb-test:/u),
-        pendingLinqChatLookupKey: expect.stringMatching(/^hbidx:linq-chat:v1:/u),
-      }),
-      where: {
-        memberId: "member_123",
-      },
-    }));
-  });
-
-  it("clears only the expected pending Linq binding", async () => {
-    const executeRaw = vi.fn().mockResolvedValue(0);
-    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const prisma = asRootPrisma({
-      $executeRaw: executeRaw,
-      hostedMemberRouting: {
-        updateMany,
-      },
-    });
-
-    await clearHostedMemberPendingLinqBindingTx({
-      linqChatId: "claim_chat",
-      memberId: "member_123",
-      prisma: prisma as never,
-    });
-
-    expect(executeRaw).toHaveBeenCalledTimes(1);
-    expect(updateMany).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        pendingLinqChatIdEncrypted: null,
-        pendingLinqChatLookupKey: null,
-      }),
-      where: {
-        memberId: "member_123",
-        pendingLinqChatLookupKey: {
-          in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
-        },
-      },
-    });
   });
 
   it("fails closed before overwriting a different pending Linq chat", async () => {
