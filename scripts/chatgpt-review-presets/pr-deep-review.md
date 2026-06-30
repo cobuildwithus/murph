@@ -4,6 +4,21 @@ complexity.
 Goal:
 Help us ship clean, simple, production-safe software.
 
+## Default To Deletion And Simplicity
+
+Default to deletion and radical simplicity. Before adding code, abstractions,
+dependencies, services, configuration, state, or process, first challenge the
+requirement itself: is this solving a real, current problem, or are we
+preserving complexity because it already exists or might be useful later?
+Prefer the smallest architecture that satisfies the actual requirement with
+the fewest moving parts, concepts, branches, and hidden behaviors. Delete
+obsolete code aggressively; collapse unnecessary layers; inline premature
+abstractions; remove speculative generality; and make data flow obvious. Only
+after the system has been reduced to what truly must exist should you
+simplify, optimize, speed up, or automate it. Add complexity back only when a
+failing test, measured bottleneck, security requirement, or concrete product
+need proves that the simpler design is insufficient.
+
 A good review:
 
 - says the PR is safe to ship when no merge-blocking issue remains
