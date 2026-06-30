@@ -119,7 +119,9 @@ export function parseHostedPulseTrialResetBatchSize(value: string): number {
 
 export function buildHostedPulseTrialResetWindow(now = new Date()): HostedPulseTrialResetWindow {
   return {
-    trialEndsAt: new Date(now.getTime() + HOSTED_PULSE_TRIAL_DAYS * MS_PER_DAY),
+    trialEndsAt: toStripeUnixSecondDate(
+      new Date(now.getTime() + HOSTED_PULSE_TRIAL_DAYS * MS_PER_DAY),
+    ),
     trialStartedAt: now,
   };
 }
@@ -491,4 +493,8 @@ function buildHostedPulseTrialUsagePeriodResetData(input: {
     periodStart: input.resetWindow.trialStartedAt,
     spentUsdMicros: 0n,
   };
+}
+
+function toStripeUnixSecondDate(value: Date): Date {
+  return new Date(Math.floor(value.getTime() / 1000) * 1000);
 }
