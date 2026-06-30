@@ -7446,6 +7446,35 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     ).toBe("2026-04-27T00:10:00.000Z");
   });
 
+  it("preserves queued provider cleanup when pending assistant input runs first", async () => {
+    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
+      "2026-04-27T00:10:00.000Z",
+    );
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:10:00.000Z",
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledWith("/tmp/murph-vault");
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      progressed: true,
+    }));
+  });
+
   it("runs pending assistant input before due device-sync work", async () => {
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
       "2026-04-27T00:10:00.000Z",

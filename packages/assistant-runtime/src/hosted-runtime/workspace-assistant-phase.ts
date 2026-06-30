@@ -2975,10 +2975,10 @@ async function runProviderCleanupPhase(input: {
     });
   }
 
-  const providerCleanupCheckpoint = input.foregroundAssistantPass
-    ? input.initialProviderCleanupCheckpoint
-      ?? await readHostedProviderCleanupCheckpoint(input.input.restored.vaultRoot)
-    : input.initialProviderCleanupCheckpoint;
+  const providerCleanupCheckpoint = input.initialProviderCleanupCheckpoint
+    ?? (terminalLinqCleanupDue
+      ? { nextWakeAt: null }
+      : await readHostedProviderCleanupCheckpoint(input.input.restored.vaultRoot));
   const providerCleanupDue = !input.foregroundAssistantPass
     && isHostedProviderCleanupCheckpointDue(providerCleanupCheckpoint, input.input);
   const deferredProviderCleanupWakeAt = resolveHostedProviderCleanupPhaseWakeAt({
