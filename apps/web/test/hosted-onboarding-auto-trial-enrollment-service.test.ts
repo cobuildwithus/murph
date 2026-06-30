@@ -192,7 +192,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         currentTrialStartedAt: new Date("2026-06-14T12:00:00.000Z"),
         lastStripeEventCreatedAt: new Date("2026-06-14T12:00:00.000Z"),
         memberId: "member_123",
-        pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
         pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
         stripeCustomerId: "cus_auto_trial_123",
         stripeSubscriptionId: "sub_auto_trial_123",
@@ -275,11 +275,11 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         billingPlanCode: "launch_monthly",
         checkoutOffer: "pulse_trial_7d",
         memberId: "member_123",
-        trialDurationDays: "7",
-        trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+        trialDurationDays: "10",
+        trialPolicyVersion: "pulse-trial-2026-06-30-v2",
         trialUsageLimitUsdMicros: "4500000",
       },
-      trial_period_days: 7,
+      trial_period_days: 10,
       trial_settings: {
         end_behavior: {
           missing_payment_method: "pause",
@@ -288,7 +288,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     }, {
       idempotencyKey: buildHostedAutoPulseTrialSubscriptionIdempotencyKey({
         memberId: "member_123",
-        policyVersion: "pulse-trial-2026-05-05-v1",
+        policyVersion: "pulse-trial-2026-06-30-v2",
         priceId: "price_pulse_monthly_123",
         recoveryScope: "initial",
         stripeCustomerId: "cus_auto_trial_123",
@@ -315,7 +315,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         currentTrialEndsAt: new Date("2026-06-21T12:00:00.000Z"),
         currentTrialStartedAt: new Date("2026-06-14T12:00:00.000Z"),
         freshnessPolicy: "auto-pulse-trial-entitlement",
-        pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
         pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
         stripeCustomerId: "cus_auto_trial_123",
         stripeSubscriptionId: "sub_auto_trial_123",
@@ -374,7 +374,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(
       buildHostedAutoPulseTrialSubscriptionIdempotencyKey({
         memberId: "member_123",
-        policyVersion: "pulse-trial-2026-05-05-v1",
+        policyVersion: "pulse-trial-2026-06-30-v2",
         priceId: "price_pulse_monthly_123",
         recoveryScope: "initial",
         stripeCustomerId: "cus_auto_trial_123",
@@ -382,7 +382,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     ).toBe(
       buildHostedAutoPulseTrialSubscriptionIdempotencyKey({
         memberId: "member_123",
-        policyVersion: "pulse-trial-2026-05-05-v1",
+        policyVersion: "pulse-trial-2026-06-30-v2",
         priceId: "price_pulse_monthly_123",
         recoveryScope: "initial",
         stripeCustomerId: "cus_auto_trial_123",
@@ -579,7 +579,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       {
         idempotencyKey: buildHostedAutoPulseTrialSubscriptionIdempotencyKey({
           memberId: "member_123",
-          policyVersion: "pulse-trial-2026-05-05-v1",
+          policyVersion: "pulse-trial-2026-06-30-v2",
           priceId: "price_pulse_monthly_123",
           recoveryScope: "after-terminal:sub_expired_trial_123:incomplete_expired:1781438500",
           stripeCustomerId: "cus_auto_trial_123",
@@ -946,7 +946,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         currentTrialStartedAt: new Date("2026-06-14T12:00:00.000Z"),
         lastStripeEventCreatedAt: null,
         memberId: "member_123",
-        pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+        pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
         pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
         stripeCustomerId: "cus_existing_123",
         stripeSubscriptionId: "sub_old_123",
@@ -1143,7 +1143,7 @@ function makePulseTrialBillingRef(overrides: Record<string, unknown> = {}) {
     currentTrialStartedAt: new Date("2026-06-14T12:00:00.000Z"),
     lastStripeEventCreatedAt: null,
     memberId: "member_123",
-    pulseTrialPolicyVersion: "pulse-trial-2026-05-05-v1",
+    pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
     pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
     stripeCustomerId: "cus_existing_123",
     stripeSubscriptionId: "sub_existing_trial_123",
@@ -1204,8 +1204,8 @@ function makeTrialSubscriptionMetadata(
     billingPlanCode: "launch_monthly",
     checkoutOffer: "pulse_trial_7d",
     memberId: "member_123",
-    trialDurationDays: "7",
-    trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+    trialDurationDays: "10",
+    trialPolicyVersion: "pulse-trial-2026-06-30-v2",
     trialUsageLimitUsdMicros: "4500000",
     ...overrides,
   };

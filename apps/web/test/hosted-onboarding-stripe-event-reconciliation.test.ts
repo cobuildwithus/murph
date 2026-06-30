@@ -1200,7 +1200,7 @@ function makePulseTrialCheckoutCompletedEvent(): Stripe.Event {
           billingPlanCode: "launch_monthly",
           checkoutOffer: "pulse_trial_7d",
           memberId: "member_123",
-          trialPolicyVersion: "pulse-trial-2026-05-05-v1",
+          trialPolicyVersion: "pulse-trial-2026-06-30-v2",
         },
         mode: "subscription",
         status: "complete",

@@ -17,6 +17,7 @@
     "start": "next start",
     "dev:smoke": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-smoke.ts",
     "product-labels:env-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-product-label-runtime-env.ts",
+    "pulse-trial:reset": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/reset-pulse-trials.ts",
     "device:reconnect-link": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/create-device-reconnect-link.ts",
     "pitch:pdf": "pnpm --dir ../.. exec tsx apps/web/scripts/export-pitch-pdf.ts",
     "legal:pdf": "pnpm --dir ../.. exec tsx apps/web/scripts/generate-legal-pdfs.ts",

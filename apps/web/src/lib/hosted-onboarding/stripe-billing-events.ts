@@ -13,12 +13,15 @@ import {
 import {
   HOSTED_PULSE_TRIAL_OFFER,
   HOSTED_PULSE_TRIAL_POLICY_VERSION,
+  HOSTED_PULSE_TRIAL_STARTED_AT_OVERRIDE_METADATA_KEY,
   HOSTED_STANDARD_CHECKOUT_OFFER,
   getHostedBillingPlanDefinition,
   HOSTED_BILLING_PLAN_CODES,
   parseHostedBillingCheckoutOffer,
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
+  parseHostedPulseTrialPolicyVersion,
+  requireHostedPulseTrialPolicy,
 } from "./billing-plans";
 import { isHostedAccessBlockedBillingStatus } from "./entitlement";
 import {
@@ -186,8 +189,11 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
 
   const currentPeriodStart = readHostedStripeSubscriptionDate(subscription, "current_period_start");
   const currentPeriodEnd = readHostedStripeSubscriptionDate(subscription, "current_period_end");
-  const currentTrialStartedAt = readHostedStripeSubscriptionDate(subscription, "trial_start");
   const currentTrialEndsAt = readHostedStripeSubscriptionDate(subscription, "trial_end");
+  const currentTrialStartedAt = readHostedStripePulseTrialStartedAt(
+    subscription,
+    currentTrialEndsAt,
+  );
   const currentPeriodSnapshot = buildHostedPulseTrialCheckoutCurrentPeriodSnapshot({
     currentPeriodEnd,
     currentPeriodStart,
@@ -220,7 +226,9 @@ export async function applyPulseTrialCheckoutCompletedTx(input: {
     dispatchContext: input.dispatchContext,
     freshnessPolicy: "trial-checkout-entitlement",
     member: input.member,
-    pulseTrialPolicyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
+    pulseTrialPolicyVersion:
+      parseHostedPulseTrialPolicyVersion(input.session.metadata?.trialPolicyVersion)
+      ?? HOSTED_PULSE_TRIAL_POLICY_VERSION,
     pulseTrialRedeemedAt: currentTrialStartedAt,
     stripeCustomerId: coerceStripeObjectId(input.session.customer)
       ?? coerceStripeObjectId(subscription.customer)
@@ -908,8 +916,11 @@ function buildHostedStripeSubscriptionTrialDateSnapshot(
   currentTrialEndsAt?: Date | null;
   currentTrialStartedAt?: Date | null;
 } {
-  const currentTrialStartedAt = readHostedStripeSubscriptionDate(subscription, "trial_start");
   const currentTrialEndsAt = readHostedStripeSubscriptionDate(subscription, "trial_end");
+  const currentTrialStartedAt = readHostedStripePulseTrialStartedAt(
+    subscription,
+    currentTrialEndsAt,
+  );
 
   return {
     ...(currentTrialStartedAt ? { currentTrialStartedAt } : {}),
@@ -1057,6 +1068,33 @@ function readHostedStripeSubscriptionDate(
   return readHostedStripeObjectDate(subscription, field);
 }
 
+function readHostedStripePulseTrialStartedAt(
+  subscription: Stripe.Subscription,
+  currentTrialEndsAt: Date | null,
+): Date | null {
+  const override = readHostedStripeMetadataDate(
+    subscription.metadata?.[HOSTED_PULSE_TRIAL_STARTED_AT_OVERRIDE_METADATA_KEY],
+  );
+  if (
+    override &&
+    currentTrialEndsAt &&
+    override.getTime() < currentTrialEndsAt.getTime()
+  ) {
+    return override;
+  }
+
+  return readHostedStripeSubscriptionDate(subscription, "trial_start");
+}
+
+function readHostedStripeMetadataDate(value: string | null | undefined): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
 function readHostedStripeObjectDate(
   value: object,
   field: "current_period_end" | "current_period_start" | "trial_end" | "trial_start",
@@ -1114,13 +1152,17 @@ function isPulseTrialCheckoutSessionEntitlementCandidate(
   session: Stripe.Checkout.Session,
   memberId: string,
 ): boolean {
+  const trialPolicy = requireHostedPulseTrialPolicy(session.metadata?.trialPolicyVersion);
+
   return session.status === "complete" &&
     session.mode === "subscription" &&
     session.client_reference_id === memberId &&
     session.metadata?.memberId === memberId &&
     session.metadata?.billingPlanCode === "launch_monthly" &&
     session.metadata?.checkoutOffer === HOSTED_PULSE_TRIAL_OFFER &&
-    session.metadata?.trialPolicyVersion === HOSTED_PULSE_TRIAL_POLICY_VERSION;
+    trialPolicy !== null &&
+    session.metadata?.trialDurationDays === trialPolicy.durationDays.toString() &&
+    session.metadata?.trialUsageLimitUsdMicros === trialPolicy.usageLimitUsdMicros.toString();
 }
 
 function isValidPulseTrialCheckoutSubscription(input: {
