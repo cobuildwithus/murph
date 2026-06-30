@@ -1,8 +1,8 @@
 import "server-only";
 
 import {
-  readConfiguredDeviceSyncConnectTargetConfigs,
-} from "@murphai/device-syncd/connect-config";
+  readConfiguredDeviceSyncProviderConfigs,
+} from "@murphai/device-syncd/provider-configs";
 import {
   listConfiguredDeviceSyncPublicProviderDescriptors,
 } from "@murphai/device-syncd/public-provider-descriptors";
@@ -72,7 +72,7 @@ async function buildHostedDeviceSyncSettingsSourcesForMember(input: {
     }),
   );
   const providers = listConfiguredDeviceSyncPublicProviderDescriptors(
-    readConfiguredDeviceSyncConnectTargetConfigs(process.env),
+    readConfiguredDeviceSyncProviderConfigs(process.env),
     { publicBaseUrl: env.publicBaseUrl },
   );
   const sources = buildHostedDeviceSyncSettingsSources({

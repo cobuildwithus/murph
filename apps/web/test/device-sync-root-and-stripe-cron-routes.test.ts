@@ -93,6 +93,30 @@ describe("device-sync root route", () => {
     });
   });
 
+  it("does not advertise providers when authoritative provider config is invalid", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("OURA_RECONCILE_DAYS", "soon");
+
+    try {
+      const response = await deviceSyncRootRoute.GET(
+        new Request("https://join.example.test/api/device-sync"),
+      );
+
+      expect(response.status).toBe(400);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+      expect(mocks.describeProviders).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "INVALID_REQUEST",
+          message: "Invalid request.",
+        },
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("maps route wrapper request errors to a no-store JSON error", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");

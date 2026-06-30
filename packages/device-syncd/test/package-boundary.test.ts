@@ -24,6 +24,7 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     "./hosted-runtime",
     "./http",
     "./local-secret-codec",
+    "./provider-configs",
     "./provider-credential-policy",
     "./provider-label",
     "./provider-match",
@@ -55,6 +56,10 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
   assert.deepEqual(packageManifest.exports?.["./provider-credential-policy"], {
     default: "./dist/provider-credential-policy.js",
     types: "./dist/provider-credential-policy.d.ts",
+  });
+  assert.deepEqual(packageManifest.exports?.["./provider-configs"], {
+    default: "./dist/provider-configs.js",
+    types: "./dist/provider-configs.d.ts",
   });
   assert.deepEqual(packageManifest.exports?.["./provider-match"], {
     default: "./dist/provider-match.js",

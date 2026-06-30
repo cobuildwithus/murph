@@ -1,4 +1,3 @@
-import { getConfiguredDeviceSyncProviderManifest } from "./provider-manifests.ts";
 import {
   configuredDeviceSyncProviderKeys,
   listConfiguredDeviceSyncProviderNames,
@@ -8,6 +7,7 @@ import {
   parseCsvEnv,
   parseIntegerEnv,
   parsePortEnv,
+  readOptionalCredentialPair,
   requireEnv,
 } from "./provider-config-helpers.ts";
 
@@ -18,6 +18,41 @@ import type {
   ConfiguredDeviceSyncProviderPresence,
   DeviceSyncEnvSource,
 } from "./provider-types.ts";
+import {
+  OURA_API_BASE_URL_ENV_KEYS,
+  OURA_AUTH_BASE_URL_ENV_KEYS,
+  OURA_BACKFILL_DAYS_ENV_KEYS,
+  OURA_CLIENT_ID_ENV_KEYS,
+  OURA_CLIENT_SECRET_ENV_KEYS,
+  OURA_RECONCILE_DAYS_ENV_KEYS,
+  OURA_RECONCILE_INTERVAL_MS_ENV_KEYS,
+  OURA_REQUEST_TIMEOUT_MS_ENV_KEYS,
+  OURA_SCOPES_ENV_KEYS,
+  OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
+  OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS,
+  STRAVA_API_BASE_URL_ENV_KEYS,
+  STRAVA_AUTH_BASE_URL_ENV_KEYS,
+  STRAVA_BACKFILL_DAYS_ENV_KEYS,
+  STRAVA_CLIENT_ID_ENV_KEYS,
+  STRAVA_CLIENT_SECRET_ENV_KEYS,
+  STRAVA_RECONCILE_DAYS_ENV_KEYS,
+  STRAVA_RECONCILE_INTERVAL_MS_ENV_KEYS,
+  STRAVA_REQUEST_TIMEOUT_MS_ENV_KEYS,
+  STRAVA_SCOPES_ENV_KEYS,
+  STRAVA_WEBHOOK_SIGNING_SECRET_ENV_KEYS,
+  STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
+  STRAVA_WEBHOOK_VERIFY_TOKEN_ENV_KEYS,
+  WHOOP_BACKFILL_DAYS_ENV_KEYS,
+  WHOOP_BASE_URL_ENV_KEYS,
+  WHOOP_CLIENT_ID_ENV_KEYS,
+  WHOOP_CLIENT_SECRET_ENV_KEYS,
+  WHOOP_RECONCILE_DAYS_ENV_KEYS,
+  WHOOP_RECONCILE_INTERVAL_MS_ENV_KEYS,
+  WHOOP_REQUEST_TIMEOUT_MS_ENV_KEYS,
+  WHOOP_SCOPES_ENV_KEYS,
+  WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
+} from "./provider-env.ts";
+import { readConfiguredJunctionDeviceSyncProviderConfig } from "../providers/junction-config.ts";
 import type { OuraDeviceSyncProviderConfig } from "../providers/oura.ts";
 import type { StravaDeviceSyncProviderConfig } from "../providers/strava.ts";
 import type { WhoopDeviceSyncProviderConfig } from "../providers/whoop.ts";
@@ -31,42 +66,120 @@ export type {
 } from "./provider-types.ts";
 
 export { configuredDeviceSyncProviderKeys };
+export { readConfiguredJunctionDeviceSyncProviderConfig };
 
 export function readConfiguredDeviceSyncProviderConfigs(
   env: DeviceSyncEnvSource,
 ): ConfiguredDeviceSyncProviderConfigs {
   const configs: ConfiguredDeviceSyncProviderConfigs = {};
 
-  for (const provider of configuredDeviceSyncProviderKeys) {
-    const manifest = getConfiguredDeviceSyncProviderManifest(provider);
-    const config = manifest.readConfig(env);
+  const junction = readConfiguredJunctionDeviceSyncProviderConfig(env);
+  if (junction) {
+    configs.junction = junction;
+  }
 
-    if (config) {
-      configs[provider] = config as never;
-    }
+  const oura = readConfiguredOuraDeviceSyncProviderConfig(env);
+  if (oura) {
+    configs.oura = oura;
+  }
+
+  const whoop = readConfiguredWhoopDeviceSyncProviderConfig(env);
+  if (whoop) {
+    configs.whoop = whoop;
+  }
+
+  const strava = readConfiguredStravaDeviceSyncProviderConfig(env);
+  if (strava) {
+    configs.strava = strava;
   }
 
   return configs;
 }
 
-export { readConfiguredJunctionDeviceSyncProviderConfig } from "../providers/junction-config.ts";
-
 export function readConfiguredWhoopDeviceSyncProviderConfig(
   env: DeviceSyncEnvSource,
 ): WhoopDeviceSyncProviderConfig | null {
-  return getConfiguredDeviceSyncProviderManifest("whoop").readConfig(env);
+  const credentials = readOptionalCredentialPair(
+    env,
+    WHOOP_CLIENT_ID_ENV_KEYS,
+    WHOOP_CLIENT_SECRET_ENV_KEYS,
+    "WHOOP",
+  );
+
+  if (!credentials) {
+    return null;
+  }
+
+  return {
+    clientId: credentials.clientId,
+    clientSecret: credentials.clientSecret,
+    baseUrl: optionalEnv(env, WHOOP_BASE_URL_ENV_KEYS),
+    scopes: parseCsvEnv(env, WHOOP_SCOPES_ENV_KEYS),
+    backfillDays: parseIntegerEnv(env, WHOOP_BACKFILL_DAYS_ENV_KEYS),
+    reconcileDays: parseIntegerEnv(env, WHOOP_RECONCILE_DAYS_ENV_KEYS),
+    reconcileIntervalMs: parseIntegerEnv(env, WHOOP_RECONCILE_INTERVAL_MS_ENV_KEYS),
+    webhookTimestampToleranceMs: parseIntegerEnv(env, WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
+    requestTimeoutMs: parseIntegerEnv(env, WHOOP_REQUEST_TIMEOUT_MS_ENV_KEYS),
+  };
 }
 
 export function readConfiguredOuraDeviceSyncProviderConfig(
   env: DeviceSyncEnvSource,
 ): OuraDeviceSyncProviderConfig | null {
-  return getConfiguredDeviceSyncProviderManifest("oura").readConfig(env);
+  const credentials = readOptionalCredentialPair(
+    env,
+    OURA_CLIENT_ID_ENV_KEYS,
+    OURA_CLIENT_SECRET_ENV_KEYS,
+    "Oura",
+  );
+
+  if (!credentials) {
+    return null;
+  }
+
+  return {
+    clientId: credentials.clientId,
+    clientSecret: credentials.clientSecret,
+    authBaseUrl: optionalEnv(env, OURA_AUTH_BASE_URL_ENV_KEYS),
+    apiBaseUrl: optionalEnv(env, OURA_API_BASE_URL_ENV_KEYS),
+    scopes: parseCsvEnv(env, OURA_SCOPES_ENV_KEYS),
+    backfillDays: parseIntegerEnv(env, OURA_BACKFILL_DAYS_ENV_KEYS),
+    reconcileDays: parseIntegerEnv(env, OURA_RECONCILE_DAYS_ENV_KEYS),
+    reconcileIntervalMs: parseIntegerEnv(env, OURA_RECONCILE_INTERVAL_MS_ENV_KEYS),
+    webhookTimestampToleranceMs: parseIntegerEnv(env, OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
+    requestTimeoutMs: parseIntegerEnv(env, OURA_REQUEST_TIMEOUT_MS_ENV_KEYS),
+    webhookVerificationToken: optionalEnv(env, OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS),
+  };
 }
 
 export function readConfiguredStravaDeviceSyncProviderConfig(
   env: DeviceSyncEnvSource,
 ): StravaDeviceSyncProviderConfig | null {
-  return getConfiguredDeviceSyncProviderManifest("strava").readConfig(env);
+  const credentials = readOptionalCredentialPair(
+    env,
+    STRAVA_CLIENT_ID_ENV_KEYS,
+    STRAVA_CLIENT_SECRET_ENV_KEYS,
+    "Strava",
+  );
+
+  if (!credentials) {
+    return null;
+  }
+
+  return {
+    clientId: credentials.clientId,
+    clientSecret: credentials.clientSecret,
+    authBaseUrl: optionalEnv(env, STRAVA_AUTH_BASE_URL_ENV_KEYS),
+    apiBaseUrl: optionalEnv(env, STRAVA_API_BASE_URL_ENV_KEYS),
+    scopes: parseCsvEnv(env, STRAVA_SCOPES_ENV_KEYS),
+    backfillDays: parseIntegerEnv(env, STRAVA_BACKFILL_DAYS_ENV_KEYS),
+    reconcileDays: parseIntegerEnv(env, STRAVA_RECONCILE_DAYS_ENV_KEYS),
+    reconcileIntervalMs: parseIntegerEnv(env, STRAVA_RECONCILE_INTERVAL_MS_ENV_KEYS),
+    requestTimeoutMs: parseIntegerEnv(env, STRAVA_REQUEST_TIMEOUT_MS_ENV_KEYS),
+    webhookSigningSecret: optionalEnv(env, STRAVA_WEBHOOK_SIGNING_SECRET_ENV_KEYS),
+    webhookTimestampToleranceMs: parseIntegerEnv(env, STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
+    webhookVerifyToken: optionalEnv(env, STRAVA_WEBHOOK_VERIFY_TOKEN_ENV_KEYS),
+  };
 }
 
 export function hasConfiguredDeviceSyncProviderConfigs(

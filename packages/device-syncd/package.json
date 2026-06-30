@@ -58,6 +58,10 @@
       "types": "./dist/provider-credential-policy.d.ts",
       "default": "./dist/provider-credential-policy.js"
     },
+    "./provider-configs": {
+      "types": "./dist/provider-configs.d.ts",
+      "default": "./dist/provider-configs.js"
+    },
     "./provider-match": {
       "types": "./dist/provider-match.d.ts",
       "default": "./dist/provider-match.js"

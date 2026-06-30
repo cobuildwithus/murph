@@ -420,6 +420,29 @@ describe("device sync settings routes", () => {
     });
   });
 
+  it("does not mark settings sources configured when authoritative provider config is invalid", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("OURA_RECONCILE_DAYS", "soon");
+
+    try {
+      const response = await settingsDeviceSyncRoute.GET(
+        new Request("https://join.example.test/api/settings/device-sync"),
+      );
+
+      expect(response.status).toBe(400);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "INVALID_REQUEST",
+          message: "Invalid request.",
+        },
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("returns a minimized sidebar status summary for the authenticated hosted member", async () => {
     const response = await settingsDeviceSyncSidebarStatusRoute.GET(
       new Request("https://join.example.test/api/settings/device-sync/sidebar-status"),

@@ -1,6 +1,6 @@
 import {
-  readConfiguredDeviceSyncConnectTargetConfigs,
-} from "@murphai/device-syncd/connect-config";
+  readConfiguredDeviceSyncProviderConfigs,
+} from "@murphai/device-syncd/provider-configs";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   listConfiguredDeviceSyncPublicProviderDescriptors,
@@ -15,7 +15,7 @@ export const GET = withJsonError(async (request: Request) => {
   return jsonOk({
     ok: true,
     providers: listConfiguredDeviceSyncPublicProviderDescriptors(
-      readConfiguredDeviceSyncConnectTargetConfigs(process.env),
+      readConfiguredDeviceSyncProviderConfigs(process.env),
       { publicBaseUrl: resolveHostedDeviceSyncRootPublicBaseUrl(request, env) },
     ),
   });
