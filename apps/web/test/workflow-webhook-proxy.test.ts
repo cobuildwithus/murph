@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 import { describe, it } from "vitest";
 
-import { config, middleware, rejectMalformedWorkflowWebhookToken } from "../middleware";
+import { config, proxy, rejectMalformedWorkflowWebhookToken } from "../proxy";
 
-describe("workflow webhook middleware", () => {
+describe("workflow webhook proxy", () => {
   it("guards the generated workflow webhook route", () => {
     assert.equal(config.matcher, "/.well-known/workflow/v1/webhook/:path*");
   });
@@ -19,8 +19,8 @@ describe("workflow webhook middleware", () => {
     assert.equal(await response?.text(), "Malformed token");
   });
 
-  it("returns 400 from the middleware entrypoint for malformed token paths", async () => {
-    const response = middleware(
+  it("returns 400 from the proxy entrypoint for malformed token paths", async () => {
+    const response = proxy(
       new NextRequest("https://example.test/.well-known/workflow/v1/webhook/%E0%A4%A"),
     );
 
