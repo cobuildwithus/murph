@@ -33,15 +33,28 @@ export interface AssistantDeviceActivityCronJobMetadata {
 export function buildAssistantDeviceActivityAuthorityKey(
   automation: AssistantDeviceActivityAuthorityInput,
 ): string {
+  return hashAssistantDeviceActivityAuthorityPayload({
+    activityKind: automation.schedule.activityKind ?? null,
+    automationId: automation.automationId,
+    continuityPolicy: automation.continuityPolicy,
+    instructions: automation.instructions,
+    route: automation.route,
+    source: automation.schedule.source ?? null,
+  })
+}
+
+export function assistantDeviceActivityAuthorityKeyMatches(input: {
+  automation: AssistantDeviceActivityAuthorityInput
+  authorityKey: string
+}): boolean {
+  return buildAssistantDeviceActivityAuthorityKey(input.automation) === input.authorityKey
+}
+
+function hashAssistantDeviceActivityAuthorityPayload(
+  payload: Record<string, unknown>,
+): string {
   return createHash('sha256')
-    .update(JSON.stringify({
-      activityKind: automation.schedule.activityKind ?? null,
-      automationId: automation.automationId,
-      continuityPolicy: automation.continuityPolicy,
-      instructions: automation.instructions,
-      route: automation.route,
-      source: automation.schedule.source ?? null,
-    }))
+    .update(JSON.stringify(payload))
     .digest('hex')
     .slice(0, 40)
 }

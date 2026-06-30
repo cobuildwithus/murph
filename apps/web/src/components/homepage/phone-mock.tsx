@@ -1,3 +1,7 @@
+import {
+  MurphHeadshotAvatar,
+  type MurphHeadshotSrc,
+} from "./murph-headshot-avatar";
 import { PhoneChatScroller } from "./phone-chat-scroller";
 
 export type PhoneMessage = {
@@ -38,12 +42,14 @@ export type ExperimentResult = {
 export function PhoneMock({
   conversationHeight = 460,
   headerTitle = "Murph",
+  murphHeadshotSrc,
   messages,
   priorMessages,
   result,
 }: {
   conversationHeight?: number;
   headerTitle?: string;
+  murphHeadshotSrc: MurphHeadshotSrc;
   messages: ReadonlyArray<PhoneMessage>;
   priorMessages?: ReadonlyArray<PhoneMessage>;
   result?: ExperimentResult;
@@ -54,7 +60,10 @@ export function PhoneMock({
         <StatusBar />
         <div className="relative">
           <div className="absolute inset-x-0 top-0 z-20">
-            <ChatHeader title={headerTitle} />
+            <ChatHeader
+              murphHeadshotSrc={murphHeadshotSrc}
+              title={headerTitle}
+            />
           </div>
           <PhoneChatScroller conversationHeight={conversationHeight}>
             <div className="flex min-h-full flex-col justify-end gap-2 px-3 pb-3 pt-[68px]">
@@ -338,7 +347,13 @@ function StatusBar() {
   );
 }
 
-function ChatHeader({ title }: { title: string }) {
+function ChatHeader({
+  murphHeadshotSrc,
+  title,
+}: {
+  murphHeadshotSrc: MurphHeadshotSrc;
+  title: string;
+}) {
   return (
     <div className="relative z-20 flex items-start justify-between px-2.5 pb-2 pt-1.5">
       {/* Back pill with unread badge — liquid glass */}
@@ -359,11 +374,7 @@ function ChatHeader({ title }: { title: string }) {
 
       {/* Center: avatar floating just above name pill */}
       <div className="flex flex-1 flex-col items-center">
-        <div className="relative z-10 flex size-[38px] items-center justify-center rounded-full bg-[#4a4035] shadow-[0_2px_6px_-2px_rgba(0,0,0,0.3)]">
-          <span className="text-[1.125rem] font-semibold leading-none text-[#f5f0e8]">
-            M
-          </span>
-        </div>
+        <MurphHeadshotAvatar src={murphHeadshotSrc} />
         <div className="-mt-[5px] flex items-center gap-[3px] rounded-full bg-[#2d3436]/10 px-2.5 py-[3px] backdrop-blur-md ring-1 ring-inset ring-white/50">
           <p className="text-[0.6875rem] font-semibold tracking-tight text-[#2d3436]">
             {title}

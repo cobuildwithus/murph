@@ -17,7 +17,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'murph-onboarding',
     name: 'murph-onboarding',
     triggerHint:
-      'Use when Murph onboarding is open and the assistant needs the next unresolved onboarding step, or when the user clearly declines/skips onboarding and the assistant needs to mark onboarding complete with the declined reason. This includes after the user supplies onboarding-relevant context such as files, labs, supplement labels, wearable data, medications, meals, workouts, symptoms, or setup answers.',
+      'Use when Murph onboarding is open and the assistant needs the next unresolved onboarding step, or when the user clearly declines/skips onboarding and the assistant needs to mark onboarding complete with the declined reason. This includes after the user supplies onboarding-relevant context such as files, labs, supplement labels, wearable data, medications, meals, workouts, symptoms, setup answers, or slow lab/supplement saves that may be delegated to a V2 subagent.',
   },
   {
     slug: 'experiment-onboarding',

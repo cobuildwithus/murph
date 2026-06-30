@@ -7,18 +7,24 @@ import {
   useState,
 } from "react";
 
-import { LandingAuthActions, LandingAuthDialogButton } from "@/app/auth-controls";
-import { cn } from "@/src/lib/utils";
 import {
-  fetchHeroContactInfo,
-  type HeroContactInfo,
-} from "@/src/lib/hero-contact-info";
+  LandingAuthActions,
+  LandingAuthDialogButton,
+} from "@/app/auth-controls";
+import { cn } from "@/src/lib/utils";
+import { type HeroContactInfo } from "@/src/lib/hero-contact-info";
 import {
   buildMurphSmsHref,
   buildMurphTelegramTextHref,
 } from "@/src/lib/murph-contact-routing";
 
+export type HeroMessengerChannel = "imessage" | "telegram";
+
 import { ExperimentCard, type ExperimentResult } from "./phone-mock";
+import {
+  MurphHeadshotAvatar,
+  type MurphHeadshotSrc,
+} from "./murph-headshot-avatar";
 
 type BloodworkMarker = {
   label: string;
@@ -93,9 +99,9 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
   },
   {
     topic: "Bone density",
-    user: "Find me a DEXA scan nearby.",
+    user: "Book me a DEXA scan nearby.",
     murph:
-      "BodySpec on Mission has Thursday at 2pm for $49, 1.4 miles away. I put a hold on it. Confirm and I'll book it.",
+      "Booked BodySpec on Mission for Thursday at 2pm: $49, 1.4 miles away. I added the confirmation and prep notes to your calendar.",
   },
   {
     topic: "LDL cholesterol",
@@ -317,14 +323,24 @@ const FLOATER_INDEX_BY_TOPIC: Record<string, number> = FLOATERS.reduce(
   {} as Record<string, number>,
 );
 
-const FIRST_RUN_DELAY = 700;
+const FIRST_RUN_DELAY = 3000;
 const USER_BUBBLE_AT = 1400;
 const TYPING_AT = 2200;
 const REPLY_AT = 3600;
 const CYCLE_LENGTH = 7800;
 const MAX_ITEMS = 30;
 
-export function HeroClocksIn({ authenticated }: { authenticated: boolean }) {
+export function HeroClocksIn({
+  authenticated,
+  contactInfo,
+  messengerChannel,
+  murphHeadshotSrc,
+}: {
+  authenticated: boolean;
+  contactInfo: HeroContactInfo;
+  messengerChannel: HeroMessengerChannel;
+  murphHeadshotSrc: MurphHeadshotSrc;
+}) {
   const [items, setItems] = useState<ReadonlyArray<StreamItem>>([]);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const [typing, setTyping] = useState(false);
@@ -337,7 +353,6 @@ export function HeroClocksIn({ authenticated }: { authenticated: boolean }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const cancelDemoRef = useRef<(() => void) | null>(null);
   const engagedRef = useRef(false);
-  const contactsRef = useRef<HeroContactInfo | null>(null);
   const isAtBottomRef = useRef(true);
 
   const markFloaterUsed = (idx: number | null) => {
@@ -524,28 +539,19 @@ export function HeroClocksIn({ authenticated }: { authenticated: boolean }) {
     await new Promise((r) => setTimeout(r, 450));
     setTyping(true);
 
-    try {
-      let info = contactsRef.current;
-      if (!info) {
-        info = await fetchHeroContactInfo();
-        contactsRef.current = info;
-      }
-      await new Promise((r) => setTimeout(r, 1100));
-      setTyping(false);
-      setItems((prev) =>
-        [
-          ...prev,
-          {
-            kind: "contact",
-            id: ++idRef.current,
-            info: info!,
-            text: "Hey mate, shoot me a message and we can get started.",
-          } as ContactItem,
-        ].slice(-MAX_ITEMS),
-      );
-    } catch {
-      setTyping(false);
-    }
+    await new Promise((r) => setTimeout(r, 1100));
+    setTyping(false);
+    setItems((prev) =>
+      [
+        ...prev,
+        {
+          kind: "contact",
+          id: ++idRef.current,
+          info: contactInfo,
+          text: "Hey mate, shoot me a message and we can get started.",
+        } as ContactItem,
+      ].slice(-MAX_ITEMS),
+    );
   };
 
   const runExchangeOnce = async (ex: Exchange) => {
@@ -607,6 +613,13 @@ export function HeroClocksIn({ authenticated }: { authenticated: boolean }) {
     if (!ex) return;
     runExchangeOnce(ex);
   };
+
+  const channelIcon =
+    messengerChannel === "telegram" ? (
+      <TelegramLogo className="size-[18px]" />
+    ) : (
+      <IMessageLogo className="size-[18px]" />
+    );
 
   return (
     <section className="relative min-h-svh overflow-hidden bg-[#f5f0e8]">
@@ -717,7 +730,7 @@ export function HeroClocksIn({ authenticated }: { authenticated: boolean }) {
             Murph is your personal health assistant. Wearables, bloodwork,
             doctor visits, supplements, blood pressure, sleep. Murph runs it
             all and helps you figure out what actually makes you healthier,
-            then build the habits that stick.
+            then build habits that stick.
           </p>
 
           <div className="mt-10 hidden lg:block">
@@ -725,6 +738,7 @@ export function HeroClocksIn({ authenticated }: { authenticated: boolean }) {
               authLabel="Meet Murph"
               authenticated={authenticated}
               context="hero"
+              leadingIcon={channelIcon}
               preloadAuthPanel
             />
           </div>
@@ -737,7 +751,7 @@ export function HeroClocksIn({ authenticated }: { authenticated: boolean }) {
                 <StatusBar />
                 <div className="relative">
                   <div className="absolute inset-x-0 top-0 z-20">
-                    <ChatHeader />
+                    <ChatHeader murphHeadshotSrc={murphHeadshotSrc} />
                   </div>
                   <div className="relative" style={{ height: 580 }}>
                     <div
@@ -824,6 +838,7 @@ export function HeroClocksIn({ authenticated }: { authenticated: boolean }) {
             authLabel="Meet Murph"
             authenticated={authenticated}
             context="hero"
+            leadingIcon={channelIcon}
           />
         </div>
       </div>
@@ -1068,7 +1083,11 @@ function StatusBar() {
   );
 }
 
-function ChatHeader() {
+function ChatHeader({
+  murphHeadshotSrc,
+}: {
+  murphHeadshotSrc: MurphHeadshotSrc;
+}) {
   return (
     <div className="relative z-20 flex items-start justify-between px-2.5 pb-2 pt-1.5">
       <div className="flex h-[30px] items-center gap-1.5 rounded-full bg-[#2d3436]/10 px-2.5 pr-1.5 backdrop-blur-md ring-1 ring-inset ring-white/50">
@@ -1087,11 +1106,7 @@ function ChatHeader() {
       </div>
 
       <div className="flex flex-1 flex-col items-center">
-        <div className="relative z-10 flex size-[38px] items-center justify-center rounded-full bg-[#4a4035] shadow-[0_2px_6px_-2px_rgba(0,0,0,0.3)]">
-          <span className="text-[1.125rem] font-semibold leading-none text-[#f5f0e8]">
-            M
-          </span>
-        </div>
+        <MurphHeadshotAvatar src={murphHeadshotSrc} />
         <div className="-mt-[5px] flex items-center gap-[3px] rounded-full bg-[#2d3436]/10 px-2.5 py-[3px] backdrop-blur-md ring-1 ring-inset ring-white/50">
           <p className="text-[0.6875rem] font-semibold tracking-tight text-[#2d3436]">
             Murph

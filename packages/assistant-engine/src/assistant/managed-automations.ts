@@ -8,6 +8,7 @@ import {
 } from '@murphai/core'
 import {
   MURPH_PRODUCT_ORIGIN,
+  type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
   type AutomationRoute,
   type AutomationSchedule,
@@ -36,6 +37,7 @@ export type MurphManagedAutomationSchedule = Exclude<
 
 export interface MurphManagedAutomationSeed {
   automationId: string
+  assistantTargetOverride?: AutomationAssistantTargetOverride | null
   continuityPolicy?: AutomationContinuityPolicy
   instructions: string
   requiredRuntimeEnvKeys?: readonly string[]
@@ -195,6 +197,9 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       expression: '0 12 * * 0',
     },
     continuityPolicy: 'fresh',
+    assistantTargetOverride: {
+      reasoningEffort: 'high',
+    },
     tags: [
       'murph-managed:weekly-health-insight',
     ],
@@ -269,6 +274,9 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     },
     continuityPolicy: 'fresh',
     requiredRuntimeEnvKeys: ['EXA_API_KEY'],
+    assistantTargetOverride: {
+      reasoningEffort: 'high',
+    },
     tags: [
       'murph-managed:weekly-health-research-scout',
     ],
@@ -341,21 +349,22 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'murph-managed:weekly-product-updates',
     ],
     instructions: [
-      'On this scheduled weekly run, compose one concise personalized in-chat update about what is new in Murph.',
+      'Goal: send one concise personalized in-chat update with the 2-3 shipped Murph updates this user is most likely to find genuinely interesting. If nothing clears that bar, send nothing.',
       '',
       `Fetch the canonical JSON feed once from ${MURPH_PRODUCT_ORIGIN}/api/changelog?days=7&featureLimit=70&improvementLimit=10.`,
       '- Treat that feed as the only source of shipped-product truth. Do not infer launches from repository history or invent availability, benefits, or try-it instructions.',
       '- If the feed is unavailable, invalid, or empty, return `{"kind":"skip","privateSummary":"Changelog feed unavailable or empty."}` and do not attach media.',
       '',
-      'Choose 3-7 items that are most likely to matter to this user. Rank using only context Murph already has for normal assistance: connected providers and channels, active experiments and automations, recurring request categories, and features the user already uses.',
+      'Selection budget: choose 2-3 items from the feed using only context Murph already has for normal assistance: connected providers and channels, active experiments and automations, recurring request categories, and features the user already uses.',
       '- Do not inspect raw health values solely to personalize product news.',
-      '- Prefer relevance, practical benefit, editorial priority, and novelty. Do not fill space with weak matches.',
+      '- Prefer user-fit, practical benefit, editorial priority, and novelty. Do not pad with weak matches; send one strong item or skip rather than stretching to fill 2-3 slots.',
       '- Use the canonical title, summary, URL, and tryIt fields from the feed.',
+      '- Before sending, verify each selected item has a concrete reason it may interest this user and a canonical feed-backed title or summary. Drop anything that is merely generally new.',
       '',
       'Keep this scheduled announcement text-only. Do not create, attach, or send a changelog image or response media.',
       '',
-      'Write a brief, warm note with the selected updates, why the top choices fit this user.',
-      'If the user has not received one of these announcement automations before, let them know what the announcement is for at a high level before diving in (eg cool new features, helps us make Murph better for you every week if you give us good feedback).',
+      'Write a brief, warm note with the selected updates and why they may be interesting for this user. Keep it compact; 2-3 short bullets or short paragraphs are enough.',
+      'If the user has not received one of these announcement automations before, add one short opening sentence about the update, then move directly into the chosen items.',
       'Close by inviting the user to reply if any update sounds interesting, or if they have another feature in mind they would like Murph to add.',
       '',
       'On a later user turn, call `murph.submit_product_feedback` for explicit product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Use only structured kind, a concise product-only summary, and optional changelog item ids; do not include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
@@ -463,6 +472,9 @@ export async function applyMurphManagedAutomations(
         continuityPolicy: resolveMurphManagedAutomationContinuity(seed),
         instructions: seed.instructions,
         now,
+        ...(seed.assistantTargetOverride === undefined
+          ? {}
+          : { assistantTargetOverride: seed.assistantTargetOverride }),
         route,
         schedule: seed.schedule,
         slug: seed.slug,
@@ -543,6 +555,9 @@ export async function applyMurphManagedAutomations(
       continuityPolicy: resolveMurphManagedAutomationContinuity(seed),
       instructions: seed.instructions,
       now,
+      ...(seed.assistantTargetOverride === undefined
+        ? {}
+        : { assistantTargetOverride: seed.assistantTargetOverride }),
       // Routes are user/runtime-owned: seeds never carry one, so updates
       // preserve the existing route without re-checking deliverability.
       // Only the create path validates routes, because that is the only
@@ -770,6 +785,13 @@ function murphManagedAutomationSeedChanged(
     (summary !== null && existing.summary !== summary) ||
     existing.continuityPolicy !== resolveMurphManagedAutomationContinuity(seed) ||
     existing.instructions !== seed.instructions ||
+    (
+      seed.assistantTargetOverride !== undefined &&
+      !murphManagedAutomationValuesEqual(
+        existing.assistantTargetOverride,
+        seed.assistantTargetOverride,
+      )
+    ) ||
     (
       options.ignoreSchedule !== true &&
       !murphManagedAutomationValuesEqual(existing.schedule, seed.schedule)

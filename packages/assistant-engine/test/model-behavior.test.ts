@@ -1773,6 +1773,22 @@ describe('assistant Murph onboarding guidance', () => {
       'If this turn was a meal photo, symptom report, or other health-data immediate request, do not append an onboarding question in the same turn',
     )
     expect(prompt).toContain(
+      'For slow, non-reply-critical onboarding ingestion such as lab PDFs or supplement-label lookup',
+    )
+    expect(prompt).toContain('collaboration.spawn_agent')
+    expect(prompt).toContain(
+      'Spawn it as a fresh thread with `fork_turns: "none"`',
+    )
+    expect(prompt).toContain(
+      'make the spawn message self-contained with durable source evidence, needed user/vault context, duplicate-avoidance instructions, and the expected completion format',
+    )
+    expect(prompt).toContain(
+      'The child must call the relevant `vault-cli` save/import commands, avoid duplicates, and return saved record ids or blockers',
+    )
+    expect(prompt).toContain(
+      'The parent may continue the visible onboarding flow and incorporate the result on the next turn',
+    )
+    expect(prompt).toContain(
       'If the user clearly declines or skips onboarding',
     )
     expect(prompt).toContain(

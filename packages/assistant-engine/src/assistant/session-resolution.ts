@@ -11,8 +11,10 @@ import {
   compactAssistantProviderConfigInput,
   isAssistantCodexTargetConfig,
   resolveAssistantChatProviderFromConfig,
+  type AssistantProviderConfigInput,
 } from '@murphai/operator-config/assistant/provider-config'
 import {
+  isAssistantSessionNotFoundError,
   resolveAssistantSession,
   type ResolveAssistantSessionInput,
   type ResolvedAssistantSession,
@@ -187,31 +189,123 @@ export async function resolveAssistantSessionForMessage(input: {
   defaults: AssistantOperatorDefaults | null
   message: AssistantMessageInput
 }) {
-  const resolved = await resolveAssistantSession(buildResolveAssistantSessionInput(
+  const messageOverride = compactAssistantProviderConfigInput(input.message)
+  const sessionInput = buildResolveAssistantSessionInput(
     input.message,
     input.defaults,
     input.boundaryDefaultTarget ?? null,
-  ))
+  )
   const hostedDefaultTarget =
-    normalizeAssistantExecutionContext(input.message.executionContext).hosted
-      ?.defaultTarget ?? null
-
-  return applyHostedDefaultTargetToResolvedSession(resolved, hostedDefaultTarget)
+    normalizeAssistantBackendTarget(
+      normalizeAssistantExecutionContext(input.message.executionContext).hosted
+        ?.defaultTarget ?? null,
+    )
+  const resolved = await resolveAssistantSessionForMessageInput({
+    hostedDefaultTarget,
+    messageOverride,
+    sessionInput,
+  })
+  const effectiveTarget = resolveEffectiveTargetForResolvedSession({
+    hostedDefaultTarget,
+    messageOverride,
+    resolved,
+  })
+  return effectiveTarget
+    ? applyEffectiveTargetToResolvedSession(resolved, effectiveTarget)
+    : resolved
 }
 
-export function applyHostedDefaultTargetToResolvedSession(
+async function resolveAssistantSessionForMessageInput(input: {
+  hostedDefaultTarget: AssistantModelTarget | null
+  messageOverride: AssistantProviderConfigInput | null
+  sessionInput: ResolveAssistantSessionInput
+}): Promise<ResolvedAssistantSession> {
+  if (!input.messageOverride) {
+    return await resolveAssistantSession(input.sessionInput)
+  }
+
+  try {
+    return await resolveAssistantSession(
+      buildAssistantSessionLookupInputForMessageOverride(input),
+    )
+  } catch (error) {
+    if (!isAssistantSessionNotFoundError(error)) {
+      throw error
+    }
+  }
+
+  return await resolveAssistantSession(input.sessionInput)
+}
+
+function buildAssistantSessionLookupInputForMessageOverride(input: {
+  hostedDefaultTarget: AssistantModelTarget | null
+  sessionInput: ResolveAssistantSessionInput
+}): ResolveAssistantSessionInput {
+  const locatorInput = stripAssistantSessionTargetResolutionInput(
+    input.sessionInput,
+  )
+  return {
+    ...locatorInput,
+    ...(input.hostedDefaultTarget ? { target: input.hostedDefaultTarget } : {}),
+    createIfMissing: false,
+  }
+}
+
+function stripAssistantSessionTargetResolutionInput(
+  input: ResolveAssistantSessionInput,
+): ResolveAssistantSessionInput {
+  const {
+    approvalPolicy: _approvalPolicy,
+    codexHome: _codexHome,
+    model: _model,
+    modelProvider: _modelProvider,
+    oss: _oss,
+    profile: _profile,
+    provider: _provider,
+    reasoningEffort: _reasoningEffort,
+    sandbox: _sandbox,
+    target: _target,
+    ...locatorInput
+  } = input
+  return locatorInput
+}
+
+function resolveEffectiveTargetForResolvedSession(input: {
+  hostedDefaultTarget: AssistantModelTarget | null
+  messageOverride: AssistantProviderConfigInput | null
+  resolved: ResolvedAssistantSession
+}): AssistantModelTarget | null {
+  if (!input.messageOverride) {
+    return input.hostedDefaultTarget
+  }
+
+  const baseTarget =
+    input.hostedDefaultTarget ??
+    normalizeAssistantBackendTarget(input.resolved.session.target)
+  if (!baseTarget) {
+    return null
+  }
+
+  return resolveAssistantExecutionPlan({
+    defaults: null,
+    override: input.messageOverride,
+    sessionTarget: baseTarget,
+  }).primaryTarget
+}
+
+export function applyEffectiveTargetToResolvedSession(
   resolved: ResolvedAssistantSession,
-  hostedDefaultTarget: AssistantModelTarget | null | undefined,
+  effectiveTarget: AssistantModelTarget | null | undefined,
 ): ResolvedAssistantSession {
-  const defaultTarget = normalizeAssistantBackendTarget(hostedDefaultTarget ?? null)
-  if (!defaultTarget) {
+  const target = normalizeAssistantBackendTarget(effectiveTarget ?? null)
+  if (!target) {
     return resolved
   }
 
   const projectedSession = normalizeAssistantConversationSnapshot({
     ...resolved.session,
-    codexTarget: defaultTarget,
-    target: defaultTarget,
+    codexTarget: target,
+    target,
   })
   const continuityChanged =
     projectedSession.providerOptions.continuityFingerprint !==

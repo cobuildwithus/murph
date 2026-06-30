@@ -690,6 +690,18 @@ Hosted onboarding surfaces:
 - `POST /api/hosted-onboarding/linq/webhook`
 - `POST /api/hosted-onboarding/stripe/webhook`
 
+Hosted ops repair surfaces:
+
+- `/ops/onboarding-activation` and `POST /api/ops/onboarding-activation`
+  let allowlisted hosted ops members activate a verified hosted signup that
+  stopped before billing. The route accepts an existing invite code or join
+  URL, issues or reuses a fresh internal web invite for the same member, then
+  delegates to the no-card Pulse Trial enrollment path so billing state,
+  activation mailbox work, hosted crypto provisioning, runtime wake, and
+  welcome email behavior stay on the canonical signup path. It returns status
+  metadata only, not invite codes, invite URLs, phone numbers, or contact
+  targets.
+
 The onboarding lane is intentionally thin:
 
 - Linq or the public landing page can start phone-bound signup.

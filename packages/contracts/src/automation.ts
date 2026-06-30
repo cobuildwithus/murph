@@ -9,6 +9,7 @@ import {
   isValidExecutableCronExpression,
   MIN_EXECUTABLE_SCHEDULE_EVERY_MS,
 } from "./schedule-intent.ts";
+import { assistantReasoningEffortValues } from "./assistant.ts";
 import { withContractMetadata } from "./schema-metadata.ts";
 
 export const AUTOMATION_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.automationFrontmatter;
@@ -232,6 +233,14 @@ export const automationRouteSchema = z
   })
   .strict();
 
+export const automationAssistantTargetOverrideSchema = z
+  .object({
+    model: z.string().min(1).max(200).nullable().optional(),
+    modelProvider: z.string().min(1).max(120).nullable().optional(),
+    reasoningEffort: z.enum(assistantReasoningEffortValues).nullable().optional(),
+  })
+  .strict();
+
 export const automationFrontmatterSchema = withContractMetadata(
   z
     .object({
@@ -244,6 +253,7 @@ export const automationFrontmatterSchema = withContractMetadata(
       summary: z.string().min(1).max(4000).optional(),
       schedule: automationScheduleSchema,
       route: automationRouteSchema,
+      assistantTargetOverride: automationAssistantTargetOverrideSchema.optional(),
       continuityPolicy: z.enum(automationContinuityPolicyValues),
       tags: z.array(z.string().min(1)).optional(),
       createdAt: isoTimestampSchema(),
@@ -267,6 +277,7 @@ export const automationScaffoldPayloadSchema = z
     continuityPolicy: z.enum(automationContinuityPolicyValues).default("preserve"),
     instructions: z.string().min(1),
     route: automationRouteSchema,
+    assistantTargetOverride: automationAssistantTargetOverrideSchema.nullable().optional(),
     schedule: automationScheduleSchema,
     slug: z.string().regex(slugPattern).optional(),
     status: z.enum(automationStatusValues).default("active"),
@@ -285,6 +296,9 @@ export type AutomationDeviceActivityKind = z.infer<typeof automationDeviceActivi
 export type AutomationTimeSchedule = z.infer<typeof automationTimeScheduleSchema>;
 export type AutomationSchedule = z.infer<typeof automationScheduleSchema>;
 export type AutomationRoute = z.infer<typeof automationRouteSchema>;
+export type AutomationAssistantTargetOverride = z.infer<
+  typeof automationAssistantTargetOverrideSchema
+>;
 export type AutomationFrontmatter = z.infer<typeof automationFrontmatterSchema>;
 export type AutomationMarkdownDocument = z.infer<typeof automationMarkdownDocumentSchema>;
 export type AutomationScaffoldPayload = z.infer<typeof automationScaffoldPayloadSchema>;

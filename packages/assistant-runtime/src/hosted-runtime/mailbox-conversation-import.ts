@@ -14,6 +14,9 @@ import type {
   HostedRuntimeLatencyTraceStagedMilestones,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  readHostedIngressLatencySource,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
   hashNullableHostedAssistantConversationIdentifier,
@@ -383,7 +386,8 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
   runtimeAttemptId?: string | null;
   wake: HostedExecutionConversationMessageWake;
 }): void {
-  if (input.wake.message.channel !== "linq") {
+  const source = readHostedIngressLatencySource(input.wake.message.channel);
+  if (!source) {
     return;
   }
   const latencyTracePort = input.runtime.platform.latencyTracePort ?? null;
@@ -412,7 +416,7 @@ function recordHostedConversationLatencyTraceAssistantInputStagedBestEffort(inpu
         ...(latencyMilestones?.phaseBreakdown === undefined
           ? {}
           : { phaseBreakdown: latencyMilestones.phaseBreakdown }),
-        source: "linq",
+        source,
         type: "assistant_input_staged",
         ...(latencyMilestones?.workspaceRestoreDoneAt === undefined
           ? {}

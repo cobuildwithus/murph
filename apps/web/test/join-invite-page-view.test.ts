@@ -93,7 +93,7 @@ test("JoinInvitePageView renders verify copy without exposing the masked phone h
 
   assert.match(markup, /Chat with Murph/);
   assert.match(markup, /Verify your phone/);
-  assert.match(markup, /Use the number that received this join link\./);
+  assert.doesNotMatch(markup, /Use the number that received this join link\./);
   assert.match(markup, /data-phone-verification-island="true"/);
   assert.doesNotMatch(markup, /\*\*\* 2671/);
   assert.doesNotMatch(markup, /Telegram/);

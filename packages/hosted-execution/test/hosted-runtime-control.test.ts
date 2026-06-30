@@ -29,6 +29,7 @@ import {
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
   normalizeHostedAiUsageAllowancePricedModelId,
   parseHostedRunnerNudgeRequest,
+  readHostedIngressLatencySource,
   resolveHostedAiUsageTokenPricingBasis,
   mergeHostedRuntimeLatencyPhaseBreakdownJson,
   sanitizeHostedRuntimeOrchestrationLatencyDiagnostics,
@@ -733,6 +734,20 @@ describe("hosted runtime control contracts", () => {
   });
 
   it("parses hosted runtime latency trace callbacks with exact safe keys", () => {
+    expect([
+      readHostedIngressLatencySource("linq"),
+      readHostedIngressLatencySource("telegram"),
+      readHostedIngressLatencySource("whatsapp"),
+      readHostedIngressLatencySource("email"),
+      readHostedIngressLatencySource(null),
+    ]).toEqual([
+      "linq",
+      "telegram",
+      null,
+      null,
+      null,
+    ]);
+
     expect(parseHostedRuntimeLatencyTraceRequest({
       event: {
         assistantInputId: "input_1",

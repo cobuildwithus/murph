@@ -2024,6 +2024,7 @@ function buildHostedContainerCodexShellSmokeConfig(model: string): string {
     "",
     "[features]",
     "plugins = false",
+    "multi_agent_v2 = true",
     "",
     '[model_providers."hosted-shell-smoke"]',
     'name = "OpenAI"',
