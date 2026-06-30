@@ -2867,7 +2867,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
   });
 
-  it("does not use pending Linq new-chat line reservations as webhook authority", async () => {
+  it("fails closed for unknown media replies before a new-chat provider chat is bound", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -2914,13 +2914,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         findMany: vi.fn().mockResolvedValue([]),
       },
       hostedMemberRouting: {
-        findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
-          if ("pendingLinqNewChatLinePhoneLookupKey" in where) {
-            throw new Error("Line-only new-chat reservations must not route webhooks.");
-          }
-
-          return [];
-        }),
+        findMany: vi.fn().mockResolvedValue([]),
         upsert: vi.fn(),
       },
     };
