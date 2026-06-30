@@ -51,7 +51,6 @@ export function buildRunnerWriteFenceValidationRejectedDetails(input: {
   generation: string;
   record: RunnerStateRecord | null;
   userId: string;
-  workspaceVersion: string | null;
 }): HostedExecutionStructuredLogDetails {
   if (!input.record) {
     return {
@@ -62,7 +61,6 @@ export function buildRunnerWriteFenceValidationRejectedDetails(input: {
       writeFenceGenerationMatches: false,
       writeFenceUserMatches: false,
       writeFenceValidationRejectReason: "missing_runner_state",
-      writeFenceWorkspaceVersionMatches: false,
     };
   }
 
@@ -72,11 +70,6 @@ export function buildRunnerWriteFenceValidationRejectedDetails(input: {
   const writeFenceGenerationMatches = writeFence !== null
     && String(writeFence.generation) === input.generation;
   const writeFenceUserMatches = input.record.userId === input.userId;
-  const writeFenceWorkspaceVersionMatches = input.workspaceVersion === null
-    || (
-      writeFence !== null
-      && writeFence.workspaceVersion === input.workspaceVersion
-    );
 
   return {
     activeWriteFencePresent: writeFence !== null,
@@ -86,13 +79,11 @@ export function buildRunnerWriteFenceValidationRejectedDetails(input: {
     writeFenceAttemptMatches,
     writeFenceGenerationMatches,
     writeFenceUserMatches,
-    writeFenceWorkspaceVersionMatches,
     writeFenceValidationRejectReason: readRunnerWriteFenceValidationRejectReason({
       writeFenceAttemptMatches,
       writeFenceGenerationMatches,
       writeFencePresent: writeFence !== null,
       writeFenceUserMatches,
-      writeFenceWorkspaceVersionMatches,
     }),
   };
 }
@@ -102,7 +93,6 @@ export function readRunnerWriteFenceValidationRejectReason(input: {
   writeFenceGenerationMatches: boolean;
   writeFencePresent: boolean;
   writeFenceUserMatches: boolean;
-  writeFenceWorkspaceVersionMatches: boolean;
 }): string {
   if (!input.writeFencePresent) {
     return "no_active_write_fence";
@@ -115,9 +105,6 @@ export function readRunnerWriteFenceValidationRejectReason(input: {
   }
   if (!input.writeFenceUserMatches) {
     return "user_mismatch";
-  }
-  if (!input.writeFenceWorkspaceVersionMatches) {
-    return "workspace_version_mismatch";
   }
   return "unknown";
 }
