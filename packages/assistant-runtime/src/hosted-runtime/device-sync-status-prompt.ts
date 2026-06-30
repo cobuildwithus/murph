@@ -196,15 +196,22 @@ function buildHostedDeviceSyncSourceReconnectNotice(input: {
     reconnectTargets: input.reconnectTargets,
     sourceProviderSlug: input.source.sourceProviderSlug,
   });
+  const sourceProviderSlug = normalizeHostedDeviceSyncKey(input.source.sourceProviderSlug);
+  const matchedBySourceProviderSlug = Boolean(
+    sourceProviderSlug
+      && normalizeHostedDeviceSyncKey(reconnectTarget?.sourceProviderSlug) === sourceProviderSlug,
+  );
 
   return {
     commandConnectTarget: reconnectTarget?.connectTarget ?? null,
-    commandConnectTargetAmbiguous: reconnectTarget?.connectTargetAmbiguous === true,
+    commandConnectTargetAmbiguous:
+      reconnectTarget?.connectTargetAmbiguous === true
+      && !matchedBySourceProviderSlug,
     errorCode,
     label: reconnectTarget?.label
       ?? input.source.displayName
       ?? formatHostedDeviceSyncProviderLabel(input.source.sourceProviderSlug),
-    sourceProviderSlug: normalizeHostedDeviceSyncKey(input.source.sourceProviderSlug),
+    sourceProviderSlug,
   };
 }
 

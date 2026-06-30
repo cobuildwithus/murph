@@ -322,7 +322,6 @@ export async function runHostedWorkspaceAssistantPhase(
     const resolveAssistantLaneExecutionContext = async (options: {
       includeDeviceSyncStatusPrompt: boolean;
     }): Promise<{
-      deferActiveTurnInputRefresh: boolean;
       deviceSyncStatusPromptAttached: boolean;
       executionContext: AssistantExecutionContext;
     }> => {
@@ -331,7 +330,6 @@ export async function runHostedWorkspaceAssistantPhase(
         || input.shouldYieldBackgroundMaintenance?.() === true
       ) {
         return {
-          deferActiveTurnInputRefresh: false,
           deviceSyncStatusPromptAttached: false,
           executionContext,
         };
@@ -354,14 +352,12 @@ export async function runHostedWorkspaceAssistantPhase(
           || !deviceSyncStatusPrompt
         ) {
           return {
-            deferActiveTurnInputRefresh: false,
             deviceSyncStatusPromptAttached: false,
             executionContext,
           };
         }
 
         return {
-          deferActiveTurnInputRefresh: true,
           deviceSyncStatusPromptAttached: true,
           executionContext: withHostedAssistantDynamicContextPrompt({
             executionContext,
@@ -419,13 +415,17 @@ export async function runHostedWorkspaceAssistantPhase(
           options.includeDeviceSyncStatusPrompt
           && assistantRuntimeState.assistantConfigured,
       });
+      const laneCancellation = automationExecutionContext.deviceSyncStatusPromptAttached
+        ? createHostedIdleDeviceSyncMaintenanceCancellation({
+            signal: channelAbortController.signal,
+            shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
+            timeoutMs: null,
+          })
+        : null;
       const assistantMetrics = await (async () => {
         try {
           return await runHostedAssistantAutomationLane({
             assistantRuntimeState,
-            ...(automationExecutionContext.deferActiveTurnInputRefresh
-              ? { deferActiveTurnInputRefresh: true }
-              : {}),
             executionContext: automationExecutionContext.executionContext,
             freshAssistantInputIds,
             requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
@@ -439,7 +439,7 @@ export async function runHostedWorkspaceAssistantPhase(
             operatorHomeRoot: input.restored.operatorHomeRoot,
             runtimeAttemptId: input.request.attemptId,
             runtimeEnv: input.runtimeEnv,
-            signal: input.signal ?? undefined,
+            signal: laneCancellation?.signal ?? input.signal ?? undefined,
             vaultRoot: input.restored.vaultRoot,
             wake,
           });
@@ -459,6 +459,8 @@ export async function runHostedWorkspaceAssistantPhase(
             });
           }
           throw error;
+        } finally {
+          laneCancellation?.dispose();
         }
       })();
       assistantAutomationRedactedLogEntries.push(

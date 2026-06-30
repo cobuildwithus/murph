@@ -203,6 +203,32 @@ describe("hosted device sync status prompt", () => {
     expect(prompt).not.toContain("vault-cli device connect whoop --format json");
   });
 
+  it("renders source-specific Junction WHOOP commands even when direct WHOOP is configured", () => {
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [
+        {
+          connectTarget: "whoop",
+          connectTargetAmbiguous: true,
+          label: "WHOOP",
+          provider: "whoop",
+        },
+        {
+          connectTarget: "whoop",
+          connectTargetAmbiguous: true,
+          label: "WHOOP",
+          provider: "junction",
+          sourceProviderSlug: "whoop_v2",
+        },
+      ],
+      snapshot: buildSnapshot(),
+    });
+
+    expect(prompt).toContain("WHOOP currently needs reconnect");
+    expect(prompt).toContain("source `whoop_v2`");
+    expect(prompt).toContain("vault-cli device connect whoop --format json");
+    expect(prompt).not.toContain("generic device-connect command is ambiguous");
+  });
+
   it("does not render when sources are connected", () => {
     const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
       reconnectTargets: [
