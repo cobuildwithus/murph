@@ -5,10 +5,7 @@ import type { SupportedContentType } from "@linqapp/sdk/resources";
 import { createHash, randomUUID } from "node:crypto";
 
 import { getPrisma } from "../prisma";
-import {
-  createHostedLinqChatLookupKey,
-  readHostedPhoneHint,
-} from "../hosted-onboarding/contact-privacy";
+import { readHostedPhoneHint } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   buildHostedInviteUrl,
@@ -466,22 +463,20 @@ async function claimHostedOpsOnboardingVoiceMemoSend(input: {
   prisma: PrismaClient;
   requestId: string;
 }): Promise<HostedOpsOnboardingVoiceMemoSendClaim> {
-  const linqChatLookupKey = createHostedLinqChatLookupKey(input.chatId);
-
-  if (!linqChatLookupKey) {
-    throw hostedOnboardingError({
-      code: "HOSTED_OPS_ONBOARDING_LINQ_CHAT_ID_REQUIRED",
-      httpStatus: 400,
-      message: "Linq chat id is required before sending a voice memo.",
-      retryable: false,
-    });
-  }
+  const dedupeKey = buildHostedOpsOnboardingIdempotencyKey({
+    requestId: input.requestId,
+    step: "voice",
+    targetParts: [
+      input.memberId,
+      input.chatId,
+    ],
+  });
 
   const id = randomUUID();
   const created = await input.prisma.hostedOpsOnboardingVoiceMemoSend.createMany({
     data: {
+      dedupeKey,
       id,
-      linqChatLookupKey,
       memberId: input.memberId,
       requestId: input.requestId,
     },
@@ -504,7 +499,7 @@ async function claimHostedOpsOnboardingVoiceMemoSend(input: {
       updatedAt: true,
     },
     where: {
-      linqChatLookupKey,
+      dedupeKey,
       memberId: input.memberId,
       requestId: input.requestId,
     },
@@ -851,7 +846,7 @@ function buildHostedOpsOnboardingInviteMessage(input: {
 
 function buildHostedOpsOnboardingIdempotencyKey(input: {
   requestId: string;
-  step: "invite" | "open";
+  step: "invite" | "open" | "voice";
   targetParts: readonly string[];
 }): string {
   const digest = createHash("sha256");

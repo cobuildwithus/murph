@@ -843,7 +843,7 @@ model HostedInvite {
 model HostedOpsOnboardingVoiceMemoSend {
   id                String       @id
   memberId          String       @map("member_id")
-  linqChatLookupKey String       @map("linq_chat_lookup_key")
+  dedupeKey         String       @unique(map: "hosted_ops_onboarding_voice_memo_dedupe_key") @map("dedupe_key")
   requestId         String       @map("request_id")
   sentAt            DateTime?    @map("sent_at")
   sendAttemptedAt   DateTime?    @map("send_attempted_at")
@@ -852,7 +852,6 @@ model HostedOpsOnboardingVoiceMemoSend {
   updatedAt         DateTime     @updatedAt @map("updated_at")
   member            HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
-  @@unique([memberId, linqChatLookupKey, requestId], map: "hosted_ops_onboarding_voice_memo_member_chat_request_key")
   @@index([memberId, createdAt], map: "hosted_ops_onboarding_voice_memo_member_created_at_idx")
   @@map("hosted_ops_onboarding_voice_memo_send")
 }

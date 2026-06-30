@@ -398,13 +398,20 @@ describe("hosted ops onboarding invites", () => {
 
     expect(prisma.hostedOpsOnboardingVoiceMemoSend.createMany).toHaveBeenCalledWith({
       data: {
+        dedupeKey: expect.stringMatching(
+          /^ops-onboarding-invite:voice:[a-f0-9]{64}$/u,
+        ),
         id: expect.any(String),
-        linqChatLookupKey: "lookup:chat_existing",
         memberId: "member_123",
         requestId: "request-voice",
       },
       skipDuplicates: true,
     });
+    const voiceClaimData =
+      prisma.hostedOpsOnboardingVoiceMemoSend.createMany.mock.calls[0]?.[0]?.data as {
+        dedupeKey?: string;
+      } | undefined;
+    expect(voiceClaimData?.dedupeKey).not.toContain("chat_existing");
     expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledWith({
       bytes: new Uint8Array([1, 2, 3]),
       contentType: "audio/x-m4a",
@@ -475,7 +482,9 @@ describe("hosted ops onboarding invites", () => {
         updatedAt: true,
       },
       where: {
-        linqChatLookupKey: "lookup:chat_existing",
+        dedupeKey: expect.stringMatching(
+          /^ops-onboarding-invite:voice:[a-f0-9]{64}$/u,
+        ),
         memberId: "member_123",
         requestId: "request-voice-replay",
       },
@@ -630,6 +639,65 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.uploadHostedLinqAttachment).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqVoiceMemo).not.toHaveBeenCalled();
     expect(result.voiceMemo).toEqual({
+      error: null,
+      requested: true,
+      sent: true,
+    });
+  });
+
+  it("does not resend a native voice memo replay after contact privacy key rotation", async () => {
+    const seenVoiceClaimKeys = new Set<string>();
+    let lookupKeyVersion = 0;
+    mocks.createHostedLinqChatLookupKey.mockImplementation((chatId: string | null | undefined) =>
+      chatId ? `lookup:v${++lookupKeyVersion}:${chatId}` : null
+    );
+    prisma.hostedOpsOnboardingVoiceMemoSend.createMany.mockImplementation(
+      (input: unknown) => {
+        const key = readVoiceClaimIdentity(input);
+        if (seenVoiceClaimKeys.has(key)) {
+          return Promise.resolve({ count: 0 });
+        }
+
+        seenVoiceClaimKeys.add(key);
+        return Promise.resolve({ count: 1 });
+      },
+    );
+    prisma.hostedOpsOnboardingVoiceMemoSend.findFirst.mockResolvedValue({
+      failedAt: null,
+      id: "voice_claim_rotation",
+      sendAttemptedAt: new Date("2026-06-29T10:00:00.000Z"),
+      sentAt: new Date("2026-06-29T10:00:01.000Z"),
+      updatedAt: new Date("2026-06-29T10:00:01.000Z"),
+    });
+
+    const voiceMemo = {
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "audio/x-m4a" as const,
+      extension: "m4a",
+      sizeBytes: 3,
+    };
+
+    await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_existing",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-voice-rotation",
+      voiceMemo,
+    });
+    const replay = await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_existing",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-voice-rotation",
+      voiceMemo,
+    });
+
+    expect(mocks.createHostedLinqChatLookupKey).not.toHaveBeenCalled();
+    expect(prisma.hostedOpsOnboardingVoiceMemoSend.createMany).toHaveBeenCalledTimes(2);
+    expect(seenVoiceClaimKeys.size).toBe(1);
+    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(1);
+    expect(replay.voiceMemo).toEqual({
       error: null,
       requested: true,
       sent: true,
@@ -838,4 +906,23 @@ function readIdempotencyKey(
   }
 
   return input.idempotencyKey;
+}
+
+function readVoiceClaimIdentity(input: unknown): string {
+  if (!isRecord(input) || !isRecord(input.data)) {
+    throw new Error("Expected voice claim createMany input to include data.");
+  }
+
+  for (const key of ["dedupeKey", "linqChatLookupKey", "id"] as const) {
+    const value = input.data[key];
+    if (typeof value === "string") {
+      return value;
+    }
+  }
+
+  throw new Error("Expected voice claim createMany input to include an identity key.");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

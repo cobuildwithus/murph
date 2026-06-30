@@ -1,7 +1,7 @@
 CREATE TABLE "hosted_ops_onboarding_voice_memo_send" (
   "id" TEXT NOT NULL,
   "member_id" TEXT NOT NULL,
-  "linq_chat_lookup_key" TEXT NOT NULL,
+  "dedupe_key" TEXT NOT NULL,
   "request_id" TEXT NOT NULL,
   "sent_at" TIMESTAMP(3),
   "send_attempted_at" TIMESTAMP(3),
@@ -12,8 +12,8 @@ CREATE TABLE "hosted_ops_onboarding_voice_memo_send" (
   CONSTRAINT "hosted_ops_onboarding_voice_memo_send_pkey" PRIMARY KEY ("id")
 );
 
-CREATE UNIQUE INDEX "hosted_ops_onboarding_voice_memo_member_chat_request_key"
-  ON "hosted_ops_onboarding_voice_memo_send"("member_id", "linq_chat_lookup_key", "request_id");
+CREATE UNIQUE INDEX "hosted_ops_onboarding_voice_memo_dedupe_key"
+  ON "hosted_ops_onboarding_voice_memo_send"("dedupe_key");
 
 CREATE INDEX "hosted_ops_onboarding_voice_memo_member_created_at_idx"
   ON "hosted_ops_onboarding_voice_memo_send"("member_id", "created_at");
