@@ -184,6 +184,7 @@ export async function runHostedAssistantAutomationLane(input: {
   runtimeEnv?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
+  suppressActiveTurnInputRefresh?: boolean;
   vaultRoot: string;
 }): Promise<HostedAssistantAutomationLaneMetrics> {
   const startedAt = Date.now();
@@ -219,6 +220,7 @@ export async function runHostedAssistantAutomationLane(input: {
         {
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
+          suppressActiveTurnInputRefresh: input.suppressActiveTurnInputRefresh ?? false,
         },
       )
     : {
@@ -265,9 +267,10 @@ export async function runHostedAssistantAutomation(
   freshAssistantInputIds: readonly string[] = [],
   signal?: AbortSignal,
   turnEnvironment?: AssistantTurnEnvironment | null,
-  latencyTrace?: {
+  options?: {
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     runtimeAttemptId?: string | null;
+    suppressActiveTurnInputRefresh?: boolean | null;
   },
 ): Promise<{
   currentTurnDeliveryIntentIds: string[];
@@ -316,6 +319,9 @@ export async function runHostedAssistantAutomation(
     selectedInputIds: selectedInputIds.inputIds,
     vaultRoot,
   });
+  const suppressActiveTurnInputRefresh =
+    selectedInputIds.mode === "background"
+    && options?.suppressActiveTurnInputRefresh === true;
   const inputSource: AssistantInputSource = {
     ...baseInputSource,
     async listInputCandidates(query) {
@@ -345,6 +351,13 @@ export async function runHostedAssistantAutomation(
       return result;
     },
     async listNewConversationInputs(query) {
+      if (suppressActiveTurnInputRefresh) {
+        return {
+          inputs: [],
+          nextCursor: query.afterCursor ?? null,
+        };
+      }
+
       const startedAt = Date.now();
       const result = await baseInputSource.listNewConversationInputs(query);
       if (result.inputs.length > 0) {
@@ -365,6 +378,16 @@ export async function runHostedAssistantAutomation(
         redactedInputQueryLogCount += 1;
       }
       return result;
+    },
+    async refresh(refreshInput) {
+      if (suppressActiveTurnInputRefresh) {
+        return {
+          progressed: false,
+          reason: "no_new_input",
+        };
+      }
+
+      return await baseInputSource.refresh(refreshInput);
     },
   };
   const beforeStateStartedAt = Date.now();
@@ -425,8 +448,8 @@ export async function runHostedAssistantAutomation(
       onProviderRequestStarted: (event) => {
         recordHostedAssistantProviderStartLatencyTraceBestEffort({
           ...event,
-          latencyTracePort: latencyTrace?.latencyTracePort ?? null,
-          runtimeAttemptId: latencyTrace?.runtimeAttemptId ?? null,
+          latencyTracePort: options?.latencyTracePort ?? null,
+          runtimeAttemptId: options?.runtimeAttemptId ?? null,
         });
       },
       onTraceEvent: (event) => {

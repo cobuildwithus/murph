@@ -319,18 +319,20 @@ export async function runHostedWorkspaceAssistantPhase(
     const freshAssistantInputIds =
       input.initialMailboxImport.importResult.assistantInputIds ?? [];
     const assistantAutomationRedactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
-    let assistantLaneExecutionContextWithDynamicPrompt: AssistantExecutionContext | null = null;
     const resolveAssistantLaneExecutionContext = async (options: {
       includeDeviceSyncStatusPrompt: boolean;
-    }): Promise<AssistantExecutionContext> => {
+    }): Promise<{
+      executionContext: AssistantExecutionContext;
+      suppressActiveTurnInputRefresh: boolean;
+    }> => {
       if (
         !options.includeDeviceSyncStatusPrompt
         || input.shouldYieldBackgroundMaintenance?.() === true
       ) {
-        return executionContext;
-      }
-      if (assistantLaneExecutionContextWithDynamicPrompt) {
-        return assistantLaneExecutionContextWithDynamicPrompt;
+        return {
+          executionContext,
+          suppressActiveTurnInputRefresh: false,
+        };
       }
 
       const cancellation = createHostedIdleDeviceSyncMaintenanceCancellation({
@@ -345,19 +347,26 @@ export async function runHostedWorkspaceAssistantPhase(
           reconnectTargets: resolveHostedWorkspaceDeviceReconnectTargets(input.runtime),
           signal: cancellation.signal,
         });
-        if (input.shouldYieldBackgroundMaintenance?.() === true) {
-          return executionContext;
+        if (
+          input.shouldYieldBackgroundMaintenance?.() === true
+          || !deviceSyncStatusPrompt
+        ) {
+          return {
+            executionContext,
+            suppressActiveTurnInputRefresh: false,
+          };
         }
 
-        assistantLaneExecutionContextWithDynamicPrompt =
-          withHostedAssistantDynamicContextPrompt({
+        return {
+          executionContext: withHostedAssistantDynamicContextPrompt({
             executionContext,
             prompt: deviceSyncStatusPrompt,
-          });
+          }),
+          suppressActiveTurnInputRefresh: true,
+        };
       } finally {
         cancellation.dispose();
       }
-      return assistantLaneExecutionContextWithDynamicPrompt;
     };
     const shouldIncludeDeviceSyncStatusPrompt = async (options: {
       managedAutomationsResult?: HostedWorkspaceRunnerAssistantPhaseResult | null;
@@ -410,7 +419,7 @@ export async function runHostedWorkspaceAssistantPhase(
         try {
           return await runHostedAssistantAutomationLane({
             assistantRuntimeState,
-            executionContext: automationExecutionContext,
+            executionContext: automationExecutionContext.executionContext,
             freshAssistantInputIds,
             requestId: `hosted-workspace-invocation:${input.request.attemptId}:assistant`,
             runtime: {
@@ -424,6 +433,9 @@ export async function runHostedWorkspaceAssistantPhase(
             runtimeAttemptId: input.request.attemptId,
             runtimeEnv: input.runtimeEnv,
             signal: input.signal ?? undefined,
+            ...(automationExecutionContext.suppressActiveTurnInputRefresh
+              ? { suppressActiveTurnInputRefresh: true }
+              : {}),
             vaultRoot: input.restored.vaultRoot,
             wake,
           });
