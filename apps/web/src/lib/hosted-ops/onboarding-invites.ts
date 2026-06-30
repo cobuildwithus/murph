@@ -2,7 +2,7 @@ import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { SupportedContentType } from "@linqapp/sdk/resources";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 
 import { getPrisma } from "../prisma";
 import { readHostedPhoneHint } from "../hosted-onboarding/contact-privacy";
@@ -27,6 +27,7 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   normalizeNullableString,
 } from "../hosted-onboarding/shared";
+import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { getHostedOnboardingEnvironment } from "../hosted-onboarding/runtime";
 
@@ -42,11 +43,6 @@ const HOSTED_OPS_ONBOARDING_DEFAULT_INVITE_MESSAGE =
   "Murph setup link:\n{{inviteUrl}}\n\nReply here when you are in.";
 const HOSTED_OPS_ONBOARDING_DEFAULT_NEW_CHAT_OPENER =
   "Hey, I am sending the Murph setup link next.";
-
-type HostedOpsOnboardingVoiceMemoSendTx = Pick<
-  Prisma.TransactionClient,
-  "$queryRaw" | "hostedOpsOnboardingVoiceMemoSend"
->;
 
 type HostedOpsOnboardingInviteDeliveryMode = "existing_chat" | "new_chat";
 
@@ -138,22 +134,10 @@ export async function sendHostedOpsOnboardingInvite(
     assertHostedOpsOnboardingAuthorizedLinqSenderPhone(request.linqFromPhoneNumber);
   }
 
-  const issued = await prisma.$transaction(async (tx) => {
-    const member = await ensureHostedMemberForPhoneTx({
-      phoneNumber: request.recipientPhoneNumber,
-      prisma: tx,
-    });
-    const invite = await issueHostedInviteTx({
-      channel: "linq",
-      memberId: member.id,
-      prisma: tx,
-    });
-
-    return {
-      invite,
-      memberId: member.id,
-    };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  const issued = await issueHostedOpsOnboardingInviteForRequest({
+    prisma,
+    request,
+  });
   const inviteUrl = buildHostedInviteUrl(issued.invite.inviteCode);
   const inviteMessage = buildHostedOpsOnboardingInviteMessage({
     inviteMessage: request.inviteMessage,
@@ -180,8 +164,6 @@ export async function sendHostedOpsOnboardingInvite(
   const voiceMemo = request.voiceMemo
     ? await sendHostedOpsOnboardingVoiceMemoBestEffort({
         chatId: delivery.chatId,
-        memberId: issued.memberId,
-        prisma,
         request,
       })
     : {
@@ -207,6 +189,37 @@ export async function sendHostedOpsOnboardingInvite(
     textMessageSent: true,
     voiceMemo,
   };
+}
+
+async function issueHostedOpsOnboardingInviteForRequest(input: {
+  prisma: PrismaClient;
+  request: NormalizedHostedOpsOnboardingInviteInput;
+}): Promise<{
+  invite: Awaited<ReturnType<typeof issueHostedInviteTx>>;
+  memberId: string;
+}> {
+  return input.prisma.$transaction(async (tx) => {
+    const memberId = input.request.deliveryMode === "existing_chat"
+      ? await resolveHostedOpsOnboardingExistingChatMemberId({
+          linqChatId: input.request.linqChatId,
+          prisma: tx,
+          recipientPhoneNumber: input.request.recipientPhoneNumber,
+        })
+      : (await ensureHostedMemberForPhoneTx({
+          phoneNumber: input.request.recipientPhoneNumber,
+          prisma: tx,
+        })).id;
+    const invite = await issueHostedInviteTx({
+      channel: "linq",
+      memberId,
+      prisma: tx,
+    });
+
+    return {
+      invite,
+      memberId,
+    };
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export function resolveHostedOpsOnboardingVoiceMemoContentType(input: {
@@ -267,12 +280,6 @@ async function resolveHostedOpsOnboardingInviteDelivery(input: {
   openerMessageId: string | null;
 }> {
   if (input.request.deliveryMode === "existing_chat") {
-    await assertHostedOpsOnboardingExistingLinqChatAuthority({
-      linqChatId: input.request.linqChatId,
-      memberId: input.memberId,
-      prisma: input.prisma,
-    });
-
     await sendHostedLinqChatMessage({
       chatId: input.request.linqChatId,
       idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
@@ -348,45 +355,12 @@ async function resolveHostedOpsOnboardingInviteDelivery(input: {
 
 async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
   chatId: string;
-  memberId: string;
-  prisma: PrismaClient;
   request: NormalizedHostedOpsOnboardingInviteInput;
 }): Promise<HostedOpsOnboardingInviteResult["voiceMemo"]> {
   if (!input.request.voiceMemo) {
     return {
       error: null,
       requested: false,
-      sent: false,
-    };
-  }
-
-  const dedupeKey = buildHostedOpsOnboardingVoiceMemoDedupeKey({
-    chatId: input.chatId,
-    memberId: input.memberId,
-    requestId: input.request.requestId,
-  });
-
-  try {
-    const existingSent = await input.prisma.hostedOpsOnboardingVoiceMemoSend.findUnique({
-      select: {
-        id: true,
-      },
-      where: {
-        dedupeKey,
-      },
-    });
-
-    if (existingSent) {
-      return {
-        error: null,
-        requested: true,
-        sent: true,
-      };
-    }
-  } catch {
-    return {
-      error: "Voice memo delivery failed after the setup link was sent.",
-      requested: true,
       sent: false,
     };
   }
@@ -401,54 +375,10 @@ async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
       sizeBytes: input.request.voiceMemo.sizeBytes,
     });
 
-    return await input.prisma.$transaction(async (tx) => {
-      // The Linq voice memo endpoint has no provider idempotency field in the SDK.
-      // Serialize the native send by opaque request identity and re-check the marker
-      // immediately before the user-visible side effect.
-      await acquireHostedOpsOnboardingVoiceMemoSendLockTx({
-        dedupeKey,
-        tx,
-      });
-
-      const existingSent = await tx.hostedOpsOnboardingVoiceMemoSend.findUnique({
-        select: {
-          id: true,
-        },
-        where: {
-          dedupeKey,
-        },
-      });
-
-      if (existingSent) {
-        return {
-          error: null,
-          requested: true,
-          sent: true,
-        };
-      }
-
-      await sendHostedLinqVoiceMemo({
-        attachmentId: attachment.attachmentId,
-        chatId: input.chatId,
-      });
-
-      await tx.hostedOpsOnboardingVoiceMemoSend.createMany({
-        data: {
-          dedupeKey,
-          id: randomUUID(),
-          memberId: input.memberId,
-          requestId: input.request.requestId,
-          sentAt: new Date(),
-        },
-        skipDuplicates: true,
-      });
-
-      return {
-        error: null,
-        requested: true,
-        sent: true,
-      };
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    await sendHostedLinqVoiceMemo({
+      attachmentId: attachment.attachmentId,
+      chatId: input.chatId,
+    });
   } catch {
     return {
       error: "Voice memo delivery failed after the setup link was sent.",
@@ -456,40 +386,44 @@ async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
       sent: false,
     };
   }
+
+  return {
+    error: null,
+    requested: true,
+    sent: true,
+  };
 }
 
-async function acquireHostedOpsOnboardingVoiceMemoSendLockTx(input: {
-  dedupeKey: string;
-  tx: HostedOpsOnboardingVoiceMemoSendTx;
-}): Promise<void> {
-  await input.tx.$queryRaw`
-    SELECT pg_advisory_xact_lock(
-      hashtext('hosted-ops-onboarding-voice-memo'),
-      hashtext(${input.dedupeKey})
-    )
-  `;
-}
-
-function buildHostedOpsOnboardingVoiceMemoDedupeKey(input: {
-  chatId: string;
-  memberId: string;
-  requestId: string;
-}): string {
-  return buildHostedOpsOnboardingIdempotencyKey({
-    requestId: input.requestId,
-    step: "voice",
-    targetParts: [
-      input.memberId,
-      input.chatId,
-    ],
-  });
-}
-
-async function assertHostedOpsOnboardingExistingLinqChatAuthority(input: {
+async function resolveHostedOpsOnboardingExistingChatMemberId(input: {
   linqChatId: string;
-  memberId: string;
-  prisma: PrismaClient;
-}): Promise<void> {
+  prisma: Prisma.TransactionClient;
+  recipientPhoneNumber: string;
+}): Promise<string> {
+  const memberId = await resolveHostedOpsOnboardingExistingLinqChatMemberId({
+    linqChatId: input.linqChatId,
+    prisma: input.prisma,
+  });
+  const phoneIdentity = await lookupHostedMemberIdentityByPhoneNumber({
+    phoneNumber: input.recipientPhoneNumber,
+    prisma: input.prisma,
+  });
+
+  if (!phoneIdentity || phoneIdentity.core.id !== memberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_OPS_ONBOARDING_RECIPIENT_PHONE_NOT_BOUND",
+      httpStatus: 403,
+      message: "Recipient phone is not bound to this Linq chat.",
+      retryable: false,
+    });
+  }
+
+  return memberId;
+}
+
+async function resolveHostedOpsOnboardingExistingLinqChatMemberId(input: {
+  linqChatId: string;
+  prisma: PrismaClient | Prisma.TransactionClient;
+}): Promise<string> {
   const homeRoute = await lookupHostedMemberRoutingByHomeLinqChatId({
     linqChatId: input.linqChatId,
     prisma: input.prisma,
@@ -502,8 +436,8 @@ async function assertHostedOpsOnboardingExistingLinqChatAuthority(input: {
       });
   const route = homeRoute ?? pendingRoute;
 
-  if (route?.routing.memberId === input.memberId) {
-    return;
+  if (route?.routing.memberId) {
+    return route.routing.memberId;
   }
 
   throw hostedOnboardingError({

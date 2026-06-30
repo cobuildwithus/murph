@@ -190,12 +190,6 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes invite codes and channel metadata owned by the member.",
   },
   {
-    slug: "prisma.hosted_ops_onboarding_voice_memo_send",
-    label: "Ops onboarding voice memo send claims",
-    deletion: "live-delete",
-    note: "Deletes member-scoped ops onboarding voice memo replay claims. Export reports counts only and omits Linq chat lookup keys.",
-  },
-  {
     slug: "prisma.hosted_consent_event",
     label: "Hosted consent event records",
     deletion: "live-delete",
@@ -940,7 +934,6 @@ async function countHostedAccountData(input: {
     hostedUserCryptoEnvelope,
     hostedUserCryptoAudit,
     hostedInvite,
-    hostedOpsOnboardingVoiceMemoSend,
     hostedConsentEvent,
     hostedConsentGrant,
     hostedVaultShare,
@@ -979,7 +972,6 @@ async function countHostedAccountData(input: {
     countHostedUserCryptoEnvelopeRows(input.prisma, memberIds),
     countHostedUserCryptoAuditRows(input.prisma, memberIds),
     input.prisma.hostedInvite.count({ where: { memberId: memberIdFilter } }),
-    input.prisma.hostedOpsOnboardingVoiceMemoSend.count({ where: { memberId: memberIdFilter } }),
     input.prisma.hostedConsentEvent.count({ where: { memberId: memberIdFilter } }),
     input.prisma.hostedConsentGrant.count({ where: { memberId: memberIdFilter } }),
     input.prisma.hostedVaultShare.count({
@@ -1053,7 +1045,6 @@ async function countHostedAccountData(input: {
     "prisma.hosted_member_email_authorization": hostedMemberEmailAuthorization,
     "prisma.hosted_member_identity": hostedMemberIdentity,
     "prisma.hosted_member_routing": hostedMemberRouting,
-    "prisma.hosted_ops_onboarding_voice_memo_send": hostedOpsOnboardingVoiceMemoSend,
     "prisma.hosted_thread_container": hostedThreadContainer,
     "prisma.hosted_thread_route": hostedThreadRoute,
     "prisma.hosted_user_crypto_audit": hostedUserCryptoAudit,
@@ -1088,7 +1079,6 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_codex_auth_connection", await input.prisma.hostedCodexAuthConnection.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_linq_daily_state", await input.prisma.hostedLinqDailyState.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_invite", await input.prisma.hostedInvite.deleteMany({ where: { memberId: memberIdFilter } }));
-  record("prisma.hosted_ops_onboarding_voice_memo_send", await input.prisma.hostedOpsOnboardingVoiceMemoSend.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_consent_event", await input.prisma.hostedConsentEvent.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_consent_grant", await input.prisma.hostedConsentGrant.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_workspace", await input.prisma.hostedWorkspace.deleteMany({ where: { userId: memberIdFilter } }));

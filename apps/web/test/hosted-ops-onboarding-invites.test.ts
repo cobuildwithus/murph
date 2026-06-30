@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   getHostedOnboardingEnvironment: vi.fn(),
   issueHostedInviteTx: vi.fn(),
+  lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqChatId: vi.fn(),
   requireHostedOpsRequestAccess: vi.fn(),
@@ -58,6 +59,10 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
   ensureHostedMemberForPhoneTx: mocks.ensureHostedMemberForPhoneTx,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
+  lookupHostedMemberIdentityByPhoneNumber: mocks.lookupHostedMemberIdentityByPhoneNumber,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: mocks.getHostedOnboardingEnvironment,
 }));
@@ -67,13 +72,7 @@ type RouteModule = typeof import("../app/api/ops/onboarding-invites/route");
 
 let service: ServiceModule;
 let route: RouteModule;
-type MockedVoiceMemoSendDelegate = {
-  createMany: ReturnType<typeof vi.fn>;
-  findUnique: ReturnType<typeof vi.fn>;
-};
 type MockedTx = {
-  $queryRaw: ReturnType<typeof vi.fn>;
-  hostedOpsOnboardingVoiceMemoSend: MockedVoiceMemoSendDelegate;
   transaction: true;
 };
 type MockedPrisma = {
@@ -81,7 +80,6 @@ type MockedPrisma = {
   hostedInvite: {
     updateMany: ReturnType<typeof vi.fn>;
   };
-  hostedOpsOnboardingVoiceMemoSend: MockedVoiceMemoSendDelegate;
 };
 
 let prisma: MockedPrisma;
@@ -95,13 +93,7 @@ describe("hosted ops onboarding invites", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    const voiceMemoSendDelegate = {
-      createMany: vi.fn().mockResolvedValue({ count: 1 }),
-      findUnique: vi.fn().mockResolvedValue(null),
-    };
     tx = {
-      $queryRaw: vi.fn().mockResolvedValue([{ pg_advisory_xact_lock: "" }]),
-      hostedOpsOnboardingVoiceMemoSend: voiceMemoSendDelegate,
       transaction: true,
     };
     prisma = {
@@ -111,7 +103,6 @@ describe("hosted ops onboarding invites", () => {
       hostedInvite: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-      hostedOpsOnboardingVoiceMemoSend: voiceMemoSendDelegate,
     };
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.createHostedLinqChatLookupKey.mockImplementation((chatId: string | null | undefined) =>
@@ -122,6 +113,15 @@ describe("hosted ops onboarding invites", () => {
     });
     mocks.requireHostedOpsRequestAccess.mockResolvedValue({ member: { id: "member_ops" } });
     mocks.ensureHostedMemberForPhoneTx.mockResolvedValue({ id: "member_123" });
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: {
+        id: "member_123",
+      },
+      identity: {
+        memberId: "member_123",
+      },
+      matchedBy: "phoneNumber",
+    });
     mocks.issueHostedInviteTx.mockResolvedValue(inviteRow({ sentAt: null }));
     mocks.lookupHostedMemberRoutingByHomeLinqChatId.mockResolvedValue({
       routing: {
@@ -147,18 +147,29 @@ describe("hosted ops onboarding invites", () => {
       requestId: "request-123",
     });
 
-    expect(mocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
+    expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.lookupHostedMemberRoutingByHomeLinqChatId).toHaveBeenCalledWith({
+      linqChatId: "chat_existing",
+      prisma: tx,
+    });
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledWith({
       phoneNumber: "+15551234567",
       prisma: tx,
     });
+    expect(
+      mocks.lookupHostedMemberRoutingByHomeLinqChatId.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.issueHostedInviteTx.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(
+      mocks.lookupHostedMemberIdentityByPhoneNumber.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.issueHostedInviteTx.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(mocks.issueHostedInviteTx).toHaveBeenCalledWith({
       channel: "linq",
       memberId: "member_123",
       prisma: tx,
-    });
-    expect(mocks.lookupHostedMemberRoutingByHomeLinqChatId).toHaveBeenCalledWith({
-      linqChatId: "chat_existing",
-      prisma,
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
       chatId: "chat_existing",
@@ -213,7 +224,7 @@ describe("hosted ops onboarding invites", () => {
 
     expect(mocks.lookupHostedMemberRoutingByPendingLinqChatId).toHaveBeenCalledWith({
       linqChatId: "chat_pending",
-      prisma,
+      prisma: tx,
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_pending",
@@ -233,11 +244,35 @@ describe("hosted ops onboarding invites", () => {
       recipientPhoneNumber: "+15551234567",
       requestId: "request-wrong-route",
     })).rejects.toMatchObject({
-      code: "HOSTED_OPS_ONBOARDING_LINQ_CHAT_NOT_BOUND",
+      code: "HOSTED_OPS_ONBOARDING_RECIPIENT_PHONE_NOT_BOUND",
     });
 
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledWith({
+      phoneNumber: "+15551234567",
+      prisma: tx,
+    });
+    expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects existing-chat sends without creating a member when the recipient phone has no identity", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue(null);
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_existing",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-missing-phone-identity",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_RECIPIENT_PHONE_NOT_BOUND",
+    });
+
+    expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
   });
 
@@ -406,31 +441,12 @@ describe("hosted ops onboarding invites", () => {
       },
     });
 
-    expect(prisma.hostedOpsOnboardingVoiceMemoSend.createMany).toHaveBeenCalledWith({
-      data: {
-        dedupeKey: expect.stringMatching(
-          /^ops-onboarding-invite:voice:[a-f0-9]{64}$/u,
-        ),
-        id: expect.any(String),
-        memberId: "member_123",
-        requestId: "request-voice",
-        sentAt: expect.any(Date),
-      },
-      skipDuplicates: true,
-    });
-    expect(readVoiceCreateManyDedupeKey(
-      prisma.hostedOpsOnboardingVoiceMemoSend.createMany,
-    )).not.toContain("chat_existing");
     expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledWith({
       bytes: new Uint8Array([1, 2, 3]),
       contentType: "audio/x-m4a",
       filename: "murph-ops-voice-memo.m4a",
       sizeBytes: 3,
     });
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
-    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.sendHostedLinqVoiceMemo.mock.invocationCallOrder[0] ?? 0,
-    );
     expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledWith({
       attachmentId: "attachment_123",
       chatId: "chat_existing",
@@ -442,39 +458,7 @@ describe("hosted ops onboarding invites", () => {
     });
   });
 
-  it("serializes same-request native voice memo overlaps before calling Linq", async () => {
-    installSerializedAdvisoryLockTransactionMock();
-    const sentDedupeKeys = new Set<string>();
-    prisma.hostedOpsOnboardingVoiceMemoSend.findUnique.mockImplementation(
-      async (input: unknown) => {
-        const dedupeKey = readDedupeKeyFromInput(input);
-        return dedupeKey && sentDedupeKeys.has(dedupeKey)
-          ? { id: "voice_sent_overlap" }
-          : null;
-      },
-    );
-    prisma.hostedOpsOnboardingVoiceMemoSend.createMany.mockImplementation(
-      async (input: unknown) => {
-        const dedupeKey = readCreateManyDedupeKeyFromInput(input);
-        sentDedupeKeys.add(dedupeKey);
-        return { count: 1 };
-      },
-    );
-
-    const uploadsReady = createDeferred<void>();
-    let uploadCount = 0;
-    mocks.uploadHostedLinqAttachment.mockImplementation(async () => {
-      uploadCount += 1;
-      const attachmentId = `attachment_${uploadCount}`;
-
-      if (uploadCount === 2) {
-        uploadsReady.resolve();
-      }
-
-      await uploadsReady.promise;
-      return { attachmentId };
-    });
-
+  it("keeps the text invite idempotent when the same best-effort voice request is submitted twice", async () => {
     const voiceMemo = {
       bytes: new Uint8Array([1, 2, 3]),
       contentType: "audio/x-m4a" as const,
@@ -482,78 +466,29 @@ describe("hosted ops onboarding invites", () => {
       sizeBytes: 3,
     };
 
-    const [first, second] = await Promise.all([
-      service.sendHostedOpsOnboardingInvite({
-        deliveryMode: "existing_chat",
-        linqChatId: "chat_existing",
-        recipientPhoneNumber: "+15551234567",
-        requestId: "request-voice-overlap",
-        voiceMemo,
-      }),
-      service.sendHostedOpsOnboardingInvite({
-        deliveryMode: "existing_chat",
-        linqChatId: "chat_existing",
-        recipientPhoneNumber: "+15551234567",
-        requestId: "request-voice-overlap",
-        voiceMemo,
-      }),
-    ]);
-
-    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(2);
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
-    expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedOpsOnboardingVoiceMemoSend.createMany).toHaveBeenCalledTimes(1);
-    expect(first.voiceMemo).toEqual({
-      error: null,
-      requested: true,
-      sent: true,
-    });
-    expect(second.voiceMemo).toEqual({
-      error: null,
-      requested: true,
-      sent: true,
-    });
-  });
-
-  it("does not resend a confirmed native voice memo replay", async () => {
-    prisma.hostedOpsOnboardingVoiceMemoSend.findUnique.mockResolvedValueOnce({
-      id: "voice_sent_123",
-    });
-
-    const result = await service.sendHostedOpsOnboardingInvite({
+    await service.sendHostedOpsOnboardingInvite({
       deliveryMode: "existing_chat",
       linqChatId: "chat_existing",
       recipientPhoneNumber: "+15551234567",
-      requestId: "request-voice-sent",
-      voiceMemo: {
-        bytes: new Uint8Array([1, 2, 3]),
-        contentType: "audio/x-m4a",
-        extension: "m4a",
-        sizeBytes: 3,
-      },
+      requestId: "request-voice-repeat",
+      voiceMemo,
+    });
+    await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "existing_chat",
+      linqChatId: "chat_existing",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-voice-repeat",
+      voiceMemo,
     });
 
-    expect(prisma.hostedOpsOnboardingVoiceMemoSend.findUnique).toHaveBeenCalledWith({
-      select: {
-        id: true,
-      },
-      where: {
-        dedupeKey: expect.stringMatching(
-          /^ops-onboarding-invite:voice:[a-f0-9]{64}$/u,
-        ),
-      },
-    });
-    expect(prisma.hostedOpsOnboardingVoiceMemoSend.createMany).not.toHaveBeenCalled();
-    expect(mocks.uploadHostedLinqAttachment).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqVoiceMemo).not.toHaveBeenCalled();
-    expect(result.voiceMemo).toEqual({
-      error: null,
-      requested: true,
-      sent: true,
-    });
+    expect(readIdempotencyKey(mocks.sendHostedLinqChatMessage, 1))
+      .toBe(readIdempotencyKey(mocks.sendHostedLinqChatMessage, 0));
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(2);
+    expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(2);
   });
 
-  it("retries a native voice memo after a pre-send upload failure", async () => {
+  it("retries a best-effort native voice memo after a pre-send upload failure", async () => {
     mocks.uploadHostedLinqAttachment.mockRejectedValueOnce(
       new Error("provider rejected upload"),
     );
@@ -587,7 +522,6 @@ describe("hosted ops onboarding invites", () => {
     });
     expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(2);
     expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedOpsOnboardingVoiceMemoSend.createMany).toHaveBeenCalledTimes(1);
     expect(retry.voiceMemo).toEqual({
       error: null,
       requested: true,
@@ -595,7 +529,7 @@ describe("hosted ops onboarding invites", () => {
     });
   });
 
-  it("does not persist a voice memo marker when the provider send fails", async () => {
+  it("returns a partial warning when the provider voice send fails", async () => {
     mocks.sendHostedLinqVoiceMemo.mockRejectedValueOnce(
       new Error("provider timed out after send request"),
     );
@@ -614,86 +548,10 @@ describe("hosted ops onboarding invites", () => {
 
     expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedOpsOnboardingVoiceMemoSend.createMany).not.toHaveBeenCalled();
     expect(result.voiceMemo).toEqual({
       error: "Voice memo delivery failed after the setup link was sent.",
       requested: true,
       sent: false,
-    });
-  });
-
-  it("returns a partial warning when the post-send marker write fails", async () => {
-    prisma.hostedOpsOnboardingVoiceMemoSend.createMany.mockRejectedValueOnce(
-      new Error("database went away"),
-    );
-    const result = await service.sendHostedOpsOnboardingInvite({
-      deliveryMode: "existing_chat",
-      linqChatId: "chat_existing",
-      recipientPhoneNumber: "+15551234567",
-      requestId: "request-voice-marker-fail",
-      voiceMemo: {
-        bytes: new Uint8Array([1, 2, 3]),
-        contentType: "audio/x-m4a",
-        extension: "m4a",
-        sizeBytes: 3,
-      },
-    });
-
-    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(1);
-    expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedOpsOnboardingVoiceMemoSend.createMany).toHaveBeenCalledTimes(1);
-    expect(result.voiceMemo).toEqual({
-      error: "Voice memo delivery failed after the setup link was sent.",
-      requested: true,
-      sent: false,
-    });
-  });
-
-  it("does not resend a native voice memo replay after contact privacy key rotation", async () => {
-    let lookupKeyVersion = 0;
-    mocks.createHostedLinqChatLookupKey.mockImplementation((chatId: string | null | undefined) =>
-      chatId ? `lookup:v${++lookupKeyVersion}:${chatId}` : null
-    );
-    prisma.hostedOpsOnboardingVoiceMemoSend.findUnique
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ id: "voice_sent_rotation" });
-
-    const voiceMemo = {
-      bytes: new Uint8Array([1, 2, 3]),
-      contentType: "audio/x-m4a" as const,
-      extension: "m4a",
-      sizeBytes: 3,
-    };
-
-    await service.sendHostedOpsOnboardingInvite({
-      deliveryMode: "existing_chat",
-      linqChatId: "chat_existing",
-      recipientPhoneNumber: "+15551234567",
-      requestId: "request-voice-rotation",
-      voiceMemo,
-    });
-    const replay = await service.sendHostedOpsOnboardingInvite({
-      deliveryMode: "existing_chat",
-      linqChatId: "chat_existing",
-      recipientPhoneNumber: "+15551234567",
-      requestId: "request-voice-rotation",
-      voiceMemo,
-    });
-
-    expect(mocks.createHostedLinqChatLookupKey).not.toHaveBeenCalled();
-    expect(prisma.hostedOpsOnboardingVoiceMemoSend.findUnique).toHaveBeenCalledTimes(3);
-    expect(readVoiceDedupeKey(prisma.hostedOpsOnboardingVoiceMemoSend.findUnique, 2))
-      .toBe(readVoiceDedupeKey(prisma.hostedOpsOnboardingVoiceMemoSend.findUnique, 0));
-    expect(readVoiceDedupeKey(prisma.hostedOpsOnboardingVoiceMemoSend.findUnique, 0))
-      .not.toContain("chat_existing");
-    expect(prisma.hostedOpsOnboardingVoiceMemoSend.createMany).toHaveBeenCalledTimes(1);
-    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(1);
-    expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(1);
-    expect(replay.voiceMemo).toEqual({
-      error: null,
-      requested: true,
-      sent: true,
     });
   });
 
@@ -716,7 +574,6 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalled();
     expect(prisma.hostedInvite.updateMany).toHaveBeenCalled();
     expect(mocks.sendHostedLinqVoiceMemo).not.toHaveBeenCalled();
-    expect(prisma.hostedOpsOnboardingVoiceMemoSend.createMany).not.toHaveBeenCalled();
     expect(result.voiceMemo).toEqual({
       error: "Voice memo delivery failed after the setup link was sent.",
       requested: true,
@@ -815,45 +672,6 @@ function createBodyStream(byteLength: number): ReadableStream<Uint8Array> {
   });
 }
 
-function installSerializedAdvisoryLockTransactionMock(): void {
-  let locked = false;
-  const waiters: Array<() => void> = [];
-
-  tx.$queryRaw.mockImplementation(async () => {
-    if (locked) {
-      await new Promise<void>((resolve) => {
-        waiters.push(resolve);
-      });
-    }
-
-    locked = true;
-    return [{ pg_advisory_xact_lock: "" }];
-  });
-
-  prisma.$transaction.mockImplementation(async (callback: (transaction: MockedTx) => Promise<unknown>) => {
-    try {
-      return await callback(tx);
-    } finally {
-      if (locked) {
-        locked = false;
-        waiters.shift()?.();
-      }
-    }
-  });
-}
-
-function createDeferred<T>(): {
-  promise: Promise<T>;
-  resolve: (value: T | PromiseLike<T>) => void;
-} {
-  let resolve: (value: T | PromiseLike<T>) => void = () => {};
-  const promise = new Promise<T>((innerResolve) => {
-    resolve = innerResolve;
-  });
-
-  return { promise, resolve };
-}
-
 function readIdempotencyKey(
   mock: { mock: { calls: Array<Array<unknown>> } },
   callIndex = 0,
@@ -867,62 +685,4 @@ function readIdempotencyKey(
   }
 
   return input.idempotencyKey;
-}
-
-function readVoiceCreateManyDedupeKey(
-  mock: { mock: { calls: Array<Array<unknown>> } },
-  callIndex = 0,
-): string {
-  const input = mock.mock.calls[callIndex]?.[0];
-
-  if (!isRecord(input) || !isRecord(input.data)) {
-    throw new Error("Expected voice marker createMany input to include data.");
-  }
-
-  if (typeof input.data.dedupeKey !== "string") {
-    throw new Error("Expected voice marker createMany input to include a dedupe key.");
-  }
-
-  return input.data.dedupeKey;
-}
-
-function readCreateManyDedupeKeyFromInput(input: unknown): string {
-  if (!isRecord(input) || !isRecord(input.data)) {
-    throw new Error("Expected voice marker createMany input to include data.");
-  }
-
-  if (typeof input.data.dedupeKey !== "string") {
-    throw new Error("Expected voice marker createMany input to include a dedupe key.");
-  }
-
-  return input.data.dedupeKey;
-}
-
-function readVoiceDedupeKey(
-  mock: { mock: { calls: Array<Array<unknown>> } },
-  callIndex = 0,
-): string {
-  const input = mock.mock.calls[callIndex]?.[0];
-
-  if (!isRecord(input) || !isRecord(input.where)) {
-    throw new Error("Expected voice marker lookup input to include where.");
-  }
-
-  if (typeof input.where.dedupeKey !== "string") {
-    throw new Error("Expected voice marker lookup input to include a dedupe key.");
-  }
-
-  return input.where.dedupeKey;
-}
-
-function readDedupeKeyFromInput(input: unknown): string | null {
-  if (!isRecord(input) || !isRecord(input.where)) {
-    return null;
-  }
-
-  return typeof input.where.dedupeKey === "string" ? input.where.dedupeKey : null;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }

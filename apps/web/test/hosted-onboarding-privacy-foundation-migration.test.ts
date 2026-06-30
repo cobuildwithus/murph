@@ -147,7 +147,6 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMemberEmailAuthorization",
   "HostedMemberIdentity",
   "HostedMemberRouting",
-  "HostedOpsOnboardingVoiceMemoSend",
   "HostedPhoneCall",
   "HostedProductFeedback",
   "HostedWebSession",
@@ -514,7 +513,6 @@ describe("hosted Prisma baseline migration", () => {
       "20260627230000_linq_first_contact_rejected_message_text",
       "20260628000000_linq_first_contact_scrub_rejected_message_text",
       "20260629160000_computer_handoff_viewport_session_hint",
-      "20260629210000_hosted_ops_onboarding_voice_memo_send",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
