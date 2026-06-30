@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type { SupportedContentType } from "@linqapp/sdk/resources";
 import { createHash, randomUUID } from "node:crypto";
 
@@ -42,6 +42,11 @@ const HOSTED_OPS_ONBOARDING_DEFAULT_INVITE_MESSAGE =
   "Murph setup link:\n{{inviteUrl}}\n\nReply here when you are in.";
 const HOSTED_OPS_ONBOARDING_DEFAULT_NEW_CHAT_OPENER =
   "Hey, I am sending the Murph setup link next.";
+
+type HostedOpsOnboardingVoiceMemoSendTx = Pick<
+  Prisma.TransactionClient,
+  "$queryRaw" | "hostedOpsOnboardingVoiceMemoSend"
+>;
 
 type HostedOpsOnboardingInviteDeliveryMode = "existing_chat" | "new_chat";
 
@@ -396,10 +401,54 @@ async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
       sizeBytes: input.request.voiceMemo.sizeBytes,
     });
 
-    await sendHostedLinqVoiceMemo({
-      attachmentId: attachment.attachmentId,
-      chatId: input.chatId,
-    });
+    return await input.prisma.$transaction(async (tx) => {
+      // The Linq voice memo endpoint has no provider idempotency field in the SDK.
+      // Serialize the native send by opaque request identity and re-check the marker
+      // immediately before the user-visible side effect.
+      await acquireHostedOpsOnboardingVoiceMemoSendLockTx({
+        dedupeKey,
+        tx,
+      });
+
+      const existingSent = await tx.hostedOpsOnboardingVoiceMemoSend.findUnique({
+        select: {
+          id: true,
+        },
+        where: {
+          dedupeKey,
+        },
+      });
+
+      if (existingSent) {
+        return {
+          error: null,
+          requested: true,
+          sent: true,
+        };
+      }
+
+      await sendHostedLinqVoiceMemo({
+        attachmentId: attachment.attachmentId,
+        chatId: input.chatId,
+      });
+
+      await tx.hostedOpsOnboardingVoiceMemoSend.createMany({
+        data: {
+          dedupeKey,
+          id: randomUUID(),
+          memberId: input.memberId,
+          requestId: input.request.requestId,
+          sentAt: new Date(),
+        },
+        skipDuplicates: true,
+      });
+
+      return {
+        error: null,
+        requested: true,
+        sent: true,
+      };
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch {
     return {
       error: "Voice memo delivery failed after the setup link was sent.",
@@ -407,27 +456,18 @@ async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
       sent: false,
     };
   }
+}
 
-  try {
-    await input.prisma.hostedOpsOnboardingVoiceMemoSend.createMany({
-      data: {
-        dedupeKey,
-        id: randomUUID(),
-        memberId: input.memberId,
-        requestId: input.request.requestId,
-        sentAt: new Date(),
-      },
-      skipDuplicates: true,
-    });
-  } catch {
-    // The Linq send already succeeded. This marker only suppresses later same-request replays.
-  }
-
-  return {
-    error: null,
-    requested: true,
-    sent: true,
-  };
+async function acquireHostedOpsOnboardingVoiceMemoSendLockTx(input: {
+  dedupeKey: string;
+  tx: HostedOpsOnboardingVoiceMemoSendTx;
+}): Promise<void> {
+  await input.tx.$queryRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtext('hosted-ops-onboarding-voice-memo'),
+      hashtext(${input.dedupeKey})
+    )
+  `;
 }
 
 function buildHostedOpsOnboardingVoiceMemoDedupeKey(input: {

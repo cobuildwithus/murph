@@ -67,17 +67,25 @@ type RouteModule = typeof import("../app/api/ops/onboarding-invites/route");
 
 let service: ServiceModule;
 let route: RouteModule;
-let prisma: {
+type MockedVoiceMemoSendDelegate = {
+  createMany: ReturnType<typeof vi.fn>;
+  findUnique: ReturnType<typeof vi.fn>;
+};
+type MockedTx = {
+  $queryRaw: ReturnType<typeof vi.fn>;
+  hostedOpsOnboardingVoiceMemoSend: MockedVoiceMemoSendDelegate;
+  transaction: true;
+};
+type MockedPrisma = {
   $transaction: ReturnType<typeof vi.fn>;
   hostedInvite: {
     updateMany: ReturnType<typeof vi.fn>;
   };
-  hostedOpsOnboardingVoiceMemoSend: {
-    createMany: ReturnType<typeof vi.fn>;
-    findUnique: ReturnType<typeof vi.fn>;
-  };
+  hostedOpsOnboardingVoiceMemoSend: MockedVoiceMemoSendDelegate;
 };
-const tx = { transaction: true };
+
+let prisma: MockedPrisma;
+let tx: MockedTx;
 
 describe("hosted ops onboarding invites", () => {
   beforeAll(async () => {
@@ -87,17 +95,23 @@ describe("hosted ops onboarding invites", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    const voiceMemoSendDelegate = {
+      createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findUnique: vi.fn().mockResolvedValue(null),
+    };
+    tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ pg_advisory_xact_lock: "" }]),
+      hostedOpsOnboardingVoiceMemoSend: voiceMemoSendDelegate,
+      transaction: true,
+    };
     prisma = {
-      $transaction: vi.fn(async (callback: (transaction: typeof tx) => Promise<unknown>) =>
+      $transaction: vi.fn(async (callback: (transaction: MockedTx) => Promise<unknown>) =>
         callback(tx),
       ),
       hostedInvite: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-      hostedOpsOnboardingVoiceMemoSend: {
-        createMany: vi.fn().mockResolvedValue({ count: 1 }),
-        findUnique: vi.fn().mockResolvedValue(null),
-      },
+      hostedOpsOnboardingVoiceMemoSend: voiceMemoSendDelegate,
     };
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.createHostedLinqChatLookupKey.mockImplementation((chatId: string | null | undefined) =>
@@ -413,11 +427,88 @@ describe("hosted ops onboarding invites", () => {
       filename: "murph-ops-voice-memo.m4a",
       sizeBytes: 3,
     });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.sendHostedLinqVoiceMemo.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledWith({
       attachmentId: "attachment_123",
       chatId: "chat_existing",
     });
     expect(result.voiceMemo).toEqual({
+      error: null,
+      requested: true,
+      sent: true,
+    });
+  });
+
+  it("serializes same-request native voice memo overlaps before calling Linq", async () => {
+    installSerializedAdvisoryLockTransactionMock();
+    const sentDedupeKeys = new Set<string>();
+    prisma.hostedOpsOnboardingVoiceMemoSend.findUnique.mockImplementation(
+      async (input: unknown) => {
+        const dedupeKey = readDedupeKeyFromInput(input);
+        return dedupeKey && sentDedupeKeys.has(dedupeKey)
+          ? { id: "voice_sent_overlap" }
+          : null;
+      },
+    );
+    prisma.hostedOpsOnboardingVoiceMemoSend.createMany.mockImplementation(
+      async (input: unknown) => {
+        const dedupeKey = readCreateManyDedupeKeyFromInput(input);
+        sentDedupeKeys.add(dedupeKey);
+        return { count: 1 };
+      },
+    );
+
+    const uploadsReady = createDeferred<void>();
+    let uploadCount = 0;
+    mocks.uploadHostedLinqAttachment.mockImplementation(async () => {
+      uploadCount += 1;
+      const attachmentId = `attachment_${uploadCount}`;
+
+      if (uploadCount === 2) {
+        uploadsReady.resolve();
+      }
+
+      await uploadsReady.promise;
+      return { attachmentId };
+    });
+
+    const voiceMemo = {
+      bytes: new Uint8Array([1, 2, 3]),
+      contentType: "audio/x-m4a" as const,
+      extension: "m4a",
+      sizeBytes: 3,
+    };
+
+    const [first, second] = await Promise.all([
+      service.sendHostedOpsOnboardingInvite({
+        deliveryMode: "existing_chat",
+        linqChatId: "chat_existing",
+        recipientPhoneNumber: "+15551234567",
+        requestId: "request-voice-overlap",
+        voiceMemo,
+      }),
+      service.sendHostedOpsOnboardingInvite({
+        deliveryMode: "existing_chat",
+        linqChatId: "chat_existing",
+        recipientPhoneNumber: "+15551234567",
+        requestId: "request-voice-overlap",
+        voiceMemo,
+      }),
+    ]);
+
+    expect(mocks.uploadHostedLinqAttachment).toHaveBeenCalledTimes(2);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedOpsOnboardingVoiceMemoSend.createMany).toHaveBeenCalledTimes(1);
+    expect(first.voiceMemo).toEqual({
+      error: null,
+      requested: true,
+      sent: true,
+    });
+    expect(second.voiceMemo).toEqual({
       error: null,
       requested: true,
       sent: true,
@@ -531,7 +622,7 @@ describe("hosted ops onboarding invites", () => {
     });
   });
 
-  it("still reports voice memo success when the post-send marker write fails", async () => {
+  it("returns a partial warning when the post-send marker write fails", async () => {
     prisma.hostedOpsOnboardingVoiceMemoSend.createMany.mockRejectedValueOnce(
       new Error("database went away"),
     );
@@ -552,9 +643,9 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.sendHostedLinqVoiceMemo).toHaveBeenCalledTimes(1);
     expect(prisma.hostedOpsOnboardingVoiceMemoSend.createMany).toHaveBeenCalledTimes(1);
     expect(result.voiceMemo).toEqual({
-      error: null,
+      error: "Voice memo delivery failed after the setup link was sent.",
       requested: true,
-      sent: true,
+      sent: false,
     });
   });
 
@@ -564,6 +655,7 @@ describe("hosted ops onboarding invites", () => {
       chatId ? `lookup:v${++lookupKeyVersion}:${chatId}` : null
     );
     prisma.hostedOpsOnboardingVoiceMemoSend.findUnique
+      .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ id: "voice_sent_rotation" });
 
@@ -590,8 +682,8 @@ describe("hosted ops onboarding invites", () => {
     });
 
     expect(mocks.createHostedLinqChatLookupKey).not.toHaveBeenCalled();
-    expect(prisma.hostedOpsOnboardingVoiceMemoSend.findUnique).toHaveBeenCalledTimes(2);
-    expect(readVoiceDedupeKey(prisma.hostedOpsOnboardingVoiceMemoSend.findUnique, 1))
+    expect(prisma.hostedOpsOnboardingVoiceMemoSend.findUnique).toHaveBeenCalledTimes(3);
+    expect(readVoiceDedupeKey(prisma.hostedOpsOnboardingVoiceMemoSend.findUnique, 2))
       .toBe(readVoiceDedupeKey(prisma.hostedOpsOnboardingVoiceMemoSend.findUnique, 0));
     expect(readVoiceDedupeKey(prisma.hostedOpsOnboardingVoiceMemoSend.findUnique, 0))
       .not.toContain("chat_existing");
@@ -723,6 +815,45 @@ function createBodyStream(byteLength: number): ReadableStream<Uint8Array> {
   });
 }
 
+function installSerializedAdvisoryLockTransactionMock(): void {
+  let locked = false;
+  const waiters: Array<() => void> = [];
+
+  tx.$queryRaw.mockImplementation(async () => {
+    if (locked) {
+      await new Promise<void>((resolve) => {
+        waiters.push(resolve);
+      });
+    }
+
+    locked = true;
+    return [{ pg_advisory_xact_lock: "" }];
+  });
+
+  prisma.$transaction.mockImplementation(async (callback: (transaction: MockedTx) => Promise<unknown>) => {
+    try {
+      return await callback(tx);
+    } finally {
+      if (locked) {
+        locked = false;
+        waiters.shift()?.();
+      }
+    }
+  });
+}
+
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+} {
+  let resolve: (value: T | PromiseLike<T>) => void = () => {};
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve;
+  });
+
+  return { promise, resolve };
+}
+
 function readIdempotencyKey(
   mock: { mock: { calls: Array<Array<unknown>> } },
   callIndex = 0,
@@ -755,6 +886,18 @@ function readVoiceCreateManyDedupeKey(
   return input.data.dedupeKey;
 }
 
+function readCreateManyDedupeKeyFromInput(input: unknown): string {
+  if (!isRecord(input) || !isRecord(input.data)) {
+    throw new Error("Expected voice marker createMany input to include data.");
+  }
+
+  if (typeof input.data.dedupeKey !== "string") {
+    throw new Error("Expected voice marker createMany input to include a dedupe key.");
+  }
+
+  return input.data.dedupeKey;
+}
+
 function readVoiceDedupeKey(
   mock: { mock: { calls: Array<Array<unknown>> } },
   callIndex = 0,
@@ -770,6 +913,14 @@ function readVoiceDedupeKey(
   }
 
   return input.where.dedupeKey;
+}
+
+function readDedupeKeyFromInput(input: unknown): string | null {
+  if (!isRecord(input) || !isRecord(input.where)) {
+    return null;
+  }
+
+  return typeof input.where.dedupeKey === "string" ? input.where.dedupeKey : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
