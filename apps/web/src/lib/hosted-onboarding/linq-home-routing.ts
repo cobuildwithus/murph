@@ -169,11 +169,12 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
     };
   }
 
+  const now = new Date();
   const activeMembersByRecipientPhone = await countHostedMemberHomeLinqBindingsByRecipientPhone({
+    now,
     prisma: input.prisma,
     recipientPhones,
   });
-  const now = new Date();
   const newAssignmentsByRecipientPhone =
     await countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince({
       prisma: input.prisma,

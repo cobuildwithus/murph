@@ -366,6 +366,7 @@ describe("hosted ops onboarding invites", () => {
       prisma: tx,
     });
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledWith({
+      now: expect.any(Date),
       prisma: tx,
       recipientPhones: ["+15557654321"],
     });
@@ -562,6 +563,7 @@ describe("hosted ops onboarding invites", () => {
     });
 
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledWith({
+      now: expect.any(Date),
       prisma: tx,
       recipientPhones: ["+15557654321"],
     });

@@ -714,6 +714,7 @@ async function resolveHostedOpsOnboardingNewChatLineAssignmentTx(input: {
   const recipientPhones = [line.phoneNumber];
   const activeMembersByRecipientPhone =
     await countHostedMemberHomeLinqBindingsByRecipientPhone({
+      now,
       prisma: input.prisma,
       recipientPhones,
     });

@@ -1544,6 +1544,7 @@ describe("hosted-member-store", () => {
   it("counts active home-line assignments and pre-activation reservations by recipient phone", async () => {
     const homePhoneOne = "+15550100001";
     const homePhoneTwo = "+15550100002";
+    const now = new Date("2026-06-30T12:00:00.000Z");
     const groupBy = vi.fn().mockResolvedValue([
       {
         linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homePhoneOne),
@@ -1562,6 +1563,7 @@ describe("hosted-member-store", () => {
 
     await expect(
       countHostedMemberHomeLinqBindingsByRecipientPhone({
+        now,
         prisma,
         recipientPhones: [homePhoneOne, homePhoneTwo],
       }),
@@ -1583,14 +1585,33 @@ describe("hosted-member-store", () => {
         },
         OR: [
           {
-            linqHomeLineAssignedAt: {
-              not: null,
-            },
-          },
-          {
             member: {
               is: {
                 billingStatus: HostedBillingStatus.active,
+                suspendedAt: null,
+              },
+            },
+          },
+          {
+            linqHomeLineAssignedAt: {
+              not: null,
+            },
+            member: {
+              is: {
+                billingStatus: {
+                  in: [
+                    HostedBillingStatus.not_started,
+                    HostedBillingStatus.incomplete,
+                  ],
+                },
+                invites: {
+                  some: {
+                    channel: "linq",
+                    expiresAt: {
+                      gt: now,
+                    },
+                  },
+                },
                 suspendedAt: null,
               },
             },
@@ -1632,6 +1653,7 @@ describe("hosted-member-store", () => {
 
     await expect(
       countHostedMemberHomeLinqBindingsByRecipientPhone({
+        now: new Date("2026-06-30T12:00:00.000Z"),
         prisma,
         recipientPhones: [homePhone],
       }),

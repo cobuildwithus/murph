@@ -286,6 +286,7 @@ export async function acquireHostedMemberHomeLinqRecipientAssignmentLockTx(input
 }
 
 export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
+  now: Date;
   prisma: HostedOnboardingReadClient;
   recipientPhones: readonly string[];
 }): Promise<Map<string, number>> {
@@ -315,14 +316,33 @@ export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
       },
       OR: [
         {
-          linqHomeLineAssignedAt: {
-            not: null,
-          },
-        },
-        {
           member: {
             is: {
               billingStatus: HostedBillingStatus.active,
+              suspendedAt: null,
+            },
+          },
+        },
+        {
+          linqHomeLineAssignedAt: {
+            not: null,
+          },
+          member: {
+            is: {
+              billingStatus: {
+                in: [
+                  HostedBillingStatus.not_started,
+                  HostedBillingStatus.incomplete,
+                ],
+              },
+              invites: {
+                some: {
+                  channel: "linq",
+                  expiresAt: {
+                    gt: input.now,
+                  },
+                },
+              },
               suspendedAt: null,
             },
           },
