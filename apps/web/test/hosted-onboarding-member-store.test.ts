@@ -1539,20 +1539,19 @@ describe("hosted-member-store", () => {
   it("counts active home-line assignments by recipient phone even before a home chat is bound", async () => {
     const homePhoneOne = "+15550100001";
     const homePhoneTwo = "+15550100002";
-    const findMany = vi.fn().mockResolvedValue([
+    const groupBy = vi.fn().mockResolvedValue([
       {
         linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homePhoneOne),
-      },
-      {
-        linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homePhoneOne),
+        _count: { _all: 2 },
       },
       {
         linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homePhoneTwo),
+        _count: { _all: 1 },
       },
     ]);
     const prisma = {
       hostedMemberRouting: {
-        findMany,
+        groupBy,
       },
     } as never;
 
@@ -1568,7 +1567,8 @@ describe("hosted-member-store", () => {
       ]),
     );
 
-    expect(findMany).toHaveBeenCalledWith({
+    expect(groupBy).toHaveBeenCalledWith({
+      by: ["linqRecipientPhoneLookupKey"],
       where: {
         linqRecipientPhoneLookupKey: {
           in: expect.arrayContaining([
@@ -1583,8 +1583,8 @@ describe("hosted-member-store", () => {
           },
         },
       },
-      select: {
-        linqRecipientPhoneLookupKey: true,
+      _count: {
+        _all: true,
       },
     });
   });
@@ -1600,17 +1600,19 @@ describe("hosted-member-store", () => {
 
     const homePhone = "+15550100001";
     const [currentLookupKey, previousLookupKey] = createHostedPhoneLookupKeyReadCandidates(homePhone);
-    const findMany = vi.fn().mockResolvedValue([
+    const groupBy = vi.fn().mockResolvedValue([
       {
         linqRecipientPhoneLookupKey: previousLookupKey,
+        _count: { _all: 1 },
       },
       {
         linqRecipientPhoneLookupKey: currentLookupKey,
+        _count: { _all: 1 },
       },
     ]);
     const prisma = {
       hostedMemberRouting: {
-        findMany,
+        groupBy,
       },
     } as never;
 
@@ -1621,7 +1623,8 @@ describe("hosted-member-store", () => {
       }),
     ).resolves.toEqual(new Map([[homePhone, 2]]));
 
-    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(groupBy).toHaveBeenCalledWith(expect.objectContaining({
+      by: ["linqRecipientPhoneLookupKey"],
       where: expect.objectContaining({
         linqRecipientPhoneLookupKey: {
           in: expect.arrayContaining([
@@ -1630,6 +1633,9 @@ describe("hosted-member-store", () => {
           ]),
         },
       }),
+      _count: {
+        _all: true,
+      },
     }));
   });
 

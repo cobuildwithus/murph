@@ -307,7 +307,8 @@ export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
     ] as const),
   );
 
-  const routingRecords = await input.prisma.hostedMemberRouting.findMany({
+  const groupedCounts = await input.prisma.hostedMemberRouting.groupBy({
+    by: ["linqRecipientPhoneLookupKey"],
     where: {
       linqRecipientPhoneLookupKey: {
         in: recipientPhoneEntries.map(({ lookupKey }) => lookupKey),
@@ -319,21 +320,21 @@ export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
         },
       },
     },
-    select: {
-      linqRecipientPhoneLookupKey: true,
+    _count: {
+      _all: true,
     },
   });
 
-  for (const routingRecord of routingRecords) {
-    const recipientPhone = routingRecord.linqRecipientPhoneLookupKey
-      ? recipientPhoneByLookupKey.get(routingRecord.linqRecipientPhoneLookupKey)
+  for (const groupedCount of groupedCounts) {
+    const recipientPhone = groupedCount.linqRecipientPhoneLookupKey
+      ? recipientPhoneByLookupKey.get(groupedCount.linqRecipientPhoneLookupKey)
       : null;
 
     if (!recipientPhone) {
       continue;
     }
 
-    counts.set(recipientPhone, (counts.get(recipientPhone) ?? 0) + 1);
+    counts.set(recipientPhone, (counts.get(recipientPhone) ?? 0) + groupedCount._count._all);
   }
 
   return counts;
@@ -362,7 +363,8 @@ export async function countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince(
     ] as const),
   );
 
-  const routingRecords = await input.prisma.hostedMemberRouting.findMany({
+  const groupedCounts = await input.prisma.hostedMemberRouting.groupBy({
+    by: ["linqRecipientPhoneLookupKey"],
     where: {
       linqHomeLineAssignedAt: {
         gte: input.since,
@@ -371,21 +373,21 @@ export async function countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince(
         in: recipientPhoneEntries.map(({ lookupKey }) => lookupKey),
       },
     },
-    select: {
-      linqRecipientPhoneLookupKey: true,
+    _count: {
+      _all: true,
     },
   });
 
-  for (const routingRecord of routingRecords) {
-    const recipientPhone = routingRecord.linqRecipientPhoneLookupKey
-      ? recipientPhoneByLookupKey.get(routingRecord.linqRecipientPhoneLookupKey)
+  for (const groupedCount of groupedCounts) {
+    const recipientPhone = groupedCount.linqRecipientPhoneLookupKey
+      ? recipientPhoneByLookupKey.get(groupedCount.linqRecipientPhoneLookupKey)
       : null;
 
     if (!recipientPhone) {
       continue;
     }
 
-    counts.set(recipientPhone, (counts.get(recipientPhone) ?? 0) + 1);
+    counts.set(recipientPhone, (counts.get(recipientPhone) ?? 0) + groupedCount._count._all);
   }
 
   return counts;

@@ -732,7 +732,6 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          egressPolicy: "disabled",
           healthStatus: "unhealthy",
           lastStatusEventId: createHostedLinqProviderEventLookupKey("evt_status_123"),
           providerStatus: "CRITICAL",
@@ -750,7 +749,7 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
-  it("does not re-enable egress policy for healthy status updates", async () => {
+  it("does not change operator egress policy for healthy status updates", async () => {
     const fixture = createObservabilityPrismaFixture();
     const event = requireParsedProviderEvent(buildProviderEvent({
       data: {
@@ -806,7 +805,6 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          egressPolicy: "disabled",
           healthStatus: "unhealthy",
           providerStatus: "FLAGGED",
         }),
@@ -846,13 +844,11 @@ describe("hosted Linq observability stores", () => {
               },
             },
             {
-              egressPolicy: {
-                notIn: ["disabled", "avoid_new_assignments"],
-              },
+              healthStatus: { in: ["healthy", "unknown"] },
               providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
             },
             {
-              egressPolicy: "avoid_new_assignments",
+              healthStatus: "degraded",
               providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
               OR: [
                 { lastStatusEventId: null },
@@ -885,13 +881,12 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          egressPolicy: "disabled",
           healthStatus: "unhealthy",
         }),
         where: expect.objectContaining({
           OR: expect.arrayContaining([
             {
-              egressPolicy: { not: "disabled" },
+              healthStatus: { not: "unhealthy" },
               providerUpdatedAt: new Date("2026-03-26T12:00:00.000Z"),
             },
           ]),

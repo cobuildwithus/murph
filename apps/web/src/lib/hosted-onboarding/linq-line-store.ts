@@ -79,7 +79,6 @@ async function upsertHostedLinqLineForPhoneInTransaction(input: {
   });
 
   const providerStatus = normalizeNullableString(input.providerStatus);
-  const providerEgressPolicy = deriveHostedLinqEgressPolicy(providerStatus);
   const providerHealthStatus = providerStatus
     ? classifyHostedLinqProviderStatus(providerStatus)
     : null;
@@ -118,7 +117,6 @@ async function upsertHostedLinqLineForPhoneInTransaction(input: {
     ...(input.providerStatus === undefined
       ? {}
       : {
-          ...(providerEgressPolicy ? { egressPolicy: providerEgressPolicy } : {}),
           ...(providerHealthStatus ? { healthStatus: providerHealthStatus } : {}),
           providerStatus,
           providerUpdatedAt: input.observedAt,
@@ -130,7 +128,7 @@ async function upsertHostedLinqLineForPhoneInTransaction(input: {
     assignmentWeight: 100,
     ...(input.activeMemberLimit === undefined ? {} : { activeMemberLimit: input.activeMemberLimit }),
     configuredAt: input.source === "configured" ? input.observedAt : null,
-    egressPolicy: providerEgressPolicy ?? "enabled",
+    egressPolicy: "enabled",
     healthStatus: providerHealthStatus ?? "unknown",
     phoneNumberEncrypted,
     phoneNumberHint: readHostedPhoneHint(normalizedPhoneNumber),
@@ -564,7 +562,6 @@ async function projectPhoneNumberStatusUpdated(
   event: ParsedHostedLinqProviderEvent,
 ): Promise<boolean> {
   const healthStatus = classifyHostedLinqProviderStatus(event.providerStatus);
-  const egressPolicy = deriveHostedLinqEgressPolicy(event.providerStatus);
   const progress = createHostedLinqProviderEventProgress({
     eventId: event.eventId,
     providerCreatedAt: event.providerCreatedAt,
@@ -573,7 +570,6 @@ async function projectPhoneNumberStatusUpdated(
   const updated = await prisma.hostedLinqLine.updateMany({
     where: buildPhoneNumberStatusProjectionWhere(phoneNumberLookupKey, progress),
     data: {
-      ...(egressPolicy ? { egressPolicy } : {}),
       healthStatus,
       lastStatusEventId: progress.eventLookupKey,
       providerReason: event.providerReason,
@@ -640,11 +636,11 @@ function buildSameTimestampStatusProjectionWhere(
   if (progress.rank === 2) {
     return [
       {
-        egressPolicy: { not: "disabled" },
+        healthStatus: { not: "unhealthy" },
         providerUpdatedAt: sameTimestamp,
       },
       {
-        egressPolicy: "disabled",
+        healthStatus: "unhealthy",
         providerUpdatedAt: sameTimestamp,
         OR: [
           { lastStatusEventId: null },
@@ -657,11 +653,11 @@ function buildSameTimestampStatusProjectionWhere(
   if (progress.rank === 1) {
     return [
       {
-        egressPolicy: { notIn: ["disabled", "avoid_new_assignments"] },
+        healthStatus: { in: ["healthy", "unknown"] },
         providerUpdatedAt: sameTimestamp,
       },
       {
-        egressPolicy: "avoid_new_assignments",
+        healthStatus: "degraded",
         providerUpdatedAt: sameTimestamp,
         OR: [
           { lastStatusEventId: null },
@@ -673,7 +669,7 @@ function buildSameTimestampStatusProjectionWhere(
 
   return [
     {
-      egressPolicy: { notIn: ["disabled", "avoid_new_assignments"] },
+      healthStatus: { in: ["healthy", "unknown"] },
       providerUpdatedAt: sameTimestamp,
       OR: [
         { lastStatusEventId: null },
@@ -697,23 +693,12 @@ function classifyHostedLinqProviderStatus(value: string | null): string {
   return "unknown";
 }
 
-function deriveHostedLinqEgressPolicy(value: string | null): string | null {
-  const normalized = value?.trim().toLowerCase() ?? "";
-  if (/critical|flagged|blocked|disabled|suspended|banned/u.test(normalized)) {
-    return "disabled";
-  }
-  if (/at_risk|at-risk|degraded|warning|limited|throttled/u.test(normalized)) {
-    return "avoid_new_assignments";
-  }
-  return null;
-}
-
 function rankHostedLinqLineStatusProgress(value: string | null): number {
-  const egressPolicy = deriveHostedLinqEgressPolicy(value);
-  if (egressPolicy === "disabled") {
+  const healthStatus = classifyHostedLinqProviderStatus(value);
+  if (healthStatus === "unhealthy") {
     return 2;
   }
-  if (egressPolicy === "avoid_new_assignments") {
+  if (healthStatus === "degraded") {
     return 1;
   }
   return 0;

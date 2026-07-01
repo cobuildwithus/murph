@@ -333,6 +333,9 @@ describe("hosted ops onboarding invites", () => {
       recipientPhones: ["+15557654321"],
       since: expect.any(Date),
     });
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(2);
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledTimes(2);
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalledTimes(2);
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
       homeLineAssignedAt: expect.any(Date),
       memberId: "member_123",
@@ -366,12 +369,12 @@ describe("hosted ops onboarding invites", () => {
       recipientPhone: "+15557654321",
     });
     expect(
-      mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mock.invocationCallOrder[0],
-    ).toBeLessThan(
       mocks.createHostedLinqChat.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mock.invocationCallOrder[0],
     );
     expect(
-      mocks.createHostedLinqChat.mock.invocationCallOrder[0],
+      mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mock.invocationCallOrder[0],
     ).toBeLessThan(
       mocks.upsertHostedMemberPendingLinqBindingTx.mock.invocationCallOrder[0],
     );
@@ -395,9 +398,9 @@ describe("hosted ops onboarding invites", () => {
     const events: string[] = [];
     prisma.$transaction
       .mockImplementationOnce(async (callback: (transaction: MockedTx) => Promise<unknown>) => {
-        events.push("reservation:start");
+        events.push("prepare:start");
         const result = await callback(tx);
-        events.push("reservation:commit");
+        events.push("prepare:commit");
         return result;
       })
       .mockImplementationOnce(async (callback: (transaction: MockedTx) => Promise<unknown>) => {
@@ -422,8 +425,8 @@ describe("hosted ops onboarding invites", () => {
     });
 
     expect(events).toEqual([
-      "reservation:start",
-      "reservation:commit",
+      "prepare:start",
+      "prepare:commit",
       "provider:create",
       "binding:start",
       "binding:commit",
@@ -552,15 +555,37 @@ describe("hosted ops onboarding invites", () => {
     });
 
     expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
-      homeLineAssignedAt: expect.any(Date),
-      memberId: "member_123",
-      prisma: tx,
-      recipientPhone: "+15557654321",
-    });
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not write route state when the post-provider capacity recheck fails", async () => {
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince
+      .mockResolvedValueOnce(new Map())
+      .mockResolvedValueOnce(new Map([["+15557654321", 1]]));
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+      buildHomeLine("+15557654321", {
+        maxNewConversationsPerDay: 1,
+      }),
+    ]);
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-post-provider-cap-exhausted",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_CAPACITY_EXHAUSTED",
+    });
+
+    expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("does not runtime-sync env-configured Linq lines during new-chat assignment", async () => {
