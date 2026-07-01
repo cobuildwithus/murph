@@ -66,15 +66,26 @@ export const POST = withJsonError(async (request: Request) => {
     invite = await issueInvite();
   } catch (error) {
     if (
-      body.addSeatIfNeeded === true &&
-      isHostedOnboardingError(error) &&
-      error.code === "HOSTED_FAMILY_SEAT_LIMIT_REACHED" &&
-      (await addHostedFamilySeatForOwner(prisma, auth.member.id))
+      body.addSeatIfNeeded !== true ||
+      !isHostedOnboardingError(error) ||
+      error.code !== "HOSTED_FAMILY_SEAT_LIMIT_REACHED"
     ) {
-      invite = await issueInvite();
-    } else {
       throw error;
     }
+    const seatResult = await addHostedFamilySeatForOwner(prisma, auth.member.id);
+    if (seatResult === "unavailable") {
+      throw error;
+    }
+    if (seatResult === "syncing") {
+      // The seat was added and charged, but Stripe has not reconciled the count
+      // yet. Tell the owner it is finishing rather than failing the invite.
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_SEAT_ADDED_SYNCING",
+        httpStatus: 409,
+        message: "Added a paid seat — finishing with Stripe. Send the invite again in a moment.",
+      });
+    }
+    invite = await issueInvite();
   }
 
   const { publicBaseUrl, telegramBotUsername } = readHostedOnboardingEnvironment();
@@ -104,13 +115,13 @@ export const POST = withJsonError(async (request: Request) => {
 async function addHostedFamilySeatForOwner(
   prisma: ReturnType<typeof getPrisma>,
   ownerMemberId: string,
-): Promise<boolean> {
+): Promise<"confirmed" | "syncing" | "unavailable"> {
   const snapshot = await readHostedFamilyOwnerSnapshotForMember({
     memberId: ownerMemberId,
     prisma,
   });
   if (!snapshot?.billingActive || snapshot.seats.billed >= snapshot.seats.max) {
-    return false;
+    return "unavailable";
   }
   const targetSeatCount = snapshot.seats.billed + 1;
   await updateHostedFamilySeatCount({
@@ -119,13 +130,13 @@ async function addHostedFamilySeatForOwner(
     prisma,
     targetSeatCount,
   });
-  // Wait for the webhook to reconcile the new count so the follow-up invite sees
-  // the open seat. Best-effort: on timeout the retry seat-limits and the owner
-  // can try again, which never double-buys because the seat already exists.
-  await waitForHostedFamilyBilledSeatCount({
+  // Only report the seat ready once the webhook reconciled the new count, so the
+  // follow-up invite sees the open seat. If it is still syncing the caller tells
+  // the owner to retry rather than failing with a bare seat-limit error.
+  const confirmed = await waitForHostedFamilyBilledSeatCount({
     groupId: snapshot.groupId,
     prisma,
     targetSeatCount,
   });
-  return true;
+  return confirmed ? "confirmed" : "syncing";
 }

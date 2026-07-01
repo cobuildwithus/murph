@@ -185,14 +185,37 @@ test("adds one paid seat and retries when the plan is full", async () => {
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
 });
 
-test("surfaces the seat limit (no second seat) when confirmation has not landed on retry", async () => {
-  const seatLimit = () =>
+test("reports a syncing state (no failed invite) when the seat webhook is slow", async () => {
+  mocks.issueHostedFamilyInviteTx.mockRejectedValueOnce(
     hostedOnboardingError({
       code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
       httpStatus: 409,
       message: "This Family plan has no open paid seats.",
-    });
-  mocks.issueHostedFamilyInviteTx.mockRejectedValue(seatLimit());
+    }),
+  );
+  mocks.waitForHostedFamilyBilledSeatCount.mockResolvedValueOnce(false);
+
+  const response = await inviteRoute.POST(
+    inviteRequest({ addSeatIfNeeded: true, targetLabel: "Dad", targetPhoneNumber: "+48600000001" }),
+  );
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_FAMILY_SEAT_ADDED_SYNCING" },
+  });
+  // Seat added once, and no second invite attempt that would fail confusingly.
+  expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledTimes(1);
+  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(1);
+});
+
+test("adds at most one seat and surfaces the limit if a confirmed seat is taken first", async () => {
+  mocks.issueHostedFamilyInviteTx.mockRejectedValue(
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
+      message: "This Family plan has no open paid seats.",
+    }),
+  );
 
   const response = await inviteRoute.POST(
     inviteRequest({ addSeatIfNeeded: true, targetLabel: "Dad", targetPhoneNumber: "+48600000001" }),
@@ -202,7 +225,6 @@ test("surfaces the seat limit (no second seat) when confirmation has not landed 
   await expect(response.json()).resolves.toMatchObject({
     error: { code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED" },
   });
-  // One add attempt only, then a single retry — never a runaway of purchases.
   expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledTimes(1);
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
 });
