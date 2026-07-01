@@ -97,7 +97,8 @@ Ask "what device do you have?" early when dosing depends on duration. Then:
 
 - If the user gives a Bestqool model, first check the skill-local `device-seeds.json` next to this file. Treat it as manufacturer-claim seed data, not verified Health Commons evidence.
 - Use the seed only for the exact model alias, device class, active mode, and distance/contact setting shown. Do not assume similarly named models are interchangeable, such as `BQ60` versus `BQ60Pro` or `Pro100` versus `Pro200`.
-- If the seed says `deviceClass: panel`, use the listed reading only at the listed panel distance.
+- Match the seed reading's `activeModeLabel` before duration math. If the user is using red-only, NIR-only, pulsed, a lower intensity, or another named mode and no matching reading exists, say the seed cannot support a duration calculation for that mode.
+- If the seed says `deviceClass: panel`, use the listed reading only at the listed panel distance and active-mode scope.
 - If the seed says `deviceClass: contact_wrap` or `contact_mat`, treat the reading as a surface/contact reading tied to the listed intensity label. Do not convert it to a panel distance or reuse it for a different intensity setting.
 - If the user has the device's irradiance chart, use the row for their actual distance, surface setting, or mode.
 - If the user only has a model name, ask for the intended distance/contact setting and offer to check the official manufacturer page when browser/computer-use is available.
@@ -105,7 +106,7 @@ Ask "what device do you have?" early when dosing depends on duration. Then:
 - If official specs are internally inconsistent, surface the mismatch and avoid dose math until the user supplies a manual/chart or a current page resolves it.
 - If no current spec is available, give a range only as an example and clearly label it as not device-specific.
 
-The seed file intentionally stores current official model-page values and caveats in JSON rather than prose. As of 2026-06-30, it includes Bestqool `BQ40`, `BQ60`, `BQ60Pro`, `BQ150`, `Pro100`, `Pro200`, `Pro300`, and `Redot S/M/L` manufacturer-claim examples. Use those only when the user is actually using that model with the listed distance or contact/intensity setting. Do not treat this skill as a broad device catalog; prefer the current official product page or a user-provided manual/irradiance chart.
+The seed file intentionally stores current official model-page values and caveats in JSON rather than prose. As of 2026-06-30, it includes Bestqool `BQ40`, `BQ60`, `BQ60Pro`, `BQ150`, `Pro100`, `Pro200`, `Pro300`, and `Redot S/M/L` manufacturer-claim examples. Use those only when the user is actually using that model with the listed distance, contact/intensity setting, and `activeModeLabel`. The listed panel readings are manufacturer-listed combined/all-wavelength output claims with no channel split; they cannot support red-only or NIR-only duration estimates. Do not treat this skill as a broad device catalog; prefer the current official product page or a user-provided manual/irradiance chart.
 
 Common brands worth checking by official model page when the user gives a device name: Hooga, Mito Red Light, Joovv, PlatinumLED BioMax, Red Light Man, Bon Charge, Omnilux, CurrentBody, Solawave, LightStim, HigherDOSE, Lumebox, Celluma, Kineon, and Therabody. Prefer official pages or user-provided manuals/irradiance charts over retailer listings, reviews, or blogs.
 

@@ -5,6 +5,7 @@
     "Use these entries as skill-local manufacturer-claim examples, not as verified Health Commons evidence.",
     "Prefer the user's manual, device irradiance chart, or current official manufacturer page over this file.",
     "Use a listed irradiance only when the user's exact model, device class, active mode, and treatment distance or contact setting match the reading.",
+    "Match activeModeLabel before using any irradiance reading for duration math.",
     "When distanceCm is 0, the reading is a surface/contact reading tied to the listed intensity label, not a panel-distance reading.",
     "Do not extrapolate to other distances, intensity levels, active modes, or device classes from these entries.",
     "Do not reuse manufacturer disease, hormone, fat-loss, sleep, or recovery claims as Murph evidence."
@@ -24,6 +25,7 @@
           "sourceType": "manufacturer_claim",
           "sourceLabel": "Bestqool BQ40 official product page, checked 2026-06-30",
           "sourceUrl": "https://www.bestqool.com/products/portable-red-light-therapy-device-bq40",
+          "activeModeLabel": "manufacturer-listed combined 660/850 nm output; channel split not published",
           "measurementContext": "Panel reading at 3 in; source page also states 126 J/cm2 after 30 min at 3 in."
         }
       ],
@@ -45,6 +47,7 @@
           "sourceType": "manufacturer_claim",
           "sourceLabel": "Bestqool BQ60 official product page, checked 2026-06-30",
           "sourceUrl": "https://www.bestqool.com/products/red-light-therapy-bq60",
+          "activeModeLabel": "manufacturer-listed combined 660/850 nm output; channel split not published",
           "measurementContext": "Panel reading at 3 in; source page also states 172.1 J/cm2 after 30 min at 3 in."
         }
       ],
@@ -66,6 +69,7 @@
           "sourceType": "manufacturer_claim",
           "sourceLabel": "Bestqool BQ60Pro official product page, checked 2026-06-30",
           "sourceUrl": "https://www.bestqool.com/products/red-light-therapy-bq-60-pro",
+          "activeModeLabel": "manufacturer-listed combined all-wavelength output; channel split not published",
           "measurementContext": "Clamp-style panel reading at 3 in."
         }
       ],
@@ -87,6 +91,7 @@
           "sourceType": "manufacturer_claim",
           "sourceLabel": "Bestqool BQ150 official product page, checked 2026-06-30",
           "sourceUrl": "https://www.bestqool.com/products/4-wavelengths-half-body-red-light-therapy-bq150",
+          "activeModeLabel": "manufacturer-listed combined all-wavelength output; channel split not published",
           "measurementContext": "Panel reading at 3 in."
         }
       ],
@@ -108,6 +113,7 @@
           "sourceType": "manufacturer_claim",
           "sourceLabel": "Bestqool Pro100 official product page, checked 2026-06-30",
           "sourceUrl": "https://www.bestqool.com/products/red-light-therapy-pro100",
+          "activeModeLabel": "manufacturer-listed combined all-wavelength output; channel split not published",
           "measurementContext": "Panel reading at 3 in. The same page also lists 217.8 J/cm2 after 30 min at 3 in, which does not match 109 mW/cm2 over 30 min."
         }
       ],
@@ -130,6 +136,7 @@
           "sourceType": "manufacturer_claim",
           "sourceLabel": "Bestqool Pro200 official product page, checked 2026-06-30",
           "sourceUrl": "https://www.bestqool.com/products/full-body-red-light-therapy-pro200",
+          "activeModeLabel": "manufacturer-listed combined all-wavelength output; channel split not published",
           "measurementContext": "Panel reading at 3 in."
         }
       ],
@@ -151,6 +158,7 @@
           "sourceType": "manufacturer_claim",
           "sourceLabel": "Bestqool Pro300 official product page, checked 2026-06-30",
           "sourceUrl": "https://www.bestqool.com/products/full-body-red-light-therapy-pro300",
+          "activeModeLabel": "manufacturer-listed combined all-wavelength output; channel split not published",
           "measurementContext": "Panel reading at 3 in; source page also states 190.8 J/cm2 after 30 min at 3 in."
         }
       ],
@@ -172,6 +180,7 @@
           "sourceType": "manufacturer_claim",
           "sourceLabel": "Bestqool Redot S official product page, checked 2026-06-30",
           "sourceUrl": "https://www.bestqool.com/products/red-light-therapy-belt",
+          "activeModeLabel": "surface L4 combined red+NIR intensity",
           "measurementContext": "Surface/contact reading at intensity level L4."
         }
       ],
@@ -195,6 +204,7 @@
           "sourceType": "manufacturer_claim",
           "sourceLabel": "Bestqool Redot M official product page, checked 2026-06-30",
           "sourceUrl": "https://www.bestqool.com/products/red-light-therapy-belt-medium",
+          "activeModeLabel": "surface P5 combined red+NIR intensity",
           "measurementContext": "Surface/contact reading at intensity level P5."
         }
       ],
@@ -218,6 +228,7 @@
           "sourceType": "manufacturer_claim",
           "sourceLabel": "Bestqool Redot L official product page, checked 2026-06-30",
           "sourceUrl": "https://www.bestqool.com/products/red-light-therapy-mat-yoga-pad",
+          "activeModeLabel": "surface P5 combined red+NIR intensity",
           "measurementContext": "Surface/contact reading at intensity level P5."
         }
       ],

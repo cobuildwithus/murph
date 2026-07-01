@@ -460,6 +460,9 @@ describe('assistant skill assets', () => {
         expect(String(readingValue.sourceUrl)).toMatch(
           /^https:\/\/www\.bestqool\.com\/products\//u,
         )
+        expect(typeof readingValue.activeModeLabel).toBe('string')
+        expect(String(readingValue.activeModeLabel).trim().length)
+          .toBeGreaterThan(0)
         expect(typeof readingValue.distanceCm).toBe('number')
         expect(typeof readingValue.distanceLabel).toBe('string')
         expect(typeof readingValue.irradianceMwPerCm2).toBe('number')
