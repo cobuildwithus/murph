@@ -71,6 +71,7 @@ afterEach(() => {
   vi.doUnmock('@murphai/operator-config/assistant-backend')
   vi.doUnmock('../src/assistant/runtime-state-service.js')
   vi.doUnmock('../src/assistant/execution-context.js')
+  vi.doUnmock('../src/assistant/outbox.js')
   vi.doUnmock('../src/assistant/session-resolution.js')
   vi.doUnmock('../src/assistant/turn-plan.js')
   vi.doUnmock('../src/assistant/codex-turn-runner.js')
@@ -1664,6 +1665,57 @@ test('sendAssistantNotificationLocal defers queue-only notification commit until
   expect(runtimeState?.turns.finalizeReceipt).not.toHaveBeenCalled()
 })
 
+test('sendAssistantNotificationLocal abandons queued delivery when deferred commit fails', async () => {
+  const providerSession = createAssistantSession()
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Queued scheduled reminder.',
+      text: 'Remember to sleep.',
+    }),
+    session: providerSession,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-notification-deferred-queue-commit-failure',
+    })
+  deliverMessage.mockResolvedValueOnce({
+    delivery: null,
+    deliveryError: null,
+    intent: {
+      intentId: 'intent-queued-commit-failure',
+    },
+    kind: 'queued',
+    session: providerSession,
+  })
+  const commitError = new Error('durable notification commit failed')
+  mocks.persistAssistantTurnAndSession.mockRejectedValueOnce(commitError)
+
+  await expect(
+    sendAssistantNotificationLocal({
+      deferCommitUntilDeliveryAccepted: true,
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: null,
+      },
+      instructions: 'Queue this scheduled reminder.',
+      vault: '/vaults/deferred-queue-commit-failure',
+    }),
+  ).rejects.toBe(commitError)
+
+  const runtimeState = mocks.createAssistantRuntimeStateService.mock.results[0]?.value
+  expect(runtimeState?.turns.createReceipt).toHaveBeenCalledOnce()
+  expect(runtimeState?.turns.finalizeReceipt).not.toHaveBeenCalled()
+  expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith({
+    error: commitError,
+    intentId: 'intent-queued-commit-failure',
+    onlyCurrentStatuses: ['pending', 'retryable', 'awaiting_approval'],
+    status: 'abandoned',
+    vault: '/vaults/deferred-queue-commit-failure',
+  })
+})
+
 test('sendAssistantNotificationLocal runs beforeCommit before persisting skip decisions', async () => {
   const providerSession = createAssistantSession()
   const providerResult = createProviderResult({
@@ -2621,6 +2673,7 @@ async function loadNotificationTurnHarness(input: {
       async (clearInput: { session: AssistantSession }) => clearInput.session,
     ),
     normalizeAssistantExecutionContext: vi.fn((value) => value),
+    markAssistantOutboxIntentMirrorTerminalById: vi.fn(async () => null),
     resolveAssistantExecutionDefaultTarget: vi.fn((targetInput) =>
       targetInput.executionContext?.hosted?.defaultTarget ?? targetInput.fallbackTarget,
     ),
@@ -2656,6 +2709,14 @@ async function loadNotificationTurnHarness(input: {
   vi.doMock('../src/assistant/runtime-state-service.js', () => ({
     createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
   }))
+  vi.doMock('../src/assistant/outbox.js', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../src/assistant/outbox.js')>()
+    return {
+      ...actual,
+      markAssistantOutboxIntentMirrorTerminalById:
+        mocks.markAssistantOutboxIntentMirrorTerminalById,
+    }
+  })
   vi.doMock('../src/assistant/execution-context.js', () => ({
     normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
     resolveAssistantExecutionDefaultTarget:

@@ -58,7 +58,10 @@ import {
   startAssistantChannelTypingIndicator,
   stopAssistantChannelTypingIndicator,
 } from './channel-typing.js'
-import { normalizeAssistantDeliveryError } from './outbox.js'
+import {
+  markAssistantOutboxIntentMirrorTerminalById,
+  normalizeAssistantDeliveryError,
+} from './outbox.js'
 import {
   normalizeNullableString,
   normalizeRequiredText,
@@ -431,47 +434,59 @@ export async function sendAssistantNotificationLocal(
           sharedPlan,
           turnId,
         })
-        await runAssistantNotificationBeforeCommit(input, {
-          decision: {
-            ...decision,
-            text: responseText,
-          },
-          deliveryOutcome,
-          response: responseText,
-        })
-        if (deliveryOutcome.kind === 'failed') {
-          throw annotateAssistantNotificationError(
-            deliveryOutcome.error,
-            buildAssistantNotificationObservabilityDetails({
-              stage: 'delivery',
+        const committedDeliveryOutcome = await (async (): Promise<AssistantDeliveryOutcome> => {
+          try {
+            await runAssistantNotificationBeforeCommit(input, {
+              decision: {
+                ...decision,
+                text: responseText,
+              },
+              deliveryOutcome,
+              response: responseText,
+            })
+            if (deliveryOutcome.kind === 'failed') {
+              throw annotateAssistantNotificationError(
+                deliveryOutcome.error,
+                buildAssistantNotificationObservabilityDetails({
+                  stage: 'delivery',
+                  input: messageInput,
+                  route: selectedRoute,
+                  session: providerResult.session,
+                }),
+              )
+            }
+            await createNotificationReceipt(deliveryOutcome.session)
+            const savedSession = await persistAssistantTurnAndSession({
+              assistantTranscriptText: responseText,
               input: messageInput,
-              route: selectedRoute,
-              session: providerResult.session,
-            }),
-          )
-        }
-        await createNotificationReceipt(deliveryOutcome.session)
-        const savedSession = await persistAssistantTurnAndSession({
-          assistantTranscriptText: responseText,
-          input: messageInput,
-          plan: sharedPlan,
-          persistUserPromptToTranscript: false,
-          providerResult,
-          providerResumeStateAction,
-          session: deliveryOutcome.session,
-          turnCreatedAt,
-          turnId,
-        })
-        const committedDeliveryOutcome = {
-          ...deliveryOutcome,
-          session: savedSession,
-        }
-        await finalizeAssistantTurnFromDeliveryOutcome({
-          outcome: committedDeliveryOutcome,
-          response: responseText,
-          turnId,
-          vault: input.vault,
-        })
+              plan: sharedPlan,
+              persistUserPromptToTranscript: false,
+              providerResult,
+              providerResumeStateAction,
+              session: deliveryOutcome.session,
+              turnCreatedAt,
+              turnId,
+            })
+            const finalizedDeliveryOutcome = {
+              ...deliveryOutcome,
+              session: savedSession,
+            }
+            await finalizeAssistantTurnFromDeliveryOutcome({
+              outcome: finalizedDeliveryOutcome,
+              response: responseText,
+              turnId,
+              vault: input.vault,
+            })
+            return finalizedDeliveryOutcome
+          } catch (error) {
+            await abandonQueuedNotificationDeliveryAfterCommitFailure({
+              deliveryOutcome,
+              error,
+              vault: input.vault,
+            })
+            throw error
+          }
+        })()
         if (
           input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
           assistantNotificationDeliveryAcceptedFirstContact({
@@ -559,16 +574,61 @@ async function sendAssistantExactTextNotificationLocal(input: {
     turnId,
   })
 
+  let savedSession: AssistantSession
   if (input.input.deferCommitUntilDeliveryAccepted === true) {
-    await runAssistantNotificationBeforeCommit(input.input, {
-      decision: {
-        kind: 'send_message',
-        privateSummary: 'Sent required exact notification text.',
-        text: responseText,
-      },
-      deliveryOutcome,
+    try {
+      await runAssistantNotificationBeforeCommit(input.input, {
+        decision: {
+          kind: 'send_message',
+          privateSummary: 'Sent required exact notification text.',
+          text: responseText,
+        },
+        deliveryOutcome,
+        response: responseText,
+      })
+      if (
+        input.input.deliveryDispatchMode !== 'queue-only' &&
+        deliveryOutcome.kind === 'queued'
+      ) {
+        throw new VaultCliError(
+          'ASSISTANT_NOTIFICATION_DELIVERY_DEFERRED',
+          'Required exact-text notification delivery was deferred instead of sent.',
+        )
+      }
+
+      if (deliveryOutcome.kind === 'failed') {
+        throw deliveryOutcome.error
+      }
+
+      await createExactTextReceipt(deliveryOutcome.session)
+      await finalizeAssistantTurnFromDeliveryOutcome({
+        outcome: deliveryOutcome,
+        response: responseText,
+        turnId,
+        vault: input.input.vault,
+      })
+      savedSession = await persistAssistantExactTextNotificationSession({
+        responseText,
+        session: deliveryOutcome.session,
+        turnCreatedAt,
+        vault: input.input.vault,
+      })
+    } catch (error) {
+      await abandonQueuedNotificationDeliveryAfterCommitFailure({
+        deliveryOutcome,
+        error,
+        vault: input.input.vault,
+      })
+      throw error
+    }
+  } else {
+    await finalizeAssistantTurnFromDeliveryOutcome({
+      outcome: deliveryOutcome,
       response: responseText,
+      turnId,
+      vault: input.input.vault,
     })
+
     if (
       input.input.deliveryDispatchMode !== 'queue-only' &&
       deliveryOutcome.kind === 'queued'
@@ -583,40 +643,13 @@ async function sendAssistantExactTextNotificationLocal(input: {
       throw deliveryOutcome.error
     }
 
-    await createExactTextReceipt(deliveryOutcome.session)
+    savedSession = await persistAssistantExactTextNotificationSession({
+      responseText,
+      session: deliveryOutcome.session,
+      turnCreatedAt,
+      vault: input.input.vault,
+    })
   }
-
-  await finalizeAssistantTurnFromDeliveryOutcome({
-    outcome: deliveryOutcome,
-    response: responseText,
-    turnId,
-    vault: input.input.vault,
-  })
-
-  if (
-    input.input.deferCommitUntilDeliveryAccepted !== true &&
-    input.input.deliveryDispatchMode !== 'queue-only' &&
-    deliveryOutcome.kind === 'queued'
-  ) {
-    throw new VaultCliError(
-      'ASSISTANT_NOTIFICATION_DELIVERY_DEFERRED',
-      'Required exact-text notification delivery was deferred instead of sent.',
-    )
-  }
-
-  if (
-    input.input.deferCommitUntilDeliveryAccepted !== true &&
-    deliveryOutcome.kind === 'failed'
-  ) {
-    throw deliveryOutcome.error
-  }
-
-  const savedSession = await persistAssistantExactTextNotificationSession({
-    responseText,
-    session: deliveryOutcome.session,
-    turnCreatedAt,
-    vault: input.input.vault,
-  })
 
   if (
     input.input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
@@ -661,6 +694,24 @@ async function runAssistantNotificationBeforeCommit(
   throwIfAssistantNotificationAborted(input.abortSignal)
   await input.beforeCommit?.(context)
   throwIfAssistantNotificationAborted(input.abortSignal)
+}
+
+async function abandonQueuedNotificationDeliveryAfterCommitFailure(input: {
+  deliveryOutcome: AssistantDeliveryOutcome
+  error: unknown
+  vault: string
+}): Promise<void> {
+  if (input.deliveryOutcome.kind !== 'queued') {
+    return
+  }
+
+  await markAssistantOutboxIntentMirrorTerminalById({
+    error: input.error,
+    intentId: input.deliveryOutcome.intentId,
+    onlyCurrentStatuses: ['pending', 'retryable', 'awaiting_approval'],
+    status: 'abandoned',
+    vault: input.vault,
+  })
 }
 
 function assistantNotificationDeliveryAcceptedFirstContact(input: {

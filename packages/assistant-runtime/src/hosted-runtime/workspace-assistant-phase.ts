@@ -1288,6 +1288,9 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
   const deviceSyncMaintenanceRan =
     input.systemMailboxResult.deviceSyncMaintenanceRan === true
     || input.assistantResult.deviceSyncMaintenanceRan === true;
+  const afterCheckpointKeepsForegroundImportLoop =
+    input.systemMailboxResult.afterCheckpointKeepsForegroundImportLoop === true
+    || input.assistantResult.afterCheckpointKeepsForegroundImportLoop === true;
   const afterCheckpoint = composeHostedAssistantPhaseAfterCheckpoint({
     callbacks: [
       input.systemMailboxResult.afterCheckpoint,
@@ -1311,6 +1314,9 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
         ? { browserVaultReplicaRefreshRequested: true }
         : {}),
       ...(deviceSyncMaintenanceRan ? { deviceSyncMaintenanceRan: true } : {}),
+      ...(afterCheckpointKeepsForegroundImportLoop
+        ? { afterCheckpointKeepsForegroundImportLoop: true }
+        : {}),
       checkpointReason: progressedResult.checkpointReason,
       ...(foregroundReplyFailed === undefined ? {} : { foregroundReplyFailed }),
       ...(hasNextWakeAt ? { nextWakeAt: nextWake.at } : {}),
@@ -2575,6 +2581,9 @@ async function runSystemMailboxMaintenancePhase(input: {
         : {}),
       ...(shouldRunPostSystemCheckpoint
         ? {
+            ...(systemMailboxDeliveryEffects.length > 0 || initialProviderCleanupDue
+              ? { afterCheckpointKeepsForegroundImportLoop: true }
+              : {}),
             afterCheckpoint: async () => {
               assertHostedAssistantPhaseLiveness(phaseInput.signal);
               return await runSystemMailboxPostCheckpointPhase({
@@ -3202,6 +3211,7 @@ async function runForegroundAssistantReplyPhase(input: {
   return {
     ...(hasPostCommitProviderCleanup
       ? {
+          afterCheckpointKeepsForegroundImportLoop: true,
           afterCheckpoint: async () => {
             assertHostedAssistantPhaseLiveness(input.input.signal);
             const baseNextWake = selectHostedRuntimeWakeCandidate([
