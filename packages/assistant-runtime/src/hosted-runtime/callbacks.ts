@@ -1654,6 +1654,15 @@ function assertHostedBackgroundDeliveryNotYielded(input: {
   }
 }
 
+async function assertHostedDeliveryCanEnterProvider(input: {
+  assertLiveness?: () => Promise<void>;
+  shouldYieldBackgroundDelivery?: (() => boolean) | null;
+  signal: AbortSignal | null;
+}): Promise<void> {
+  await assertHostedDeliveryLiveNow(input);
+  assertHostedBackgroundDeliveryNotYielded(input);
+}
+
 function isHostedAssistantReactionOnlyEffect(
   effect: HostedAssistantDeliveryEffect,
 ): boolean {
@@ -1771,6 +1780,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             now: preflightNow,
             vaultRoot: vault,
           }),
+        shouldRethrowDispatchError: ({ error }) =>
+          isHostedBackgroundDeliveryYieldedError(error),
       },
       dependencies: {
         sendEmail: async (request) => {
@@ -1781,7 +1792,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             );
           }
 
-          await assertHostedDeliveryLiveNow(input);
+          await assertHostedDeliveryCanEnterProvider(input);
           providerDispatchEntered = true;
           // The binding identityId is a privacy-blinded conversation identifier,
           // never a sender address. Hosted email always sends from the
@@ -1798,7 +1809,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           return result;
         },
         sendTelegram: async (request) => {
-          await assertHostedDeliveryLiveNow(input);
+          await assertHostedDeliveryCanEnterProvider(input);
           const dependencies = requireHostedProviderFetchDependencies({
             env: input.telegramEnv,
             fetchImplementation: input.providerFetch,
@@ -1810,7 +1821,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           return result;
         },
         sendTelegramImage: async (request) => {
-          await assertHostedDeliveryLiveNow(input);
+          await assertHostedDeliveryCanEnterProvider(input);
           const dependencies = requireHostedProviderFetchDependencies({
             env: input.telegramEnv,
             fetchImplementation: input.providerFetch,
@@ -1830,7 +1841,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           return result;
         },
         setTelegramMessageReaction: async (request) => {
-          await assertHostedDeliveryLiveNow(input);
+          await assertHostedDeliveryCanEnterProvider(input);
           const dependencies = requireHostedProviderFetchDependencies({
             env: input.telegramEnv,
             fetchImplementation: input.providerFetch,
@@ -1845,6 +1856,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           env: input.telegramVoiceMemoEnv,
           fetchImplementation: createHostedProviderFetchBoundary({
             assertLive: () => assertHostedDeliveryLiveNow(input),
+            assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
             onTelegramVoiceMemoDispatchEntered: () => {
               providerDispatchEntered = true;
             },
@@ -1862,6 +1874,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
           linqEgressLatencyTrace: input.linqEgressLatencyTrace,
+          shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
@@ -1875,6 +1888,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
           linqEgressLatencyTrace: input.linqEgressLatencyTrace,
+          shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
@@ -1902,7 +1916,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             targetKind: "thread",
           });
           let reactionProviderDispatchEntered = false;
-          await assertHostedDeliveryLiveNow(input);
+          await assertHostedDeliveryCanEnterProvider(input);
           const result = await setHostedProviderLinqMessageReaction({
             reaction: request.reaction,
             targetMessageId: request.targetMessageId,
@@ -1934,7 +1948,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           };
         },
         sendWhatsApp: async (request) => {
-          await assertHostedDeliveryLiveNow(input);
+          await assertHostedDeliveryCanEnterProvider(input);
           const dependencies = requireHostedProviderFetchDependencies({
             env: input.whatsAppEnv,
             fetchImplementation: input.providerFetch,
@@ -2106,12 +2120,13 @@ function shouldResetHostedPreparedDeliveryOnPreProviderAbort(input: {
 
 function createHostedProviderFetchBoundary(input: {
   assertLive?: () => Promise<void>;
+  assertProviderEntryLive?: () => Promise<void>;
   onTelegramVoiceMemoDispatchEntered?: () => void;
   operation: string;
   providerFetch: typeof fetch | null;
 }): typeof fetch {
   return (async (request, init) => {
-    await input.assertLive?.();
+    await (input.assertProviderEntryLive ?? input.assertLive)?.();
     const fetchImplementation = requireHostedProviderFetch(
       input.providerFetch,
       input.operation,
@@ -2180,6 +2195,7 @@ function createHostedAssistantLinqSendDependency(input: {
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
+  shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal: AbortSignal | null;
   vaultRoot?: string | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
@@ -2224,6 +2240,7 @@ function createHostedAssistantLinqSendDependency(input: {
       media: request.media ?? [],
       vaultRoot: input.vaultRoot ?? null,
     });
+    await assertHostedDeliveryCanEnterProvider(input);
     const attemptedAt = new Date();
     input.onProviderDispatchEntered?.();
     let result: HostedRuntimeLinqSendResponse;
@@ -2427,6 +2444,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
+  shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal: AbortSignal | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinqVoiceMemo"]> {
   return async (request) => {
@@ -2457,6 +2475,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       target: providerTarget,
       targetKind: "thread",
     });
+    await assertHostedDeliveryCanEnterProvider(input);
     const attemptedAt = new Date();
     input.onProviderDispatchEntered?.();
     let result: HostedRuntimeLinqSendResponse;

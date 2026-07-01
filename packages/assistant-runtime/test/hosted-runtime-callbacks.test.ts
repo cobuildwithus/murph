@@ -3119,6 +3119,124 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
+  it("rethrows provider-entry foreground yield without persisting a delivery failure", async () => {
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_yield_at_provider_entry",
+      deliveryPhase: "background_retry",
+      effectId: "intent_yield_at_provider_entry",
+      payload: createPayload({
+        idempotencyKey: "assistant-outbox:intent_yield_at_provider_entry",
+        transportIdempotent: true,
+      }),
+    });
+    const yieldedCounts: number[] = [];
+    let yieldChecks = 0;
+    let providerEntryYieldWasRethrown = false;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey: "assistant-outbox:intent_yield_at_provider_entry",
+          deliveryTransportIdempotent: true,
+          intentId: effect.effectId,
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingStartedAt: "2026-04-08T00:00:05.000Z",
+        },
+      ),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
+      expect(request).toEqual(expect.objectContaining({
+        allowPreparedSending: true,
+        intentId: "intent_yield_at_provider_entry",
+        preparedDispatch: {
+          deliveryIdempotencyKey: "assistant-outbox:intent_yield_at_provider_entry",
+          deliveryTransportIdempotent: true,
+          preparedDispatchToken: "prepared-dispatch-token-yield-at-provider-entry",
+        },
+      }));
+      try {
+        await request.dependencies.sendTelegram({
+          idempotencyKey: "assistant-outbox:intent_yield_at_provider_entry",
+          message: "hello from hosted",
+          replyToMessageId: null,
+          target: "chat_123",
+        });
+      } catch (error) {
+        providerEntryYieldWasRethrown =
+          request.dispatchHooks?.shouldRethrowDispatchError?.({
+            error,
+            intent: {
+              intentId: "intent_yield_at_provider_entry",
+            },
+            vault: HOSTED_WAKE.vaultRoot,
+          }) === true;
+        if (providerEntryYieldWasRethrown) {
+          throw error;
+        }
+        return createDispatchResult(
+          {
+            lastError: {
+              code: "HOSTED_BACKGROUND_DELIVERY_YIELDED",
+              message: "Hosted background delivery yielded to fresh foreground input.",
+            },
+            status: "retryable",
+          },
+          {
+            code: "HOSTED_BACKGROUND_DELIVERY_YIELDED",
+            message: "Hosted background delivery yielded to fresh foreground input.",
+          },
+        );
+      }
+      throw new Error("expected provider-entry foreground yield");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
+        yieldedCounts.push(yieldedEffectCount);
+      },
+      preparedDispatches: [{
+        intentId: "intent_yield_at_provider_entry",
+        preparedDispatchToken: "prepared-dispatch-token-yield-at-provider-entry",
+        previousDispatchState: createPreparedPreviousDispatchState({
+          deliveryIdempotencyKey: "assistant-outbox:intent_yield_at_provider_entry",
+          deliveryTransportIdempotent: true,
+        }),
+      }],
+      providerFetch: vi.fn<typeof fetch>(),
+      shouldYieldBackgroundDelivery: () => {
+        yieldChecks += 1;
+        return yieldChecks >= 3;
+      },
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([]);
+    expect(providerEntryYieldWasRethrown).toBe(true);
+    expect(yieldedCounts).toEqual([1]);
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledTimes(1);
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith({
+      deliveryIdempotencyKey: "assistant-outbox:intent_yield_at_provider_entry",
+      deliveryTransportIdempotent: true,
+      intentId: "intent_yield_at_provider_entry",
+      preparedDispatchToken: "prepared-dispatch-token-yield-at-provider-entry",
+      resetAt: expect.any(Date),
+      restoreDispatchState: createPreparedPreviousDispatchState({
+        deliveryIdempotencyKey: "assistant-outbox:intent_yield_at_provider_entry",
+        deliveryTransportIdempotent: true,
+      }),
+      vault: HOSTED_WAKE.vaultRoot,
+    });
+  });
+
   it("throws after pre-provider abort when owned prepared reset is a no-op", async () => {
     const abortReason = new Error("lease expired before no-op reset");
     const preparedAt = "2026-04-08T00:00:05.000Z";

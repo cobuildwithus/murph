@@ -190,6 +190,11 @@ export interface AssistantOutboxDispatchHooks {
     intent: AssistantOutboxIntent
     vault: string
   }) => Promise<AssistantChannelDelivery | null>
+  shouldRethrowDispatchError?: (input: {
+    error: unknown
+    intent: AssistantOutboxIntent
+    vault: string
+  }) => boolean
 }
 
 export type DeliverAssistantOutboxMessageResult =
@@ -886,6 +891,14 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       session: delivered.session ?? null,
     }
   } catch (error) {
+    if (input.dispatchHooks?.shouldRethrowDispatchError?.({
+      error,
+      intent: dispatchIntent,
+      vault: input.vault,
+    }) === true) {
+      throw error
+    }
+
     let failure = error
     let effectiveDeliveryMayHaveSucceeded =
       deliveryMayHaveSucceeded || errorImpliesAssistantDeliveryMayHaveSucceeded(error)

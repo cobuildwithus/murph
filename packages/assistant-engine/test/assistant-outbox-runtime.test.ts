@@ -2234,6 +2234,49 @@ describe('assistant outbox runtime', () => {
     )
   })
 
+  it('rethrows selected dispatch errors before failure persistence', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-rethrow-')
+    const seeded = await createIntent(vaultRoot, {
+      message: 'control flow rethrow',
+      sessionId: 'session-rethrow',
+      turnId: 'turn-rethrow',
+    })
+    const controlFlowError = new VaultCliError(
+      'ASSISTANT_OUTBOX_CONTROL_FLOW',
+      'Dispatch stopped for runtime control flow.',
+    )
+    const shouldRethrowDispatchError = vi.fn((input: {
+      error: unknown
+      intent: AssistantOutboxIntent
+      vault: string
+    }) => {
+      const { error, intent, vault } = input
+      expect(error).toBe(controlFlowError)
+      expect(intent.intentId).toBe(seeded.intentId)
+      expect(vault).toBe(vaultRoot)
+      return true
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(controlFlowError)
+
+    await expect(
+      dispatchAssistantOutboxIntent({
+        dispatchHooks: {
+          shouldRethrowDispatchError,
+        },
+        force: true,
+        intentId: seeded.intentId,
+        now: new Date('2026-04-08T04:20:00.000Z'),
+        vault: vaultRoot,
+      }),
+    ).rejects.toBe(controlFlowError)
+
+    const persisted = await readAssistantOutboxIntent(vaultRoot, seeded.intentId)
+    expect(shouldRethrowDispatchError).toHaveBeenCalledTimes(1)
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+    expect(persisted?.status).toBe('sending')
+    expect(persisted?.lastError).toBeNull()
+  })
+
   it('preserves diagnostic context in high-level delivery helper results', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-helper-error-')
 
