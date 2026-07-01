@@ -4289,7 +4289,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('buffers tagged reused warm events until the turn/start response confirms the turn', async () => {
+  it('captures tagged pre-start turn/started when the turn/start response omits the turn id', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-prestart-tagged-work-')
     const codexHome = await createTempDir('assistant-codex-local-prestart-tagged-home-')
     const spawnedChildren: MockChildProcess[] = []
@@ -4341,11 +4341,7 @@ describe('assistant codex runtime', () => {
           }))
           child.stdout.write(jsonLine({
             id: secondTurn.id,
-            result: {
-              turn: {
-                id: 'turn-local-prestart-tagged-2',
-              },
-            },
+            result: {},
           }))
           child.stdout.write(jsonLine({
             method: 'assistant.message.delta',
@@ -4396,7 +4392,7 @@ describe('assistant codex runtime', () => {
     await expect(
       executeCodexAppServerTurn({
         ...stableInput,
-        prompt: 'second local turn with tagged prestart event',
+        prompt: 'second local turn with tagged prestart turn/started',
       }),
     ).resolves.toMatchObject({
       finalMessage: 'Buffered event succeeded',

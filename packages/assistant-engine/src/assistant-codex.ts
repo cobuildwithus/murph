@@ -2193,7 +2193,6 @@ async function runCodexAppServerTurnOnProcess(
   let terminationSignalSent: NodeJS.Signals | null = null
   let codexThreadId = normalizeNullableString(input.resumeSessionId) ?? null
   let turnId: string | null = null
-  let turnStartResponseReceived = false
   const isReusedWarmProcess = codexProcess.initializedForRpc
   let lastAgentMessage: string | null = null
   // Completed final-phase agent messages that were followed by a steered
@@ -3437,9 +3436,8 @@ async function runCodexAppServerTurnOnProcess(
         codexProcess.noteBoundThreadId(codexThreadId)
       }
       if (pending?.method === 'turn/start') {
-        turnStartResponseReceived = true
         const resultTurnId = extractCodexTurnIdFromResult(message.result)
-        turnId = resultTurnId ?? turnId
+        turnId = turnId ?? resultTurnId
         drainPreStartParentTurnMessages()
       }
       return
@@ -3463,11 +3461,9 @@ async function runCodexAppServerTurnOnProcess(
 
     const messageTurnId = extractCodexTurnIdFromMessage(message)
     const method = readCodexEventMethod(message)
-    if (
-      messageTurnId !== null &&
-      turnId === null &&
-      !(turnStartResponseReceived && isCodexTurnStartedMethod(method))
-    ) {
+    if (messageTurnId !== null && turnId === null && isCodexTurnStartedMethod(method)) {
+      turnId = messageTurnId
+    } else if (messageTurnId !== null && turnId === null) {
       bufferPreStartParentTurnMessage(message)
       return
     }
@@ -3495,7 +3491,7 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     handleAcceptedEvent(message, method)
-    if (turnStartResponseReceived && isCodexTurnStartedMethod(method)) {
+    if (isCodexTurnStartedMethod(method)) {
       drainPreStartParentTurnMessages()
     }
   }
