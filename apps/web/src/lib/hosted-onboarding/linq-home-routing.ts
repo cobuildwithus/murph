@@ -8,7 +8,12 @@ import {
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
 } from "./hosted-member-routing-store";
-import { chooseHostedLinqHomeLine } from "./linq-routing-policy";
+import {
+  chooseHostedLinqHomeLine,
+  resolveHostedLinqActiveRouteDecision,
+  resolveHostedLinqHomeBindingRecipientPhone,
+  type HostedLinqActiveRouteDecision,
+} from "./linq-routing-policy";
 import {
   type HostedMemberAssistantNotificationRoute,
   resolveHostedMemberAssistantNotificationRoute,
@@ -44,6 +49,20 @@ export type HostedLinqHomeLinePhoneReservationResult =
       kind: "capacity_exhausted";
     };
 
+export type HostedLinqHomeLineRouteBindingResult =
+  | {
+      homeLineAssignedAt: Date | null;
+      kind: "bind";
+      recipientPhone: string | null;
+    }
+  | Exclude<HostedLinqActiveRouteDecision, { kind: "bind_home" }>
+  | {
+      kind: "unassignable";
+    }
+  | {
+      kind: "capacity_exhausted";
+    };
+
 export async function reserveHostedLinqHomeLineForPhoneTx(input: {
   phoneNumber: string;
   prisma: Prisma.TransactionClient;
@@ -52,8 +71,63 @@ export async function reserveHostedLinqHomeLineForPhoneTx(input: {
     prisma: input.prisma,
   });
 
-  const line = await readHostedLinqAssignableHomeLineByPhone({
+  return reserveHostedLinqHomeLineForPhoneAfterLockTx({
     phoneNumber: input.phoneNumber,
+    prisma: input.prisma,
+  });
+}
+
+export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
+  incomingChatId: string;
+  incomingDirectAttested: boolean;
+  incomingRecipientPhone: string | null;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedLinqHomeLineRouteBindingResult> {
+  await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
+    prisma: input.prisma,
+  });
+
+  const now = new Date();
+  const routing = await readHostedMemberRoutingState({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const routeDecision = resolveHostedLinqActiveRouteDecision({
+    homeChatId: routing?.linqChatId ?? null,
+    homeRecipientPhone: routing?.linqRecipientPhone ?? null,
+    incomingChatId: input.incomingChatId,
+    incomingDirectAttested: input.incomingDirectAttested,
+    incomingRecipientPhone: input.incomingRecipientPhone,
+  });
+
+  if (routeDecision.kind !== "bind_home") {
+    return routeDecision;
+  }
+
+  const recipientPhone = resolveHostedLinqHomeBindingRecipientPhone({
+    homeChatId: routing?.linqChatId ?? null,
+    homeRecipientPhone: routing?.linqRecipientPhone ?? null,
+    incomingChatId: input.incomingChatId,
+    incomingRecipientPhone: input.incomingRecipientPhone,
+  });
+
+  if (routing?.linqChatId === input.incomingChatId) {
+    return {
+      homeLineAssignedAt: null,
+      kind: "bind",
+      recipientPhone,
+    };
+  }
+
+  if (!recipientPhone) {
+    return {
+      kind: "unassignable",
+    };
+  }
+
+  const line = await readHostedLinqAssignableHomeLineByPhone({
+    phoneNumber: recipientPhone,
     prisma: input.prisma,
   });
 
@@ -63,8 +137,24 @@ export async function reserveHostedLinqHomeLineForPhoneTx(input: {
     };
   }
 
+  const reusableAssignedAt = resolveReusableHostedMemberLinqHomeLineAssignedAt({
+    now,
+    phoneNumber: line.phoneNumber,
+    routing,
+    scope: "authorized-route",
+  });
+
+  if (reusableAssignedAt) {
+    return {
+      homeLineAssignedAt: reusableAssignedAt,
+      kind: "bind",
+      recipientPhone: line.phoneNumber,
+    };
+  }
+
   const reservation = await reserveHostedLinqHomeLineFromCandidatesTx({
     lines: [line],
+    now,
     preferredRecipientPhone: line.phoneNumber,
     prisma: input.prisma,
   });
@@ -76,22 +166,10 @@ export async function reserveHostedLinqHomeLineForPhoneTx(input: {
   }
 
   return {
-    kind: "reserved",
-    reservation,
+    homeLineAssignedAt: reservation.assignedAt,
+    kind: "bind",
+    recipientPhone: reservation.line.phoneNumber,
   };
-}
-
-export async function reserveOrReuseHostedMemberLinqHomeLineForRouteTx(input: {
-  memberId: string;
-  phoneNumber: string;
-  prisma: Prisma.TransactionClient;
-}): Promise<HostedLinqHomeLinePhoneReservationResult> {
-  return reserveOrReuseHostedMemberLinqHomeLineForPhoneTx({
-    memberId: input.memberId,
-    phoneNumber: input.phoneNumber,
-    prisma: input.prisma,
-    reuseScope: "authorized-route",
-  });
 }
 
 export async function assignHostedMemberLinqHomeLineForPhoneTx(input: {
@@ -294,6 +372,39 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
         line: chosen,
       }
     : null;
+}
+
+async function reserveHostedLinqHomeLineForPhoneAfterLockTx(input: {
+  phoneNumber: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedLinqHomeLinePhoneReservationResult> {
+  const line = await readHostedLinqAssignableHomeLineByPhone({
+    phoneNumber: input.phoneNumber,
+    prisma: input.prisma,
+  });
+
+  if (!line) {
+    return {
+      kind: "unassignable",
+    };
+  }
+
+  const reservation = await reserveHostedLinqHomeLineFromCandidatesTx({
+    lines: [line],
+    preferredRecipientPhone: line.phoneNumber,
+    prisma: input.prisma,
+  });
+
+  if (!reservation) {
+    return {
+      kind: "capacity_exhausted",
+    };
+  }
+
+  return {
+    kind: "reserved",
+    reservation,
+  };
 }
 
 async function resolveHostedMemberActivationTargetRecipientPhone(input: {

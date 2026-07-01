@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMailboxItemOwnerById: vi.fn(),
   readHostedMemberHomeLinqRoute: vi.fn(),
+  readHostedMemberRoutingState: vi.fn(),
   readHostedLinqDailyState: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
   checkHostedAiUsageGate: vi.fn(),
@@ -108,6 +109,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   lookupHostedMemberRoutingByPendingLinqParticipantContact:
     mocks.lookupHostedMemberRoutingByPendingLinqParticipantContact,
   readHostedMemberHomeLinqRoute: mocks.readHostedMemberHomeLinqRoute,
+  readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
   upsertHostedMemberHomeLinqBindingTx: mocks.upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberPendingLinqBindingTx: mocks.upsertHostedMemberPendingLinqBindingTx,
 }));
@@ -255,6 +257,22 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
     mocks.lookupHostedMemberRoutingByPendingLinqParticipantContact.mockResolvedValue(null);
     mocks.readHostedMemberHomeLinqRoute.mockResolvedValue(null);
+    mocks.readHostedMemberRoutingState.mockImplementation(async () => {
+      const route = await mocks.readHostedMemberHomeLinqRoute();
+
+      return {
+        linqChatId: route?.linqChatId ?? null,
+        linqHomeLineAssignedAt: null,
+        linqRecipientPhone: route?.linqRecipientPhone ?? null,
+        memberId: route?.memberId ?? "member_123",
+        pendingLinqChatId: null,
+        pendingLinqParticipantContact: null,
+        pendingLinqRecipientPhone: null,
+        telegramThreadId: null,
+        telegramUserId: null,
+        telegramUserLookupKey: null,
+      };
+    });
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
   });

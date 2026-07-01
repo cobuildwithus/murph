@@ -32,7 +32,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
 }));
 
 import {
-  reserveOrReuseHostedMemberLinqHomeLineForRouteTx,
+  resolveHostedMemberLinqHomeLineRouteBindingTx,
   resolveHostedMemberActivationLinqRoute,
 } from "@/src/lib/hosted-onboarding/linq-home-routing";
 
@@ -380,7 +380,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
   });
 });
 
-describe("reserveOrReuseHostedMemberLinqHomeLineForRouteTx", () => {
+describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
@@ -414,17 +414,17 @@ describe("reserveOrReuseHostedMemberLinqHomeLineForRouteTx", () => {
     );
 
     await expect(
-      reserveOrReuseHostedMemberLinqHomeLineForRouteTx({
+      resolveHostedMemberLinqHomeLineRouteBindingTx({
+        incomingChatId: "chat_123",
+        incomingDirectAttested: true,
+        incomingRecipientPhone: "+15550100001",
         memberId: "member_123",
-        phoneNumber: "+15550100001",
         prisma: {} as never,
       }),
     ).resolves.toEqual({
-      kind: "reserved",
-      reservation: {
-        assignedAt,
-        line,
-      },
+      homeLineAssignedAt: assignedAt,
+      kind: "bind",
+      recipientPhone: line.phoneNumber,
     });
 
     expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledWith({
@@ -470,18 +470,50 @@ describe("reserveOrReuseHostedMemberLinqHomeLineForRouteTx", () => {
     });
 
     await expect(
-      reserveOrReuseHostedMemberLinqHomeLineForRouteTx({
+      resolveHostedMemberLinqHomeLineRouteBindingTx({
+        incomingChatId: "chat_new",
+        incomingDirectAttested: true,
+        incomingRecipientPhone: "+15550100001",
         memberId: "member_123",
-        phoneNumber: "+15550100001",
         prisma: {} as never,
       }),
     ).resolves.toEqual({
-      kind: "reserved",
-      reservation: {
-        assignedAt,
-        line,
-      },
+      homeLineAssignedAt: assignedAt,
+      kind: "bind",
+      recipientPhone: line.phoneNumber,
     });
+  });
+
+  it("rejects a stale same-line rebind when the current route now requires direct attestation", async () => {
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "chat_current",
+      linqHomeLineAssignedAt: new Date("2026-06-30T14:15:00.000Z"),
+      linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+
+    await expect(
+      resolveHostedMemberLinqHomeLineRouteBindingTx({
+        incomingChatId: "chat_possible_group",
+        incomingDirectAttested: false,
+        incomingRecipientPhone: "+15550100001",
+        memberId: "member_123",
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      kind: "ignore_unattested_direct",
+    });
+
+    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
   });
 
   it("timestamps a migrated same-phone route claim without consuming capacity", async () => {
@@ -511,17 +543,17 @@ describe("reserveOrReuseHostedMemberLinqHomeLineForRouteTx", () => {
     });
 
     await expect(
-      reserveOrReuseHostedMemberLinqHomeLineForRouteTx({
+      resolveHostedMemberLinqHomeLineRouteBindingTx({
+        incomingChatId: "chat_new",
+        incomingDirectAttested: true,
+        incomingRecipientPhone: "+15550100001",
         memberId: "member_123",
-        phoneNumber: "+15550100001",
         prisma: {} as never,
       }),
     ).resolves.toEqual({
-      kind: "reserved",
-      reservation: {
-        assignedAt: expect.any(Date),
-        line,
-      },
+      homeLineAssignedAt: expect.any(Date),
+      kind: "bind",
+      recipientPhone: line.phoneNumber,
     });
   });
 });

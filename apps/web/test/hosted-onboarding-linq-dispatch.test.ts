@@ -6418,6 +6418,92 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
+  it("rechecks the current home route under lock before binding an active Linq chat", async () => {
+    const homeLinePhone = "+15550100001";
+    const currentRoute = {
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id",
+        memberId: "member_123",
+        value: "chat_current",
+      }),
+      linqHomeLineAssignedAt: new Date("2026-03-26T11:30:00.000Z"),
+      linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-recipient-phone",
+        memberId: "member_123",
+        value: homeLinePhone,
+      }),
+      linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homeLinePhone),
+      memberId: "member_123",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    };
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock(currentRoute);
+    hostedMemberRouting.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(withHostedMemberRoutingMember(currentRoute));
+    const prisma = asPrismaTransactionClient({
+      hostedLinqLine: buildHostedLinqLineFixture({
+        phoneNumber: homeLinePhone,
+      }),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          routing: null,
+          suspendedAt: null,
+        }),
+      },
+      hostedMemberRouting,
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_possible_group",
+            owner_handle: {
+              handle: homeLinePhone,
+              id: "handle_owner_123",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+        },
+        eventId: "evt_stale_route_recheck",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "unattested-direct-chat",
+    });
+    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("rebinds an active member's direct chat on the same owned line without consuming capacity", async () => {
     const homeLinePhone = "+15550100001";
     const assignedAt = new Date("2026-03-26T11:30:00.000Z");

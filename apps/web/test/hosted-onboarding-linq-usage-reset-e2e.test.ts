@@ -115,6 +115,7 @@ const mocks = vi.hoisted(() => {
       userId: "member_usage_reset",
     })),
     readHostedMemberHomeLinqRoute: vi.fn(),
+    readHostedMemberRoutingState: vi.fn(),
     sendHostedLinqChatMessage: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
     startHostedLinqTypingIndicator: vi.fn(),
@@ -174,6 +175,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
     lookupHostedMemberRoutingByPendingLinqParticipantContact:
       mocks.lookupHostedMemberRoutingByPendingLinqParticipantContact,
     readHostedMemberHomeLinqRoute: mocks.readHostedMemberHomeLinqRoute,
+    readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
     upsertHostedMemberHomeLinqBindingTx: mocks.upsertHostedMemberHomeLinqBindingTx,
   };
 });
@@ -379,6 +381,18 @@ describe("hosted Linq usage reset e2e", () => {
       linqChatId: CHAT_ID,
       linqRecipientPhone: OWNER_PHONE,
       memberId: MEMBER_ID,
+    });
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: CHAT_ID,
+      linqHomeLineAssignedAt: null,
+      linqRecipientPhone: OWNER_PHONE,
+      memberId: MEMBER_ID,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
     });
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValue(makeHostedLinqDailyState());
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
