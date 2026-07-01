@@ -16,6 +16,8 @@ import {
   resolveHostedWebDistDir,
 } from "../next-artifacts";
 import {
+  HOSTED_WEB_NEXT_TSCONFIG_PATH,
+  HOSTED_WEB_PRODUCTION_BUILD_CPUS,
   HOSTED_WEB_WORKFLOW_OPTIONS,
   WORKSPACE_SOURCE_PACKAGE_NAMES,
   buildHostedWebClientEnv,
@@ -65,6 +67,12 @@ test("next.config transpiles hosted workspace source packages instead of pinning
   assert.deepEqual(productionNextConfig.transpilePackages, [...WORKSPACE_SOURCE_PACKAGE_NAMES]);
 });
 
+test("next.config stays out of hosted web runtime source modules", () => {
+  const source = readFileSync(path.join(repoRoot, "apps/web/next.config.ts"), "utf8");
+
+  assert.doesNotMatch(source, /from ["']\.\/src\//u);
+});
+
 test("next.config exposes the non-secret Telegram username override to client bundles", () => {
   assert.deepEqual(
     buildHostedWebClientEnv(createProcessEnv({
@@ -105,6 +113,40 @@ test("hosted web tsconfig resolves Temporal orchestration-control from source", 
     tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/providers/junction-client"],
     ["packages/device-syncd/src/providers/junction-client.ts"],
   );
+  assert.deepEqual(
+    tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/provider-credential-policy"],
+    ["packages/device-syncd/src/provider-credential-policy.ts"],
+  );
+  assert.deepEqual(
+    tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/provider-match"],
+    ["packages/device-syncd/src/provider-match.ts"],
+  );
+  assert.deepEqual(
+    tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/providers/junction-config"],
+    ["packages/device-syncd/src/providers/junction-config.ts"],
+  );
+});
+
+test("hosted web build tsconfig keeps tests out of Next production checks", () => {
+  const tsconfig = JSON.parse(
+    readFileSync(path.join(repoRoot, "apps/web/tsconfig.next.json"), "utf8"),
+  ) as {
+    extends?: string;
+    include?: readonly string[];
+    exclude?: readonly string[];
+    compilerOptions?: {
+      tsBuildInfoFile?: string;
+    };
+  };
+
+  assert.equal(tsconfig.extends, "./tsconfig.json");
+  assert.equal(tsconfig.compilerOptions?.tsBuildInfoFile, ".next/cache/tsconfig.next.tsbuildinfo");
+  assert.ok(tsconfig.include?.includes("app/**/*.tsx"));
+  assert.ok(tsconfig.include?.includes("src/**/*.ts"));
+  assert.ok(tsconfig.include?.includes(".next/types/**/*.ts"));
+  assert.ok(!tsconfig.include?.includes("test/**/*.ts"));
+  assert.ok(!tsconfig.include?.includes("test/**/*.tsx"));
+  assert.ok(tsconfig.exclude?.includes("test"));
 });
 
 test("hosted web dist-dir selection reserves a dedicated artifact directory for interactive dev", () => {
@@ -249,7 +291,10 @@ test("hosted web dev filesystem cache defaults off and allows explicit opt-in", 
 test("next.config keeps Turbopack focused on the repo root without custom workspace rewrite rules", () => {
   assert.equal(productionNextConfig.turbopack?.root, process.cwd());
   assert.equal(productionNextConfig.webpack, undefined);
-  assert.equal(productionNextConfig.typescript, undefined);
+  assert.deepEqual(productionNextConfig.typescript, {
+    tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
+  });
+  assert.equal(productionNextConfig.experimental?.cpus, HOSTED_WEB_PRODUCTION_BUILD_CPUS);
 });
 
 test("hosted runtime issue imports avoid the runtime-state Node barrel", () => {
@@ -307,6 +352,28 @@ test("next.config traces generated Health Commons route files without the monoli
     [
       "../../packages/health-commons/generated/web/routes/index.json",
       "../../packages/health-commons/generated/web/bundles/measurement_method/**/*.json",
+    ],
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/biomarkers"],
+    [
+      "../../packages/health-commons/generated/web/browse/biomarkers.json",
+    ],
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/biomarkers/[biomarkerId]"],
+    [
+      "../../packages/health-commons/generated/web/routes/index.json",
+      "../../packages/health-commons/generated/web/shell/biomarkers/**/*.json",
+      "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
+    ],
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/biomarkers/[biomarkerId]/research"],
+    [
+      "../../packages/health-commons/generated/web/routes/index.json",
+      "../../packages/health-commons/generated/web/shell/biomarkers/**/*.json",
+      "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
     ],
   );
   assert.doesNotMatch(

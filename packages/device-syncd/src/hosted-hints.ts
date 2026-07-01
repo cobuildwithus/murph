@@ -1,4 +1,4 @@
-import { shapeConfiguredDeviceSyncHostedHintPayload } from "./config/provider-manifests.ts";
+import { shapeConfiguredDeviceSyncHostedHintPayload } from "./provider-job-definitions.ts";
 
 import type { DeviceSyncJobInput } from "./types.ts";
 

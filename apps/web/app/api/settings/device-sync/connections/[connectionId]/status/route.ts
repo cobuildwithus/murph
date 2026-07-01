@@ -1,6 +1,9 @@
-import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
+
+import { readHostedDeviceSyncEnvironment } from "@/src/lib/device-sync/env";
+import { resolveHostedDeviceSyncPublicBaseUrl } from "@/src/lib/device-sync/public-base-url";
+import { buildHostedDeviceSyncSettingsSurfaceResponse } from "@/src/lib/device-sync/sidebar-status-service";
 import {
-  buildHostedDeviceSyncSettingsSources,
   type HostedDeviceSyncSettingsSource,
 } from "@/src/lib/device-sync/settings-surface";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
@@ -13,19 +16,22 @@ export const GET = withJsonError(async (
 ) => {
   const auth = await requireActiveHostedAppSessionFromRequest(request);
   const connectionId = await resolveDecodedRouteParam(context.params, "connectionId");
-  const controlPlane = createHostedDeviceSyncControlPlane(request);
-  const [{ connection }, settings] = await Promise.all([
-    controlPlane.getConnectionStatus(auth.member.id, connectionId),
-    controlPlane.listConnections(auth.member.id),
-  ]);
-  const connections = settings.connections.some((entry) => entry.id === connection.id)
-    ? settings.connections.map((entry) => entry.id === connection.id ? connection : entry)
-    : [connection, ...settings.connections];
-  const source = buildHostedDeviceSyncSettingsSources({
-    connectionSources: settings.connectionSources,
-    connections,
-    providers: settings.providers,
-  }).find((entry) => entry.connectionId === connection.id) ?? null;
+  const env = readHostedDeviceSyncEnvironment(process.env);
+  const publicBaseUrl = resolveHostedDeviceSyncPublicBaseUrl(request, env).baseUrl;
+  const settings = await buildHostedDeviceSyncSettingsSurfaceResponse({
+    memberId: auth.member.id,
+    publicBaseUrl,
+  });
+  const source = settings.sources.find((entry) => entry.connectionId === connectionId) ?? null;
+
+  if (!source) {
+    throw deviceSyncError({
+      code: "CONNECTION_NOT_FOUND",
+      message: "Hosted device-sync connection was not found for the current user.",
+      retryable: false,
+      httpStatus: 404,
+    });
+  }
 
   return jsonOk({
     generatedAt: new Date().toISOString(),

@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+import { createHostedBrowserConnectionId } from "../src/lib/device-sync/public-connection";
 import { createJsonPostRequest, createRouteContext } from "./route-test-helpers";
 
 vi.mock("server-only", () => ({}));
@@ -9,18 +10,25 @@ const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
+  createHostedDeviceSyncPublicIngressService: vi.fn(),
   createBrowserConnectionId: vi.fn(),
   diagnoseBackfill: vi.fn(),
   disconnectConnection: vi.fn(),
+  findManyDeviceConnectionSources: vi.fn(),
+  findManyDeviceConnections: vi.fn(),
   getConnectionForUser: vi.fn(),
   getPrisma: vi.fn(),
   getConnectionStatus: vi.fn(),
   getStoredConnectionAccountForUser: vi.fn(),
+  listConfiguredDeviceSyncPublicProviderDescriptors: vi.fn(),
+  listConnectionSources: vi.fn(),
   listConnections: vi.fn(),
   listConnectionsForUser: vi.fn(),
   probeRest: vi.fn(),
-  prismaClient: {
-    label: "test-prisma",
+  prismaClient: {} as {
+    deviceConnection: { findMany: ReturnType<typeof vi.fn> };
+    deviceConnectionSource: { findMany: ReturnType<typeof vi.fn> };
+    label: string;
   },
   registryGet: vi.fn(),
   requireActivePrivyMemberAuth: vi.fn(),
@@ -30,6 +38,30 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
 }));
+
+vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
+  createHostedDeviceSyncPublicIngressService: mocks.createHostedDeviceSyncPublicIngressService,
+}));
+
+vi.mock("@/src/lib/device-sync/providers", () => ({
+  createHostedDeviceSyncRegistry: vi.fn(() => ({
+    get: mocks.registryGet,
+  })),
+}));
+
+vi.mock("@murphai/device-syncd/public-provider-descriptors", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@murphai/device-syncd/public-provider-descriptors")>();
+
+  return {
+    ...actual,
+    listConfiguredDeviceSyncPublicProviderDescriptors: (
+      ...args: Parameters<typeof actual.listConfiguredDeviceSyncPublicProviderDescriptors>
+    ) => {
+      mocks.listConfiguredDeviceSyncPublicProviderDescriptors(...args);
+      return actual.listConfiguredDeviceSyncPublicProviderDescriptors(...args);
+    },
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
   assertHostedOnboardingMutationOrigin: mocks.assertHostedOnboardingMutationOrigin,
@@ -62,6 +94,156 @@ let settingsDeviceSyncDisconnectRoute: SettingsDeviceSyncDisconnectRouteModule;
 let settingsDeviceSyncStatusRoute: SettingsDeviceSyncStatusRouteModule;
 let connectSourceStartRoute: ConnectSourceStartRouteModule;
 
+const ROUTING_INDEX_KEY = Buffer.from(
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "hex",
+);
+const OURA_PUBLIC_CONNECTION_ID = createHostedBrowserConnectionId(
+  ROUTING_INDEX_KEY,
+  "dsc_oura_123",
+);
+const JUNCTION_PUBLIC_CONNECTION_ID = createHostedBrowserConnectionId(
+  ROUTING_INDEX_KEY,
+  "dsc_junction_123",
+);
+
+function buildDeviceConnectionRecord(overrides: Partial<{
+  accessTokenEncrypted: string | null;
+  accessTokenExpiresAt: Date | null;
+  connectedAt: Date;
+  createdAt: Date;
+  credentialKind: "oauth_tokens" | "provider_config" | "none";
+  credentialMetadataJson: Record<string, unknown>;
+  displayName: string | null;
+  externalAccountIdEncrypted: string | null;
+  id: string;
+  keyVersion: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastSyncCompletedAt: Date | null;
+  lastSyncErrorAt: Date | null;
+  lastSyncStartedAt: Date | null;
+  lastWebhookAt: Date | null;
+  metadataJson: Record<string, unknown>;
+  nextReconcileAt: Date | null;
+  provider: string;
+  providerAccountBlindIndex: string | null;
+  providerConfigKey: string | null;
+  refreshLeaseExpiresAt: Date | null;
+  refreshLeaseOwner: string | null;
+  refreshLeaseTokenVersion: number | null;
+  refreshTokenEncrypted: string | null;
+  scopesJson: string[];
+  setupExpiresAt: Date | null;
+  setupPhase: "pending_link" | "link_returned" | "source_confirmed" | "failed" | null;
+  status: "active" | "reauthorization_required" | "disconnected";
+  tokenVersion: number | null;
+  updatedAt: Date;
+  userId: string;
+}> = {}) {
+  return {
+    accessTokenEncrypted: null,
+    accessTokenExpiresAt: null,
+    connectedAt: new Date("2026-04-01T08:00:00.000Z"),
+    createdAt: new Date("2026-04-01T08:00:00.000Z"),
+    credentialKind: "oauth_tokens" as const,
+    credentialMetadataJson: {},
+    displayName: null,
+    externalAccountIdEncrypted: null,
+    id: "dsc_123",
+    keyVersion: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSyncCompletedAt: null,
+    lastSyncErrorAt: null,
+    lastSyncStartedAt: null,
+    lastWebhookAt: null,
+    metadataJson: {},
+    nextReconcileAt: null,
+    provider: "oura",
+    providerAccountBlindIndex: null,
+    providerConfigKey: null,
+    refreshLeaseExpiresAt: null,
+    refreshLeaseOwner: null,
+    refreshLeaseTokenVersion: null,
+    refreshTokenEncrypted: null,
+    scopesJson: [],
+    setupExpiresAt: null,
+    setupPhase: null,
+    status: "active" as const,
+    tokenVersion: null,
+    updatedAt: new Date("2026-04-01T08:05:00.000Z"),
+    userId: "member_123",
+    ...overrides,
+  };
+}
+
+function buildDeviceConnectionSourceRecord(overrides: Partial<{
+  connectionId: string;
+  createdAt: Date;
+  displayName: string | null;
+  firstSeenAt: Date;
+  id: string;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastSeenAt: Date;
+  resourceAvailabilitySummaryJson: Record<string, unknown> | null;
+  sourceInstanceKey: string;
+  sourceProviderSlug: string;
+  status: "connected" | "disconnected" | "error" | "unavailable";
+  updatedAt: Date;
+}> = {}) {
+  return {
+    connectionId: "dsc_123",
+    createdAt: new Date("2026-04-01T08:00:00.000Z"),
+    displayName: null,
+    firstSeenAt: new Date("2026-04-01T08:00:00.000Z"),
+    id: "dcs_123",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: new Date("2026-04-03T07:01:00.000Z"),
+    resourceAvailabilitySummaryJson: null,
+    sourceInstanceKey: "source_123",
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+    updatedAt: new Date("2026-04-03T07:01:00.000Z"),
+    ...overrides,
+  };
+}
+
+function buildHostedDeviceConnectionSource(overrides: Partial<{
+  connectionId: string;
+  createdAt: string;
+  displayName: string | null;
+  firstSeenAt: string;
+  id: string;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastSeenAt: string;
+  resourceAvailabilitySummary: Record<string, unknown> | null;
+  sourceInstanceKey: string;
+  sourceProviderSlug: string;
+  status: "connected" | "disconnected" | "error" | "unavailable";
+  updatedAt: string;
+}> = {}) {
+  return {
+    connectionId: "dsc_junction_123",
+    createdAt: "2026-04-01T08:00:00.000Z",
+    displayName: null,
+    firstSeenAt: "2026-04-01T08:00:00.000Z",
+    id: "dcs_123",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-04-03T07:01:00.000Z",
+    resourceAvailabilitySummary: null,
+    sourceInstanceKey: "garmin:default",
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+    updatedAt: "2026-04-03T07:01:00.000Z",
+    ...overrides,
+  };
+}
+
 describe("device sync settings routes", () => {
   beforeAll(async () => {
     settingsDeviceSyncRoute = await import("../app/api/settings/device-sync/route");
@@ -79,12 +261,23 @@ describe("device sync settings routes", () => {
     vi.clearAllMocks();
     vi.stubEnv("OURA_CLIENT_ID", "oura-client");
     vi.stubEnv("OURA_CLIENT_SECRET", "oura-secret");
+    vi.stubEnv(
+      "HOSTED_DEVICE_ROUTING_INDEX_KEY",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
     vi.stubEnv("JUNCTION_API_KEY", "");
     vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "");
     vi.stubEnv("JUNCTION_ENV", "");
     vi.stubEnv("JUNCTION_PROVIDER_FILTER", "");
     vi.stubEnv("JUNCTION_REGION", "");
     vi.stubEnv("DEVICE_SYNC_BACKFILL_DIAGNOSTIC_ENABLED", "true");
+    mocks.prismaClient.deviceConnection = {
+      findMany: mocks.findManyDeviceConnections,
+    };
+    mocks.prismaClient.deviceConnectionSource = {
+      findMany: mocks.findManyDeviceConnectionSources,
+    };
+    mocks.prismaClient.label = "test-prisma";
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
@@ -94,23 +287,22 @@ describe("device sync settings routes", () => {
       },
     });
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      connections: {
-        createBrowserConnectionId: mocks.createBrowserConnectionId,
-      },
-      disconnectConnection: mocks.disconnectConnection,
-      getConnectionStatus: mocks.getConnectionStatus,
-      listConnections: mocks.listConnections,
+      createBrowserConnectionId: mocks.createBrowserConnectionId,
       publicIngressBaseUrl: "http://localhost:3000/api/device-sync",
       publicIngressBaseUrlSource: "request",
-      registry: {
-        get: mocks.registryGet,
+      env: {
+        routingIndexKey: ROUTING_INDEX_KEY,
       },
-      startConnection: mocks.startConnection,
       store: {
         getConnectionForUser: mocks.getConnectionForUser,
         getStoredConnectionAccountForUser: mocks.getStoredConnectionAccountForUser,
+        listConnectionSources: mocks.listConnectionSources,
         listConnectionsForUser: mocks.listConnectionsForUser,
       },
+    });
+    mocks.createHostedDeviceSyncPublicIngressService.mockReturnValue({
+      disconnectConnection: mocks.disconnectConnection,
+      startConnection: mocks.startConnection,
     });
     mocks.createBrowserConnectionId.mockImplementation((connectionId: string) =>
       connectionId === "dsc_junction_123" ? "dspc_junction_123" : connectionId
@@ -135,7 +327,22 @@ describe("device sync settings routes", () => {
     });
     mocks.getConnectionForUser.mockResolvedValue(null);
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(null);
+    mocks.listConnectionSources.mockResolvedValue([]);
     mocks.listConnectionsForUser.mockResolvedValue([]);
+    mocks.findManyDeviceConnections.mockResolvedValue([
+      buildDeviceConnectionRecord({
+        displayName: "Alice Oura",
+        id: "dsc_oura_123",
+        lastSyncCompletedAt: new Date("2026-04-03T07:00:00.000Z"),
+        lastSyncStartedAt: new Date("2026-04-03T06:55:00.000Z"),
+        lastWebhookAt: new Date("2026-04-03T07:01:00.000Z"),
+        nextReconcileAt: new Date("2026-04-03T16:00:00.000Z"),
+        provider: "oura",
+        scopesJson: ["daily"],
+        updatedAt: new Date("2026-04-03T07:05:00.000Z"),
+      }),
+    ]);
+    mocks.findManyDeviceConnectionSources.mockResolvedValue([]);
     mocks.diagnoseBackfill.mockResolvedValue({
       generatedAt: "2026-04-03T12:00:00.000Z",
       provider: "junction",
@@ -266,12 +473,25 @@ describe("device sync settings routes", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.listConnections).toHaveBeenCalledWith("member_123");
+    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+    expect(mocks.listConfiguredDeviceSyncPublicProviderDescriptors).toHaveBeenCalledWith(
+      expect.objectContaining({
+        oura: expect.any(Object),
+      }),
+      {
+        publicBaseUrl: "https://join.example.test/api/device-sync",
+      },
+    );
+    expect(mocks.findManyDeviceConnections).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        userId: "member_123",
+      },
+    }));
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       sources: [
         {
-          connectionId: "dspc_oura_123",
+          connectionId: expect.stringMatching(/^dspc_/),
           headline: "Connected and syncing normally",
           provider: "oura",
           providerLabel: "Oura",
@@ -282,6 +502,60 @@ describe("device sync settings routes", () => {
     });
   });
 
+  it("does not mark settings sources configured when authoritative provider config is invalid", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("OURA_RECONCILE_DAYS", "soon");
+
+    try {
+      const response = await settingsDeviceSyncRoute.GET(
+        new Request("https://join.example.test/api/settings/device-sync"),
+      );
+
+      expect(response.status).toBe(400);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "INVALID_REQUEST",
+          message: "Invalid request.",
+        },
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("fails closed for the settings route in production when no public base URL is configured", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DEVICE_SYNC_PUBLIC_BASE_URL", "");
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "");
+    vi.stubEnv("HOSTED_WEB_BASE_URL", "");
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "");
+
+    try {
+      const response = await settingsDeviceSyncRoute.GET(
+        new Request("https://preview.example.test/api/settings/device-sync"),
+      );
+
+      expect(response.status).toBe(500);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
+      expect(mocks.findManyDeviceConnections).not.toHaveBeenCalled();
+      expect(mocks.listConfiguredDeviceSyncPublicProviderDescriptors).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "DEVICE_SYNC_PUBLIC_BASE_URL_REQUIRED",
+          message:
+            "Hosted device-sync public callback and webhook routes require DEVICE_SYNC_PUBLIC_BASE_URL or a canonical hosted public URL in production.",
+          retryable: false,
+        },
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("returns a minimized sidebar status summary for the authenticated hosted member", async () => {
     const response = await settingsDeviceSyncSidebarStatusRoute.GET(
       new Request("https://join.example.test/api/settings/device-sync/sidebar-status"),
@@ -290,7 +564,20 @@ describe("device sync settings routes", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.listConnections).toHaveBeenCalledWith("member_123");
+    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+    expect(mocks.listConfiguredDeviceSyncPublicProviderDescriptors).toHaveBeenCalledWith(
+      expect.objectContaining({
+        oura: expect.any(Object),
+      }),
+      {
+        publicBaseUrl: "https://join.example.test/api/device-sync",
+      },
+    );
+    expect(mocks.findManyDeviceConnections).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        userId: "member_123",
+      },
+    }));
     await expect(response.json()).resolves.toEqual({
       generatedAt: "2026-04-03T12:00:00.000Z",
       ok: true,
@@ -301,57 +588,75 @@ describe("device sync settings routes", () => {
     });
   });
 
+  it("fails closed for sidebar status in production when no public base URL is configured", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DEVICE_SYNC_PUBLIC_BASE_URL", "");
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "");
+    vi.stubEnv("HOSTED_WEB_BASE_URL", "");
+    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "");
+
+    try {
+      const response = await settingsDeviceSyncSidebarStatusRoute.GET(
+        new Request("https://preview.example.test/api/settings/device-sync/sidebar-status"),
+      );
+
+      expect(response.status).toBe(500);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(mocks.requireActivePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
+      expect(mocks.findManyDeviceConnections).not.toHaveBeenCalled();
+      expect(mocks.listConfiguredDeviceSyncPublicProviderDescriptors).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "DEVICE_SYNC_PUBLIC_BASE_URL_REQUIRED",
+          message:
+            "Hosted device-sync public callback and webhook routes require DEVICE_SYNC_PUBLIC_BASE_URL or a canonical hosted public URL in production.",
+          retryable: false,
+        },
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("returns a Junction upstream wearable label in the minimized sidebar status", async () => {
-    mocks.listConnections.mockResolvedValueOnce({
-      connectionSources: [
-        {
-          connectionId: "dspc_junction_123",
-          firstSeenAt: "2026-04-01T08:00:00.000Z",
-          lastSeenAt: "2026-04-03T07:01:00.000Z",
-          resourceCount: 3,
-          sourceProviderSlug: "garmin",
-          status: "connected",
+    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+    vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret-value");
+    vi.stubEnv("JUNCTION_ENV", "sandbox");
+    vi.stubEnv("JUNCTION_REGION", "us");
+    mocks.findManyDeviceConnections.mockResolvedValueOnce([
+      buildDeviceConnectionRecord({
+        credentialKind: "provider_config",
+        displayName: "Junction",
+        id: "dsc_junction_123",
+        lastSyncCompletedAt: new Date("2026-04-03T07:00:00.000Z"),
+        lastSyncStartedAt: new Date("2026-04-03T06:55:00.000Z"),
+        lastWebhookAt: new Date("2026-04-03T07:01:00.000Z"),
+        nextReconcileAt: new Date("2026-04-03T16:00:00.000Z"),
+        provider: "junction",
+        providerConfigKey: "junction",
+        scopesJson: [],
+        updatedAt: new Date("2026-04-03T07:05:00.000Z"),
+      }),
+    ]);
+    mocks.findManyDeviceConnectionSources.mockResolvedValueOnce([
+      buildDeviceConnectionSourceRecord({
+        connectionId: "dsc_junction_123",
+        resourceAvailabilitySummaryJson: {
+          sleep: true,
+          steps: true,
+          workouts: true,
         },
-      ],
-      connections: [
-        {
-          accessTokenExpiresAt: null,
-          connectedAt: "2026-04-01T08:00:00.000Z",
-          createdAt: "2026-04-01T08:00:00.000Z",
-          displayName: "Junction",
-          id: "dspc_junction_123",
-          lastErrorCode: null,
-          lastErrorMessage: null,
-          lastSyncCompletedAt: "2026-04-03T07:00:00.000Z",
-          lastSyncErrorAt: null,
-          lastSyncStartedAt: "2026-04-03T06:55:00.000Z",
-          lastWebhookAt: "2026-04-03T07:01:00.000Z",
-          metadata: {},
-          nextReconcileAt: "2026-04-03T16:00:00.000Z",
-          provider: "junction",
-          scopes: [],
-          status: "active",
-          updatedAt: "2026-04-03T07:05:00.000Z",
-        },
-      ],
-      providers: [
-        {
-          callbackPath: "/connect/junction/callback",
-          callbackUrl: "https://join.example.test/connect/junction/callback",
-          defaultScopes: [],
-          provider: "junction",
-          supportsWebhooks: true,
-          webhookPath: "/webhooks/junction",
-          webhookUrl: "https://join.example.test/webhooks/junction",
-        },
-      ],
-    });
+        sourceProviderSlug: "garmin",
+      }),
+    ]);
 
     const response = await settingsDeviceSyncSidebarStatusRoute.GET(
       new Request("https://join.example.test/api/settings/device-sync/sidebar-status"),
     );
 
     expect(response.status).toBe(200);
+    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       status: {
@@ -425,6 +730,11 @@ describe("device sync settings routes", () => {
         status: "active",
         updatedAt: "2026-04-03T08:00:00.000Z",
       },
+    ]);
+    mocks.listConnectionSources.mockResolvedValueOnce([
+      buildHostedDeviceConnectionSource({
+        resourceAvailabilitySummary: null,
+      }),
     ]);
 
     const response = await settingsDeviceSyncDiagnoseBackfillRoute.GET(
@@ -549,6 +859,13 @@ describe("device sync settings routes", () => {
         status: "active",
         updatedAt: "2026-04-03T08:00:00.000Z",
       },
+    ]);
+    mocks.listConnectionSources.mockResolvedValueOnce([
+      buildHostedDeviceConnectionSource({
+        resourceAvailabilitySummary: {
+          steps: true,
+        },
+      }),
     ]);
 
     const response = await settingsDeviceSyncDiagnoseBackfillRoute.GET(
@@ -675,6 +992,9 @@ describe("device sync settings routes", () => {
         updatedAt: "2026-04-03T08:00:00.000Z",
       },
     ]);
+    mocks.listConnectionSources.mockResolvedValueOnce([
+      buildHostedDeviceConnectionSource(),
+    ]);
 
     const response = await settingsDeviceSyncDiagnoseBackfillRoute.POST(
       createJsonPostRequest(
@@ -743,6 +1063,29 @@ describe("device sync settings routes", () => {
       ],
       providers: [],
     });
+    mocks.listConnectionsForUser.mockResolvedValueOnce([
+      {
+        accessTokenExpiresAt: null,
+        connectedAt: "2026-04-01T08:00:00.000Z",
+        createdAt: "2026-04-01T08:00:00.000Z",
+        displayName: "Junction",
+        externalAccountId: "junction-user-redacted",
+        id: "dsc_junction_123",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: null,
+        lastWebhookAt: null,
+        metadata: {},
+        nextReconcileAt: null,
+        provider: "junction",
+        scopes: [],
+        setupPhase: null,
+        status: "disconnected",
+        updatedAt: "2026-04-03T08:00:00.000Z",
+      },
+    ]);
 
     const response = await settingsDeviceSyncDiagnoseBackfillRoute.GET(
       new Request("https://join.example.test/api/settings/device-sync/diagnose-backfill?provider=junction"),
@@ -1029,17 +1372,17 @@ describe("device sync settings routes", () => {
 
   it("returns one settings source for an opaque connection id status lookup", async () => {
     const response = await settingsDeviceSyncStatusRoute.GET(
-      new Request("https://join.example.test/api/settings/device-sync/connections/dspc_oura_123/status"),
-      createRouteContext({ connectionId: "dspc_oura_123" }),
+      new Request(`https://join.example.test/api/settings/device-sync/connections/${OURA_PUBLIC_CONNECTION_ID}/status`),
+      createRouteContext({ connectionId: OURA_PUBLIC_CONNECTION_ID }),
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.getConnectionStatus).toHaveBeenCalledWith("member_123", "dspc_oura_123");
-    expect(mocks.listConnections).toHaveBeenCalledWith("member_123");
+    expect(mocks.getConnectionStatus).not.toHaveBeenCalled();
+    expect(mocks.listConnections).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       source: {
-        connectionId: "dspc_oura_123",
+        connectionId: OURA_PUBLIC_CONNECTION_ID,
         provider: "oura",
         statusLabel: "Connected",
         tone: "calm",
@@ -1048,72 +1391,45 @@ describe("device sync settings routes", () => {
   });
 
   it("keeps upstream source context on connection status lookups", async () => {
-    const junctionConnection = {
-      accessTokenExpiresAt: null,
-      connectedAt: "2026-04-01T08:00:00.000Z",
-      createdAt: "2026-04-01T08:00:00.000Z",
-      displayName: "Junction",
-      id: "dspc_junction_123",
-      lastErrorCode: null,
-      lastErrorMessage: null,
-      lastSyncCompletedAt: "2026-04-03T07:00:00.000Z",
-      lastSyncErrorAt: null,
-      lastSyncStartedAt: "2026-04-03T06:55:00.000Z",
-      lastWebhookAt: "2026-04-03T07:01:00.000Z",
-      metadata: {},
-      nextReconcileAt: "2026-04-03T16:00:00.000Z",
-      provider: "junction",
-      scopes: [],
-      status: "active",
-      updatedAt: "2026-04-03T08:00:00.000Z",
-    };
-    mocks.getConnectionStatus.mockResolvedValueOnce({
-      connection: junctionConnection,
-    });
-    mocks.listConnections.mockResolvedValueOnce({
-      connectionSources: [
-        {
-          connectionId: "dspc_junction_123",
-          firstSeenAt: "2026-04-01T08:00:00.000Z",
-          lastSeenAt: "2026-04-03T07:01:00.000Z",
-          resourceCount: 3,
-          sourceProviderSlug: "garmin",
-          status: "connected",
+    mocks.findManyDeviceConnections.mockResolvedValueOnce([
+      buildDeviceConnectionRecord({
+        displayName: "Junction",
+        id: "dsc_junction_123",
+        lastSyncCompletedAt: new Date("2026-04-03T07:00:00.000Z"),
+        lastSyncStartedAt: new Date("2026-04-03T06:55:00.000Z"),
+        lastWebhookAt: new Date("2026-04-03T07:01:00.000Z"),
+        nextReconcileAt: new Date("2026-04-03T16:00:00.000Z"),
+        provider: "junction",
+        scopesJson: [],
+        updatedAt: new Date("2026-04-03T08:00:00.000Z"),
+      }),
+    ]);
+    mocks.findManyDeviceConnectionSources.mockResolvedValueOnce([
+      buildDeviceConnectionSourceRecord({
+        connectionId: "dsc_junction_123",
+        resourceAvailabilitySummaryJson: {
+          sleep: true,
+          steps: true,
+          workouts: true,
         },
-      ],
-      connections: [
-        {
-          ...junctionConnection,
-          updatedAt: "2026-04-03T07:05:00.000Z",
-        },
-      ],
-      providers: [
-        {
-          callbackPath: "/connect/junction/callback",
-          callbackUrl: "https://join.example.test/connect/junction/callback",
-          defaultScopes: [],
-          provider: "junction",
-          supportsWebhooks: true,
-          webhookPath: "/webhooks/junction",
-          webhookUrl: "https://join.example.test/webhooks/junction",
-        },
-      ],
-    });
+        sourceProviderSlug: "garmin",
+      }),
+    ]);
 
     const response = await settingsDeviceSyncStatusRoute.GET(
-      new Request("https://join.example.test/api/settings/device-sync/connections/dspc_junction_123/status"),
-      createRouteContext({ connectionId: "dspc_junction_123" }),
+      new Request(`https://join.example.test/api/settings/device-sync/connections/${JUNCTION_PUBLIC_CONNECTION_ID}/status`),
+      createRouteContext({ connectionId: JUNCTION_PUBLIC_CONNECTION_ID }),
     );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       source: {
-        connectionId: "dspc_junction_123",
+        connectionId: JUNCTION_PUBLIC_CONNECTION_ID,
         provider: "junction",
         providerLabel: "Garmin",
-        statusLabel: "Connected",
-        tone: "calm",
+        statusLabel: "Unavailable",
+        tone: "muted",
         updatedAt: "2026-04-03T08:00:00.000Z",
         upstreamSources: [
           {

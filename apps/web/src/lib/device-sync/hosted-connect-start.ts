@@ -2,7 +2,7 @@ import "server-only";
 
 import type { DeviceSyncConnectTarget } from "@murphai/device-syncd/connect-config";
 
-import { createHostedDeviceSyncControlPlane } from "./control-plane";
+import { createHostedDeviceSyncPublicIngressService } from "./public-ingress-service";
 import { requireActiveHostedAppSessionFromRequest } from "../hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "../hosted-onboarding/csrf";
 import {
@@ -26,8 +26,8 @@ export async function startHostedDeviceSyncConnection(input: {
     memberId: auth.member.id,
     prisma,
   });
-  const controlPlane = createHostedDeviceSyncControlPlane(input.request);
-  const started = await controlPlane.startConnection(
+  const publicIngress = createHostedDeviceSyncPublicIngressService(input.request);
+  const started = await publicIngress.startConnection(
     auth.member.id,
     input.target.provider,
     input.defaultReturnTo,

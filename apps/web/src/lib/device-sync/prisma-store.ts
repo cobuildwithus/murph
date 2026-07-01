@@ -10,7 +10,7 @@ import type {
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
   UpsertPublicDeviceSyncConnectionResult,
-} from "@murphai/device-syncd/public-ingress";
+} from "@murphai/device-syncd/types";
 import type { HostedExecutionDeviceSyncStagedDirtyAck } from "@murphai/device-syncd/hosted-runtime";
 import type { HostedDeviceSyncSecretTestCodec } from "./prisma-store/connection-secrets";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";

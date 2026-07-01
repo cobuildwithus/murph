@@ -1,9 +1,10 @@
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { sanitizeHostedRuntimeErrorText } from "./hosted-runtime.ts";
+import { resolveDeviceSyncProviderCredentialPolicy } from "./provider-credential-policy.ts";
+import { resolvePublicProviderDefaultScopes } from "./public-provider-descriptor-shared.ts";
 import {
   normalizeConfiguredDeviceSyncJobInput,
-  resolveDeviceSyncProviderCredentialPolicy,
-} from "./config/provider-manifests.ts";
+} from "./provider-job-definitions.ts";
 import { resolveDeviceProviderConnectionDescriptor } from "@murphai/importers/device-providers/provider-descriptors";
 import {
   addMilliseconds,
@@ -471,7 +472,7 @@ export class DeviceSyncPublicIngress {
       webhookPath,
       webhookUrl: webhookPath ? joinUrl(this.publicBaseUrl, webhookPath) : null,
       supportsWebhooks: Boolean(webhookPath && resolveProviderWebhookVerifier(provider)),
-      defaultScopes: [...(connection.defaultScopes ?? [])],
+      defaultScopes: resolvePublicProviderDefaultScopes(provider.descriptor, connection),
     };
   }
 
@@ -1533,12 +1534,12 @@ export { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
 export { sanitizeStoredDeviceSyncMetadata } from "./shared.ts";
 export { resolveDeviceSyncWebhookPreflightResponse } from "./webhook-verification.ts";
 export { createOuraDeviceSyncProvider } from "./providers/oura.ts";
-export type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
+export type { OuraDeviceSyncProviderConfig } from "./config/provider-types.ts";
 export { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
-export type { WhoopDeviceSyncProviderConfig } from "./providers/whoop.ts";
+export type { WhoopDeviceSyncProviderConfig } from "./config/provider-types.ts";
 export { createStravaDeviceSyncProvider, resolveStravaWebhookPreflightResponse } from "./providers/strava.ts";
-export type { StravaDeviceSyncProviderConfig } from "./providers/strava.ts";
-export { normalizeJunctionResourceName, readJunctionWebhookResourceName } from "./providers/junction.ts";
+export type { StravaDeviceSyncProviderConfig } from "./config/provider-types.ts";
+export { normalizeJunctionResourceName, readJunctionWebhookResourceName } from "./junction-resources.ts";
 export {
   DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
   DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,

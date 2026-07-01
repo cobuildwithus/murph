@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 
-import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
+import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
 
 import {
   buildHostedLocalHeartbeatRuntimeLocalStateUpdate,

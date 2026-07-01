@@ -1,23 +1,32 @@
 import {
+  createDeviceSyncPublicIngress,
+  resolveDeviceSyncWebhookPreflightResponse,
+} from "@murphai/device-syncd/public-ingress";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
+import {
   DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
   DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
-  createDeviceSyncPublicIngress,
-  deviceSyncError,
   type BeginConnectionResult,
   type CompleteConnectionResult,
   type HandleWebhookResult,
+  type DeviceSyncWebhookPreflightResponse,
   type PublicDeviceSyncAccount,
   type PublicProviderDescriptor,
   type SdkSignInSessionResult,
-} from "@murphai/device-syncd/public-ingress";
+  type DeviceSyncRegistry,
+} from "@murphai/device-syncd/types";
 
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
+import { createHostedDeviceSyncControlPlaneContext } from "./control-plane-context";
+import {
+  toHostedBrowserDeviceSyncConnectionSource,
+  type HostedBrowserDeviceSyncConnectionSource,
+} from "./browser-connection-source";
 import {
   createHostedBrowserConnectionId,
   toHostedBrowserDeviceSyncConnection,
   type HostedBrowserDeviceSyncConnection,
 } from "./public-connection";
-import type { HostedDeviceConnectionSource } from "./prisma-store";
 import {
   disconnectHostedDeviceSyncConnection,
   handleHostedDeviceSyncConnectionEstablished,
@@ -26,6 +35,7 @@ import {
 } from "./wake-service";
 import { readRawBodyBuffer } from "./http";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
+import { createHostedDeviceSyncRegistry } from "./providers";
 
 export class HostedDeviceSyncPublicIngressService {
   private readonly ingress;
@@ -33,11 +43,12 @@ export class HostedDeviceSyncPublicIngressService {
   constructor(
     private readonly context: HostedDeviceSyncControlPlaneContext,
     private readonly webhookAdmin: HostedDeviceSyncWebhookAdminService,
+    private readonly registry: DeviceSyncRegistry,
   ) {
     this.ingress = createDeviceSyncPublicIngress({
       publicBaseUrl: this.context.publicIngressBaseUrl,
       allowedReturnOrigins: this.context.allowedReturnOrigins,
-      registry: this.context.registry,
+      registry: this.registry,
       store: this.context.store,
       hooks: {
         onConnectionEstablished: async ({
@@ -210,6 +221,20 @@ export class HostedDeviceSyncPublicIngressService {
     return this.ingress.handleWebhook(provider, this.context.request.headers, resolvedRawBody);
   }
 
+  async resolveWebhookPreflight(
+    provider: string,
+    rawBody: Buffer,
+  ): Promise<DeviceSyncWebhookPreflightResponse | null> {
+    return resolveDeviceSyncWebhookPreflightResponse({
+      provider,
+      registry: this.registry,
+      method: this.context.request.method,
+      url: new URL(this.context.request.url),
+      headers: this.context.request.headers,
+      rawBody,
+    });
+  }
+
   async disconnectConnection(userId: string, connectionId: string): Promise<{
     connection: HostedBrowserDeviceSyncConnection;
     warning?: { code: string; message: string };
@@ -217,7 +242,7 @@ export class HostedDeviceSyncPublicIngressService {
     const connection = await this.requireOwnedBrowserConnection(userId, connectionId);
     const disconnected = await disconnectHostedDeviceSyncConnection({
       connectionId: connection.id,
-      registry: this.context.registry,
+      registry: this.registry,
       store: this.context.store,
       userId,
     });
@@ -259,62 +284,12 @@ export class HostedDeviceSyncPublicIngressService {
 
 }
 
-export interface HostedBrowserDeviceSyncConnectionSource {
-  connectionId: string;
-  firstSeenAt: string;
-  lastSeenAt: string;
-  requiresReconnect?: boolean;
-  resourceCount: number;
-  sourceProviderSlug: string;
-  status: HostedDeviceConnectionSource["status"];
-}
+export function createHostedDeviceSyncPublicIngressService(
+  request: Request,
+): HostedDeviceSyncPublicIngressService {
+  const context = createHostedDeviceSyncControlPlaneContext(request);
+  const webhookAdmin = new HostedDeviceSyncWebhookAdminService(context);
+  const registry = createHostedDeviceSyncRegistry(process.env);
 
-function toHostedBrowserDeviceSyncConnectionSource(
-  source: HostedDeviceConnectionSource,
-  browserConnectionId: string,
-): HostedBrowserDeviceSyncConnectionSource {
-  return {
-    connectionId: browserConnectionId,
-    firstSeenAt: source.firstSeenAt,
-    lastSeenAt: source.lastSeenAt,
-    ...(requiresConnectionSourceReconnect(source) ? { requiresReconnect: true } : {}),
-    resourceCount: countSourceResources(source.resourceAvailabilitySummary),
-    sourceProviderSlug: source.sourceProviderSlug,
-    status: source.status,
-  };
-}
-
-const CONNECTION_SOURCE_SUMMARY_METADATA_KEYS = new Set([
-  "sourceInstanceKeyFallback",
-]);
-const CONNECTION_SOURCE_RECONNECT_ERROR_CODES = new Set(["TOKEN_REFRESH_FAILED"]);
-
-/**
- * True when a `resourceAvailabilitySummary` entry names an available resource
- * rather than bookkeeping metadata or an unavailable marker.
- */
-export function isAvailableConnectionSourceResource(
-  key: string,
-  value: unknown,
-): boolean {
-  return !CONNECTION_SOURCE_SUMMARY_METADATA_KEYS.has(key)
-    && value !== false
-    && value !== null
-    && value !== undefined;
-}
-
-function countSourceResources(summary: HostedDeviceConnectionSource["resourceAvailabilitySummary"]): number {
-  if (!summary) {
-    return 0;
-  }
-
-  return Object.entries(summary).filter(([key, value]) =>
-    isAvailableConnectionSourceResource(key, value)
-  ).length;
-}
-
-function requiresConnectionSourceReconnect(source: HostedDeviceConnectionSource): boolean {
-  return source.status === "error"
-    && source.lastErrorCode !== null
-    && CONNECTION_SOURCE_RECONNECT_ERROR_CODES.has(source.lastErrorCode);
+  return new HostedDeviceSyncPublicIngressService(context, webhookAdmin, registry);
 }

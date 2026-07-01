@@ -1,6 +1,5 @@
-import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
-
-import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
+import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
 import {
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,

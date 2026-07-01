@@ -1,23 +1,18 @@
-import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
 import {
-  buildHostedDeviceSyncSettingsSources,
-  type HostedDeviceSyncSettingsResponse,
-} from "@/src/lib/device-sync/settings-surface";
+  buildHostedDeviceSyncSettingsSurfaceResponse,
+} from "@/src/lib/device-sync/sidebar-status-service";
+import { readHostedDeviceSyncEnvironment } from "@/src/lib/device-sync/env";
+import { resolveHostedDeviceSyncPublicBaseUrl } from "@/src/lib/device-sync/public-base-url";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 
 export const GET = withJsonError(async (request: Request) => {
   const auth = await requireActiveHostedAppSessionFromRequest(request);
-  const controlPlane = createHostedDeviceSyncControlPlane(request);
-  const { connectionSources, connections, providers } = await controlPlane.listConnections(auth.member.id);
+  const env = readHostedDeviceSyncEnvironment(process.env);
+  const publicBaseUrl = resolveHostedDeviceSyncPublicBaseUrl(request, env).baseUrl;
 
-  return jsonOk({
-    generatedAt: new Date().toISOString(),
-    ok: true,
-    sources: buildHostedDeviceSyncSettingsSources({
-      connectionSources,
-      connections,
-      providers,
-    }),
-  } satisfies HostedDeviceSyncSettingsResponse);
+  return jsonOk(await buildHostedDeviceSyncSettingsSurfaceResponse({
+    memberId: auth.member.id,
+    publicBaseUrl,
+  }));
 });

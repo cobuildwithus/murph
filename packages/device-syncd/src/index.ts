@@ -113,12 +113,14 @@ export {
   normalizeJunctionProviderFilter,
   resolveJunctionConnectSourceLabel,
   resolveJunctionConnectTargetForSourceId,
-} from "./providers/junction-connect-sources.ts";
+} from "./config/junction-connect-sources.ts";
 export { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 export type {
   JunctionDeviceSyncProviderConfig,
-} from "./providers/junction.ts";
-export type { JunctionConnectSourceTarget } from "./providers/junction-connect-sources.ts";
+  JunctionEnvironment,
+  JunctionRegion,
+} from "./config/provider-types.ts";
+export type { JunctionConnectSourceTarget } from "./config/junction-connect-sources.ts";
 export {
   assertValidJunctionClientConfig,
   isAllowedJunctionLinkHost,
@@ -128,14 +130,12 @@ export {
 } from "./providers/junction-client.ts";
 export type {
   JunctionClientConfig,
-  JunctionEnvironment,
   JunctionProviderConnection,
-  JunctionRegion,
 } from "./providers/junction-client.ts";
 export { createOuraDeviceSyncProvider, resolveOuraWebhookPreflightResponse } from "./providers/oura.ts";
-export type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
+export type { OuraDeviceSyncProviderConfig } from "./config/provider-types.ts";
 export { createStravaDeviceSyncProvider, resolveStravaWebhookPreflightResponse } from "./providers/strava.ts";
-export type { StravaDeviceSyncProviderConfig } from "./providers/strava.ts";
+export type { StravaDeviceSyncProviderConfig } from "./config/provider-types.ts";
 export {
   createOuraWebhookSubscriptionClient,
   OURA_DEFAULT_WEBHOOK_DATA_TYPES,
@@ -161,5 +161,5 @@ export type {
   StravaWebhookSubscriptionClient,
 } from "./providers/strava-webhooks.ts";
 export { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
-export type { WhoopDeviceSyncProviderConfig } from "./providers/whoop.ts";
+export type { WhoopDeviceSyncProviderConfig } from "./config/provider-types.ts";
 export * from "./types.ts";
