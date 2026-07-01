@@ -9,6 +9,7 @@ import {
   readHostedFamilyOwnerSnapshotForMember,
   updateHostedFamilySeatCount,
 } from "@/src/lib/hosted-onboarding/family-plan";
+import { HOSTED_FAMILY_MAX_SEATS } from "@/src/lib/hosted-onboarding/billing-plans";
 import { hostedOnboardingError, isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
@@ -54,20 +55,25 @@ export const POST = withJsonError(async (request: Request) => {
       });
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
+  // Only grow the plan when the invite genuinely needs a seat. Reused invites
+  // return before the seat check, so a duplicate/retried invite never buys one.
+  // Loop (bounded by max seats) so concurrent full-plan invites each add their
+  // own seat instead of racing on the same billed count.
   let invite;
-  try {
-    invite = await issueInvite();
-  } catch (error) {
-    // Only grow the plan when the invite genuinely needs a seat. Reused invites
-    // return before the seat check, so a duplicate/retried invite never buys one.
-    if (
-      body.addSeatIfNeeded === true &&
-      isHostedOnboardingError(error) &&
-      error.code === "HOSTED_FAMILY_SEAT_LIMIT_REACHED" &&
-      (await addHostedFamilySeatForOwner(prisma, auth.member.id))
-    ) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
       invite = await issueInvite();
-    } else {
+      break;
+    } catch (error) {
+      if (
+        body.addSeatIfNeeded === true &&
+        isHostedOnboardingError(error) &&
+        error.code === "HOSTED_FAMILY_SEAT_LIMIT_REACHED" &&
+        attempt < HOSTED_FAMILY_MAX_SEATS &&
+        (await addHostedFamilySeatForOwner(prisma, auth.member.id))
+      ) {
+        continue;
+      }
       throw error;
     }
   }

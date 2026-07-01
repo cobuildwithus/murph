@@ -182,6 +182,35 @@ test("adds one paid seat and retries when the plan is full", async () => {
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
 });
 
+test("keeps adding seats across retries until the invite lands", async () => {
+  const seatLimit = () =>
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
+      message: "This Family plan has no open paid seats.",
+    });
+  mocks.issueHostedFamilyInviteTx
+    .mockRejectedValueOnce(seatLimit())
+    .mockRejectedValueOnce(seatLimit())
+    .mockResolvedValueOnce({
+      channel: "family",
+      expiresAt: new Date("2026-07-01T00:00:00.000Z"),
+      id: "inv_new",
+      inviteCode: "NEWCODE",
+      status: "pending",
+      targetLabel: "Dad",
+      targetPhoneHint: "+48 6** *** ***",
+    });
+
+  const response = await inviteRoute.POST(
+    inviteRequest({ addSeatIfNeeded: true, targetLabel: "Dad", targetPhoneNumber: "+48600000001" }),
+  );
+
+  expect(response.status).toBe(200);
+  expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledTimes(2);
+  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(3);
+});
+
 test("does not buy a seat when a full-plan invite is reused (no seat-limit error)", async () => {
   const response = await inviteRoute.POST(
     inviteRequest({ addSeatIfNeeded: true, targetLabel: "Mom", targetPhoneNumber: "+48600000000" }),
