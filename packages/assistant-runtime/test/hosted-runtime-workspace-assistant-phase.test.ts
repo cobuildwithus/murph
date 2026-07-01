@@ -2472,6 +2472,70 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
   });
 
+  it("keeps provider cleanup deferred when foreground-yield input is not ingested yet", async () => {
+    let shouldYield = false;
+    const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-27T00:08:00.000Z",
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(async () => {
+      shouldYield = true;
+      return {
+        item: createSystemMailboxItem(),
+        itemId: "system_mailbox_item_processed",
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "assistant-notification",
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      };
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      activeTurnInputIngested: false,
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: false,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: false,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:09:00.000Z",
+      shouldYieldBackgroundMaintenance,
+    }));
+
+    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
+      item: expect.objectContaining({
+        itemId: "system_mailbox_item_processed",
+      }),
+      operatorHomeRoot: "/tmp/murph-operator-home",
+      runtime: expect.any(Object),
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+    }));
+    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+  });
+
   it("checkpoints a consumed alarm wake when foreground input was ingested", async () => {
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       activeTurnInputIngested: true,

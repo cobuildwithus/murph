@@ -541,6 +541,10 @@ export async function runHostedWorkspaceAssistantPhase(
       deviceSyncMaintenanceRan = deviceSyncMaintenanceRan
         || deferredPendingSystemMailboxMaintenance.deviceSyncMaintenanceRan;
     }
+    let providerCleanupDeferredByMaintenanceYield =
+      systemMailboxMaintenance.providerCleanupDeferredByMaintenanceYield
+      || (deferredPendingSystemMailboxMaintenance?.providerCleanupDeferredByMaintenanceYield
+        ?? false);
     if (deferredPendingSystemMailboxMaintenance?.continueAssistantLane === true) {
       assistantMetrics = await runAutomationLane({
         managedAutomationsResult: null,
@@ -561,6 +565,9 @@ export async function runHostedWorkspaceAssistantPhase(
       assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
         assistantNextWakeAt,
       });
+      providerCleanupDeferredByMaintenanceYield =
+        providerCleanupDeferredByMaintenanceYield
+        || deferredPendingSystemMailboxMaintenance.providerCleanupDeferredByMaintenanceYield;
     }
     const deviceSyncFollowUpWake = resolveHostedDeviceSyncFollowUpWake({
       deviceSyncMaintenanceRan,
@@ -575,6 +582,7 @@ export async function runHostedWorkspaceAssistantPhase(
       vault: input.restored.vaultRoot,
     });
     const providerCleanupPhase = await runProviderCleanupPhase({
+      deferProviderCleanup: providerCleanupDeferredByMaintenanceYield,
       foregroundAssistantPass,
       initialProviderCleanupCheckpoint,
       input,
@@ -693,10 +701,12 @@ export async function runHostedWorkspaceAssistantPhase(
         checkpointReason: "outbox_receipt",
         canConsumeWorkspaceAssistantWake: true,
         input,
-        providerCleanup: {
-          checkpoint: providerCleanupCheckpoint,
-          mode: "drain",
-        },
+        providerCleanup: providerCleanupPhase.deferProviderCleanup
+          ? { mode: "defer" }
+          : {
+              checkpoint: providerCleanupCheckpoint,
+              mode: "drain",
+            },
         redactedStatus: null,
         wake,
       });
@@ -857,10 +867,12 @@ export async function runHostedWorkspaceAssistantPhase(
                 checkpointReason: deliveryEffects.length > 0 ? "outbox_receipt" : "provider_cleanup",
                 canConsumeWorkspaceAssistantWake: true,
                 input,
-                providerCleanup: {
-                  checkpoint: providerCleanupCheckpoint,
-                  mode: "drain",
-                },
+                providerCleanup: providerCleanupPhase.deferProviderCleanup
+                  ? { mode: "defer" }
+                  : {
+                      checkpoint: providerCleanupCheckpoint,
+                      mode: "drain",
+                    },
                 redactedStatus: null,
                 wake,
               });
@@ -923,6 +935,7 @@ function emptyHostedSystemMailboxMaintenanceResult(input: {
   deviceSyncMaintenanceRan: boolean;
   initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
   pendingAssistantInputWakeAt: string | null;
+  providerCleanupDeferredByMaintenanceYield: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
 } {
   return {
@@ -930,6 +943,7 @@ function emptyHostedSystemMailboxMaintenanceResult(input: {
     deviceSyncMaintenanceRan: false,
     initialProviderCleanupCheckpoint: null,
     pendingAssistantInputWakeAt: input.pendingAssistantInputWakeAt,
+    providerCleanupDeferredByMaintenanceYield: false,
     result: null,
   };
 }
@@ -2311,6 +2325,7 @@ async function runSystemMailboxMaintenancePhase(input: {
   deviceSyncMaintenanceRan: boolean;
   initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
   pendingAssistantInputWakeAt: string | null;
+  providerCleanupDeferredByMaintenanceYield: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
 }> {
   if (
@@ -2322,6 +2337,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       deviceSyncMaintenanceRan: false,
       initialProviderCleanupCheckpoint: null,
       pendingAssistantInputWakeAt: null,
+      providerCleanupDeferredByMaintenanceYield: false,
       result: null,
     };
   }
@@ -2355,6 +2371,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       deviceSyncMaintenanceRan: false,
       initialProviderCleanupCheckpoint,
       pendingAssistantInputWakeAt,
+      providerCleanupDeferredByMaintenanceYield: false,
       result: null,
     };
   }
@@ -2370,6 +2387,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         deviceSyncMaintenanceRan: false,
         initialProviderCleanupCheckpoint,
         pendingAssistantInputWakeAt: null,
+        providerCleanupDeferredByMaintenanceYield: false,
         result: null,
       };
     }
@@ -2434,6 +2452,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         deviceSyncMaintenanceRan: false,
         initialProviderCleanupCheckpoint: carriedProviderCleanupCheckpoint,
         pendingAssistantInputWakeAt,
+        providerCleanupDeferredByMaintenanceYield: shouldYieldAfterSystemMailboxPreparation,
         result: null,
       };
     }
@@ -2455,6 +2474,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         deviceSyncMaintenanceRan: !dirtyDeviceSyncMetrics.deviceSyncSkipped,
         initialProviderCleanupCheckpoint: carriedProviderCleanupCheckpoint,
         pendingAssistantInputWakeAt,
+        providerCleanupDeferredByMaintenanceYield: shouldYieldAfterSystemMailboxPreparation,
         result: buildIdleDeviceSyncOnlyAssistantPhaseResult({
           assistantCronWake,
           backgroundWake,
@@ -2486,6 +2506,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         deviceSyncMaintenanceRan: false,
         initialProviderCleanupCheckpoint: carriedProviderCleanupCheckpoint,
         pendingAssistantInputWakeAt,
+        providerCleanupDeferredByMaintenanceYield: shouldYieldAfterSystemMailboxPreparation,
         result: withHostedRuntimeWakeCandidate({
           wake: backgroundWake,
           result: contextSnapshotRefresh,
@@ -2498,6 +2519,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       deviceSyncMaintenanceRan: false,
       initialProviderCleanupCheckpoint: carriedProviderCleanupCheckpoint,
       pendingAssistantInputWakeAt,
+      providerCleanupDeferredByMaintenanceYield: shouldYieldAfterSystemMailboxPreparation,
       result: null,
     };
   }
@@ -2626,6 +2648,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       || shouldContinueAssistantLaneAfterSystemMailboxPreparation(systemMailboxPreparation),
     initialProviderCleanupCheckpoint: carriedProviderCleanupCheckpoint,
     pendingAssistantInputWakeAt,
+    providerCleanupDeferredByMaintenanceYield: shouldYieldAfterSystemMailboxPreparation,
     result: {
       ...(browserVaultReplicaRefreshRequested
         ? { browserVaultReplicaRefreshRequested: true }
@@ -3010,16 +3033,28 @@ function resolveHostedSystemMailboxMetricsWakeAt(input: {
 }
 
 async function runProviderCleanupPhase(input: {
+  deferProviderCleanup: boolean;
   foregroundAssistantPass: boolean;
   initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   terminalLinqCleanup: HostedTerminalLinqCleanupEvidence;
 }): Promise<{
+  deferProviderCleanup: boolean;
   deferredProviderCleanupWakeAt: string | null;
   providerCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
   providerCleanupDue: boolean;
   terminalLinqCleanupDue: boolean;
 }> {
+  if (input.deferProviderCleanup && !input.foregroundAssistantPass) {
+    return {
+      deferProviderCleanup: true,
+      deferredProviderCleanupWakeAt: null,
+      providerCleanupCheckpoint: null,
+      providerCleanupDue: false,
+      terminalLinqCleanupDue: false,
+    };
+  }
+
   const terminalLinqCleanupDue =
     !input.foregroundAssistantPass && input.terminalLinqCleanup.linqMessageIds.length > 0;
   if (terminalLinqCleanupDue) {
@@ -3052,6 +3087,7 @@ async function runProviderCleanupPhase(input: {
     terminalLinqCleanupPending: input.terminalLinqCleanup.linqMessageIds.length > 0,
   });
   return {
+    deferProviderCleanup: false,
     deferredProviderCleanupWakeAt,
     providerCleanupCheckpoint,
     providerCleanupDue,
