@@ -128,7 +128,7 @@ landing; record the chosen posture here so the decision is reviewable.
   months. Snapshot/restore cost remains negligible at the projected steady
   state, so no rotation or compaction seam is planned.
 
-- `raw/shared/vault-share-projections.json`
+- `derived/vault-share/projections.json`
   (`murph.shared-vault-projections.v1`) is the destination-side materialization
   for consented HostedVaultShare records. It is one compact JSON document per
   workspace, not one file per shared record. Each grantor/projection entry keeps
@@ -138,5 +138,7 @@ landing; record the chosen posture here so the decision is reviewable.
   deleted. Group join grants also cap active grantors per destination/projection
   through `HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION`, so the
   single-file read/write cost is bounded on the growing destination side. This
-  makes the file count hard-bounded at one file for the shared projection family
-  and keeps normal import work bounded despite delivery retries or night count.
+  derived path is included in hosted workspace snapshots while keeping `raw/`
+  reserved for immutable imported originals. The file count stays hard-bounded
+  at one file for the shared projection family and keeps normal import work
+  bounded despite delivery retries or night count.

@@ -95,8 +95,21 @@ const mocks = vi.hoisted(() => ({
   createHostedWorkspaceSnapshotCheckpointRequestBuilder: vi.fn(),
   ensureHostedInboxSidecarReady: vi.fn(),
   refreshHostedBrowserVaultReplicaFromRuntime: vi.fn(),
+  summarizeWearableSleepRuntime: vi.fn(),
   snapshotHostedPortableWorkspaceDelta: vi.fn(),
 }));
+
+vi.mock("@murphai/query", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@murphai/query")>();
+
+  return {
+    ...actual,
+    summarizeWearableSleepRuntime:
+      mocks.summarizeWearableSleepRuntime.mockImplementation(
+        actual.summarizeWearableSleepRuntime,
+      ),
+  };
+});
 
 vi.mock("@murphai/runtime-state/node", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@murphai/runtime-state/node")>();
@@ -7394,6 +7407,151 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("late foreground input during vault-share delivery runs before the delivery completes", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-vault-share-preempt-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_vault_share_preempt_initial",
+        laneSeq: "1",
+      }),
+    ];
+    const importedInputIds: string[] = [];
+    let assistantPhaseCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.summarizeWearableSleepRuntime.mockResolvedValueOnce([{
+        date: "2026-04-26",
+        sleepEndAt: "2026-04-27T06:31:00.000Z",
+        sleepStartAt: "2026-04-26T22:04:00.000Z",
+      }]);
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_vault_share_preempt",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-vault-share-preempt.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+
+            const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            importedInputIds.push(inputId);
+            return {
+              assistantInputId: inputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            vaultSharePort: {
+              async deliver() {
+                events.push("vault-share.deliver:start");
+                mailboxItems.push(createMailboxItem({
+                  id: "mailbox_item_entrypoint_vault_share_preempt_late",
+                  laneSeq: "2",
+                  occurredAt: "2026-04-27T00:00:01.000Z",
+                }));
+                runtimeWakeSignal.notify();
+                await waitUntil(() => {
+                  assert.equal(assistantPhaseCalls, 2);
+                });
+                events.push("vault-share.deliver:done");
+                return { status: "delivered" };
+              },
+            },
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            const inputId = importedInputIds.shift();
+            if (inputId) {
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId,
+                vaultRoot,
+              });
+            }
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              nextWakeAt: null,
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await waitUntil(() => {
+        assert.equal(assistantPhaseCalls, 2);
+      });
+      const result = await resultPromise;
+
+      assert.ok(events.includes(
+        "mailbox.importItem:mailbox_item_entrypoint_vault_share_preempt_late",
+      ));
+      assert.ok(events.includes("vault-share.deliver:done"));
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:2")
+          < requireEventIndex(events, "vault-share.deliver:done"),
+        "fresh foreground input should run before the slow vault-share delivery completes",
+      );
+      assert.ok(
+        fetchRequests.some((request) =>
+          request.lanes.some((lane) => lane.lane === "conversation")
+        ),
+      );
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(result.status, "idle");
+    } finally {
+      runtimeAbortController.abort();
+      mocks.summarizeWearableSleepRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("late foreground input after checkpoint-gated system pass clears stale gate", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-stale-gate-"));
     const events: string[] = [];
@@ -12845,6 +13003,7 @@ function createPlatform(input: {
   runtimeLivenessPort?: RuntimeLivenessPort | null;
   runtimeLivenessRequired?: boolean | null;
   stageSamples?: StageTimingSample[];
+  vaultSharePort?: HostedRuntimePlatform["vaultSharePort"] | null;
   workspacePort: HostedRuntimeWorkspacePort | null;
   workspaceSnapshotPort?: HostedRuntimePlatform["workspaceSnapshotPort"] | null;
 }): HostedRuntimePlatform {
@@ -12917,6 +13076,7 @@ function createPlatform(input: {
     ...(input.runtimeLivenessRequired !== undefined
       ? { runtimeLivenessRequired: input.runtimeLivenessRequired }
       : {}),
+    ...(input.vaultSharePort ? { vaultSharePort: input.vaultSharePort } : {}),
     ...(input.workspacePort ? { workspacePort: input.workspacePort } : {}),
     ...(input.workspaceSnapshotPort ? { workspaceSnapshotPort: input.workspaceSnapshotPort } : {}),
   };

@@ -151,7 +151,7 @@ describe("importHostedVaultShareDeliveryWake", () => {
     userId: "member_referee",
   };
   const storePath = (vaultRoot: string) =>
-    join(vaultRoot, "raw", "shared", "vault-share-projections.json");
+    join(vaultRoot, "derived", "vault-share", "projections.json");
 
   it("lands the shared record as durable vault content, idempotently", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
@@ -173,6 +173,10 @@ describe("importHostedVaultShareDeliveryWake", () => {
     expect(grantor.records[0].record).toEqual(RECORD);
     expect(grantor.records[0].shareId).toBe("share_1");
     expect(grantor.records[0].receivedEventId).toBe(wake.eventId);
+    await expect(readFile(
+      join(vaultRoot, "raw", "shared", "vault-share-projections.json"),
+      "utf8",
+    )).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("keeps one compact file with only the latest bounded records", async () => {

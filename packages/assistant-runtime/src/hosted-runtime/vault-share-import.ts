@@ -48,11 +48,11 @@ interface SharedVaultShareProjectionsFile {
 
 /**
  * Destination-side landing for consented vault-share deliveries: a deterministic,
- * idempotent upsert of the shared record into one compact destination workspace file:
- * `raw/shared/vault-share-projections.json`. The file is bounded by projection kind,
- * grantor, and the delivery record cap, so repeated deliveries cannot grow the vault file
- * tree. Promotion into richer canonical entities is a future consumer of this file, not a
- * change to this boundary.
+ * idempotent upsert of the shared record into one compact derived destination
+ * workspace file. The file is bounded by projection kind, grantor, and the delivery
+ * record cap, so repeated deliveries cannot grow the vault file tree. Promotion into
+ * richer canonical entities is a future consumer of this file, not a change to this
+ * boundary.
  */
 export async function importHostedVaultShareDeliveryWake(input: {
   vaultRoot: string;
@@ -264,7 +264,7 @@ async function writeSharedVaultShareProjectionStore(
 }
 
 function resolveSharedVaultShareProjectionStorePath(vaultRoot: string): string {
-  return join(vaultRoot, "raw", "shared", "vault-share-projections.json");
+  return join(vaultRoot, "derived", "vault-share", "projections.json");
 }
 
 function parseSharedVaultShareProjectionStore(
