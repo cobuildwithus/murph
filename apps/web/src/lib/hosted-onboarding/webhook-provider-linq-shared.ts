@@ -304,6 +304,7 @@ export function buildQuotaReplyResponse(input: {
 
 export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
   chatId: string;
+  homeLineAssignedAt?: Date | null;
   memberId: string;
   occurredAt: string;
   prisma: Prisma.TransactionClient;
@@ -311,6 +312,7 @@ export async function bindHostedMemberHomeLinqChatAndTrackInbound(input: {
 }) {
   await upsertHostedMemberHomeLinqBindingTx({
     clearPending: true,
+    homeLineAssignedAt: input.homeLineAssignedAt ?? null,
     linqChatId: input.chatId,
     memberId: input.memberId,
     prisma: input.prisma,

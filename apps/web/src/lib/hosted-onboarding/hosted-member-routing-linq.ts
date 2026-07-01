@@ -325,6 +325,22 @@ export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
           },
         },
         {
+          member: {
+            is: {
+              accountGroupMemberships: {
+                some: {
+                  group: {
+                    billingStatus: HostedBillingStatus.active,
+                    suspendedAt: null,
+                  },
+                  status: "active",
+                },
+              },
+              suspendedAt: null,
+            },
+          },
+        },
+        {
           linqHomeLineAssignedAt: {
             not: null,
           },

@@ -630,6 +630,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
 
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
       clearPending: true,
+      homeLineAssignedAt: null,
       linqChatId: "chat_123",
       memberId: "member_123",
       prisma,

@@ -2261,6 +2261,68 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it("does not bind an active member home route from a capacity-exhausted inbound Linq line", async () => {
+    const homeLinePhone = "+15550000000";
+    const homeLineLookupKey = createHostedPhoneLookupKey(homeLinePhone);
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
+    hostedMemberRouting.groupBy.mockImplementation(
+      async (input: { where?: { linqHomeLineAssignedAt?: unknown } }) =>
+        input.where?.linqHomeLineAssignedAt
+          ? [{
+              linqRecipientPhoneLookupKey: homeLineLookupKey,
+              _count: { _all: 1 },
+            }]
+          : []
+    );
+    const prisma = asPrismaTransactionClient({
+      hostedLinqLine: buildHostedLinqLineFixture({
+        maxNewConversationsPerDay: 1,
+        phoneNumber: homeLinePhone,
+      }),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_active_capacity_exhausted_line",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "home-line-capacity-exhausted",
+    });
+    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("accepts a phone-bound Family invite token from inbound iMessage", async () => {
     mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValueOnce({
       groupId: "group_family",
@@ -2315,6 +2377,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
       now: new Date("2026-03-26T12:00:00.000Z"),
+      onAcceptedMemberValidated: expect.any(Function),
       phoneNumber: "+15551234567",
       text: "family_phone_token",
       tx: prisma,
@@ -2422,6 +2485,75 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it("does not accept a Family invite token from a capacity-exhausted inbound Linq line", async () => {
+    const homeLinePhone = "+15550000000";
+    const homeLineLookupKey = createHostedPhoneLookupKey(homeLinePhone);
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
+    hostedMemberRouting.groupBy.mockImplementation(
+      async (input: { where?: { linqHomeLineAssignedAt?: unknown } }) =>
+        input.where?.linqHomeLineAssignedAt
+          ? [{
+              linqRecipientPhoneLookupKey: homeLineLookupKey,
+              _count: { _all: 1 },
+            }]
+          : []
+    );
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        create: vi.fn(),
+      },
+      hostedLinqLine: buildHostedLinqLineFixture({
+        maxNewConversationsPerDay: 1,
+        phoneNumber: homeLinePhone,
+      }),
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            {
+              type: "text",
+              value: "family_capacity_token",
+            },
+          ],
+        },
+        eventId: "evt_family_capacity_exhausted_line",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "home-line-capacity-exhausted",
+    });
+    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).not.toHaveBeenCalled();
+    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("does not send a generic signup link for unaccepted Family invite tokens", async () => {
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),
@@ -2471,6 +2603,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
       now: new Date("2026-03-26T12:00:00.000Z"),
+      onAcceptedMemberValidated: expect.any(Function),
       phoneNumber: "+15551234567",
       text: "family_expired_or_wrong_line",
       tx: prisma,
@@ -2610,6 +2743,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.acceptHostedFamilyInviteFromPhoneTx).toHaveBeenCalledWith({
       now: new Date("2026-03-26T12:00:00.000Z"),
+      onAcceptedMemberValidated: expect.any(Function),
       phoneNumber: "+15551234567",
       text: "family_wrong_phone",
       tx: prisma,
