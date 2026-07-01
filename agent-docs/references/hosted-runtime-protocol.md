@@ -561,7 +561,8 @@ drained through hosted provider-cleanup after the next successful runtime-owned
 idle or scheduled-wake workspace checkpoint. The first deferred cleanup wake is
 scheduled after the configured idle-checkpoint horizon so cleanup cannot shorten
 the warm idle window; actual cleanup failures use the provider-cleanup retry
-delay.
+delay. Post-checkpoint delivery and provider-cleanup drains recompute cleanup
+wakes from the post-side-effect state, not from a pre-side-effect base wake.
 
 The hosted workspace checkpoint ref may be a v2 direct-R2 snapshot ref, a
 legacy full/base workspace bundle, a legacy working `{base, delta}` ref, or a

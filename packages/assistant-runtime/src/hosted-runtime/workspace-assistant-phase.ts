@@ -642,12 +642,13 @@ export async function runHostedWorkspaceAssistantPhase(
           result: timedForegroundAssistantResult,
         }),
       );
-      return withHostedProviderCleanupWake({
+      return withHostedRuntimeWakeCandidate({
+        preserveAfterCheckpoint: !foregroundAssistantResult.afterCheckpoint,
         result,
-        wakeAt: providerCleanupPhase.deferredProviderCleanupWakeAt ?? result.nextWakeAt ?? null,
-        wakeReason: providerCleanupPhase.deferredProviderCleanupWakeAt
-          ? HOSTED_ASSISTANT_WAKE_REASON
-          : result.nextWakeReason ?? HOSTED_ASSISTANT_WAKE_REASON,
+        wake: createHostedRuntimeWakeCandidate(
+          providerCleanupPhase.deferredProviderCleanupWakeAt,
+          HOSTED_ASSISTANT_WAKE_REASON,
+        ),
       });
     }
     const assistantCronWakeAfterPass =
@@ -699,7 +700,6 @@ export async function runHostedWorkspaceAssistantPhase(
       const fastDispatchBaseNextWake = selectHostedRuntimeWakeCandidate([
         resolveHostedFastDispatchBaseNextWake({
           assistantMetrics,
-          deferredProviderCleanupWakeAt,
           input,
           skippedDeviceSyncWake: deviceSyncFollowUpWake,
           systemMailboxWake,
@@ -762,29 +762,23 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(postDelivery.redactedStatus ?? {}),
       };
       if (!phaseProgressed) {
-        return withHostedProviderCleanupWake({
-          result: mergeContinuingSystemMailboxResult({
-            ...(nextWakeAt ? { nextWakeAt } : {}),
-            ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
-              ? { nextWakeReason: postDelivery.nextWakeReason }
-              : {}),
-            progressed: false,
-            redactedStatus,
-          }),
-          wakeAt: deferredProviderCleanupWakeAt,
-        });
-      }
-      return withHostedProviderCleanupWake({
-        result: mergeContinuingSystemMailboxResult({
-          checkpointReason: postDelivery.checkpointReason,
-          nextWakeAt,
+        return mergeContinuingSystemMailboxResult({
+          ...(nextWakeAt ? { nextWakeAt } : {}),
           ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
             ? { nextWakeReason: postDelivery.nextWakeReason }
             : {}),
-          progressed: true,
+          progressed: false,
           redactedStatus,
-        }),
-        wakeAt: deferredProviderCleanupWakeAt,
+        });
+      }
+      return mergeContinuingSystemMailboxResult({
+        checkpointReason: postDelivery.checkpointReason,
+        nextWakeAt,
+        ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
+          ? { nextWakeReason: postDelivery.nextWakeReason }
+          : {}),
+        progressed: true,
+        redactedStatus,
       });
     }
 
@@ -838,7 +832,8 @@ export async function runHostedWorkspaceAssistantPhase(
       systemMailboxRetryableFailed: 0,
     });
     if (!phaseProgressed) {
-      return withHostedProviderCleanupWake({
+      return withHostedRuntimeWakeCandidate({
+        preserveAfterCheckpoint: deferredProviderCleanupWakeAt !== null,
         result: mergeContinuingSystemMailboxResult({
           ...(nextWakeAt ? { nextWakeAt } : {}),
           ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
@@ -847,7 +842,10 @@ export async function runHostedWorkspaceAssistantPhase(
           progressed: false,
           redactedStatus,
         }),
-        wakeAt: deferredProviderCleanupWakeAt,
+        wake: createHostedRuntimeWakeCandidate(
+          deferredProviderCleanupWakeAt,
+          HOSTED_ASSISTANT_WAKE_REASON,
+        ),
       });
     }
 
@@ -865,7 +863,6 @@ export async function runHostedWorkspaceAssistantPhase(
                   continuingSystemMailboxResult?.nextWakeAt ?? null,
                   continuingSystemMailboxResult?.nextWakeReason ?? "assistant",
                 ),
-                createHostedRuntimeWakeCandidate(deferredProviderCleanupWakeAt, "assistant"),
               ]);
               const baseNextWakeAt = baseNextWake.at;
               if (
@@ -920,9 +917,14 @@ export async function runHostedWorkspaceAssistantPhase(
       progressed: true,
       redactedStatus,
     });
-    return withHostedProviderCleanupWake({
+    return withHostedRuntimeWakeCandidate({
+      preserveAfterCheckpoint:
+        !hasPostCommitProviderCleanup && deferredProviderCleanupWakeAt !== null,
       result,
-      wakeAt: deferredProviderCleanupWakeAt,
+      wake: createHostedRuntimeWakeCandidate(
+        deferredProviderCleanupWakeAt,
+        HOSTED_ASSISTANT_WAKE_REASON,
+      ),
     });
   } finally {
     releaseChannelAbortRelay();
@@ -1417,11 +1419,17 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
     terminalLinqCleanup,
   });
   const resultDrainsProviderCleanup = input.result.checkpointReason === "outbox_sending";
-  const result = withHostedProviderCleanupWake({
+  const result = withHostedRuntimeWakeCandidate({
+    preserveAfterCheckpoint:
+      !resultDrainsProviderCleanup
+      && providerCleanupPhase.deferredProviderCleanupWakeAt !== null,
     result: input.result,
-    wakeAt: resultDrainsProviderCleanup
-      ? null
-      : providerCleanupPhase.deferredProviderCleanupWakeAt,
+    wake: createHostedRuntimeWakeCandidate(
+      resultDrainsProviderCleanup
+        ? null
+        : providerCleanupPhase.deferredProviderCleanupWakeAt,
+      HOSTED_ASSISTANT_WAKE_REASON,
+    ),
   });
   if (
     resultDrainsProviderCleanup
@@ -1469,37 +1477,7 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
   };
 }
 
-function withHostedProviderCleanupWake(input: {
-  result: HostedWorkspaceRunnerAssistantPhaseResult;
-  wakeAt: string | null;
-  wakeReason?: string | null;
-}): HostedWorkspaceRunnerAssistantPhaseResult {
-  const wake = createHostedRuntimeWakeCandidate(
-    input.wakeAt,
-    input.wakeReason ?? HOSTED_ASSISTANT_WAKE_REASON,
-  );
-  const result = withHostedRuntimeWakeCandidate({
-    result: input.result,
-    wake,
-  });
-  if (!wake.at || !result.afterCheckpoint) {
-    return result;
-  }
-
-  const afterCheckpoint = result.afterCheckpoint;
-  return {
-    ...result,
-    afterCheckpoint: async () => {
-      const postCheckpoint = await afterCheckpoint();
-      return mergeHostedProviderCleanupWakeIntoPostCheckpoint({
-        postCheckpoint,
-        wake,
-      });
-    },
-  };
-}
-
-function mergeHostedProviderCleanupWakeIntoPostCheckpoint(input: {
+function mergeHostedWakeCandidateIntoPostCheckpoint(input: {
   postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void;
   wake: HostedRuntimeWakeCandidate;
 }): HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null {
@@ -1518,14 +1496,14 @@ function mergeHostedProviderCleanupWakeIntoPostCheckpoint(input: {
     },
   };
   return input.postCheckpoint
-    ? preserveHostedProviderCleanupPostCheckpointWakeReason({
+    ? preserveHostedWakeCandidatePostCheckpointReason({
         merged: mergeHostedAssistantPhasePostCheckpoint(input.postCheckpoint, wakeResult),
         wake: input.wake,
       })
     : wakeResult;
 }
 
-function preserveHostedProviderCleanupPostCheckpointWakeReason(input: {
+function preserveHostedWakeCandidatePostCheckpointReason(input: {
   merged: HostedWorkspaceRunnerAssistantPhasePostCheckpoint;
   wake: HostedRuntimeWakeCandidate;
 }): HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
@@ -1973,6 +1951,7 @@ function withHostedAssistantCronWakeCandidate(input: {
 }
 
 function withHostedRuntimeWakeCandidate(input: {
+  preserveAfterCheckpoint?: boolean | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
   wake: HostedRuntimeWakeCandidate | null;
 }): HostedWorkspaceRunnerAssistantPhaseResult {
@@ -2003,12 +1982,25 @@ function withHostedRuntimeWakeCandidate(input: {
   const result = { ...input.result };
   delete result.nextWakeAt;
   delete result.nextWakeReason;
-  return {
+  const nextResult: HostedWorkspaceRunnerAssistantPhaseResult = {
     ...result,
     ...(nextWake.at ? { nextWakeAt: nextWake.at } : {}),
     ...(nextWakeReason
       ? { nextWakeReason }
       : {}),
+  };
+  if (input.preserveAfterCheckpoint !== true || !nextWake.at || !nextResult.afterCheckpoint) {
+    return nextResult;
+  }
+
+  const afterCheckpoint = nextResult.afterCheckpoint;
+  return {
+    ...nextResult,
+    afterCheckpoint: async () =>
+      mergeHostedWakeCandidateIntoPostCheckpoint({
+        postCheckpoint: await afterCheckpoint(),
+        wake: nextWake,
+      }),
   };
 }
 
@@ -3251,7 +3243,6 @@ async function runForegroundAssistantReplyPhase(input: {
   ) {
     const fastDispatchBaseNextWake = resolveHostedFastDispatchBaseNextWake({
       assistantMetrics: input.assistantMetrics,
-      deferredProviderCleanupWakeAt: input.deferredProviderCleanupWakeAt,
       foregroundWorkspaceWake: input.foregroundWorkspaceWake,
       input: input.input,
       skippedDeviceSyncWake: input.skippedDeviceSyncWake,
@@ -3412,7 +3403,6 @@ async function runForegroundAssistantReplyPhase(input: {
               input.foregroundWorkspaceWake,
               input.skippedDeviceSyncWake,
               input.systemMailboxWake,
-              createHostedRuntimeWakeCandidate(input.deferredProviderCleanupWakeAt, "assistant"),
             ]);
             const postDelivery = await drainHostedPostCheckpointDelivery({
               assistantMetrics: input.assistantMetrics,
@@ -5405,7 +5395,6 @@ function shouldFastDispatchAssistantDeliveryEffects(input: {
 
 function resolveHostedFastDispatchBaseNextWake(input: {
   assistantMetrics: Awaited<ReturnType<typeof runHostedAssistantAutomationLane>>;
-  deferredProviderCleanupWakeAt: string | null;
   foregroundWorkspaceWake?: HostedRuntimeWakeCandidate | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   skippedDeviceSyncWake: HostedRuntimeWakeCandidate | null;
@@ -5427,7 +5416,6 @@ function resolveHostedFastDispatchBaseNextWake(input: {
     input.foregroundWorkspaceWake ?? null,
     skippedDeviceSyncWake,
     input.systemMailboxWake,
-    createHostedRuntimeWakeCandidate(input.deferredProviderCleanupWakeAt, "assistant"),
   ]);
 }
 

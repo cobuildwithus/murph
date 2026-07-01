@@ -4605,6 +4605,75 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(finishLogIndex).toBeGreaterThan(outboxLogIndex);
   });
 
+  it("does not re-emit a stale pre-delivery outbox wake after deferred foreground delivery drains", async () => {
+    const staleOutboxWakeAt = "2026-05-08T16:00:05.000Z";
+    const deliveryEffect = createDeliveryEffect();
+    const deferredDeliveryEffect = {
+      ...deliveryEffect,
+      payload: {
+        ...deliveryEffect.payload,
+        transportIdempotent: false,
+      },
+    };
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [deferredDeliveryEffect.effectId],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deferredDeliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deferredDeliveryEffect),
+    });
+    mocks.resolveHostedAssistantOutboxNextWakeAt
+      .mockResolvedValueOnce(staleOutboxWakeAt)
+      .mockResolvedValueOnce(null);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "telegram",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: deferredDeliveryEffect.fingerprint,
+        effectId: deferredDeliveryEffect.effectId,
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: null,
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-05-08T16:00:00.000Z",
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      nextWakeAt: staleOutboxWakeAt,
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: null,
+      redactedStatus: expect.objectContaining({
+        hostedAssistantNextWakeAt: null,
+        nextWakeAt: null,
+      }),
+    }));
+  });
+
   it("passes the runtime action-approval port into hosted delivery drain", async () => {
     const actionApprovalPort = {
       consume: vi.fn(),
@@ -9085,6 +9154,95 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       checkpointReason: "canonical_runtime_commit",
       nextWakeAt: "2026-04-27T00:14:00.000Z",
       progressed: true,
+    }));
+  });
+
+  it("does not preserve a consumed provider cleanup wake after background delivery drains cleanup", async () => {
+    const providerCleanupWakeAt = "2026-04-27T00:14:00.000Z";
+    const deliveryEffect = createDeliveryEffect();
+    const deferredDeliveryEffect = {
+      ...deliveryEffect,
+      payload: {
+        ...deliveryEffect.payload,
+        transportIdempotent: false,
+      },
+    };
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: providerCleanupWakeAt,
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: true,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deferredDeliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deferredDeliveryEffect),
+    });
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "telegram",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: deferredDeliveryEffect.fingerprint,
+        effectId: deferredDeliveryEffect.effectId,
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: null,
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+    mocks.drainHostedProviderCleanupAfterCommit.mockResolvedValueOnce({
+      attemptedLinqMessageCount: 1,
+      deletedLinqMessageCount: 1,
+      failedLinqMessageCount: 0,
+      nextWakeAt: null,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:10:00.000Z",
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      nextWakeAt: providerCleanupWakeAt,
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        checkpoint: {
+          nextWakeAt: providerCleanupWakeAt,
+        },
+        vaultRoot: "/tmp/murph-vault",
+      }),
+    );
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: null,
+      redactedStatus: expect.objectContaining({
+        hostedProviderCleanupAttemptedLinqItems: 1,
+        hostedProviderCleanupDeletedLinqItems: 1,
+        hostedProviderCleanupFailedLinqItems: 0,
+        nextWakeAt: null,
+      }),
     }));
   });
 
