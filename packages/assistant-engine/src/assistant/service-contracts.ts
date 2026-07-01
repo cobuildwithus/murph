@@ -132,6 +132,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   operatorAuthority?: AssistantOperatorAuthority
   persistUserPromptOnFailure?: boolean
   prompt: string
+  suppressProviderFailureTranscriptAudit?: boolean
   turnContext?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null

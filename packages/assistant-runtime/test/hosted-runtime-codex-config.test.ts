@@ -146,6 +146,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /^requires_openai_auth = false$/mu);
   assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
   assert.match(config, /\[features\]\nplugins = false\nmulti_agent_v2 = true/u);
+  assert.doesNotMatch(config, /\[memories\]/u);
   assert.doesNotMatch(config, /^plugins = true$/mu);
   assert.match(config, /\[skills\]\ninclude_instructions = false/u);
   assert.match(config, /\[skills\.bundled\]\nenabled = false/u);
@@ -1304,6 +1305,8 @@ test("hosted Codex config keeps skill instructions disabled for stable prompt pr
   assert.match(config, /\[skills\.bundled\]\nenabled = false/u);
   assert.match(config, /\[features\]\nplugins = false/u);
   assert.match(config, /^multi_agent_v2 = true$/mu);
+  assert.doesNotMatch(config, /^memories = true$/mu);
+  assert.doesNotMatch(config, /\[memories\]/u);
   assert.match(config, /^check_for_update_on_startup = false$/mu);
   assert.match(config, /\[history\]\npersistence = "none"/u);
   assert.match(config, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);

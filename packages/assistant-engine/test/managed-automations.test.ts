@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  HOSTED_RUNTIME_PROCESS_ENV,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
 
 type StoredAutomationRecord = {
   automationId: string
@@ -104,6 +107,7 @@ vi.mock('../src/assistant/channel-adapters.ts', () => ({
 import {
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
@@ -363,6 +367,33 @@ describe('applyMurphManagedAutomations', () => {
     )).toBe('2026-06-25T15:30:00.000Z')
   })
 
+  it('keeps overnight memory consolidation as a hosted-only daily local maintenance seed', () => {
+    const seed = MURPH_MANAGED_AUTOMATIONS.find(
+      (entry) =>
+        entry.automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+    )
+    if (!seed || seed.schedule.kind !== 'dailyLocal') {
+      throw new Error('Expected overnight memory consolidation to use a daily local schedule.')
+    }
+
+    expect(seed.hostedRuntimeOnly).toBe(true)
+    expect(seed.continuityPolicy).toBe('fresh')
+    expect(seed.schedule.localTime).toBe('03:00')
+    expect(seed.slug).toBe('overnight-memory-consolidation')
+    expect(seed.tags).toContain('murph-managed:overnight-memory-consolidation')
+    expect(seed.tags).toContain('runtime-maintenance')
+    expect(seed.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(seed.instructions).toContain('normal scheduled assistant App Server path')
+    expect(seed.instructions).toContain('vault-cli memory show --format json')
+    expect(seed.instructions).toContain('vault-cli memory upsert')
+    expect(seed.instructions).toContain('vault-cli memory update')
+    expect(seed.instructions).toContain('Do not inspect hidden Codex memory state')
+    expect(seed.instructions).not.toContain('generated memory extraction')
+    expect(seed.instructions).toContain(
+      '{"kind":"skip","privateSummary":"Overnight memory consolidation maintenance wake completed."}',
+    )
+  })
+
   it('creates the managed automations in a fresh vault', async () => {
     const result = await applyMurphManagedAutomations({
       defaultRoute,
@@ -567,6 +598,52 @@ describe('applyMurphManagedAutomations', () => {
       '{"kind":"skip","privateSummary":"Changelog feed unavailable or empty."}',
     )
     expect(productUpdatesRecord?.instructions).not.toContain('finish_without_reply')
+    expect(
+      managedAutomationMocks.records.has(MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID),
+    ).toBe(false)
+  })
+
+  it('creates the hosted overnight memory consolidation automation in hosted runtime', async () => {
+    const result = await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      runtimeEnv: {
+        [HOSTED_RUNTIME_PROCESS_ENV]: '1',
+        EXA_API_KEY: 'fixture-exa-key',
+      },
+      vaultRoot,
+    })
+
+    expect(result).toEqual({
+      created: 5,
+      skipped: 0,
+      updated: 0,
+    })
+    const memoryRecord = managedAutomationMocks.records.get(
+      MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+    )
+    expect(memoryRecord).toMatchObject({
+      automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      route: defaultRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '03:00',
+      },
+      slug: 'overnight-memory-consolidation',
+      status: 'active',
+      title: 'Overnight memory consolidation',
+    })
+    expect(memoryRecord?.tags).toContain('murph-managed:overnight-memory-consolidation')
+    expect(memoryRecord?.tags).toContain('runtime-maintenance')
+    expect(memoryRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+    expect(memoryRecord?.instructions).toContain('normal scheduled assistant App Server path')
+    expect(memoryRecord?.instructions).toContain('vault-cli memory show --format json')
+    expect(memoryRecord?.instructions).toContain('vault-cli memory upsert')
+    expect(memoryRecord?.instructions).not.toContain('generated memory extraction')
+    expect(memoryRecord?.instructions).toContain(
+      '{"kind":"skip","privateSummary":"Overnight memory consolidation maintenance wake completed."}',
+    )
   })
 
   it('updates existing research-oriented automations without rewriting their cadence', async () => {

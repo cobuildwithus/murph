@@ -191,6 +191,7 @@ export async function runHostedAssistantAutomationLane(input: {
   buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
   runtimeEnv?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   skipAssistantAutomation?: boolean;
   vaultRoot: string;
 }): Promise<HostedAssistantAutomationLaneMetrics> {
@@ -229,6 +230,8 @@ export async function runHostedAssistantAutomationLane(input: {
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
+          shouldYieldBackgroundMaintenance:
+            input.shouldYieldBackgroundMaintenance ?? null,
         },
       )
     : {
@@ -281,6 +284,7 @@ export async function runHostedAssistantAutomation(
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     runtimeAttemptId?: string | null;
+    shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   },
 ): Promise<{
   currentTurnDeliveryIntentIds: string[];
@@ -429,6 +433,7 @@ export async function runHostedAssistantAutomation(
       ...(buildBackgroundDynamicContextPrompt
         ? { buildDynamicContextPrompt: buildBackgroundDynamicContextPrompt }
         : {}),
+      deferCronForForegroundInput: selectedInputIds.mode === "foreground",
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
       executionContext,
@@ -495,6 +500,8 @@ export async function runHostedAssistantAutomation(
       maxPerScan,
       requestId,
       signal,
+      shouldYieldBackgroundMaintenance:
+        options?.shouldYieldBackgroundMaintenance ?? null,
       inputSource,
       turnEnvironment: turnEnvironment ?? null,
       vault: vaultRoot,

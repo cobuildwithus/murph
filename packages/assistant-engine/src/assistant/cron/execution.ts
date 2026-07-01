@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
 import {
+  HOSTED_RUNTIME_PROCESS_ENV,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
+import {
   type AutomationQueryRecord,
 } from '@murphai/query'
 import {
@@ -11,10 +14,17 @@ import {
   type AssistantCronTrigger,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { sendAssistantNotificationLocal } from '../../assistant-service.js'
+import {
+  sendAssistantNotificationLocal,
+  type AssistantNotificationTurnPolicy,
+} from '../../assistant-service.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
+import {
+  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+} from '../managed-automations.js'
 import { readAssistantOnboardingState } from '../onboarding-state.js'
 import { runExperimentLifecycleOutcomePrecondition } from '../experiment-support-automations.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
@@ -61,6 +71,7 @@ import {
 import {
   appendAssistantCronRun,
   isAssistantCronJobDue,
+  type AssistantCronStore,
   readAssistantCronStore,
   resolveAssistantCronJobIndex,
   sortAssistantCronJobs,
@@ -80,6 +91,9 @@ const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR =
   'Assistant cron notification expired before delivery.'
+const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELD_POLL_MS = 250
+const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_NON_REPLAYABLE_WORK_ERROR =
+  'Assistant background maintenance stopped after provider work; occurrence consumed to avoid replay.'
 const ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR =
   'Device activity occurrence skipped because its parent listener is no longer authorized.'
 const ASSISTANT_CRON_ONBOARDING_OPEN_RESEARCH_SKIP_ERROR =
@@ -104,6 +118,37 @@ interface DueAssistantCronCandidate {
   job: AssistantCronJob
   localJob?: AssistantCronJob
 }
+
+export interface AssistantCronRuntimeScopeInput {
+  executionContext?: AssistantExecutionContext | null
+  turnEnvironment?: AssistantTurnEnvironment | null
+}
+
+interface AssistantCronRuntimeScope {
+  hostedRuntimeProcess: boolean
+}
+
+export interface AssistantCronRunnableProjectionInput
+  extends AssistantCronRuntimeScopeInput {
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null
+}
+
+export interface RunnableAssistantCronCanonicalEntry {
+  job: AssistantCronJob
+  runtimeState: AssistantCronCanonicalRuntimeRecord
+  runtimeStatePresent: boolean
+  source: CanonicalAssistantCronJobRecord
+}
+
+export interface RunnableAssistantCronJobProjection {
+  canonicalEntries: RunnableAssistantCronCanonicalEntry[]
+  jobs: AssistantCronJob[]
+  visibleLocalStore: ReturnType<typeof buildVisibleLocalAssistantCronStore>
+}
+
+const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELDED_CODE =
+  'ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELDED'
+const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELD_RETRY_MS = 30_000
 
 export async function claimResolvedAssistantCronJob(input: {
   job: ResolvedAssistantCronJob
@@ -207,6 +252,7 @@ export async function claimResolvedAssistantCronJob(input: {
 export async function claimNextDueAssistantCronJob(
   paths: AssistantStatePaths,
   vault: string,
+  runtimeScopeInput: AssistantCronRunnableProjectionInput = {},
 ): Promise<ResolvedAssistantCronJob | null> {
   return withAssistantCronWriteLock(paths, async () => {
     const [store, canonicalRecords, runtimeStore] = await Promise.all([
@@ -219,6 +265,7 @@ export async function claimNextDueAssistantCronJob(
       canonicalRecords,
       localStore: store,
       nowIso: now,
+      runtimeScopeInput,
       runtimeStore,
     })
     if (!candidate) {
@@ -256,6 +303,77 @@ export async function claimNextDueAssistantCronJob(
   })
 }
 
+export function assertAssistantCronJobRunnableInRuntime(input: {
+  job: ResolvedAssistantCronJob
+} & AssistantCronRuntimeScopeInput): void {
+  if (
+    input.job.kind !== 'canonical' ||
+    canonicalAssistantCronSourceCanRunInRuntime({
+      runtimeScope: resolveAssistantCronRuntimeScope(input),
+      source: input.job.source,
+    })
+  ) {
+    return
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_CRON_RUNTIME_SCOPE_UNAVAILABLE',
+    `Assistant cron job "${input.job.job.name}" is not available in this runtime.`,
+  )
+}
+
+export function buildRunnableAssistantCronJobProjection(input: {
+  canonicalRecords: readonly CanonicalAssistantCronJobRecord[]
+  localStore: AssistantCronStore
+  runtimeScopeInput?: AssistantCronRunnableProjectionInput
+  runtimeStore: AssistantCronCanonicalRuntimeStore
+}): RunnableAssistantCronJobProjection {
+  const runtimeScopeInput = input.runtimeScopeInput ?? {}
+  const runtimeScope = resolveAssistantCronRuntimeScope(runtimeScopeInput)
+  const visibleLocalStore = buildVisibleLocalAssistantCronStore(input.localStore)
+  const canonicalEntries = input.canonicalRecords.flatMap((source) => {
+    if (
+      !canonicalAssistantCronSourceCanRunInPass({
+        runtimeScope,
+        shouldYieldBackgroundMaintenance:
+          runtimeScopeInput.shouldYieldBackgroundMaintenance ?? null,
+        source,
+      })
+    ) {
+      return []
+    }
+
+    const runtimeState = resolveCanonicalRuntimeState(source, input.runtimeStore)
+    return [{
+      source,
+      runtimeState,
+      runtimeStatePresent: input.runtimeStore.jobs.some(
+        (record) => record.jobId === resolveCanonicalAssistantCronJobId(source),
+      ),
+      job: projectCanonicalAssistantCronJob({
+        source,
+        runtimeState,
+      }),
+    }]
+  })
+
+  return {
+    canonicalEntries,
+    visibleLocalStore,
+    jobs: sortAssistantCronJobs([
+      ...visibleLocalStore.jobs,
+      ...canonicalEntries.map((entry) => entry.job),
+    ]),
+  }
+}
+
+export function isAssistantCronBackgroundMaintenanceYieldError(
+  error: unknown,
+): error is VaultCliError {
+  return error instanceof VaultCliError &&
+    error.code === ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELDED_CODE
+}
+
 export async function executeClaimedAssistantCronJob(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   executionContext?: AssistantExecutionContext | null
@@ -263,6 +381,7 @@ export async function executeClaimedAssistantCronJob(input: {
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   paths: AssistantStatePaths
   signal?: AbortSignal
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null
   turnEnvironment?: AssistantTurnEnvironment | null
   trigger: AssistantCronTrigger
   vault: string
@@ -290,13 +409,30 @@ export async function executeClaimedAssistantCronJob(input: {
         ) ??
         startedAt
       : claimedJob.state.nextRunAt ?? startedAt
+  const yieldCancellation = createAssistantCronBackgroundMaintenanceCancellation({
+    job: input.job,
+    signal: input.signal ?? null,
+    shouldYieldBackgroundMaintenance:
+      input.shouldYieldBackgroundMaintenance ?? null,
+  })
+  let releaseClaimAfterYield = false
 
   try {
-    if (input.signal?.aborted) {
+    if (yieldCancellation.signal.aborted) {
+      if (yieldCancellation.yieldRequested()) {
+        releaseClaimAfterYield = true
+        throw createAssistantCronBackgroundMaintenanceYieldError()
+      }
+
       throw new VaultCliError(
         'ASSISTANT_CRON_ABORTED',
         `Assistant cron job "${claimedJob.name}" was aborted before it started.`,
       )
+    }
+
+    if (yieldCancellation.shouldYield()) {
+      releaseClaimAfterYield = true
+      throw createAssistantCronBackgroundMaintenanceYieldError()
     }
 
     if (input.job.kind === 'canonical') {
@@ -311,7 +447,8 @@ export async function executeClaimedAssistantCronJob(input: {
       vault: input.vault,
     })
     const staleError =
-      input.trigger === 'scheduled'
+      input.trigger === 'scheduled' &&
+        !assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
         ? resolveStaleAssistantCronNotificationError({
             job: claimedJob,
             nowIso: startedAt,
@@ -361,7 +498,7 @@ export async function executeClaimedAssistantCronJob(input: {
           deliveryDispatchMode: input.deliveryDispatchMode,
           executionContext: input.executionContext,
           serviceTier,
-          signal: input.signal,
+          signal: yieldCancellation.signal,
           turnEnvironment: input.turnEnvironment ?? null,
           turnTrigger: 'automation-cron',
         })
@@ -400,6 +537,11 @@ export async function executeClaimedAssistantCronJob(input: {
           status = 'skipped'
           errorText = lifecycleSkipReason
         } else {
+          if (yieldCancellation.shouldYield()) {
+            releaseClaimAfterYield = true
+            throw createAssistantCronBackgroundMaintenanceYieldError()
+          }
+
           const result = await sendAssistantNotificationLocal({
             vault: input.vault,
             ...automationTurn,
@@ -423,6 +565,7 @@ export async function executeClaimedAssistantCronJob(input: {
             identityId: claimedJob.target.identityId,
             onTraceEvent: input.onTraceEvent,
             participantId: claimedJob.target.participantId,
+            ...resolveAssistantCronNotificationTurnPolicy(input.job),
             responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
             threadId: claimedJob.target.threadId,
             bindingDeliveryTarget: bindingDelivery?.target ?? undefined,
@@ -445,11 +588,38 @@ export async function executeClaimedAssistantCronJob(input: {
       }
     }
   } catch (error) {
-    errorText = errorMessage(error)
-    errorCode = error instanceof VaultCliError ? error.code : null
-    status = 'failed'
+    const backgroundMaintenanceYielded =
+      isAssistantCronBackgroundMaintenanceYieldError(error) ||
+      yieldCancellation.yieldRequested()
+    const nonReplayableBackgroundMaintenanceWork =
+      assistantCronJobIsPreemptibleBackgroundMaintenance(input.job) &&
+      assistantNotificationErrorHasNonReplayableProviderWork(error)
+    if (nonReplayableBackgroundMaintenanceWork) {
+      errorText = ASSISTANT_CRON_BACKGROUND_MAINTENANCE_NON_REPLAYABLE_WORK_ERROR
+      errorCode = backgroundMaintenanceYielded
+        ? ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELDED_CODE
+        : error instanceof VaultCliError ? error.code : null
+      status = 'skipped'
+    } else if (backgroundMaintenanceYielded) {
+      if (releaseClaimAfterYield || yieldCancellation.yieldRequested()) {
+        await releaseClaimedAssistantCronJobAfterBackgroundMaintenanceYield({
+          job: input.job,
+          paths: input.paths,
+        })
+        throw createAssistantCronBackgroundMaintenanceYieldError()
+      } else {
+        errorText = errorMessage(error)
+        errorCode = error instanceof VaultCliError ? error.code : null
+        status = 'failed'
+      }
+    } else {
+      errorText = errorMessage(error)
+      errorCode = error instanceof VaultCliError ? error.code : null
+      status = 'failed'
+    }
   } finally {
     finishedAt = new Date().toISOString()
+    yieldCancellation.dispose()
   }
 
   const run = assistantCronRunRecordSchema.parse({
@@ -677,6 +847,23 @@ function resolveAssistantCronNotificationResponsePolicy(
   return listAssistantCronNotificationTags(job).includes(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     ? { kind: 'require_send' }
     : null
+}
+
+function resolveAssistantCronNotificationTurnPolicy(
+  job: ResolvedAssistantCronJob,
+):
+  | { turnPolicy: AssistantNotificationTurnPolicy }
+  | Record<string, never> {
+  return job.kind === 'canonical' &&
+    job.source.kind === 'automation' &&
+    job.source.automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
+    ? {
+        turnPolicy: {
+          kind: 'maintenance-exact-skip',
+          privateSummary: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+        },
+      }
+    : {}
 }
 
 function buildAssistantCronDeviceActivityDeliveryIdempotencyKey(input: {
@@ -1021,26 +1208,20 @@ function cryptoRandomRunId(): string {
 
 function resolveNextDueAssistantCronCandidate(input: {
   canonicalRecords: readonly CanonicalAssistantCronJobRecord[]
-  localStore: ReturnType<typeof buildVisibleLocalAssistantCronStore>
+  localStore: AssistantCronStore
   nowIso: string
+  runtimeScopeInput: AssistantCronRunnableProjectionInput
   runtimeStore: AssistantCronCanonicalRuntimeStore
 }): DueAssistantCronCandidate | null {
-  const visibleLocalStore = buildVisibleLocalAssistantCronStore(input.localStore)
-  const canonicalEntries = input.canonicalRecords.map((source) => {
-    const runtimeState = resolveCanonicalRuntimeState(source, input.runtimeStore)
-    return {
-      source,
-      runtimeState,
-      job: projectCanonicalAssistantCronJob({
-        source,
-        runtimeState,
-      }),
-    }
+  const projection = buildRunnableAssistantCronJobProjection({
+    canonicalRecords: input.canonicalRecords,
+    localStore: input.localStore,
+    runtimeScopeInput: input.runtimeScopeInput,
+    runtimeStore: input.runtimeStore,
   })
-  const candidate = sortAssistantCronJobs([
-    ...visibleLocalStore.jobs,
-    ...canonicalEntries.map((entry) => entry.job),
-  ]).find((job) => isAssistantCronJobDue(job, input.nowIso))
+  const candidate = projection.jobs.find((job) =>
+    isAssistantCronJobDue(job, input.nowIso)
+  )
   if (!candidate) {
     return null
   }
@@ -1054,12 +1235,62 @@ function resolveNextDueAssistantCronCandidate(input: {
     }
   }
 
-  const canonicalEntry = canonicalEntries.find(
+  const canonicalEntry = projection.canonicalEntries.find(
     (entry) => resolveCanonicalAssistantCronJobId(entry.source) === candidate.jobId,
   )
   return {
     job: candidate,
     ...(canonicalEntry ? { canonicalEntry } : {}),
+  }
+}
+
+function canonicalAssistantCronSourceCanRunInPass(input: {
+  runtimeScope: AssistantCronRuntimeScope
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null
+  source: CanonicalAssistantCronJobRecord
+}): boolean {
+  if (
+    !canonicalAssistantCronSourceCanRunInRuntime({
+      runtimeScope: input.runtimeScope,
+      source: input.source,
+    })
+  ) {
+    return false
+  }
+
+  return !canonicalAssistantCronSourceIsBackgroundMaintenance(input.source) ||
+    input.shouldYieldBackgroundMaintenance?.() !== true
+}
+
+function canonicalAssistantCronSourceCanRunInRuntime(input: {
+  runtimeScope: AssistantCronRuntimeScope
+  source: CanonicalAssistantCronJobRecord
+}): boolean {
+  return !canonicalAssistantCronSourceRequiresHostedRuntime(input.source) ||
+    input.runtimeScope.hostedRuntimeProcess
+}
+
+function canonicalAssistantCronSourceRequiresHostedRuntime(
+  source: CanonicalAssistantCronJobRecord,
+): boolean {
+  return canonicalAssistantCronSourceIsBackgroundMaintenance(source)
+}
+
+function canonicalAssistantCronSourceIsBackgroundMaintenance(
+  source: CanonicalAssistantCronJobRecord,
+): boolean {
+  return source.kind === 'automation' &&
+    source.automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
+}
+
+function resolveAssistantCronRuntimeScope(
+  input: AssistantCronRuntimeScopeInput,
+): AssistantCronRuntimeScope {
+  return {
+    hostedRuntimeProcess:
+      input.executionContext?.hosted != null ||
+      input.turnEnvironment?.env?.[HOSTED_RUNTIME_PROCESS_ENV]?.trim() === '1' ||
+      process.env[HOSTED_RUNTIME_PROCESS_ENV]?.trim() === '1',
   }
 }
 
@@ -1092,4 +1323,152 @@ async function assertCanonicalRuntimeClaimCurrent(input: {
       `Assistant cron job "${input.job.job.name}" was reclaimed before it started.`,
     )
   }
+}
+
+function createAssistantCronBackgroundMaintenanceCancellation(input: {
+  job: ResolvedAssistantCronJob
+  signal: AbortSignal | null
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null
+}): {
+  dispose(): void
+  shouldYield(): boolean
+  yieldRequested(): boolean
+  signal: AbortSignal
+} {
+  if (!assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)) {
+    return {
+      dispose() {},
+      shouldYield: () => false,
+      yieldRequested: () => false,
+      signal: input.signal ?? new AbortController().signal,
+    }
+  }
+
+  const controller = new AbortController()
+  let yielded = false
+  const abortForYield = () => {
+    yielded = true
+    if (!controller.signal.aborted) {
+      controller.abort(createAssistantCronBackgroundMaintenanceYieldError())
+    }
+  }
+  const abortForParent = () => {
+    if (!controller.signal.aborted) {
+      controller.abort(input.signal?.reason)
+    }
+  }
+  const checkYield = () => {
+    if (input.shouldYieldBackgroundMaintenance?.() === true) {
+      abortForYield()
+    }
+  }
+
+  if (input.signal?.aborted) {
+    abortForParent()
+  } else {
+    input.signal?.addEventListener('abort', abortForParent, { once: true })
+  }
+
+  checkYield()
+  const timer =
+    input.shouldYieldBackgroundMaintenance &&
+    !controller.signal.aborted
+      ? setInterval(checkYield, ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELD_POLL_MS)
+      : null
+  if (timer && typeof timer.unref === 'function') {
+    timer.unref()
+  }
+
+  return {
+    dispose() {
+      if (timer) {
+        clearInterval(timer)
+      }
+      input.signal?.removeEventListener('abort', abortForParent)
+    },
+    shouldYield() {
+      if (yielded) {
+        return true
+      }
+      if (input.shouldYieldBackgroundMaintenance?.() === true) {
+        abortForYield()
+        return true
+      }
+      return false
+    },
+    yieldRequested() {
+      return yielded
+    },
+    signal: controller.signal,
+  }
+}
+
+function assistantNotificationErrorHasNonReplayableProviderWork(
+  error: unknown,
+): boolean {
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  const details = Reflect.get(error, 'details')
+  if (typeof details !== 'object' || details === null || Array.isArray(details)) {
+    return false
+  }
+
+  return Reflect.get(details, 'assistantNotificationProviderNonReplayableWork') === true
+}
+
+function assistantCronJobIsPreemptibleBackgroundMaintenance(
+  job: ResolvedAssistantCronJob,
+): boolean {
+  return job.kind === 'canonical' &&
+    canonicalAssistantCronSourceIsBackgroundMaintenance(job.source)
+}
+
+function createAssistantCronBackgroundMaintenanceYieldError(): VaultCliError {
+  return new VaultCliError(
+    ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELDED_CODE,
+    'Assistant cron background maintenance yielded to foreground input.',
+  )
+}
+
+async function releaseClaimedAssistantCronJobAfterBackgroundMaintenanceYield(input: {
+  job: ResolvedAssistantCronJob
+  paths: AssistantStatePaths
+}): Promise<void> {
+  if (input.job.kind !== 'canonical') {
+    return
+  }
+  const job = input.job
+
+  await withAssistantCronWriteLock(input.paths, async () => {
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(input.paths, {
+      reclaimStaleRunningClaims: false,
+    })
+    const currentRuntimeState =
+      findAssistantCronCanonicalRuntimeRecord(
+        runtimeStore,
+        resolveCanonicalAssistantCronJobId(job.source),
+      ) ?? job.runtimeState
+
+    if (!canonicalRuntimeClaimMatches(job.runtimeState, currentRuntimeState)) {
+      return
+    }
+
+    const now = new Date().toISOString()
+    upsertAssistantCronCanonicalRuntimeRecord(runtimeStore, {
+      ...currentRuntimeState,
+      updatedAt: now,
+      state: {
+        ...currentRuntimeState.state,
+        runningAt: null,
+        runningClaimId: null,
+        runningPid: null,
+        retryAfterAt: new Date(
+          Date.parse(now) + ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELD_RETRY_MS,
+        ).toISOString(),
+      },
+    })
+    await writeAssistantCronCanonicalRuntimeStore(input.paths, runtimeStore)
+  })
 }

@@ -47,6 +47,10 @@ const providerTurnRunnerMocks = vi.hoisted(() => ({
   recordCodexPlan: vi.fn(),
 }))
 
+const storeMocks = vi.hoisted(() => ({
+  appendAssistantTranscriptEntries: vi.fn(() => Promise.resolve([])),
+}))
+
 vi.mock('../src/assistant/codex-runtime.js', () => ({
   executeCodexAssistantTurnAttemptFromInput: (input: {
     providerConfig: unknown
@@ -81,6 +85,13 @@ vi.mock('../src/assistant/codex-turn/attempt-observability.js', () => ({
 vi.mock('../src/assistant/issue-reporting.js', () => ({
   recordAssistantRuntimeIssueInputsBestEffort:
     providerTurnRunnerMocks.recordAssistantRuntimeIssueInputsBestEffort,
+}))
+
+vi.mock('../src/assistant/store.js', async () => ({
+  ...(await vi.importActual<typeof import('../src/assistant/store.js')>(
+    '../src/assistant/store.js',
+  )),
+  appendAssistantTranscriptEntries: storeMocks.appendAssistantTranscriptEntries,
 }))
 
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
@@ -129,6 +140,9 @@ afterEach(() => {
   providerTurnRunnerMocks.recordCodexAttemptStarted.mockReset()
   providerTurnRunnerMocks.recordCodexAttemptSucceeded.mockReset()
   providerTurnRunnerMocks.recordCodexPlan.mockReset()
+  storeMocks.appendAssistantTranscriptEntries
+    .mockReset()
+    .mockImplementation(() => Promise.resolve([]))
   vi.restoreAllMocks()
 })
 
@@ -1238,6 +1252,132 @@ describe('Codex model catalog', () => {
       },
       vault: '/vaults/test',
     })
+    expect(storeMocks.appendAssistantTranscriptEntries).toHaveBeenCalledWith(
+      '/vaults/test',
+      session.sessionId,
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'error',
+        }),
+      ]),
+    )
+  })
+
+  it('suppresses terminal provider failure transcript audit when requested', async () => {
+    const route = createRoute()
+    const session = createAssistantSession({
+      providerOptions: route.providerOptions,
+      sessionId: 'session-maintenance-exact-skip',
+    })
+    const input = {
+      prompt: 'Run overnight memory maintenance.',
+      suppressProviderFailureTranscriptAudit: true,
+      vault: '/vaults/test',
+    } satisfies Parameters<typeof executeCodexTurnWithRecovery>[0]['input']
+    const providerError = Object.assign(new Error('Codex failed.'), {
+      code: 'ASSISTANT_CODEX_FAILED',
+    })
+    const failedProviderAttempt: AssistantProviderTurnAttemptResult = {
+      codexThreadId: 'thread-maintenance-provider-failure',
+      error: providerError,
+      metadata: {
+        activityLabels: ['Memory Update'],
+        executedToolCount: 0,
+        providerActionCount: 2,
+        rawToolEvents: [],
+        runtimeIssueInputs: [],
+      },
+      ok: false,
+      providerRequestOutcome: 'failed',
+      providerTurnId: 'turn-maintenance-provider-failure',
+      rawEvents: [
+        { event: 'item.started' },
+      ],
+      usage: null,
+    }
+
+    providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportedUserMessageContentTypes: ['text'],
+      supportsReasoningEffort: true,
+    })
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(
+      failedProviderAttempt,
+    )
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      activeTurnSteering: null,
+      executionContext: {
+        hosted: {
+          memberId: 'member-maintenance-provider-failure',
+          userEnvKeys: [],
+        },
+      },
+      input,
+      profile: {
+        promptProfile: 'notification-decision',
+        toolProfile: 'notification-turn',
+        threadScope: 'isolated-thread',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-04-29',
+        currentTimeZone: 'UTC',
+      },
+      route,
+      sharedPlan: createSharedPlan(),
+      turnId: 'turn-maintenance-provider-failure',
+    } satisfies AssistantCodexTurnExecutionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue({
+      attemptCount: 1,
+      route,
+      routePlan: {
+        assistantContractFingerprint:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        assistantCliContract: null,
+        cliEnv: {},
+        developerInstructions: null,
+        dynamicTools: [],
+        diagnosticsPolicy: {
+          environment: 'hosted',
+          privateIssueCaptureEnabled: true,
+          surface: 'linq',
+        },
+        onboardingGuidanceInjected: false,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        } satisfies AssistantCodexContinuation,
+        planningDiagnostics: createRoutePlanningDiagnostics(),
+        promptCacheMetadata: null,
+        resume: null,
+        sessionContext: undefined,
+        systemPrompt: null,
+        turnContextPrompt: null,
+        workingDirectory: '/work',
+      } satisfies AssistantRouteTurnPlan,
+      session,
+    } satisfies AssistantCodexAttemptPlan)
+
+    const outcome = await executeCodexTurnWithRecovery({
+      input,
+      plan: createSharedPlan(),
+      providerRequestOrdinal: 1,
+      resolvedSession: session,
+      route,
+      turnCreatedAt: '2026-04-29T00:00:00.000Z',
+      turnId: 'turn-maintenance-provider-failure',
+    })
+
+    expect(outcome).toMatchObject({
+      kind: 'failed_terminal',
+      codexThreadId: 'thread-maintenance-provider-failure',
+      providerRequestOutcome: 'failed',
+      providerTurnId: 'turn-maintenance-provider-failure',
+    })
+    expect(storeMocks.appendAssistantTranscriptEntries).not.toHaveBeenCalled()
+    expect(providerTurnRunnerMocks.recordCodexAttemptFailed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: session.sessionId,
+        turnId: 'turn-maintenance-provider-failure',
+      }),
+    )
   })
 
   it('drops flex service tier for hosted OpenAI routes without catalog evidence', async () => {

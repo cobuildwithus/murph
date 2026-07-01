@@ -3,6 +3,9 @@ import type {
   AssistantResponseMedia,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  parseAssistantSessionRecord,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -11,6 +14,7 @@ import { normalizeAssistantExecutionContext } from './execution-context.js'
 import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
 import { resolveAssistantExecutionOperatorDefaults } from './execution-context.js'
 import { resolveAssistantSessionForMessage } from './session-resolution.js'
+import { resolveAssistantSessionTarget } from './session-resolution.js'
 import { resolveAssistantTurnSharedPlan } from './turn-plan.js'
 import {
   executeCodexTurnWithRecovery,
@@ -26,6 +30,7 @@ import {
 } from './service-usage.js'
 import {
   persistAssistantTurnAndSession,
+  type AssistantProviderResumeStateAction,
 } from './turn-finalizer.js'
 import { resolveAssistantTurnRoute } from './service-turn-routes.js'
 import { createAssistantTurnId } from './turns.js'
@@ -38,6 +43,7 @@ import type {
   AssistantDeliveryOutcome,
   AssistantMessageInput,
   AssistantSessionResolutionFields,
+  ResolvedAssistantSession,
 } from './service-contracts.js'
 import {
   dropUnsupportedAssistantResponseMediaForChannel,
@@ -59,6 +65,11 @@ import {
   stopAssistantChannelTypingIndicator,
 } from './channel-typing.js'
 import { normalizeAssistantDeliveryError } from './outbox.js'
+import { createAssistantBinding } from './bindings.js'
+import {
+  createAssistantSessionId,
+  resolveAssistantStatePaths,
+} from './store/paths.js'
 import {
   normalizeNullableString,
   normalizeRequiredText,
@@ -94,9 +105,22 @@ const ASSISTANT_NOTIFICATION_TURN_PROFILE: Required<
   toolProfile: 'notification-turn',
 }
 
+const ASSISTANT_NOTIFICATION_ISOLATED_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'notification-decision',
+  threadScope: 'isolated-thread',
+  toolProfile: 'notification-turn',
+}
+
 export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
+
+export type AssistantNotificationTurnPolicy =
+  | { kind: 'default' }
+  | { kind: 'maintenance-exact-skip'; privateSummary: string }
 
 export type AssistantNotificationResponsePolicy =
   | { kind: 'allow_send_or_skip' }
@@ -139,6 +163,7 @@ export interface AssistantNotificationInput
   deliveryDedupeToken?: string | null
   firstContactPolicy?: AssistantNotificationFirstContactPolicy | null
   instructions: string
+  turnPolicy?: AssistantNotificationTurnPolicy | null
   responsePolicy?: AssistantNotificationResponsePolicy | null
 }
 
@@ -167,11 +192,18 @@ export async function sendAssistantNotificationLocal(
     vault: input.vault,
     run: async () => {
       const messageInput = buildAssistantNotificationMessageInput(input)
-      const resolved = await resolveAssistantSessionForMessage({
-        boundaryDefaultTarget,
-        defaults,
-        message: messageInput,
-      })
+      const resolved =
+        isAssistantNotificationMaintenanceExactSkip(input)
+          ? createAssistantMaintenanceNotificationResolvedSession({
+              boundaryDefaultTarget,
+              defaults,
+              message: messageInput,
+            })
+          : await resolveAssistantSessionForMessage({
+              boundaryDefaultTarget,
+              defaults,
+              message: messageInput,
+            })
       await emitHostedAssistantContextSessionResolvedTrace({
         message: messageInput,
         resolved,
@@ -219,14 +251,17 @@ export async function sendAssistantNotificationLocal(
       const turnId = createAssistantTurnId()
       const turnCreatedAt = new Date().toISOString()
       const progressDelivery = null
-      const typingIndicator = startAssistantChannelTypingIndicator({
-        channelDependencies:
-          executionContext?.hosted?.channelTypingDependencies ?? null,
-        input: messageInput,
-        precedence: 'audience-first',
-        session: resolved.session,
-        sharedPlan,
-      })
+      const typingIndicator =
+        isAssistantNotificationMaintenanceExactSkip(input)
+          ? null
+          : startAssistantChannelTypingIndicator({
+              channelDependencies:
+                executionContext?.hosted?.channelTypingDependencies ?? null,
+              input: messageInput,
+              precedence: 'audience-first',
+              session: resolved.session,
+              sharedPlan,
+            })
 
       try {
         const providerOutcome = await executeCodexTurnWithRecovery({
@@ -234,7 +269,7 @@ export async function sendAssistantNotificationLocal(
           input: messageInput,
           plan: sharedPlan,
           progressDelivery,
-          profile: ASSISTANT_NOTIFICATION_TURN_PROFILE,
+          profile: resolveAssistantNotificationTurnProfile(input),
           resolvedSession: resolved.session,
           route,
           turnCreatedAt,
@@ -265,21 +300,26 @@ export async function sendAssistantNotificationLocal(
           })
           throw annotateAssistantNotificationError(
             providerOutcome.error,
-            buildAssistantNotificationObservabilityDetails({
-              stage: 'provider',
-              input: messageInput,
-              route: providerOutcome.route,
-              session: resolved.session,
-            }),
+            {
+              ...buildAssistantNotificationObservabilityDetails({
+                stage: 'provider',
+                input: messageInput,
+                route: providerOutcome.route,
+                session: resolved.session,
+              }),
+              assistantNotificationProviderNonReplayableWork:
+                providerOutcome.nonReplayableProviderWork,
+            },
           )
         }
 
         const providerResult = providerOutcome.providerTurn
         const selectedRoute = providerResult.route
         const providerResumeStateAction =
-          normalizeNullableString(providerResult.codexThreadId)
-            ? 'persist-from-provider-turn'
-            : 'preserve-existing'
+          resolveAssistantNotificationProviderResumeStateAction({
+            input,
+            providerResult,
+          })
         await recordAssistantUsageEvent({
           executionContext,
           providerResult,
@@ -292,7 +332,44 @@ export async function sendAssistantNotificationLocal(
           providerResult,
           turnId,
         })
-        const decision = parseAssistantNotificationDecision(providerResult.response)
+        const providerValidationErrorDetails = {
+          ...buildAssistantNotificationObservabilityDetails({
+            stage: 'provider',
+            input: messageInput,
+            route: selectedRoute,
+            session: providerResult.session,
+          }),
+          assistantNotificationProviderNonReplayableWork:
+            providerResult.nonReplayableProviderWork === true,
+        }
+        let decision: AssistantNotificationDecision
+        try {
+          decision = parseAssistantNotificationDecision(providerResult.response)
+        } catch (error) {
+          throw annotateAssistantNotificationError(
+            error,
+            providerValidationErrorDetails,
+          )
+        }
+
+        if (isAssistantNotificationMaintenanceExactSkip(input)) {
+          try {
+            assertAssistantMaintenanceNotificationDecision({
+              decision,
+              policy: input.turnPolicy,
+            })
+          } catch (error) {
+            throw annotateAssistantNotificationError(
+              error,
+              providerValidationErrorDetails,
+            )
+          }
+          return {
+            decision,
+            response: null,
+            session: resolved.session,
+          }
+        }
 
         if (decision.kind === 'skip') {
           assertAssistantNotificationSkipAllowed(responsePolicy)
@@ -744,6 +821,9 @@ function buildAssistantNotificationMessageInput(
     serviceTier: input.serviceTier ?? null,
     sessionId: input.sessionId,
     showThinkingTraces: input.showThinkingTraces,
+    ...(isAssistantNotificationMaintenanceExactSkip(input)
+      ? { suppressProviderFailureTranscriptAudit: true }
+      : {}),
     threadId: input.threadId,
     threadIsDirect: input.threadIsDirect,
     turnEnvironment: input.turnEnvironment ?? null,
@@ -844,6 +924,95 @@ async function deliverAssistantNotificationMessage(input: {
         session: input.session,
       }
   }
+}
+
+function resolveAssistantNotificationTurnProfile(
+  input: AssistantNotificationInput,
+): AssistantCodexTurnThreadScopeProfile {
+  return isAssistantNotificationMaintenanceExactSkip(input)
+    ? ASSISTANT_NOTIFICATION_ISOLATED_TURN_PROFILE
+    : ASSISTANT_NOTIFICATION_TURN_PROFILE
+}
+
+function resolveAssistantNotificationProviderResumeStateAction(input: {
+  input: AssistantNotificationInput
+  providerResult: { codexThreadId?: string | null }
+}): AssistantProviderResumeStateAction {
+  if (isAssistantNotificationMaintenanceExactSkip(input.input)) {
+    return 'preserve-existing'
+  }
+
+  return normalizeNullableString(input.providerResult.codexThreadId)
+    ? 'persist-from-provider-turn'
+    : 'preserve-existing'
+}
+
+function createAssistantMaintenanceNotificationResolvedSession(input: {
+  boundaryDefaultTarget:
+    Parameters<typeof resolveAssistantSessionTarget>[0]['boundaryDefaultTarget']
+  defaults: Parameters<typeof resolveAssistantSessionTarget>[0]['defaults']
+  message: AssistantMessageInput
+}): ResolvedAssistantSession {
+  const now = new Date().toISOString()
+  const sessionId = createAssistantSessionId()
+  const target = resolveAssistantSessionTarget({
+    boundaryDefaultTarget: input.boundaryDefaultTarget,
+    defaults: input.defaults,
+    input: input.message,
+  })
+  const actorId = input.message.actorId ?? input.message.participantId ?? null
+  const binding = createAssistantBinding({
+    actorId,
+    channel: input.message.channel,
+    deliveryKind: input.message.deliveryKind,
+    deliveryTarget:
+      input.message.bindingDeliveryTarget ?? input.message.deliveryTarget ?? null,
+    identityId: input.message.identityId,
+    threadId: input.message.threadId,
+    threadIsDirect: input.message.threadIsDirect,
+  })
+  const session = parseAssistantSessionRecord({
+    schema: 'murph.assistant-conversation.v2',
+    conversationId: sessionId,
+    alias: input.message.alias ?? null,
+    binding,
+    codexTarget: target,
+    codexResume: null,
+    createdAt: now,
+    updatedAt: now,
+    lastTurnAt: null,
+    turnCount: 0,
+  })
+
+  return {
+    created: true,
+    paths: resolveAssistantStatePaths(input.message.vault),
+    session,
+  }
+}
+
+function isAssistantNotificationMaintenanceExactSkip(
+  input: AssistantNotificationInput,
+): boolean {
+  return input.turnPolicy?.kind === 'maintenance-exact-skip'
+}
+
+function assertAssistantMaintenanceNotificationDecision(input: {
+  decision: AssistantNotificationDecision
+  policy: AssistantNotificationTurnPolicy | null | undefined
+}): void {
+  if (
+    input.policy?.kind === 'maintenance-exact-skip' &&
+    input.decision.kind === 'skip' &&
+    input.decision.privateSummary === input.policy.privateSummary
+  ) {
+    return
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
+    'Assistant maintenance notification must return the exact configured skip decision.',
+  )
 }
 
 function resolveAssistantNotificationFirstContactDocIds(input: {

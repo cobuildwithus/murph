@@ -126,6 +126,7 @@ type AssistantCodexAttemptOutcome =
       providerTurnId: string | null
       rawEvents: unknown[]
       session: AssistantSession
+      nonReplayableProviderWork: boolean
       usage: AssistantProviderUsage | null
       additionalUsages: readonly AssistantProviderUsageDraft[]
       usageAttribution: AssistantUsageAttribution | null
@@ -150,6 +151,7 @@ export type AssistantCodexTurnRecoveryOutcome =
       rawEvents: unknown[]
       route: CodexThreadIdentity
       session: AssistantSession
+      nonReplayableProviderWork: boolean
       usage: AssistantProviderUsage | null
       additionalUsages: readonly AssistantProviderUsageDraft[]
       usageAttribution: AssistantUsageAttribution | null
@@ -229,6 +231,7 @@ export async function executeCodexTurnWithRecovery(input: {
         rawEvents: attemptOutcome.rawEvents,
         route: attemptPlan.route,
         session: attemptOutcome.session,
+        nonReplayableProviderWork: attemptOutcome.nonReplayableProviderWork,
         usage: attemptOutcome.usage,
         additionalUsages: attemptOutcome.additionalUsages,
         usageAttribution: attemptOutcome.usageAttribution,
@@ -623,15 +626,17 @@ async function executeAssistantCodexAttempt(input: {
       policy: attemptPlan.routePlan.diagnosticsPolicy,
       vault: executionPlan.input.vault,
     })
-    void appendAssistantTranscriptEntries(
-      executionPlan.input.vault,
-      session.sessionId,
-      buildAssistantProviderTranscriptAuditEntries({
-        error,
-        rawToolEvents: attemptMetadata.rawToolEvents,
-        routeLabel: attemptPlan.route.label,
-      }),
-    ).catch(() => undefined)
+    if (executionPlan.input.suppressProviderFailureTranscriptAudit !== true) {
+      void appendAssistantTranscriptEntries(
+        executionPlan.input.vault,
+        session.sessionId,
+        buildAssistantProviderTranscriptAuditEntries({
+          error,
+          rawToolEvents: attemptMetadata.rawToolEvents,
+          routeLabel: attemptPlan.route.label,
+        }),
+      ).catch(() => undefined)
+    }
 
     await recordCodexAttemptFailed({
       activityLabels: attemptMetadata.activityLabels,
@@ -664,6 +669,9 @@ async function executeAssistantCodexAttempt(input: {
       providerTurnId: failedAttemptProviderTurnId,
       rawEvents: failedAttemptRawEvents,
       session,
+      nonReplayableProviderWork:
+        attemptMetadata.executedToolCount > 0 ||
+        attemptMetadata.providerActionCount > 0,
       usage: failedAttemptUsage,
       additionalUsages: failedAttemptAdditionalUsages,
       usageAttribution,

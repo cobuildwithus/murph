@@ -34,9 +34,13 @@ import {
   type ResolvedAssistantCronJob,
 } from './cron/canonical-jobs.ts'
 import {
+  assertAssistantCronJobRunnableInRuntime,
+  buildRunnableAssistantCronJobProjection,
   claimNextDueAssistantCronJob,
   claimResolvedAssistantCronJob,
   executeClaimedAssistantCronJob,
+  isAssistantCronBackgroundMaintenanceYieldError,
+  type AssistantCronRunnableProjectionInput,
 } from './cron/execution.ts'
 import type { AssistantRunEvent } from './automation/shared.ts'
 import {
@@ -102,6 +106,11 @@ export interface AssistantCronStatusSnapshot {
   totalJobs: number
 }
 
+export interface AssistantCronStatusOptions
+  extends AssistantCronRunnableProjectionInput {
+  includeRuntimeUnavailable?: boolean
+}
+
 export interface AssistantCronRunExecutionResult {
   job: AssistantCronJob
   removedAfterRun: boolean
@@ -125,9 +134,11 @@ export interface AssistantCronProcessDueResult {
 }
 
 export interface RunAssistantCronJobInput {
+  executionContext?: AssistantExecutionContext | null
   job: string
   signal?: AbortSignal
   trigger?: AssistantCronTrigger
+  turnEnvironment?: AssistantTurnEnvironment | null
   vault: string
 }
 
@@ -138,6 +149,7 @@ export interface ProcessDueAssistantCronJobsInput {
   onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   signal?: AbortSignal
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null
   turnEnvironment?: AssistantTurnEnvironment | null
   vault: string
 }
@@ -419,8 +431,12 @@ export async function setAssistantCronJobTarget(
 
 export async function getAssistantCronStatus(
   vault: string,
+  options: AssistantCronStatusOptions = {},
 ): Promise<AssistantCronStatusSnapshot> {
-  const canonicalJobs = await listAssistantCronJobs(vault)
+  const canonicalJobs =
+    options.includeRuntimeUnavailable === true
+      ? await listAssistantCronJobs(vault)
+      : await listAssistantRunnableCronJobs(vault, options)
   const now = new Date().toISOString()
   const enabledJobs = canonicalJobs.filter((job) => job.enabled)
   const dueJobs = enabledJobs.filter((job) => isAssistantCronJobDue(job, now)).length
@@ -485,27 +501,36 @@ export async function runAssistantCronJobNow(
       paths,
       vault: input.vault,
     })
+    const job =
+      resolved.kind === 'local'
+        ? {
+            kind: 'local' as const,
+            job: resolved.job,
+          }
+        : {
+            kind: 'canonical' as const,
+            source: resolved.source,
+            runtimeState: resolved.runtimeState,
+            job: resolved.job,
+          }
+
+    assertAssistantCronJobRunnableInRuntime({
+      executionContext: input.executionContext,
+      job,
+      turnEnvironment: input.turnEnvironment ?? null,
+    })
 
     return claimResolvedAssistantCronJob({
       paths,
-      job:
-        resolved.kind === 'local'
-          ? {
-              kind: 'local',
-              job: resolved.job,
-            }
-          : {
-              kind: 'canonical',
-              source: resolved.source,
-              runtimeState: resolved.runtimeState,
-              job: resolved.job,
-            },
+      job,
     })
   })
 
   return executeClaimedAssistantCronJob({
+    executionContext: input.executionContext,
     paths,
     signal: input.signal,
+    turnEnvironment: input.turnEnvironment ?? null,
     trigger: input.trigger ?? 'manual',
     vault: input.vault,
     job: claimed,
@@ -544,11 +569,22 @@ export async function processDueAssistantCronJobsLocal(
       assistantCronDeliveryRouteValidationProfileForExecutionContext(
         input.executionContext,
       ),
+    runtimeScopeInput: {
+      executionContext: input.executionContext,
+      shouldYieldBackgroundMaintenance:
+        input.shouldYieldBackgroundMaintenance ?? null,
+      turnEnvironment: input.turnEnvironment ?? null,
+    },
     vault: input.vault,
   })
 
   while (!input.signal?.aborted && summary.processed < limit) {
-    const claimed = await claimNextDueAssistantCronJob(paths, input.vault)
+    const claimed = await claimNextDueAssistantCronJob(paths, input.vault, {
+      executionContext: input.executionContext,
+      shouldYieldBackgroundMaintenance:
+        input.shouldYieldBackgroundMaintenance ?? null,
+      turnEnvironment: input.turnEnvironment ?? null,
+    })
     if (!claimed) {
       break
     }
@@ -559,11 +595,22 @@ export async function processDueAssistantCronJobsLocal(
       onTraceEvent: input.onTraceEvent,
       paths,
       signal: input.signal,
+      shouldYieldBackgroundMaintenance:
+        input.shouldYieldBackgroundMaintenance ?? null,
       turnEnvironment: input.turnEnvironment ?? null,
       trigger: 'scheduled',
       vault: input.vault,
       job: claimed,
+    }).catch((error) => {
+      if (isAssistantCronBackgroundMaintenanceYieldError(error)) {
+        return null
+      }
+
+      throw error
     })
+    if (!result) {
+      break
+    }
     summary.processed += 1
 
     if (result.run.status === 'succeeded') {
@@ -595,6 +642,7 @@ async function emitAssistantCronScanEvents(input: {
   onEvent?: (event: AssistantRunEvent) => void
   paths: ReturnType<typeof resolveAssistantStatePaths>
   routeValidationProfile: AssistantCronDeliveryRouteValidationProfile
+  runtimeScopeInput?: AssistantCronRunnableProjectionInput
   vault: string
 }): Promise<void> {
   if (!input.onEvent) {
@@ -607,24 +655,15 @@ async function emitAssistantCronScanEvents(input: {
     readAssistantCronCanonicalRuntimeStore(input.paths),
   ])
   const nowIso = new Date().toISOString()
-  const visibleLocalStore = buildVisibleLocalAssistantCronStore(store)
-  const canonicalEntries = canonicalRecords.map((source) => {
-    const runtimeState = resolveCanonicalRuntimeState(source, runtimeStore)
-    return {
-      source,
-      runtimeStatePresent: runtimeStore.jobs.some(
-        (record) => record.jobId === resolveCanonicalAssistantCronJobId(source),
-      ),
-      job: projectCanonicalAssistantCronJob({
-        source,
-        runtimeState,
-      }),
-    }
+  const projection = buildRunnableAssistantCronJobProjection({
+    canonicalRecords,
+    localStore: store,
+    runtimeScopeInput: input.runtimeScopeInput ?? {},
+    runtimeStore,
   })
-  const jobs = sortAssistantCronJobs([
-    ...visibleLocalStore.jobs,
-    ...canonicalEntries.map((entry) => entry.job),
-  ])
+  const visibleLocalStore = projection.visibleLocalStore
+  const canonicalEntries = projection.canonicalEntries
+  const jobs = projection.jobs
   const dueJobs = jobs.filter((job) => isAssistantCronJobDue(job, nowIso))
 
   input.onEvent({
@@ -674,6 +713,24 @@ async function emitAssistantCronScanEvents(input: {
       providerState: 'completed',
     })
   }
+}
+
+async function listAssistantRunnableCronJobs(
+  vault: string,
+  runtimeScopeInput: AssistantCronRunnableProjectionInput,
+): Promise<AssistantCronJob[]> {
+  const paths = resolveAssistantStatePaths(vault)
+  const [localStore, canonicalRecords, runtimeStore] = await Promise.all([
+    readAssistantCronStore(paths),
+    listCanonicalAssistantCronRecords(vault),
+    readAssistantCronCanonicalRuntimeStore(paths),
+  ])
+  return buildRunnableAssistantCronJobProjection({
+    canonicalRecords,
+    localStore,
+    runtimeScopeInput,
+    runtimeStore,
+  }).jobs
 }
 
 function emitAssistantCronJobCompletedEvent(input: {

@@ -3134,6 +3134,7 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(result).not.toHaveProperty("deviceSyncSkipped");
     expect(result).not.toHaveProperty("parserProcessed");
     expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith({
+      deferCronForForegroundInput: false,
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
       executionContext: {
@@ -3150,6 +3151,7 @@ describe("runHostedAssistantAutomationLane", () => {
       onProviderRequestStarted: expect.any(Function),
       onTraceEvent: expect.any(Function),
       requestId: "req_123",
+      shouldYieldBackgroundMaintenance: null,
       signal: undefined,
       turnEnvironment: {
         currentWorkingDirectory: null,
@@ -3510,6 +3512,7 @@ describe("runHostedAssistantAutomationLane", () => {
     });
     expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
+        deferCronForForegroundInput: true,
         maxPerScan: selectedInputIds.length,
       }),
     );
@@ -3543,6 +3546,7 @@ describe("runHostedAssistantAutomationLane", () => {
 
     expect(mocks.runAssistantAutomationPass.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
+        deferCronForForegroundInput: false,
         maxPerScan: 1,
       }),
     );

@@ -5,11 +5,15 @@ import {
   showAutomation,
   upsertAutomation,
 } from '@murphai/core'
+import {
+  HOSTED_RUNTIME_PROCESS_ENV,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
@@ -242,6 +246,48 @@ describe('applyMurphManagedAutomations core integration', () => {
       '{"kind":"skip","privateSummary":"Changelog feed unavailable or empty."}',
     )
     expect(productUpdatesRecord?.instructions).not.toContain('finish_without_reply')
+    await expect(showAutomation({
+      automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toBeNull()
+  })
+
+  it('creates hosted overnight memory consolidation through the canonical automation registry', async () => {
+    const vaultRoot = await createVaultRoot()
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      runtimeEnv: {
+        [HOSTED_RUNTIME_PROCESS_ENV]: '1',
+        EXA_API_KEY: 'fixture-exa-key',
+      },
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 5,
+      skipped: 0,
+      updated: 0,
+    })
+
+    await expect(showAutomation({
+      automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      route: defaultRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '03:00',
+      },
+      slug: 'overnight-memory-consolidation',
+      status: 'active',
+      tags: expect.arrayContaining([
+        'murph-managed:overnight-memory-consolidation',
+        'runtime-maintenance',
+      ]),
+      title: 'Overnight memory consolidation',
+    })
   })
 
   it('creates managed health automations for hosted email targets without a local sender identity', async () => {

@@ -96,6 +96,8 @@ export interface RunAssistantAutomationInput {
   onInboxEvent?: (event: InboxRunEvent) => void
   once?: boolean
   requestId?: string | null
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null
+  deferCronForForegroundInput?: boolean
   signal?: AbortSignal
   startDaemon?: boolean
   sessionMaxAgeMs?: number | null
@@ -969,11 +971,14 @@ export async function runAssistantAutomationPass(
         queued: 0,
         sent: 0,
       }
-  const shouldDeferCronAfterHostedReply =
+  const shouldDeferCronForHostedForegroundWork =
     executionContext?.hosted != null &&
     input.deliveryDispatchMode === 'queue-only' &&
-    scanResult.replies.replied > 0
-  const cronResult = applyCanonicalWrites && !shouldDeferCronAfterHostedReply
+    (
+      input.deferCronForForegroundInput === true ||
+      scanResult.replies.replied > 0
+    )
+  const cronResult = applyCanonicalWrites && !shouldDeferCronForHostedForegroundWork
     ? await processDueAssistantCronJobs({
         deliveryDispatchMode: input.deliveryDispatchMode,
         executionContext,
@@ -981,6 +986,8 @@ export async function runAssistantAutomationPass(
         onTraceEvent: input.onTraceEvent,
         vault: input.vault,
         signal: input.signal,
+        shouldYieldBackgroundMaintenance:
+          input.shouldYieldBackgroundMaintenance ?? null,
         turnEnvironment: input.turnEnvironment ?? null,
         limit: input.maxPerScan,
       })
@@ -1006,11 +1013,16 @@ export async function runAssistantAutomationPass(
     stateBeforeScan,
     state,
   )
-  const cronStatus = await getAssistantCronStatus(input.vault)
+  const cronStatus = await getAssistantCronStatus(input.vault, {
+    executionContext,
+    shouldYieldBackgroundMaintenance:
+      input.shouldYieldBackgroundMaintenance ?? null,
+    turnEnvironment: input.turnEnvironment ?? null,
+  })
   const cronNextRunAt = resolveAssistantCronNextWakeAt({
     applyCanonicalWrites,
     cronStatus,
-    shouldDeferCronAfterHostedReply,
+    shouldDeferCronForHostedForegroundWork,
   })
   const outboxNextAttemptAt = input.drainOutbox ?? true
     ? (await buildAssistantOutboxSummary(input.vault)).nextAttemptAt
@@ -1061,14 +1073,14 @@ function appendHostedDynamicContextPrompt(input: {
 function resolveAssistantCronNextWakeAt(input: {
   applyCanonicalWrites: boolean
   cronStatus: Awaited<ReturnType<typeof getAssistantCronStatus>>
-  shouldDeferCronAfterHostedReply: boolean
+  shouldDeferCronForHostedForegroundWork: boolean
 }): string | null {
   if (!input.applyCanonicalWrites) {
     return null
   }
 
   if (
-    input.shouldDeferCronAfterHostedReply &&
+    input.shouldDeferCronForHostedForegroundWork &&
     (input.cronStatus.dueJobs ?? 0) > 0
   ) {
     return computeAssistantAutomationRetryAt(

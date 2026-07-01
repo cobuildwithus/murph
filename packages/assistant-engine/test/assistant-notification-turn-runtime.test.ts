@@ -215,6 +215,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   }))
   vi.doMock('../src/assistant/session-resolution.js', () => ({
     resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+    resolveAssistantSessionTarget: vi.fn(() => createCodexTarget()),
   }))
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
@@ -490,6 +491,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
   }))
   vi.doMock('../src/assistant/session-resolution.js', () => ({
     resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+    resolveAssistantSessionTarget: vi.fn(() => createCodexTarget()),
   }))
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
@@ -719,6 +721,7 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   }))
   vi.doMock('../src/assistant/session-resolution.js', () => ({
     resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+    resolveAssistantSessionTarget: vi.fn(() => createCodexTarget()),
   }))
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
@@ -952,6 +955,7 @@ test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery 
   }))
   vi.doMock('../src/assistant/session-resolution.js', () => ({
     resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+    resolveAssistantSessionTarget: vi.fn(() => createCodexTarget()),
   }))
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
@@ -1134,6 +1138,7 @@ test('sendAssistantNotificationLocal derives hosted notification keys from resol
   }))
   vi.doMock('../src/assistant/session-resolution.js', () => ({
     resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+    resolveAssistantSessionTarget: vi.fn(() => createCodexTarget()),
   }))
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
@@ -1312,6 +1317,7 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
   }))
   vi.doMock('../src/assistant/session-resolution.js', () => ({
     resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+    resolveAssistantSessionTarget: vi.fn(() => createCodexTarget()),
   }))
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
@@ -1451,6 +1457,10 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
     })),
     resolveAssistantTurnRoute: vi.fn(() => providerResult.route),
     resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
+    startAssistantChannelTypingIndicator: vi.fn(() => ({
+      stop: vi.fn(async () => undefined),
+    })),
+    stopAssistantChannelTypingIndicator: vi.fn(async () => undefined),
     withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
   }
 
@@ -1472,6 +1482,7 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
   }))
   vi.doMock('../src/assistant/session-resolution.js', () => ({
     resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+    resolveAssistantSessionTarget: vi.fn(() => createCodexTarget()),
   }))
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
@@ -1492,6 +1503,12 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
   }))
   vi.doMock('../src/assistant/turns.js', () => ({
     createAssistantTurnId: () => 'turn-notification-skip',
+  }))
+  vi.doMock('../src/assistant/channel-typing.js', () => ({
+    startAssistantChannelTypingIndicator:
+      mocks.startAssistantChannelTypingIndicator,
+    stopAssistantChannelTypingIndicator:
+      mocks.stopAssistantChannelTypingIndicator,
   }))
   vi.doMock('../src/assistant/turn-lock.js', () => ({
     withAssistantTurnLock: mocks.withAssistantTurnLock,
@@ -1537,6 +1554,87 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
       allowFinishWithoutReply: false,
     }),
   )
+  expect(mocks.startAssistantChannelTypingIndicator).toHaveBeenCalledTimes(1)
+  expect(deliverMessage).not.toHaveBeenCalled()
+
+  vi.clearAllMocks()
+
+  const maintenanceResult = await sendAssistantNotificationLocal({
+    executionContext: {
+      hosted: null,
+    },
+    instructions: 'Run overnight memory maintenance.',
+    serviceTier: 'flex',
+    turnPolicy: {
+      kind: 'maintenance-exact-skip',
+      privateSummary: 'No notification required.',
+    },
+    vault: '/vaults/skip',
+  })
+
+  expect(maintenanceResult.decision).toEqual({
+    kind: 'skip',
+    privateSummary: 'No notification required.',
+  })
+  expect(maintenanceResult.response).toBeNull()
+  expect(maintenanceResult.session.sessionId).not.toBe(providerSession.sessionId)
+  expect(maintenanceResult.session.turnCount).toBe(0)
+  expect(mocks.resolveAssistantSessionForMessage).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.startAssistantChannelTypingIndicator).not.toHaveBeenCalled()
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+    expect.objectContaining({
+      input: expect.objectContaining({
+        suppressProviderFailureTranscriptAudit: true,
+      }),
+      profile: expect.objectContaining({
+        nativeResumePolicy: 'disabled',
+        threadScope: 'isolated-thread',
+      }),
+    }),
+  )
+
+  vi.clearAllMocks()
+  mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
+    kind: 'succeeded',
+    providerTurn: {
+      ...createProviderResult({
+        response: JSON.stringify({
+          kind: 'send_message',
+          privateSummary: 'Should not send.',
+          text: 'Visible maintenance message.',
+        }),
+        session: providerSession,
+      }),
+      additionalUsages: [],
+      nonReplayableProviderWork: true,
+    },
+  })
+
+  let invalidMaintenanceError: unknown
+  try {
+    await sendAssistantNotificationLocal({
+      instructions: 'Run overnight memory maintenance.',
+      turnPolicy: {
+        kind: 'maintenance-exact-skip',
+        privateSummary: 'No notification required.',
+      },
+      vault: '/vaults/skip',
+    })
+  } catch (error) {
+    invalidMaintenanceError = error
+  }
+  expect(invalidMaintenanceError).toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
+  })
+  expect((invalidMaintenanceError as Error & {
+    details?: Record<string, unknown>
+  }).details).toMatchObject({
+    assistantNotificationProviderNonReplayableWork: true,
+    assistantNotificationStage: 'provider',
+  })
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   expect(deliverMessage).not.toHaveBeenCalled()
 })
 
@@ -1585,6 +1683,7 @@ test('sendAssistantNotificationLocal lets hosted shared planning stabilize provi
     }))
     vi.doMock('../src/assistant/session-resolution.js', () => ({
       resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+      resolveAssistantSessionTarget: vi.fn(() => createCodexTarget()),
     }))
     vi.doMock('../src/assistant/turn-plan.js', async () => {
       const actual = await vi.importActual<typeof import('../src/assistant/turn-plan.ts')>(
@@ -1740,6 +1839,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   }))
   vi.doMock('../src/assistant/session-resolution.js', () => ({
     resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+    resolveAssistantSessionTarget: vi.fn(() => createCodexTarget()),
   }))
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
@@ -1910,6 +2010,7 @@ test('sendAssistantNotificationLocal forwards provider response media to deliver
   }))
   vi.doMock('../src/assistant/session-resolution.js', () => ({
     resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+    resolveAssistantSessionTarget: vi.fn(() => createCodexTarget()),
   }))
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
@@ -1983,6 +2084,7 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
     executeCodexTurnWithRecovery: vi.fn(async () => ({
       error: providerError,
       kind: 'failed_terminal',
+      nonReplayableProviderWork: true,
       route,
     })),
     normalizeAssistantExecutionContext: vi.fn((value) => value),
@@ -2023,6 +2125,7 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
   }))
   vi.doMock('../src/assistant/session-resolution.js', () => ({
     resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+    resolveAssistantSessionTarget: vi.fn(() => createCodexTarget()),
   }))
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
@@ -2060,6 +2163,7 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
     assistantNotificationProviderBaseUrlOrigin: null,
     assistantNotificationProviderBaseUrlPath: null,
     assistantNotificationProviderModel: 'gpt-5.5-mini',
+    assistantNotificationProviderNonReplayableWork: true,
     assistantNotificationRouteId: 'route-provider-failure',
     assistantNotificationStage: 'provider',
   })
@@ -2162,6 +2266,7 @@ test('sendAssistantNotificationLocal drops generated email thread subjects befor
   }))
   vi.doMock('../src/assistant/session-resolution.js', () => ({
     resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+    resolveAssistantSessionTarget: vi.fn(() => createCodexTarget()),
   }))
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
@@ -2497,6 +2602,7 @@ async function loadNotificationTurnHarness(input: {
   }))
   vi.doMock('../src/assistant/session-resolution.js', () => ({
     resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+    resolveAssistantSessionTarget: vi.fn(() => createCodexTarget()),
   }))
   vi.doMock('../src/assistant/turn-plan.js', () => ({
     resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
@@ -2536,6 +2642,7 @@ async function loadNotificationTurnHarness(input: {
 
 function createProviderResult(input?: {
   codexThreadHistoryUnsafe?: boolean | null
+  nonReplayableProviderWork?: boolean
   providerOptions?: AssistantProviderSessionOptions
   codexThreadId?: string | null
   responseMedia?: ExecutedAssistantProviderTurnResult['responseMedia']
@@ -2571,6 +2678,9 @@ function createProviderResult(input?: {
       kind: 'explicit-structured-history',
     },
     providerOptions: input?.providerOptions ?? createProviderOptions(),
+    ...(input?.nonReplayableProviderWork !== undefined
+      ? { nonReplayableProviderWork: input.nonReplayableProviderWork }
+      : {}),
     ...(input?.codexThreadHistoryUnsafe !== undefined
       ? { codexThreadHistoryUnsafe: input.codexThreadHistoryUnsafe }
       : {}),

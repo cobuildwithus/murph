@@ -7,6 +7,9 @@ import {
   type AutomationRecord,
 } from '@murphai/core'
 import {
+  HOSTED_RUNTIME_PROCESS_ENV,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
+import {
   MURPH_PRODUCT_ORIGIN,
   type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
@@ -39,6 +42,7 @@ export interface MurphManagedAutomationSeed {
   automationId: string
   assistantTargetOverride?: AutomationAssistantTargetOverride | null
   continuityPolicy?: AutomationContinuityPolicy
+  hostedRuntimeOnly?: boolean
   instructions: string
   requiredRuntimeEnvKeys?: readonly string[]
   schedule: MurphManagedAutomationSchedule
@@ -74,6 +78,10 @@ export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
   'automation_01K0EXA5C0VT9F7X3KG6JMPZ5A'
 export const MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID =
   'automation_01K0Z7X9Y8W6V5T4S3R2Q1P0NM'
+export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID =
+  'automation_01K4Y0Q5C8M9N2P3R4S5T6V7WX'
+export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY =
+  'Overnight memory consolidation maintenance wake completed.'
 
 interface MurphManagedWeeklyScheduleSpread {
   daysOfWeek: readonly number[]
@@ -370,6 +378,31 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'On a later user turn, call `murph.submit_product_feedback` for explicit product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Use only structured kind, a concise product-only summary, and optional changelog item ids; do not include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
     ].join('\n'),
   },
+  {
+    automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+    slug: 'overnight-memory-consolidation',
+    title: 'Overnight memory consolidation',
+    summary:
+      'A hosted-only app-server maintenance wake for canonical vault memory.',
+    schedule: {
+      kind: 'dailyLocal',
+      localTime: '03:00',
+    },
+    continuityPolicy: 'fresh',
+    hostedRuntimeOnly: true,
+    tags: [
+      'murph-managed:overnight-memory-consolidation',
+      'runtime-maintenance',
+    ],
+    instructions: [
+      'This hosted maintenance automation runs through the normal scheduled assistant App Server path to consolidate durable user context only into the canonical vault memory surface.',
+      '',
+      'Read existing saved context with `vault-cli memory show --format json` before considering any write.',
+      'Write durable memory only with `vault-cli memory upsert` or `vault-cli memory update` when a concise, user-useful fact is clearly supported by canonical inputs available to this scheduled turn and is not already represented.',
+      'Do not inspect hidden Codex memory state, assistant runtime logs, raw transcripts, unbounded filesystem trees, or vault health data. Do not call external services or send the user a message.',
+      `Return exactly \`{"kind":"skip","privateSummary":"${MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY}"}\`.`,
+    ].join('\n'),
+  },
 ] satisfies readonly MurphManagedAutomationSeed[]
 
 export async function applyMurphManagedAutomations(
@@ -382,6 +415,9 @@ export async function applyMurphManagedAutomations(
       ...MURPH_MANAGED_AUTOMATIONS,
       ...(await buildExperimentFinalResultsSeeds({ vaultRoot: input.vaultRoot, now })),
     ]
+  const seeds = rawSeeds.filter((seed) =>
+    murphManagedAutomationAppliesToRuntime(seed, input.runtimeEnv)
+  )
   let scheduleStableKey: string | null | undefined
   let scheduleStableKeyUnavailable = false
   const resolveScheduleStableKey = async (): Promise<string | null> => {
@@ -407,7 +443,7 @@ export async function applyMurphManagedAutomations(
     updated: 0,
   }
 
-  for (const rawSeed of rawSeeds) {
+  for (const rawSeed of seeds) {
     const existing = await showAutomation({
       automationId: rawSeed.automationId,
       vaultRoot: input.vaultRoot,
@@ -830,6 +866,14 @@ function murphManagedAutomationRuntimeRequirementsMet(
   return seed.requiredRuntimeEnvKeys.every((key) =>
     typeof runtimeEnv[key] === 'string' && runtimeEnv[key].trim().length > 0
   )
+}
+
+function murphManagedAutomationAppliesToRuntime(
+  seed: MurphManagedAutomationSeed,
+  runtimeEnv: Readonly<Record<string, string | undefined>> | undefined,
+): boolean {
+  return seed.hostedRuntimeOnly !== true ||
+    runtimeEnv?.[HOSTED_RUNTIME_PROCESS_ENV]?.trim() === '1'
 }
 
 function normalizeMurphManagedAutomationSummary(

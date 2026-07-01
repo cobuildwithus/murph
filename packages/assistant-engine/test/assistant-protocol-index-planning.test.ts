@@ -118,6 +118,28 @@ describe('assistant protocol index planning', () => {
     expect(plan.onFinishWithoutReplyAccepted).toBe(onFinishWithoutReplyAccepted)
   })
 
+  it('resolves disabled native resume notification turns as isolated threads', async () => {
+    const plan = await buildCodexTurnExecutionPlan({
+      input: createMessageInput(),
+      plan: createSharedPlan(),
+      profile: {
+        nativeResumePolicy: 'disabled',
+        promptProfile: 'notification-decision',
+        toolProfile: 'notification-turn',
+      },
+      resolvedSession: createSession(),
+      route: createRoute(),
+      turnCreatedAt: '2026-05-04T00:00:00.000Z',
+      turnId: 'turn-isolated-notification',
+    })
+
+    expect(plan.profile).toEqual({
+      promptProfile: 'notification-decision',
+      threadScope: 'isolated-thread',
+      toolProfile: 'notification-turn',
+    })
+  })
+
   it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -1631,6 +1653,85 @@ describe('assistant protocol index planning', () => {
           },
         ],
       })
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('does not resume or replay transcript messages for isolated notification maintenance turns', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-route-plan-notification-isolated-'),
+    )
+    const route = createRoute()
+    const initialPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: {
+        ...createMessageInput(),
+        vault,
+      },
+      profile: {
+        promptProfile: 'notification-decision',
+        threadScope: 'session-thread',
+        toolProfile: 'notification-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession({
+        turnCount: 1,
+      }),
+      sharedPlan: createSharedPlan(),
+    })
+    const session = createSession({
+      resumeState: {
+        assistantContractFingerprint: initialPlan.assistantContractFingerprint,
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        threadId: 'thread-resume',
+      },
+      turnCount: 1,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          kind: 'user',
+          text: 'Prior sensitive context.',
+        },
+        {
+          kind: 'assistant',
+          text: 'Prior assistant context.',
+        },
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        profile: {
+          promptProfile: 'notification-decision',
+          threadScope: 'isolated-thread',
+          toolProfile: 'notification-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-05-04',
+          currentTimeZone: 'Asia/Kuala_Lumpur',
+        },
+        route,
+        session,
+        sharedPlan: createSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.conversationHistoryMessages).toBeUndefined()
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
