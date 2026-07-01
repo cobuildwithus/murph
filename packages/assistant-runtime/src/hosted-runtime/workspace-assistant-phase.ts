@@ -1456,11 +1456,10 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
     return result;
   }
 
-  const baseNextWake = createHostedRuntimeWakeCandidate(
-    result.nextWakeAt ?? null,
-    result.nextWakeReason ?? HOSTED_ASSISTANT_WAKE_REASON,
-  );
-  const providerCleanupAfterCheckpoint = async () => {
+  const afterCheckpoint = result.afterCheckpoint ?? null;
+  const drainProviderCleanupAfterCheckpoint = async (
+    baseNextWake: HostedRuntimeWakeCandidate,
+  ) => {
     assertHostedAssistantPhaseLiveness(input.input.signal);
     return await drainHostedPostCheckpointDelivery({
       assistantDeliveryEffects: [],
@@ -1476,15 +1475,26 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
       wake: input.wake,
     });
   };
+  const afterProviderCleanupCheckpoint = async () => {
+    const postCheckpoint = afterCheckpoint ? await afterCheckpoint() : null;
+    const baseNextWake = postCheckpoint
+      ? createHostedRuntimeWakeCandidate(
+          postCheckpoint.nextWakeAt ?? null,
+          postCheckpoint.nextWakeReason ?? HOSTED_ASSISTANT_WAKE_REASON,
+        )
+      : createHostedRuntimeWakeCandidate(
+          result.nextWakeAt ?? null,
+          result.nextWakeReason ?? HOSTED_ASSISTANT_WAKE_REASON,
+        );
+    const providerCleanup = await drainProviderCleanupAfterCheckpoint(baseNextWake);
+    return postCheckpoint
+      ? mergeHostedAssistantPhasePostCheckpoint(postCheckpoint, providerCleanup)
+      : providerCleanup;
+  };
 
   return {
     ...result,
-    afterCheckpoint: composeHostedAssistantPhaseAfterCheckpoint({
-      callbacks: [
-        result.afterCheckpoint,
-        providerCleanupAfterCheckpoint,
-      ],
-    }),
+    afterCheckpoint: afterProviderCleanupCheckpoint,
     checkpointReason: result.progressed === true
       ? result.checkpointReason ?? "assistant_runtime_commit"
       : "provider_cleanup",
@@ -1966,10 +1976,7 @@ function withHostedRuntimeWakeCandidatePreservedAfterCheckpoint(input: {
   wake: HostedRuntimeWakeCandidate | null;
 }): HostedWorkspaceRunnerAssistantPhaseResult {
   const result = withHostedRuntimeWakeCandidate(input);
-  const wake = createHostedRuntimeWakeCandidate(
-    result.nextWakeAt ?? null,
-    result.nextWakeReason ?? HOSTED_ASSISTANT_WAKE_REASON,
-  );
+  const wake = input.wake;
   if (!wake?.at || !result.afterCheckpoint) {
     return result;
   }
@@ -3136,7 +3143,7 @@ async function runProviderCleanupPhase(input: {
   providerCleanupDue: boolean;
   terminalLinqCleanupDue: boolean;
 }> {
-  if (input.deferProviderCleanup && !input.foregroundAssistantPass) {
+  if (input.deferProviderCleanup) {
     const nowMs = resolveHostedAssistantPhaseNowMs(input.input);
     const scheduledCleanupWake = await resolveHostedProviderCleanupScheduledWakeAt({
       deferDueOrInvalid: true,

@@ -2449,11 +2449,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
-    expect(mocks.resolveHostedProviderCleanupCheckpointWakeAt).toHaveBeenCalledWith({
-      checkpoint: null,
+    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith({
       deferDueOrInvalid: true,
       idleCheckpointDelayMs: undefined,
       nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
+      vaultRoot: "/tmp/murph-vault",
     });
     expect(result).toEqual(expect.objectContaining({
       nextWakeAt: "2026-04-27T00:14:00.000Z",
@@ -6268,6 +6268,61 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       checkpointReason: "system_mailbox_receipt",
       nextWakeAt: providerCleanupWakeAt,
       nextWakeReason: "assistant",
+    }));
+  });
+
+  it("does not preserve a consumed system mailbox wake while draining provider cleanup", async () => {
+    const staleSystemMailboxWakeAt = "2026-04-27T00:00:00.000Z";
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: null,
+    });
+    mocks.resolveHostedSystemMailboxNextWakeAt
+      .mockResolvedValueOnce(staleSystemMailboxWakeAt)
+      .mockResolvedValue(null);
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createCodexAuthSystemMailboxItem(),
+      itemId: "system_mailbox_item_codex_auth",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      failed: 0,
+      nextWakeAt: null,
+      recorded: 1,
+    });
+    mocks.drainHostedProviderCleanupAfterCommit.mockResolvedValueOnce({
+      attemptedLinqMessageCount: 1,
+      deletedLinqMessageCount: 1,
+      failedLinqMessageCount: 0,
+      nextWakeAt: null,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => staleSystemMailboxWakeAt,
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: staleSystemMailboxWakeAt,
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "provider_cleanup",
+      nextWakeAt: null,
+      redactedStatus: expect.objectContaining({
+        hostedProviderCleanupAttemptedLinqItems: 1,
+        hostedProviderCleanupDeletedLinqItems: 1,
+        hostedProviderCleanupFailedLinqItems: 0,
+        nextWakeAt: null,
+      }),
     }));
   });
 
