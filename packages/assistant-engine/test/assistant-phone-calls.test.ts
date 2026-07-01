@@ -52,6 +52,15 @@ describe("assistant phone calls", () => {
     expect(resolveMurphDynamicTools({
       phoneCallsAvailable: false,
     })).not.toContain(MURPH_CREATE_PHONE_CALL_TOOL);
+    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
+      "Set allowTransferToUser=true for calls likely to require live user identity verification",
+    );
+    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
+      "Set allowTransferToUser=false for info-only calls",
+    );
+    expect(MURPH_CREATE_PHONE_CALL_TOOL.description).toContain(
+      "Murph resolves verified transfer numbers server-side",
+    );
   });
 
   it("uses only eligible user-sourced accepted input as phone-call authority", () => {
