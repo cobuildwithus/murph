@@ -83,16 +83,7 @@ export function resolveHostedDeviceSyncMessagingReturnPhoneRecipient(
 export function resolveHostedDeviceSyncAssignedMessagingReturnPhoneRecipient(
   value: string | null,
 ): string | null {
-  const recipient = normalizePhoneNumber(value);
-
-  if (!recipient) {
-    return null;
-  }
-
-  const configuredRecipients = readConfiguredMurphPhoneNumbers();
-  return configuredRecipients.length === 0 || configuredRecipients.includes(recipient)
-    ? recipient
-    : null;
+  return normalizePhoneNumber(value);
 }
 
 export function resolveHostedDeviceSyncAssignedMessagesReturnDestination(input: {
