@@ -36,7 +36,6 @@ import {
 import {
   assertAssistantCronJobRunnableInRuntime,
   buildRunnableAssistantCronJobProjection,
-  canonicalAssistantCronSourceIsBackgroundMaintenance,
   claimNextDueAssistantCronJob,
   claimResolvedAssistantCronJob,
   computeAssistantCronBackgroundMaintenanceYieldRetryAt,
@@ -44,7 +43,10 @@ import {
   isAssistantCronBackgroundMaintenanceYieldError,
   type AssistantCronRunnableProjectionInput,
 } from './cron/execution.ts'
-import type { AssistantRunEvent } from './automation/shared.ts'
+import {
+  earliestAssistantAutomationWakeAt,
+  type AssistantRunEvent,
+} from './automation/shared.ts'
 import {
   sanitizeAssistantAutomationFailureText,
 } from './automation/failure-observability.ts'
@@ -109,9 +111,7 @@ export interface AssistantCronStatusSnapshot {
 }
 
 export interface AssistantCronStatusOptions
-  extends AssistantCronRunnableProjectionInput {
-  includeRuntimeUnavailable?: boolean
-}
+  extends AssistantCronRunnableProjectionInput {}
 
 export interface AssistantCronRunExecutionResult {
   job: AssistantCronJob
@@ -436,19 +436,40 @@ export async function getAssistantCronStatus(
   vault: string,
   options: AssistantCronStatusOptions = {},
 ): Promise<AssistantCronStatusSnapshot> {
-  const canonicalJobs =
-    options.includeRuntimeUnavailable === true
-      ? await listAssistantCronJobs(vault)
-      : await listAssistantRunnableCronJobs(vault, options)
+  const paths = resolveAssistantStatePaths(vault)
+  const [localStore, canonicalRecords, runtimeStore] = await Promise.all([
+    readAssistantCronStore(paths),
+    listCanonicalAssistantCronRecords(vault),
+    readAssistantCronCanonicalRuntimeStore(paths),
+  ])
+  const projection = buildRunnableAssistantCronJobProjection({
+    canonicalRecords,
+    localStore,
+    runtimeScopeInput: options,
+    runtimeStore,
+  })
+  const canonicalJobs = projection.jobs
   const now = new Date().toISOString()
   const enabledJobs = canonicalJobs.filter((job) => job.enabled)
   const dueJobs = enabledJobs.filter((job) => isAssistantCronJobDue(job, now)).length
   const runningJobs = canonicalJobs.filter((job) => job.state.runningAt !== null).length
   const visibleNextRunAt =
     enabledJobs.find((job) => job.state.nextRunAt !== null)?.state.nextRunAt ?? null
-  const backgroundMaintenanceRetryWakeAt =
-    await resolveAssistantCronBackgroundMaintenanceRetryWakeAt(vault, options)
-  const nextRunAt = earliestAssistantCronWakeAt(
+  // Background maintenance hidden by active foreground yield still needs a
+  // wake: a released claim carries its persisted retry time, and a due but
+  // never-claimed occurrence gets the same short catch-up deferral so it is
+  // not disarmed until an unrelated wake.
+  const backgroundMaintenanceRetryWakeAt = earliestAssistantAutomationWakeAt(
+    ...projection.yieldDeferredBackgroundMaintenanceEntries.map((entry) => {
+      if (entry.runtimeState.state.retryAfterAt !== null) {
+        return entry.job.state.nextRunAt
+      }
+      return isAssistantCronJobDue(entry.job, now)
+        ? computeAssistantCronBackgroundMaintenanceYieldRetryAt(now)
+        : null
+    }),
+  )
+  const nextRunAt = earliestAssistantAutomationWakeAt(
     visibleNextRunAt,
     backgroundMaintenanceRetryWakeAt,
   )
@@ -460,60 +481,6 @@ export async function getAssistantCronStatus(
     runningJobs,
     nextRunAt,
   }
-}
-
-async function resolveAssistantCronBackgroundMaintenanceRetryWakeAt(
-  vault: string,
-  options: AssistantCronStatusOptions,
-): Promise<string | null> {
-  if (options.shouldYieldBackgroundMaintenance?.() !== true) {
-    return null
-  }
-
-  const paths = resolveAssistantStatePaths(vault)
-  const [localStore, canonicalRecords, runtimeStore] = await Promise.all([
-    readAssistantCronStore(paths),
-    listCanonicalAssistantCronRecords(vault),
-    readAssistantCronCanonicalRuntimeStore(paths),
-  ])
-  const projection = buildRunnableAssistantCronJobProjection({
-    canonicalRecords,
-    localStore,
-    runtimeScopeInput: {
-      executionContext: options.executionContext,
-      turnEnvironment: options.turnEnvironment,
-      shouldYieldBackgroundMaintenance: null,
-    },
-    runtimeStore,
-  })
-
-  const now = new Date().toISOString()
-  return earliestAssistantCronWakeAt(
-    ...projection.canonicalEntries
-      .filter((entry) =>
-        canonicalAssistantCronSourceIsBackgroundMaintenance(entry.source),
-      )
-      .map((entry) => {
-        if (entry.runtimeState.state.retryAfterAt !== null) {
-          return entry.job.state.nextRunAt
-        }
-        // A due job that was never claimed has no persisted retry marker, but
-        // active foreground yield hides it from the runnable projection. It
-        // still needs a catch-up wake or the occurrence sits until an
-        // unrelated wake happens with yield inactive.
-        return isAssistantCronJobDue(entry.job, now)
-          ? computeAssistantCronBackgroundMaintenanceYieldRetryAt(now)
-          : null
-      }),
-  )
-}
-
-function earliestAssistantCronWakeAt(
-  ...values: Array<string | null | undefined>
-): string | null {
-  return values
-    .filter((value): value is string => typeof value === 'string' && value.length > 0)
-    .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null
 }
 
 export async function listAssistantCronRuns(input: {
@@ -664,33 +631,29 @@ export async function processDueAssistantCronJobsLocal(
       break
     }
 
-    let backgroundMaintenanceYielded = false
-    const result = await executeClaimedAssistantCronJob({
-      deliveryDispatchMode: input.deliveryDispatchMode,
-      executionContext: input.executionContext,
-      onTraceEvent: input.onTraceEvent,
-      paths,
-      shouldYield: input.shouldYield ?? null,
-      signal: input.signal,
-      shouldYieldBackgroundMaintenance:
-        input.shouldYieldBackgroundMaintenance ?? null,
-      turnEnvironment: input.turnEnvironment ?? null,
-      trigger: 'scheduled',
-      vault: input.vault,
-      job: claimed,
-    }).catch((error) => {
+    let result: Awaited<ReturnType<typeof executeClaimedAssistantCronJob>>
+    try {
+      result = await executeClaimedAssistantCronJob({
+        deliveryDispatchMode: input.deliveryDispatchMode,
+        executionContext: input.executionContext,
+        onTraceEvent: input.onTraceEvent,
+        paths,
+        shouldYield: input.shouldYield ?? null,
+        signal: input.signal,
+        shouldYieldBackgroundMaintenance:
+          input.shouldYieldBackgroundMaintenance ?? null,
+        turnEnvironment: input.turnEnvironment ?? null,
+        trigger: 'scheduled',
+        vault: input.vault,
+        job: claimed,
+      })
+    } catch (error) {
       if (isAssistantCronBackgroundMaintenanceYieldError(error)) {
-        backgroundMaintenanceYielded = true
-        return null
+        summary.processed += 1
+        break
       }
 
       throw error
-    })
-    if (!result) {
-      if (backgroundMaintenanceYielded) {
-        summary.processed += 1
-      }
-      break
     }
     summary.processed += 1
 
@@ -794,24 +757,6 @@ async function emitAssistantCronScanEvents(input: {
       providerState: 'completed',
     })
   }
-}
-
-async function listAssistantRunnableCronJobs(
-  vault: string,
-  runtimeScopeInput: AssistantCronRunnableProjectionInput,
-): Promise<AssistantCronJob[]> {
-  const paths = resolveAssistantStatePaths(vault)
-  const [localStore, canonicalRecords, runtimeStore] = await Promise.all([
-    readAssistantCronStore(paths),
-    listCanonicalAssistantCronRecords(vault),
-    readAssistantCronCanonicalRuntimeStore(paths),
-  ])
-  return buildRunnableAssistantCronJobProjection({
-    canonicalRecords,
-    localStore,
-    runtimeScopeInput,
-    runtimeStore,
-  }).jobs
 }
 
 function emitAssistantCronJobCompletedEvent(input: {

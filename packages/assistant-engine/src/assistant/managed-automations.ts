@@ -7,7 +7,7 @@ import {
   type AutomationRecord,
 } from '@murphai/core'
 import {
-  HOSTED_RUNTIME_PROCESS_ENV,
+  isHostedRuntimeProcessEnv,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
 import {
   MURPH_PRODUCT_ORIGIN,
@@ -882,7 +882,7 @@ function murphManagedAutomationAppliesToRuntime(
   runtimeEnv: Readonly<Record<string, string | undefined>> | undefined,
 ): boolean {
   return seed.hostedRuntimeOnly !== true ||
-    runtimeEnv?.[HOSTED_RUNTIME_PROCESS_ENV]?.trim() === '1'
+    isHostedRuntimeProcessEnv(runtimeEnv ?? {})
 }
 
 function normalizeMurphManagedAutomationSummary(

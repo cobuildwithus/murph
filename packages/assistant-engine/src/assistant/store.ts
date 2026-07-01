@@ -348,31 +348,7 @@ export async function listAssistantSessionsLocal(
 ): Promise<AssistantSession[]> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
-
-    const entries = await readdir(paths.sessionsDirectory, {
-      withFileTypes: true,
-    })
-    const sessions: AssistantSession[] = []
-
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.json')) {
-        continue
-      }
-
-      const sessionId = entry.name.replace(/\.json$/u, '')
-      const session = await readAssistantSession({
-        paths,
-        sessionId,
-        treatCorruptedAsMissing: true,
-      })
-      if (session) {
-        sessions.push(session)
-      }
-    }
-
-    return sessions.sort((left, right) =>
-      compareAssistantTimestampsAscending(right.updatedAt, left.updatedAt),
-    )
+    return readAssistantSessionsSorted(paths, await listAssistantSessionFileIds(paths))
   })
 }
 
@@ -387,43 +363,60 @@ export async function listRecentAssistantSessions(
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
 
-    const entries = await readdir(paths.sessionsDirectory, {
-      withFileTypes: true,
-    })
-    const candidates: Array<{ mtimeMs: number; sessionId: string }> = []
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.json')) {
-        continue
-      }
-      try {
-        const stats = await stat(path.join(paths.sessionsDirectory, entry.name))
-        candidates.push({
-          mtimeMs: stats.mtimeMs,
-          sessionId: entry.name.replace(/\.json$/u, ''),
-        })
-      } catch {
-        continue
-      }
-    }
+    const sessionIds = await listAssistantSessionFileIds(paths)
+    const candidates = (await Promise.all(
+      sessionIds.map(async (sessionId) => {
+        try {
+          const stats = await stat(
+            path.join(paths.sessionsDirectory, `${sessionId}.json`),
+          )
+          return { mtimeMs: stats.mtimeMs, sessionId }
+        } catch {
+          return null
+        }
+      }),
+    )).filter((candidate) => candidate !== null)
 
-    const sessions: AssistantSession[] = []
-    for (const candidate of candidates
-      .sort((left, right) => right.mtimeMs - left.mtimeMs)
-      .slice(0, Math.max(0, options.limit))) {
-      const session = await readAssistantSession({
-        paths,
-        sessionId: candidate.sessionId,
-        treatCorruptedAsMissing: true,
-      })
-      if (session) {
-        sessions.push(session)
-      }
-    }
-
-    return sessions.sort((left, right) =>
-      compareAssistantTimestampsAscending(right.updatedAt, left.updatedAt),
+    return readAssistantSessionsSorted(
+      paths,
+      candidates
+        .sort((left, right) => right.mtimeMs - left.mtimeMs)
+        .slice(0, Math.max(0, options.limit))
+        .map((candidate) => candidate.sessionId),
     )
   })
+}
+
+async function listAssistantSessionFileIds(
+  paths: AssistantStatePaths,
+): Promise<string[]> {
+  const entries = await readdir(paths.sessionsDirectory, {
+    withFileTypes: true,
+  })
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .map((entry) => entry.name.replace(/\.json$/u, ''))
+}
+
+async function readAssistantSessionsSorted(
+  paths: AssistantStatePaths,
+  sessionIds: readonly string[],
+): Promise<AssistantSession[]> {
+  const sessions: AssistantSession[] = []
+  for (const sessionId of sessionIds) {
+    const session = await readAssistantSession({
+      paths,
+      sessionId,
+      treatCorruptedAsMissing: true,
+    })
+    if (session) {
+      sessions.push(session)
+    }
+  }
+
+  return sessions.sort((left, right) =>
+    compareAssistantTimestampsAscending(right.updatedAt, left.updatedAt),
+  )
 }
 
 export async function getAssistantSession(

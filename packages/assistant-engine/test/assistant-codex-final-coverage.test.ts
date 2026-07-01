@@ -1659,7 +1659,6 @@ describe('Codex model catalog', () => {
       throw new Error('Expected Codex provider handling to succeed.')
     }
     expect(outcome.providerTurn.response).toBe('provider response')
-    expect(outcome.providerTurn.nonReplayableProviderWork).toBe(false)
     expect(issueDeviceConnectLink).not.toHaveBeenCalled()
     expect(providerMocks.executeCodexAssistantTurnAttemptFromInput).toHaveBeenCalledWith(
       expect.objectContaining({

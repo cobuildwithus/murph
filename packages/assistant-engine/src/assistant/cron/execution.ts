@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { setScheduledLogStatus, upsertAutomation } from '@murphai/core'
 import {
-  HOSTED_RUNTIME_PROCESS_ENV,
+  isHostedRuntimeProcessEnv,
 } from '@murphai/hosted-execution/cli-runtime-bridge'
 import {
   type AutomationQueryRecord,
@@ -20,6 +20,7 @@ import {
 } from '../../assistant-service.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
 import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelope.js'
+import { computeAssistantAutomationRetryAt } from '../automation/shared.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import {
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
@@ -132,10 +133,6 @@ export interface AssistantCronRuntimeScopeInput {
   turnEnvironment?: AssistantTurnEnvironment | null
 }
 
-interface AssistantCronRuntimeScope {
-  hostedRuntimeProcess: boolean
-}
-
 export interface AssistantCronRunnableProjectionInput
   extends AssistantCronRuntimeScopeInput {
   shouldYieldBackgroundMaintenance?: (() => boolean) | null
@@ -152,6 +149,7 @@ export interface RunnableAssistantCronJobProjection {
   canonicalEntries: RunnableAssistantCronCanonicalEntry[]
   jobs: AssistantCronJob[]
   visibleLocalStore: ReturnType<typeof buildVisibleLocalAssistantCronStore>
+  yieldDeferredBackgroundMaintenanceEntries: RunnableAssistantCronCanonicalEntry[]
 }
 
 const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELDED_CODE =
@@ -161,9 +159,10 @@ const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELD_RETRY_MS = 30_000
 export function computeAssistantCronBackgroundMaintenanceYieldRetryAt(
   nowIso: string,
 ): string {
-  return new Date(
-    Date.parse(nowIso) + ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELD_RETRY_MS,
-  ).toISOString()
+  return computeAssistantAutomationRetryAt(
+    ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELD_RETRY_MS,
+    Date.parse(nowIso),
+  )
 }
 
 export async function claimResolvedAssistantCronJob(input: {
@@ -325,7 +324,7 @@ export function assertAssistantCronJobRunnableInRuntime(input: {
   if (
     input.job.kind !== 'canonical' ||
     canonicalAssistantCronSourceCanRunInRuntime({
-      runtimeScope: resolveAssistantCronRuntimeScope(input),
+      hostedRuntimeProcess: resolveAssistantCronRuntimeScope(input),
       source: input.job.source,
     })
   ) {
@@ -345,22 +344,23 @@ export function buildRunnableAssistantCronJobProjection(input: {
   runtimeStore: AssistantCronCanonicalRuntimeStore
 }): RunnableAssistantCronJobProjection {
   const runtimeScopeInput = input.runtimeScopeInput ?? {}
-  const runtimeScope = resolveAssistantCronRuntimeScope(runtimeScopeInput)
+  const hostedRuntimeProcess = resolveAssistantCronRuntimeScope(runtimeScopeInput)
   const visibleLocalStore = buildVisibleLocalAssistantCronStore(input.localStore)
-  const canonicalEntries = input.canonicalRecords.flatMap((source) => {
+  const canonicalEntries: RunnableAssistantCronCanonicalEntry[] = []
+  const yieldDeferredBackgroundMaintenanceEntries: RunnableAssistantCronCanonicalEntry[] = []
+
+  for (const source of input.canonicalRecords) {
     if (
-      !canonicalAssistantCronSourceCanRunInPass({
-        runtimeScope,
-        shouldYieldBackgroundMaintenance:
-          runtimeScopeInput.shouldYieldBackgroundMaintenance ?? null,
+      !canonicalAssistantCronSourceCanRunInRuntime({
+        hostedRuntimeProcess,
         source,
       })
     ) {
-      return []
+      continue
     }
 
     const runtimeState = resolveCanonicalRuntimeState(source, input.runtimeStore)
-    return [{
+    const entry = {
       source,
       runtimeState,
       runtimeStatePresent: input.runtimeStore.jobs.some(
@@ -370,12 +370,24 @@ export function buildRunnableAssistantCronJobProjection(input: {
         source,
         runtimeState,
       }),
-    }]
-  })
+    }
+    // Active foreground yield hides background maintenance from the runnable
+    // set, but the entries stay visible here so status/wake computation can
+    // schedule the catch-up instead of silently disarming a due occurrence.
+    if (
+      canonicalAssistantCronSourceIsBackgroundMaintenance(source) &&
+      runtimeScopeInput.shouldYieldBackgroundMaintenance?.() === true
+    ) {
+      yieldDeferredBackgroundMaintenanceEntries.push(entry)
+      continue
+    }
+    canonicalEntries.push(entry)
+  }
 
   return {
     canonicalEntries,
     visibleLocalStore,
+    yieldDeferredBackgroundMaintenanceEntries,
     jobs: sortAssistantCronJobs([
       ...visibleLocalStore.jobs,
       ...canonicalEntries.map((entry) => entry.job),
@@ -438,12 +450,9 @@ export async function executeClaimedAssistantCronJob(input: {
     shouldYieldBackgroundMaintenance:
       input.shouldYieldBackgroundMaintenance ?? null,
   })
-  let releaseClaimAfterYield = false
-
   try {
     if (yieldCancellation.signal.aborted) {
       if (yieldCancellation.yieldRequested()) {
-        releaseClaimAfterYield = true
         throw createAssistantCronBackgroundMaintenanceYieldError()
       }
 
@@ -458,7 +467,6 @@ export async function executeClaimedAssistantCronJob(input: {
     }
 
     if (yieldCancellation.shouldYield()) {
-      releaseClaimAfterYield = true
       throw createAssistantCronBackgroundMaintenanceYieldError()
     }
 
@@ -579,7 +587,6 @@ export async function executeClaimedAssistantCronJob(input: {
           errorText = lifecycleSkipReason
         } else {
           if (yieldCancellation.shouldYield()) {
-            releaseClaimAfterYield = true
             throw createAssistantCronBackgroundMaintenanceYieldError()
           }
 
@@ -619,7 +626,7 @@ export async function executeClaimedAssistantCronJob(input: {
             identityId: claimedJob.target.identityId,
             onTraceEvent: input.onTraceEvent,
             participantId: claimedJob.target.participantId,
-            ...resolveAssistantCronNotificationTurnPolicy(input.job),
+            turnPolicy: resolveAssistantCronNotificationTurnPolicy(input.job),
             responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
             threadId: claimedJob.target.threadId,
             bindingDeliveryTarget: bindingDelivery?.target ?? undefined,
@@ -666,7 +673,7 @@ export async function executeClaimedAssistantCronJob(input: {
         : error instanceof VaultCliError ? error.code : null
       status = 'skipped'
     } else if (backgroundMaintenanceYielded) {
-      if (releaseClaimAfterYield || yieldCancellation.yieldRequested()) {
+      if (yieldCancellation.yieldRequested()) {
         await releaseClaimedAssistantCronJobAfterBackgroundMaintenanceYield({
           job: input.job,
           paths: input.paths,
@@ -931,19 +938,13 @@ function resolveAssistantCronNotificationResponsePolicy(
 
 function resolveAssistantCronNotificationTurnPolicy(
   job: ResolvedAssistantCronJob,
-):
-  | { turnPolicy: AssistantNotificationTurnPolicy }
-  | Record<string, never> {
-  return job.kind === 'canonical' &&
-    job.source.kind === 'automation' &&
-    job.source.automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
+): AssistantNotificationTurnPolicy | null {
+  return assistantCronJobIsPreemptibleBackgroundMaintenance(job)
     ? {
-        turnPolicy: {
-          kind: 'maintenance-exact-skip',
-          privateSummary: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
-        },
+        kind: 'maintenance-exact-skip',
+        privateSummary: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
       }
-    : {}
+    : null
 }
 
 function buildAssistantCronDeviceActivityDeliveryIdempotencyKey(input: {
@@ -1480,36 +1481,13 @@ function resolveNextDueAssistantCronCandidate(input: {
   }
 }
 
-function canonicalAssistantCronSourceCanRunInPass(input: {
-  runtimeScope: AssistantCronRuntimeScope
-  shouldYieldBackgroundMaintenance?: (() => boolean) | null
-  source: CanonicalAssistantCronJobRecord
-}): boolean {
-  if (
-    !canonicalAssistantCronSourceCanRunInRuntime({
-      runtimeScope: input.runtimeScope,
-      source: input.source,
-    })
-  ) {
-    return false
-  }
-
-  return !canonicalAssistantCronSourceIsBackgroundMaintenance(input.source) ||
-    input.shouldYieldBackgroundMaintenance?.() !== true
-}
-
+// Background maintenance is hosted-only; everything else runs anywhere.
 function canonicalAssistantCronSourceCanRunInRuntime(input: {
-  runtimeScope: AssistantCronRuntimeScope
+  hostedRuntimeProcess: boolean
   source: CanonicalAssistantCronJobRecord
 }): boolean {
-  return !canonicalAssistantCronSourceRequiresHostedRuntime(input.source) ||
-    input.runtimeScope.hostedRuntimeProcess
-}
-
-function canonicalAssistantCronSourceRequiresHostedRuntime(
-  source: CanonicalAssistantCronJobRecord,
-): boolean {
-  return canonicalAssistantCronSourceIsBackgroundMaintenance(source)
+  return !canonicalAssistantCronSourceIsBackgroundMaintenance(input.source) ||
+    input.hostedRuntimeProcess
 }
 
 export function canonicalAssistantCronSourceIsBackgroundMaintenance(
@@ -1521,13 +1499,10 @@ export function canonicalAssistantCronSourceIsBackgroundMaintenance(
 
 function resolveAssistantCronRuntimeScope(
   input: AssistantCronRuntimeScopeInput,
-): AssistantCronRuntimeScope {
-  return {
-    hostedRuntimeProcess:
-      input.executionContext?.hosted != null ||
-      input.turnEnvironment?.env?.[HOSTED_RUNTIME_PROCESS_ENV]?.trim() === '1' ||
-      process.env[HOSTED_RUNTIME_PROCESS_ENV]?.trim() === '1',
-  }
+): boolean {
+  return input.executionContext?.hosted != null ||
+    isHostedRuntimeProcessEnv(input.turnEnvironment?.env ?? {}) ||
+    isHostedRuntimeProcessEnv(process.env)
 }
 
 function cryptoRandomCronClaimId(): string {

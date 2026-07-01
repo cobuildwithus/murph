@@ -573,23 +573,23 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const dynamicTools = input.profile.toolProfile === 'maintenance-turn'
     ? []
     : resolveMurphDynamicTools({
-    allowFinishWithoutReply,
-    allowMessageReactions: messageReactionsAvailable,
-    computerToolsAvailable:
-      input.hostedToolContext?.computerToolsAvailable === true,
-    progressUpdatesAvailable: input.progressDelivery != null,
-    connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
-    familyPlanAvailable: input.hostedToolContext?.familyPlanTool != null,
-    productFeedbackAvailable:
-      productFeedbackAcceptedInputIds.length > 0 &&
-      typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
-    phoneCallsAvailable:
-      phoneCallAcceptedInputIds.length > 0 &&
-      input.hostedToolContext?.phoneCalls != null,
-    voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
-    vaultFileSendAvailable:
-      input.hostedToolContext?.vaultFileSendAvailable === true,
-  })
+        allowFinishWithoutReply,
+        allowMessageReactions: messageReactionsAvailable,
+        computerToolsAvailable:
+          input.hostedToolContext?.computerToolsAvailable === true,
+        progressUpdatesAvailable: input.progressDelivery != null,
+        connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
+        familyPlanAvailable: input.hostedToolContext?.familyPlanTool != null,
+        productFeedbackAvailable:
+          productFeedbackAcceptedInputIds.length > 0 &&
+          typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
+        phoneCallsAvailable:
+          phoneCallAcceptedInputIds.length > 0 &&
+          input.hostedToolContext?.phoneCalls != null,
+        voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
+        vaultFileSendAvailable:
+          input.hostedToolContext?.vaultFileSendAvailable === true,
+      })
   const reactionDynamicToolAvailable = dynamicTools.some(
     (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
   )
@@ -875,7 +875,7 @@ export function limitAssistantConversationHistoryTextBytes(
   return normalizeNullableString(codePoints.slice(0, low).join('').trimEnd())
 }
 
-function assistantConversationHistoryUtf8Bytes(value: string): number {
+export function assistantConversationHistoryUtf8Bytes(value: string): number {
   return assistantConversationHistoryTextEncoder.encode(value).byteLength
 }
 

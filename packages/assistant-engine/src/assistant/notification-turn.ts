@@ -127,9 +127,10 @@ export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
 
-export type AssistantNotificationTurnPolicy =
-  | { kind: 'default' }
-  | { kind: 'maintenance-exact-skip'; privateSummary: string }
+export type AssistantNotificationTurnPolicy = {
+  kind: 'maintenance-exact-skip'
+  privateSummary: string
+}
 
 export type AssistantNotificationResponsePolicy =
   | { kind: 'allow_send_or_skip' }
@@ -307,8 +308,6 @@ export async function sendAssistantNotificationLocal(
           const nonReplayableProviderWork =
             resolveAssistantNotificationProviderNonReplayableWork({
               input,
-              providerNonReplayableWork:
-                providerOutcome.nonReplayableProviderWork,
               rawEvents: providerOutcome.rawEvents ?? [],
             })
           const failedProviderResult = {
@@ -352,8 +351,6 @@ export async function sendAssistantNotificationLocal(
         const nonReplayableProviderWork =
           resolveAssistantNotificationProviderNonReplayableWork({
             input,
-            providerNonReplayableWork:
-              providerResult.nonReplayableProviderWork === true,
             rawEvents: providerResult.rawEvents ?? [],
           })
         const selectedRoute = providerResult.route
@@ -1016,7 +1013,16 @@ function buildAssistantNotificationMessageInput(
   maintenanceEvidence: string | null,
 ): AssistantMessageInput {
   const instructions = normalizeRequiredText(input.instructions, 'instructions')
+  // One overlay for every maintenance-turn divergence, so the fields cannot
+  // drift apart across separate conditional spreads.
+  const maintenanceOverlay = isAssistantNotificationMaintenanceExactSkip(input)
+    ? {
+        codexConfigOverrides: ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
+        suppressProviderFailureTranscriptAudit: true,
+      }
+    : {}
   return {
+    ...maintenanceOverlay,
     abortSignal: input.abortSignal,
     actorId: input.actorId,
     alias: input.alias,
@@ -1024,12 +1030,6 @@ function buildAssistantNotificationMessageInput(
     approvalPolicy: input.approvalPolicy,
     bindingDeliveryTarget: input.bindingDeliveryTarget,
     channel: input.channel,
-    ...(isAssistantNotificationMaintenanceExactSkip(input)
-      ? {
-          codexConfigOverrides:
-            ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
-        }
-      : {}),
     codexCommand: input.codexCommand,
     codexHome: input.codexHome,
     conversation: input.conversation,
@@ -1065,9 +1065,6 @@ function buildAssistantNotificationMessageInput(
     serviceTier: input.serviceTier ?? null,
     sessionId: input.sessionId,
     showThinkingTraces: input.showThinkingTraces,
-    ...(isAssistantNotificationMaintenanceExactSkip(input)
-      ? { suppressProviderFailureTranscriptAudit: true }
-      : {}),
     threadId: input.threadId,
     threadIsDirect: input.threadIsDirect,
     turnEnvironment: input.turnEnvironment ?? null,
@@ -1242,16 +1239,15 @@ function isAssistantNotificationMaintenanceExactSkip(
   return input.turnPolicy?.kind === 'maintenance-exact-skip'
 }
 
+// Only maintenance turns consume this signal (to decide whether a failed run
+// already performed non-replayable memory writes); it is derived from the
+// committed provider events rather than trusted from provider metadata.
 function resolveAssistantNotificationProviderNonReplayableWork(input: {
   input: AssistantNotificationInput
-  providerNonReplayableWork: boolean
   rawEvents: readonly unknown[]
 }): boolean {
-  if (!isAssistantNotificationMaintenanceExactSkip(input.input)) {
-    return input.providerNonReplayableWork
-  }
-
-  return assistantMaintenanceRawEventsIncludeMemoryMutation(input.rawEvents)
+  return isAssistantNotificationMaintenanceExactSkip(input.input) &&
+    assistantMaintenanceRawEventsIncludeMemoryMutation(input.rawEvents)
 }
 
 function assistantMaintenanceRawEventsIncludeMemoryMutation(

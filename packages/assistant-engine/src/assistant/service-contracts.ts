@@ -171,7 +171,6 @@ export interface PersistedUserTurn {
 export interface ExecutedAssistantProviderTurnResult extends AssistantProviderTurnExecutionResult {
   assistantContractFingerprint: string
   attemptCount: number
-  nonReplayableProviderWork?: boolean
   onboardingGuidanceInjected?: boolean
   codexContinuation: AssistantCodexContinuation
   providerOptions: AssistantProviderSessionOptions

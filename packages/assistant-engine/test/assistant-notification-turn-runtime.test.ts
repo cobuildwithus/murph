@@ -1683,7 +1683,6 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
         session: providerSession,
       }),
       additionalUsages: [],
-      nonReplayableProviderWork: true,
     },
   })
 
@@ -1717,7 +1716,6 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
     kind: 'succeeded',
     providerTurn: {
       ...createProviderResult({
-        nonReplayableProviderWork: true,
         rawEvents: [
           createCodexCommandCompletedEvent(
             'vault-cli memory show --vault "$VAULT" --format json',
@@ -2364,7 +2362,6 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
     executeCodexTurnWithRecovery: vi.fn(async () => ({
       error: providerError,
       kind: 'failed_terminal',
-      nonReplayableProviderWork: true,
       route,
     })),
     normalizeAssistantExecutionContext: vi.fn((value) => value),
@@ -2443,7 +2440,7 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
     assistantNotificationProviderBaseUrlOrigin: null,
     assistantNotificationProviderBaseUrlPath: null,
     assistantNotificationProviderModel: 'gpt-5.5-mini',
-    assistantNotificationProviderNonReplayableWork: true,
+    assistantNotificationProviderNonReplayableWork: false,
     assistantNotificationRouteId: 'route-provider-failure',
     assistantNotificationStage: 'provider',
   })
@@ -2931,7 +2928,6 @@ async function loadNotificationTurnHarness(input: {
 
 function createProviderResult(input?: {
   codexThreadHistoryUnsafe?: boolean | null
-  nonReplayableProviderWork?: boolean
   providerOptions?: AssistantProviderSessionOptions
   codexThreadId?: string | null
   rawEvents?: readonly unknown[]
@@ -2968,9 +2964,6 @@ function createProviderResult(input?: {
       kind: 'explicit-structured-history',
     },
     providerOptions: input?.providerOptions ?? createProviderOptions(),
-    ...(input?.nonReplayableProviderWork !== undefined
-      ? { nonReplayableProviderWork: input.nonReplayableProviderWork }
-      : {}),
     ...(input?.codexThreadHistoryUnsafe !== undefined
       ? { codexThreadHistoryUnsafe: input.codexThreadHistoryUnsafe }
       : {}),

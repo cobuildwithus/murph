@@ -3,6 +3,10 @@ import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type {
+  AssistantCodexTurnPromptProfile,
+  AssistantCodexTurnToolProfile,
+} from './codex-turn/planning.js'
+import type {
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
 } from '@murphai/hosted-execution/runtime-control'
@@ -72,8 +76,8 @@ export function shouldCreateAssistantProgressDelivery(
     'channel' | 'deliverResponse' | 'deliveryDispatchMode' | 'turnTrigger'
   >,
   profile?: {
-    promptProfile?: 'conversation' | 'notification-decision' | null
-    toolProfile?: 'provider-turn' | 'notification-turn' | 'maintenance-turn' | null
+    promptProfile?: AssistantCodexTurnPromptProfile | null
+    toolProfile?: AssistantCodexTurnToolProfile | null
   } | null,
 ): boolean {
   return input.deliverResponse === true &&

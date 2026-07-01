@@ -1,4 +1,8 @@
-import { limitAssistantConversationHistoryTextBytes } from './codex-turn/planning.js'
+import {
+  assistantConversationHistoryUtf8Bytes,
+  limitAssistantConversationHistoryTextBytes,
+} from './codex-turn/planning.js'
+import { compareAssistantTimestampsAscending } from './shared.js'
 import {
   listAssistantTranscriptTailEntries,
   listRecentAssistantSessions,
@@ -19,8 +23,6 @@ const ASSISTANT_MAINTENANCE_EVIDENCE_TRANSCRIPT_TAIL_BYTES = 262_144
 
 const ASSISTANT_MAINTENANCE_EVIDENCE_EMPTY_BODY =
   'No committed user or assistant conversation messages were found in this window. Do not write any new memory this run.'
-
-const assistantMaintenanceEvidenceTextEncoder = new TextEncoder()
 
 interface AssistantMaintenanceEvidenceMessage {
   createdAt: string
@@ -121,7 +123,7 @@ async function collectAssistantMaintenanceEvidenceMessages(input: {
   }
 
   return messages.sort((left, right) =>
-    left.createdAt.localeCompare(right.createdAt),
+    compareAssistantTimestampsAscending(left.createdAt, right.createdAt),
   )
 }
 
@@ -136,8 +138,7 @@ function selectNewestAssistantMaintenanceEvidenceMessages(
     if (!candidate || selected.length >= ASSISTANT_MAINTENANCE_EVIDENCE_MAX_MESSAGES) {
       break
     }
-    const candidateBytes =
-      assistantMaintenanceEvidenceTextEncoder.encode(candidate.text).length
+    const candidateBytes = assistantConversationHistoryUtf8Bytes(candidate.text)
     if (totalBytes + candidateBytes > ASSISTANT_MAINTENANCE_EVIDENCE_TOTAL_BYTES) {
       break
     }

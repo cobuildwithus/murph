@@ -163,17 +163,7 @@ export async function readAssistantTranscriptEntries(
   const transcriptPath = resolveAssistantTranscriptPath(paths, sessionId)
 
   try {
-    const raw = await readFile(transcriptPath, 'utf8')
-    const parsed = parseAssistantJsonLinesWithTailSalvage(raw, (value) =>
-      assistantTranscriptEntrySchema.parse(value),
-    )
-    if (parsed.malformedLineCount > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_TRANSCRIPT_CORRUPTED',
-        'Assistant transcript contains malformed committed entries.',
-      )
-    }
-    return parsed.values
+    return parseAssistantTranscriptRaw(await readFile(transcriptPath, 'utf8'))
   } catch (error) {
     if (isMissingFileError(error)) {
       return []
@@ -181,6 +171,19 @@ export async function readAssistantTranscriptEntries(
 
     throw error
   }
+}
+
+function parseAssistantTranscriptRaw(raw: string): AssistantTranscriptEntry[] {
+  const parsed = parseAssistantJsonLinesWithTailSalvage(raw, (value) =>
+    assistantTranscriptEntrySchema.parse(value),
+  )
+  if (parsed.malformedLineCount > 0) {
+    throw new VaultCliError(
+      'ASSISTANT_TRANSCRIPT_CORRUPTED',
+      'Assistant transcript contains malformed committed entries.',
+    )
+  }
+  return parsed.values
 }
 
 // Bounded tail read for recurring maintenance work: reads at most maxBytes
@@ -216,16 +219,7 @@ export async function readAssistantTranscriptTailEntries(
       const firstNewlineIndex = raw.indexOf('\n')
       raw = firstNewlineIndex === -1 ? '' : raw.slice(firstNewlineIndex + 1)
     }
-    const parsed = parseAssistantJsonLinesWithTailSalvage(raw, (value) =>
-      assistantTranscriptEntrySchema.parse(value),
-    )
-    if (parsed.malformedLineCount > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_TRANSCRIPT_CORRUPTED',
-        'Assistant transcript contains malformed committed entries.',
-      )
-    }
-    return parsed.values
+    return parseAssistantTranscriptRaw(raw)
   } finally {
     await handle.close()
   }

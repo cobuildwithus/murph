@@ -126,7 +126,6 @@ type AssistantCodexAttemptOutcome =
       providerTurnId: string | null
       rawEvents: unknown[]
       session: AssistantSession
-      nonReplayableProviderWork: boolean
       usage: AssistantProviderUsage | null
       additionalUsages: readonly AssistantProviderUsageDraft[]
       usageAttribution: AssistantUsageAttribution | null
@@ -151,7 +150,6 @@ export type AssistantCodexTurnRecoveryOutcome =
       rawEvents: unknown[]
       route: CodexThreadIdentity
       session: AssistantSession
-      nonReplayableProviderWork: boolean
       usage: AssistantProviderUsage | null
       additionalUsages: readonly AssistantProviderUsageDraft[]
       usageAttribution: AssistantUsageAttribution | null
@@ -231,7 +229,6 @@ export async function executeCodexTurnWithRecovery(input: {
         rawEvents: attemptOutcome.rawEvents,
         route: attemptPlan.route,
         session: attemptOutcome.session,
-        nonReplayableProviderWork: attemptOutcome.nonReplayableProviderWork,
         usage: attemptOutcome.usage,
         additionalUsages: attemptOutcome.additionalUsages,
         usageAttribution: attemptOutcome.usageAttribution,
@@ -581,9 +578,6 @@ async function executeAssistantCodexAttempt(input: {
         assistantContractFingerprint:
           attemptPlan.routePlan.assistantContractFingerprint,
         attemptCount: attemptPlan.attemptCount,
-        nonReplayableProviderWork:
-          attemptMetadata.executedToolCount > 0 ||
-          attemptMetadata.providerActionCount > 0,
         onboardingGuidanceInjected: attemptPlan.routePlan.onboardingGuidanceInjected,
         codexContinuation:
           result.codexContinuation ?? effectiveCodexContinuation,
@@ -670,9 +664,6 @@ async function executeAssistantCodexAttempt(input: {
       providerTurnId: failedAttemptProviderTurnId,
       rawEvents: failedAttemptRawEvents,
       session,
-      nonReplayableProviderWork:
-        attemptMetadata.executedToolCount > 0 ||
-        attemptMetadata.providerActionCount > 0,
       usage: failedAttemptUsage,
       additionalUsages: failedAttemptAdditionalUsages,
       usageAttribution,
