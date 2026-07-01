@@ -43,6 +43,7 @@ import {
 
 import {
   buildHostedCodexConfigToml,
+  HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
   prepareHostedCodexRuntimeEnvironment,
 } from "../src/hosted-runtime/codex-config.ts";
 import {
@@ -62,6 +63,22 @@ const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
 const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
+
+test("hosted Codex memory diagnostics expose only safe config metadata", () => {
+  assert.deepEqual(HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS, {
+    codexOperatorMemoryDisableOnExternalContext: false,
+    codexOperatorMemoryFeatureEnabled: true,
+    codexOperatorMemoryGenerateMemories: true,
+    codexOperatorMemoryMaxRawMemoriesForConsolidation: 128,
+    codexOperatorMemoryMaxRolloutAgeDays: 10,
+    codexOperatorMemoryMaxRolloutsPerStartup: 1,
+    codexOperatorMemoryMaxUnusedDays: 30,
+    codexOperatorMemoryMinRateLimitRemainingPercent: 25,
+    codexOperatorMemoryMinRolloutIdleHours: 1,
+    codexOperatorMemoryMode: "codex-native-operator-context",
+    codexOperatorMemoryUseMemories: true,
+  });
+});
 
 function executeCodexAppServerTurn(
   input: Omit<CodexAppServerTurnInput, "dynamicTools"> & {
