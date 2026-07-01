@@ -1444,6 +1444,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         domains: ["experiments"],
         vaultRoot,
       });
+      mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
+        captureIds: ["cap_terminal_cleanup"],
+        linqMessageIds: ["linq_msg_terminal_cleanup"],
+      });
 
       const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
         importedCount: 0,
@@ -1608,6 +1612,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         lastCompleted: null,
         pendingDirtyDomains: ["experiments"],
       });
+      expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+      expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+      expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
     } finally {
       await rm(parentRoot, {
         force: true,
@@ -5048,7 +5055,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       return [{
         cleanupMessages: [],
         cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
+        deliveryChannel: "linq",
         deliveryErrorCode: null,
         deliveryErrorMessage: null,
         deliveryStatus: "sent",
@@ -5082,6 +5089,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     );
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: "2026-04-27T00:05:00.000Z",
+      },
+      linqMessageIds: ["provider_late_yield_first"],
+      vaultRoot: "/tmp/murph-vault",
+    });
     expect(mocks.resetHostedPreparedAssistantDeliveryEffects).not.toHaveBeenCalled();
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "assistant_runtime_commit",

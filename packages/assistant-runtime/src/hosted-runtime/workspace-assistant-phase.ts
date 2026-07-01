@@ -1449,13 +1449,19 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
   resultDrainsProviderCleanup?: boolean;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
-  const terminalLinqCleanup = await listPendingAssistantAutoReplyLinqCleanupEvidence({
-    vault: input.input.restored.vaultRoot,
-  });
+  const deferProviderCleanup =
+    input.backgroundMaintenanceYielded
+    || input.input.shouldYieldBackgroundMaintenance?.() === true;
+  const terminalLinqCleanup: HostedTerminalLinqCleanupEvidence = deferProviderCleanup
+    ? {
+        captureIds: [],
+        linqMessageIds: [],
+      }
+    : await listPendingAssistantAutoReplyLinqCleanupEvidence({
+        vault: input.input.restored.vaultRoot,
+      });
   const providerCleanupPhase = await runProviderCleanupPhase({
-    deferProviderCleanup:
-      input.backgroundMaintenanceYielded
-      || input.input.shouldYieldBackgroundMaintenance?.() === true,
+    deferProviderCleanup,
     foregroundAssistantPass: false,
     initialProviderCleanupCheckpoint: input.initialProviderCleanupCheckpoint,
     input: input.input,
@@ -3692,6 +3698,10 @@ async function drainHostedPostCheckpointDelivery(input: {
       })
     : [];
   if (backgroundDeliveryDrainYielded) {
+    await deferHostedProviderCleanupAfterDelivery({
+      input: input.input,
+      outcomes,
+    });
     return await yieldHostedBackgroundPostCheckpointDrain(input, {
       resetPreparedDelivery: false,
       yieldedDeliveryCount: backgroundDeliveryDrainYieldedCount,
