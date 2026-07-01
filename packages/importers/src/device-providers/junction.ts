@@ -669,6 +669,17 @@ interface JunctionDailyTimeseriesAggregate {
   timeZone?: string;
 }
 
+interface JunctionSleepStageAggregate {
+  dataOriginEntry: PlainObject;
+  durationMinutes: number;
+  endAt: string;
+  recordedAt?: string;
+  stage: JunctionSleepStage;
+  startAt: string;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  timeZone?: string;
+}
+
 function parseJunctionSnapshot(snapshot: unknown): JunctionSnapshotInput {
   return junctionSnapshotSchema.parse(snapshot);
 }
@@ -1722,8 +1733,9 @@ function pushSleepCycle(
   context: NormalizationContext,
 ): void {
   const parentTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+  const aggregates = new Map<string, JunctionSleepStageAggregate>();
 
-  for (const [index, intervalEntry] of sleepStageIntervalEntries(entry).entries()) {
+  for (const intervalEntry of sleepStageIntervalEntries(entry)) {
     const stage = firstSleepStageFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_VALUE_PATHS);
     if (!stage) {
       continue;
@@ -1753,8 +1765,10 @@ function pushSleepCycle(
 
     const intervalTimestamp = resolveRecordTimestamp(intervalEntry, context, resourceContext.sourceProviderSlug);
     const originEntry: PlainObject = { ...entry, ...intervalEntry };
+    const timeZone = firstStringFromPaths(intervalEntry, ["timeZone", "timezone", "time_zone"])
+      ?? firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]);
     const stageTimestamp = withTimestampOverride(intervalTimestamp, {
-      occurredAt: resolvedStartAt,
+      occurredAt: resolvedEndAt,
       recordedAt: intervalTimestamp.recordedAt ?? parentTimestamp.recordedAt ?? resolvedStartAt,
       dayKey: resolveSleepStageDayKey(intervalEntry, entry, resolvedStartAt, context.defaultTimeZone) ??
         intervalTimestamp.dayKey ??
@@ -1762,28 +1776,95 @@ function pushSleepCycle(
       observedAtRaw: stringId(startAtRaw) ?? intervalTimestamp.observedAtRaw ?? parentTimestamp.observedAtRaw ?? resolvedStartAt,
       timestampSemantics: intervalTimestamp.timestampSemantics ?? parentTimestamp.timestampSemantics,
     });
+    const aggregateKey = [
+      stage,
+      stageTimestamp.dayKey ?? "",
+      timeZone ?? "",
+    ].join("|");
+    const existing = aggregates.get(aggregateKey);
 
-    context.samples.push(stripUndefined({
-      stream: "sleep_stage",
-      unit: "stage",
+    if (existing) {
+      existing.durationMinutes += durationMinutes;
+      existing.startAt = earlierIsoTimestamp(existing.startAt, resolvedStartAt);
+      existing.endAt = laterIsoTimestamp(existing.endAt, resolvedEndAt);
+      existing.recordedAt = laterOptionalIsoTimestamp(existing.recordedAt, stageTimestamp.recordedAt);
+      existing.timestamp = withTimestampOverride(existing.timestamp, {
+        occurredAt: existing.endAt,
+        recordedAt: existing.recordedAt,
+      });
+      continue;
+    }
+
+    aggregates.set(aggregateKey, {
+      dataOriginEntry: originEntry,
+      durationMinutes,
+      endAt: resolvedEndAt,
       recordedAt: stageTimestamp.recordedAt,
-      dayKey: stageTimestamp.dayKey,
-      timeZone: firstStringFromPaths(intervalEntry, ["timeZone", "timezone", "time_zone"])
-        ?? firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]),
+      stage,
+      startAt: resolvedStartAt,
+      timestamp: stageTimestamp,
+      timeZone,
+    });
+  }
+
+  for (const aggregate of aggregates.values()) {
+    const metric = sleepStageMetricDescriptor(aggregate.stage);
+
+    context.events.push(stripUndefined({
+      kind: "observation",
+      occurredAt: aggregate.endAt,
+      recordedAt: aggregate.recordedAt,
+      dayKey: aggregate.timestamp.dayKey,
+      timeZone: aggregate.timeZone,
       source: "device",
-      quality: "normalized",
-      externalRef: makeJunctionSleepStageExternalRef(resourceContext, originEntry, stageTimestamp, stage, index),
-      dataOrigin: buildDataOrigin(originEntry, resourceContext, stageTimestamp),
-      sample: {
-        recordedAt: stageTimestamp.recordedAt,
-        occurredAt: stageTimestamp.occurredAt,
-        stage,
-        startAt: resolvedStartAt,
-        endAt: resolvedEndAt,
-        durationMinutes,
+      title: metric.title,
+      evidenceRoles: resourceContext.evidenceRoles,
+      externalRef: makeJunctionExternalRef(resourceContext, aggregate.dataOriginEntry, aggregate.timestamp, metric.metric),
+      dataOrigin: buildDataOrigin(aggregate.dataOriginEntry, resourceContext, aggregate.timestamp),
+      fields: {
+        metric: metric.metric,
+        observationGrain: "summary",
+        value: Number(aggregate.durationMinutes.toFixed(4)),
+        unit: "minutes",
       },
     }));
   }
+}
+
+function sleepStageMetricDescriptor(stage: JunctionSleepStage): Pick<MetricDescriptor, "metric" | "title"> {
+  switch (stage) {
+    case "awake":
+      return { metric: "sleep-awake-minutes", title: "Junction awake time" };
+    case "light":
+      return { metric: "sleep-light-minutes", title: "Junction light sleep" };
+    case "deep":
+      return { metric: "sleep-deep-minutes", title: "Junction deep sleep" };
+    case "rem":
+      return { metric: "sleep-rem-minutes", title: "Junction REM sleep" };
+  }
+
+  const exhaustive: never = stage;
+  return exhaustive;
+}
+
+function earlierIsoTimestamp(left: string, right: string): string {
+  return Date.parse(right) < Date.parse(left) ? right : left;
+}
+
+function laterIsoTimestamp(left: string, right: string): string {
+  return Date.parse(right) > Date.parse(left) ? right : left;
+}
+
+function laterOptionalIsoTimestamp(left: string | undefined, right: string | undefined): string | undefined {
+  if (!left) {
+    return right;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  return laterIsoTimestamp(left, right);
 }
 
 function resolveSleepStageDayKey(
@@ -3148,22 +3229,6 @@ function makeJunctionExternalRef(
   );
 }
 
-function makeJunctionSleepStageExternalRef(
-  resourceContext: ResourceContext,
-  entry: PlainObject,
-  timestamp: ReturnType<typeof resolveRecordTimestamp>,
-  stage: JunctionSleepStage,
-  index: number,
-): DeviceExternalRefPayload {
-  return makeProviderExternalRef(
-    "junction",
-    resourceContext.externalRefResourceType,
-    buildStableSleepStageResourceId(resourceContext, entry, timestamp, stage, index),
-    undefined,
-    `sleep-stage-${stage}`,
-  );
-}
-
 function buildJunctionResourceType(sourceProviderSlug: string, resourceSlug: string): string {
   return `junction-${slugify(sourceProviderSlug, "source")}-${slugify(resourceSlug, "resource")}`;
 }
@@ -3223,35 +3288,6 @@ function buildStableTimeseriesResourceId(
     resourceContext.origin.sourceType,
     resourceContext.origin.sourceInstanceId,
     timestamp.observedAtRaw ?? timestamp.occurredAt,
-  ])}`;
-}
-
-function buildStableSleepStageResourceId(
-  resourceContext: ResourceContext,
-  entry: PlainObject,
-  timestamp: ReturnType<typeof resolveRecordTimestamp>,
-  stage: JunctionSleepStage,
-  index: number,
-): string {
-  const explicitId = firstStringFromPaths(entry, [
-    "id",
-    "stageId",
-    "stage_id",
-    "resourceId",
-    "resource_id",
-    "externalId",
-    "external_id",
-  ]);
-
-  return `${resourceContext.resourceSlug}-stage-${shortHash([
-    resourceContext.resourceSlug,
-    resourceContext.sourceProviderSlug,
-    resourceContext.origin.sourceType,
-    resourceContext.origin.sourceInstanceId,
-    explicitId,
-    timestamp.observedAtRaw ?? timestamp.occurredAt,
-    stage,
-    index,
   ])}`;
 }
 

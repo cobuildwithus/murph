@@ -4477,7 +4477,7 @@ test("Junction normalizer canonicalizes documented resource aliases before allow
   assert.equal(glucoseEvent?.fields?.value, 100.9019);
 });
 
-test("Junction sleep_cycle normalizer emits structured sleep-stage samples", () => {
+test("Junction sleep_cycle normalizer emits compact sleep-stage observations", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-05-20T12:00:00.000Z",
     summaries: {
@@ -4528,7 +4528,7 @@ test("Junction sleep_cycle normalizer emits structured sleep-stage samples", () 
       }],
     },
   });
-  const samples = payload.samples ?? [];
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
   const rawSleepCycleArtifact = payload.evidenceParts?.find((artifact) =>
     artifact.role === "junction-summary-sleep-cycle"
   );
@@ -4541,33 +4541,27 @@ test("Junction sleep_cycle normalizer emits structured sleep-stage samples", () 
   );
   assert.equal(rawSleepCycleArtifact?.role, "junction-summary-sleep-cycle");
   assert.doesNotMatch(rawSleepCycleArtifactText, /raw-oura-ring-1/u);
-  assert.equal(payload.events?.length ?? 0, 0);
-  assert.equal(samples.length, 6);
-  assert.deepEqual(samples.map((sample) => sample.stream), [
-    "sleep_stage",
-    "sleep_stage",
-    "sleep_stage",
-    "sleep_stage",
-    "sleep_stage",
-    "sleep_stage",
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(observations.length, 5);
+  assert.deepEqual(observations.map((event) => event.fields?.metric), [
+    "sleep-light-minutes",
+    "sleep-rem-minutes",
+    "sleep-deep-minutes",
+    "sleep-awake-minutes",
+    "sleep-light-minutes",
   ]);
-  assert.deepEqual(samples.map((sample) => sample.unit), ["stage", "stage", "stage", "stage", "stage", "stage"]);
-  assert.deepEqual(samples.map((sample) => sample.sample.stage), ["light", "rem", "deep", "awake", "deep", "light"]);
-  assert.deepEqual(samples.map((sample) => sample.sample.durationMinutes), [30, 30, 60, 15, 15, 20]);
-  assert.equal(samples[0]?.sample.startAt, "2026-05-20T02:00:00.000Z");
-  assert.equal(samples[0]?.sample.endAt, "2026-05-20T02:30:00.000Z");
-  assert.equal(samples[2]?.sample.endAt, "2026-05-20T04:00:00.000Z");
-  assert.equal(samples[4]?.sample.startAt, "2026-05-20T04:15:00.000Z");
-  assert.equal(samples[4]?.sample.endAt, "2026-05-20T04:30:00.000Z");
-  assert.ok(samples.every((sample) => sample.externalRef?.system === "junction"));
-  assert.equal(samples.some((sample) => sample.externalRef?.resourceType.includes("hypnogram")), false);
-  assert.deepEqual([...new Set(samples.map((sample) => sample.externalRef?.resourceType))].sort(), [
+  assert.deepEqual(observations.map((event) => event.fields?.value), [30, 30, 75, 15, 20]);
+  assert.ok(observations.every((event) => event.fields?.unit === "minutes"));
+  assert.ok(observations.every((event) => event.fields?.observationGrain === "summary"));
+  assert.ok(observations.every((event) => event.externalRef?.system === "junction"));
+  assert.equal(observations.some((event) => event.externalRef?.resourceType.includes("hypnogram")), false);
+  assert.deepEqual([...new Set(observations.map((event) => event.externalRef?.resourceType))].sort(), [
     "junction-garmin-sleep-cycle",
     "junction-oura-sleep-cycle",
   ]);
-  assert.ok(samples.slice(0, 5).every((sample) => sample.dataOrigin?.sourceProviderSlug === "oura"));
-  assert.ok(samples.slice(0, 5).every((sample) => sample.dataOrigin?.sourceType === "ring"));
-  assert.equal(samples[5]?.dataOrigin?.sourceProviderSlug, "garmin");
+  assert.ok(observations.slice(0, 4).every((event) => event.dataOrigin?.sourceProviderSlug === "oura"));
+  assert.ok(observations.slice(0, 4).every((event) => event.dataOrigin?.sourceType === "ring"));
+  assert.equal(observations[4]?.dataOrigin?.sourceProviderSlug, "garmin");
 });
 
 test("Junction sleep_cycle normalizer vectorizes parallel offset stage arrays", () => {
@@ -4590,22 +4584,31 @@ test("Junction sleep_cycle normalizer vectorizes parallel offset stage arrays", 
     },
     { defaultTimeZone: "America/New_York" },
   );
-  const samples = payload.samples ?? [];
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
 
-  assert.equal(samples.length, 4);
-  assert.deepEqual(samples.map((sample) => sample.sample.stage), ["light", "rem", "awake", "deep"]);
-  assert.deepEqual(samples.map((sample) => sample.sample.durationMinutes), [15, 15, 15, 15]);
-  assert.deepEqual(samples.map((sample) => sample.dayKey), [
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(observations.length, 4);
+  assert.deepEqual(observations.map((event) => event.fields?.metric), [
+    "sleep-light-minutes",
+    "sleep-rem-minutes",
+    "sleep-awake-minutes",
+    "sleep-deep-minutes",
+  ]);
+  assert.deepEqual(observations.map((event) => event.fields?.value), [15, 15, 15, 15]);
+  assert.deepEqual(observations.map((event) => event.dayKey), [
     "2026-06-24",
     "2026-06-24",
     "2026-06-24",
     "2026-06-24",
   ]);
-  assert.equal(samples[0]?.sample.startAt, "2026-06-25T02:00:00.000Z");
-  assert.equal(samples[3]?.sample.endAt, "2026-06-25T03:00:00.000Z");
-  assert.ok(samples.every((sample) => sample.timeZone === "America/New_York"));
-  assert.ok(samples.every((sample) => sample.externalRef?.resourceType === "junction-garmin-sleep-cycle"));
-  assert.equal(new Set(samples.map((sample) => sample.externalRef?.resourceId)).size, 4);
+  assert.ok(observations.every((event) => event.timeZone === "America/New_York"));
+  assert.ok(observations.every((event) => event.externalRef?.resourceType === "junction-garmin-sleep-cycle"));
+  assert.deepEqual(observations.map((event) => event.externalRef?.facet), [
+    "sleep-light-minutes",
+    "sleep-rem-minutes",
+    "sleep-awake-minutes",
+    "sleep-deep-minutes",
+  ]);
 });
 
 test("Junction sleep_cycle direct intervals use timezone for local sleep-stage day", () => {
@@ -4640,16 +4643,20 @@ test("Junction sleep_cycle direct intervals use timezone for local sleep-stage d
     },
     { defaultTimeZone: "America/New_York" },
   );
-  const samples = payload.samples ?? [];
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
 
-  assert.equal(samples.length, 2);
-  assert.deepEqual(samples.map((sample) => sample.sample.stage), ["light", "deep"]);
-  assert.deepEqual(samples.map((sample) => sample.dayKey), ["2026-01-01", "2026-01-01"]);
-  assert.equal(samples[0]?.timeZone, "America/New_York");
-  assert.equal(samples[1]?.timeZone, undefined);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(observations.length, 2);
+  assert.deepEqual(observations.map((event) => event.fields?.metric), [
+    "sleep-light-minutes",
+    "sleep-deep-minutes",
+  ]);
+  assert.deepEqual(observations.map((event) => event.dayKey), ["2026-01-01", "2026-01-01"]);
+  assert.equal(observations[0]?.timeZone, "America/New_York");
+  assert.equal(observations[1]?.timeZone, undefined);
 });
 
-test("Junction hypnogram alias emits canonical sleep-stage records", async () => {
+test("Junction hypnogram alias emits canonical compact sleep-stage observations", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",
     connectionId: "conn-junction-sleep-stage",
@@ -4679,23 +4686,87 @@ test("Junction hypnogram alias emits canonical sleep-stage records", async () =>
     },
   });
 
-  const samples = payload.samples ?? [];
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
 
   assert.deepEqual(payload.provenance?.summaryResources, ["sleep_cycle"]);
-  assert.equal(samples.length, 2);
-  assert.deepEqual(samples.map((sample) => sample.unit), ["stage", "stage"]);
-  assert.deepEqual(samples.map((sample) => sample.sample.stage), ["awake", "deep"]);
-  assert.deepEqual(samples.map((sample) => sample.sample.durationMinutes), [12, 30]);
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(observations.length, 2);
+  assert.deepEqual(observations.map((event) => event.fields?.metric), [
+    "sleep-awake-minutes",
+    "sleep-deep-minutes",
+  ]);
+  assert.deepEqual(observations.map((event) => event.fields?.value), [12, 30]);
   assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
-  assert.equal(samples.some((sample) => sample.externalRef?.resourceType.includes("hypnogram")), false);
-  assert.ok(samples.every((sample) => sample.externalRef?.system === "junction"));
-  assert.ok(samples.every((sample) => sample.externalRef?.resourceType === "junction-garmin-sleep-cycle"));
-  assert.ok(samples.every((sample) => sample.dataOrigin?.sourceProviderSlug === "garmin"));
-  assert.ok(samples.every((sample) => sample.dataOrigin?.sourceType === "watch"));
+  assert.equal(observations.some((event) => event.externalRef?.resourceType.includes("hypnogram")), false);
+  assert.ok(observations.every((event) => event.externalRef?.system === "junction"));
+  assert.ok(observations.every((event) => event.externalRef?.resourceType === "junction-garmin-sleep-cycle"));
+  assert.ok(observations.every((event) => event.dataOrigin?.sourceProviderSlug === "garmin"));
+  assert.ok(observations.every((event) => event.dataOrigin?.sourceType === "watch"));
   assert.equal(Object.hasOwn(payload, "canonicalWearableRecords"), false);
 });
 
-test("Junction sleep-stage samples keep stable replay identity with parent offset metadata", async () => {
+test("Junction sleep_cycle compacts large stage timelines before core import", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-sleep-cycle-compact");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-05-20T00:00:00.000Z",
+      timezone: "UTC",
+    });
+
+    const stageValues = ["light", "rem", "deep", "awake"] as const;
+    const stageStart = Date.parse("2026-05-20T00:00:00.000Z");
+    const stages = Array.from({ length: 1004 }, (_, index) => {
+      const start = new Date(stageStart + index * 60_000).toISOString();
+      const end = new Date(stageStart + (index + 1) * 60_000).toISOString();
+      return {
+        start,
+        end,
+        stage: stageValues[index % stageValues.length],
+      };
+    });
+    const snapshot = {
+      importedAt: "2026-05-20T18:00:00.000Z",
+      summaries: {
+        sleep_cycle: [{
+          id: "sleep-cycle-dense-stage-1",
+          source_provider: "garmin",
+          source_type: "watch",
+          time_zone: "UTC",
+          stages,
+        }],
+      },
+    };
+    const payload = await prepareDeviceProviderSnapshotImport({
+      provider: "junction",
+      vaultRoot,
+      snapshot,
+    });
+    const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
+
+    assert.equal(payload.samples?.length ?? 0, 0);
+    assert.equal(observations.length, 4);
+    assert.deepEqual(observations.map((event) => event.fields?.value), [251, 251, 251, 251]);
+
+    const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+
+    assert.equal(result.samples.length, 0);
+    assert.equal(result.events.length, 4);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction sleep-stage observations keep stable replay identity with parent offset metadata", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-sleep-stage-replay");
   try {
     await coreRuntime.initializeVault({
@@ -4730,21 +4801,30 @@ test("Junction sleep-stage samples keep stable replay identity with parent offse
       vaultRoot,
       snapshot,
     });
-    const [sample] = payload.samples ?? [];
+    const [event] = payload.events ?? [];
 
-    assert.ok(sample);
-    assert.equal(sample.stream, "sleep_stage");
-    assert.equal(sample.dayKey, "2026-06-25");
+    assert.ok(event);
+    assert.equal(event.kind, "observation");
+    assert.equal(event.fields?.metric, "sleep-light-minutes");
+    assert.equal(event.dayKey, "2026-06-25");
+    assert.equal(payload.samples?.length ?? 0, 0);
+    const evidenceParts = (payload.evidenceParts ?? []).map((part) => ({
+      role: part.role,
+      fileName: part.fileName,
+      mediaType: part.mediaType,
+      content: part.content,
+    }));
 
     const legacyImport = await coreRuntime.importDeviceBatch({
       vaultRoot,
       provider: payload.provider,
       accountId: payload.accountId,
       importedAt: payload.importedAt,
-      samples: [{
-        ...sample,
+      events: [{
+        ...event,
         dayKey: "2026-06-25",
       }],
+      evidenceParts,
     });
     const replayImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
       {
@@ -4756,16 +4836,16 @@ test("Junction sleep-stage samples keep stable replay identity with parent offse
         corePort: coreRuntime,
       },
     );
-    const [sampleShardPath] = legacyImport.sampleShardPaths;
-    assert.ok(sampleShardPath);
-    const sampleRecords = await coreRuntime.readJsonlRecords({
+    const [eventShardPath] = legacyImport.eventShardPaths;
+    assert.ok(eventShardPath);
+    const eventRecords = await coreRuntime.readJsonlRecords({
       vaultRoot,
-      relativePath: sampleShardPath,
+      relativePath: eventShardPath,
     });
 
-    assert.equal(replayImport.samples[0]?.id, legacyImport.samples[0]?.id);
-    assert.equal(sampleRecords.length, 1);
-    assert.equal(sampleRecords[0]?.dayKey, "2026-06-25");
+    assert.equal(replayImport.events[0]?.id, legacyImport.events[0]?.id);
+    assert.equal(eventRecords.length, 1);
+    assert.equal(eventRecords[0]?.dayKey, "2026-06-25");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
