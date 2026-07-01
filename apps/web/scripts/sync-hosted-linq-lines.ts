@@ -4,6 +4,7 @@ import {
   assertHostedLinqAssignableHomeLinePoolReady,
   syncHostedLinqConfiguredLinesTx,
 } from "../src/lib/hosted-onboarding/linq-line-store";
+import { sanitizeHostedOnboardingLogString } from "../src/lib/hosted-onboarding/http";
 import {
   HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT,
   syncHostedLinqPhoneNumberInventory,
@@ -53,7 +54,10 @@ async function main(): Promise<void> {
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   main().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : String(error));
+    console.error(
+      sanitizeHostedOnboardingLogString(error instanceof Error ? error.message : String(error))
+      ?? "Hosted Linq line sync failed.",
+    );
     process.exitCode = 1;
   });
 }

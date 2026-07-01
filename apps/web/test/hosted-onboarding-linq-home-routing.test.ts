@@ -122,6 +122,90 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
   });
 
+  it("excludes the member's stale bare activation claim from active capacity", async () => {
+    const line = buildLine("+15550100001", {
+      activeMemberLimit: 1,
+      maxNewConversationsPerDay: 1,
+    });
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(line);
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([line]);
+    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockImplementation(
+      async (input: { excludedMemberId?: string | null }) =>
+        new Map([[line.phoneNumber, input.excludedMemberId === "member_123" ? 0 : 1]]),
+    );
+
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member: buildMember({
+          linqHomeLineAssignedAt: new Date("2026-06-29T14:15:00.000Z"),
+          linqRecipientPhone: "+15550100001",
+        }),
+        prisma: {} as never,
+      }),
+    ).resolves.toMatchObject({
+      welcomeRoute: {
+        delivery: {
+          kind: "participant",
+          source: {
+            fromPhoneNumber: line.phoneNumber,
+            kind: "linq",
+          },
+        },
+      },
+    });
+
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledWith({
+      prisma: {} as never,
+    });
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledWith({
+      excludedMemberId: "member_123",
+      now: expect.any(Date),
+      prisma: {} as never,
+      recipientPhones: [line.phoneNumber],
+    });
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalledWith({
+      prisma: {} as never,
+      recipientPhones: [line.phoneNumber],
+      since: expect.any(Date),
+    });
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      clearPending: true,
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma: {} as never,
+      recipientPhone: line.phoneNumber,
+    });
+  });
+
+  it("does not reuse a stale bare activation claim after the daily cap is exhausted", async () => {
+    const line = buildLine("+15550100001", {
+      maxNewConversationsPerDay: 1,
+    });
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(line);
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([line]);
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
+      new Map([[line.phoneNumber, 1]]),
+    );
+
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member: buildMember({
+          linqHomeLineAssignedAt: new Date("2026-06-29T14:15:00.000Z"),
+          linqRecipientPhone: "+15550100001",
+        }),
+        prisma: {} as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "LINQ_CONVERSATION_PHONE_REQUIRED",
+    });
+
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledWith({
+      prisma: {} as never,
+    });
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+  });
+
   it("reuses a pending Linq thread when its recipient matches the chosen home line", async () => {
     await expect(
       resolveHostedMemberActivationLinqRoute({

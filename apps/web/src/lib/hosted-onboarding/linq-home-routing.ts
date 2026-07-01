@@ -254,6 +254,8 @@ export async function assignHostedMemberLinqHomeLineForPhoneTx(input: {
 }
 
 export async function reserveHostedLinqHomeLineFromPoolTx(input: {
+  excludedActiveMemberId?: string | null;
+  now?: Date;
   preferredRecipientPhone?: string | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLineAssignmentReservation | null> {
@@ -262,9 +264,13 @@ export async function reserveHostedLinqHomeLineFromPoolTx(input: {
   });
 
   return reserveHostedLinqHomeLineFromCandidatesTx({
+    ...(input.excludedActiveMemberId
+      ? { excludedActiveMemberId: input.excludedActiveMemberId }
+      : {}),
     lines: await listHostedLinqAssignableHomeLines({
       prisma: input.prisma,
     }),
+    ...(input.now ? { now: input.now } : {}),
     preferredRecipientPhone: input.preferredRecipientPhone ?? null,
     prisma: input.prisma,
   });
@@ -470,7 +476,8 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
 }): Promise<{ homeLineAssignedAt?: Date; recipientPhone: string | null }> {
-  const existingRecipientPhone = normalizePhoneNumber(input.member.routing?.linqRecipientPhone);
+  const routing = input.member.routing;
+  const existingRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
   if (existingRecipientPhone) {
     const existingRecipientLine = await readHostedLinqAssignableHomeLineByPhone({
       phoneNumber: existingRecipientPhone,
@@ -478,8 +485,40 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
     });
 
     if (existingRecipientLine) {
+      if (!routing?.linqHomeLineAssignedAt) {
+        return {
+          recipientPhone: existingRecipientLine.phoneNumber,
+        };
+      }
+
+      const now = new Date();
+      const reusableBareAssignedAt = resolveReusableBareSameDayHomeLineAssignedAt({
+        now,
+        phoneNumber: existingRecipientLine.phoneNumber,
+        routing,
+      });
+
+      if (reusableBareAssignedAt) {
+        return {
+          homeLineAssignedAt: reusableBareAssignedAt,
+          recipientPhone: existingRecipientLine.phoneNumber,
+        };
+      }
+
+      const reservation = await reserveHostedLinqHomeLineFromPoolTx({
+        excludedActiveMemberId: resolveBareSameLineClaimOwnerMemberId({
+          memberId: input.member.core.id,
+          phoneNumber: existingRecipientLine.phoneNumber,
+          routing,
+        }),
+        now,
+        preferredRecipientPhone: existingRecipientLine.phoneNumber,
+        prisma: input.prisma,
+      });
+
       return {
-        recipientPhone: existingRecipientLine.phoneNumber,
+        ...(reservation ? { homeLineAssignedAt: reservation.assignedAt } : {}),
+        recipientPhone: reservation?.line.phoneNumber ?? null,
       };
     }
   }
