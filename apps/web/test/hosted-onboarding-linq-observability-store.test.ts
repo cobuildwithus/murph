@@ -618,6 +618,20 @@ describe("hosted Linq observability stores", () => {
         }),
       }),
     );
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          healthStatus: "healthy",
+          lastDeliveredAt: providerCreatedAt,
+          lastReceiptAt: providerCreatedAt,
+        }),
+        where: expect.objectContaining({
+          healthStatus: { notIn: ["degraded", "unhealthy"] },
+          lastReceiptAt: providerCreatedAt,
+          lastReceiptEventId: eventLookupKey,
+        }),
+      }),
+    );
   });
 
   it("preserves the stored line lookup key when the phone blind-index key rotated", async () => {
@@ -1286,10 +1300,21 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          healthStatus: "healthy",
           lastDeliveredAt: receiptAt,
           lastReceiptAt: receiptAt,
           totalDeliveredCount: { increment: 1 },
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          healthStatus: "healthy",
+          lastDeliveredAt: receiptAt,
+          lastReceiptAt: receiptAt,
+        }),
+        where: expect.objectContaining({
+          healthStatus: { notIn: ["degraded", "unhealthy"] },
         }),
       }),
     );

@@ -112,23 +112,6 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
   });
 
   it("reuses a pending Linq thread when its recipient matches the chosen home line", async () => {
-    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
-      buildLine("+15550100001", { activeMemberLimit: 3 }),
-      buildLine("+15550100002", { activeMemberLimit: 3 }),
-    ]);
-    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(
-      new Map([
-        ["+15550100001", 1],
-        ["+15550100002", 0],
-      ]),
-    );
-    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
-      new Map([
-        ["+15550100001", 0],
-        ["+15550100002", 0],
-      ]),
-    );
-
     await expect(
       resolveHostedMemberActivationLinqRoute({
         member: buildMember({
@@ -152,9 +135,10 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
 
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
       clearPending: true,
-      homeLineAssignedAt: expect.any(Date),
       linqChatId: "chat_pending",
       memberId: "member_123",
       prisma: {} as never,
@@ -191,15 +175,6 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
         verifiedAt: new Date("2026-04-12T00:02:00.000Z"),
       },
     };
-    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
-      buildLine("+15550100001", { activeMemberLimit: 3 }),
-    ]);
-    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(
-      new Map([["+15550100001", 0]]),
-    );
-    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
-      new Map([["+15550100001", 0]]),
-    );
 
     await expect(
       resolveHostedMemberActivationLinqRoute({
@@ -221,10 +196,49 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
 
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
       clearPending: true,
-      homeLineAssignedAt: expect.any(Date),
       linqChatId: "chat_pending_email",
+      memberId: "member_123",
+      prisma: {} as never,
+      recipientPhone: null,
+    });
+  });
+
+  it("promotes an existing pending Linq thread even when that line is over daily cap", async () => {
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+      buildLine("+15550100001", {
+        maxNewConversationsPerDay: 1,
+      }),
+    ]);
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
+      new Map([["+15550100001", 1]]),
+    );
+
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member: buildMember({
+          pendingLinqChatId: "chat_pending",
+          pendingLinqRecipientPhone: "+15550100001",
+        }),
+        prisma: {} as never,
+      }),
+    ).resolves.toMatchObject({
+      welcomeRoute: {
+        delivery: {
+          kind: "thread",
+          target: "chat_pending",
+        },
+      },
+    });
+
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
+      clearPending: true,
+      linqChatId: "chat_pending",
       memberId: "member_123",
       prisma: {} as never,
       recipientPhone: "+15550100001",
@@ -251,10 +265,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
 
     await expect(
       resolveHostedMemberActivationLinqRoute({
-        member: buildMember({
-          pendingLinqChatId: "chat_pending",
-          pendingLinqRecipientPhone: "+15550100001",
-        }),
+        member: buildMember(),
         prisma: {} as never,
       }),
     ).resolves.toEqual({

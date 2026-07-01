@@ -521,13 +521,28 @@ async function projectMessageDelivered(
     where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, progress),
     data: {
       consecutiveFailures: 0,
-      healthStatus: "healthy",
       lastDeliveredAt: event.providerCreatedAt,
       lastReceiptAt: event.providerCreatedAt,
       lastReceiptEventId: progress.eventLookupKey,
       totalDeliveredCount: { increment: 1 },
     },
   });
+  if (updated.count === 1) {
+    await prisma.hostedLinqLine.updateMany({
+      where: {
+        healthStatus: { notIn: ["degraded", "unhealthy"] },
+        lastReceiptAt: progress.providerCreatedAt,
+        lastReceiptEventId: progress.eventLookupKey,
+        phoneNumberLookupKey,
+      },
+      data: {
+        healthStatus: "healthy",
+        lastDeliveredAt: event.providerCreatedAt,
+        lastReceiptAt: event.providerCreatedAt,
+        lastReceiptEventId: progress.eventLookupKey,
+      },
+    });
+  }
   return updated.count === 1;
 }
 

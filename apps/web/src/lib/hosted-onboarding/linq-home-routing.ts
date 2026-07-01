@@ -59,32 +59,22 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
     };
   }
 
-  const target = await resolveHostedMemberActivationTargetRecipientPhone({
-    member: input.member,
-    prisma: input.prisma,
-  });
-  const targetRecipientPhone = normalizePhoneNumber(target.recipientPhone);
-
   const pendingLinqRecipientPhone = normalizePhoneNumber(routing?.pendingLinqRecipientPhone);
-
   if (
     routing?.pendingLinqChatId
     && linqContactLookupKey
     && (
       memberPhoneNumber
-        ? targetRecipientPhone !== null && pendingLinqRecipientPhone === targetRecipientPhone
+        ? pendingLinqRecipientPhone !== null
         : true
     )
   ) {
-    const promotedRecipientPhone =
-      pendingLinqRecipientPhone ?? targetRecipientPhone;
     await upsertHostedMemberHomeLinqBindingTx({
       clearPending: true,
-      homeLineAssignedAt: target.homeLineAssignedAt,
       linqChatId: routing.pendingLinqChatId,
       memberId: input.member.core.id,
       prisma: input.prisma,
-      recipientPhone: promotedRecipientPhone,
+      recipientPhone: pendingLinqRecipientPhone,
     });
 
     return {
@@ -97,6 +87,12 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
       }),
     };
   }
+
+  const target = await resolveHostedMemberActivationTargetRecipientPhone({
+    member: input.member,
+    prisma: input.prisma,
+  });
+  const targetRecipientPhone = normalizePhoneNumber(target.recipientPhone);
 
   if (!targetRecipientPhone) {
     throw hostedOnboardingError({
