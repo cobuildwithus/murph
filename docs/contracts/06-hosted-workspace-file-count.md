@@ -127,3 +127,14 @@ landing; record the chosen posture here so the decision is reviewable.
   bucket: the monthly shard count is also bounded by elapsed wall-clock
   months. Snapshot/restore cost remains negligible at the projected steady
   state, so no rotation or compaction seam is planned.
+
+- `raw/shared/vault-share-projections.json`
+  (`murph.shared-vault-projections.v1`) is the destination-side materialization
+  for consented HostedVaultShare records. It is one compact JSON document per
+  workspace, not one file per shared record. Each grantor/projection entry keeps
+  only the latest `HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS` records, and a
+  `vault-share.revoke` mailbox wake removes the grantor/projection entry when
+  permission is revoked. If the final entry is removed, the compact document is
+  deleted. This makes the file count hard-bounded at one file for the shared
+  projection family regardless of delivery retries, night count, or grantor
+  count.

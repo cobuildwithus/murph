@@ -40,6 +40,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "assistant.notification.requested",
   "device-sync.wake",
   "vault-share.delivery",
+  "vault-share.revoke",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -771,9 +772,7 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
   recorded: boolean;
 }
 
-export type HostedRuntimeGroupToolAction =
-  | "create_join_link"
-  | "read_current";
+export type HostedRuntimeGroupToolAction = "read_current";
 
 export interface HostedRuntimeGroupSummary {
   displayName: string | null;
@@ -784,35 +783,15 @@ export interface HostedRuntimeGroupSummary {
   status: string;
 }
 
-export type HostedRuntimeGroupToolRequest =
-  | { action: "read_current" }
-  | {
-      action: "create_join_link";
-      displayName?: string | null;
-      kind?: "custom" | "family" | "couple" | "friends" | "household" | "team" | null;
-      requestedVaultShareProjectionKinds?: HostedVaultShareProjectionKind[] | null;
-    };
+export type HostedRuntimeGroupToolRequest = { action: "read_current" };
 
-export type HostedRuntimeGroupToolResponse =
-  | {
-      action: "read_current";
-      result:
-        | { status: "ok"; group: HostedRuntimeGroupSummary }
-        | { status: "none"; group: null }
-        | { status: "unavailable"; unavailableReason: string; group: null };
-    }
-  | {
-      action: "create_join_link";
-      result:
-        | { status: "ok"; group: HostedRuntimeGroupSummary; joinUrl: string; replyText: string }
-        | {
-            status: "unavailable";
-            unavailableReason: string;
-            group: null;
-            joinUrl: null;
-            replyText: string | null;
-          };
-    };
+export type HostedRuntimeGroupToolResponse = {
+  action: "read_current";
+  result:
+    | { status: "ok"; group: HostedRuntimeGroupSummary }
+    | { status: "none"; group: null }
+    | { status: "unavailable"; unavailableReason: string; group: null };
+};
 
 export type HostedRuntimeFamilyPlanToolAction =
   | "create_invite"

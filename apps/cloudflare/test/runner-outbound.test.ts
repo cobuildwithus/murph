@@ -1269,10 +1269,7 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_GROUP_TOOL_PATH}`, {
         body: JSON.stringify({
-          action: "create_join_link",
-          displayName: "Sunday sleep crew",
-          kind: "friends",
-          requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+          action: "read_current",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
@@ -1303,7 +1300,7 @@ describe("handleRunnerOutboundRequest", () => {
       ..._args: Parameters<typeof fetch>
     ): Promise<Response> =>
       new Response(JSON.stringify({
-        action: "create_join_link",
+        action: "read_current",
         result: { status: "ok" },
       }), {
         headers: {
@@ -1317,10 +1314,7 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_GROUP_TOOL_PATH}`, {
         body: JSON.stringify({
-          action: "create_join_link",
-          displayName: "Sunday sleep crew",
-          kind: "friends",
-          requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+          action: "read_current",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
@@ -1365,10 +1359,7 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_GROUP_TOOL_PATH}`, {
         body: JSON.stringify({
-          action: "create_join_link",
-          displayName: "Sunday sleep crew",
-          kind: "friends",
-          requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+          action: "read_current",
         }),
         headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",

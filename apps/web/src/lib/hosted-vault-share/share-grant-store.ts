@@ -2,10 +2,16 @@ import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
+  buildHostedExecutionVaultShareRevokeWake,
+} from "@murphai/hosted-execution";
+import {
+  buildHostedVaultShareRevokeDedupeKey,
+  HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
   isHostedVaultShareProjectionKind,
   type HostedVaultShareProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
 
+import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { generateHostedVaultShareId } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
@@ -98,7 +104,14 @@ export async function revokeHostedVaultSharesTx(input: {
     return 0;
   }
 
-  const result = await input.tx.hostedVaultShare.updateMany({
+  const shares = await input.tx.hostedVaultShare.findMany({
+    orderBy: { createdAt: "asc" },
+    select: {
+      destinationMemberId: true,
+      grantorMemberId: true,
+      id: true,
+      projectionKind: true,
+    },
     where: {
       destinationMemberId: input.destinationMemberId,
       ...(input.grantorMemberId ? { grantorMemberId: input.grantorMemberId } : {}),
@@ -107,12 +120,58 @@ export async function revokeHostedVaultSharesTx(input: {
         : {}),
       status: "granted",
     },
+  }).then((rows) =>
+    rows.flatMap((row) => {
+      if (!isHostedVaultShareProjectionKind(row.projectionKind)) {
+        return [];
+      }
+
+      return [{
+        destinationMemberId: row.destinationMemberId,
+        grantorMemberId: row.grantorMemberId,
+        id: row.id,
+        projectionKind: row.projectionKind,
+      }];
+    })
+  );
+
+  if (shares.length === 0) {
+    return 0;
+  }
+
+  const result = await input.tx.hostedVaultShare.updateMany({
+    where: {
+      id: { in: shares.map((share) => share.id) },
+      status: "granted",
+    },
     data: {
       revokedAt: input.now,
       source: input.source,
       status: "revoked",
     },
   });
+
+  const revokedAt = input.now.toISOString();
+  for (const share of shares) {
+    const envelope = buildHostedExecutionVaultShareRevokeWake({
+      eventId: buildHostedVaultShareRevokeDedupeKey({
+        revokedAt,
+        shareId: share.id,
+      }),
+      memberId: share.destinationMemberId,
+      revoke: {
+        grantorMemberId: share.grantorMemberId,
+        projectionKind: share.projectionKind,
+        revokedAt,
+        schema: HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
+        shareId: share.id,
+      },
+    });
+    await appendHostedMailboxEnvelopeTx({
+      envelope,
+      tx: input.tx,
+    });
+  }
 
   return result.count;
 }

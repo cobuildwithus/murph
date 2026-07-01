@@ -747,27 +747,7 @@ export function parseHostedRuntimeGroupToolRequest(
     );
     return { action };
   }
-  if (action !== "create_join_link") {
-    throw new TypeError("Hosted runtime group tool action is not supported.");
-  }
-  assertAllowedObjectKeys(
-    record,
-    new Set(["action", "displayName", "kind", "requestedVaultShareProjectionKinds"]),
-    "Hosted runtime group tool create_join_link request",
-  );
-  const displayName = readOptionalNullableString(record.displayName, "Hosted runtime group displayName");
-  if (displayName && displayName.length > 120) {
-    throw new TypeError("Hosted runtime group displayName must be at most 120 characters.");
-  }
-  return {
-    action,
-    displayName: displayName ?? null,
-    kind: parseHostedRuntimeGroupKind(record.kind),
-    requestedVaultShareProjectionKinds: parseHostedRuntimeGroupProjectionKindArray(
-      record.requestedVaultShareProjectionKinds,
-      "Hosted runtime group requestedVaultShareProjectionKinds",
-    ),
-  };
+  throw new TypeError("Hosted runtime group tool action is not supported.");
 }
 
 export function parseHostedRuntimeGroupToolResponse(
@@ -801,45 +781,7 @@ export function parseHostedRuntimeGroupToolResponse(
     }
   }
 
-  if (action === "create_join_link") {
-    const result = requireObject(record.result, "Hosted runtime group tool create_join_link response result");
-    const status = requireString(result.status, "Hosted runtime group tool create_join_link response status");
-    if (status === "ok") {
-      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl", "replyText"]), "Hosted runtime group tool create_join_link ok response result");
-      return {
-        action,
-        result: {
-          status,
-          group: parseHostedRuntimeGroupSummary(result.group),
-          joinUrl: requireString(result.joinUrl, "Hosted runtime group joinUrl"),
-          replyText: requireString(result.replyText, "Hosted runtime group replyText"),
-        },
-      };
-    }
-    if (status === "unavailable") {
-      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group", "joinUrl", "replyText"]), "Hosted runtime group tool create_join_link unavailable response result");
-      return {
-        action,
-        result: {
-          status,
-          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
-          group: null,
-          joinUrl: null,
-          replyText: result.replyText === null ? null : requireString(result.replyText, "Hosted runtime group replyText"),
-        },
-      };
-    }
-  }
   throw new TypeError("Hosted runtime group tool response action/status is not supported.");
-}
-
-function parseHostedRuntimeGroupKind(value: unknown) {
-  if (value === undefined || value === null) return null;
-  const kind = requireString(value, "Hosted runtime group kind");
-  if (["custom", "family", "couple", "friends", "household", "team"].includes(kind)) {
-    return kind as "custom" | "family" | "couple" | "friends" | "household" | "team";
-  }
-  throw new TypeError("Hosted runtime group kind is not supported.");
 }
 
 function parseHostedRuntimeGroupProjectionKindArray(

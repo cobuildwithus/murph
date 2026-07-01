@@ -1,8 +1,10 @@
 import {
   parseHostedVaultShareDeliveryPayload,
+  parseHostedVaultShareRevokePayload,
 } from "./vault-share.ts";
 import {
   buildHostedExecutionVaultShareDeliveryWake,
+  buildHostedExecutionVaultShareRevokeWake,
 } from "./builders.ts";
 import {
   normalizeIanaTimeZone,
@@ -209,6 +211,12 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         delivery: parseHostedVaultShareDeliveryPayload(record.delivery),
         eventId,
         memberId: wireUserId,
+      });
+    case "vault-share.revoke":
+      return buildHostedExecutionVaultShareRevokeWake({
+        eventId,
+        memberId: wireUserId,
+        revoke: parseHostedVaultShareRevokePayload(record.revoke),
       });
     case "member.channels.updated":
       return buildHostedExecutionMemberChannelsUpdatedWake({

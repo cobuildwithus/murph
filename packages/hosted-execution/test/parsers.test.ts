@@ -472,31 +472,18 @@ describe("parseHostedRuntimeGroupTool", () => {
     status: "active",
   };
 
-  it("parses read and create-link requests with a closed permission list", () => {
+  it("parses read requests and rejects mutations", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_current",
     })).toEqual({
       action: "read_current",
-    });
-
-    expect(parseHostedRuntimeGroupToolRequest({
-      action: "create_join_link",
-      displayName: "Sunday sleep crew",
-      kind: "friends",
-      requestedVaultShareProjectionKinds: ["sleep-times.v0", "sleep-times.v0"],
-    })).toEqual({
-      action: "create_join_link",
-      displayName: "Sunday sleep crew",
-      kind: "friends",
-      requestedVaultShareProjectionKinds: ["sleep-times.v0"],
     });
 
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "create_join_link",
-        requestedVaultShareProjectionKinds: ["all-health-data"],
       })
-    ).toThrow(/unsupported projection kind/u);
+    ).toThrow(/not supported/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "read_current",
@@ -516,24 +503,6 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "read_current",
       result: {
         group: GROUP_SUMMARY,
-        status: "ok",
-      },
-    });
-
-    expect(parseHostedRuntimeGroupToolResponse({
-      action: "create_join_link",
-      result: {
-        group: GROUP_SUMMARY,
-        joinUrl: "https://local.withmurph.ai/groups/join/code_123",
-        replyText: "Join here: https://local.withmurph.ai/groups/join/code_123",
-        status: "ok",
-      },
-    })).toEqual({
-      action: "create_join_link",
-      result: {
-        group: GROUP_SUMMARY,
-        joinUrl: "https://local.withmurph.ai/groups/join/code_123",
-        replyText: "Join here: https://local.withmurph.ai/groups/join/code_123",
         status: "ok",
       },
     });

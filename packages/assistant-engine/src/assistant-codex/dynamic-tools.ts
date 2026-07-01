@@ -8,9 +8,6 @@ import {
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
 import {
-  HOSTED_VAULT_SHARE_PROJECTION_KINDS,
-} from '@murphai/hosted-execution/vault-share'
-import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
@@ -313,41 +310,14 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group or create a join link for the current connected group chat. This does not grant Family billing access, private chat access, raw vault access, health-data sharing without explicit VaultShare permissions, or email opt-in. Use create_join_link only for current group-chat features that need members to join and optionally approve supported data-sharing permissions.',
+    'Read the current hosted group for the connected group-chat runtime. This does not create groups, create join links, manage members, grant Family billing access, grant private chat access, grant raw vault access, share health data, or opt anyone into email.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       action: {
         type: 'string',
-        enum: ['read_current', 'create_join_link'],
-      },
-      kind: {
-        anyOf: [
-          { type: 'string', enum: ['custom', 'family', 'couple', 'friends', 'household', 'team'] },
-          { type: 'null' },
-        ],
-        default: null,
-        description: 'Optional group type hint for a newly created group.',
-      },
-      displayName: {
-        anyOf: [
-          { type: 'string', minLength: 1, maxLength: 120 },
-          { type: 'null' },
-        ],
-        default: null,
-        description: 'Optional concise display name for a newly created group.',
-      },
-      requestedVaultShareProjectionKinds: {
-        type: 'array',
-        maxItems: 8,
-        default: [],
-        description:
-          'Optional supported VaultShare projection permissions to request on the join page. Today only sleep-times.v0 is supported; do not request activity, workouts, all health data, or arbitrary strings.',
-        items: {
-          type: 'string',
-          enum: [...HOSTED_VAULT_SHARE_PROJECTION_KINDS],
-        },
+        enum: ['read_current'],
       },
     },
     required: ['action'],
@@ -677,20 +647,10 @@ const generateImageArgumentsSchema = z
   .strict()
 
 const groupArgumentsSchema = z
-  .discriminatedUnion('action', [
-    z.object({
-      action: z.literal('read_current'),
-    }).strict(),
-    z.object({
-      action: z.literal('create_join_link'),
-      kind: z.enum(['custom', 'family', 'couple', 'friends', 'household', 'team']).nullable().default(null),
-      displayName: z.string().trim().min(1).max(120).nullable().default(null),
-      requestedVaultShareProjectionKinds: z
-        .array(z.enum(HOSTED_VAULT_SHARE_PROJECTION_KINDS))
-        .max(8)
-        .default([]),
-    }).strict(),
-  ])
+  .object({
+    action: z.literal('read_current'),
+  })
+  .strict()
 
 const sendVaultFileArgumentsSchema = z
   .object({
@@ -2477,23 +2437,12 @@ function parseGroupArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.group.input',
-        schemaRootKeys: ['action', 'kind', 'displayName', 'requestedVaultShareProjectionKinds'],
+        schemaRootKeys: ['action'],
         toolName: 'murph.group',
       }),
     }
   }
-  if (parsed.data.action === 'read_current') {
-    return { ok: true, request: { action: 'read_current' } }
-  }
-  return {
-    ok: true,
-    request: {
-      action: 'create_join_link',
-      displayName: parsed.data.displayName,
-      kind: parsed.data.kind,
-      requestedVaultShareProjectionKinds: [...new Set(parsed.data.requestedVaultShareProjectionKinds)],
-    },
-  }
+  return { ok: true, request: { action: 'read_current' } }
 }
 
 function parseFinishWithoutReplyArguments(
