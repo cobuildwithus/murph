@@ -173,20 +173,21 @@ retention wake instead of becoming a second scheduler concern.
 Runtime-fence liveness uses one container probe vocabulary: exact-active,
 inactive, mismatched, or indeterminate. The probe only answers whether the
 container still has the requested fence identity in flight. It does not own
-completion or replacement policy: UserRunner maps inactive fences to the
-existing clear-and-start path, preserves or retries ambiguous/mismatched
-foreground ownership, and keeps transport-failure committed-progress recovery
-limited to the exact accepted attempt.
+completion or replacement policy: UserRunner maps inactive fences to one
+controller-owned path that first recovers completion from a successful
+web-owned status read when the workspace advanced and mailbox lag is drained,
+otherwise replaces the stale fence by identity. Ambiguous or mismatched
+foreground ownership is preserved/retried.
 For foreground/default work behind an `inbox_media_retention` fence, the
 existing workspace-invocation abort seam is the preemption authority when
 liveness is ambiguous. This foreground-over-retention path uses the same
 legacy unversioned per-user runner container-name fallback as active wake for
 fences that predate persisted container names; fresh starts still use the
 current versioned container resolver. A local exact-pointer abort or inactive
-proof permits the durable fence CAS replacement; missing-pointer abort delivery
-is only an abort request and preserves the fence until a later liveness pass
-proves the old child inactive. Stale or failed status preserves the fence and
-retries.
+proof enters the same inactive-fence recovery/replacement path; missing-pointer
+abort delivery is only an abort request and preserves the fence until a later
+liveness pass proves the old child inactive. Stale or failed status preserves
+the fence and retries.
 
 The foreground-priority rule does not weaken correctness checks. Wrong-user
 authority, invalid auth, undecryptable mailbox payloads, stale leases, and
