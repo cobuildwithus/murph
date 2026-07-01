@@ -3368,12 +3368,19 @@ function sanitizeJunctionImportSnapshotValue(
   const fallback = readJunctionSourceReference(record, sourceReferences);
   const origin = resolveJunctionOrigin(record, fallback);
   const sanitized = stripJunctionRawSourceIdentityFields(record, sourceReferences, options);
+  const fallbackSourceInstanceId = normalizeString(fallback.sourceInstanceId);
+  const unresolvedPreservedSourceReference =
+    options.preserveSourceReferenceKeys === true &&
+    !fallbackSourceInstanceId &&
+    hasJunctionSourceReferenceIdentity(record);
+  const sourceInstanceId = fallbackSourceInstanceId ??
+    (unresolvedPreservedSourceReference ? undefined : origin.sourceInstanceId);
 
   return stripUndefined({
     ...sanitized,
     sourceProviderSlug: normalizeProviderSlug(origin.sourceProviderSlug) ?? sanitized.sourceProviderSlug,
     sourceType: origin.sourceType ?? sanitized.sourceType,
-    sourceInstanceId: origin.sourceInstanceId ?? sanitized.sourceInstanceId,
+    sourceInstanceId: sourceInstanceId ?? sanitized.sourceInstanceId,
   });
 }
 

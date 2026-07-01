@@ -6273,6 +6273,116 @@ test("Junction resource jobs import direct Garmin sleep-cycle stage payloads wit
   assert.deepEqual(snapshot.timeseries, {});
 });
 
+test("Junction signed direct sleep-cycle source reference aliases resolve at execution", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            source: {
+              device_id: "garmin-watch-1",
+            },
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+
+  for (const sourceReferenceKey of ["connection_id", "source_id"] as const) {
+    const directSleepCycleData: Record<string, unknown> = {
+      end: "2026-06-30T11:00:00.000Z",
+      id: `sleep-cycle-${sourceReferenceKey}`,
+      sourceProviderSlug: "garmin",
+      stages: [
+        {
+          endAt: "2026-06-30T06:30:00.000Z",
+          stage: "light",
+          startAt: "2026-06-30T03:30:00.000Z",
+        },
+        {
+          endAt: "2026-06-30T11:00:00.000Z",
+          stage: "deep",
+          startAt: "2026-06-30T06:30:00.000Z",
+        },
+      ],
+      start: "2026-06-30T03:30:00.000Z",
+      timeZone: "America/New_York",
+      [sourceReferenceKey]: "provider-garmin-1",
+    };
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: "daily.data.sleep_cycle.created",
+        user_id: "junction-user-1",
+        client_user_id: "murph_blinded",
+        data: directSleepCycleData,
+      },
+      messageId: `msg_sleep_cycle_${sourceReferenceKey}`,
+      timestamp: String(Math.floor(Date.parse("2026-06-30T11:30:00.000Z") / 1000)),
+    });
+    const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-06-30T11:31:00.000Z",
+    });
+    const parsedJob = parsed.jobs[0];
+    assert.ok(parsedJob);
+    assert.equal(parsedJob.kind, "resource");
+    const parsedPayload = parsedJob.payload;
+    assert.ok(parsedPayload);
+    assert.equal(typeof parsedPayload.webhookDataJson, "string");
+    const queuedWebhookData = JSON.parse(String(parsedPayload.webhookDataJson)) as Record<string, unknown>;
+    assert.equal(queuedWebhookData[sourceReferenceKey], "provider-garmin-1", sourceReferenceKey);
+    assert.equal(queuedWebhookData.sourceInstanceId, undefined, sourceReferenceKey);
+
+    await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          return { imported: true };
+        },
+        upsertConnectionSource: () => {
+          throw new Error("Direct sleep_cycle imports should not project Junction source state.");
+        },
+      }),
+      createJob(parsedJob.kind, parsedPayload),
+    );
+
+    const snapshot = importedSnapshots[importedSnapshots.length - 1] as {
+      connections?: Array<Record<string, unknown>>;
+      summaries?: Record<string, Array<Record<string, unknown>>>;
+      timeseries?: Record<string, unknown[]>;
+    } | undefined;
+    const sleepCycleRecord = snapshot?.summaries?.sleep_cycle?.[0];
+    const sourceInstanceId = snapshot?.connections?.[0]?.sourceInstanceId;
+    assert.equal(typeof sourceInstanceId, "string", sourceReferenceKey);
+    assert.equal(sleepCycleRecord?.sourceInstanceId, sourceInstanceId, sourceReferenceKey);
+    assert.equal(sourceReferenceKey in (sleepCycleRecord ?? {}), false, sourceReferenceKey);
+    assert.deepEqual(snapshot?.timeseries, {}, sourceReferenceKey);
+  }
+
+  assert.ok(requests.some((url) => url.includes("/v2/user/providers/")));
+  assert.equal(requests.some((url) => url.includes("/v2/summary/sleep_cycle/")), false);
+});
+
 test("Junction direct Garmin sleep-cycle payloads without normalizable coverage fall back to fetch", async () => {
   const cases: Array<{ directRecord: Record<string, unknown>; label: string }> = [
     {
