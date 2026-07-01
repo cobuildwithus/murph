@@ -338,6 +338,104 @@ test("hosted provider cleanup plan queues terminal Linq cleanup as checkpoint wo
   }
 });
 
+test("hosted provider cleanup legacy evidence recovery drains batches once and then stops scanning", async () => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+  mocks.listPendingAssistantAutoReplyLinqCleanupEvidence
+    .mockResolvedValueOnce({
+      captureIds: ["capture_batch_1"],
+      linqMessageIds: ["linq_legacy_1"],
+    })
+    .mockResolvedValueOnce({
+      captureIds: ["capture_batch_2"],
+      linqMessageIds: ["linq_legacy_2"],
+    });
+
+  try {
+    const plan = await prepareHostedProviderCleanupPlan({
+      deferred: false,
+      nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
+      vaultRoot,
+    });
+
+    assert.equal(plan.stateQueued, true);
+    assert.equal(plan.due, true);
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).toHaveBeenCalledTimes(3);
+    const raw = await readHostedProviderCleanupFile(vaultRoot);
+    assert.deepEqual(raw.linqMessageIds, ["linq_legacy_1", "linq_legacy_2"]);
+
+    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockClear();
+    const secondPlan = await prepareHostedProviderCleanupPlan({
+      deferred: false,
+      nowMs: Date.parse("2026-07-01T00:20:00.000Z"),
+      vaultRoot,
+    });
+
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+    assert.equal(secondPlan.stateQueued, false);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("hosted provider cleanup legacy evidence recovery stops when marking makes no progress", async () => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+  mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValue({
+    captureIds: ["capture_stuck"],
+    linqMessageIds: ["linq_stuck_1"],
+  });
+
+  try {
+    const plan = await prepareHostedProviderCleanupPlan({
+      deferred: false,
+      nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
+      vaultRoot,
+    });
+
+    assert.equal(plan.stateQueued, true);
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).toHaveBeenCalledTimes(2);
+    const raw = await readHostedProviderCleanupFile(vaultRoot);
+    assert.deepEqual(raw.linqMessageIds, ["linq_stuck_1"]);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("hosted provider cleanup non-deferred plan queues producer cleanup refs without scanning after recovery", async () => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+
+  try {
+    await prepareHostedProviderCleanupPlan({
+      deferred: false,
+      nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
+      vaultRoot,
+    });
+    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockClear();
+    mocks.markAssistantAutoReplyLinqCleanupQueued.mockClear();
+
+    const plan = await prepareHostedProviderCleanupPlan({
+      deferred: false,
+      nowMs: Date.parse("2026-07-01T00:20:00.000Z"),
+      terminalCleanup: {
+        captureIds: ["capture_background_1"],
+        linqMessageIds: ["linq_background_1"],
+      },
+      vaultRoot,
+    });
+
+    assert.equal(plan.stateQueued, true);
+    assert.equal(plan.due, true);
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).toHaveBeenCalledWith({
+      captureIds: ["capture_background_1"],
+      vault: vaultRoot,
+    });
+    const raw = await readHostedProviderCleanupFile(vaultRoot);
+    assert.deepEqual(raw.linqMessageIds, ["linq_background_1"]);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("hosted provider cleanup first defer wake follows the idle checkpoint delay", () => {
   assert.equal(
     resolveHostedProviderCleanupFirstDeferredWakeAt({

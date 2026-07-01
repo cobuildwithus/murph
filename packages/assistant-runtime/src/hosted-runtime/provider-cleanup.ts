@@ -27,6 +27,10 @@ import {
 
 const HOSTED_PROVIDER_CLEANUP_SCHEMA = "murph.hosted-provider-cleanup.v1";
 const HOSTED_PROVIDER_CLEANUP_FILE_NAME = "hosted-provider-cleanup.json";
+const HOSTED_PROVIDER_CLEANUP_RECOVERY_SCHEMA =
+  "murph.hosted-provider-cleanup-recovery.v1";
+const HOSTED_PROVIDER_CLEANUP_RECOVERY_FILE_NAME =
+  "hosted-provider-cleanup-recovery.json";
 const HOSTED_PROVIDER_CLEANUP_DEFAULT_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const HOSTED_PROVIDER_CLEANUP_AFTER_IDLE_BUFFER_MS = 1_000;
 const HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS = 5 * 60_000;
@@ -142,20 +146,20 @@ export async function prepareHostedProviderCleanupPlan(input: {
     };
   }
 
-  const terminalCleanup = await listPendingAssistantAutoReplyLinqCleanupEvidence({
-    vault: input.vaultRoot,
-  });
-  const terminalCleanupMessageIds = terminalCleanup.linqMessageIds;
-  const terminalCleanupQueued = terminalCleanupMessageIds.length > 0;
-  if (terminalCleanupQueued) {
+  const recoveredCleanupQueued =
+    await recoverLegacyPendingTerminalLinqCleanupOnce(input.vaultRoot);
+  const pendingLinqMessageIds =
+    normalizeHostedProviderMessageIds([...(input.terminalCleanup?.linqMessageIds ?? [])]);
+  if (pendingLinqMessageIds.length > 0) {
     await queueHostedTerminalLinqCleanup({
-      captureIds: terminalCleanup.captureIds,
-      linqMessageIds: terminalCleanupMessageIds,
+      captureIds: input.terminalCleanup?.captureIds ?? [],
+      linqMessageIds: pendingLinqMessageIds,
       nextWakeAt: null,
       vaultRoot: input.vaultRoot,
     });
   }
 
+  const terminalCleanupQueued = recoveredCleanupQueued || pendingLinqMessageIds.length > 0;
   const checkpoint =
     input.initialCheckpoint
     ?? (terminalCleanupQueued
@@ -168,6 +172,43 @@ export async function prepareHostedProviderCleanupPlan(input: {
     nowMs: input.nowMs,
     stateQueued: terminalCleanupQueued,
   });
+}
+
+// One-shot per vault: drain terminal cleanup evidence written before producers
+// carried cleanup refs, then mark recovery complete so steady-state wakes never
+// scan the evidence directory again.
+async function recoverLegacyPendingTerminalLinqCleanupOnce(
+  vaultRoot: string,
+): Promise<boolean> {
+  if (await hasHostedProviderCleanupRecoveryCompleted(vaultRoot)) {
+    return false;
+  }
+
+  let recoveredCleanupQueued = false;
+  const queuedCaptureIds = new Set<string>();
+  for (;;) {
+    const pending = await listPendingAssistantAutoReplyLinqCleanupEvidence({
+      vault: vaultRoot,
+    });
+    if (
+      pending.linqMessageIds.length === 0
+      || pending.captureIds.every((captureId) => queuedCaptureIds.has(captureId))
+    ) {
+      break;
+    }
+    recoveredCleanupQueued = true;
+    for (const captureId of pending.captureIds) {
+      queuedCaptureIds.add(captureId);
+    }
+    await queueHostedTerminalLinqCleanup({
+      captureIds: pending.captureIds,
+      linqMessageIds: pending.linqMessageIds,
+      nextWakeAt: null,
+      vaultRoot,
+    });
+  }
+  await markHostedProviderCleanupRecoveryCompleted(vaultRoot);
+  return recoveredCleanupQueued;
 }
 
 export async function recordHostedProviderCleanupAfterDelivery(input: {
@@ -493,6 +534,36 @@ function resolveHostedProviderCleanupStatePath(vaultRoot: string): string {
   return path.join(
     resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
     HOSTED_PROVIDER_CLEANUP_FILE_NAME,
+  );
+}
+
+async function hasHostedProviderCleanupRecoveryCompleted(
+  vaultRoot: string,
+): Promise<boolean> {
+  try {
+    const raw = await readFile(
+      resolveHostedProviderCleanupRecoveryPath(vaultRoot),
+      "utf8",
+    );
+    return (JSON.parse(raw) as { schema?: unknown }).schema
+      === HOSTED_PROVIDER_CLEANUP_RECOVERY_SCHEMA;
+  } catch {
+    return false;
+  }
+}
+
+async function markHostedProviderCleanupRecoveryCompleted(
+  vaultRoot: string,
+): Promise<void> {
+  await writeAssistantStateJson(resolveHostedProviderCleanupRecoveryPath(vaultRoot), {
+    schema: HOSTED_PROVIDER_CLEANUP_RECOVERY_SCHEMA,
+  });
+}
+
+function resolveHostedProviderCleanupRecoveryPath(vaultRoot: string): string {
+  return path.join(
+    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+    HOSTED_PROVIDER_CLEANUP_RECOVERY_FILE_NAME,
   );
 }
 
