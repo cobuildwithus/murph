@@ -41,11 +41,38 @@ const RECORDS = [
   nightRecord("2026-06-09", "2026-06-10"),
 ];
 
-const TX = { tag: "tx" };
+const TX = {
+  $queryRaw: vi.fn(),
+  tag: "tx",
+};
 
-function fakePrisma(): PrismaClient {
+function shareAuthorityRow(
+  share: typeof SHARE,
+  status: "granted" | "revoked" = "granted",
+): {
+  destinationMemberId: string;
+  grantorMemberId: string;
+  id: string;
+  projectionKind: string;
+  status: string;
+} {
   return {
-    $transaction: vi.fn(async (fn: (tx: typeof TX) => Promise<unknown>) => fn(TX)),
+    destinationMemberId: share.destinationMemberId,
+    grantorMemberId: share.grantorMemberId,
+    id: share.id,
+    projectionKind: share.projectionKind,
+    status,
+  };
+}
+
+function fakePrisma(
+  shareRows: readonly ReturnType<typeof shareAuthorityRow>[] = [shareAuthorityRow(SHARE)],
+): PrismaClient {
+  TX.$queryRaw.mockResolvedValue(shareRows);
+  return {
+    $transaction: vi.fn(async (fn: (tx: typeof TX) => Promise<unknown>) => {
+      return fn(TX);
+    }),
   } as unknown as PrismaClient;
 }
 
@@ -125,5 +152,26 @@ describe("deliverHostedVaultShareRecords", () => {
 
     // Null is the route's signal-skip contract: a fully re-delivered offer wakes nobody.
     expect(result).toEqual({ lastAppendedMailboxItemId: null });
+  });
+
+  it("rechecks the durable share authority before appending records", async () => {
+    const prisma = fakePrisma([shareAuthorityRow(SHARE, "revoked")]);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      inserted: true,
+      item: { id: "mailbox_item_1" },
+    });
+
+    const result = await deliverHostedVaultShareRecords({
+      prisma,
+      records: RECORDS,
+      share: SHARE,
+    });
+
+    expect(result).toEqual({ lastAppendedMailboxItemId: null });
+    expect(TX.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(Array.from(TX.$queryRaw.mock.calls[0]?.[0] ?? []).join("?"))
+      .toContain("FOR UPDATE");
+    expect(TX.$queryRaw.mock.calls[0]?.[1]).toBe("share_1");
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 });

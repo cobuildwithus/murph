@@ -10,7 +10,7 @@ import {
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
 import { appendHostedMailboxEnvelopeTx } from "./store";
@@ -63,6 +63,14 @@ export interface DeliverHostedVaultShareRecordsResult {
   lastAppendedMailboxItemId: string | null;
 }
 
+type HostedVaultShareAuthorityRow = {
+  destinationMemberId: string;
+  grantorMemberId: string;
+  id: string;
+  projectionKind: string;
+  status: string;
+};
+
 /**
  * Appends one typed `vault-share.delivery` wake envelope per shared record into the
  * destination mailbox, all in a single transaction per share. The envelope eventId doubles
@@ -82,21 +90,29 @@ export async function deliverHostedVaultShareRecords(input: {
 
   return prisma.$transaction(async (tx) => {
     let lastAppendedMailboxItemId: string | null = null;
+    const share = await readGrantedHostedVaultShareForUpdateTx({
+      share: input.share,
+      tx,
+    });
+
+    if (!share) {
+      return { lastAppendedMailboxItemId };
+    }
 
     for (const record of input.records) {
       const envelope = buildHostedExecutionVaultShareDeliveryWake({
         delivery: {
-          grantorMemberId: input.share.grantorMemberId,
-          projectionKind: input.share.projectionKind,
+          grantorMemberId: share.grantorMemberId,
+          projectionKind: share.projectionKind,
           record,
           schema: HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
-          shareId: input.share.id,
+          shareId: share.id,
         },
         eventId: buildHostedVaultShareDeliveryDedupeKey({
           recordKey: record.recordKey,
-          shareId: input.share.id,
+          shareId: share.id,
         }),
-        memberId: input.share.destinationMemberId,
+        memberId: share.destinationMemberId,
       });
       const result = await appendHostedMailboxEnvelopeTx({
         envelope,
@@ -110,4 +126,34 @@ export async function deliverHostedVaultShareRecords(input: {
 
     return { lastAppendedMailboxItemId };
   });
+}
+
+async function readGrantedHostedVaultShareForUpdateTx(input: {
+  share: ActiveHostedVaultShare;
+  tx: Prisma.TransactionClient;
+}): Promise<ActiveHostedVaultShare | null> {
+  const rows = await input.tx.$queryRaw<HostedVaultShareAuthorityRow[]>`
+    SELECT
+      id,
+      grantor_member_id AS "grantorMemberId",
+      projection_kind AS "projectionKind",
+      destination_member_id AS "destinationMemberId",
+      status
+    FROM hosted_vault_share
+    WHERE id = ${input.share.id}
+    FOR UPDATE
+  `;
+  const row = rows[0];
+
+  if (
+    !row
+    || row.status !== "granted"
+    || row.grantorMemberId !== input.share.grantorMemberId
+    || row.destinationMemberId !== input.share.destinationMemberId
+    || row.projectionKind !== input.share.projectionKind
+  ) {
+    return null;
+  }
+
+  return input.share;
 }
