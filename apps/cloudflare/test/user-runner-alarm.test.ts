@@ -1741,16 +1741,23 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("preempts retention work through abort when active liveness is indeterminate", async () => {
+  it("waits for inactive proof after requesting abort for indeterminate retention liveness", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const abortWorkspaceInvocation = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
-    >(async () => "accepted");
+    >(async () => "requested");
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    let activeRuntimeState: "inactive" | "indeterminate" = "indeterminate";
     const readActiveRuntimeUserFence = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
     >(async () => {
+      if (activeRuntimeState === "inactive") {
+        return {
+          active: false,
+          reason: "no_active_runtime",
+        };
+      }
       throw new Error("container health still reports active workspace work");
     });
     const { invoke, runner, sql } = createRunnerHarness({
@@ -1770,12 +1777,31 @@ describe("HostedUserRunner execution coordination", () => {
       orchestrationAttemptId: "test-orchestration-attempt-default-behind-indeterminate-retention",
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:05.000Z",
+    });
+
+    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(abortWorkspaceInvocation).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_expires_at: null,
+      wake_at: null,
+    });
+
+    activeRuntimeState = "inactive";
+    vi.setSystemTime(new Date("2026-04-27T00:00:05.000Z"));
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-default-behind-inactive-retention",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
       action: "replaced",
       kind: "runtime_processing_accepted",
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
-    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(readActiveRuntimeUserFence).toHaveBeenCalledTimes(2);
     expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
       attemptId: token.attemptId,
       leaseGeneration: String(token.generation),

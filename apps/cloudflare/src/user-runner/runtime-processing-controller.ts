@@ -506,7 +506,6 @@ export class RuntimeProcessingController {
       });
       if (
         abortStatus === "accepted"
-        || abortStatus === "queued"
         || abortStatus === "inactive"
       ) {
         return { aborted: true };

@@ -3644,7 +3644,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toBe("accepted");
+    })).resolves.toBe("requested");
     expect(containerFetch).toHaveBeenCalledOnce();
   });
 

@@ -241,10 +241,11 @@ export type RunnerWorkspaceInvocationAbortStatus =
   | "failed"
   | "inactive"
   | "queued"
+  | "requested"
   | "stale";
 
 type RunnerWorkspaceInvocationAbortPostStatus =
-  Exclude<RunnerWorkspaceInvocationAbortStatus, "inactive">;
+  Exclude<RunnerWorkspaceInvocationAbortStatus, "inactive" | "requested">;
 
 type RunnerContainerDestroyReason =
   | "activity-expired"
@@ -1293,7 +1294,10 @@ export class RunnerContainer extends Container {
     if (isRunnerContainerStopped(status)) {
       return "inactive";
     }
-    return await this.postWorkspaceInvocationAbort(input);
+    const abortStatus = await this.postWorkspaceInvocationAbort(input);
+    return abortStatus === "accepted" || abortStatus === "queued"
+      ? "requested"
+      : abortStatus;
   }
 
   private async postWorkspaceInvocationAbort(input: {
