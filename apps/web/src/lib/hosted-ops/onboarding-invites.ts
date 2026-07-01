@@ -350,6 +350,7 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
       senderPhone: input.request.linqFromPhoneNumber,
     });
     await upsertHostedMemberHomeLinqRecipientPhoneTx({
+      homeLineAssignedAt: assignment.assignedAt,
       memberId,
       prisma: tx,
       recipientPhone: assignment.line.phoneNumber,
@@ -398,12 +399,6 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
 
   await input.prisma.$transaction(async (tx) => {
     await assertHostedOpsOnboardingNewChatReservationTx({
-      memberId: prepared.issued.memberId,
-      prisma: tx,
-      recipientPhone: prepared.linePhoneNumber,
-    });
-    await upsertHostedMemberHomeLinqRecipientPhoneTx({
-      homeLineAssignedAt: new Date(),
       memberId: prepared.issued.memberId,
       prisma: tx,
       recipientPhone: prepared.linePhoneNumber,
@@ -458,6 +453,7 @@ function resolveHostedOpsOnboardingReusableNewChatReservation(input: {
 
   return input.routing
     && !input.routing.linqChatId
+    && input.routing.linqHomeLineAssignedAt
     && !input.routing.pendingLinqChatId
     && senderPhone
     && homeRecipientPhone === senderPhone

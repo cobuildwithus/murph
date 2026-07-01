@@ -109,6 +109,7 @@ let prisma: MockedPrisma;
 let tx: MockedTx;
 let routingState: {
   linqChatId: string | null;
+  linqHomeLineAssignedAt: Date | null;
   linqRecipientPhone: string | null;
   pendingLinqChatId: string | null;
   pendingLinqParticipantContact: null;
@@ -183,9 +184,10 @@ describe("hosted ops onboarding invites", () => {
     });
     mocks.syncHostedLinqConfiguredLinesTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockImplementation(
-      async (input: { recipientPhone: string }) => {
+      async (input: { homeLineAssignedAt?: Date; recipientPhone: string }) => {
         routingState = {
           linqChatId: null,
+          linqHomeLineAssignedAt: input.homeLineAssignedAt ?? null,
           linqRecipientPhone: input.recipientPhone,
           pendingLinqChatId: null,
           pendingLinqParticipantContact: null,
@@ -199,6 +201,7 @@ describe("hosted ops onboarding invites", () => {
         routingState = {
           ...(routingState ?? {
             linqChatId: null,
+            linqHomeLineAssignedAt: null,
             linqRecipientPhone: null,
             pendingLinqParticipantContact: null,
             telegramThreadId: null,
@@ -538,6 +541,45 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
   });
 
+  it("does not reuse an uncounted home-line reservation after the daily cap is exhausted", async () => {
+    routingState = {
+      linqChatId: null,
+      linqHomeLineAssignedAt: null,
+      linqRecipientPhone: "+15557654321",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+    };
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(
+      buildHomeLine("+15557654321", {
+        maxNewConversationsPerDay: 1,
+      }),
+    );
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
+      new Map([["+15557654321", 1]]),
+    );
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-uncounted-reservation",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_CAPACITY_EXHAUSTED",
+      httpStatus: 429,
+    });
+
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalledWith({
+      prisma: tx,
+      recipientPhones: ["+15557654321"],
+      since: expect.any(Date),
+    });
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
+  });
+
   it("rejects new-chat sends for members that already have a home Linq chat", async () => {
     tx.hostedMemberRouting.findUnique.mockResolvedValue({
       linqChatLookupKey: "lookup:existing-home-chat",
@@ -622,6 +664,7 @@ describe("hosted ops onboarding invites", () => {
       prisma: tx,
     });
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      homeLineAssignedAt: expect.any(Date),
       memberId: "member_123",
       prisma: tx,
       recipientPhone: "+15557654321",
@@ -733,7 +776,7 @@ describe("hosted ops onboarding invites", () => {
     });
 
     expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledTimes(2);
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledTimes(1);
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
     expect(readIdempotencyKey(mocks.sendHostedLinqChatMessage, 1)).toBe(

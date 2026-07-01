@@ -110,7 +110,6 @@ async function upsertHostedLinqLineForPhoneInTransaction(input: {
     ?? lookupKey;
 
   const updateData = {
-    ...(input.activeMemberLimit === undefined ? {} : { activeMemberLimit: input.activeMemberLimit }),
     ...(input.source === "configured" ? { configuredAt: input.observedAt } : {}),
     ...(input.source === "provider"
       ? {

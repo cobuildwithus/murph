@@ -16,6 +16,7 @@ import type { HostedOnboardingReadClient } from "./shared";
 export const hostedMemberRoutingStateSelect =
   Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
     linqChatIdEncrypted: true,
+    linqHomeLineAssignedAt: true,
     linqRecipientPhoneEncrypted: true,
     memberId: true,
     pendingLinqChatIdEncrypted: true,
@@ -47,6 +48,7 @@ export type HostedMemberHomeLinqRouteRecord = Prisma.HostedMemberRoutingGetPaylo
 export const hostedMemberRoutingLookupSelect =
   Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
     linqChatIdEncrypted: true,
+    linqHomeLineAssignedAt: true,
     linqRecipientPhoneEncrypted: true,
     memberId: true,
     pendingLinqChatIdEncrypted: true,
@@ -75,6 +77,7 @@ export type HostedMemberRoutingLookupRecord = Prisma.HostedMemberRoutingGetPaylo
 
 export interface HostedMemberRoutingStateSnapshot {
   linqChatId: string | null;
+  linqHomeLineAssignedAt: Date | null;
   linqRecipientPhone: string | null;
   memberId: string;
   pendingLinqChatId: string | null;
@@ -126,6 +129,7 @@ export async function projectHostedMemberRoutingState(
 
   return {
     linqChatId: privateState.linqChatId,
+    linqHomeLineAssignedAt: routing.linqHomeLineAssignedAt,
     linqRecipientPhone: privateState.linqRecipientPhone,
     memberId: routing.memberId,
     pendingLinqChatId: privateState.pendingLinqChatId,

@@ -119,6 +119,7 @@ describe("hosted-member-store", () => {
     };
     const routing: HostedMemberRoutingStateSnapshot = {
       linqChatId: "linq_chat_123",
+      linqHomeLineAssignedAt: null,
       linqRecipientPhone: null,
       memberId: core.id,
       pendingLinqChatId: null,
@@ -619,6 +620,7 @@ describe("hosted-member-store", () => {
       },
       select: {
         linqChatIdEncrypted: true,
+        linqHomeLineAssignedAt: true,
         linqRecipientPhoneEncrypted: true,
         member: {
           select: {
@@ -655,6 +657,7 @@ describe("hosted-member-store", () => {
     const findMany = vi.fn().mockResolvedValue([
       {
         linqChatIdEncrypted: null,
+        linqHomeLineAssignedAt: null,
         linqRecipientPhoneEncrypted: null,
         member: {
           billingStatus: HostedBillingStatus.active,
@@ -669,6 +672,7 @@ describe("hosted-member-store", () => {
       },
       {
         linqChatIdEncrypted: null,
+        linqHomeLineAssignedAt: null,
         linqRecipientPhoneEncrypted: null,
         member: {
           billingStatus: HostedBillingStatus.incomplete,
@@ -713,6 +717,7 @@ describe("hosted-member-store", () => {
       },
       select: {
         linqChatIdEncrypted: true,
+        linqHomeLineAssignedAt: true,
         linqRecipientPhoneEncrypted: true,
         member: {
           select: {

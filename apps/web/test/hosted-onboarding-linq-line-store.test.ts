@@ -336,12 +336,12 @@ describe("upsertHostedLinqLineForPhoneTx", () => {
         phoneNumberLookupKey: legacyLookupKey,
       },
       data: expect.objectContaining({
-        activeMemberLimit: 250,
         configuredAt: observedAt,
         phoneNumberHint: "*** 0001",
         source: "configured",
       }),
     }));
+    expect(update.mock.calls[0]?.[0].data).not.toHaveProperty("activeMemberLimit");
     expect(create).not.toHaveBeenCalled();
     expect(updateMany).not.toHaveBeenCalled();
   });
