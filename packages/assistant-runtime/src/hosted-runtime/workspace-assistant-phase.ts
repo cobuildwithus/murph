@@ -2644,6 +2644,7 @@ async function runSystemMailboxMaintenancePhase(input: {
                 input: phaseInput,
                 pendingAssistantInputWakeAt,
                 deviceSyncFollowUpWake,
+                providerCleanupWake: backgroundProviderCleanupWake,
                 readAssistantCronWakeState,
                 systemMailboxMetricsWakeAt,
                 systemMailboxMetricsWakeReason,
@@ -2742,6 +2743,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
   initialProviderCleanupDue: boolean;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   pendingAssistantInputWakeAt: string | null;
+  providerCleanupWake: HostedRuntimeWakeCandidate | null;
   readAssistantCronWakeState: () => Promise<HostedAssistantCronWakeState>;
   systemMailboxMetricsWakeAt: string | null;
   systemMailboxMetricsWakeReason: string | null;
@@ -2761,11 +2763,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
     phaseInput: input.input,
     state: assistantCronWakeState,
   });
-  const providerCleanupWake = resolveHostedProviderCleanupCheckpointWakeCandidate({
-    checkpoint: input.initialProviderCleanupCheckpoint,
-    deferDueOrInvalid: false,
-    phaseInput: input.input,
-  });
+  const providerCleanupWake = input.providerCleanupWake;
 
   if ("item" in input.systemMailboxPreparation) {
     const statusCallbackInput = {

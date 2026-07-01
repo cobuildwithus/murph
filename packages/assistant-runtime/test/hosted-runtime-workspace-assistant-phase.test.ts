@@ -2455,7 +2455,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       progressed: true,
     }));
 
-    await result.afterCheckpoint?.();
+    const postCheckpoint = await result.afterCheckpoint?.();
 
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
       item: expect.objectContaining({
@@ -2465,6 +2465,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runtime: expect.any(Object),
       vaultRoot: "/tmp/murph-vault",
     });
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+    }));
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
   });
 
