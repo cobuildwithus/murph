@@ -490,8 +490,15 @@ describe("hosted ops onboarding invites", () => {
       phoneNumber: "+15557654321",
       prisma: tx,
     });
-    expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
-    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
+      phoneNumber: "+15551234567",
+      prisma: tx,
+    });
+    expect(mocks.issueHostedInviteTx).toHaveBeenCalledWith({
+      channel: "linq",
+      memberId: "member_123",
+      prisma: tx,
+    });
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
@@ -518,8 +525,15 @@ describe("hosted ops onboarding invites", () => {
       httpStatus: 429,
     });
 
-    expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
-    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
+      phoneNumber: "+15551234567",
+      prisma: tx,
+    });
+    expect(mocks.issueHostedInviteTx).toHaveBeenCalledWith({
+      channel: "linq",
+      memberId: "member_123",
+      prisma: tx,
+    });
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
   });
@@ -549,7 +563,11 @@ describe("hosted ops onboarding invites", () => {
         pendingLinqChatLookupKey: true,
       },
     });
-    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.issueHostedInviteTx).toHaveBeenCalledWith({
+      channel: "linq",
+      memberId: "member_123",
+      prisma: tx,
+    });
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
@@ -572,7 +590,11 @@ describe("hosted ops onboarding invites", () => {
       httpStatus: 409,
     });
 
-    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.issueHostedInviteTx).toHaveBeenCalledWith({
+      channel: "linq",
+      memberId: "member_123",
+      prisma: tx,
+    });
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
@@ -600,7 +622,6 @@ describe("hosted ops onboarding invites", () => {
       prisma: tx,
     });
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
-      homeLineAssignedAt: expect.any(Date),
       memberId: "member_123",
       prisma: tx,
       recipientPhone: "+15557654321",
@@ -627,8 +648,15 @@ describe("hosted ops onboarding invites", () => {
     });
 
     expect(mocks.syncHostedLinqConfiguredLinesTx).not.toHaveBeenCalled();
-    expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
-    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedMemberForPhoneTx).toHaveBeenCalledWith({
+      phoneNumber: "+15551234567",
+      prisma: tx,
+    });
+    expect(mocks.issueHostedInviteTx).toHaveBeenCalledWith({
+      channel: "linq",
+      memberId: "member_123",
+      prisma: tx,
+    });
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
   });
@@ -705,7 +733,7 @@ describe("hosted ops onboarding invites", () => {
     });
 
     expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledTimes(2);
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
     expect(readIdempotencyKey(mocks.sendHostedLinqChatMessage, 1)).toBe(

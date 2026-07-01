@@ -89,7 +89,7 @@ describe("hosted web production migration guard", () => {
       },
       {
         command: hostedWebProductionLinqLineSyncCommand.command,
-        args: ["--dir", "apps/web", "linq:sync-lines"],
+        args: ["--dir", "apps/web", "linq:sync-lines", "--", "--skip-provider-inventory"],
       },
     ]);
   });

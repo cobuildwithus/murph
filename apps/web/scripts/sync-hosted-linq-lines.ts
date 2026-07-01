@@ -14,6 +14,7 @@ async function main(): Promise<void> {
   const prisma = getPrisma();
   const environment = getHostedOnboardingEnvironment();
   const observedAt = new Date();
+  const syncProviderInventory = !process.argv.includes("--skip-provider-inventory");
 
   await prisma.$transaction(async (tx) => {
     await syncHostedLinqConfiguredLinesTx({
@@ -33,16 +34,21 @@ async function main(): Promise<void> {
       configuredHints.length > 0 ? `: ${configuredHints.join(", ")}` : "."
     }`,
   );
+
+  if (syncProviderInventory) {
+    const inventory = await syncHostedLinqPhoneNumberInventory({
+      maxLines: HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT,
+      observedAt,
+      prisma,
+    });
+    console.log(`Synced ${inventory.syncedCount} Linq provider inventory line(s).`);
+  } else {
+    console.log("Skipped Linq provider inventory sync.");
+  }
+
   await assertHostedLinqAssignableHomeLinePoolReady({
     prisma,
   });
-
-  const inventory = await syncHostedLinqPhoneNumberInventory({
-    maxLines: HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT,
-    observedAt,
-    prisma,
-  });
-  console.log(`Synced ${inventory.syncedCount} Linq provider inventory line(s).`);
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {

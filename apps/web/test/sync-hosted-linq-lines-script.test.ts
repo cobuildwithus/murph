@@ -14,10 +14,12 @@ describe("sync-hosted-linq-lines script", () => {
     const assignablePoolCheckIndex =
       mainBody.indexOf("assertHostedLinqAssignableHomeLinePoolReady({");
     const inventorySyncIndex = mainBody.indexOf("syncHostedLinqPhoneNumberInventory({");
+    const inventorySkipIndex = mainBody.indexOf("Skipped Linq provider inventory sync.");
 
     expect(configuredWriteIndex).toBeGreaterThanOrEqual(0);
     expect(configuredLogIndex).toBeGreaterThan(configuredWriteIndex);
-    expect(assignablePoolCheckIndex).toBeGreaterThan(configuredLogIndex);
-    expect(inventorySyncIndex).toBeGreaterThan(assignablePoolCheckIndex);
+    expect(inventorySyncIndex).toBeGreaterThan(configuredLogIndex);
+    expect(inventorySkipIndex).toBeGreaterThan(inventorySyncIndex);
+    expect(assignablePoolCheckIndex).toBeGreaterThan(inventorySkipIndex);
   });
 });

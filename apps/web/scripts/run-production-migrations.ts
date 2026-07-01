@@ -7,7 +7,7 @@ export const hostedWebProductionMigrationCommand = {
 
 export const hostedWebProductionLinqLineSyncCommand = {
   command: resolvePnpmCommand(),
-  args: ["--dir", "apps/web", "linq:sync-lines"],
+  args: ["--dir", "apps/web", "linq:sync-lines", "--", "--skip-provider-inventory"],
 } as const;
 
 export type HostedWebProductionMigrationEnvironment = Record<string, string | undefined>;
