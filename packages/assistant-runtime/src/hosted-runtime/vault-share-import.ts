@@ -81,7 +81,7 @@ export async function importHostedVaultShareDeliveryWake(input: {
     if (!store) {
       return {
         reasonCode: "vault_share.read_failed",
-        retryable: false,
+        retryable: true,
         status: "blocked",
       };
     }
@@ -96,12 +96,12 @@ export async function importHostedVaultShareDeliveryWake(input: {
     });
     await writeSharedVaultShareProjectionStore(input.vaultRoot, store);
   } catch {
-    // Quarantine instead of retrying: a persistent fs failure must not head-of-line
-    // block the destination's system lane forever, and records are re-offered on
-    // later wakes anyway.
+    // Retry instead of consuming the mailbox item: the web mailbox dedupe key already
+    // owns exact replay idempotency, so the destination must not checkpoint past the
+    // item until the projection write is durable.
     return {
       reasonCode: "vault_share.write_failed",
-      retryable: false,
+      retryable: true,
       status: "blocked",
     };
   }

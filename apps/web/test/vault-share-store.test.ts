@@ -115,7 +115,7 @@ describe("deliverHostedVaultShareRecords", () => {
     }
   });
 
-  it("builds the envelope deterministically: dedupe-key eventId and record-derived occurredAt", async () => {
+  it("builds the envelope deterministically: revisioned dedupe-key eventId and record-derived occurredAt", async () => {
     const prisma = fakePrisma();
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       inserted: true,
@@ -130,22 +130,57 @@ describe("deliverHostedVaultShareRecords", () => {
 
     // The store passes no occurredAt: the builder derives it from the parsed record, so
     // the plaintext occurred_at mailbox column can only ever hold the night-date midnight.
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
-      envelope: {
-        delivery: {
-          grantorMemberId: "member_grantor",
-          projectionKind: "sleep-times.v0",
-          record: FIRST_RECORD,
-          schema: "murph.vault-share.delivery.v1",
-          shareId: "share_1",
-        },
-        eventId: "vault-share:share_1:2026-06-07",
-        kind: "vault-share.delivery",
-        occurredAt: "2026-06-07T00:00:00.000Z",
-        userId: "member_referee",
+    const envelope = mocks.appendHostedMailboxEnvelopeTx.mock.calls[0]?.[0].envelope;
+    expect(envelope).toEqual({
+      delivery: {
+        grantorMemberId: "member_grantor",
+        projectionKind: "sleep-times.v0",
+        record: FIRST_RECORD,
+        schema: "murph.vault-share.delivery.v1",
+        shareId: "share_1",
       },
-      tx: TX,
+      eventId: expect.stringMatching(/^vault-share:share_1:2026-06-07:[A-Za-z0-9_-]{32}$/u),
+      kind: "vault-share.delivery",
+      occurredAt: "2026-06-07T00:00:00.000Z",
+      userId: "member_referee",
     });
+  });
+
+  it("dedupes exact replay while appending corrected payload for the same record key", async () => {
+    const prisma = fakePrisma();
+    const seenEventIds = new Set<string>();
+    mocks.appendHostedMailboxEnvelopeTx.mockImplementation(async (input) => {
+      const eventId = input.envelope.eventId;
+      if (seenEventIds.has(eventId)) {
+        return { duplicate: true, inserted: false };
+      }
+      seenEventIds.add(eventId);
+      return {
+        inserted: true,
+        item: { id: `mailbox_item_${seenEventIds.size}` },
+      };
+    });
+    const correctedRecord = {
+      ...FIRST_RECORD,
+      data: {
+        ...FIRST_RECORD.data,
+        sleepEndAt: "2026-06-08T06:59:00.000Z",
+      },
+    };
+
+    const result = await deliverHostedVaultShareRecords({
+      prisma,
+      records: [FIRST_RECORD, FIRST_RECORD, correctedRecord],
+      share: SHARE,
+    });
+
+    const eventIds = mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(
+      (call) => call[0].envelope.eventId,
+    );
+    expect(result).toEqual({ lastAppendedMailboxItemId: "mailbox_item_2" });
+    expect(eventIds[0]).toBe(eventIds[1]);
+    expect(eventIds[2]).not.toBe(eventIds[0]);
+    expect(eventIds[2]).toMatch(/^vault-share:share_1:2026-06-07:[A-Za-z0-9_-]{32}$/u);
   });
 
   it("reports a null item id when every record is a dedupe duplicate", async () => {

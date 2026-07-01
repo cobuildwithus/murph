@@ -179,6 +179,38 @@ describe("importHostedVaultShareDeliveryWake", () => {
     )).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("replaces a shared record when a corrected delivery revision arrives", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
+    const correctedRecord = {
+      ...RECORD,
+      data: {
+        ...RECORD.data,
+        sleepEndAt: "2026-06-10T06:59:00.000Z",
+      },
+    };
+
+    await expect(importHostedVaultShareDeliveryWake({ vaultRoot, wake }))
+      .resolves.toEqual({ status: "imported" });
+    await expect(importHostedVaultShareDeliveryWake({
+      vaultRoot,
+      wake: {
+        ...wake,
+        delivery: {
+          ...wake.delivery,
+          record: correctedRecord,
+        },
+        eventId: "vault-share:share_1:2026-06-09:revision_2",
+      },
+    })).resolves.toEqual({ status: "imported" });
+
+    const stored = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
+    const grantor = stored.projections["sleep-times.v0"].grantors.member_grantor;
+    expect(grantor.records).toHaveLength(1);
+    expect(grantor.records[0].record).toEqual(correctedRecord);
+    expect(grantor.records[0].receivedEventId)
+      .toBe("vault-share:share_1:2026-06-09:revision_2");
+  });
+
   it("keeps one compact file with only the latest bounded records", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
 
@@ -367,7 +399,7 @@ describe("importHostedVaultShareDeliveryWake", () => {
     )).toEqual(["2026-06-10"]);
   });
 
-  it("quarantines as a non-retryable block when the vault path is unreadable", async () => {
+  it("keeps delivery import read failures retryable so shared data is not consumed", async () => {
     const result = await importHostedVaultShareDeliveryWake({
       vaultRoot: "/dev/null/not-a-dir",
       wake,
@@ -375,7 +407,7 @@ describe("importHostedVaultShareDeliveryWake", () => {
 
     expect(result).toEqual({
       reasonCode: "vault_share.read_failed",
-      retryable: false,
+      retryable: true,
       status: "blocked",
     });
   });

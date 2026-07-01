@@ -102,11 +102,17 @@ function parseHostedVaultShareProjectionKind(
   throw new TypeError(`${label} must be a known vault-share projection kind.`);
 }
 
+/**
+ * Delivery dedupe separates logical record identity from revision identity: recordKey is
+ * the stable destination replacement key, while recordRevision is the stable hash of the
+ * validated payload that lets corrected facts append without duplicating exact retries.
+ */
 export function buildHostedVaultShareDeliveryDedupeKey(input: {
   recordKey: string;
+  recordRevision: string;
   shareId: string;
 }): string {
-  return `vault-share:${input.shareId}:${input.recordKey}`;
+  return `vault-share:${input.shareId}:${input.recordKey}:${input.recordRevision}`;
 }
 
 export function buildHostedVaultShareRevokeDedupeKey(input: {

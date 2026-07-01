@@ -44,10 +44,14 @@ describe("vault-share contracts", () => {
     expect(HOSTED_MAILBOX_KINDS).toContain("vault-share.revoke");
   });
 
-  it("derives the dedupe key from share id and record key", () => {
+  it("derives the delivery dedupe key from share id, record key, and revision", () => {
     expect(
-      buildHostedVaultShareDeliveryDedupeKey({ recordKey: "2026-06-09", shareId: "share_1" }),
-    ).toBe("vault-share:share_1:2026-06-09");
+      buildHostedVaultShareDeliveryDedupeKey({
+        recordKey: "2026-06-09",
+        recordRevision: "revision_1",
+        shareId: "share_1",
+      }),
+    ).toBe("vault-share:share_1:2026-06-09:revision_1");
   });
 
   it("derives the revoke dedupe key from share id and revocation timestamp", () => {
@@ -264,7 +268,7 @@ describe("vault-share contracts", () => {
     // from the record normalizes back to the record's night-date midnight.
     const parsed = parseHostedExecutionWake({
       delivery: VALID_DELIVERY,
-      eventId: "vault-share:share_1:2026-06-09",
+      eventId: "vault-share:share_1:2026-06-09:revision_1",
       kind: "vault-share.delivery",
       occurredAt: "2026-06-10T07:00:00.000Z",
       userId: "member_referee",
@@ -272,7 +276,7 @@ describe("vault-share contracts", () => {
 
     expect(parsed).toEqual({
       delivery: VALID_DELIVERY,
-      eventId: "vault-share:share_1:2026-06-09",
+      eventId: "vault-share:share_1:2026-06-09:revision_1",
       kind: "vault-share.delivery",
       occurredAt: VALID_RECORD.occurredAt,
       userId: "member_referee",
@@ -283,7 +287,7 @@ describe("vault-share contracts", () => {
     expect(() =>
       parseHostedExecutionWake({
         delivery: { ...VALID_DELIVERY, schema: "murph.vault-share.delivery.v999" },
-        eventId: "vault-share:share_1:2026-06-09",
+        eventId: "vault-share:share_1:2026-06-09:revision_1",
         kind: "vault-share.delivery",
         occurredAt: "2026-06-10T07:00:00.000Z",
         userId: "member_referee",
