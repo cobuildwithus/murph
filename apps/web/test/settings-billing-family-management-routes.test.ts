@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   buildHostedFamilyTelegramInviteUrl: vi.fn(),
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
   getPrisma: vi.fn(),
+  hostedFamilyInviteHasReusableTarget: vi.fn(),
   hostedAccountGroupFindUnique: vi.fn(),
   issueHostedFamilyInviteTx: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   buildHostedFamilyInviteAcceptUrl: mocks.buildHostedFamilyInviteAcceptUrl,
   buildHostedFamilyTelegramInviteUrl: mocks.buildHostedFamilyTelegramInviteUrl,
   ensureHostedAccountGroupForOwnerTx: mocks.ensureHostedAccountGroupForOwnerTx,
+  hostedFamilyInviteHasReusableTarget: mocks.hostedFamilyInviteHasReusableTarget,
   issueHostedFamilyInviteTx: mocks.issueHostedFamilyInviteTx,
   readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
   removeHostedFamilyMemberTx: mocks.removeHostedFamilyMemberTx,
@@ -109,6 +111,7 @@ beforeEach(async () => {
     seats: { active: 2, billed: 2, invited: 0, max: 6, min: 2, remaining: 0, used: 2 },
   });
   mocks.waitForHostedFamilyBilledSeatCount.mockResolvedValue(true);
+  mocks.hostedFamilyInviteHasReusableTarget.mockReturnValue(true);
 
   inviteRoute = await import("../app/api/settings/billing/family/invite/route");
   inviteCancelRoute = await import("../app/api/settings/billing/family/invite/[inviteId]/route");
@@ -281,6 +284,8 @@ test("does not auto-add a seat for a label-only invite (no dedup key)", async ()
       message: "This Family plan has no open paid seats.",
     }),
   );
+
+  mocks.hostedFamilyInviteHasReusableTarget.mockReturnValueOnce(false);
 
   const response = await inviteRoute.POST(
     inviteRequest({ addSeatIfNeeded: true, targetLabel: "Grandpa" }),

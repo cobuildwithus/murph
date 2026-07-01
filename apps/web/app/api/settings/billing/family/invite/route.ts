@@ -5,6 +5,7 @@ import {
   buildHostedFamilyInviteAcceptUrl,
   buildHostedFamilyTelegramInviteUrl,
   ensureHostedAccountGroupForOwnerTx,
+  hostedFamilyInviteHasReusableTarget,
   issueHostedFamilyInviteTx,
   readHostedFamilyOwnerSnapshotForMember,
   updateHostedFamilySeatCount,
@@ -39,11 +40,11 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   // Auto-adding a seat only happens for invites the issuer can dedup on retry
-  // (phone/email/Telegram). Label-only invites have no reuse key, so a lost-
-  // response retry could otherwise buy a second seat.
+  // (a normalized phone/email/Telegram). Label-only or invalid-contact invites
+  // have no reuse key, so a lost-response retry could otherwise buy a second seat.
   const canAutoAddSeat =
     body.addSeatIfNeeded === true &&
-    Boolean(targetPhoneNumber || targetTelegramUsername || targetEmail);
+    hostedFamilyInviteHasReusableTarget({ targetEmail, targetPhoneNumber, targetTelegramUsername });
 
   const issueInvite = () =>
     prisma.$transaction(async (tx) => {

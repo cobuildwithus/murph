@@ -2295,6 +2295,29 @@ export async function issueHostedFamilyInvite(input: {
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
+/**
+ * Whether an invite target has a contact the issuer can dedup on (phone, email,
+ * or Telegram) after normalization. Mirrors the reuse-key logic in
+ * issueHostedFamilyInviteTx so callers can gate retry-unsafe side effects (paid
+ * seat auto-add) on the same validity, not on raw non-empty strings.
+ */
+export function hostedFamilyInviteHasReusableTarget(input: {
+  targetEmail?: string | null;
+  targetPhoneNumber?: string | null;
+  targetTelegramUsername?: string | null;
+}): boolean {
+  const phone = createHostedPhoneLookupKeyReadCandidates(
+    normalizePhoneNumber(input.targetPhoneNumber),
+  );
+  const telegram = createHostedTelegramUsernameLookupKeyReadCandidates(
+    normalizeHostedTelegramUsernameForLookup(input.targetTelegramUsername),
+  );
+  const email = createHostedEmailLookupKeyReadCandidates(
+    normalizeHostedEmailAddress(input.targetEmail),
+  );
+  return phone.length > 0 || telegram.length > 0 || email.length > 0;
+}
+
 export async function issueHostedFamilyInviteTx(input: {
   groupId: string;
   invitedByMemberId: string;

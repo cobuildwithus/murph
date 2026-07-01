@@ -64,6 +64,7 @@ import {
   createHostedAccountGroupForOwnerTx,
   createHostedFamilyBillingCheckout,
   hasHostedAccountGroupMembershipAccess,
+  hostedFamilyInviteHasReusableTarget,
   issueHostedFamilyInviteFromOwnerTx,
   issueHostedFamilyInviteTx,
   readHostedFamilyCheckoutSessionIdFromUrl,
@@ -2799,3 +2800,16 @@ function clearHostedOnboardingEnvCache(): void {
     __murphHostedOnboardingStripe?: unknown;
   }).__murphHostedOnboardingStripe;
 }
+
+describe("hostedFamilyInviteHasReusableTarget", () => {
+  it("is true for a valid phone or email", () => {
+    expect(hostedFamilyInviteHasReusableTarget({ targetPhoneNumber: "+48600000000" })).toBe(true);
+    expect(hostedFamilyInviteHasReusableTarget({ targetEmail: "mom@example.com" })).toBe(true);
+  });
+
+  it("is false for label-only, empty, or whitespace contacts", () => {
+    expect(hostedFamilyInviteHasReusableTarget({})).toBe(false);
+    expect(hostedFamilyInviteHasReusableTarget({ targetPhoneNumber: "   " })).toBe(false);
+    expect(hostedFamilyInviteHasReusableTarget({ targetEmail: "  " })).toBe(false);
+  });
+});
