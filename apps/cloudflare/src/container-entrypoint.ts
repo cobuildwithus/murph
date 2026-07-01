@@ -106,8 +106,6 @@ const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_TIMEOUT_MS = 60_000;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_TAIL_MAX_CHARS = 16 * 1024;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_ERROR_MESSAGE_MAX_CHARS = 512;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDOUT_EXCERPT_MAX_CHARS = 220;
-const HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_INTERVAL_MS = 50;
-const HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_TIMEOUT_MS = 5_000;
 const HOSTED_CONTAINER_LIVE_MODEL_TURN_SMOKE_STDERR_EXCERPT_MAX_CHARS = 160;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES = 150 * 1024 * 1024;
 const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES = 512 * 1024 * 1024;
@@ -123,15 +121,11 @@ interface HostedContainerProcessDirectoryEntryLike {
 }
 
 interface HostedContainerProcessApi {
-  kill(pid: number, signal: NodeJS.Signals): void;
   readFile(path: string, encoding: BufferEncoding): Promise<string>;
   readdir(path: string): Promise<HostedContainerProcessDirectoryEntryLike[]>;
 }
 
 const defaultHostedContainerProcessApi: HostedContainerProcessApi = {
-  kill(pid, signal) {
-    process.kill(pid, signal);
-  },
   async readFile(path, encoding) {
     return await readFile(path, encoding);
   },
@@ -280,10 +274,17 @@ type HostedAbortResponseLike = HostedAbortEmitterLike & {
   writableEnded: boolean;
 };
 
+interface HostedRunnerShellIsolationErrorOptions extends ErrorOptions {
+  unexpectedProcessCount?: number;
+}
+
 class HostedRunnerShellIsolationError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  readonly unexpectedProcessCount: number | null;
+
+  constructor(message: string, options?: HostedRunnerShellIsolationErrorOptions) {
     super(message, options);
     this.name = "HostedRunnerShellIsolationError";
+    this.unexpectedProcessCount = options?.unexpectedProcessCount ?? null;
   }
 }
 
@@ -320,15 +321,9 @@ interface HostedContainerProcessSnapshot {
   rootUid: number | null;
 }
 
-interface HostedContainerProcessIsolationResult {
-  killedExpectedCodexRoot: boolean;
-  killedPids: number[];
-}
-
 type HostedWarmCodexStopReason =
   | "cli-bridge-off-invocation-request"
   | "container-server-close"
-  | "expected-root-rejected"
   | "process-isolation-failed";
 
 interface HostedContainerRuntimeWakeRequest {
@@ -2026,7 +2021,9 @@ function buildHostedContainerCodexShellSmokeConfig(model: string): string {
     "",
     "[features]",
     "plugins = false",
-    "multi_agent_v2 = true",
+    "",
+    "[features.multi_agent_v2]",
+    "enabled = true",
     "",
     '[model_providers."hosted-shell-smoke"]',
     'name = "OpenAI"',
@@ -2483,67 +2480,25 @@ async function enforceHostedContainerProcessIsolation(
   processApi: HostedContainerProcessApi,
   baseline: HostedContainerProcessSnapshot,
   expectedCodexRoot: HostedExpectedCodexRootProcess | null,
-): Promise<HostedContainerProcessIsolationResult> {
+): Promise<void> {
   if (process.platform === "win32") {
-    return {
-      killedExpectedCodexRoot: false,
-      killedPids: [],
-    };
+    return;
   }
 
-  const firstPass = await listUnexpectedHostedContainerProcessIds(
+  const unexpectedPids = await listUnexpectedHostedContainerProcessIds(
     process.pid,
     processApi,
     baseline,
     expectedCodexRoot,
   );
-  if (firstPass.length === 0) {
-    return {
-      killedExpectedCodexRoot: false,
-      killedPids: [],
-    };
+  if (unexpectedPids.length === 0) {
+    return;
   }
 
-  const killedExpectedCodexRoot =
-    expectedCodexRoot !== null && firstPass.includes(expectedCodexRoot.pid);
-
-  let remaining = firstPass;
-  const deadlineMs = Date.now() + HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_TIMEOUT_MS;
-
-  while (remaining.length > 0) {
-    for (const pid of remaining) {
-      try {
-        processApi.kill(pid, "SIGKILL");
-      } catch {
-        // Re-check after the cleanup pass.
-      }
-    }
-
-    await new Promise((resolve) =>
-      setTimeout(resolve, HOSTED_CONTAINER_PROCESS_CLEANUP_SETTLE_INTERVAL_MS)
-    );
-
-    remaining = await listUnexpectedHostedContainerProcessIds(
-      process.pid,
-      processApi,
-      baseline,
-      expectedCodexRoot,
-    );
-    if (remaining.length === 0 || Date.now() >= deadlineMs) {
-      break;
-    }
-  }
-
-  if (remaining.length > 0) {
-    throw new HostedRunnerShellIsolationError(
-      `Hosted runner shell still has unexpected live processes after cleanup: ${remaining.join(", ")}.`,
-    );
-  }
-
-  return {
-    killedExpectedCodexRoot,
-    killedPids: firstPass,
-  };
+  throw new HostedRunnerShellIsolationError(
+    "Hosted runner shell has unexpected live processes outside the verified Codex app-server tree.",
+    { unexpectedProcessCount: unexpectedPids.length },
+  );
 }
 
 async function snapshotHostedContainerProcesses(
@@ -2603,26 +2558,11 @@ async function listUnexpectedHostedContainerProcessIds(
   expectedCodexRoot: HostedExpectedCodexRootProcess | null,
 ): Promise<number[]> {
   const processStates = await readHostedContainerProcessStates(rootPid, processApi);
-  const descendantPids = new Set<number>();
-  const frontier = [rootPid];
-  const visited = new Set<number>(frontier);
-
-  while (frontier.length > 0) {
-    const currentPid = frontier.shift();
-    if (currentPid === undefined) {
-      break;
-    }
-
-    for (const [pid, state] of processStates) {
-      if (state.ppid !== currentPid || visited.has(pid)) {
-        continue;
-      }
-
-      visited.add(pid);
-      frontier.push(pid);
-      descendantPids.add(pid);
-    }
-  }
+  const descendantPids = listHostedContainerProcessTreeIds(processStates, rootPid);
+  const expectedCodexProcessIds = listExpectedHostedCodexProcessIds(
+    processStates,
+    expectedCodexRoot,
+  );
 
   const unexpected: number[] = [];
   for (const [pid, state] of processStates) {
@@ -2630,7 +2570,7 @@ async function listUnexpectedHostedContainerProcessIds(
       continue;
     }
 
-    if (isExpectedHostedCodexRootProcess(pid, state, expectedCodexRoot)) {
+    if (expectedCodexProcessIds.has(pid)) {
       continue;
     }
 
@@ -2649,6 +2589,61 @@ async function listUnexpectedHostedContainerProcessIds(
   }
 
   return unexpected.sort((left, right) => left - right);
+}
+
+function listExpectedHostedCodexProcessIds(
+  processStates: Map<number, HostedContainerProcessState>,
+  expectedCodexRoot: HostedExpectedCodexRootProcess | null,
+): Set<number> {
+  if (!expectedCodexRoot) {
+    return new Set();
+  }
+
+  const rootState = processStates.get(expectedCodexRoot.pid);
+  if (
+    !rootState ||
+    rootState.state === "Z" ||
+    !isExpectedHostedCodexRootProcess(
+      expectedCodexRoot.pid,
+      rootState,
+      expectedCodexRoot,
+    )
+  ) {
+    return new Set();
+  }
+
+  return listHostedContainerProcessTreeIds(processStates, expectedCodexRoot.pid);
+}
+
+function listHostedContainerProcessTreeIds(
+  processStates: Map<number, HostedContainerProcessState>,
+  rootPid: number,
+): Set<number> {
+  const processTreePids = new Set<number>();
+  const frontier = [rootPid];
+  const visited = new Set<number>(frontier);
+  if (processStates.has(rootPid)) {
+    processTreePids.add(rootPid);
+  }
+
+  while (frontier.length > 0) {
+    const currentPid = frontier.shift();
+    if (currentPid === undefined) {
+      break;
+    }
+
+    for (const [pid, state] of processStates) {
+      if (state.ppid !== currentPid || visited.has(pid)) {
+        continue;
+      }
+
+      visited.add(pid);
+      frontier.push(pid);
+      processTreePids.add(pid);
+    }
+  }
+
+  return processTreePids;
 }
 
 function isExpectedHostedCodexRootProcess(
@@ -3105,34 +3100,30 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
       try {
         expectedCodexRoot = await runtime.snapshotExpectedCodexRootProcess();
         expectedCodexRootSnapshotCompleted = true;
-        const cleanupResult = await enforceHostedContainerProcessIsolation(
+        await enforceHostedContainerProcessIsolation(
           runtime.processApi,
           processBaseline,
           expectedCodexRoot,
         );
         logHostedProcessIsolationCleanup({
-          killedExpectedCodexRoot: cleanupResult.killedExpectedCodexRoot,
-          killedProcessCount: cleanupResult.killedPids.length,
           expectedCodexRootPresent: expectedCodexRoot !== null,
           expectedCodexRootSnapshotStatus,
           status: "passed",
+          unexpectedProcessCount: 0,
         });
-        if (cleanupResult.killedExpectedCodexRoot) {
-          await stopWarmCodexWithLifecycleLog(runtime, {
-            reason: "expected-root-rejected",
-          }).catch(() => undefined);
-        }
         options?.onCleanupStatus?.("passed");
       } catch (error) {
         if (!expectedCodexRootSnapshotCompleted) {
           expectedCodexRootSnapshotStatus = "failed";
         }
         logHostedProcessIsolationCleanup({
-          killedExpectedCodexRoot: false,
-          killedProcessCount: 0,
           expectedCodexRootPresent: expectedCodexRoot !== null,
           expectedCodexRootSnapshotStatus,
           status: "failed",
+          unexpectedProcessCount:
+            error instanceof HostedRunnerShellIsolationError
+              ? error.unexpectedProcessCount ?? 0
+              : 0,
         });
         await stopWarmCodexWithLifecycleLog(runtime, {
           reason: "process-isolation-failed",
@@ -3147,9 +3138,8 @@ async function runHostedWorkspaceInvocationWithProcessIsolation(
 function logHostedProcessIsolationCleanup(input: {
   expectedCodexRootPresent: boolean;
   expectedCodexRootSnapshotStatus: "available" | "failed";
-  killedExpectedCodexRoot: boolean;
-  killedProcessCount: number;
   status: "failed" | "passed";
+  unexpectedProcessCount: number;
 }): void {
   emitHostedExecutionStructuredLog({
     component: "container",
@@ -3157,8 +3147,7 @@ function logHostedProcessIsolationCleanup(input: {
       processIsolationCleanupStatus: input.status,
       processIsolationExpectedCodexRootPresent: input.expectedCodexRootPresent,
       processIsolationExpectedCodexRootSnapshotStatus: input.expectedCodexRootSnapshotStatus,
-      processIsolationKilledExpectedCodexRoot: input.killedExpectedCodexRoot,
-      processIsolationKilledProcessCount: input.killedProcessCount,
+      processIsolationUnexpectedProcessCount: input.unexpectedProcessCount,
     },
     level: input.status === "passed" ? "info" : "warn",
     message: "Hosted container process isolation cleanup completed.",

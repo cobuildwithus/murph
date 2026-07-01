@@ -44,7 +44,7 @@ describe('Codex provider config overrides', () => {
     })
 
     expect(overrides).toEqual([
-      'features.multi_agent_v2=true',
+      'features.multi_agent_v2.enabled=true',
     ])
   })
 

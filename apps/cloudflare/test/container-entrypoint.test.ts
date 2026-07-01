@@ -1429,7 +1429,8 @@ describe("startHostedContainerEntrypoint", () => {
       expect(codexConfigToml).toContain("supports_websockets = false");
       expect(codexConfigToml).toContain("request_max_retries = 4");
       expect(codexConfigToml).toContain("stream_max_retries = 5");
-      expect(codexConfigToml).toContain("multi_agent_v2 = true");
+      expect(codexConfigToml).toContain("[features.multi_agent_v2]");
+      expect(codexConfigToml).toContain("enabled = true");
     } finally {
       if (previousHostedHome === undefined) {
         delete process.env.HOSTED_HOME;
@@ -3009,25 +3010,21 @@ describe("startHostedContainerEntrypoint", () => {
       }));
   });
 
-  it("allows only the verified warm Codex root process during cleanup", async () => {
+  it("preserves the verified warm Codex app-server process tree during cleanup", async () => {
     const codexPid = process.pid + 1250;
-    const codexChildPid = process.pid + 1251;
+    const codexImplementationPid = process.pid + 1251;
+    const subagentShellPid = process.pid + 1252;
     const codexCmdline = "codex\u0000-a\u0000never\u0000app-server\u0000";
     const codexCmdlineDigest = createHash("sha256").update(codexCmdline).digest("hex");
     const codexStartTime = "1234567";
     let runnerStarted = false;
-    let childKilled = false;
-    const kill = vi.fn((pid: number) => {
-      if (pid === codexChildPid) {
-        childKilled = true;
-      }
-    });
     const readdir = vi.fn(async () => [
       { isDirectory: () => true, name: String(process.pid) },
       ...(runnerStarted
         ? [
           { isDirectory: () => true, name: String(codexPid) },
-          { isDirectory: () => true, name: String(codexChildPid) },
+          { isDirectory: () => true, name: String(codexImplementationPid) },
+          { isDirectory: () => true, name: String(subagentShellPid) },
         ]
         : []),
     ]);
@@ -3052,12 +3049,23 @@ describe("startHostedContainerEntrypoint", () => {
         return "Name:\tcodex\nUid:\t1000\t1000\t1000\t1000\n";
       }
 
-      if (String(filePath).endsWith(`/${codexChildPid}/stat`)) {
-        const state = childKilled ? "Z" : "S";
-        return `${codexChildPid} (sh) ${state} ${codexPid} ${codexPid} 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 7654321 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      if (String(filePath).endsWith(`/${codexImplementationPid}/cmdline`)) {
+        return "codex-native\u0000-a\u0000never\u0000app-server\u0000";
       }
 
-      if (String(filePath).endsWith(`/${codexChildPid}/status`)) {
+      if (String(filePath).endsWith(`/${codexImplementationPid}/stat`)) {
+        return `${codexImplementationPid} (codex) S ${codexPid} ${codexPid} 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 7654321 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      if (String(filePath).endsWith(`/${codexImplementationPid}/status`)) {
+        return "Name:\tcodex\nUid:\t1000\t1000\t1000\t1000\n";
+      }
+
+      if (String(filePath).endsWith(`/${subagentShellPid}/stat`)) {
+        return `${subagentShellPid} (sh) S ${codexImplementationPid} ${codexPid} 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 8765432 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      if (String(filePath).endsWith(`/${subagentShellPid}/status`)) {
         return "Name:\tsh\nUid:\t1000\t1000\t1000\t1000\n";
       }
 
@@ -3073,7 +3081,7 @@ describe("startHostedContainerEntrypoint", () => {
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
-        processApi: { kill, readFile, readdir },
+        processApi: { readFile, readdir },
         processIsolation: true,
         snapshotExpectedCodexRootProcess: vi.fn(async () => ({
           commandLineDigest: codexCmdlineDigest,
@@ -3109,17 +3117,14 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(response.status).toBe(200);
     expect(runnerSpy).toHaveBeenCalledTimes(1);
-    expect(kill).not.toHaveBeenCalledWith(codexPid, "SIGKILL");
-    expect(kill).toHaveBeenCalledWith(codexChildPid, "SIGKILL");
-    expect(readdir).toHaveBeenCalledTimes(3);
+    expect(readdir).toHaveBeenCalledTimes(2);
     expect(mocks.emitHostedExecutionStructuredLog.mock.calls
       .map(([input]) => input)).toContainEqual(expect.objectContaining({
         details: expect.objectContaining({
           processIsolationCleanupStatus: "passed",
           processIsolationExpectedCodexRootPresent: true,
           processIsolationExpectedCodexRootSnapshotStatus: "available",
-          processIsolationKilledExpectedCodexRoot: false,
-          processIsolationKilledProcessCount: 1,
+          processIsolationUnexpectedProcessCount: 0,
         }),
         message: "Hosted container process isolation cleanup completed.",
       }));
@@ -3130,12 +3135,6 @@ describe("startHostedContainerEntrypoint", () => {
     const codexCmdline = "python\u0000worker.py\u0000";
     const codexStartTime = "2468135";
     let runnerStarted = false;
-    let codexKilled = false;
-    const kill = vi.fn((pid: number) => {
-      if (pid === codexPid) {
-        codexKilled = true;
-      }
-    });
     const readdir = vi.fn(async () => [
       { isDirectory: () => true, name: String(process.pid) },
       ...(runnerStarted ? [{ isDirectory: () => true, name: String(codexPid) }] : []),
@@ -3154,8 +3153,7 @@ describe("startHostedContainerEntrypoint", () => {
       }
 
       if (String(filePath).endsWith(`/${codexPid}/stat`)) {
-        const state = codexKilled ? "Z" : "S";
-        return `${codexPid} (python) ${state} ${process.pid} ${codexPid} 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ${codexStartTime} 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+        return `${codexPid} (python) S ${process.pid} ${codexPid} 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ${codexStartTime} 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
       }
 
       if (String(filePath).endsWith(`/${codexPid}/status`)) {
@@ -3171,11 +3169,13 @@ describe("startHostedContainerEntrypoint", () => {
       },
     );
     const stopWarmCodex = vi.fn(async () => undefined);
+    const exitScheduler = vi.fn();
 
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
-        processApi: { kill, readFile, readdir },
+        exitScheduler,
+        processApi: { readFile, readdir },
         processIsolation: true,
         snapshotExpectedCodexRootProcess: vi.fn(async () => ({
           commandLineDigest: createHash("sha256")
@@ -3211,26 +3211,25 @@ describe("startHostedContainerEntrypoint", () => {
       method: "POST",
     });
 
-    expect(response.status).toBe(200);
-    expect(kill).toHaveBeenCalledWith(codexPid, "SIGKILL");
+    expect(response.status).toBe(500);
     expect(stopWarmCodex).toHaveBeenCalledTimes(1);
-    expect(stopWarmCodex).toHaveBeenCalledWith("expected-root-rejected");
+    expect(stopWarmCodex).toHaveBeenCalledWith("process-isolation-failed");
+    expect(exitScheduler).toHaveBeenCalledTimes(1);
     const logInputs = mocks.emitHostedExecutionStructuredLog.mock.calls
       .map(([input]) => input);
     expect(logInputs).toContainEqual(expect.objectContaining({
       details: expect.objectContaining({
-        processIsolationCleanupStatus: "passed",
+        processIsolationCleanupStatus: "failed",
         processIsolationExpectedCodexRootPresent: true,
         processIsolationExpectedCodexRootSnapshotStatus: "available",
-        processIsolationKilledExpectedCodexRoot: true,
-        processIsolationKilledProcessCount: 1,
+        processIsolationUnexpectedProcessCount: 1,
       }),
       message: "Hosted container process isolation cleanup completed.",
     }));
     expect(logInputs).toContainEqual(expect.objectContaining({
       details: expect.objectContaining({
         warmCodexExpectedRootSnapshotStatus: "available",
-        warmCodexStopReason: "expected-root-rejected",
+        warmCodexStopReason: "process-isolation-failed",
         warmCodexStopStatus: "completed",
       }),
       message: "Hosted container warm Codex stop completed.",
@@ -3263,7 +3262,7 @@ describe("startHostedContainerEntrypoint", () => {
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
-        processApi: { kill: vi.fn(), readFile, readdir },
+        processApi: { readFile, readdir },
         processIsolation: true,
         snapshotExpectedCodexRootProcess,
         stopWarmCodex,
@@ -3299,8 +3298,7 @@ describe("startHostedContainerEntrypoint", () => {
         processIsolationCleanupStatus: "failed",
         processIsolationExpectedCodexRootPresent: false,
         processIsolationExpectedCodexRootSnapshotStatus: "failed",
-        processIsolationKilledExpectedCodexRoot: false,
-        processIsolationKilledProcessCount: 0,
+        processIsolationUnexpectedProcessCount: 0,
       }),
       message: "Hosted container process isolation cleanup completed.",
     }));
@@ -3315,12 +3313,8 @@ describe("startHostedContainerEntrypoint", () => {
     }));
   });
 
-  it("runs warm-container cleanup after a failed runner job", async () => {
+  it("poisons the container when a failed runner job leaves a descendant process", async () => {
     const childPid = process.pid + 1500;
-    let killed = false;
-    const kill = vi.fn(() => {
-      killed = true;
-    });
     const exit = vi.fn();
     const readdir = vi.fn(async () => [
       { isDirectory: () => true, name: String(process.pid) },
@@ -3328,8 +3322,7 @@ describe("startHostedContainerEntrypoint", () => {
     ]);
     const readFile = vi.fn(async (filePath: string) => {
       if (String(filePath).endsWith(`/${childPid}/stat`)) {
-        const state = killed ? "Z" : "S";
-        return `${childPid} (child) ${state} ${process.pid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+        return `${childPid} (child) S ${process.pid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
       }
 
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -3342,7 +3335,7 @@ describe("startHostedContainerEntrypoint", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
-        processApi: { kill, readFile, readdir },
+        processApi: { readFile, readdir },
         processIsolation: true,
       },
     });
@@ -3370,21 +3363,17 @@ describe("startHostedContainerEntrypoint", () => {
     expect(response.status).toBe(500);
     const payload = await response.json() as ClassifiedRunnerPayload;
     expect(payload).toMatchObject({
-      code: "type_error",
+      code: "runtime_error",
       error: "Hosted execution runtime failed.",
     });
-    expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
-    expect(readdir).toHaveBeenCalledTimes(3);
-    expect(exit).not.toHaveBeenCalled();
+    expect(readdir).toHaveBeenCalledTimes(2);
+    expect(exit).toHaveBeenCalledTimes(1);
   });
 
-  it("kills daemonized same-user processes created during a warm-container job", async () => {
+  it("poisons the container when same-user processes are created during a warm-container job", async () => {
     const daemonPid = process.pid + 1750;
     let runnerStarted = false;
-    let killed = false;
-    const kill = vi.fn(() => {
-      killed = true;
-    });
+    const exit = vi.fn();
     const readdir = vi.fn(async () => [
       { isDirectory: () => true, name: String(process.pid) },
       ...(runnerStarted ? [{ isDirectory: () => true, name: String(daemonPid) }] : []),
@@ -3399,8 +3388,7 @@ describe("startHostedContainerEntrypoint", () => {
       }
 
       if (String(filePath).endsWith(`/${daemonPid}/stat`)) {
-        const state = killed ? "Z" : "S";
-        return `${daemonPid} (daemon) ${state} 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+        return `${daemonPid} (daemon) S 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
       }
 
       if (String(filePath).endsWith(`/${daemonPid}/status`)) {
@@ -3419,7 +3407,8 @@ describe("startHostedContainerEntrypoint", () => {
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
-        processApi: { kill, readFile, readdir },
+        exitScheduler: exit,
+        processApi: { readFile, readdir },
         processIsolation: true,
       },
     });
@@ -3444,85 +3433,15 @@ describe("startHostedContainerEntrypoint", () => {
       method: "POST",
     });
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(500);
     expect(runnerSpy).toHaveBeenCalledTimes(1);
-    expect(kill).toHaveBeenCalledWith(daemonPid, "SIGKILL");
-    expect(readdir).toHaveBeenCalledTimes(3);
+    expect(readdir).toHaveBeenCalledTimes(2);
+    expect(exit).toHaveBeenCalledTimes(1);
   });
 
-  it("waits for killed warm-container processes to disappear before poisoning the shell", async () => {
-    const childPid = process.pid + 1900;
-    let runnerStarted = false;
-    let killed = false;
-    let childStateReadsAfterKill = 0;
-    const kill = vi.fn((pid: number) => {
-      if (pid === childPid) {
-        killed = true;
-      }
-    });
-    const exit = vi.fn();
-    const readdir = vi.fn(async () => [
-      { isDirectory: () => true, name: String(process.pid) },
-      ...(runnerStarted ? [{ isDirectory: () => true, name: String(childPid) }] : []),
-    ]);
-    const readFile = vi.fn(async (filePath: string) => {
-      if (String(filePath).endsWith(`/${childPid}/stat`)) {
-        if (killed) {
-          childStateReadsAfterKill += 1;
-        }
-        const state = killed && childStateReadsAfterKill >= 3 ? "Z" : "S";
-        return `${childPid} (child) ${state} ${process.pid} 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
-      }
-
-      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-    });
-    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
-      async () => {
-        runnerStarted = true;
-        return buildWorkspaceRunnerResult();
-      },
-    );
-
-    const server = await startHostedContainerEntrypoint({
-      port: 0,
-      runtime: {
-        exitScheduler: exit,
-        processApi: { kill, readFile, readdir },
-        processIsolation: true,
-      },
-    });
-    servers.push(server);
-    const address = server.address();
-
-    if (!address || typeof address === "string") {
-      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-    }
-
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
-      body: JSON.stringify(buildJobBody({
-        wake: {
-          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
-          eventId: "evt_delayed_cleanup",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
-      })),
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      method: "POST",
-    });
-
-    expect(response.status).toBe(200);
-    expect(runnerSpy).toHaveBeenCalledTimes(1);
-    expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
-    expect(kill.mock.calls.filter(([pid]) => pid === childPid).length).toBeGreaterThan(1);
-    expect(exit).not.toHaveBeenCalled();
-  });
-
-  it("still rejects lingering descendant processes after the cleanup pass", async () => {
+  it("rejects unexpected descendant processes without sending signals", async () => {
     const childPid = process.pid + 2000;
 
-    const kill = vi.fn();
     const exit = vi.fn();
     const readdir = vi.fn(async () => [
       { isDirectory: () => true, name: String(process.pid) },
@@ -3541,7 +3460,7 @@ describe("startHostedContainerEntrypoint", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
-        processApi: { kill, readFile, readdir },
+        processApi: { readFile, readdir },
         processIsolation: true,
       },
     });
@@ -3578,7 +3497,6 @@ describe("startHostedContainerEntrypoint", () => {
       error: "Hosted execution runtime failed.",
     });
     expect(JSON.stringify(payload)).not.toContain(String(childPid));
-    expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
     expect(exit).toHaveBeenCalledTimes(1);
 
     const health = await sendHostedContainerGetRequest({
@@ -3606,7 +3524,6 @@ describe("startHostedContainerEntrypoint", () => {
       },
     );
 
-    const kill = vi.fn();
     const exit = vi.fn();
     const readdir = vi.fn(async () => [
       { isDirectory: () => true, name: String(process.pid) },
@@ -3625,7 +3542,7 @@ describe("startHostedContainerEntrypoint", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
-        processApi: { kill, readFile, readdir },
+        processApi: { readFile, readdir },
         processIsolation: true,
       },
     });
@@ -3659,7 +3576,6 @@ describe("startHostedContainerEntrypoint", () => {
     const response = await responsePromise;
 
     expect(response.status).toBe(500);
-    expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
     expect(exit).toHaveBeenCalledTimes(1);
     expect(mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3694,7 +3610,6 @@ describe("startHostedContainerEntrypoint", () => {
       },
     );
 
-    const kill = vi.fn();
     const exit = vi.fn();
     const readdir = vi.fn(async () => [
       { isDirectory: () => true, name: String(process.pid) },
@@ -3712,7 +3627,7 @@ describe("startHostedContainerEntrypoint", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
-        processApi: { kill, readFile, readdir },
+        processApi: { readFile, readdir },
         processIsolation: true,
       },
     });
@@ -3755,7 +3670,6 @@ describe("startHostedContainerEntrypoint", () => {
     await vi.waitFor(() => {
       expect(exit).toHaveBeenCalledTimes(1);
     });
-    expect(kill).toHaveBeenCalledWith(childPid, "SIGKILL");
     expect(mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort).toHaveBeenCalledWith(
       expect.objectContaining({
         closeActiveCaptures: true,

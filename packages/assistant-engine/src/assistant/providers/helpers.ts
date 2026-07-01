@@ -266,7 +266,7 @@ export function mergeCodexConfigOverrides(input: {
   if (input.enableMultiAgentV2) {
     upsertCodexConfigOverride(
       overrides,
-      'features.multi_agent_v2',
+      'features.multi_agent_v2.enabled',
       'true',
     )
   }

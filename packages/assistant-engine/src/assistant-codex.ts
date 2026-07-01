@@ -238,9 +238,9 @@ function prepareCodexRpcParams(
   return stripped
 }
 
-// The 0.135 app-server reports compaction completion to v2 clients as a
-// contextCompaction item; `thread/compacted` is the legacy fan-out kept for
-// protocol drift tolerance.
+// Modern app-server clients receive compaction lifecycle as contextCompaction
+// items; `thread/compacted` is the legacy fan-out kept for protocol drift
+// tolerance.
 function isCodexContextCompactionStarted(message: CodexRpcMessage): boolean {
   const method = typeof message.method === 'string' ? message.method : null
   if (method !== 'item/started' && method !== 'item.started') {
@@ -734,7 +734,6 @@ class CodexAppServerProcess {
   private boundThreadId: string | null = null
   private boundThreadServiceTier: AssistantProviderServiceTier | null = null
   private cleanupProcessExitListener: () => void
-  private completedTurnCount = 0
   private lastThreadTokenUsage: CodexWarmThreadTokenUsage | null = null
   private readonly codexCommand: string
   private ignoredResponseIds = new Set<CodexRpcId>()
@@ -792,10 +791,6 @@ class CodexAppServerProcess {
     return Math.max(0, Date.now() - this.startedAt)
   }
 
-  get requiresCompleteTurnCorrelation(): boolean {
-    return this.completedTurnCount > 0
-  }
-
   get hasInFlightTurn(): boolean {
     return this.state === 'reserved' || this.state === 'running'
   }
@@ -838,7 +833,6 @@ class CodexAppServerProcess {
     this.activeTurn = null
     if (this.state === 'running') {
       this.state = 'idle'
-      this.completedTurnCount += 1
     }
   }
 
@@ -1190,9 +1184,8 @@ class CodexAppServerProcess {
     }
   }
 
-  // The most recent thread this process ran a turn for. Used between turns
-  // to tell subagent-thread notifications apart from same-thread output
-  // contamination, which must still poison the warm process.
+  // The most recent parent thread this process ran. A freshly bound turn can
+  // use it to route late child-thread traffic before thread/start returns.
   noteBoundThreadId(threadId: string | null): void {
     if (threadId) {
       this.boundThreadId = threadId
@@ -1209,32 +1202,19 @@ class CodexAppServerProcess {
     return this.boundThreadId
   }
 
-  // Subagent threads can outlive the parent turn: codex broadcasts their
-  // thread-scoped notifications on this connection even when no turn is
-  // active. Tolerate (and never bill) those between turns; deny their server
-  // requests so the child does not hang. Idle output for the bound thread
-  // keeps poisoning so the contamination guard is unchanged.
-  shouldTolerateIdleSubagentMessage(message: CodexRpcMessage): boolean {
-    const messageThreadId = extractCodexThreadIdFromMessage(message)
-    if (
-      messageThreadId === null ||
-      this.boundThreadId === null ||
-      messageThreadId === this.boundThreadId
-    ) {
-      return false
+  private handleIdleServerRequest(message: CodexRpcMessage): void {
+    const requestId = readCodexRpcServerRequestId(message)
+    if (requestId === null) {
+      return
     }
 
-    const requestId = readCodexRpcServerRequestId(message)
-    if (requestId !== null) {
-      void this.writeRpcMessage({
-        id: requestId,
-        error: {
-          code: -32000,
-          message: 'Server requests from codex subagent threads are not supported.',
-        },
-      })
-    }
-    return true
+    void this.writeRpcMessage({
+      id: requestId,
+      error: {
+        code: -32000,
+        message: 'Server requests outside an active Codex turn are not supported.',
+      },
+    })
   }
 
   private handleStdoutLine(line: string): void {
@@ -1243,11 +1223,8 @@ class CodexAppServerProcess {
       this.observeThreadTokenUsage(parsed.value)
       if (this.activeTurn) {
         this.activeTurn.onParsedMessage(parsed.value)
-      } else if (
-        line.trim().length > 0 &&
-        !this.shouldTolerateIdleSubagentMessage(parsed.value)
-      ) {
-        void this.poison('off-turn-output')
+      } else {
+        this.handleIdleServerRequest(parsed.value)
       }
       return
     }
@@ -1262,7 +1239,8 @@ class CodexAppServerProcess {
       return
     }
 
-    void this.poison('off-turn-framing-error')
+    // Codex may emit lifecycle text while no Murph turn is bound. Do not kill
+    // the resident app-server for output that cannot affect the current user.
   }
 
   private handleClose(code: number | null, signal: NodeJS.Signals | null): void {
@@ -1763,7 +1741,7 @@ export interface CodexWarmThreadCompactionUsage {
 function estimateCodexWarmThreadCompactionUsage(
   threadContextTokensBefore: number,
 ): CodexWarmThreadCompactionUsage {
-  // Codex 0.135 compact_remote_v2 consumes the provider response without
+  // Codex idle compaction consumes the provider response without
   // surfacing ResponseEvent::Completed.token_usage, then emits a recomputed
   // post-compact context-size update whose request input/output buckets are
   // zero. Until Codex surfaces real compact request usage, store the
@@ -1972,7 +1950,20 @@ export async function compactWarmCodexThread(input: {
         return
       }
 
-      if (processInstance.shouldTolerateIdleSubagentMessage(message)) {
+      const requestId = readCodexRpcServerRequestId(message)
+      if (requestId !== null) {
+        void processInstance.writeRpcMessage({
+          id: requestId,
+          error: {
+            code: -32000,
+            message: 'Server requests during idle Codex compaction are not supported.',
+          },
+        })
+        return
+      }
+
+      const messageThreadId = extractCodexThreadIdFromMessage(message)
+      if (messageThreadId !== null && messageThreadId !== vitals.threadId) {
         return
       }
 
@@ -2139,33 +2130,6 @@ function readCodexEventMethod(message: CodexRpcMessage): string | null {
         : null
 }
 
-function codexEventMethodRequiresTurnCorrelation(method: string | null): boolean {
-  const normalizedMethod = normalizeNullableString(method)
-  if (!normalizedMethod) {
-    return true
-  }
-
-  return (
-    normalizedMethod === 'error' ||
-    normalizedMethod === 'thread/compacted' ||
-    isCodexThreadTokenUsageUpdatedMethod(normalizedMethod) ||
-    normalizedMethod.startsWith('turn/') ||
-    normalizedMethod.startsWith('item/') ||
-    normalizedMethod.startsWith('rawResponseItem/') ||
-    normalizedMethod.startsWith('command/exec/') ||
-    normalizedMethod.startsWith('process/') ||
-    normalizedMethod.startsWith('model/') ||
-    normalizedMethod.startsWith('turn.') ||
-    normalizedMethod.startsWith('item.') ||
-    normalizedMethod.startsWith('rawResponseItem.') ||
-    normalizedMethod.startsWith('command.exec.') ||
-    normalizedMethod.startsWith('process.') ||
-    normalizedMethod.startsWith('model.') ||
-    normalizedMethod.includes('assistant.message.delta') ||
-    normalizedMethod.includes('agent.message.delta')
-  )
-}
-
 function isCodexTurnStartedMethod(method: string | null): boolean {
   return method === 'turn/started' || method === 'turn.started'
 }
@@ -2228,7 +2192,6 @@ async function runCodexAppServerTurnOnProcess(
   let terminationSignalSent: NodeJS.Signals | null = null
   let codexThreadId = normalizeNullableString(input.resumeSessionId) ?? null
   let turnId: string | null = null
-  let expectedTurnId: string | null = null
   let lastAgentMessage: string | null = null
   // Completed final-phase agent messages that were followed by a steered
   // user-message item and then superseded by a newer final message in the
@@ -2292,11 +2255,6 @@ async function runCodexAppServerTurnOnProcess(
   const pendingProgressDeliveries = new Set<Promise<void>>()
   let dynamicToolExecutionChain: Promise<void> = Promise.resolve()
   const dynamicToolAbortController = new AbortController()
-  const pendingPreStartMessages: Array<{
-    kind: 'event' | 'server_request'
-    message: CodexRpcMessage
-    method: string | null
-  }> = []
   const turnCompleted = new Promise<void>((resolve, reject) => {
     completeTurn = resolve
     failTurn = reject
@@ -2900,112 +2858,6 @@ async function runCodexAppServerTurnOnProcess(
     return patch?.kind === 'none'
   }
 
-  const buildUnknownRpcResponseError = (): VaultCliError =>
-    new VaultCliError(
-      'ASSISTANT_CODEX_APP_SERVER_LATE_RESPONSE',
-      'Codex app-server emitted a response for an unknown request id.',
-      {
-        retryable: true,
-      },
-    )
-
-  const buildStaleTurnEventError = (input: {
-    eventMethod: string | null
-    eventTurnId: string | null
-  }): VaultCliError =>
-    new VaultCliError(
-      'ASSISTANT_CODEX_APP_SERVER_STALE_TURN_EVENT',
-      'Codex app-server emitted an event that does not match the active turn.',
-      {
-        eventMethod: input.eventMethod,
-        eventTurnIdPresent: input.eventTurnId !== null,
-        expectedTurnIdPresent: expectedTurnId !== null,
-        retryable: true,
-      },
-    )
-
-  const buildMissingReusedTurnIdError = (): VaultCliError =>
-    new VaultCliError(
-      'ASSISTANT_CODEX_APP_SERVER_TURN_ID_MISSING',
-      'Codex app-server turn/start response is missing a turn id on a reused warm process.',
-      {
-        retryable: true,
-      },
-    )
-
-  const bindExpectedTurnId = (
-    candidateTurnId: string | null,
-    eventMethod: string | null,
-  ): VaultCliError | null => {
-    if (!candidateTurnId) {
-      return null
-    }
-
-    if (expectedTurnId === null) {
-      expectedTurnId = candidateTurnId
-      return null
-    }
-
-    if (candidateTurnId === expectedTurnId) {
-      return null
-    }
-
-    return buildStaleTurnEventError({
-      eventMethod,
-      eventTurnId: candidateTurnId,
-    })
-  }
-
-  const validateWarmTurnEventCorrelation = (
-    message: CodexRpcMessage,
-    eventMethod: string | null,
-  ): VaultCliError | null => {
-    const eventTurnId = extractCodexTurnIdFromMessage(message)
-    if (
-      codexProcess.requiresCompleteTurnCorrelation &&
-      expectedTurnId === null &&
-      codexEventMethodRequiresTurnCorrelation(eventMethod)
-    ) {
-      if (eventTurnId) {
-        return null
-      }
-
-      return buildStaleTurnEventError({
-        eventMethod,
-        eventTurnId,
-      })
-    }
-
-    if (eventTurnId) {
-      return bindExpectedTurnId(eventTurnId, eventMethod)
-    }
-
-    return codexProcess.requiresCompleteTurnCorrelation &&
-      codexEventMethodRequiresTurnCorrelation(eventMethod)
-      ? buildStaleTurnEventError({
-        eventMethod,
-        eventTurnId: null,
-      })
-      : null
-  }
-
-  const shouldBufferPreStartWarmMessage = (
-    message: CodexRpcMessage,
-    eventMethod: string | null,
-  ): boolean => {
-    return (
-      codexProcess.requiresCompleteTurnCorrelation &&
-      expectedTurnId === null &&
-      codexEventMethodRequiresTurnCorrelation(eventMethod) &&
-      extractCodexTurnIdFromMessage(message) !== null
-    ) || (
-      codexProcess.requiresCompleteTurnCorrelation &&
-      expectedTurnId === null &&
-      readCodexRpcServerRequestId(message) !== null &&
-      extractCodexTurnIdFromMessage(message) !== null
-    )
-  }
-
   const acceptJsonEvent = (message: CodexRpcMessage): void => {
     jsonEvents.push(message)
   }
@@ -3455,33 +3307,6 @@ async function runCodexAppServerTurnOnProcess(
     completeTurn?.()
   }
 
-  const flushPendingPreStartMessages = (): boolean => {
-    while (pendingPreStartMessages.length > 0) {
-      const pending = pendingPreStartMessages.shift()!
-      const correlationError = validateWarmTurnEventCorrelation(
-        pending.message,
-        pending.method,
-      )
-      if (correlationError) {
-        rejectOnce(correlationError)
-        return false
-      }
-
-      if (pending.kind === 'server_request') {
-        const requestId = readCodexRpcServerRequestId(pending.message)
-        if (requestId === null) {
-          rejectOnce(buildUnknownRpcResponseError())
-          return false
-        }
-        handleAcceptedServerRequest(pending.message, requestId)
-      } else {
-        handleAcceptedEvent(pending.message, pending.method)
-      }
-    }
-
-    return true
-  }
-
   const handleSubagentThreadMessage = (
     threadId: string,
     message: CodexRpcMessage,
@@ -3542,51 +3367,30 @@ async function runCodexAppServerTurnOnProcess(
         pendingRequests: codexProcess.pendingRequests,
         responseId,
       })
-      if (
-        resolveResult === 'unknown_response_id' &&
-        !codexProcess.consumeIgnoredResponseId(responseId)
-      ) {
-        rejectOnce(buildUnknownRpcResponseError())
+      if (resolveResult === 'unknown_response_id') {
+        codexProcess.consumeIgnoredResponseId(responseId)
         return
       }
-      if (resolveResult !== 'unknown_response_id') {
-        acceptJsonEvent(message)
-        if (message.error) {
-          return
-        }
-        if (pending?.method === 'thread/start' || pending?.method === 'thread/resume') {
-          codexThreadId = extractCodexThreadIdFromResult(message.result) ?? codexThreadId
-          codexProcess.noteBoundThreadId(codexThreadId)
-        }
-        if (pending?.method === 'turn/start') {
-          const resultTurnId = extractCodexTurnIdFromResult(message.result)
-          if (codexProcess.requiresCompleteTurnCorrelation && !resultTurnId) {
-            rejectOnce(buildMissingReusedTurnIdError())
-            return
-          }
-          const correlationError = bindExpectedTurnId(resultTurnId, 'turn/start')
-          if (correlationError) {
-            rejectOnce(correlationError)
-            return
-          }
-          turnId = resultTurnId ?? turnId
-        }
-        if (pending?.method === 'turn/start' && !flushPendingPreStartMessages()) {
-          return
-        }
+      acceptJsonEvent(message)
+      if (message.error) {
+        return
+      }
+      if (pending?.method === 'thread/start' || pending?.method === 'thread/resume') {
+        codexThreadId = extractCodexThreadIdFromResult(message.result) ?? codexThreadId
+        codexProcess.noteBoundThreadId(codexThreadId)
+      }
+      if (pending?.method === 'turn/start') {
+        const resultTurnId = extractCodexTurnIdFromResult(message.result)
+        turnId = resultTurnId ?? turnId
       }
       return
     }
 
-    // Codex app-server auto-attaches this connection to every thread it
-    // creates, including spawned subagent threads, and their notifications
-    // carry foreign thread/turn ids. Route them off the single-turn
-    // correlation path: token usage is buffered for billing, server requests
-    // are denied without failing the parent turn, everything else is dropped.
-    // Before a fresh thread/start response produces this turn's thread id,
-    // fall back to the process's last bound thread id so a late child event
-    // in that window is still routed instead of failing correlation; events
-    // for the last bound thread itself keep today's strict stale handling.
+    // Codex owns subagent/thread lifecycle. Murph only keeps foreign thread
+    // traffic away from the active parent turn: token usage is buffered for
+    // billing, server requests are denied, and other child events are dropped.
+    // Before a fresh thread/start response produces this turn's thread id, the
+    // previous bound thread id is enough to distinguish late child traffic.
     const messageThreadId = extractCodexThreadIdFromMessage(message)
     const knownParentThreadId = codexThreadId ?? codexProcess.lastBoundThreadId
     if (
@@ -3600,42 +3404,11 @@ async function runCodexAppServerTurnOnProcess(
 
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId !== null) {
-      const requestMethod = typeof message.method === 'string' ? message.method : null
-      if (shouldBufferPreStartWarmMessage(message, requestMethod)) {
-        pendingPreStartMessages.push({
-          kind: 'server_request',
-          message,
-          method: requestMethod,
-        })
-        return
-      }
-      const correlationError = validateWarmTurnEventCorrelation(
-        message,
-        requestMethod,
-      )
-      if (correlationError) {
-        rejectOnce(correlationError)
-        return
-      }
       handleAcceptedServerRequest(message, requestId)
       return
     }
 
     const method = readCodexEventMethod(message)
-    if (shouldBufferPreStartWarmMessage(message, method)) {
-      pendingPreStartMessages.push({
-        kind: 'event',
-        message,
-        method,
-      })
-      return
-    }
-
-    const correlationError = validateWarmTurnEventCorrelation(message, method)
-    if (correlationError) {
-      rejectOnce(correlationError)
-      return
-    }
     handleAcceptedEvent(message, method)
   }
 

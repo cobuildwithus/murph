@@ -518,7 +518,6 @@ describe("container entrypoint abort boundary", () => {
     const invocationStarted = createDeferred<AbortSignal>();
     const failCleanup = createDeferred();
     const exit = vi.fn();
-    const kill = vi.fn();
     const readdir = vi.fn(async () => [
       { isDirectory: () => true, name: String(process.pid) },
       { isDirectory: () => true, name: String(process.pid + 1) },
@@ -547,7 +546,7 @@ describe("container entrypoint abort boundary", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
-        processApi: { kill, readFile, readdir },
+        processApi: { readFile, readdir },
         processIsolation: true,
       },
     });
