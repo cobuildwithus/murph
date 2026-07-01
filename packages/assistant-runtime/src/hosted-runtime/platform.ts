@@ -24,6 +24,8 @@ import type {
   HostedRuntimeIssueExportResponse,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
+  HostedRuntimeGroupToolRequest,
+  HostedRuntimeGroupToolResponse,
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
   HostedCodexAuthUpdate,
@@ -347,6 +349,12 @@ export interface HostedRuntimeFamilyPlanToolPort {
   ): Promise<HostedRuntimeFamilyPlanToolResponse>;
 }
 
+export interface HostedRuntimeGroupToolPort {
+  request(
+    request: HostedRuntimeGroupToolRequest,
+  ): Promise<HostedRuntimeGroupToolResponse>;
+}
+
 export interface HostedRuntimeCodexAuthPort {
   update(update: HostedCodexAuthUpdate): Promise<HostedCodexAuthUpdateResponse>;
 }
@@ -483,6 +491,7 @@ export interface HostedRuntimePlatform {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;
   familyPlanToolPort?: HostedRuntimeFamilyPlanToolPort | null;
+  groupToolPort?: HostedRuntimeGroupToolPort | null;
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null;
   providerFetch?: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;

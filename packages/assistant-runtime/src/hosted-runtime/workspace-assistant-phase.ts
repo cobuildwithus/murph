@@ -277,6 +277,9 @@ export async function runHostedWorkspaceAssistantPhase(
         ...(input.runtime.platform.familyPlanToolPort
           ? { familyPlanTool: input.runtime.platform.familyPlanToolPort }
           : {}),
+        ...(input.runtime.platform.groupToolPort
+          ? { groupTool: input.runtime.platform.groupToolPort }
+          : {}),
         ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
         ...(input.materializeWorkspaceArtifacts
           ? { materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts }

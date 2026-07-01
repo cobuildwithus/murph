@@ -4,6 +4,7 @@ import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeFamilyPlanToolRequest,
+  type HostedRuntimeGroupToolRequest,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -305,6 +306,24 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   },
 } as const
 
+export const MURPH_GROUP_TOOL = {
+  namespace: 'murph',
+  name: 'group',
+  description:
+    'Read the current hosted group for the connected group-chat runtime. This does not create groups, create join links, manage members, grant Family billing access, grant private chat access, grant raw vault access, share health data, or opt anyone into email.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['read_current'],
+      },
+    },
+    required: ['action'],
+  },
+} as const
+
 export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
@@ -510,6 +529,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
+  MURPH_GROUP_TOOL,
   MURPH_GENERATE_SONG_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
@@ -541,6 +561,7 @@ export interface MurphDynamicToolAvailability {
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
+  groupAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
@@ -570,6 +591,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.allowMessageReactions)],
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
+    [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
@@ -621,6 +643,12 @@ const generateImageArgumentsSchema = z
       .max(16)
       .default([]),
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
+  })
+  .strict()
+
+const groupArgumentsSchema = z
+  .object({
+    action: z.literal('read_current'),
   })
   .strict()
 
@@ -961,8 +989,16 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-group-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'family-plan'
       request: HostedRuntimeFamilyPlanToolRequest
+    }
+  | {
+      kind: 'group'
+      request: HostedRuntimeGroupToolRequest
     }
   | {
       kind: 'submit-product-feedback'
@@ -1128,6 +1164,19 @@ export function readMurphDynamicToolRequest(
       }
       return {
         kind: 'family-plan',
+        request: parsed.request,
+      }
+    }
+    case MURPH_GROUP_TOOL.name: {
+      const parsed = parseGroupArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-group-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'group',
         request: parsed.request,
       }
     }
@@ -1330,6 +1379,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid product feedback arguments')
     case 'invalid-family-plan-arguments':
       return toolTextResult(false, 'invalid family plan arguments')
+    case 'invalid-group-arguments':
+      return toolTextResult(false, 'invalid group arguments')
     case 'invalid-finish-without-reply-arguments':
       return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-media-arguments':
@@ -1461,6 +1512,11 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     case 'family-plan':
       return await executeFamilyPlanTool({
+        hostedToolContext: input.hostedToolContext ?? null,
+        request: input.request.request,
+      })
+    case 'group':
+      return await executeGroupTool({
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
       })
@@ -1687,6 +1743,22 @@ async function executeFamilyPlanTool(input: {
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
     return toolTextResult(false, 'family plan tool request failed')
+  }
+}
+
+async function executeGroupTool(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  request: HostedRuntimeGroupToolRequest
+}): Promise<MurphDynamicToolExecutionResult> {
+  const groupTool = input.hostedToolContext?.groupTool ?? null
+  if (!groupTool) {
+    return toolTextResult(false, 'group tools are unavailable for this turn')
+  }
+  try {
+    const result = await groupTool.request(input.request)
+    return toolTextResult(true, safeToolPayloadText(result))
+  } catch {
+    return toolTextResult(false, 'group tool request failed')
   }
 }
 
@@ -2347,6 +2419,30 @@ function parseFamilyPlanArguments(
       },
     },
   }
+}
+
+function parseGroupArguments(
+  value: unknown,
+):
+  | {
+      request: HostedRuntimeGroupToolRequest
+      ok: true
+    }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = groupArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.group.input',
+        schemaRootKeys: ['action'],
+        toolName: 'murph.group',
+      }),
+    }
+  }
+  return { ok: true, request: { action: 'read_current' } }
 }
 
 function parseFinishWithoutReplyArguments(

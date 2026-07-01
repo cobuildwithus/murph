@@ -61,6 +61,7 @@ export type HostedExecutionEventKind =
 
 import type {
   HostedVaultShareDeliveryPayload,
+  HostedVaultShareRevokePayload,
 } from "./vault-share.ts";
 
 export const HOSTED_EXECUTION_WAKE_KINDS = [
@@ -70,6 +71,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "assistant.notification.requested",
   "device-sync.wake",
   "vault-share.delivery",
+  "vault-share.revoke",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -429,6 +431,11 @@ export interface HostedExecutionVaultShareDeliveryWake extends HostedExecutionBa
   kind: "vault-share.delivery";
 }
 
+export interface HostedExecutionVaultShareRevokeWake extends HostedExecutionBaseWake {
+  kind: "vault-share.revoke";
+  revoke: HostedVaultShareRevokePayload;
+}
+
 export interface HostedExecutionDeviceSyncWake extends HostedExecutionBaseWake {
   connectionId?: string | null;
   hint?: HostedExecutionDeviceSyncWakeHint | null;
@@ -463,6 +470,7 @@ export type HostedExecutionWake =
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionDeviceSyncWake
   | HostedExecutionVaultShareDeliveryWake
+  | HostedExecutionVaultShareRevokeWake
   | HostedExecutionRuntimeControlWake;
 
 export type HostedRuntimeEvent =

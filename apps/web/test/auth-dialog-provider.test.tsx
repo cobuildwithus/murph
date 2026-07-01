@@ -166,6 +166,63 @@ test("AuthProvider resumes a private computer handoff after sign-in completion",
   await rendered.cleanup();
 });
 
+test("AuthProvider resumes the data privacy settings handoff after sign-in completion", async () => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const assign = vi.fn();
+  const reload = vi.fn();
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      {
+        type: "button",
+        onClick: openAuthDialog,
+      },
+      "Sign in",
+    );
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(AuthProvider, {
+      authenticated: false,
+    }, createElement(OpenAuthButton)),
+  );
+
+  Object.defineProperty(rendered.window, "location", {
+    configurable: true,
+    value: {
+      assign,
+      hash: "",
+      href: "https://join.example.test/settings/data-privacy",
+      origin: "https://join.example.test",
+      pathname: "/settings/data-privacy",
+      reload,
+      search: "",
+    },
+  });
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  const completeButton = Array.from(rendered.container.querySelectorAll("button")).find(
+    (button) => button.textContent === "Complete auth",
+  );
+  expect(completeButton).toBeTruthy();
+
+  await act(async () => {
+    completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  expect(reload).toHaveBeenCalledTimes(1);
+  expect(assign).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
+});
+
 test("ComputerHandoffAuthRequiredState opens the shared auth dialog on mount", async () => {
   const { AuthProvider } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"

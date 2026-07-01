@@ -86,6 +86,8 @@ import {
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
   type HostedRuntimeFamilyPlanToolStatusResponse,
+  type HostedRuntimeGroupToolRequest,
+  type HostedRuntimeGroupToolResponse,
   type HostedRuntimeProductFeedbackRecordRequest,
   type HostedRuntimeProductFeedbackRecordResponse,
   type HostedCodexAuthUpdate,
@@ -106,6 +108,11 @@ import {
 import type {
   HostedExecutionLinqExternalThreadRouteAuthority,
 } from "../contracts.ts";
+import {
+  HOSTED_VAULT_SHARE_PROJECTION_KINDS,
+  isHostedVaultShareProjectionKind,
+  type HostedVaultShareProjectionKind,
+} from "../vault-share.ts";
 import {
   rejectLegacyAliases,
   requireArray,
@@ -724,6 +731,95 @@ export function parseHostedRuntimeProductFeedbackRecordResponse(
       record.recorded,
       "Hosted runtime product feedback response recorded",
     ),
+  };
+}
+
+export function parseHostedRuntimeGroupToolRequest(
+  value: unknown,
+): HostedRuntimeGroupToolRequest {
+  const record = requireObject(value, "Hosted runtime group tool request");
+  const action = requireString(record.action, "Hosted runtime group tool request action");
+  if (action === "read_current") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action"]),
+      "Hosted runtime group tool read_current request",
+    );
+    return { action };
+  }
+  throw new TypeError("Hosted runtime group tool action is not supported.");
+}
+
+export function parseHostedRuntimeGroupToolResponse(
+  value: unknown,
+): HostedRuntimeGroupToolResponse {
+  const record = requireObject(value, "Hosted runtime group tool response");
+  const action = requireString(record.action, "Hosted runtime group tool response action");
+  assertAllowedObjectKeys(record, new Set(["action", "result"]), "Hosted runtime group tool response");
+
+  if (action === "read_current") {
+    const result = requireObject(record.result, "Hosted runtime group tool read_current response result");
+    const status = requireString(result.status, "Hosted runtime group tool read_current response status");
+    if (status === "ok") {
+      assertAllowedObjectKeys(result, new Set(["status", "group"]), "Hosted runtime group tool read_current ok response result");
+      return { action, result: { status, group: parseHostedRuntimeGroupSummary(result.group) } };
+    }
+    if (status === "none") {
+      assertAllowedObjectKeys(result, new Set(["status", "group"]), "Hosted runtime group tool read_current none response result");
+      return { action, result: { status, group: null } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool read_current unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+          group: null,
+        },
+      };
+    }
+  }
+
+  throw new TypeError("Hosted runtime group tool response action/status is not supported.");
+}
+
+function parseHostedRuntimeGroupProjectionKindArray(
+  value: unknown,
+  label: string,
+): HostedVaultShareProjectionKind[] | null {
+  if (value === undefined || value === null) return null;
+  const requested = requireArray(value, label);
+  if (requested.length > 8) {
+    throw new TypeError(`${label} must contain at most 8 entries.`);
+  }
+  const seen = new Set<HostedVaultShareProjectionKind>();
+  for (const entry of requested) {
+    if (!isHostedVaultShareProjectionKind(entry)) {
+      throw new TypeError(`${label} contains an unsupported projection kind.`);
+    }
+    seen.add(entry);
+  }
+  return HOSTED_VAULT_SHARE_PROJECTION_KINDS.filter((kind) => seen.has(kind));
+}
+
+function parseHostedRuntimeGroupSummary(value: unknown) {
+  const record = requireObject(value, "Hosted runtime group summary");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["displayName", "id", "kind", "memberCount", "requestedVaultShareProjectionKinds", "status"]),
+    "Hosted runtime group summary",
+  );
+  return {
+    displayName: readNullableString(record.displayName, "Hosted runtime group summary displayName"),
+    id: requireString(record.id, "Hosted runtime group summary id"),
+    kind: requireString(record.kind, "Hosted runtime group summary kind"),
+    memberCount: requireNumber(record.memberCount, "Hosted runtime group summary memberCount"),
+    requestedVaultShareProjectionKinds: parseHostedRuntimeGroupProjectionKindArray(
+      record.requestedVaultShareProjectionKinds,
+      "Hosted runtime group summary requestedVaultShareProjectionKinds",
+    ) ?? [],
+    status: requireString(record.status, "Hosted runtime group summary status"),
   };
 }
 

@@ -18,6 +18,7 @@ import {
   HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
+  HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
@@ -143,6 +144,9 @@ export async function handleRunnerWebControlRequest(input: {
   const isVaultShareDeliverRequest =
     input.url.pathname === HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH
     && input.request.method === "POST";
+  const isGroupToolRequest =
+    input.url.pathname === HOSTED_RUNTIME_GROUP_TOOL_PATH
+    && input.request.method === "POST";
   const isComputerUseRequest = policy.operation === "computer_use"
     && input.request.method === "POST";
   const isConnectedAppsRequest = policy.operation === "connected_apps"
@@ -166,6 +170,7 @@ export async function handleRunnerWebControlRequest(input: {
     || isLinqDeliveryOutcomeRequest
     || isLinqEgressEngagementRequest
     || isVaultShareDeliverRequest
+    || isGroupToolRequest
     || isComputerUseRequest
     || isConnectedAppsRequest
     || isCodexAuthUpdateRequest

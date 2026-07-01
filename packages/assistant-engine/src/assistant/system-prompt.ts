@@ -230,6 +230,7 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantConnectedAppsGuidanceText(),
     buildAssistantProductFeedbackGuidanceText(),
     buildAssistantFamilyPlanGuidanceText(),
+    buildAssistantHostedGroupGuidanceText(),
     buildAssistantKnowledgeGuidanceText({
       assistantKnowledgeToolsAvailable:
         input.assistantKnowledgeToolsAvailable ?? false,
@@ -302,6 +303,16 @@ function buildAssistantFamilyPlanGuidanceText(): string {
     "- Telegram usernames in invite requests are owner-provided routing context, not proof that the invite is bound to that Telegram account. Across Telegram, WhatsApp, iMessage, and web chat, describe the result as an invite link/token intended for that person, and avoid saying you verified or directly delivered access to a specific @username unless the acceptance event confirms it.",
     "- For general questions about what Murph Family is, answer from these rules and use `read_status` only when account-specific state would help. Do not invent billing dates, official launch terms, or unsupported admin controls.",
     "- Do not treat ordinary family medical history, family symptoms, genetics, or household health context as Murph Family account management unless the user is asking about account access, seats, invites, or billing.",
+  ].join("\n");
+}
+
+function buildAssistantHostedGroupGuidanceText(): string {
+  return [
+    "Hosted groups:",
+    "- When `murph.group` is available, use it only to read the current hosted group for the connected group-chat runtime. Do not use it for group creation, join-link creation, or member management.",
+    "- Hosted groups are separate from Murph Family billing/account groups. Joining a hosted group does not grant billing access, private chat access, vault access, health-data access, or email opt-in.",
+    "- Optional group health permissions are approved only through server-owned join pages and are returned through the runtime/vault-share flow.",
+    "- Today, the supported group health permission is `sleep-times.v0`. Do not claim that activity, workouts, all health data, or arbitrary categories can be shared unless the tool/parser supports a closed projection kind for them.",
   ].join("\n");
 }
 

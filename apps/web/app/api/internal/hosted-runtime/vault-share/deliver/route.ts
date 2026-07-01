@@ -8,8 +8,18 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "@/src/lib/hosted-execution/logging";
+import {
   hasHostedMemberEffectiveActiveAccessForMember,
 } from "@/src/lib/hosted-onboarding/family-plan";
+import {
+  isHostedRuntimeInactiveAccessError,
+  requireHostedRuntimeActiveAccess,
+} from "@/src/lib/hosted-mailbox/runtime-access";
+import {
+  hostedOnboardingError,
+} from "@/src/lib/hosted-onboarding/errors";
 import {
   readHostedMemberCoreState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
@@ -54,27 +64,48 @@ export const POST = withJsonError(async (request: Request) => {
   const body = parseHostedVaultShareDeliverRequest(await readOptionalJsonObject(request));
   const prisma = getPrisma();
 
+  if (!await hasDeliverableHostedRuntimeActiveAccess(grantorMemberId, prisma)) {
+    return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
+  }
+
   const shares = await findActiveHostedVaultShares({
     grantorMemberId,
     projectionKind: body.projectionKind,
   });
   const activeShares: ActiveHostedVaultShare[] = [];
+  let deliveryFailed = false;
 
   for (const share of shares) {
-    const destination = await readHostedMemberCoreState({
-      memberId: share.destinationMemberId,
-      prisma,
-    });
+    try {
+      const destination = await readHostedMemberCoreState({
+        memberId: share.destinationMemberId,
+        prisma,
+      });
 
-    if (destination && await hasHostedMemberEffectiveActiveAccessForMember({
-      member: destination,
-      prisma,
-    })) {
-      activeShares.push(share);
+      if (
+        destination
+        && await hasHostedMemberEffectiveActiveAccessForMember({
+          member: destination,
+          prisma,
+        })
+        && await hasDeliverableHostedRuntimeActiveAccess(share.destinationMemberId, prisma)
+      ) {
+        activeShares.push(share);
+      }
+    } catch (error) {
+      deliveryFailed = true;
+      console.error("Hosted vault-share destination share eligibility check failed.", {
+        ...formatHostedExecutionSafeLogErrorDetails(error, {
+          code: "HOSTED_VAULT_SHARE_DESTINATION_ELIGIBILITY_FAILED",
+        }),
+      });
     }
   }
 
   if (activeShares.length === 0) {
+    if (deliveryFailed) {
+      throw createHostedVaultShareDeliveryFailedError();
+    }
     return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
   }
 
@@ -107,19 +138,50 @@ export const POST = withJsonError(async (request: Request) => {
         }
       }
     } catch (error) {
+      deliveryFailed = true;
       // Best-effort per destination: one failing share must not block delivery to the
-      // others, and the next wake re-offers (already-appended records dedupe). Log ids
-      // only — never payload fields or timestamps — so a persistently failing destination
-      // stays visible to operators.
+      // others, and the retry re-offers (already-appended records dedupe). Log only
+      // redacted error details — never payload fields, timestamps, or raw share ids.
       console.error("Hosted vault-share delivery to a destination share failed.", {
-        errorName: error instanceof Error ? error.name : "unknown",
-        shareId: share.id,
+        ...formatHostedExecutionSafeLogErrorDetails(error, {
+          code: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
+        }),
       });
     }
   }
 
+  if (deliveryFailed) {
+    throw createHostedVaultShareDeliveryFailedError();
+  }
+
   return jsonOk(DELIVERED_RESPONSE);
 });
+
+async function hasDeliverableHostedRuntimeActiveAccess(
+  memberId: string,
+  prisma: ReturnType<typeof getPrisma>,
+): Promise<boolean> {
+  try {
+    await requireHostedRuntimeActiveAccess(memberId, {
+      prisma,
+    });
+    return true;
+  } catch (error) {
+    if (isHostedRuntimeInactiveAccessError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function createHostedVaultShareDeliveryFailedError(): Error {
+  return hostedOnboardingError({
+    code: "HOSTED_VAULT_SHARE_DELIVERY_FAILED",
+    httpStatus: 503,
+    message: "Hosted vault-share delivery failed. Retry the request.",
+    retryable: true,
+  });
+}
 
 /**
  * Bounds the mailbox dedupe-key space a grantor runtime can mint: only records inside a
