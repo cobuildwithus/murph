@@ -374,6 +374,48 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   expect(JSON.stringify(rawEvent)).not.toContain(initialSession.sessionId)
 })
 
+test('sendAssistantNotificationLocal aborts before outbound delivery when the provider signal trips', async () => {
+  const abortController = new AbortController()
+  const abortError = new VaultCliError(
+    'ASSISTANT_CRON_FOREGROUND_YIELDED',
+    'Assistant cron yielded to fresh foreground input.',
+  )
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'summary',
+      text: 'stale reminder text',
+    }),
+  })
+  const {
+    deliverMessage,
+    mocks,
+    sendAssistantNotificationLocal,
+  } = await loadNotificationTurnHarness({
+    onExecuteCodexTurnWithRecovery: async () => {
+      abortController.abort(abortError)
+      return {
+        kind: 'succeeded',
+        providerTurn: providerResult,
+      }
+    },
+    providerResult,
+    turnId: 'turn-notification-aborted-before-delivery',
+  })
+
+  await expect(
+    sendAssistantNotificationLocal({
+      abortSignal: abortController.signal,
+      instructions: 'Send the scheduled reminder.',
+      vault: '/vaults/notification-abort-test',
+    }),
+  ).rejects.toBe(abortError)
+
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(mocks.createAssistantRuntimeStateService).not.toHaveBeenCalled()
+})
+
 test('sendAssistantNotificationLocal sends required exact text without a provider turn', async () => {
   const order: string[] = []
   const initialSession = createAssistantSession({

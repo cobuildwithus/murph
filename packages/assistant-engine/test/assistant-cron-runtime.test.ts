@@ -2025,6 +2025,98 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('does not claim due cron jobs when foreground work is already observed', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
+    try {
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-yield-before-claim-',
+      )
+      const canonicalJob = await createCanonicalJob(vaultRoot, 'yield-before-claim')
+
+      const summary = await processDueAssistantCronJobsLocal({
+        limit: 1,
+        shouldYield: () => true,
+        vault: vaultRoot,
+      })
+
+      expect(summary).toEqual({
+        failed: 0,
+        processed: 0,
+        succeeded: 0,
+      })
+      expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+      await expect(
+        listAssistantCronRuns({
+          job: canonicalJob.jobId,
+          vault: vaultRoot,
+        }),
+      ).resolves.toEqual({
+        jobId: canonicalJob.jobId,
+        runs: [],
+      })
+      const current = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
+      expect(current.state.runningAt).toBeNull()
+      expect(current.state.lastSucceededAt).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('aborts an in-flight canonical cron assistant turn when foreground work appears', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    try {
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-yield-in-flight-',
+      )
+      const canonicalJob = await createCanonicalJob(vaultRoot, 'yield-in-flight')
+      let shouldYield = false
+      cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
+        async (input: { abortSignal?: AbortSignal }) => {
+          expect(input.abortSignal?.aborted).toBe(false)
+          shouldYield = true
+          await vi.advanceTimersByTimeAsync(50)
+          expect(input.abortSignal?.aborted).toBe(true)
+          throw input.abortSignal?.reason ?? new Error('Expected foreground yield abort.')
+        },
+      )
+
+      const summary = await processDueAssistantCronJobsLocal({
+        limit: 1,
+        shouldYield: () => shouldYield,
+        vault: vaultRoot,
+      })
+
+      expect(summary).toEqual({
+        failed: 1,
+        processed: 1,
+        succeeded: 0,
+      })
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+      await expect(
+        listAssistantCronRuns({
+          job: canonicalJob.jobId,
+          vault: vaultRoot,
+        }),
+      ).resolves.toMatchObject({
+        jobId: canonicalJob.jobId,
+        runs: [{
+          error: 'Assistant cron yielded to fresh foreground input.',
+          status: 'failed',
+        }],
+      })
+
+      const current = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
+      expect(current.state.runningAt).toBeNull()
+      expect(current.state.lastFailedAt).toBeNull()
+      expect(current.state.consecutiveFailures).toBe(0)
+      expect(current.state.nextRunAt).toBe('2026-04-08T10:20:10.050Z')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('uses flex service tier with a deadline for clean hosted scheduled notification sends', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T08:20:00.000Z'))

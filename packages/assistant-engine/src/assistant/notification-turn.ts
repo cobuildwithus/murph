@@ -315,6 +315,7 @@ export async function sendAssistantNotificationLocal(
         }
 
         const responseText = normalizeRequiredText(decision.text, 'notification response')
+        throwIfAssistantNotificationAborted(messageInput.abortSignal)
 
         const state = createAssistantRuntimeStateService(input.vault)
         await state.turns.createReceipt({
@@ -423,6 +424,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
   const turnId = createAssistantTurnId()
   const turnCreatedAt = new Date().toISOString()
   const state = createAssistantRuntimeStateService(input.input.vault)
+  throwIfAssistantNotificationAborted(input.input.abortSignal)
 
   await state.turns.createReceipt({
     deliveryRequested: true,
@@ -801,6 +803,7 @@ async function deliverAssistantNotificationMessage(input: {
     dedupeToken: input.dedupeToken,
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+    signal: input.input.abortSignal,
     ...deliveryFields,
     media,
     dispatchMode: input.input.deliveryDispatchMode,
@@ -844,6 +847,22 @@ async function deliverAssistantNotificationMessage(input: {
         session: input.session,
       }
   }
+}
+
+function throwIfAssistantNotificationAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) {
+    return
+  }
+
+  const reason: unknown = signal.reason
+  if (reason instanceof Error) {
+    throw reason
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_NOTIFICATION_ABORTED',
+    'Assistant notification turn was aborted before outbound delivery.',
+  )
 }
 
 function resolveAssistantNotificationFirstContactDocIds(input: {

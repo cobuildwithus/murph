@@ -81,8 +81,6 @@ type AssistantDynamicContextPromptBuilder = (input: {
 const SAFE_ATTACHMENT_EVIDENCE_ERROR_CODE_PATTERN =
   /^[A-Za-z0-9_.:-]{1,96}$/u
 const HOSTED_DEFERRED_CRON_CATCHUP_WAKE_DELAY_MS = 10_000
-const HOSTED_LOCAL_TEST_CRON_PRE_DEFER_DELAY_ENV =
-  'MURPH_HOSTED_LOCAL_TEST_AUTOMATION_CRON_PRE_DEFER_DELAY_MS'
 export interface RunAssistantAutomationInput {
   applyCanonicalWrites?: boolean
   allowSelfAuthored?: boolean
@@ -972,12 +970,6 @@ export async function runAssistantAutomationPass(
         queued: 0,
         sent: 0,
       }
-  await maybeDelayHostedLocalCronDeferCheck({
-    deliveryDispatchMode: input.deliveryDispatchMode,
-    executionContext,
-    signal: input.signal,
-    turnEnvironment: input.turnEnvironment ?? null,
-  })
   const shouldDeferCronAfterHostedReply =
     executionContext?.hosted != null &&
     input.deliveryDispatchMode === 'queue-only' &&
@@ -994,6 +986,7 @@ export async function runAssistantAutomationPass(
         executionContext,
         onEvent: input.onEvent,
         onTraceEvent: input.onTraceEvent,
+        shouldYield: input.shouldDeferCron ?? null,
         vault: input.vault,
         signal: input.signal,
         turnEnvironment: input.turnEnvironment ?? null,
@@ -1092,72 +1085,6 @@ function resolveAssistantCronNextWakeAt(input: {
   }
 
   return input.cronStatus.nextRunAt
-}
-
-async function maybeDelayHostedLocalCronDeferCheck(input: {
-  deliveryDispatchMode?: AssistantOutboxDispatchMode
-  executionContext: AssistantExecutionContext | null
-  signal?: AbortSignal
-  turnEnvironment: AssistantTurnEnvironment | null
-}): Promise<void> {
-  if (
-    input.executionContext?.hosted == null ||
-    input.deliveryDispatchMode !== 'queue-only'
-  ) {
-    return
-  }
-
-  const delayMs = readHostedLocalCronPreDeferDelayMs(input.turnEnvironment)
-  if (delayMs === null) {
-    return
-  }
-
-  await sleepWithAbort(delayMs, input.signal)
-}
-
-function readHostedLocalCronPreDeferDelayMs(
-  turnEnvironment: AssistantTurnEnvironment | null,
-): number | null {
-  const turnEnv = turnEnvironment?.env ?? {}
-  if (turnEnv.MURPH_HOSTED_LOCAL_TEST_ROUTES !== '1') {
-    return null
-  }
-
-  const raw = turnEnv[HOSTED_LOCAL_TEST_CRON_PRE_DEFER_DELAY_ENV]
-  if (!raw) {
-    return null
-  }
-
-  const parsed = Number.parseInt(raw, 10)
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    return null
-  }
-
-  return Math.min(parsed, 30_000)
-}
-
-async function sleepWithAbort(
-  delayMs: number,
-  signal?: AbortSignal,
-): Promise<void> {
-  if (signal?.aborted) {
-    return
-  }
-
-  await new Promise<void>((resolve) => {
-    let settled = false
-    const complete = (): void => {
-      if (settled) {
-        return
-      }
-      settled = true
-      clearTimeout(timeout)
-      signal?.removeEventListener('abort', complete)
-      resolve()
-    }
-    const timeout = setTimeout(complete, delayMs)
-    signal?.addEventListener('abort', complete, { once: true })
-  })
 }
 
 function snapshotAssistantAutomationLoopState(

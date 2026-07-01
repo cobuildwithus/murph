@@ -42,8 +42,6 @@ const scheduledReminderLeadMs = 45_000;
 const setupLeadText = "about forty-five seconds";
 const setupReplyText = `Done - I will remind you here in ${setupLeadText}.`;
 const setupRequestText = `Remind me here in ${setupLeadText} to go to sleep.`;
-const hostedLocalCronPreDeferDelayMs = 30_000;
-const hostedLocalCronOverlapPostDelayMs = 1_000;
 const scheduledReminderMinimumRunwayMs = 5_000;
 const scheduledReminderSendWaitMs = 60_000;
 const scheduledReminderCompletionWaitMs = 60_000;
@@ -206,65 +204,77 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     expect(overlapSetupStatus.lastErrorCode ?? null).toBeNull();
     assertScheduledReminderRunway(overlapSetupTimes.dueAtIso);
 
-    requireScenario().queueAssistantResponses([
-      overlapForegroundReplyText,
+    const heldOverlapReminderResponse = createHeldAssistantProviderTextResponse(
       buildHostedAssistantNotificationDecisionResponse({
         privateSummary: "deliver overlap sleep reminder",
+        text: overlapReminderText,
+      }),
+    );
+    requireScenario().queueAssistantResponses([
+      heldOverlapReminderResponse.response,
+      overlapForegroundReplyText,
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver overlap sleep reminder after foreground reply",
         text: overlapReminderText,
       }),
     ]);
     const overlapProviderBaselineCount = countAssistantProviderResponsesApiRequests();
     const overlapSendBaselineCount = requireLinqStub().countObservedSends(reminderPath);
-    await sleepUntil(overlapSetupTimes.dueAtIso);
+    try {
+      await sleepUntil(overlapSetupTimes.dueAtIso);
 
-    const overlapScheduledWakeResult = await requireScenario().waitForLatestPendingWake(userId);
-    expect(overlapScheduledWakeResult.kind).toBe("runtime_processing_accepted");
-    await sleep(hostedLocalCronOverlapPostDelayMs);
-    const overlapForegroundWebhookResponse = await postSignedLinqWebhook(
-      buildHostedLinqInboundEvent(
+      const overlapScheduledWakeResult = await requireScenario().waitForLatestPendingWake(userId);
+      expect(overlapScheduledWakeResult.kind).toBe("runtime_processing_accepted");
+      await heldOverlapReminderResponse.started;
+      const overlapForegroundWebhookResponse = await postSignedLinqWebhook(
+        buildHostedLinqInboundEvent(
+          userId,
+          scheduledChatId,
+          {
+            eventId: `evt_scheduled_reminder_overlap_foreground_${userId}`,
+            messageId: `msg_scheduled_reminder_overlap_foreground_${userId}`,
+            text: overlapForegroundInboundText,
+          },
+        ),
+      );
+      expect(overlapForegroundWebhookResponse.status).toBe(202);
+      await waitForAssistantProviderResponsesApiRequestCount(
+        overlapProviderBaselineCount + 2,
         userId,
-        scheduledChatId,
-        {
-          eventId: `evt_scheduled_reminder_overlap_foreground_${userId}`,
-          messageId: `msg_scheduled_reminder_overlap_foreground_${userId}`,
-          text: overlapForegroundInboundText,
-        },
-      ),
-    );
-    expect(overlapForegroundWebhookResponse.status).toBe(202);
-    await waitForAssistantProviderResponsesApiRequestCount(
-      overlapProviderBaselineCount + 1,
-      userId,
-    );
-    const firstOverlapProviderRequest =
-      listAssistantProviderResponsesApiRequests()[overlapProviderBaselineCount];
-    await assertAssistantProviderRequestContainsText({
-      baselineCount: overlapProviderBaselineCount,
-      expectedText: overlapForegroundInboundText,
-      request: firstOverlapProviderRequest,
-      userId,
-    });
+      );
+      const foregroundOverlapProviderRequest =
+        listAssistantProviderResponsesApiRequests()[overlapProviderBaselineCount + 1];
+      await assertAssistantProviderRequestContainsText({
+        baselineCount: overlapProviderBaselineCount,
+        expectedText: overlapForegroundInboundText,
+        request: foregroundOverlapProviderRequest,
+        userId,
+      });
 
-    const overlapForegroundSend = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: overlapSendBaselineCount,
-      expectedPath: reminderPath,
-      scenario: requireScenario(),
-      userId,
-    });
-    expect(requireLinqStub().readObservedMessageText(overlapForegroundSend))
-      .toBe(overlapForegroundReplyText);
-    const overlapReminderSend = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: overlapSendBaselineCount + 1,
-      expectedPath: reminderPath,
-      scenario: requireScenario(),
-      userId,
-    });
-    expect(requireLinqStub().readObservedMessageText(overlapReminderSend))
-      .toBe(overlapReminderText);
-    const overlapFinalStatus = await requireScenario().waitForHostedCompletion(userId, {
-      timeoutMs: scheduledReminderCompletionWaitMs,
-    });
-    expect(overlapFinalStatus.lastErrorCode ?? null).toBeNull();
+      const overlapForegroundSend = await requireLinqStub().waitForAdditionalSend({
+        baselineCount: overlapSendBaselineCount,
+        expectedPath: reminderPath,
+        scenario: requireScenario(),
+        userId,
+      });
+      expect(requireLinqStub().readObservedMessageText(overlapForegroundSend))
+        .toBe(overlapForegroundReplyText);
+      heldOverlapReminderResponse.release();
+      const overlapReminderSend = await requireLinqStub().waitForAdditionalSend({
+        baselineCount: overlapSendBaselineCount + 1,
+        expectedPath: reminderPath,
+        scenario: requireScenario(),
+        userId,
+      });
+      expect(requireLinqStub().readObservedMessageText(overlapReminderSend))
+        .toBe(overlapReminderText);
+      const overlapFinalStatus = await requireScenario().waitForHostedCompletion(userId, {
+        timeoutMs: scheduledReminderCompletionWaitMs,
+      });
+      expect(overlapFinalStatus.lastErrorCode ?? null).toBeNull();
+    } finally {
+      heldOverlapReminderResponse.release();
+    }
   }, 720_000);
 });
 
@@ -477,8 +487,6 @@ async function startScenario(): Promise<void> {
       LINQ_API_TOKEN: "linq-local-test-token",
       LINQ_WEBHOOK_SECRET: linqWebhookSecret,
       MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
-      MURPH_HOSTED_LOCAL_TEST_AUTOMATION_CRON_PRE_DEFER_DELAY_MS:
-        String(hostedLocalCronPreDeferDelayMs),
       OPENAI_API_KEY: "stub-local-openai-key",
     },
     assistantProviderStubModelId: productionLikeAssistantModel,
@@ -526,6 +534,31 @@ function buildHostedAssistantAutomationSaveResponses(input: {
     ]),
     input.text,
   ];
+}
+
+function createHeldAssistantProviderTextResponse(text: string): {
+  release: () => void;
+  response: HostedLocalAssistantProviderScriptedResponse;
+  started: Promise<void>;
+} {
+  let release = (): void => {};
+  let markStarted = (): void => {};
+  const releasePromise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+
+  return {
+    release,
+    response: {
+      beforeResponse: () => releasePromise,
+      onResponseStarted: markStarted,
+      text,
+    },
+    started,
+  };
 }
 
 function buildActivationWake(memberId: string) {

@@ -80,6 +80,8 @@ const ASSISTANT_CRON_MAX_RESPONSE_LENGTH = 4_000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
 const ASSISTANT_CRON_NOTIFICATION_EXPIRED_ERROR =
   'Assistant cron notification expired before delivery.'
+const ASSISTANT_CRON_FOREGROUND_YIELDED_ERROR =
+  'Assistant cron yielded to fresh foreground input.'
 const ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR =
   'Device activity occurrence skipped because its parent listener is no longer authorized.'
 const ASSISTANT_CRON_ONBOARDING_OPEN_RESEARCH_SKIP_ERROR =
@@ -262,6 +264,7 @@ export async function executeClaimedAssistantCronJob(input: {
   job: ResolvedAssistantCronJob
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   paths: AssistantStatePaths
+  shouldYield?: (() => boolean) | null
   signal?: AbortSignal
   turnEnvironment?: AssistantTurnEnvironment | null
   trigger: AssistantCronTrigger
@@ -279,8 +282,14 @@ export async function executeClaimedAssistantCronJob(input: {
   let response: string | null = null
   let errorText: string | null = null
   let errorCode: string | null = null
+  let foregroundYielded = false
   let status: AssistantCronRunRecord['status'] = 'failed'
   let pendingDeliveryIntentId: string | null = null
+  const foregroundPreemption = createAssistantCronForegroundPreemption({
+    jobName: claimedJob.name,
+    parentSignal: input.signal,
+    shouldYield: input.shouldYield ?? null,
+  })
   const occurrenceAt =
     input.job.kind === 'canonical'
       ? input.job.runtimeState.state.pendingOccurrenceAt ??
@@ -292,7 +301,10 @@ export async function executeClaimedAssistantCronJob(input: {
       : claimedJob.state.nextRunAt ?? startedAt
 
   try {
-    if (input.signal?.aborted) {
+    if (foregroundPreemption.signal?.aborted) {
+      if (foregroundPreemption.wasForegroundYielded()) {
+        throw buildAssistantCronForegroundYieldedError(claimedJob.name)
+      }
       throw new VaultCliError(
         'ASSISTANT_CRON_ABORTED',
         `Assistant cron job "${claimedJob.name}" was aborted before it started.`,
@@ -361,7 +373,7 @@ export async function executeClaimedAssistantCronJob(input: {
           deliveryDispatchMode: input.deliveryDispatchMode,
           executionContext: input.executionContext,
           serviceTier,
-          signal: input.signal,
+          signal: foregroundPreemption.signal,
           turnEnvironment: input.turnEnvironment ?? null,
           turnTrigger: 'automation-cron',
         })
@@ -400,6 +412,10 @@ export async function executeClaimedAssistantCronJob(input: {
           status = 'skipped'
           errorText = lifecycleSkipReason
         } else {
+          assertAssistantCronForegroundNotYielded({
+            jobName: claimedJob.name,
+            shouldYield: input.shouldYield ?? null,
+          })
           const result = await sendAssistantNotificationLocal({
             vault: input.vault,
             ...automationTurn,
@@ -441,14 +457,33 @@ export async function executeClaimedAssistantCronJob(input: {
           } else {
             status = 'succeeded'
           }
+          if (
+            foregroundPreemption.wasForegroundYielded() &&
+            !result.deliveryOutcome
+          ) {
+            throw buildAssistantCronForegroundYieldedError(claimedJob.name)
+          }
         }
       }
     }
   } catch (error) {
-    errorText = errorMessage(error)
-    errorCode = error instanceof VaultCliError ? error.code : null
+    const yieldedError =
+      error instanceof AssistantCronForegroundYieldedError ||
+      (
+        foregroundPreemption.wasForegroundYielded() &&
+        !input.signal?.aborted
+      )
+    if (yieldedError) {
+      foregroundYielded = true
+      errorText = ASSISTANT_CRON_FOREGROUND_YIELDED_ERROR
+      errorCode = 'ASSISTANT_CRON_FOREGROUND_YIELDED'
+    } else {
+      errorText = errorMessage(error)
+      errorCode = error instanceof VaultCliError ? error.code : null
+    }
     status = 'failed'
   } finally {
+    foregroundPreemption.dispose()
     finishedAt = new Date().toISOString()
   }
 
@@ -484,6 +519,7 @@ export async function executeClaimedAssistantCronJob(input: {
       const finalizedJob = finalizeAssistantCronJobAfterRun({
         job: current,
         finishedAt,
+        foregroundYielded,
         responseSessionId: sessionId,
         pendingDeliveryIntentId,
         run: {
@@ -529,6 +565,7 @@ export async function executeClaimedAssistantCronJob(input: {
     const usesSessionPin = automationContinuityUsesSessionPin(input.job.source)
     const updatedRuntimeState = finalizeCanonicalAssistantCronRuntimeAfterRun({
       finishedAt,
+      foregroundYielded,
       run: {
         ...run,
         status,
@@ -709,6 +746,7 @@ function listAssistantCronNotificationTags(
 
 function finalizeAssistantCronJobAfterRun(input: {
   finishedAt: string
+  foregroundYielded: boolean
   job: AssistantCronJob
   pendingDeliveryIntentId: string | null
   responseSessionId: string | null
@@ -722,6 +760,17 @@ function finalizeAssistantCronJobAfterRun(input: {
   }
   const shouldAutoBindSession =
     input.responseSessionId !== null && !assistantCronJobHasStableSessionLocator(input.job)
+
+  if (input.foregroundYielded) {
+    return assistantCronJobSchema.parse({
+      ...input.job,
+      updatedAt: input.finishedAt,
+      state: {
+        ...runningClearedState,
+        nextRunAt: computeAssistantCronForegroundYieldRetryAt(input.finishedAt),
+      },
+    })
+  }
 
   if (assistantCronRunConsumedOccurrence(input.run, input.pendingDeliveryIntentId)) {
     const nextRunAt = resolveAssistantCronNextRunAfterSuccess(
@@ -818,6 +867,7 @@ function assistantCronRunConsumedOccurrence(
 
 function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
   finishedAt: string
+  foregroundYielded: boolean
   pendingDeliveryIntentId: string | null
   responseSessionId: string | null
   run: AssistantCronRunRecord
@@ -830,6 +880,20 @@ function finalizeCanonicalAssistantCronRuntimeAfterRun(input: {
     runningClaimId: null,
     runningPid: null,
     lastRunAt: input.finishedAt,
+  }
+
+  if (input.foregroundYielded) {
+    return {
+      ...input.runtimeState,
+      updatedAt: input.finishedAt,
+      state: {
+        ...runningClearedState,
+        pendingOccurrenceAt:
+          input.runtimeState.state.pendingOccurrenceAt ??
+          resolveCanonicalAssistantCronOccurrenceAt(input.source, input.runtimeState),
+        retryAfterAt: computeAssistantCronForegroundYieldRetryAt(input.finishedAt),
+      },
+    }
   }
 
   if (assistantCronRunConsumedOccurrence(input.run, input.pendingDeliveryIntentId)) {
@@ -1013,6 +1077,100 @@ function assistantCronExecutionDeliveryTargetProfile(input: {
   const isHostedExecution =
     normalizeNullableString(input.executionContext?.hosted?.memberId) !== null
   return isHostedExecution ? 'hosted' : 'local'
+}
+
+class AssistantCronForegroundYieldedError extends VaultCliError {
+  constructor(jobName: string) {
+    super(
+      'ASSISTANT_CRON_FOREGROUND_YIELDED',
+      `Assistant cron job "${jobName}" yielded to fresh foreground input.`,
+    )
+  }
+}
+
+function buildAssistantCronForegroundYieldedError(
+  jobName: string,
+): AssistantCronForegroundYieldedError {
+  return new AssistantCronForegroundYieldedError(jobName)
+}
+
+function assertAssistantCronForegroundNotYielded(input: {
+  jobName: string
+  shouldYield: (() => boolean) | null
+}): void {
+  if (input.shouldYield?.() === true) {
+    throw buildAssistantCronForegroundYieldedError(input.jobName)
+  }
+}
+
+function createAssistantCronForegroundPreemption(input: {
+  jobName: string
+  parentSignal?: AbortSignal
+  shouldYield: (() => boolean) | null
+}): {
+  dispose: () => void
+  signal?: AbortSignal
+  wasForegroundYielded: () => boolean
+} {
+  if (!input.shouldYield) {
+    return {
+      dispose: () => {},
+      signal: input.parentSignal,
+      wasForegroundYielded: () => false,
+    }
+  }
+
+  const controller = new AbortController()
+  let foregroundYielded = false
+  let disposed = false
+  let interval: ReturnType<typeof setInterval> | null = null
+
+  const abortForForeground = (): void => {
+    if (disposed || controller.signal.aborted) {
+      return
+    }
+
+    foregroundYielded = true
+    controller.abort(buildAssistantCronForegroundYieldedError(input.jobName))
+  }
+  const checkForeground = (): void => {
+    if (input.shouldYield?.() === true) {
+      abortForForeground()
+    }
+  }
+  const abortFromParent = (): void => {
+    if (disposed || controller.signal.aborted) {
+      return
+    }
+
+    controller.abort(input.parentSignal?.reason)
+  }
+
+  if (input.parentSignal?.aborted) {
+    abortFromParent()
+  } else {
+    input.parentSignal?.addEventListener('abort', abortFromParent, { once: true })
+  }
+
+  checkForeground()
+  interval = setInterval(checkForeground, 50)
+  interval.unref?.()
+
+  return {
+    dispose: () => {
+      disposed = true
+      if (interval) {
+        clearInterval(interval)
+      }
+      input.parentSignal?.removeEventListener('abort', abortFromParent)
+    },
+    signal: controller.signal,
+    wasForegroundYielded: () => foregroundYielded,
+  }
+}
+
+function computeAssistantCronForegroundYieldRetryAt(finishedAt: string): string {
+  return new Date(Date.parse(finishedAt) + 10_000).toISOString()
 }
 
 function cryptoRandomRunId(): string {

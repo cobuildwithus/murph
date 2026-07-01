@@ -1002,6 +1002,7 @@ export async function deliverAssistantOutboxMessage(input: {
   turnTrigger?: AssistantTurnTrigger | null
   vault: string
 }): Promise<DeliverAssistantOutboxMessageResult> {
+  throwIfAssistantOutboxSignalAborted(input.signal)
   const intent = await createAssistantOutboxIntent({
     actorId: input.actorId,
     bindingDelivery: input.bindingDelivery,
@@ -1086,6 +1087,22 @@ export async function deliverAssistantOutboxMessage(input: {
       normalizeAssistantDeliveryError(new Error('Assistant outbound delivery failed.')),
     session: dispatched.session ?? null,
   }
+}
+
+function throwIfAssistantOutboxSignalAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) {
+    return
+  }
+
+  const reason: unknown = signal.reason
+  if (reason instanceof Error) {
+    throw reason
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_OUTBOX_ABORTED',
+    'Assistant outbound delivery was aborted before dispatch.',
+  )
 }
 
 export async function deliverAssistantOutboxReaction(input: {

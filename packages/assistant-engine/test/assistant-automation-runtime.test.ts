@@ -5600,7 +5600,7 @@ describe('assistant auto-reply runtime', () => {
     }
   })
 
-  it('honors hosted-local cron delay from turn env before checking foreground work', async () => {
+  it('threads caller foreground-yield checks into hosted queue-only cron processing', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-05-08T16:00:00.000Z'))
     try {
@@ -5626,12 +5626,12 @@ describe('assistant auto-reply runtime', () => {
         dueJobs: 1,
         nextRunAt: '2026-05-08T15:59:00.000Z',
       })
-      const shouldDeferCron = vi.fn().mockReturnValue(true)
+      const shouldDeferCron = vi.fn().mockReturnValue(false)
       const runLoop = await vi.importActual<
         typeof import('../src/assistant/automation/run-loop.ts')
       >('../src/assistant/automation/run-loop.ts')
 
-      const resultPromise = runLoop.runAssistantAutomationPass({
+      const result = await runLoop.runAssistantAutomationPass({
         deliveryDispatchMode: 'queue-only',
         executionContext: {
           hosted: {
@@ -5639,27 +5639,19 @@ describe('assistant auto-reply runtime', () => {
             userEnvKeys: [],
           },
         },
-        requestId: 'request-hosted-local-process-env-cron-delay',
+        requestId: 'request-hosted-foreground-yield-cron-started',
         shouldDeferCron,
-        turnEnvironment: {
-          currentWorkingDirectory: null,
-          env: {
-            MURPH_HOSTED_LOCAL_TEST_AUTOMATION_CRON_PRE_DEFER_DELAY_MS: '25',
-            MURPH_HOSTED_LOCAL_TEST_ROUTES: '1',
-          },
-        },
         vault: '/tmp/assistant-automation-vault',
       })
 
-      await vi.advanceTimersByTimeAsync(24)
-      expect(shouldDeferCron).not.toHaveBeenCalled()
-      await vi.advanceTimersByTimeAsync(1)
-      const result = await resultPromise
-
       expect(shouldDeferCron).toHaveBeenCalledOnce()
-      expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
+      expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledWith(
+        expect.objectContaining({
+          shouldYield: shouldDeferCron,
+        }),
+      )
       expect(result.cronProcessed).toBe(0)
-      expect(result.nextWakeAt).toBe('2026-05-08T16:00:10.025Z')
+      expect(result.nextWakeAt).toBe('2026-05-08T15:59:00.000Z')
     } finally {
       vi.useRealTimers()
     }
