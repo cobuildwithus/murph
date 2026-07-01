@@ -3010,8 +3010,10 @@ describe("startHostedContainerEntrypoint", () => {
       }));
   });
 
-  it("preserves the verified warm Codex app-server root during cleanup", async () => {
+  it("preserves the verified warm Codex app-server process tree during cleanup", async () => {
     const codexPid = process.pid + 1250;
+    const codexImplementationPid = process.pid + 1251;
+    const subagentShellPid = process.pid + 1252;
     const codexCmdline = "codex\u0000-a\u0000never\u0000app-server\u0000";
     const codexCmdlineDigest = createHash("sha256").update(codexCmdline).digest("hex");
     const codexStartTime = "1234567";
@@ -3021,6 +3023,8 @@ describe("startHostedContainerEntrypoint", () => {
       ...(runnerStarted
         ? [
           { isDirectory: () => true, name: String(codexPid) },
+          { isDirectory: () => true, name: String(codexImplementationPid) },
+          { isDirectory: () => true, name: String(subagentShellPid) },
         ]
         : []),
     ]);
@@ -3043,6 +3047,26 @@ describe("startHostedContainerEntrypoint", () => {
 
       if (String(filePath).endsWith(`/${codexPid}/status`)) {
         return "Name:\tcodex\nUid:\t1000\t1000\t1000\t1000\n";
+      }
+
+      if (String(filePath).endsWith(`/${codexImplementationPid}/cmdline`)) {
+        return "codex-native\u0000-a\u0000never\u0000app-server\u0000";
+      }
+
+      if (String(filePath).endsWith(`/${codexImplementationPid}/stat`)) {
+        return `${codexImplementationPid} (codex) S ${codexPid} ${codexPid} 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 7654321 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      if (String(filePath).endsWith(`/${codexImplementationPid}/status`)) {
+        return "Name:\tcodex\nUid:\t1000\t1000\t1000\t1000\n";
+      }
+
+      if (String(filePath).endsWith(`/${subagentShellPid}/stat`)) {
+        return `${subagentShellPid} (sh) S ${codexImplementationPid} ${codexPid} 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 8765432 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+      }
+
+      if (String(filePath).endsWith(`/${subagentShellPid}/status`)) {
+        return "Name:\tsh\nUid:\t1000\t1000\t1000\t1000\n";
       }
 
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -3081,7 +3105,7 @@ describe("startHostedContainerEntrypoint", () => {
       body: JSON.stringify(buildJobBody({
         wake: {
           event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
-          eventId: "evt_warm_codex_root_cleanup",
+          eventId: "evt_warm_codex_tree_cleanup",
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
       })),
@@ -3101,117 +3125,6 @@ describe("startHostedContainerEntrypoint", () => {
           processIsolationExpectedCodexRootPresent: true,
           processIsolationExpectedCodexRootSnapshotStatus: "available",
           processIsolationUnexpectedProcessCount: 0,
-        }),
-        message: "Hosted container process isolation cleanup completed.",
-      }));
-  });
-
-  it("rejects leaked shell descendants under the verified warm Codex root", async () => {
-    const codexPid = process.pid + 1300;
-    const shellPid = process.pid + 1301;
-    const codexCmdline = "codex\u0000-a\u0000never\u0000app-server\u0000";
-    const codexCmdlineDigest = createHash("sha256").update(codexCmdline).digest("hex");
-    const codexStartTime = "2234567";
-    let runnerStarted = false;
-    const exitScheduler = vi.fn();
-    const stopWarmCodex = vi.fn(async () => undefined);
-    const readdir = vi.fn(async () => [
-      { isDirectory: () => true, name: String(process.pid) },
-      ...(runnerStarted
-        ? [
-          { isDirectory: () => true, name: String(codexPid) },
-          { isDirectory: () => true, name: String(shellPid) },
-        ]
-        : []),
-    ]);
-    const readFile = vi.fn(async (filePath: string) => {
-      if (String(filePath).endsWith(`/${process.pid}/stat`)) {
-        return `${process.pid} (node) S 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 999 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
-      }
-
-      if (String(filePath).endsWith(`/${process.pid}/status`)) {
-        return "Name:\tnode\nUid:\t1000\t1000\t1000\t1000\n";
-      }
-
-      if (String(filePath).endsWith(`/${codexPid}/stat`)) {
-        return `${codexPid} (codex) S ${process.pid} ${codexPid} 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ${codexStartTime} 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
-      }
-
-      if (String(filePath).endsWith(`/${codexPid}/cmdline`)) {
-        return codexCmdline;
-      }
-
-      if (String(filePath).endsWith(`/${codexPid}/status`)) {
-        return "Name:\tcodex\nUid:\t1000\t1000\t1000\t1000\n";
-      }
-
-      if (String(filePath).endsWith(`/${shellPid}/stat`)) {
-        return `${shellPid} (sh) S ${codexPid} ${codexPid} 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 8765432 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
-      }
-
-      if (String(filePath).endsWith(`/${shellPid}/status`)) {
-        return "Name:\tsh\nUid:\t1000\t1000\t1000\t1000\n";
-      }
-
-      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-    });
-    const runnerSpy = vi.spyOn(hostedInvocation, "runHostedWorkspaceInvocation").mockImplementation(
-      async () => {
-        runnerStarted = true;
-        return buildWorkspaceRunnerResult();
-      },
-    );
-
-    const server = await startHostedContainerEntrypoint({
-      port: 0,
-      runtime: {
-        exitScheduler,
-        processApi: { readFile, readdir },
-        processIsolation: true,
-        snapshotExpectedCodexRootProcess: vi.fn(async () => ({
-          commandLineDigest: codexCmdlineDigest,
-          owner: "codex-app-server" as const,
-          pid: codexPid,
-          processGroupId: codexPid,
-          startTimeTicksFromProcStat: codexStartTime,
-          uid: 1000,
-        })),
-        stopWarmCodex,
-      },
-    });
-    servers.push(server);
-    const address = server.address();
-
-    if (!address || typeof address === "string") {
-      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-    }
-
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
-      body: JSON.stringify(buildJobBody({
-        wake: {
-          event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
-          eventId: "evt_warm_codex_shell_descendant_cleanup",
-          occurredAt: "2026-03-26T12:00:00.000Z",
-        },
-      })),
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      method: "POST",
-    });
-
-    expect(response.status).toBe(500);
-    expect(runnerSpy).toHaveBeenCalledTimes(1);
-    expect(stopWarmCodex).toHaveBeenCalledTimes(1);
-    expect(stopWarmCodex).toHaveBeenCalledWith("process-isolation-failed");
-    expect(exitScheduler).toHaveBeenCalledTimes(1);
-    expect(mocks.emitHostedExecutionStructuredLog.mock.calls
-      .map(([input]) => input)).toContainEqual(expect.objectContaining({
-        details: expect.objectContaining({
-          processIsolationCleanupStatus: "failed",
-          processIsolationExpectedCodexRootPresent: true,
-          processIsolationExpectedCodexRootSnapshotStatus: "available",
-          processIsolationUnexpectedProcessCount: 1,
         }),
         message: "Hosted container process isolation cleanup completed.",
       }));

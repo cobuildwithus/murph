@@ -4405,7 +4405,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('handles tagged pre-start warm server requests without turn-correlation buffering', async () => {
+  it('buffers tagged pre-start warm server requests until the current turn id is known', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-prestart-request-work-')
     const codexHome = await createTempDir('assistant-codex-local-prestart-request-home-')
     const progressUpdates: string[] = []
@@ -4460,6 +4460,14 @@ describe('assistant codex runtime', () => {
               turnId: 'turn-local-prestart-request-2',
             },
           }))
+          child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: {
+                id: 'turn-local-prestart-request-2',
+              },
+            },
+          }))
 
           const response = await waitForRpcResponse(child, 99)
           expect(response).toMatchObject({
@@ -4469,14 +4477,6 @@ describe('assistant codex runtime', () => {
             },
           })
 
-          child.stdout.write(jsonLine({
-            id: secondTurn.id,
-            result: {
-              turn: {
-                id: 'turn-local-prestart-request-2',
-              },
-            },
-          }))
           child.stdout.write(jsonLine({
             method: 'assistant.message.delta',
             params: {
@@ -4542,7 +4542,7 @@ describe('assistant codex runtime', () => {
     expect(progressUpdates).toEqual(['Starting early work'])
   })
 
-  it('ignores stale same-thread messages tagged with an older turn id', async () => {
+  it('ignores stale same-thread pre-start messages tagged with an older turn id', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-stale-turn-id-work-')
     const codexHome = await createTempDir('assistant-codex-local-stale-turn-id-home-')
     const progressDelivery = createProgressDeliveryMock()
@@ -4576,12 +4576,16 @@ describe('assistant codex runtime', () => {
             },
           }))
 
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 2,
-            threadId: 'thread-local-stale-turn-id',
-            turnId: 'turn-local-stale-turn-id-2',
-          })
+          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondThread.id,
+            result: {
+              thread: {
+                id: 'thread-local-stale-turn-id',
+              },
+            },
+          }))
+          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
           child.stdout.write(jsonLine({
             method: 'turn/completed',
             params: {
@@ -4603,6 +4607,14 @@ describe('assistant codex runtime', () => {
               threadId: 'thread-local-stale-turn-id',
               tool: 'send_progress_update',
               turnId: 'turn-local-stale-turn-id-1',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: {
+                id: 'turn-local-stale-turn-id-2',
+              },
             },
           }))
 
