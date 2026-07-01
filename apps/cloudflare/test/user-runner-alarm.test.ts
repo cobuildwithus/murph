@@ -279,6 +279,9 @@ describe("HostedUserRunner execution coordination", () => {
   it("accepts runtime processing start before the invocation reaches idle", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const abortWorkspaceInvocation = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
+    >(async () => "requested");
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
     const { invoke, runner, sql, waitUntilPromises } = createRunnerHarness({
       invocationResults: [invocationResult.promise],
@@ -1975,6 +1978,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(readActiveRuntimeUserFence).toHaveBeenCalledTimes(2);
+    expect(abortWorkspaceInvocation).toHaveBeenCalledTimes(2);
     expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
       attemptId: token.attemptId,
       leaseGeneration: String(token.generation),
@@ -2178,6 +2182,9 @@ describe("HostedUserRunner execution coordination", () => {
   it("preempts a fresh inactive retention-only fence for default processing", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const abortWorkspaceInvocation = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
+    >(async () => "requested");
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
     const onStatusRead = vi.fn();
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
@@ -2193,6 +2200,7 @@ describe("HostedUserRunner execution coordination", () => {
       reason: "no_active_runtime",
     }));
     const { invoke, runner, sql } = createRunnerHarness({
+      abortWorkspaceInvocation,
       ensureProcessing,
       invocationResults: [invocationResult.promise],
       onStatusRead,
@@ -2219,6 +2227,11 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
+      attemptId: token.attemptId,
+      leaseGeneration: String(token.generation),
+      userId: TEST_USER_ID,
+    });
     expect(onStatusRead).not.toHaveBeenCalled();
     expect(ensureProcessing).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());

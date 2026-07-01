@@ -425,6 +425,17 @@ export class RuntimeProcessingController {
         runnerContainerName,
       });
     if (activeRuntimeState.outcome === "inactive") {
+      const abortResult = await this.abortActiveRuntimeFence({
+        acceptRequestedAbort: true,
+        activeFence,
+        commandBudget: input.commandBudget,
+        record,
+        runnerContainerName,
+      });
+      if (!abortResult.aborted) {
+        return abortResult.response;
+      }
+
       return await this.replaceInactiveRuntimeFence({
         activeFence,
         commandBudget: input.commandBudget,
@@ -463,6 +474,7 @@ export class RuntimeProcessingController {
   }
 
   private async abortActiveRuntimeFence(input: {
+    acceptRequestedAbort?: boolean;
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
     commandBudget: RuntimeProcessingCommandBudget;
     record: RunnerStateRecord;
@@ -515,6 +527,7 @@ export class RuntimeProcessingController {
       if (
         abortStatus === "accepted"
         || abortStatus === "inactive"
+        || (input.acceptRequestedAbort === true && abortStatus === "requested")
       ) {
         return { aborted: true };
       }
