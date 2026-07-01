@@ -3049,6 +3049,76 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
+  it("resets the current prepared background delivery when foreground work appears before outbox dispatch", async () => {
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_yield_before_dispatch",
+      deliveryPhase: "background_retry",
+      effectId: "intent_yield_before_dispatch",
+      payload: createPayload({
+        idempotencyKey: "assistant-outbox:intent_yield_before_dispatch",
+        transportIdempotent: true,
+      }),
+    });
+    const yieldedCounts: number[] = [];
+    let yieldChecks = 0;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey: "assistant-outbox:intent_yield_before_dispatch",
+          deliveryTransportIdempotent: true,
+          intentId: effect.effectId,
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingStartedAt: "2026-04-08T00:00:05.000Z",
+        },
+      ),
+    );
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
+        yieldedCounts.push(yieldedEffectCount);
+      },
+      preparedDispatches: [{
+        intentId: "intent_yield_before_dispatch",
+        preparedDispatchToken: "prepared-dispatch-token-yield-before-dispatch",
+        previousDispatchState: createPreparedPreviousDispatchState({
+          deliveryIdempotencyKey: "assistant-outbox:intent_yield_before_dispatch",
+          deliveryTransportIdempotent: true,
+        }),
+      }],
+      providerFetch: vi.fn<typeof fetch>(),
+      shouldYieldBackgroundDelivery: () => {
+        yieldChecks += 1;
+        return yieldChecks >= 2;
+      },
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([]);
+    expect(yieldedCounts).toEqual([1]);
+    expect(mocks.dispatchAssistantOutboxIntent).not.toHaveBeenCalled();
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledTimes(1);
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith({
+      deliveryIdempotencyKey: "assistant-outbox:intent_yield_before_dispatch",
+      deliveryTransportIdempotent: true,
+      intentId: "intent_yield_before_dispatch",
+      preparedDispatchToken: "prepared-dispatch-token-yield-before-dispatch",
+      resetAt: expect.any(Date),
+      restoreDispatchState: createPreparedPreviousDispatchState({
+        deliveryIdempotencyKey: "assistant-outbox:intent_yield_before_dispatch",
+        deliveryTransportIdempotent: true,
+      }),
+      vault: HOSTED_WAKE.vaultRoot,
+    });
+  });
+
   it("throws after pre-provider abort when owned prepared reset is a no-op", async () => {
     const abortReason = new Error("lease expired before no-op reset");
     const preparedAt = "2026-04-08T00:00:05.000Z";
