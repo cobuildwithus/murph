@@ -115,6 +115,7 @@ export interface SetScheduledLogStatusInput extends ReadScheduledLogInput {
 }
 
 export interface ExecuteScheduledLogOccurrenceInput {
+  beforeWrite?: () => Promise<void> | void;
   occurrenceAt: string;
   scheduledLogId: string;
   vaultRoot: string;
@@ -787,6 +788,7 @@ export async function executeScheduledLogOccurrence(input: ExecuteScheduledLogOc
         };
       }
 
+      await input.beforeWrite?.();
       const written = await executeScheduledLogAction({
         action: record.action,
         externalRef,
