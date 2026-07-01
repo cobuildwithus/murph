@@ -313,12 +313,21 @@ export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
       linqRecipientPhoneLookupKey: {
         in: recipientPhoneEntries.map(({ lookupKey }) => lookupKey),
       },
-      member: {
-        is: {
-          billingStatus: HostedBillingStatus.active,
-          suspendedAt: null,
+      OR: [
+        {
+          linqHomeLineAssignedAt: {
+            not: null,
+          },
         },
-      },
+        {
+          member: {
+            is: {
+              billingStatus: HostedBillingStatus.active,
+              suspendedAt: null,
+            },
+          },
+        },
+      ],
     },
     _count: {
       _all: true,

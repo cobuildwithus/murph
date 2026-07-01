@@ -541,6 +541,39 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
   });
 
+  it("rejects a new chat sender whose active line capacity is consumed by a reservation", async () => {
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(
+      buildHomeLine("+15557654321", {
+        activeMemberLimit: 1,
+      }),
+    );
+    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(
+      new Map([["+15557654321", 1]]),
+    );
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-active-cap-reserved",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_CAPACITY_EXHAUSTED",
+      httpStatus: 429,
+    });
+
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledWith({
+      prisma: tx,
+      recipientPhones: ["+15557654321"],
+    });
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalledWith({
+      prisma: tx,
+      recipientPhones: ["+15557654321"],
+      since: expect.any(Date),
+    });
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+  });
+
   it("does not reuse an uncounted home-line reservation after the daily cap is exhausted", async () => {
     routingState = {
       linqChatId: null,

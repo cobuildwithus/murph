@@ -22,7 +22,7 @@ The provider inventory client intentionally stays on the existing web-owned Linq
    pnpm release:production:migrate && pnpm build
    ```
 
-   On main-branch Vercel production deploys, `release:production:migrate` runs Prisma migrations, then runs `pnpm --dir apps/web linq:sync-lines -- --skip-provider-inventory`. The guarded line sync backfills current env-configured lines and verifies at least one configured assignable DB line exists before DB-backed assignment code serves traffic. Provider inventory sync stays on the explicit operator/contact-card path so production deploys do not depend on the Linq inventory API.
+   On main-branch Vercel production deploys, `release:production:migrate` runs Prisma migrations, regenerates the hosted web Prisma client, then runs `pnpm --dir apps/web linq:sync-lines -- --skip-provider-inventory`. The guarded line sync backfills current env-configured lines and verifies at least one configured assignable DB line exists before DB-backed assignment code serves traffic. Provider inventory sync stays on the explicit operator/contact-card path so production deploys do not depend on the Linq inventory API.
 
 2. For an explicit operator repair or a one-off cutover outside the guarded production deploy path, run:
 

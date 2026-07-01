@@ -1541,7 +1541,7 @@ describe("hosted-member-store", () => {
     }));
   });
 
-  it("counts active home-line assignments by recipient phone even before a home chat is bound", async () => {
+  it("counts active home-line assignments and pre-activation reservations by recipient phone", async () => {
     const homePhoneOne = "+15550100001";
     const homePhoneTwo = "+15550100002";
     const groupBy = vi.fn().mockResolvedValue([
@@ -1581,12 +1581,21 @@ describe("hosted-member-store", () => {
             expect.stringMatching(/^hbidx:phone:v1:/u),
           ]),
         },
-        member: {
-          is: {
-            billingStatus: HostedBillingStatus.active,
-            suspendedAt: null,
+        OR: [
+          {
+            linqHomeLineAssignedAt: {
+              not: null,
+            },
           },
-        },
+          {
+            member: {
+              is: {
+                billingStatus: HostedBillingStatus.active,
+                suspendedAt: null,
+              },
+            },
+          },
+        ],
       },
       _count: {
         _all: true,

@@ -8,6 +8,7 @@ import { describe, test } from "vitest";
 import {
   hostedWebProductionLinqLineSyncCommand,
   hostedWebProductionMigrationCommand,
+  hostedWebProductionPrismaGenerateCommand,
   runHostedWebProductionMigrationsIfNeeded,
   shouldRunHostedWebProductionMigrations,
   type HostedWebProductionMigrationEnvironment,
@@ -67,7 +68,7 @@ describe("hosted web production migration guard", () => {
     }
   });
 
-  test("runs prisma migrate deploy and Linq line sync for main-branch production builds", async () => {
+  test("runs migrate, Prisma generate, and Linq line sync for main-branch production builds", async () => {
     const calls: Array<{ args: readonly string[]; command: string }> = [];
 
     const result = await runHostedWebProductionMigrationsIfNeeded(
@@ -86,6 +87,10 @@ describe("hosted web production migration guard", () => {
       {
         command: hostedWebProductionMigrationCommand.command,
         args: ["--dir", "apps/web", "prisma:migrate:deploy"],
+      },
+      {
+        command: hostedWebProductionPrismaGenerateCommand.command,
+        args: ["--dir", "apps/web", "prisma:generate"],
       },
       {
         command: hostedWebProductionLinqLineSyncCommand.command,
