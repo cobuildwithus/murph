@@ -274,41 +274,7 @@ describe("importHostedVaultShareDeliveryWake", () => {
       .rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("does not let a stale revoke remove a newer grant epoch", async () => {
-    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
-    await importHostedVaultShareDeliveryWake({
-      vaultRoot,
-      wake: {
-        ...wake,
-        delivery: { ...wake.delivery, shareId: "share_2" },
-        eventId: "vault-share:share_2:2026-06-09",
-      },
-    });
-
-    await expect(applyHostedVaultShareRevokeWake({
-      vaultRoot,
-      wake: {
-        eventId: "vault-share-revoke:share_1:2026-07-01T00:00:00.000Z",
-        kind: "vault-share.revoke",
-        occurredAt: "2026-07-01T00:00:00.000Z",
-        revoke: {
-          grantorMemberId: "member_grantor",
-          projectionKind: "sleep-times.v0",
-          revokedAt: "2026-07-01T00:00:00.000Z",
-          schema: "murph.vault-share.revoke.v1",
-          shareId: "share_1",
-        },
-        userId: "member_referee",
-      },
-    })).resolves.toEqual({ status: "imported" });
-
-    const stored = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
-    const grantor = stored.projections["sleep-times.v0"].grantors.member_grantor;
-    expect(grantor.shareId).toBe("share_2");
-    expect(grantor.records).toHaveLength(1);
-  });
-
-  it("removes matching legacy raw shared records when a share is revoked", async () => {
+  it("preserves legacy raw shared records when a share is revoked", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
     const legacyDirectory = join(vaultRoot, "raw", "shared", "sleep-times.v0", "member_grantor");
     const revokedLegacyPath = join(legacyDirectory, "2026-06-09.json");
@@ -357,11 +323,44 @@ describe("importHostedVaultShareDeliveryWake", () => {
       },
     })).resolves.toEqual({ status: "imported" });
 
-    await expect(readFile(revokedLegacyPath, "utf8"))
-      .rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(revokedLegacyPath, "utf8")).resolves.toContain("share_1");
     await expect(readFile(activeLegacyPath, "utf8")).resolves.toContain("share_2");
     await expect(readFile(storePath(vaultRoot), "utf8"))
       .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("does not let a stale revoke remove a newer grant epoch", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
+    await importHostedVaultShareDeliveryWake({
+      vaultRoot,
+      wake: {
+        ...wake,
+        delivery: { ...wake.delivery, shareId: "share_2" },
+        eventId: "vault-share:share_2:2026-06-09",
+      },
+    });
+
+    await expect(applyHostedVaultShareRevokeWake({
+      vaultRoot,
+      wake: {
+        eventId: "vault-share-revoke:share_1:2026-07-01T00:00:00.000Z",
+        kind: "vault-share.revoke",
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        revoke: {
+          grantorMemberId: "member_grantor",
+          projectionKind: "sleep-times.v0",
+          revokedAt: "2026-07-01T00:00:00.000Z",
+          schema: "murph.vault-share.revoke.v1",
+          shareId: "share_1",
+        },
+        userId: "member_referee",
+      },
+    })).resolves.toEqual({ status: "imported" });
+
+    const stored = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
+    const grantor = stored.projections["sleep-times.v0"].grantors.member_grantor;
+    expect(grantor.shareId).toBe("share_2");
+    expect(grantor.records).toHaveLength(1);
   });
 
   it("starts a fresh record list when a delivery arrives for a new grant epoch", async () => {
