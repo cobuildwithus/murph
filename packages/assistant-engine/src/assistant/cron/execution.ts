@@ -486,28 +486,7 @@ export async function executeClaimedAssistantCronJob(input: {
             foregroundPreemption.wasForegroundYielded() ||
             input.shouldYield?.() === true
           if (result.deliveryOutcome?.kind === 'queued') {
-            const queuedIntentId = result.deliveryOutcome.intentId
-            let queuedDeliveryPreempted = false
-            if (foregroundYieldedAfterNotification) {
-              const abandonedIntent =
-                await markAssistantOutboxIntentMirrorTerminalById({
-                  error: buildAssistantCronForegroundYieldedError(claimedJob.name),
-                  intentId: queuedIntentId,
-                  onlyCurrentStatuses: ['pending', 'retryable', 'awaiting_approval'],
-                  status: 'abandoned',
-                  vault: input.vault,
-                })
-              if (
-                abandonedIntent === null ||
-                abandonedIntent.status === 'abandoned'
-              ) {
-                queuedDeliveryPreempted = true
-              }
-            }
-            if (queuedDeliveryPreempted) {
-              throw buildAssistantCronForegroundYieldedError(claimedJob.name)
-            }
-            pendingDeliveryIntentId = queuedIntentId
+            pendingDeliveryIntentId = result.deliveryOutcome.intentId
             status = 'skipped'
           } else {
             status = 'succeeded'

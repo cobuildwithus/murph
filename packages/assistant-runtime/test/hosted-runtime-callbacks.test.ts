@@ -2938,6 +2938,117 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
+  it("resets remaining prepared background deliveries when foreground work appears after an accepted outcome", async () => {
+    const firstEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_first",
+      deliveryPhase: "background_retry",
+      effectId: "intent_first",
+      payload: createPayload({
+        idempotencyKey: "assistant-outbox:intent_first",
+        transportIdempotent: true,
+      }),
+    });
+    const secondEffect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_second",
+      deliveryPhase: "background_retry",
+      effectId: "intent_second",
+      payload: createPayload({
+        idempotencyKey: "assistant-outbox:intent_second",
+        transportIdempotent: true,
+      }),
+    });
+    let shouldYield = false;
+    const yieldedCounts: number[] = [];
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey: "assistant-outbox:intent_first",
+          deliveryTransportIdempotent: true,
+          intentId: firstEffect.effectId,
+          lastError: null,
+          status: "sending",
+        },
+        {
+          sendingStartedAt: "2026-04-08T00:00:05.000Z",
+        },
+      ),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
+      expect(request).toEqual(expect.objectContaining({
+        allowPreparedSending: true,
+        intentId: "intent_first",
+        preparedDispatch: {
+          deliveryIdempotencyKey: "assistant-outbox:intent_first",
+          deliveryTransportIdempotent: true,
+          preparedDispatchToken: "prepared-dispatch-token-first",
+        },
+      }));
+      shouldYield = true;
+      return createDispatchResult({
+        delivery: createDelivery({
+          idempotencyKey: "assistant-outbox:intent_first",
+        }),
+        intentId: "intent_first",
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [firstEffect, secondEffect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
+        yieldedCounts.push(yieldedEffectCount);
+      },
+      preparedDispatches: [
+        {
+          intentId: "intent_first",
+          preparedDispatchToken: "prepared-dispatch-token-first",
+          previousDispatchState: createPreparedPreviousDispatchState({
+            deliveryIdempotencyKey: "assistant-outbox:intent_first",
+            deliveryTransportIdempotent: true,
+          }),
+        },
+        {
+          intentId: "intent_second",
+          preparedDispatchToken: "prepared-dispatch-token-second",
+          previousDispatchState: createPreparedPreviousDispatchState({
+            deliveryIdempotencyKey: "assistant-outbox:intent_second",
+            deliveryTransportIdempotent: true,
+          }),
+        },
+      ],
+      providerFetch: vi.fn<typeof fetch>(),
+      shouldYieldBackgroundDelivery: () => shouldYield,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        effectId: "intent_first",
+      }),
+    ]);
+    expect(yieldedCounts).toEqual([1]);
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
+    expect(mocks.readAssistantOutboxIntentMirrorState).toHaveBeenCalledTimes(1);
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledTimes(1);
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).toHaveBeenCalledWith({
+      deliveryIdempotencyKey: "assistant-outbox:intent_second",
+      deliveryTransportIdempotent: true,
+      intentId: "intent_second",
+      preparedDispatchToken: "prepared-dispatch-token-second",
+      resetAt: expect.any(Date),
+      restoreDispatchState: createPreparedPreviousDispatchState({
+        deliveryIdempotencyKey: "assistant-outbox:intent_second",
+        deliveryTransportIdempotent: true,
+      }),
+      vault: HOSTED_WAKE.vaultRoot,
+    });
+  });
+
   it("throws after pre-provider abort when owned prepared reset is a no-op", async () => {
     const abortReason = new Error("lease expired before no-op reset");
     const preparedAt = "2026-04-08T00:00:05.000Z";

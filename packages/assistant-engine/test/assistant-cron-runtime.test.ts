@@ -2118,7 +2118,7 @@ describe('assistant cron runtime orchestration', () => {
     }
   })
 
-  it('abandons a queued cron outbox intent when foreground work appears after provider decision', async () => {
+  it('abandons a queued cron outbox intent when foreground work appears before durable commit', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
     try {
@@ -2221,6 +2221,112 @@ describe('assistant cron runtime orchestration', () => {
       expect(current.state.lastFailedAt).toBeNull()
       expect(current.state.consecutiveFailures).toBe(0)
       expect(current.state.nextRunAt).toBe('2026-04-08T10:20:10.000Z')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps an accepted queue-only cron delivery when foreground work appears after durable commit', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    try {
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-yield-after-queued-commit-',
+      )
+      const canonicalJob = await createCanonicalJob(vaultRoot, 'yield-after-queued-commit')
+      const queuedIntentId = 'outbox_yield_after_queued_commit'
+      let shouldYield = false
+      cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
+        beforeCommit?: (context: {
+          decision: {
+            kind: 'send_message'
+            privateSummary: string
+            text: string
+          }
+          deliveryOutcome: {
+            error: null
+            intentId: string
+            kind: 'queued'
+            session: {
+              sessionId: string
+            }
+          }
+          response: string
+        }) => Promise<void> | void
+        deferCommitUntilDeliveryAccepted?: boolean | null
+      }) => {
+        await saveAssistantOutboxIntent(
+          vaultRoot,
+          buildTestLinqOutboxIntent({
+            createdAt: '2026-04-08T10:20:00.000Z',
+            intentId: queuedIntentId,
+          }),
+        )
+        const decision = {
+          kind: 'send_message' as const,
+          privateSummary: 'Queued scheduled reminder.',
+          text: 'Remember to sleep.',
+        }
+        const deliveryOutcome = {
+          kind: 'queued' as const,
+          error: null,
+          intentId: queuedIntentId,
+          session: {
+            sessionId: 'session-default',
+          },
+        }
+        expect(input.deferCommitUntilDeliveryAccepted).toBe(true)
+        await input.beforeCommit?.({
+          decision,
+          deliveryOutcome,
+          response: 'Remember to sleep.',
+        })
+        shouldYield = true
+        return {
+          decision,
+          deliveryOutcome,
+          response: 'Remember to sleep.',
+          session: {
+            sessionId: 'session-default',
+          },
+        }
+      })
+
+      const summary = await processDueAssistantCronJobsLocal({
+        deliveryDispatchMode: 'queue-only',
+        limit: 1,
+        shouldYield: () => shouldYield,
+        vault: vaultRoot,
+      })
+
+      expect(summary).toEqual({
+        failed: 0,
+        processed: 1,
+        succeeded: 0,
+      })
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+      const intent = await readAssistantOutboxIntent(vaultRoot, queuedIntentId)
+      expect(intent?.status).toBe('pending')
+      expect(intent?.lastError).toBeNull()
+      await expect(
+        listAssistantCronRuns({
+          job: canonicalJob.jobId,
+          vault: vaultRoot,
+        }),
+      ).resolves.toMatchObject({
+        jobId: canonicalJob.jobId,
+        runs: [{
+          error: null,
+          status: 'skipped',
+        }],
+      })
+
+      const current = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
+      expect(current.state.pendingDeliveryIntentId).toBe(queuedIntentId)
+      expect(current.state.runningAt).toBeNull()
+      expect(current.state.lastFailedAt).toBeNull()
+      expect(current.state.consecutiveFailures).toBe(0)
+      expect(current.state.nextRunAt).toBeNull()
     } finally {
       vi.useRealTimers()
     }

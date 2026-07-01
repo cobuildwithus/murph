@@ -3321,6 +3321,8 @@ async function drainHostedPostCheckpointDelivery(input: {
     return await yieldHostedBackgroundPostCheckpointDrain(input);
   }
 
+  let backgroundDeliveryDrainYielded = false;
+  let backgroundDeliveryDrainYieldedCount = 0;
   const outcomes = input.assistantDeliveryEffects.length > 0
     ? await drainHostedPreparedAssistantDeliveries({
         actionApprovalPort: input.input.runtime.platform.actionApprovalPort ?? null,
@@ -3333,15 +3335,29 @@ async function drainHostedPostCheckpointDelivery(input: {
         forwardedEnv: input.input.runtime.forwardedEnv,
         linqDeliveryContexts: input.linqDeliveryContexts ?? null,
         linqEgressLatencyTrace: buildHostedAssistantLinqEgressLatencyTrace(input.input),
+        onBackgroundDeliveryYield: ({ yieldedEffectCount }) => {
+          backgroundDeliveryDrainYielded = true;
+          backgroundDeliveryDrainYieldedCount = Math.max(
+            backgroundDeliveryDrainYieldedCount,
+            yieldedEffectCount,
+          );
+        },
         platformEnv: input.input.runtime.platformEnv,
         preparedDispatches: input.assistantDeliveryPreparation?.preparedDispatches ?? null,
         providerFetch: input.input.runtime.platform.providerFetch ?? null,
+        shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDrain ?? null,
         signal: input.input.signal ?? null,
         userEnv: input.input.runtime.userEnv,
         vaultRoot: input.input.restored.vaultRoot,
         wake: input.wake,
       })
     : [];
+  if (backgroundDeliveryDrainYielded) {
+    return await yieldHostedBackgroundPostCheckpointDrain(input, {
+      resetPreparedDelivery: false,
+      yieldedDeliveryCount: backgroundDeliveryDrainYieldedCount,
+    });
+  }
   let providerCleanupNextWakeAt: string | null;
   let providerCleanupRedactedStatus: HostedRuntimeRedactedJson = {};
   if (input.providerCleanup.mode === "drain") {
@@ -3465,8 +3481,13 @@ async function drainHostedPostCheckpointDelivery(input: {
 
 async function yieldHostedBackgroundPostCheckpointDrain(
   input: Parameters<typeof drainHostedPostCheckpointDelivery>[0],
+  options?: {
+    resetPreparedDelivery?: boolean;
+    yieldedDeliveryCount?: number;
+  },
 ): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
-  if (input.assistantDeliveryEffects.length > 0) {
+  const resetPreparedDelivery = options?.resetPreparedDelivery !== false;
+  if (resetPreparedDelivery && input.assistantDeliveryEffects.length > 0) {
     await resetHostedPreparedDeliveryForBarrier({
       assistantDeliveryEffects: input.assistantDeliveryEffects,
       assistantDeliveryPreparation: input.assistantDeliveryPreparation ?? null,
@@ -3492,7 +3513,8 @@ async function yieldHostedBackgroundPostCheckpointDrain(
     nextWakeReason: nextWake.reason,
     redactedStatus: {
       ...(input.redactedStatus ?? {}),
-      hostedOutboxDeliveryYielded: input.assistantDeliveryEffects.length,
+      hostedOutboxDeliveryYielded:
+        options?.yieldedDeliveryCount ?? input.assistantDeliveryEffects.length,
       hostedAssistantNextWakeAt: nextWake.at,
       nextWakeAt: nextWake.at,
     },
