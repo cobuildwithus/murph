@@ -4656,6 +4656,38 @@ test("Junction sleep_cycle direct intervals use timezone for local sleep-stage d
   assert.equal(observations[1]?.timeZone, undefined);
 });
 
+test("Junction sleep_cycle sums sub-minute stage intervals before rounding", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-01-02T12:00:00.000Z",
+    summaries: {
+      sleep_cycle: [{
+        id: "sleep-cycle-sub-minute-1",
+        source_provider: "garmin",
+        source_type: "watch",
+        time_zone: "UTC",
+        stages: [
+          {
+            start: "2026-01-02T00:00:00.000Z",
+            end: "2026-01-02T00:00:30.000Z",
+            stage: "light",
+          },
+          {
+            start: "2026-01-02T00:00:30.000Z",
+            end: "2026-01-02T00:01:00.000Z",
+            stage: "light",
+          },
+        ],
+      }],
+    },
+  });
+  const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
+
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0]?.fields?.metric, "sleep-light-minutes");
+  assert.equal(observations[0]?.fields?.value, 1);
+});
+
 test("Junction sleep_cycle keeps same-stage day aggregates distinct across timezones", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-sleep-stage-midnight");
   try {
@@ -4874,6 +4906,67 @@ test("Junction sleep_cycle compacts large stage timelines before core import", a
     assert.equal(payload.samples?.length ?? 0, 0);
     assert.equal(observations.length, 4);
     assert.deepEqual(observations.map((event) => event.fields?.value), [251, 251, 251, 251]);
+
+    const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+
+    assert.equal(result.samples.length, 0);
+    assert.equal(result.events.length, 4);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction hypnogram data compacts large stage timelines before core import", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-hypnogram-compact");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-05-20T00:00:00.000Z",
+      timezone: "UTC",
+    });
+
+    const stageValues = ["light", "rem", "deep", "awake"] as const;
+    const stageStart = Date.parse("2026-05-20T00:00:00.000Z");
+    const stages = Array.from({ length: 1004 }, (_, index) => {
+      const start = new Date(stageStart + index * 60_000).toISOString();
+      const end = new Date(stageStart + (index + 1) * 60_000).toISOString();
+      return {
+        start,
+        end,
+        stage: stageValues[index % stageValues.length],
+      };
+    });
+    const snapshot = {
+      importedAt: "2026-05-20T18:00:00.000Z",
+      summaries: {
+        hypnogram: {
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          time_zone: "UTC",
+          data: stages,
+        },
+      },
+    };
+    const payload = await prepareDeviceProviderSnapshotImport({
+      provider: "junction",
+      vaultRoot,
+      snapshot,
+    });
+    const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
+
+    assert.equal(payload.samples?.length ?? 0, 0);
+    assert.equal(observations.length, 4);
+    assert.deepEqual(observations.map((event) => event.fields?.value), [251, 251, 251, 251]);
+    assert.ok(observations.every((event) => event.externalRef?.resourceType === "junction-garmin-sleep-cycle"));
 
     const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
       {

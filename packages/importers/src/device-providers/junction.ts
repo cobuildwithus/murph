@@ -1748,16 +1748,16 @@ function pushSleepCycle(
     const startAt = resolveSafeTimestamp(startAtRaw, resourceContext.sourceProviderSlug);
     const endAt = resolveSafeTimestamp(endAtRaw, resourceContext.sourceProviderSlug);
     const durationMinutes =
-      normalizePositiveIntegerMinutes(
+      normalizePositiveMinutes(
         firstNumberFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_DURATION_MINUTE_PATHS),
       ) ??
-      normalizePositiveIntegerMinutes(
+      normalizePositiveMinutes(
         secondsToMinutes(firstNumberFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_DURATION_SECOND_PATHS)),
       ) ??
-      normalizePositiveIntegerMinutes(
+      normalizePositiveMinutes(
         millisecondsToMinutes(firstNumberFromPaths(intervalEntry, JUNCTION_SLEEP_STAGE_DURATION_MILLISECOND_PATHS)),
       ) ??
-      normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
+      exactPositiveMinutesBetween(startAt, endAt);
     const resolvedStartAt = startAt ?? subtractMinutes(endAt, durationMinutes);
     const resolvedEndAt = endAt ?? addMinutes(startAt, durationMinutes);
 
@@ -3712,11 +3712,19 @@ function readNestedResourceEntries(envelope: PlainObject, resource?: string): Pl
           return normalized ? [normalized] : [];
         });
     if (entries.length > 0) {
+      if (resource === "sleep_cycle" && entries.some(isDirectSleepStageIntervalEntry)) {
+        return null;
+      }
+
       return entries;
     }
   }
 
   return null;
+}
+
+function isDirectSleepStageIntervalEntry(entry: PlainObject): boolean {
+  return firstSleepStageFromPaths(entry, JUNCTION_SLEEP_STAGE_VALUE_PATHS) !== undefined;
 }
 
 function nestedResourceEntryKeys(resource: string | undefined): readonly string[] {
@@ -4087,6 +4095,22 @@ function normalizePositiveIntegerMinutes(value: unknown): number | undefined {
   }
 
   return Math.max(1, Math.round(numeric));
+}
+
+function normalizePositiveMinutes(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  return numeric !== undefined && numeric > 0 ? numeric : undefined;
+}
+
+function exactPositiveMinutesBetween(startAt: string | undefined, endAt: string | undefined): number | undefined {
+  if (!startAt || !endAt) {
+    return undefined;
+  }
+
+  const durationMs = Date.parse(endAt) - Date.parse(startAt);
+
+  return Number.isFinite(durationMs) && durationMs > 0 ? durationMs / 60000 : undefined;
 }
 
 function secondsToMinutes(value: unknown): number | undefined {
