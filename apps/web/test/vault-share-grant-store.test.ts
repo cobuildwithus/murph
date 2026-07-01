@@ -16,12 +16,20 @@ import {
 } from "@/src/lib/hosted-vault-share/share-grant-store";
 
 function buildTx(): Prisma.TransactionClient & {
+  $queryRaw: ReturnType<typeof vi.fn>;
   hostedVaultShare: {
     findMany: ReturnType<typeof vi.fn>;
-    updateMany: ReturnType<typeof vi.fn>;
   };
 } {
+  const transitionedRows = [{
+    destinationMemberId: "member_referee",
+    grantorMemberId: "member_grantor",
+    id: "share_1",
+    projectionKind: "sleep-times.v0",
+    revokedAt: new Date("2026-07-01T00:00:00.000Z"),
+  }];
   return {
+    $queryRaw: vi.fn(async () => transitionedRows),
     hostedVaultShare: {
       findMany: vi.fn(async () => [{
         destinationMemberId: "member_referee",
@@ -29,12 +37,11 @@ function buildTx(): Prisma.TransactionClient & {
         id: "share_1",
         projectionKind: "sleep-times.v0",
       }]),
-      updateMany: vi.fn(async () => ({ count: 1 })),
     },
   } as unknown as Prisma.TransactionClient & {
+    $queryRaw: ReturnType<typeof vi.fn>;
     hostedVaultShare: {
       findMany: ReturnType<typeof vi.fn>;
-      updateMany: ReturnType<typeof vi.fn>;
     };
   };
 }
@@ -68,16 +75,11 @@ describe("revokeHostedVaultSharesTx", () => {
         status: "granted",
       },
     }));
-    expect(tx.hostedVaultShare.updateMany).toHaveBeenCalledWith({
-      data: {
-        revokedAt: now,
-        status: "revoked",
-      },
-      where: {
-        id: { in: ["share_1"] },
-        status: "granted",
-      },
-    });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    const updateSql = Array.from(tx.$queryRaw.mock.calls[0]?.[0] ?? []).join("?");
+    expect(updateSql).toContain("UPDATE hosted_vault_share");
+    expect(updateSql).toContain("AND status = 'granted'");
+    expect(updateSql).toContain("RETURNING");
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: {
         eventId: "vault-share-revoke:share_1:2026-07-01T00:00:00.000Z",
@@ -96,6 +98,22 @@ describe("revokeHostedVaultSharesTx", () => {
     });
   });
 
+  it("does not append cleanup when a concurrent transaction already revoked the row", async () => {
+    const tx = buildTx();
+    tx.$queryRaw.mockResolvedValue([]);
+
+    await expect(revokeHostedVaultSharesTx({
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      now: new Date("2026-07-01T00:00:01.000Z"),
+      projectionKinds: ["sleep-times.v0"],
+      tx,
+    })).resolves.toBe(0);
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
   it("does not append cleanup when no active grant matched", async () => {
     const tx = buildTx();
     tx.hostedVaultShare.findMany.mockResolvedValue([]);
@@ -107,7 +125,7 @@ describe("revokeHostedVaultSharesTx", () => {
       tx,
     })).resolves.toBe(0);
 
-    expect(tx.hostedVaultShare.updateMany).not.toHaveBeenCalled();
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 });

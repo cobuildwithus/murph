@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   buildHostedExecutionVaultShareRevokeWake,
 } from "@murphai/hosted-execution";
@@ -33,6 +33,10 @@ interface RevocableHostedVaultShare {
   grantorMemberId: string;
   id: string;
   projectionKind: HostedVaultShareProjectionKind;
+}
+
+interface RevokedHostedVaultShare extends RevocableHostedVaultShare {
+  revokedAt: Date;
 }
 
 export async function grantHostedVaultShareTx(input: {
@@ -219,20 +223,35 @@ async function revokeHostedVaultShareRowsTx(input: {
     return { cleanupSignals: [], revokedCount: 0 };
   }
 
-  const result = await input.tx.hostedVaultShare.updateMany({
-    where: {
-      id: { in: input.shares.map((share) => share.id) },
-      status: "granted",
-    },
-    data: {
-      revokedAt: input.now,
-      status: "revoked",
-    },
-  });
+  const rows = await input.tx.$queryRaw<Array<{
+    destinationMemberId: string;
+    grantorMemberId: string;
+    id: string;
+    projectionKind: string;
+    revokedAt: Date;
+  }>>`
+    UPDATE hosted_vault_share
+    SET
+      revoked_at = ${input.now},
+      status = 'revoked',
+      updated_at = ${input.now}
+    WHERE id IN (${Prisma.join(input.shares.map((share) => share.id))})
+      AND status = 'granted'
+    RETURNING
+      destination_member_id AS "destinationMemberId",
+      grantor_member_id AS "grantorMemberId",
+      id,
+      projection_kind AS "projectionKind",
+      revoked_at AS "revokedAt"
+  `;
+  const revokedShares = normalizeRevokedHostedVaultShareRows(rows);
+  if (revokedShares.length === 0) {
+    return { cleanupSignals: [], revokedCount: 0 };
+  }
 
-  const revokedAt = input.now.toISOString();
   const cleanupSignals: HostedVaultShareCleanupSignal[] = [];
-  for (const share of input.shares) {
+  for (const share of revokedShares) {
+    const revokedAt = share.revokedAt.toISOString();
     const envelope = buildHostedExecutionVaultShareRevokeWake({
       eventId: buildHostedVaultShareRevokeDedupeKey({
         revokedAt,
@@ -261,7 +280,7 @@ async function revokeHostedVaultShareRowsTx(input: {
 
   return {
     cleanupSignals,
-    revokedCount: result.count,
+    revokedCount: revokedShares.length,
   };
 }
 
@@ -281,6 +300,28 @@ function normalizeRevocableHostedVaultShareRows(rows: readonly {
       grantorMemberId: row.grantorMemberId,
       id: row.id,
       projectionKind: row.projectionKind,
+    }];
+  });
+}
+
+function normalizeRevokedHostedVaultShareRows(rows: readonly {
+  destinationMemberId: string;
+  grantorMemberId: string;
+  id: string;
+  projectionKind: string;
+  revokedAt: Date;
+}[]): RevokedHostedVaultShare[] {
+  return rows.flatMap((row) => {
+    if (!isHostedVaultShareProjectionKind(row.projectionKind)) {
+      return [];
+    }
+
+    return [{
+      destinationMemberId: row.destinationMemberId,
+      grantorMemberId: row.grantorMemberId,
+      id: row.id,
+      projectionKind: row.projectionKind,
+      revokedAt: row.revokedAt,
     }];
   });
 }
