@@ -23,7 +23,6 @@ import {
   upsertHostedMemberPendingLinqBindingTx,
 } from "../hosted-onboarding/hosted-member-routing-store";
 import {
-  resolveHostedMemberLinqHomeLineBareClaimTx,
   resolveHostedMemberLinqHomeLineNewChatDeliveryTx,
 } from "../hosted-onboarding/linq-home-routing";
 import { ensureHostedMemberForPhoneTx } from "../hosted-onboarding/member-identity-service";
@@ -46,6 +45,10 @@ const HOSTED_OPS_ONBOARDING_DEFAULT_INVITE_MESSAGE =
   "Murph setup link:\n{{inviteUrl}}\n\nReply here when you are in.";
 const HOSTED_OPS_ONBOARDING_DEFAULT_NEW_CHAT_OPENER =
   "Hey, I am sending the Murph setup link next.";
+const HOSTED_OPS_ONBOARDING_NEW_CHAT_TRANSACTION_OPTIONS = {
+  ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  timeout: 30_000,
+} as const;
 
 type HostedOpsOnboardingInviteDeliveryMode = "existing_chat" | "new_chat";
 
@@ -310,7 +313,6 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
 
     if (deliveryResult.kind === "existing_pending") {
       return {
-        kind: "existing_delivery" as const,
         delivery: {
           chatId: deliveryResult.chatId,
           newChatCreated: false,
@@ -351,31 +353,39 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
     }
 
     return {
-      kind: "create_chat" as const,
+      delivery: await createHostedOpsOnboardingNewLinqChatAndBindPendingTx({
+        assignedAt: deliveryResult.reservation.assignedAt,
+        memberId,
+        prisma: tx,
+        request: input.request,
+        senderPhoneNumber: deliveryResult.reservation.line.phoneNumber,
+      }),
       issued: {
         invite,
         memberId,
       },
-      reservation: {
-        assignedAt: deliveryResult.reservation.assignedAt,
-        linePhoneNumber: deliveryResult.reservation.line.phoneNumber,
-      },
     };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  }, HOSTED_OPS_ONBOARDING_NEW_CHAT_TRANSACTION_OPTIONS);
 
-  if (prepared.kind === "existing_delivery") {
-    return {
-      delivery: prepared.delivery,
-      issued: prepared.issued,
-    };
-  }
+  return {
+    delivery: prepared.delivery,
+    issued: prepared.issued,
+  };
+}
 
+async function createHostedOpsOnboardingNewLinqChatAndBindPendingTx(input: {
+  assignedAt: Date;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  request: NormalizedHostedOpsOnboardingInviteInput;
+  senderPhoneNumber: string;
+}): Promise<HostedOpsOnboardingInviteDelivery> {
   const createdChat = await createHostedLinqChat({
-    from: prepared.reservation.linePhoneNumber,
+    from: input.senderPhoneNumber,
     idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
       parts: [
-        prepared.issued.memberId,
-        prepared.reservation.linePhoneNumber,
+        input.memberId,
+        input.senderPhoneNumber,
         input.request.recipientPhoneNumber,
       ],
       step: "open",
@@ -394,36 +404,18 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
     });
   }
 
-  await input.prisma.$transaction(async (tx) => {
-    const bareClaim = await resolveHostedMemberLinqHomeLineBareClaimTx({
-      memberId: prepared.issued.memberId,
-      prisma: tx,
-      recipientPhone: prepared.reservation.linePhoneNumber,
-    });
-    if (bareClaim.kind !== "matched") {
-      throw hostedOnboardingError({
-        code: "HOSTED_OPS_ONBOARDING_MEMBER_ROUTE_CHANGED",
-        httpStatus: 409,
-        message: "Member Linq route changed before the new-chat invite could be bound. Retry against the current route.",
-        retryable: false,
-      });
-    }
-
-    await upsertHostedMemberPendingLinqBindingTx({
-      linqChatId: chatId,
-      memberId: prepared.issued.memberId,
-      prisma: tx,
-      recipientPhone: prepared.reservation.linePhoneNumber,
-    });
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  await upsertHostedMemberPendingLinqBindingTx({
+    homeLineAssignedAt: input.assignedAt,
+    linqChatId: chatId,
+    memberId: input.memberId,
+    prisma: input.prisma,
+    recipientPhone: input.senderPhoneNumber,
+  });
 
   return {
-    delivery: {
-      chatId,
-      newChatCreated: true,
-      openerMessageId: normalizeNullableString(createdChat.messageId),
-    },
-    issued: prepared.issued,
+    chatId,
+    newChatCreated: true,
+    openerMessageId: normalizeNullableString(createdChat.messageId),
   };
 }
 
