@@ -348,14 +348,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
 
   const familyInviteTokenPresent = parseHostedFamilyInviteStartToken(summary.text) !== null;
-  if (familyInviteTokenPresent && !recipientPhoneNumber) {
-    return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
-  }
-
-  if (familyInviteTokenPresent && incomingRecipientLineIsUnassignable) {
-    return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
-  }
-
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromPhoneTx>> = null;
   let familyHomeLineAssignedAt: Date | null = null;
   let familyHomeRecipientPhone: string | null = recipientPhoneNumber;
@@ -374,23 +366,15 @@ export async function planHostedOnboardingLinqWebhook(input: {
           incomingChatId: summary.chatId,
           incomingRecipientPhone: recipientPhoneNumber,
         });
-        if (
-          shouldReserveIncomingHomeLineBinding({
-            bindingRecipientPhone: familyHomeRecipientPhone,
-            homeChatId: existingFamilyHomeRoute?.linqChatId ?? null,
-            homeRecipientPhone: existingFamilyHomeRoute?.linqRecipientPhone ?? null,
-            incomingChatId: summary.chatId,
-            incomingRecipientPhone: recipientPhoneNumber,
-          })
-        ) {
-          if (!recipientPhoneNumber) {
+        if (existingFamilyHomeRoute?.linqChatId !== summary.chatId) {
+          if (!familyHomeRecipientPhone) {
             return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
           }
 
           const reservationResult = await reserveIncomingHostedLinqHomeLineForRouteTx({
             chatId: summary.chatId,
             memberId: existingMember?.id ?? null,
-            phoneNumber: recipientPhoneNumber,
+            phoneNumber: familyHomeRecipientPhone,
             prisma: input.prisma,
           });
 
@@ -539,18 +523,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
       incomingChatId: summary.chatId,
       incomingRecipientPhone: recipientPhoneNumber,
     });
-    const homeRecipientPhone = normalizePhoneNumber(homeRoute?.linqRecipientPhone);
-    const bindingWouldUseIncomingRecipientLine =
-      shouldReserveIncomingHomeLineBinding({
-        bindingRecipientPhone: homeBindingRecipientPhone,
-        homeChatId: homeRoute?.linqChatId ?? null,
-        homeRecipientPhone,
-        incomingChatId: summary.chatId,
-        incomingRecipientPhone: recipientPhoneNumber,
-      });
-    if (bindingWouldUseIncomingRecipientLine && incomingRecipientLineIsUnassignable) {
-      return buildUnassignableHomeLinePlan("active-member-ignored-unassignable-home-line");
-    }
 
     const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
       dedupeKey: input.event.event_id,
@@ -584,15 +556,16 @@ export async function planHostedOnboardingLinqWebhook(input: {
     }
 
     let activeHomeLineAssignedAt: Date | null = null;
-    if (bindingWouldUseIncomingRecipientLine) {
-      if (!recipientPhoneNumber) {
+    let activeHomeRecipientPhone = homeBindingRecipientPhone;
+    if (homeRoute?.linqChatId !== summary.chatId) {
+      if (!activeHomeRecipientPhone) {
         return buildUnassignableHomeLinePlan("active-member-ignored-unassignable-home-line");
       }
 
       const reservationResult = await reserveIncomingHostedLinqHomeLineForRouteTx({
         chatId: summary.chatId,
         memberId: existingMember.id,
-        phoneNumber: recipientPhoneNumber,
+        phoneNumber: activeHomeRecipientPhone,
         prisma: input.prisma,
       });
 
@@ -607,6 +580,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       }
 
       activeHomeLineAssignedAt = reservationResult.reservation.assignedAt;
+      activeHomeRecipientPhone = reservationResult.reservation.line.phoneNumber;
     }
 
     const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
@@ -615,7 +589,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       memberId: existingMember.id,
       occurredAt,
       prisma: input.prisma,
-      recipientPhone: homeBindingRecipientPhone,
+      recipientPhone: activeHomeRecipientPhone,
     });
 
     // Read-first: the webhook only needs the gate decision for quota notices;
@@ -880,23 +854,6 @@ function isExpectedHostedLinqFamilyInviteAcceptanceMiss(error: unknown): boolean
   return isHostedOnboardingError(error)
     && !error.retryable
     && HOSTED_LINQ_FAMILY_INVITE_ACCEPTANCE_MISS_CODES.has(error.code);
-}
-
-function shouldReserveIncomingHomeLineBinding(input: {
-  bindingRecipientPhone: string | null;
-  homeChatId: string | null;
-  homeRecipientPhone: string | null;
-  incomingChatId: string;
-  incomingRecipientPhone: string | null;
-}): boolean {
-  const incomingRecipientPhone = normalizePhoneNumber(input.incomingRecipientPhone);
-  const bindingRecipientPhone = normalizePhoneNumber(input.bindingRecipientPhone);
-  const homeRecipientPhone = normalizePhoneNumber(input.homeRecipientPhone);
-
-  return incomingRecipientPhone !== null
-    && bindingRecipientPhone === incomingRecipientPhone
-    && input.homeChatId !== input.incomingChatId
-    && homeRecipientPhone !== incomingRecipientPhone;
 }
 
 async function reserveIncomingHostedLinqHomeLineForRouteTx(input: {
