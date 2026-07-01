@@ -38,6 +38,13 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
+  // Auto-adding a seat only happens for invites the issuer can dedup on retry
+  // (phone/email/Telegram). Label-only invites have no reuse key, so a lost-
+  // response retry could otherwise buy a second seat.
+  const canAutoAddSeat =
+    body.addSeatIfNeeded === true &&
+    Boolean(targetPhoneNumber || targetTelegramUsername || targetEmail);
+
   const issueInvite = () =>
     prisma.$transaction(async (tx) => {
       const group = await ensureHostedAccountGroupForOwnerTx({
@@ -66,7 +73,7 @@ export const POST = withJsonError(async (request: Request) => {
     invite = await issueInvite();
   } catch (error) {
     if (
-      body.addSeatIfNeeded !== true ||
+      !canAutoAddSeat ||
       !isHostedOnboardingError(error) ||
       error.code !== "HOSTED_FAMILY_SEAT_LIMIT_REACHED"
     ) {

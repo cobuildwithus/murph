@@ -143,8 +143,11 @@ export function HostedFamilyManager(props: {
   const [seatError, setSeatError] = useState<string | null>(null);
 
   const seatsFull = props.seats.remaining <= 0;
-  const inviteWillAddSeat =
-    props.billingActive && seatsFull && props.seats.billed < props.seats.max;
+  const planCanGrow = props.billingActive && seatsFull && props.seats.billed < props.seats.max;
+  // A seat is only auto-added for invites the server can dedup on retry, so the
+  // paid CTA (and the addSeatIfNeeded flag) require a phone, email, or Telegram.
+  const hasStableTarget = Boolean(phone.trim() || email.trim() || telegram.trim());
+  const inviteWillAddSeat = planCanGrow && hasStableTarget;
   const inviteDisabled = !props.billingActive || props.seats.used >= props.seats.max;
   const canRemoveSeat =
     props.billingActive &&
@@ -266,7 +269,7 @@ export function HostedFamilyManager(props: {
           </div>
           <p className="text-xs text-muted-foreground">
             {seatsFull
-              ? inviteWillAddSeat
+              ? planCanGrow
                 ? `No open seats. Inviting adds a paid seat at ${props.seatPrice}.`
                 : "All seats are full. Remove a member or cancel an invite to free one."
               : `${props.seats.remaining} paid ${props.seats.remaining === 1 ? "seat" : "seats"} open`}

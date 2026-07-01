@@ -273,6 +273,26 @@ test("does not buy a seat when a full-plan invite is reused (no seat-limit error
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(1);
 });
 
+test("does not auto-add a seat for a label-only invite (no dedup key)", async () => {
+  mocks.issueHostedFamilyInviteTx.mockRejectedValueOnce(
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
+      message: "This Family plan has no open paid seats.",
+    }),
+  );
+
+  const response = await inviteRoute.POST(
+    inviteRequest({ addSeatIfNeeded: true, targetLabel: "Grandpa" }),
+  );
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED" },
+  });
+  expect(mocks.updateHostedFamilySeatCount).not.toHaveBeenCalled();
+});
+
 test("does not add a seat when the seat limit is hit but addSeatIfNeeded is off", async () => {
   mocks.issueHostedFamilyInviteTx.mockRejectedValueOnce(
     hostedOnboardingError({
