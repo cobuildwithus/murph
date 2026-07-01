@@ -750,6 +750,11 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
         id: "member_123",
         suspendedAt: null,
       },
+      routing: {
+        hasTelegramUserBinding: false,
+        linqChatId: "chat_123",
+        memberId: "member_123",
+      },
     });
     mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
       linqChatId: "chat_123",

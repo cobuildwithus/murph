@@ -1054,11 +1054,13 @@ describe("hosted-member-store", () => {
 
   it("upserts home Linq chat bindings into the routing table with encrypted local storage", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
+    const findFirst = vi.fn().mockResolvedValue(null);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
+        findFirst,
         updateMany,
         upsert,
       },
@@ -1071,8 +1073,10 @@ describe("hosted-member-store", () => {
       recipientPhone: "+15550100001",
     });
 
-    expect(updateMany).toHaveBeenCalledTimes(3);
-    expect(updateMany).toHaveBeenNthCalledWith(1, {
+    expect(findFirst).toHaveBeenCalledWith({
+      select: {
+        memberId: true,
+      },
       where: {
         linqChatLookupKey: {
           in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
@@ -1081,16 +1085,9 @@ describe("hosted-member-store", () => {
           memberId: "member_123",
         },
       },
-      data: {
-        linqChatIdEncrypted: null,
-        linqChatLookupKey: null,
-        linqHomeLineAssignedAt: null,
-        linqLastInboundAt: null,
-        linqRecipientPhoneEncrypted: null,
-        linqRecipientPhoneLookupKey: null,
-      },
     });
-    expect(updateMany).toHaveBeenNthCalledWith(2, {
+    expect(updateMany).toHaveBeenCalledTimes(2);
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
       where: {
         linqChatLookupKey: null,
         pendingLinqChatLookupKey: {
@@ -1115,7 +1112,7 @@ describe("hosted-member-store", () => {
         pendingLinqLastInboundAt: null,
       },
     });
-    expect(updateMany).toHaveBeenNthCalledWith(3, {
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
       where: {
         linqChatLookupKey: {
           not: null,
@@ -1187,6 +1184,7 @@ describe("hosted-member-store", () => {
     const prisma = {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findUnique,
         updateMany,
         upsert,
@@ -1239,6 +1237,7 @@ describe("hosted-member-store", () => {
     const prisma = {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findUnique,
         updateMany,
         upsert,
@@ -1274,6 +1273,7 @@ describe("hosted-member-store", () => {
     const prisma = {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findUnique,
         updateMany,
         upsert,
@@ -1305,11 +1305,13 @@ describe("hosted-member-store", () => {
     });
 
     const executeRaw = vi.fn().mockResolvedValue(0);
+    const findFirst = vi.fn().mockResolvedValue(null);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
+        findFirst,
         updateMany,
         upsert,
       },
@@ -1322,7 +1324,7 @@ describe("hosted-member-store", () => {
       recipientPhone: "+15550100001",
     });
 
-    expect(updateMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         linqChatLookupKey: {
           in: expect.arrayContaining([
@@ -1332,7 +1334,7 @@ describe("hosted-member-store", () => {
         },
       }),
     }));
-    expect(updateMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    expect(updateMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
       where: expect.objectContaining({
         linqChatLookupKey: null,
         pendingLinqChatLookupKey: {
@@ -1343,7 +1345,7 @@ describe("hosted-member-store", () => {
         },
       }),
     }));
-    expect(updateMany).toHaveBeenNthCalledWith(3, expect.objectContaining({
+    expect(updateMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
       where: expect.objectContaining({
         linqChatLookupKey: {
           not: null,
@@ -1472,6 +1474,7 @@ describe("hosted-member-store", () => {
     const prisma = {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
         updateMany,
         upsert,
       },
@@ -1488,7 +1491,7 @@ describe("hosted-member-store", () => {
       code: "P2002",
     });
 
-    expect(updateMany).toHaveBeenCalledTimes(3);
+    expect(updateMany).toHaveBeenCalledTimes(2);
     expect(upsert).toHaveBeenCalledTimes(1);
   });
 
