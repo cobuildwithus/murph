@@ -2203,6 +2203,63 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
+  it("does not bind an active member home route from an unassignable inbound Linq line", async () => {
+    const hostedLinqLine = buildUnassignableHostedLinqLineFixture();
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
+    const prisma = asPrismaTransactionClient({
+      hostedLinqLine,
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_active_unassignable_line",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "unassignable-home-line",
+    });
+    expect(hostedLinqLine.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        configuredAt: { not: null },
+        egressPolicy: "enabled",
+        healthStatus: { in: ["healthy", "unknown"] },
+        phoneNumberEncrypted: { not: null },
+      }),
+    }));
+    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("accepts a phone-bound Family invite token from inbound iMessage", async () => {
     mocks.acceptHostedFamilyInviteFromPhoneTx.mockResolvedValueOnce({
       groupId: "group_family",
@@ -2296,6 +2353,72 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       signal: undefined,
     });
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
+  it("does not accept a Family invite token from an unassignable inbound Linq line", async () => {
+    const hostedLinqLine = buildUnassignableHostedLinqLineFixture();
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        create: vi.fn(),
+      },
+      hostedLinqLine,
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            {
+              type: "text",
+              value: "family_phone_token",
+            },
+          ],
+        },
+        eventId: "evt_family_unassignable_line",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "unassignable-home-line",
+    });
+    expect(hostedLinqLine.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        configuredAt: { not: null },
+        egressPolicy: "enabled",
+        healthStatus: { in: ["healthy", "unknown"] },
+        phoneNumberEncrypted: { not: null },
+      }),
+    }));
+    expect(mocks.acceptHostedFamilyInviteFromPhoneTx).not.toHaveBeenCalled();
+    const hostedMemberRouting = prisma.hostedMemberRouting;
+    if (!hostedMemberRouting) {
+      throw new Error("Expected hosted member routing fixture.");
+    }
+    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("does not send a generic signup link for unaccepted Family invite tokens", async () => {
@@ -2622,13 +2745,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         update: vi.fn(),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-      hostedLinqLine: {
-        findMany: vi.fn().mockResolvedValue([]),
-        findUnique: vi.fn().mockResolvedValue(null),
-        update: vi.fn().mockResolvedValue({ phoneNumberLookupKey: "lookup:line" }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        upsert: vi.fn().mockResolvedValue({ phoneNumberLookupKey: "lookup:line" }),
-      },
+      hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue(null),
@@ -6103,6 +6220,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
   });
 });
+
+function buildUnassignableHostedLinqLineFixture(): HostedLinqLineFixture {
+  return {
+    findMany: vi.fn().mockResolvedValue([]),
+    findUnique: vi.fn().mockResolvedValue(null),
+    update: vi.fn().mockResolvedValue({ phoneNumberLookupKey: "lookup:line" }),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    upsert: vi.fn().mockResolvedValue({ phoneNumberLookupKey: "lookup:line" }),
+  };
+}
 
 function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   prisma: T,

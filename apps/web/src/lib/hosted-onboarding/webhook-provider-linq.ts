@@ -81,6 +81,7 @@ import {
 import {
   readHostedLinqAssignableHomeLineByPhone,
 } from "./linq-line-store";
+import { normalizePhoneNumber } from "./phone";
 import {
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
@@ -311,7 +312,30 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
+  const recipientLine = recipientPhoneNumber
+    ? await readHostedLinqAssignableHomeLineByPhone({
+        phoneNumber: recipientPhoneNumber,
+        prisma: input.prisma,
+      })
+    : null;
+  const incomingRecipientLineIsUnassignable =
+    recipientPhoneNumber !== null && recipientLine === null;
+  const buildUnassignableHomeLinePlan = (routeStage: string) =>
+    logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("unassignable-home-line"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: existingMemberEffectiveActive,
+        existingMemberMatch,
+        reason: "unassignable-home-line",
+        routeStage,
+      }),
+    );
+
   const familyInviteTokenPresent = parseHostedFamilyInviteStartToken(summary.text) !== null;
+  if (familyInviteTokenPresent && incomingRecipientLineIsUnassignable) {
+    return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
+  }
+
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromPhoneTx>> = null;
   if (participantContact.kind === "phone") {
     try {
@@ -437,6 +461,15 @@ export async function planHostedOnboardingLinqWebhook(input: {
       incomingChatId: summary.chatId,
       incomingRecipientPhone: recipientPhoneNumber,
     });
+    const homeRecipientPhone = normalizePhoneNumber(homeRoute?.linqRecipientPhone);
+    const bindingWouldUseIncomingRecipientLine =
+      recipientPhoneNumber !== null
+      && homeBindingRecipientPhone === recipientPhoneNumber
+      && homeRoute?.linqChatId !== summary.chatId
+      && homeRecipientPhone !== recipientPhoneNumber;
+    if (bindingWouldUseIncomingRecipientLine && incomingRecipientLineIsUnassignable) {
+      return buildUnassignableHomeLinePlan("active-member-ignored-unassignable-home-line");
+    }
 
     const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
       dedupeKey: input.event.event_id,
@@ -594,22 +627,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
-  const recipientLine = recipientPhoneNumber
-    ? await readHostedLinqAssignableHomeLineByPhone({
-        phoneNumber: recipientPhoneNumber,
-        prisma: input.prisma,
-      })
-    : null;
-  if (recipientPhoneNumber && recipientLine === null) {
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildIgnoredLinqWebhookPlan("unassignable-home-line"),
-      buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        existingMemberActive: existingMemberEffectiveActive,
-        existingMemberMatch,
-        reason: "unassignable-home-line",
-        routeStage: "ignored-unassignable-home-line",
-      }),
-    );
+  if (incomingRecipientLineIsUnassignable) {
+    return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
   }
 
   if (

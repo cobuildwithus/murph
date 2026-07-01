@@ -4,6 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildHostedAiUsageGateNoticeIdempotencyKey } from "@/src/lib/hosted-execution/usage-allowance";
 import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
 import { getHostedAiUsageMonthlyAllowanceUsdMicros } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  encryptHostedLinqLinePhoneNumber,
+} from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
 
 const MEMBER_ID = "member_usage_reset";
 const CHAT_ID = "chat_usage_reset";
@@ -321,6 +328,7 @@ type UsageResetPrismaFixture = {
     upsert: MockedFunction;
   };
   hostedLinqLine: {
+    findMany: MockedFunction;
     findUnique: MockedFunction;
     update: MockedFunction;
     upsert: MockedFunction;
@@ -757,6 +765,24 @@ function createUsageResetPrismaFixture(input: {
       upsert: vi.fn().mockResolvedValue({ id: "hld_123" }),
     },
     hostedLinqLine: {
+      findMany: vi.fn(async (query: { where?: { phoneNumberLookupKey?: { in?: string[] } } }) => {
+        const lookupKeys = new Set(query.where?.phoneNumberLookupKey?.in ?? []);
+        if (
+          !createHostedPhoneLookupKeyReadCandidates(OWNER_PHONE).some((lookupKey) =>
+            lookupKeys.has(lookupKey)
+          )
+        ) {
+          return [];
+        }
+        return [{
+          activeMemberLimit: null,
+          assignmentWeight: 1,
+          maxNewConversationsPerDay: null,
+          phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(OWNER_PHONE),
+          phoneNumberHint: "*** 0100",
+          phoneNumberLookupKey: createHostedPhoneLookupKey(OWNER_PHONE),
+        }];
+      }),
       findUnique: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
         Promise.resolve({
