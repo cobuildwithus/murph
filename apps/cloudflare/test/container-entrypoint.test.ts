@@ -3010,9 +3010,8 @@ describe("startHostedContainerEntrypoint", () => {
       }));
   });
 
-  it("preserves the verified warm Codex app-server root and implementation child during cleanup", async () => {
+  it("preserves the verified warm Codex app-server root during cleanup", async () => {
     const codexPid = process.pid + 1250;
-    const codexImplementationPid = process.pid + 1251;
     const codexCmdline = "codex\u0000-a\u0000never\u0000app-server\u0000";
     const codexCmdlineDigest = createHash("sha256").update(codexCmdline).digest("hex");
     const codexStartTime = "1234567";
@@ -3022,7 +3021,6 @@ describe("startHostedContainerEntrypoint", () => {
       ...(runnerStarted
         ? [
           { isDirectory: () => true, name: String(codexPid) },
-          { isDirectory: () => true, name: String(codexImplementationPid) },
         ]
         : []),
     ]);
@@ -3044,18 +3042,6 @@ describe("startHostedContainerEntrypoint", () => {
       }
 
       if (String(filePath).endsWith(`/${codexPid}/status`)) {
-        return "Name:\tcodex\nUid:\t1000\t1000\t1000\t1000\n";
-      }
-
-      if (String(filePath).endsWith(`/${codexImplementationPid}/cmdline`)) {
-        return "codex-native\u0000-a\u0000never\u0000app-server\u0000";
-      }
-
-      if (String(filePath).endsWith(`/${codexImplementationPid}/stat`)) {
-        return `${codexImplementationPid} (codex) S ${codexPid} ${codexPid} 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 7654321 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
-      }
-
-      if (String(filePath).endsWith(`/${codexImplementationPid}/status`)) {
         return "Name:\tcodex\nUid:\t1000\t1000\t1000\t1000\n";
       }
 
@@ -3095,7 +3081,7 @@ describe("startHostedContainerEntrypoint", () => {
       body: JSON.stringify(buildJobBody({
         wake: {
           event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
-          eventId: "evt_warm_codex_native_child_cleanup",
+          eventId: "evt_warm_codex_root_cleanup",
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
       })),
@@ -3120,9 +3106,8 @@ describe("startHostedContainerEntrypoint", () => {
       }));
   });
 
-  it("rejects leaked shell grandchildren while preserving direct Codex children", async () => {
+  it("rejects leaked direct children under the verified warm Codex root", async () => {
     const codexPid = process.pid + 1300;
-    const codexImplementationPid = process.pid + 1301;
     const shellPid = process.pid + 1302;
     const codexCmdline = "codex\u0000-a\u0000never\u0000app-server\u0000";
     const codexCmdlineDigest = createHash("sha256").update(codexCmdline).digest("hex");
@@ -3135,7 +3120,6 @@ describe("startHostedContainerEntrypoint", () => {
       ...(runnerStarted
         ? [
           { isDirectory: () => true, name: String(codexPid) },
-          { isDirectory: () => true, name: String(codexImplementationPid) },
           { isDirectory: () => true, name: String(shellPid) },
         ]
         : []),
@@ -3161,20 +3145,8 @@ describe("startHostedContainerEntrypoint", () => {
         return "Name:\tcodex\nUid:\t1000\t1000\t1000\t1000\n";
       }
 
-      if (String(filePath).endsWith(`/${codexImplementationPid}/cmdline`)) {
-        return "codex-native\u0000-a\u0000never\u0000app-server\u0000";
-      }
-
-      if (String(filePath).endsWith(`/${codexImplementationPid}/stat`)) {
-        return `${codexImplementationPid} (codex) S ${codexPid} ${codexPid} 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 7654321 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
-      }
-
-      if (String(filePath).endsWith(`/${codexImplementationPid}/status`)) {
-        return "Name:\tcodex\nUid:\t1000\t1000\t1000\t1000\n";
-      }
-
       if (String(filePath).endsWith(`/${shellPid}/stat`)) {
-        return `${shellPid} (sh) S ${codexImplementationPid} ${codexPid} 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 8765432 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
+        return `${shellPid} (sh) S ${codexPid} ${codexPid} 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 8765432 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n`;
       }
 
       if (String(filePath).endsWith(`/${shellPid}/status`)) {
@@ -3218,7 +3190,7 @@ describe("startHostedContainerEntrypoint", () => {
       body: JSON.stringify(buildJobBody({
         wake: {
           event: { kind: "runtime.timer", triggerKind: "runtime_timer", userId: "u1" },
-          eventId: "evt_warm_codex_shell_descendant_cleanup",
+          eventId: "evt_warm_codex_direct_child_cleanup",
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
       })),
