@@ -135,6 +135,8 @@ landing; record the chosen posture here so the decision is reviewable.
   only the latest `HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS` records, and a
   `vault-share.revoke` mailbox wake removes the grantor/projection entry when
   permission is revoked. If the final entry is removed, the compact document is
-  deleted. This makes the file count hard-bounded at one file for the shared
-  projection family regardless of delivery retries, night count, or grantor
-  count.
+  deleted. Group join grants also cap active grantors per destination/projection
+  through `HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION`, so the
+  single-file read/write cost is bounded on the growing destination side. This
+  makes the file count hard-bounded at one file for the shared projection family
+  and keeps normal import work bounded despite delivery retries or night count.

@@ -57,6 +57,10 @@ export const POST = withJsonError(async (request: Request) => {
   const body = parseHostedVaultShareDeliverRequest(await readOptionalJsonObject(request));
   const prisma = getPrisma();
 
+  if (!await hasHostedRuntimeActiveAccess(grantorMemberId, { prisma })) {
+    return jsonOk(NO_ACTIVE_SHARE_RESPONSE);
+  }
+
   const shares = await findActiveHostedVaultShares({
     grantorMemberId,
     projectionKind: body.projectionKind,

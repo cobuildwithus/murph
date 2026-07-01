@@ -26,6 +26,7 @@ vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
 import {
   acceptHostedGroupJoinCodeTx,
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
+  HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
 } from "@/src/lib/hosted-groups/group-store";
 
@@ -36,6 +37,7 @@ const JOIN_POLICY = {
 
 function buildTx(input?: {
   activeShareAlreadyExists?: boolean;
+  activeDestinationGrantCount?: number;
   activeGroupGrantCount?: number;
   existingMembershipId?: string | null;
 }): Prisma.TransactionClient & {
@@ -74,7 +76,10 @@ function buildTx(input?: {
       findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
     },
     hostedVaultShare: {
-      count: vi.fn(async () => {
+      count: vi.fn(async (args: { where: { destinationMemberId?: string } }) => {
+        if (args.where.destinationMemberId) {
+          return input?.activeDestinationGrantCount ?? 0;
+        }
         return input?.activeGroupGrantCount
           ?? HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION;
       }),
@@ -121,6 +126,34 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(tx.hostedVaultShare.count).toHaveBeenCalledWith({
       where: {
         grantorMemberId: "member_grantor",
+        projectionKind: "sleep-times.v0",
+        source: "hosted-group.join",
+        status: "granted",
+      },
+    });
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+  });
+
+  it("refuses to add a group vault-share grant beyond the destination projection cap", async () => {
+    const tx = buildTx({
+      activeDestinationGrantCount: HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
+      activeGroupGrantCount: 0,
+    });
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      joinCode: "join_1",
+      memberId: "member_grantor",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      selectedVaultShareProjectionKinds: ["sleep-times.v0"],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_REACHED",
+      httpStatus: 409,
+    });
+
+    expect(tx.hostedVaultShare.count).toHaveBeenCalledWith({
+      where: {
+        destinationMemberId: "member_group_runtime",
         projectionKind: "sleep-times.v0",
         source: "hosted-group.join",
         status: "granted",

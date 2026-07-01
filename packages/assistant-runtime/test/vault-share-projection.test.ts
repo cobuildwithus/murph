@@ -272,6 +272,41 @@ describe("importHostedVaultShareDeliveryWake", () => {
     expect(grantor.records).toHaveLength(1);
   });
 
+  it("starts a fresh record list when a delivery arrives for a new grant epoch", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
+    await importHostedVaultShareDeliveryWake({ vaultRoot, wake });
+
+    const nextRecord = {
+      data: {
+        date: "2026-06-10",
+        sleepEndAt: "2026-06-11T06:31:00.000Z",
+        sleepStartAt: "2026-06-10T22:04:00.000Z",
+      },
+      occurredAt: "2026-06-10T00:00:00.000Z",
+      recordKey: "2026-06-10",
+    };
+    await expect(importHostedVaultShareDeliveryWake({
+      vaultRoot,
+      wake: {
+        ...wake,
+        delivery: {
+          ...wake.delivery,
+          record: nextRecord,
+          shareId: "share_2",
+        },
+        eventId: "vault-share:share_2:2026-06-10",
+        occurredAt: "2026-06-10T00:00:00.000Z",
+      },
+    })).resolves.toEqual({ status: "imported" });
+
+    const stored = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
+    const grantor = stored.projections["sleep-times.v0"].grantors.member_grantor;
+    expect(grantor.shareId).toBe("share_2");
+    expect(grantor.records.map((entry: { record: { recordKey: string } }) =>
+      entry.record.recordKey,
+    )).toEqual(["2026-06-10"]);
+  });
+
   it("quarantines as a non-retryable block when the vault path is unreadable", async () => {
     const result = await importHostedVaultShareDeliveryWake({
       vaultRoot: "/dev/null/not-a-dir",
@@ -281,6 +316,31 @@ describe("importHostedVaultShareDeliveryWake", () => {
     expect(result).toEqual({
       reasonCode: "vault_share.read_failed",
       retryable: false,
+      status: "blocked",
+    });
+  });
+
+  it("keeps revoke import read failures retryable so stale shared data is not consumed", async () => {
+    const result = await applyHostedVaultShareRevokeWake({
+      vaultRoot: "/dev/null/not-a-dir",
+      wake: {
+        eventId: "vault-share-revoke:share_1:2026-07-01T00:00:00.000Z",
+        kind: "vault-share.revoke",
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        revoke: {
+          grantorMemberId: "member_grantor",
+          projectionKind: "sleep-times.v0",
+          revokedAt: "2026-07-01T00:00:00.000Z",
+          schema: "murph.vault-share.revoke.v1",
+          shareId: "share_1",
+        },
+        userId: "member_referee",
+      },
+    });
+
+    expect(result).toEqual({
+      reasonCode: "vault_share.read_failed",
+      retryable: true,
       status: "blocked",
     });
   });

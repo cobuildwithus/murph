@@ -131,7 +131,7 @@ export async function applyHostedVaultShareRevokeWake(input: {
     if (!store) {
       return {
         reasonCode: "vault_share.read_failed",
-        retryable: false,
+        retryable: true,
         status: "blocked",
       };
     }
@@ -162,7 +162,7 @@ export async function applyHostedVaultShareRevokeWake(input: {
   } catch {
     return {
       reasonCode: "vault_share.write_failed",
-      retryable: false,
+      retryable: true,
       status: "blocked",
     };
   }
@@ -182,7 +182,8 @@ function upsertSharedVaultShareRecord(
   },
 ): void {
   const projection = store.projections[input.projectionKind] ?? { grantors: {} };
-  const grantor = projection.grantors[input.grantorMemberId] ?? {
+  const existingGrantor = projection.grantors[input.grantorMemberId];
+  const grantor = existingGrantor?.shareId === input.shareId ? existingGrantor : {
     grantorMemberId: input.grantorMemberId,
     projectionKind: input.projectionKind,
     records: [],

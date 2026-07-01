@@ -67,6 +67,7 @@ export interface HostedGroupJoinAcceptanceTxResult
 
 const HOSTED_GROUP_VAULT_SHARE_SOURCE = "hosted-group.join";
 export const HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION = 25;
+export const HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION = 100;
 
 export async function ensureHostedGroupForThreadContainerTx(input: {
   tx: Prisma.TransactionClient;
@@ -601,6 +602,28 @@ async function assertHostedGroupVaultShareGrantLimitTx(
       httpStatus: 409,
       message:
         "You have reached the group health-sharing limit for this permission. Turn off this permission in another group before sharing it here.",
+      retryable: false,
+    });
+  }
+
+  const activeDestinationGrantCount = await tx.hostedVaultShare.count({
+    where: {
+      destinationMemberId: input.destinationMemberId,
+      projectionKind: input.projectionKind,
+      source: HOSTED_GROUP_VAULT_SHARE_SOURCE,
+      status: "granted",
+    },
+  });
+
+  if (
+    activeDestinationGrantCount
+    >= HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_REACHED",
+      httpStatus: 409,
+      message:
+        "This group has reached the health-sharing limit for this permission. Turn off this permission for another member before adding it here.",
       retryable: false,
     });
   }

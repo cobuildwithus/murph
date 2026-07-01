@@ -140,6 +140,10 @@ describe("vault-share deliver route", () => {
 			share: ACTIVE_SHARE,
 		});
 		expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledWith(
+			"member_grantor",
+			{ prisma: { kind: "prisma" } },
+		);
+		expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledWith(
 			"member_referee",
 			{ prisma: { kind: "prisma" } },
 		);
@@ -171,12 +175,26 @@ describe("vault-share deliver route", () => {
 	});
 
 	it("treats an inactive destination runtime exactly like a missing grant", async () => {
+		mocks.hasHostedRuntimeActiveAccess
+			.mockResolvedValueOnce(true)
+			.mockResolvedValueOnce(false);
+
+		const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ status: "no-active-share" });
+		expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
+		expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+	});
+
+	it("treats an inactive grantor runtime exactly like a missing grant", async () => {
 		mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
 
 		const response = await deliverRoute.POST(buildRequest(VALID_BODY));
 
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({ status: "no-active-share" });
+		expect(mocks.findActiveHostedVaultShares).not.toHaveBeenCalled();
 		expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
 		expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
 	});
