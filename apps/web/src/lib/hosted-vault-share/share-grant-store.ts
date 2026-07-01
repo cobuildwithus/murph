@@ -28,10 +28,6 @@ export interface HostedVaultShareRevocationResult {
   revokedCount: number;
 }
 
-export interface HostedVaultShareGrantResult {
-  status: "already-granted" | "foreign-active-grant" | "granted";
-}
-
 interface RevocableHostedVaultShare {
   destinationMemberId: string;
   grantorMemberId: string;
@@ -44,9 +40,8 @@ export async function grantHostedVaultShareTx(input: {
   grantorMemberId: string;
   destinationMemberId: string;
   projectionKind: HostedVaultShareProjectionKind;
-  source: string;
   now: Date;
-}): Promise<HostedVaultShareGrantResult> {
+}): Promise<void> {
   assertSupportedProjectionKind(input.projectionKind);
   if (input.grantorMemberId === input.destinationMemberId) {
     throw hostedOnboardingError({
@@ -65,7 +60,7 @@ export async function grantHostedVaultShareTx(input: {
         projectionKind: input.projectionKind,
       },
     },
-    select: { id: true, source: true, status: true },
+    select: { id: true, status: true },
   });
 
   if (!existing) {
@@ -78,11 +73,10 @@ export async function grantHostedVaultShareTx(input: {
           grantorMemberId: input.grantorMemberId,
           projectionKind: input.projectionKind,
           revokedAt: null,
-          source: input.source,
           status: "granted",
         },
       });
-      return { status: "granted" };
+      return;
     } catch (error) {
       if (!isPrismaUniqueConstraintError(error)) {
         throw error;
@@ -95,7 +89,7 @@ export async function grantHostedVaultShareTx(input: {
             projectionKind: input.projectionKind,
           },
         },
-        select: { id: true, source: true, status: true },
+        select: { id: true, status: true },
       });
       if (!existing) {
         throw error;
@@ -104,10 +98,7 @@ export async function grantHostedVaultShareTx(input: {
   }
 
   if (existing.status === "granted") {
-    if (existing.source !== input.source) {
-      return { status: "foreign-active-grant" };
-    }
-    return { status: "already-granted" };
+    return;
   }
 
   await input.tx.hostedVaultShare.update({
@@ -122,11 +113,9 @@ export async function grantHostedVaultShareTx(input: {
       id: generateHostedVaultShareId(),
       grantedAt: input.now,
       revokedAt: null,
-      source: input.source,
       status: "granted",
     },
   });
-  return { status: "granted" };
 }
 
 export async function revokeHostedVaultSharesTx(input: {
@@ -134,7 +123,6 @@ export async function revokeHostedVaultSharesTx(input: {
   destinationMemberId: string;
   grantorMemberId?: string | null;
   projectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
-  source: string;
   now: Date;
 }): Promise<number> {
   return (await revokeHostedVaultSharesWithCleanupTx(input)).revokedCount;
@@ -145,7 +133,6 @@ export async function revokeHostedVaultSharesWithCleanupTx(input: {
   destinationMemberId: string;
   grantorMemberId?: string | null;
   projectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
-  source: string;
   now: Date;
 }): Promise<HostedVaultShareRevocationResult> {
   const projectionKinds = input.projectionKinds?.map((kind) => {
@@ -170,7 +157,6 @@ export async function revokeHostedVaultSharesWithCleanupTx(input: {
       ...(projectionKinds && projectionKinds.length > 0
         ? { projectionKind: { in: [...projectionKinds] } }
         : {}),
-      source: input.source,
       status: "granted",
     },
   }).then((rows) => normalizeRevocableHostedVaultShareRows(rows));
@@ -182,7 +168,6 @@ export async function revokeHostedVaultSharesWithCleanupTx(input: {
   return revokeHostedVaultShareRowsTx({
     now: input.now,
     shares,
-    source: input.source,
     tx: input.tx,
   });
 }
@@ -190,7 +175,6 @@ export async function revokeHostedVaultSharesWithCleanupTx(input: {
 export async function revokeOutgoingHostedVaultSharesForMemberDeletionTx(input: {
   tx: Prisma.TransactionClient;
   grantorMemberIds: readonly string[];
-  source: string;
   now: Date;
 }): Promise<{
   cleanupSignals: HostedVaultShareCleanupSignal[];
@@ -219,7 +203,6 @@ export async function revokeOutgoingHostedVaultSharesForMemberDeletionTx(input: 
   return revokeHostedVaultShareRowsTx({
     now: input.now,
     shares,
-    source: input.source,
     tx: input.tx,
   });
 }
@@ -227,7 +210,6 @@ export async function revokeOutgoingHostedVaultSharesForMemberDeletionTx(input: 
 async function revokeHostedVaultShareRowsTx(input: {
   tx: Prisma.TransactionClient;
   shares: readonly RevocableHostedVaultShare[];
-  source: string;
   now: Date;
 }): Promise<{
   cleanupSignals: HostedVaultShareCleanupSignal[];
@@ -244,7 +226,6 @@ async function revokeHostedVaultShareRowsTx(input: {
     },
     data: {
       revokedAt: input.now,
-      source: input.source,
       status: "revoked",
     },
   });
@@ -309,7 +290,6 @@ export async function readActiveHostedVaultShareProjectionKinds(input: {
   grantorMemberId: string;
   destinationMemberId: string;
   projectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
-  source?: string | null;
 }): Promise<HostedVaultShareProjectionKind[]> {
   const prisma = input.prisma ?? getPrisma();
   const projectionKinds = input.projectionKinds?.map((kind) => {
@@ -326,7 +306,6 @@ export async function readActiveHostedVaultShareProjectionKinds(input: {
       ...(projectionKinds && projectionKinds.length > 0
         ? { projectionKind: { in: [...projectionKinds] } }
         : {}),
-      ...(input.source ? { source: input.source } : {}),
       status: "granted",
     },
     select: { projectionKind: true },

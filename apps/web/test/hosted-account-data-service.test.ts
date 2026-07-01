@@ -425,7 +425,6 @@ describe("deleteHostedAccountData", () => {
       .toHaveBeenCalledWith({
         grantorMemberIds: ["member_123", "member_thread_container_123"],
         now: expect.any(Date),
-        source: "hosted-account.delete",
         tx: expect.any(Object),
       });
     expect(serviceMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({

@@ -463,8 +463,6 @@ type HostedAccountDeletionDatabaseResult = {
   vaultShareCleanupSignals: readonly HostedVaultShareCleanupSignal[];
 };
 
-const HOSTED_ACCOUNT_DELETION_VAULT_SHARE_SOURCE = "hosted-account.delete";
-
 const HOSTED_ACCOUNT_RETENTION_NOTES = [
   "Messages already delivered to external carrier, Telegram, email, or Linq systems are not recalled from those services.",
   "Stripe retains records it is legally required to keep, such as invoices, under its documented processes.",
@@ -622,7 +620,6 @@ export async function deleteHostedAccountData(input: {
     const vaultShareCleanup = await revokeOutgoingHostedVaultSharesForMemberDeletionTx({
       grantorMemberIds: transactionDeletionMemberIds,
       now: deletionStartedAt,
-      source: HOSTED_ACCOUNT_DELETION_VAULT_SHARE_SOURCE,
       tx,
     });
     const deletedCounts = await deleteHostedAccountPrismaRows({

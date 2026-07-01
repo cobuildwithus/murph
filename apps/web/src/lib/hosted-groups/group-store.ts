@@ -65,7 +65,6 @@ export interface HostedGroupJoinAcceptanceTxResult
   vaultShareCleanupSignals: HostedVaultShareCleanupSignal[];
 }
 
-const HOSTED_GROUP_VAULT_SHARE_SOURCE = "hosted-group.join";
 export const HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION = 25;
 export const HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION = 100;
 
@@ -304,7 +303,6 @@ export async function readHostedGroupJoinView(input: {
         grantorMemberId: input.memberId,
         prisma,
         projectionKinds: policy.requestedVaultShareProjectionKinds,
-        source: HOSTED_GROUP_VAULT_SHARE_SOURCE,
       })
     : [];
 
@@ -426,24 +424,20 @@ export async function acceptHostedGroupJoinCodeTx(input: {
           grantorMemberId: input.memberId,
           projectionKind,
         });
-        const grant = await grantHostedVaultShareTx({
+        await grantHostedVaultShareTx({
           destinationMemberId: group.runtimeMemberId,
           grantorMemberId: input.memberId,
           now: input.now,
           projectionKind,
-          source: HOSTED_GROUP_VAULT_SHARE_SOURCE,
           tx: input.tx,
         });
-        if (grant.status !== "foreign-active-grant") {
-          grantedVaultShareProjectionKinds.push(projectionKind);
-        }
+        grantedVaultShareProjectionKinds.push(projectionKind);
       } else {
         const revoked = await revokeHostedVaultSharesWithCleanupTx({
           destinationMemberId: group.runtimeMemberId,
           grantorMemberId: input.memberId,
           now: input.now,
           projectionKinds: [projectionKind],
-          source: HOSTED_GROUP_VAULT_SHARE_SOURCE,
           tx: input.tx,
         });
         vaultShareCleanupSignals.push(...revoked.cleanupSignals);
@@ -594,7 +588,6 @@ async function assertHostedGroupVaultShareGrantLimitTx(
     where: {
       grantorMemberId: input.grantorMemberId,
       projectionKind: input.projectionKind,
-      source: HOSTED_GROUP_VAULT_SHARE_SOURCE,
       status: "granted",
     },
   });
@@ -613,7 +606,6 @@ async function assertHostedGroupVaultShareGrantLimitTx(
     where: {
       destinationMemberId: input.destinationMemberId,
       projectionKind: input.projectionKind,
-      source: HOSTED_GROUP_VAULT_SHARE_SOURCE,
       status: "granted",
     },
   });

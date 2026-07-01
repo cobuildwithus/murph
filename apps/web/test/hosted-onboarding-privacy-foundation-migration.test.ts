@@ -554,6 +554,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260628010000_linq_first_contact_drop_rejected_message_text",
       "20260629160000_computer_handoff_viewport_session_hint",
       "20260701040000_hosted_groups",
+      "20260701050000_hosted_vault_share_drop_source",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
