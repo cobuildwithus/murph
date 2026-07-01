@@ -170,7 +170,6 @@ const CODEX_APP_SERVER_TIMING_TRACE_SCHEMA =
 const CODEX_APP_SERVER_TIMING_TRACE_TYPE =
   'assistant.codex.app_server_timing'
 const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
-const MAX_CODEX_PRESTART_PARENT_TURN_MESSAGES = 32
 // Bound on distinct subagent threads whose token usage is tracked per parent
 // turn. Far above any sane spawn fan-out; threads past the cap are counted
 // and surfaced via droppedSubagentUsageThreadCount on recorded drafts.
@@ -2223,7 +2222,6 @@ async function runCodexAppServerTurnOnProcess(
   const subagentTokenUsageByThread =
     new Map<string, CodexSubagentTokenUsageSample>()
   const subagentDroppedUsageThreadIds = new Set<string>()
-  const preStartParentTurnMessages: CodexRpcMessage[] = []
   // Thread ids named by this turn's collab tool calls (spawn/sendInput/...),
   // collected live so evidenced subagent threads win buffer slots over
   // stale/unattributed foreign threads when the cap is reached.
@@ -3386,34 +3384,6 @@ async function runCodexAppServerTurnOnProcess(
     })
   }
 
-  const buildPreStartParentTurnBufferOverflowError = () =>
-    new VaultCliError(
-      'ASSISTANT_CODEX_APP_SERVER_PRESTART_BUFFER_OVERFLOW',
-      'Codex app-server emitted too many parent-thread messages before the current turn id was known.',
-      {
-        retryable: true,
-      },
-    )
-
-  const bufferPreStartParentTurnMessage = (message: CodexRpcMessage): void => {
-    if (preStartParentTurnMessages.length >= MAX_CODEX_PRESTART_PARENT_TURN_MESSAGES) {
-      rejectOnce(buildPreStartParentTurnBufferOverflowError())
-      return
-    }
-
-    preStartParentTurnMessages.push(message)
-  }
-
-  const drainPreStartParentTurnMessages = (): void => {
-    while (turnId !== null && preStartParentTurnMessages.length > 0) {
-      const message = preStartParentTurnMessages.shift()
-      if (!message) {
-        return
-      }
-      handleParsedMessage(message)
-    }
-  }
-
   function handleParsedMessage(message: CodexRpcMessage): void {
     const responseId = readCodexRpcResponseId(message)
     if (responseId !== null) {
@@ -3438,7 +3408,6 @@ async function runCodexAppServerTurnOnProcess(
       if (pending?.method === 'turn/start') {
         const resultTurnId = extractCodexTurnIdFromResult(message.result)
         turnId = turnId ?? resultTurnId
-        drainPreStartParentTurnMessages()
       }
       return
     }
@@ -3461,19 +3430,13 @@ async function runCodexAppServerTurnOnProcess(
 
     const messageTurnId = extractCodexTurnIdFromMessage(message)
     const method = readCodexEventMethod(message)
-    if (messageTurnId !== null && turnId === null && isCodexTurnStartedMethod(method)) {
-      turnId = messageTurnId
-    } else if (messageTurnId !== null && turnId === null) {
-      bufferPreStartParentTurnMessage(message)
-      return
-    }
-    if (
-      messageTurnId !== null &&
-      turnId !== null &&
-      messageTurnId !== turnId
-    ) {
-      handleStaleParentTurnMessage(message)
-      return
+    if (messageTurnId !== null) {
+      if (turnId === null) {
+        turnId = messageTurnId
+      } else if (messageTurnId !== turnId) {
+        handleStaleParentTurnMessage(message)
+        return
+      }
     }
 
     const requestId = readCodexRpcServerRequestId(message)
@@ -3491,9 +3454,6 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     handleAcceptedEvent(message, method)
-    if (isCodexTurnStartedMethod(method)) {
-      drainPreStartParentTurnMessages()
-    }
   }
 
   const emitActionDiagnosticsTrace = () => {
@@ -3723,7 +3683,6 @@ async function runCodexAppServerTurnOnProcess(
       'turn/start',
     )
     turnId = extractCodexTurnIdFromResult(turnResult) ?? turnId
-    drainPreStartParentTurnMessages()
     lifecycleStage = 'turn_started'
     emitAppServerTimingTrace('turn-started')
     notifyProviderRequestStarted()

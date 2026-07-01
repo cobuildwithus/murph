@@ -4289,7 +4289,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('captures tagged pre-start turn/started when the turn/start response omits the turn id', async () => {
+  it('trusts tagged turn/started when the turn/start response omits the turn id', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-prestart-tagged-work-')
     const codexHome = await createTempDir('assistant-codex-local-prestart-tagged-home-')
     const spawnedChildren: MockChildProcess[] = []
@@ -4350,7 +4350,7 @@ describe('assistant codex runtime', () => {
                 id: 'assistant-local-prestart-tagged-2',
                 type: 'assistant_message',
               },
-              delta: 'Buffered event succeeded',
+              delta: 'Tagged event succeeded',
               turnId: 'turn-local-prestart-tagged-2',
             },
           }))
@@ -4395,13 +4395,13 @@ describe('assistant codex runtime', () => {
         prompt: 'second local turn with tagged prestart turn/started',
       }),
     ).resolves.toMatchObject({
-      finalMessage: 'Buffered event succeeded',
+      finalMessage: 'Tagged event succeeded',
       sessionId: 'thread-local-prestart-tagged-2',
       turnId: 'turn-local-prestart-tagged-2',
     })
   })
 
-  it('buffers tagged pre-start warm server requests until the current turn id is known', async () => {
+  it('trusts tagged pre-start warm server requests as current-turn requests', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-prestart-request-work-')
     const codexHome = await createTempDir('assistant-codex-local-prestart-request-home-')
     const progressUpdates: string[] = []
@@ -4538,7 +4538,7 @@ describe('assistant codex runtime', () => {
     expect(progressUpdates).toEqual(['Starting early work'])
   })
 
-  it('ignores stale same-thread pre-start messages tagged with an older turn id', async () => {
+  it('ignores stale same-thread messages tagged with an older turn id', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-stale-turn-id-work-')
     const codexHome = await createTempDir('assistant-codex-local-stale-turn-id-home-')
     const progressDelivery = createProgressDeliveryMock()
@@ -4583,6 +4583,14 @@ describe('assistant codex runtime', () => {
           }))
           const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
           child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: {
+                id: 'turn-local-stale-turn-id-2',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
             method: 'turn/completed',
             params: {
               threadId: 'thread-local-stale-turn-id',
@@ -4603,14 +4611,6 @@ describe('assistant codex runtime', () => {
               threadId: 'thread-local-stale-turn-id',
               tool: 'send_progress_update',
               turnId: 'turn-local-stale-turn-id-1',
-            },
-          }))
-          child.stdout.write(jsonLine({
-            id: secondTurn.id,
-            result: {
-              turn: {
-                id: 'turn-local-stale-turn-id-2',
-              },
             },
           }))
 
@@ -4673,7 +4673,7 @@ describe('assistant codex runtime', () => {
     await expect(
       executeCodexAppServerTurn({
         ...stableInput,
-        prompt: 'second local turn should ignore stale same-thread output',
+        prompt: 'second local turn should ignore stale same-thread output after start',
       }),
     ).resolves.toMatchObject({
       finalMessage: 'Current turn survived stale output',

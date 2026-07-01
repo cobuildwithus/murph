@@ -3120,7 +3120,7 @@ describe("startHostedContainerEntrypoint", () => {
       }));
   });
 
-  it("rejects leaked shell descendants under the verified warm Codex app-server implementation", async () => {
+  it("preserves descendants inside the verified warm Codex app-server process group", async () => {
     const codexPid = process.pid + 1300;
     const codexImplementationPid = process.pid + 1301;
     const shellPid = process.pid + 1302;
@@ -3228,18 +3228,17 @@ describe("startHostedContainerEntrypoint", () => {
       method: "POST",
     });
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(200);
     expect(runnerSpy).toHaveBeenCalledTimes(1);
-    expect(stopWarmCodex).toHaveBeenCalledTimes(1);
-    expect(stopWarmCodex).toHaveBeenCalledWith("process-isolation-failed");
-    expect(exitScheduler).toHaveBeenCalledTimes(1);
+    expect(stopWarmCodex).not.toHaveBeenCalled();
+    expect(exitScheduler).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog.mock.calls
       .map(([input]) => input)).toContainEqual(expect.objectContaining({
         details: expect.objectContaining({
-          processIsolationCleanupStatus: "failed",
+          processIsolationCleanupStatus: "passed",
           processIsolationExpectedCodexRootPresent: true,
           processIsolationExpectedCodexRootSnapshotStatus: "available",
-          processIsolationUnexpectedProcessCount: 1,
+          processIsolationUnexpectedProcessCount: 0,
         }),
         message: "Hosted container process isolation cleanup completed.",
       }));
