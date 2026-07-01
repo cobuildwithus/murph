@@ -661,6 +661,17 @@ const JUNCTION_SLEEP_STAGE_TYPE_ARRAY_PATHS = [
   "sleepStageType",
   "sleep_stage_type",
 ] as const;
+const JUNCTION_SLEEP_COVERAGE_START_TIMESTAMP_PATHS = [
+  ...JUNCTION_SLEEP_START_TIMESTAMP_PATHS,
+  "sessionStart",
+  "session_start",
+] as const;
+const JUNCTION_SLEEP_COVERAGE_END_TIMESTAMP_PATHS = [
+  ...JUNCTION_SLEEP_END_TIMESTAMP_PATHS,
+  "sessionEnd",
+  "session_end",
+] as const;
+const SLEEP_STAGE_COVERAGE_TOLERANCE_MS = 1000;
 
 type JunctionSleepStage = JunctionSleepStageValue;
 
@@ -709,6 +720,11 @@ interface JunctionSleepStageInterval {
 interface JunctionSleepStageSegment {
   dayKey?: string;
   durationMinutes: number;
+  endAt: string;
+  startAt: string;
+}
+
+interface JunctionSleepStageCoverageWindow {
   endAt: string;
   startAt: string;
 }
@@ -1947,7 +1963,7 @@ function collectJunctionSleepStageAggregates(
   const parentTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
   const intervals = collectJunctionSleepStageIntervals(entry, resourceContext, context, parentTimestamp);
   const parentResourceId = resolveSleepCycleParentResourceId(resourceContext, entry, parentTimestamp);
-  if (!parentResourceId) {
+  if (!parentResourceId || !sleepStageIntervalsCoverParentWindow(entry, resourceContext, intervals)) {
     return;
   }
 
@@ -1992,6 +2008,71 @@ function collectJunctionSleepStageAggregates(
       });
     }
   }
+}
+
+function sleepStageIntervalsCoverParentWindow(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  intervals: readonly JunctionSleepStageInterval[],
+): boolean {
+  const coverageWindow = resolveSleepStageCoverageWindow(entry, resourceContext.sourceProviderSlug);
+  if (!coverageWindow || intervals.length === 0) {
+    return false;
+  }
+
+  return sleepStageIntervalsCoverWindow(intervals, coverageWindow);
+}
+
+function resolveSleepStageCoverageWindow(
+  entry: PlainObject,
+  sourceProviderSlug: string | undefined,
+): JunctionSleepStageCoverageWindow | undefined {
+  const startAt = resolveSafeTimestamp(
+    firstValueFromPaths(entry, JUNCTION_SLEEP_COVERAGE_START_TIMESTAMP_PATHS),
+    sourceProviderSlug,
+  );
+  const endAt = resolveSafeTimestamp(
+    firstValueFromPaths(entry, JUNCTION_SLEEP_COVERAGE_END_TIMESTAMP_PATHS),
+    sourceProviderSlug,
+  );
+
+  if (!startAt || !endAt || Date.parse(endAt) <= Date.parse(startAt)) {
+    return undefined;
+  }
+
+  return { endAt, startAt };
+}
+
+function sleepStageIntervalsCoverWindow(
+  intervals: readonly JunctionSleepStageInterval[],
+  coverageWindow: JunctionSleepStageCoverageWindow,
+): boolean {
+  const windowStartMs = Date.parse(coverageWindow.startAt);
+  const windowEndMs = Date.parse(coverageWindow.endAt);
+  if (!Number.isFinite(windowStartMs) || !Number.isFinite(windowEndMs) || windowEndMs <= windowStartMs) {
+    return false;
+  }
+
+  let coveredUntilMs = windowStartMs;
+  const orderedIntervals = [...intervals].sort((left, right) => Date.parse(left.startAt) - Date.parse(right.startAt));
+  for (const interval of orderedIntervals) {
+    const intervalStartMs = Math.max(Date.parse(interval.startAt), windowStartMs);
+    const intervalEndMs = Math.min(Date.parse(interval.endAt), windowEndMs);
+    if (!Number.isFinite(intervalStartMs) || !Number.isFinite(intervalEndMs) || intervalEndMs <= intervalStartMs) {
+      continue;
+    }
+
+    if (intervalStartMs - coveredUntilMs > SLEEP_STAGE_COVERAGE_TOLERANCE_MS) {
+      return false;
+    }
+
+    coveredUntilMs = Math.max(coveredUntilMs, intervalEndMs);
+    if (windowEndMs - coveredUntilMs <= SLEEP_STAGE_COVERAGE_TOLERANCE_MS) {
+      return true;
+    }
+  }
+
+  return windowEndMs - coveredUntilMs <= SLEEP_STAGE_COVERAGE_TOLERANCE_MS;
 }
 
 function collectJunctionSleepStageIntervals(

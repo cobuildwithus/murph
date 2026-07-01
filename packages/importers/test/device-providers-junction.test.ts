@@ -4497,6 +4497,8 @@ test("Junction sleep_cycle normalizer emits compact sleep-stage observations", (
           device_id: "raw-oura-ring-1",
         },
         observedAt: "2026-05-20T10:00:00Z",
+        start: "2026-05-20T02:00:00+00:00",
+        end: "2026-05-20T04:30:00+00:00",
         stages: [
           {
             start: "2026-05-20T02:00:00+00:00",
@@ -4528,6 +4530,8 @@ test("Junction sleep_cycle normalizer emits compact sleep-stage observations", (
       hypnogram: [{
         sourceProviderSlug: "garmin",
         observedAt: "2026-05-20T11:00:00Z",
+        start: "2026-05-20T05:00:00+00:00",
+        end: "2026-05-20T05:20:00+00:00",
         stages: [{
           startAt: "2026-05-20T05:00:00+00:00",
           endAt: "2026-05-20T05:20:00+00:00",
@@ -4582,16 +4586,43 @@ test("Junction sleep_cycle fills missing sleep summary stages without duplicatin
         sourceType: "watch",
         timeZone: "America/New_York",
         observedAt: "2026-07-01T11:00:00.000Z",
+        start: "2026-07-01T03:30:00.000Z",
+        end: "2026-07-01T11:00:00.000Z",
         stages: [
+          {
+            start: "2026-07-01T03:30:00.000Z",
+            end: "2026-07-01T03:45:00.000Z",
+            stage: "light",
+          },
           {
             start: "2026-07-01T03:45:00.000Z",
             end: "2026-07-01T04:15:00.000Z",
             stage: "deep",
           },
           {
+            start: "2026-07-01T04:15:00.000Z",
+            end: "2026-07-01T05:00:00.000Z",
+            stage: "light",
+          },
+          {
+            start: "2026-07-01T05:00:00.000Z",
+            end: "2026-07-01T06:30:00.000Z",
+            stage: "rem",
+          },
+          {
+            start: "2026-07-01T06:30:00.000Z",
+            end: "2026-07-01T10:30:00.000Z",
+            stage: "light",
+          },
+          {
             start: "2026-07-01T10:30:00.000Z",
             end: "2026-07-01T10:45:00.000Z",
             stage: "awake",
+          },
+          {
+            start: "2026-07-01T10:45:00.000Z",
+            end: "2026-07-01T11:00:00.000Z",
+            stage: "light",
           },
         ],
       }],
@@ -4704,6 +4735,8 @@ test("Junction sleep_cycle direct intervals use timezone for local sleep-stage d
             source_provider: "whoop",
             source_type: "wearable",
             time_zone: "America/New_York",
+            start: "2026-01-02T04:30:00.000Z",
+            end: "2026-01-02T05:00:00.000Z",
             stages: [{
               start: "2026-01-02T04:30:00.000Z",
               end: "2026-01-02T05:00:00.000Z",
@@ -4714,6 +4747,8 @@ test("Junction sleep_cycle direct intervals use timezone for local sleep-stage d
             id: "sleep-cycle-default-zone-1",
             source_provider: "garmin",
             source_type: "watch",
+            start: "2026-01-02T04:30:00.000Z",
+            end: "2026-01-02T05:00:00.000Z",
             stages: [{
               start: "2026-01-02T04:30:00.000Z",
               end: "2026-01-02T05:00:00.000Z",
@@ -4747,6 +4782,8 @@ test("Junction sleep_cycle sums sub-minute stage intervals before rounding", () 
         source_provider: "garmin",
         source_type: "watch",
         time_zone: "UTC",
+        start: "2026-01-02T00:00:00.000Z",
+        end: "2026-01-02T00:01:00.000Z",
         stages: [
           {
             start: "2026-01-02T00:00:00.000Z",
@@ -4787,6 +4824,8 @@ test("Junction sleep_cycle splits one stage interval across local midnight", asy
           source_provider: "garmin",
           source_type: "watch",
           time_zone: "America/New_York",
+          start: "2026-01-02T04:30:00.000Z",
+          end: "2026-01-02T05:30:00.000Z",
           stages: [{
             start: "2026-01-02T04:30:00.000Z",
             end: "2026-01-02T05:30:00.000Z",
@@ -4846,6 +4885,8 @@ test("Junction sleep_cycle uses stable UTC day when nullable offset is absent", 
           source_provider: "garmin",
           source_type: "watch",
           timezone_offset: null,
+          start: "2026-01-02T04:30:00.000Z",
+          end: "2026-01-02T05:30:00.000Z",
           stages: [{
             start: "2026-01-02T04:30:00.000Z",
             end: "2026-01-02T05:30:00.000Z",
@@ -4879,6 +4920,8 @@ test("Junction sleep_cycle identity ignores mutable vault default timezone witho
         source_provider: "garmin",
         source_type: "watch",
         timezone_offset: null,
+        start: "2026-01-02T04:30:00.000Z",
+        end: "2026-01-02T05:30:00.000Z",
         stages: [{
           start: "2026-01-02T04:30:00.000Z",
           end: "2026-01-02T05:30:00.000Z",
@@ -4920,11 +4963,18 @@ test("Junction sleep_cycle keeps same-stage day aggregates distinct across timez
           source_provider: "garmin",
           source_type: "watch",
           time_zone: "America/New_York",
+          start: "2026-01-02T04:30:00.000Z",
+          end: "2026-01-02T05:40:00.000Z",
           stages: [
             {
               start: "2026-01-02T04:30:00.000Z",
               end: "2026-01-02T04:50:00.000Z",
               stage: "light",
+            },
+            {
+              start: "2026-01-02T04:50:00.000Z",
+              end: "2026-01-02T05:10:00.000Z",
+              stage: "awake",
             },
             {
               start: "2026-01-02T05:10:00.000Z",
@@ -4937,11 +4987,18 @@ test("Junction sleep_cycle keeps same-stage day aggregates distinct across timez
           source_provider: "garmin",
           source_type: "watch",
           time_zone: "UTC",
+          start: "2026-01-01T23:30:00.000Z",
+          end: "2026-01-02T00:40:00.000Z",
           stages: [
             {
               start: "2026-01-01T23:30:00.000Z",
               end: "2026-01-01T23:50:00.000Z",
               stage: "light",
+            },
+            {
+              start: "2026-01-01T23:50:00.000Z",
+              end: "2026-01-02T00:10:00.000Z",
+              stage: "awake",
             },
             {
               start: "2026-01-02T00:10:00.000Z",
@@ -5097,6 +5154,8 @@ test("Junction sleep_cycle compacts large stage timelines before core import", a
           source_provider: "garmin",
           source_type: "watch",
           time_zone: "UTC",
+          start: "2026-05-20T00:00:00.000Z",
+          end: new Date(stageStart + stages.length * 60_000).toISOString(),
           stages,
         }],
       },
@@ -5206,6 +5265,8 @@ test("Junction sleep_cycle direct webhook envelopes collect nested stages once",
           time_zone: "UTC",
           data: [{
             id: "sleep-cycle-1",
+            start: "2026-05-20T00:00:00.000Z",
+            end: "2026-05-20T00:45:00.000Z",
             stages: [{
               startAt: "2026-05-20T00:00:00.000Z",
               endAt: "2026-05-20T00:45:00.000Z",
@@ -5539,6 +5600,97 @@ test("Junction sleep_cycle parentless full and partial replays do not mint canon
   }
 });
 
+test("Junction sleep_cycle parented partial replays cannot overwrite complete compact facts", async () => {
+  const intervalA = {
+    start: "2026-05-20T00:00:00.000Z",
+    end: "2026-05-20T00:30:00.000Z",
+    stage: "light",
+  };
+  const intervalB = {
+    start: "2026-05-20T00:30:00.000Z",
+    end: "2026-05-20T01:00:00.000Z",
+    stage: "light",
+  };
+  const snapshot = (
+    importedAt: string,
+    stages: Array<{ start: string; end: string; stage: string }>,
+  ) => ({
+    importedAt,
+    summaries: {
+      sleep_cycle: [{
+        id: "sleep-cycle-parented-overlap-1",
+        source_provider: "garmin",
+        source_type: "watch",
+        time_zone: "UTC",
+        start: "2026-05-20T00:00:00.000Z",
+        end: "2026-05-20T01:00:00.000Z",
+        stages,
+      }],
+    },
+  });
+  const scenarios = [
+    {
+      label: "full before partial retry",
+      batches: [[intervalA, intervalB], [intervalA]],
+    },
+    {
+      label: "partial before full before partial retry",
+      batches: [[intervalA], [intervalA, intervalB], [intervalA]],
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const vaultRoot = await makeTempDirectory("murph-junction-parented-sleep-cycle-overlap");
+    try {
+      await coreRuntime.initializeVault({
+        vaultRoot,
+        createdAt: "2026-05-20T00:00:00.000Z",
+        timezone: "UTC",
+      });
+
+      const imports = [];
+      for (const [index, stages] of scenario.batches.entries()) {
+        imports.push(await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+          {
+            provider: "junction",
+            vaultRoot,
+            snapshot: snapshot(
+              new Date(Date.parse("2026-05-20T18:00:00.000Z") + index * 60_000).toISOString(),
+              stages,
+            ),
+          },
+          {
+            corePort: coreRuntime,
+          },
+        ));
+      }
+
+      assert.deepEqual(
+        imports.map((result) => result.events.filter((event) =>
+          event.kind === "observation" && event.metric === "sleep-light-minutes"
+        ).length),
+        scenario.batches.map((stages) => stages.length === 2 ? 1 : 0),
+        scenario.label,
+      );
+
+      const records = (
+        await Promise.all(
+          [...new Set(imports.flatMap((result) => result.eventShardPaths))]
+            .map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
+        )
+      ).flat();
+      const liveLightRecords = latestLiveRecords(records).filter(
+        (record) => record.kind === "observation" && record.metric === "sleep-light-minutes",
+      );
+
+      assert.equal(liveLightRecords.length, 1, scenario.label);
+      assert.equal(storedObservationValue(liveLightRecords[0]), 60, scenario.label);
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  }
+});
+
 test("Junction sleep-stage observations keep stable replay identity with parent offset metadata", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-sleep-stage-replay");
   try {
@@ -5559,7 +5711,7 @@ test("Junction sleep-stage observations keep stable replay identity with parent 
             type: "wearable",
           },
           start: "2026-06-25T02:30:00.000Z",
-          end: "2026-06-25T03:45:00.000Z",
+          end: "2026-06-25T03:00:00.000Z",
           timezone_offset: "-04:00",
           stages: [{
             start: "2026-06-25T02:30:00.000Z",
