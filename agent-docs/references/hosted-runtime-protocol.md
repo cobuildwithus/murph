@@ -180,12 +180,13 @@ limited to the exact accepted attempt.
 For foreground/default work behind an `inbox_media_retention` fence, the
 existing workspace-invocation abort seam is the preemption authority when
 liveness is ambiguous. This foreground-over-retention path uses the same
-deterministic per-user runner container-name fallback as active wake for legacy
-fences that predate persisted container names. A local exact-pointer abort or
-inactive proof permits the durable fence CAS replacement; missing-pointer abort
-delivery is only an abort request and preserves the fence until a later
-liveness pass proves the old child inactive. Stale or failed status preserves
-the fence and retries.
+legacy unversioned per-user runner container-name fallback as active wake for
+fences that predate persisted container names; fresh starts still use the
+current versioned container resolver. A local exact-pointer abort or inactive
+proof permits the durable fence CAS replacement; missing-pointer abort delivery
+is only an abort request and preserves the fence until a later liveness pass
+proves the old child inactive. Stale or failed status preserves the fence and
+retries.
 
 The foreground-priority rule does not weaken correctness checks. Wrong-user
 authority, invalid auth, undecryptable mailbox payloads, stale leases, and

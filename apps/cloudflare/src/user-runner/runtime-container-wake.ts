@@ -175,10 +175,7 @@ export function readActiveRuntimeRunnerContainerName(input: {
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
 }): string | null {
   if (!input.runnerContainerName) {
-    return resolveHostedExecutionRunnerContainerName({
-      source: input.runnerRuntimeEnvSource,
-      userId: input.activeRuntime.userId,
-    });
+    return input.activeRuntime.userId;
   }
 
   const identity = readHostedRunnerContainerIdentity({

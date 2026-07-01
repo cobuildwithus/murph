@@ -1748,6 +1748,10 @@ describe("HostedUserRunner execution coordination", () => {
       NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
     >(async () => "accepted");
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const versionedContainerName = `${TEST_USER_ID}--v-current`;
+    const versionedInvoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
+      async () => await invocationResult.promise,
+    );
     let activeAttemptId = "";
     let activeGeneration = "";
     const readActiveRuntimeUserFence = vi.fn<
@@ -1758,10 +1762,82 @@ describe("HostedUserRunner execution coordination", () => {
       leaseGeneration: activeGeneration,
       userId: TEST_USER_ID,
     }));
+    const readVersionedActiveRuntimeUserFence = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+    >(async () => ({
+      active: false,
+      reason: "no_active_runtime",
+    }));
+    const legacyStub: HostedExecutionContainerStubLike = {
+      abortWorkspaceInvocation: createDirectOnlyRpcMethod<
+        NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
+      >(
+        async function (this: HostedExecutionContainerStubLike, abortInput) {
+          expect(this).toBe(legacyStub);
+          return await abortWorkspaceInvocation(abortInput);
+        },
+      ),
+      destroyInstance: async () => {},
+      invoke: async () => {
+        throw new Error("legacy retention container must not receive foreground invoke");
+      },
+      readActiveRuntimeUserFence: createDirectOnlyRpcMethod<
+        NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+      >(
+        async function (this: HostedExecutionContainerStubLike) {
+          expect(this).toBe(legacyStub);
+          return await readActiveRuntimeUserFence();
+        },
+      ),
+      smokeHealth: async () => ({
+        ok: true,
+        runnerBundle: null,
+        service: "runner",
+        status: 200,
+      }),
+    };
+    const versionedStub: HostedExecutionContainerStubLike = {
+      destroyInstance: async () => {},
+      ensureReadyForProcessing: createDirectOnlyRpcMethod<
+        NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+      >(
+        async function (this: HostedExecutionContainerStubLike) {
+          expect(this).toBe(versionedStub);
+          return { kind: "ready" };
+        },
+      ),
+      invoke: versionedInvoke,
+      readActiveRuntimeUserFence: createDirectOnlyRpcMethod<
+        NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+      >(
+        async function (this: HostedExecutionContainerStubLike) {
+          expect(this).toBe(versionedStub);
+          return await readVersionedActiveRuntimeUserFence();
+        },
+      ),
+      smokeHealth: async () => ({
+        ok: true,
+        runnerBundle: null,
+        service: "runner",
+        status: 200,
+      }),
+    };
+    const getByName = vi.fn((name: string): HostedExecutionContainerStubLike => {
+      if (name === TEST_USER_ID) {
+        return legacyStub;
+      }
+      if (name === versionedContainerName) {
+        return versionedStub;
+      }
+      throw new Error(`Unexpected runner container name: ${name}`);
+    });
     const { invoke, runner, sql } = createRunnerHarness({
-      abortWorkspaceInvocation,
       invocationResults: [invocationResult.promise],
-      readActiveRuntimeUserFence,
+      runnerContainerNamespace: { getByName },
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
@@ -1783,12 +1859,16 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(readVersionedActiveRuntimeUserFence).not.toHaveBeenCalled();
     expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
       attemptId: token.attemptId,
       leaseGeneration: String(token.generation),
       userId: TEST_USER_ID,
     });
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(getByName).toHaveBeenCalledWith(TEST_USER_ID);
+    expect(getByName).toHaveBeenCalledWith(versionedContainerName);
+    await vi.waitFor(() => expect(versionedInvoke).toHaveBeenCalledOnce());
+    expect(invoke).not.toHaveBeenCalled();
 
     invocationResult.resolve({
       nextWakeAt: null,
