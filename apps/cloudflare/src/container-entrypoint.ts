@@ -309,6 +309,7 @@ class HostedContainerArchitectureVersionMismatchError extends Error {
 
 interface HostedContainerProcessState {
   commandLineDigest: string | null;
+  name: string | null;
   ppid: number | null;
   processGroupId: number | null;
   startTimeTicksFromProcStat: string | null;
@@ -2612,7 +2613,17 @@ function listExpectedHostedCodexProcessIds(
     return new Set();
   }
 
-  return listHostedContainerProcessTreeIds(processStates, expectedCodexRoot.pid);
+  const expectedProcessIds = new Set([expectedCodexRoot.pid]);
+  for (const [pid, state] of processStates) {
+    if (
+      state.ppid === expectedCodexRoot.pid &&
+      isExpectedHostedCodexImplementationProcess(state, expectedCodexRoot)
+    ) {
+      expectedProcessIds.add(pid);
+    }
+  }
+
+  return expectedProcessIds;
 }
 
 function listHostedContainerProcessTreeIds(
@@ -2679,11 +2690,30 @@ function isExpectedHostedCodexRootProcess(
   return expectedCodexRoot.uid === null || state.uid === expectedCodexRoot.uid;
 }
 
+function isExpectedHostedCodexImplementationProcess(
+  state: HostedContainerProcessState,
+  expectedCodexRoot: HostedExpectedCodexRootProcess,
+): boolean {
+  if (state.state === "Z" || state.name !== "codex") {
+    return false;
+  }
+
+  if (
+    expectedCodexRoot.processGroupId !== null
+    && state.processGroupId !== expectedCodexRoot.processGroupId
+  ) {
+    return false;
+  }
+
+  return expectedCodexRoot.uid === null || state.uid === expectedCodexRoot.uid;
+}
+
 async function readHostedContainerProcessState(
   pid: number,
   processApi: HostedContainerProcessApi,
 ): Promise<HostedContainerProcessState> {
   let commandLineDigest: string | null = null;
+  let name: string | null = null;
   let ppid: number | null = null;
   let processGroupId: number | null = null;
   let startTimeTicksFromProcStat: string | null = null;
@@ -2725,15 +2755,16 @@ async function readHostedContainerProcessState(
   }
 
   try {
-    uid = readHostedContainerProcessUid(
-      await processApi.readFile(`/proc/${pid}/status`, "utf8"),
-    );
+    const status = await processApi.readFile(`/proc/${pid}/status`, "utf8");
+    name = readHostedContainerProcessName(status);
+    uid = readHostedContainerProcessUid(status);
   } catch {
     // UID is only needed for the daemonized-orphan cleanup path.
   }
 
   return {
     commandLineDigest,
+    name,
     ppid,
     processGroupId,
     startTimeTicksFromProcStat,
@@ -2747,6 +2778,11 @@ function readHostedContainerProcessUid(status: string): number | null {
   const uidRaw = uidLine?.trim().split(/\s+/u)[1];
   const uid = Number.parseInt(uidRaw ?? "", 10);
   return Number.isInteger(uid) && uid >= 0 ? uid : null;
+}
+
+function readHostedContainerProcessName(status: string): string | null {
+  const nameLine = status.split("\n").find((line) => line.startsWith("Name:"));
+  return nameLine?.trim().split(/\s+/u)[1] ?? null;
 }
 
 export function createRequestAbortController(

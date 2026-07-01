@@ -3376,6 +3376,42 @@ async function runCodexAppServerTurnOnProcess(
     })
   }
 
+  const buildUnscopedParentTurnMessageError = () =>
+    new VaultCliError(
+      'ASSISTANT_CODEX_APP_SERVER_UNSCOPED_PARENT_TURN_MESSAGE',
+      'Codex app-server emitted parent-thread turn output without the active turn id.',
+      {
+        retryable: true,
+      },
+    )
+
+  const isScopedParentTurnRequestRequired = (
+    method: string | null,
+  ): boolean => method === 'item/tool/call'
+
+  const isScopedParentTurnEventRequired = (
+    message: CodexRpcMessage,
+    method: string | null,
+  ): boolean => {
+    if (isCodexTurnCompletedMethod(method)) {
+      return true
+    }
+
+    const normalizedEvent = normalizeCodexEvent(message)
+    return normalizedEvent.kind === 'assistant_delta' ||
+      normalizedEvent.kind === 'assistant_message'
+  }
+
+  const rejectUnscopedParentTurnRequest = (requestId: CodexRpcId): void => {
+    void tryWriteRpcMessage({
+      id: requestId,
+      error: {
+        code: -32000,
+        message: 'Codex parent-thread request did not include the active turn id.',
+      },
+    })
+  }
+
   const buildPreStartParentTurnBufferOverflowError = () =>
     new VaultCliError(
       'ASSISTANT_CODEX_APP_SERVER_PRESTART_BUFFER_OVERFLOW',
@@ -3471,7 +3507,25 @@ async function runCodexAppServerTurnOnProcess(
 
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId !== null) {
+      if (
+        isScopedParentTurnRequestRequired(method) &&
+        messageThreadId !== null &&
+        (turnId === null || messageTurnId !== turnId)
+      ) {
+        rejectUnscopedParentTurnRequest(requestId)
+        return
+      }
       handleAcceptedServerRequest(message, requestId)
+      return
+    }
+
+    if (
+      messageTurnId === null &&
+      messageThreadId !== null &&
+      turnId !== null &&
+      isScopedParentTurnEventRequired(message, method)
+    ) {
+      rejectOnce(buildUnscopedParentTurnMessageError())
       return
     }
 
