@@ -86,6 +86,10 @@ import {
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
   type HostedRuntimeFamilyPlanToolStatusResponse,
+  HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_KINDS,
+  type HostedRuntimeGroupCreateJoinLinkRequest,
+  type HostedRuntimeGroupKind,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeProductFeedbackRecordRequest,
@@ -747,7 +751,58 @@ export function parseHostedRuntimeGroupToolRequest(
     );
     return { action };
   }
+  if (action === "create_join_link") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "joinLink"]),
+      "Hosted runtime group tool create_join_link request",
+    );
+    if (record.joinLink === undefined || record.joinLink === null) {
+      return { action };
+    }
+    return {
+      action,
+      joinLink: parseHostedRuntimeGroupCreateJoinLinkRequest(record.joinLink),
+    };
+  }
   throw new TypeError("Hosted runtime group tool action is not supported.");
+}
+
+function parseHostedRuntimeGroupCreateJoinLinkRequest(
+  value: unknown,
+): HostedRuntimeGroupCreateJoinLinkRequest {
+  const record = requireObject(value, "Hosted runtime group tool create_join_link joinLink");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["displayName", "kind", "requestedVaultShareProjectionKinds"]),
+    "Hosted runtime group tool create_join_link joinLink",
+  );
+  const displayName = readNullableString(
+    record.displayName,
+    "Hosted runtime group tool create_join_link displayName",
+  );
+  if (displayName !== null && displayName.trim().length === 0) {
+    throw new TypeError("Hosted runtime group tool create_join_link displayName must not be blank.");
+  }
+  if (displayName !== null && displayName.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH) {
+    throw new TypeError("Hosted runtime group tool create_join_link displayName is too long.");
+  }
+  return {
+    displayName,
+    kind: readHostedRuntimeGroupKind(record.kind),
+    requestedVaultShareProjectionKinds: parseHostedRuntimeGroupProjectionKindArray(
+      record.requestedVaultShareProjectionKinds,
+      "Hosted runtime group tool create_join_link requestedVaultShareProjectionKinds",
+    ),
+  };
+}
+
+function readHostedRuntimeGroupKind(value: unknown): HostedRuntimeGroupKind | null {
+  if (value === undefined || value === null) return null;
+  for (const kind of HOSTED_RUNTIME_GROUP_KINDS) {
+    if (value === kind) return kind;
+  }
+  throw new TypeError("Hosted runtime group tool create_join_link kind is not supported.");
 }
 
 export function parseHostedRuntimeGroupToolResponse(
@@ -770,6 +825,33 @@ export function parseHostedRuntimeGroupToolResponse(
     }
     if (status === "unavailable") {
       assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool read_current unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+          group: null,
+        },
+      };
+    }
+  }
+
+  if (action === "create_join_link") {
+    const result = requireObject(record.result, "Hosted runtime group tool create_join_link response result");
+    const status = requireString(result.status, "Hosted runtime group tool create_join_link response status");
+    if (status === "ok") {
+      assertAllowedObjectKeys(result, new Set(["status", "group", "joinUrl"]), "Hosted runtime group tool create_join_link ok response result");
+      return {
+        action,
+        result: {
+          status,
+          group: parseHostedRuntimeGroupSummary(result.group),
+          joinUrl: requireString(result.joinUrl, "Hosted runtime group tool create_join_link joinUrl"),
+        },
+      };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool create_join_link unavailable response result");
       return {
         action,
         result: {
