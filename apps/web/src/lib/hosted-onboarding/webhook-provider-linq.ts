@@ -372,7 +372,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
           }
 
           const reservationResult = await reserveIncomingHostedLinqHomeLineForRouteTx({
-            chatId: summary.chatId,
             memberId: existingMember?.id ?? null,
             phoneNumber: familyHomeRecipientPhone,
             prisma: input.prisma,
@@ -563,7 +562,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
       }
 
       const reservationResult = await reserveIncomingHostedLinqHomeLineForRouteTx({
-        chatId: summary.chatId,
         memberId: existingMember.id,
         phoneNumber: activeHomeRecipientPhone,
         prisma: input.prisma,
@@ -761,7 +759,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   const reservationResult = await reserveIncomingHostedLinqHomeLineForRouteTx({
-    chatId: summary.chatId,
     memberId: existingMember?.id ?? null,
     phoneNumber: recipientPhoneNumber,
     prisma: input.prisma,
@@ -857,14 +854,12 @@ function isExpectedHostedLinqFamilyInviteAcceptanceMiss(error: unknown): boolean
 }
 
 async function reserveIncomingHostedLinqHomeLineForRouteTx(input: {
-  chatId: string;
   memberId?: string | null;
   phoneNumber: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLinePhoneReservationResult> {
   return input.memberId
     ? reserveOrReuseHostedMemberLinqHomeLineForRouteTx({
-        chatId: input.chatId,
         memberId: input.memberId,
         phoneNumber: input.phoneNumber,
         prisma: input.prisma,

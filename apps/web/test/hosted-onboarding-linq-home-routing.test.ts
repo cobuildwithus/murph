@@ -415,7 +415,6 @@ describe("reserveOrReuseHostedMemberLinqHomeLineForRouteTx", () => {
 
     await expect(
       reserveOrReuseHostedMemberLinqHomeLineForRouteTx({
-        chatId: "chat_123",
         memberId: "member_123",
         phoneNumber: "+15550100001",
         prisma: {} as never,
@@ -441,6 +440,89 @@ describe("reserveOrReuseHostedMemberLinqHomeLineForRouteTx", () => {
     });
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
+  });
+
+  it("reuses an existing same-phone route claim when the chat id changes", async () => {
+    const assignedAt = new Date("2026-06-30T14:15:00.000Z");
+    const line = buildLine("+15550100001", {
+      activeMemberLimit: 1,
+      maxNewConversationsPerDay: 1,
+    });
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "chat_old",
+      linqHomeLineAssignedAt: assignedAt,
+      linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(line);
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockImplementation(async () => {
+      throw new Error("existing same-phone route claims must not consume daily capacity");
+    });
+    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockImplementation(async () => {
+      throw new Error("existing same-phone route claims must not consume active capacity");
+    });
+
+    await expect(
+      reserveOrReuseHostedMemberLinqHomeLineForRouteTx({
+        memberId: "member_123",
+        phoneNumber: "+15550100001",
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      kind: "reserved",
+      reservation: {
+        assignedAt,
+        line,
+      },
+    });
+  });
+
+  it("timestamps a migrated same-phone route claim without consuming capacity", async () => {
+    const line = buildLine("+15550100001", {
+      activeMemberLimit: 1,
+      maxNewConversationsPerDay: 1,
+    });
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "chat_old",
+      linqHomeLineAssignedAt: null,
+      linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(line);
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockImplementation(async () => {
+      throw new Error("migrated same-phone route claims must not consume daily capacity");
+    });
+    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockImplementation(async () => {
+      throw new Error("migrated same-phone route claims must not consume active capacity");
+    });
+
+    await expect(
+      reserveOrReuseHostedMemberLinqHomeLineForRouteTx({
+        memberId: "member_123",
+        phoneNumber: "+15550100001",
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      kind: "reserved",
+      reservation: {
+        assignedAt: expect.any(Date),
+        line,
+      },
+    });
   });
 });
 

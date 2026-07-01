@@ -6333,6 +6333,101 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
+  it("rebinds an active member's direct chat on the same owned line without consuming capacity", async () => {
+    const homeLinePhone = "+15550100001";
+    const assignedAt = new Date("2026-03-26T11:30:00.000Z");
+    const routingRecord = {
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id",
+        memberId: "member_123",
+        value: "chat_home",
+      }),
+      linqHomeLineAssignedAt: assignedAt,
+      linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-recipient-phone",
+        memberId: "member_123",
+        value: homeLinePhone,
+      }),
+      linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homeLinePhone),
+      memberId: "member_123",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    };
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock(routingRecord);
+    hostedMemberRouting.groupBy.mockImplementation(async () => {
+      throw new Error("same-member same-line rebinds must reuse the existing claim");
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedLinqLine: buildHostedLinqLineFixture({
+        activeMemberLimit: 1,
+        maxNewConversationsPerDay: 1,
+        phoneNumber: homeLinePhone,
+      }),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          routing: routingRecord,
+          suspendedAt: null,
+        }),
+      },
+      hostedMemberRouting,
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        chatIsGroup: false,
+        data: {
+          chat: {
+            id: "chat_new",
+            is_group: false,
+            owner_handle: {
+              handle: homeLinePhone,
+              id: "handle_owner_123",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+        },
+        eventId: "evt_direct_rebind_same_line",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    expect(hostedMemberRouting.groupBy).not.toHaveBeenCalled();
+    expect(readHostedMemberRoutingUpsertMock(prisma)).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        linqHomeLineAssignedAt: assignedAt,
+        linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homeLinePhone),
+      }),
+    }));
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
+    expectHostedLinqPointerSignalAccepted("evt_direct_rebind_same_line");
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("suppresses repeat signup links after the first send that day", async () => {
     mocks.readHostedLinqDailyState.mockResolvedValueOnce(makeHostedLinqDailyState({
       inboundCount: 1,
