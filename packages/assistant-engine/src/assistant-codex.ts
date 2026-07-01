@@ -1863,11 +1863,9 @@ export type CodexWarmThreadCompactionOutcome =
 // deliberately blunt: any non-success poisons (kills) the warm process, which
 // is always safe because rollouts only contain completed entries — an aborted
 // compact leaves the thread uncompacted and the next turn spawns a fresh
-// process and resumes natively. A pending wake therefore never waits on the
-// in-flight provider call or the compact timeout; it is bounded only by the
-// old process's kill teardown (SIGTERM, 3s ceiling, then SIGKILL — typically
-// milliseconds), which the next turn must join via the memoized stop because
-// two app-server processes must never write the same rollout concurrently.
+// process and resumes natively. A pending wake waits only on the old
+// process's bounded kill teardown, which completes before container process
+// isolation can snapshot teardown in progress.
 export async function compactWarmCodexThread(input: {
   minThreadTokens: number
   signal?: AbortSignal | null
@@ -2062,18 +2060,7 @@ export async function compactWarmCodexThread(input: {
       }
     }
 
-    // Abort (pending wake or shutdown) detaches teardown: poison() flags the
-    // process unusable synchronously and SIGTERM->SIGKILL completes out of
-    // band; a racing turn joins it via the memoized stop (3s ceiling,
-    // typically milliseconds) and never waits on the provider call or the
-    // compact timeout. Non-abort failures (timeout/rpc_error/process_exit)
-    // have no wake racing and an idle checkpoint next, so they await
-    // teardown — the snapshot must never capture a rollout mid-teardown.
-    if (settledReason === 'aborted') {
-      void processInstance.poison('idle-compaction-failed')
-    } else {
-      await processInstance.poison('idle-compaction-failed')
-    }
+    await processInstance.poison('idle-compaction-failed')
     return {
       kind: 'failed',
       reason: settledReason,

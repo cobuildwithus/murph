@@ -4075,10 +4075,27 @@ describe('assistant codex runtime', () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-abort-barrier-work-')
     const codexHome = await createTempDir('assistant-codex-compact-abort-barrier-home-')
     const barrierReady = createDeferred<Record<string, unknown>>()
+    const releaseProcessClose = createDeferred<void>()
     const threadId = 'thread-compact-abort-barrier'
     const turnId = 'turn-compact-abort-barrier'
     const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
+    vi.mocked(process.kill).mockImplementation((pid, signal) => {
+      const child = spawnedChildren.find(
+        (candidate) => pid === -candidate.pid || pid === candidate.pid,
+      )
+      if (
+        child &&
+        (signal === 'SIGTERM' || signal === 'SIGKILL') &&
+        child.exitCode === null &&
+        child.signalCode === null
+      ) {
+        void releaseProcessClose.promise.then(() => {
+          child.emit('exit', null, signal)
+          child.emit('close', null, signal)
+        })
+      }
+      return true
+    })
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
@@ -4165,20 +4182,27 @@ describe('assistant codex runtime', () => {
     abortController.abort()
     spawnedChildren[0]!.stdout.write(jsonLine({ id: barrier.id, result: {} }))
 
+    await expect(
+      Promise.race([
+        outcome.then(() => 'settled' as const),
+        new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 25)),
+      ]),
+    ).resolves.toBe('pending')
+    expect(process.kill).toHaveBeenCalledWith(-25_650, 'SIGTERM')
+    releaseProcessClose.resolve()
+
     await expect(outcome).resolves.toMatchObject({
       kind: 'failed',
       reason: 'aborted',
       threadContextTokensBefore: 125_000,
       threadId,
     })
-    await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(
       readWrittenRpcMessages(spawnedChildren[0]!).some(
         (message) => message.method === 'thread/compact/start',
       ),
     ).toBe(false)
-    expect(process.kill).toHaveBeenCalledWith(-25_650, 'SIGTERM')
   })
 
   it('accepts reused warm events with alternate current-turn id shapes', async () => {
