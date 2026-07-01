@@ -53,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   readAssistantInputEvent: vi.fn(),
   readAssistantOutboxIntent: vi.fn(),
   recordHostedDeviceSyncDirtyPostCheckpointRecord: vi.fn(),
+  recordHostedProviderCleanupAfterDelivery: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
@@ -135,6 +136,7 @@ vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
   collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes:
     mocks.collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes,
   drainHostedProviderCleanupAfterCommit: mocks.drainHostedProviderCleanupAfterCommit,
+  recordHostedProviderCleanupAfterDelivery: mocks.recordHostedProviderCleanupAfterDelivery,
   recordHostedProviderCleanupBeforeCommit: mocks.recordHostedProviderCleanupBeforeCommit,
   readHostedProviderCleanupCheckpoint: mocks.readHostedProviderCleanupCheckpoint,
   resolveHostedProviderCleanupCheckpointWakeAt:
@@ -351,6 +353,37 @@ beforeEach(() => {
     nextWakeAt: null,
     recorded: 1,
     stillDirty: false,
+  });
+  mocks.recordHostedProviderCleanupAfterDelivery.mockImplementation(async (input: {
+    idleCheckpointDelayMs?: number | null;
+    nowMs: number;
+    outcomes: readonly HostedAssistantDeliveryOutcome[];
+    vaultRoot: string;
+  }) => {
+    const linqMessageIds =
+      mocks.collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes(input.outcomes);
+    if (linqMessageIds.length === 0) {
+      return {
+        nextWakeAt: null,
+      };
+    }
+
+    const checkpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
+      checkpoint: {
+        nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
+          idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+          nowMs: input.nowMs,
+        }),
+      },
+      linqMessageIds,
+      vaultRoot: input.vaultRoot,
+    });
+    const nextWakeAt = typeof checkpoint?.nextWakeAt === "string"
+      ? checkpoint.nextWakeAt
+      : null;
+    return {
+      nextWakeAt,
+    };
   });
   mocks.recordHostedProviderCleanupBeforeCommit.mockImplementation(async (input) =>
     input.checkpoint
@@ -9611,7 +9644,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         vaultRoot: "/tmp/murph-vault",
       }),
     );
-    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deferDueOrInvalid: false,
+        vaultRoot: "/tmp/murph-vault",
+      }),
+    );
     expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
     expect(mocks.resetHostedPreparedAssistantDeliveryEffects).toHaveBeenCalledWith({
       effects: [deliveryEffect],

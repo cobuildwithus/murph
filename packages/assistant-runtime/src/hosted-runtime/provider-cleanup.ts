@@ -82,6 +82,35 @@ export async function resolveHostedProviderCleanupScheduledWakeAt(input: {
   });
 }
 
+export async function recordHostedProviderCleanupAfterDelivery(input: {
+  idleCheckpointDelayMs?: number | null;
+  nowMs: number;
+  outcomes: readonly HostedAssistantDeliveryOutcome[];
+  vaultRoot: string;
+}): Promise<{ nextWakeAt: string | null }> {
+  const providerCleanupMessageIds =
+    collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes(input.outcomes);
+  if (providerCleanupMessageIds.length === 0) {
+    return {
+      nextWakeAt: null,
+    };
+  }
+
+  const checkpoint = await recordHostedProviderCleanupBeforeCommit({
+    checkpoint: {
+      nextWakeAt: resolveHostedProviderCleanupFirstDeferredWakeAt({
+        idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+        nowMs: input.nowMs,
+      }),
+    },
+    linqMessageIds: providerCleanupMessageIds,
+    vaultRoot: input.vaultRoot,
+  });
+  return {
+    nextWakeAt: checkpoint.nextWakeAt ?? null,
+  };
+}
+
 export async function drainHostedProviderCleanupAfterCommit(input: {
   assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
   assertLiveness?: () => Promise<void>;
