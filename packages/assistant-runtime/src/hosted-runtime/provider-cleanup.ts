@@ -46,15 +46,11 @@ export interface HostedProviderCleanupDrainResult {
 export async function recordHostedProviderCleanupBeforeCommit(input: {
   linqMessageIds?: readonly string[] | null;
   checkpoint: HostedProviderCleanupCheckpoint;
-  nowMs?: number | null;
   vaultRoot: string;
 }): Promise<HostedProviderCleanupCheckpoint> {
   const existing = await readHostedProviderCleanupState(input.vaultRoot);
-  const checkpoint = resolveHostedProviderCleanupRecordedCheckpoint({
-    existing: existing?.checkpoint ?? null,
-    next: input.checkpoint,
-    nowMs: input.nowMs,
-  });
+  const checkpoint = normalizeHostedProviderCleanupCheckpoint(input.checkpoint)
+    ?? { nextWakeAt: null };
   await writeHostedProviderCleanupState(input.vaultRoot, {
     schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
     checkpoint,
@@ -217,37 +213,6 @@ export function resolveHostedProviderCleanupCheckpointWakeAt(input: {
   }
 
   return checkpointWakeAt;
-}
-
-function resolveHostedProviderCleanupRecordedCheckpoint(input: {
-  existing: HostedProviderCleanupCheckpoint | null;
-  next: HostedProviderCleanupCheckpoint;
-  nowMs?: number | null;
-}): HostedProviderCleanupCheckpoint {
-  const normalizedNext = normalizeHostedProviderCleanupCheckpoint(input.next)
-    ?? { nextWakeAt: null };
-  const nextWakeAt = normalizedNext.nextWakeAt ?? null;
-  const nextWakeMs = Date.parse(nextWakeAt ?? "");
-  if (!Number.isFinite(nextWakeMs)) {
-    return normalizedNext;
-  }
-
-  const existingWakeAt = input.existing?.nextWakeAt ?? null;
-  const existingWakeMs = Date.parse(existingWakeAt ?? "");
-  const nowMs = Number.isFinite(input.nowMs)
-    ? Number(input.nowMs)
-    : Date.now();
-  if (
-    Number.isFinite(existingWakeMs)
-    && existingWakeMs > nowMs
-    && existingWakeMs < nextWakeMs
-  ) {
-    return {
-      nextWakeAt: existingWakeAt,
-    };
-  }
-
-  return normalizedNext;
 }
 
 function resolveHostedProviderCleanupIdleCheckpointDelayMs(

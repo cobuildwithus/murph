@@ -7811,7 +7811,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         nextWakeAt: "2026-04-27T00:14:00.000Z",
       },
       linqMessageIds: ["provider_message_from_reply"],
-      nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
       vaultRoot: "/tmp/murph-vault",
     });
     expect(result).toEqual(expect.objectContaining({
@@ -7876,7 +7875,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         nextWakeAt: "2026-04-27T00:14:00.000Z",
       },
       linqMessageIds: ["provider_message_from_active_turn"],
-      nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
       vaultRoot: "/tmp/murph-vault",
     });
     expect(result).toEqual(expect.objectContaining({
@@ -7933,7 +7931,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         nextWakeAt: "2026-04-27T00:14:00.000Z",
       },
       linqMessageIds: ["provider_message_from_reply"],
-      nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
       vaultRoot: "/tmp/murph-vault",
     });
     expect(result).toEqual(expect.objectContaining({
@@ -8059,7 +8056,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         nextWakeAt: "2026-04-27T00:14:00.000Z",
       },
       linqMessageIds: ["provider_message_from_active_turn"],
-      nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
       vaultRoot: "/tmp/murph-vault",
     });
     expect(result).toEqual(expect.objectContaining({

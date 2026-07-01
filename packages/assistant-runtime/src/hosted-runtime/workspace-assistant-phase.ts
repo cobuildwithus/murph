@@ -3942,7 +3942,6 @@ async function deferHostedProviderCleanupAfterDelivery(input: {
       }),
     },
     linqMessageIds: providerCleanupMessageIds,
-    nowMs,
     vaultRoot: input.input.restored.vaultRoot,
   });
   return {

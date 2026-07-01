@@ -186,6 +186,10 @@ import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "../src/hosted-runtime/pending-assistant-input.ts";
 import {
+  readHostedProviderCleanupCheckpoint,
+  recordHostedProviderCleanupBeforeCommit,
+} from "../src/hosted-runtime/provider-cleanup.ts";
+import {
   enqueueHostedSystemMailboxItem,
 } from "../src/hosted-runtime/system-mailbox.ts";
 import type {
@@ -8302,7 +8306,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const idleCheckpointDelayMs = 250;
+    const idleCheckpointDelayMs = 1_000;
     const providerCleanupWakeAt = new Date(Date.now() + 5 * 60_000).toISOString();
     let snapshotStartedAtMs: number | null = null;
 
@@ -8373,6 +8377,108 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "idle_shutdown",
       ]);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("deferred provider cleanup append replaces an older wake inside the idle window", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-provider-cleanup-replace-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const idleCheckpointDelayMs = 250;
+    let replacementWakeAt: string | null = null;
+    let snapshotStartedAtMs: number | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await recordHostedProviderCleanupBeforeCommit({
+        checkpoint: {
+          nextWakeAt: new Date(Date.now() + 500).toISOString(),
+        },
+        linqMessageIds: ["linq_existing_cleanup"],
+        vaultRoot,
+      });
+
+      const startedAt = performance.now();
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_provider_cleanup_replace_idle_delay",
+            idleCheckpointDelayMs,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            snapshotStartedAtMs = performance.now();
+            events.push(`snapshot:${snapshotInput.reason}`);
+            assert.equal(snapshotInput.reason, "idle_shutdown");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "7".repeat(64),
+                key: "users/bundles/member-synthetic/provider-cleanup-replace-idle-delay.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            return {
+              afterCheckpoint: async () => {
+                replacementWakeAt = new Date(
+                  Date.now() + idleCheckpointDelayMs + 1_000,
+                ).toISOString();
+                const checkpoint = await recordHostedProviderCleanupBeforeCommit({
+                  checkpoint: {
+                    nextWakeAt: replacementWakeAt,
+                  },
+                  linqMessageIds: ["linq_new_cleanup"],
+                  vaultRoot,
+                });
+                return {
+                  checkpointReason: "provider_cleanup" as const,
+                  nextWakeAt: checkpoint.nextWakeAt ?? null,
+                  nextWakeReason: "assistant" as const,
+                };
+              },
+              checkpointReason: "outbox_receipt",
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.ok(replacementWakeAt);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, replacementWakeAt);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, replacementWakeAt);
+      assert.deepEqual(await readHostedProviderCleanupCheckpoint(vaultRoot), {
+        nextWakeAt: replacementWakeAt,
+      });
+      assert.ok(snapshotStartedAtMs !== null);
+      assert.ok(snapshotStartedAtMs - startedAt >= idleCheckpointDelayMs - 50);
+      assert.ok(snapshotStartedAtMs - startedAt < 5_000);
     } finally {
       await removeTempRoot(vaultRoot);
     }
