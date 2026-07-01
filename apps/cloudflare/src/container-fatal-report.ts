@@ -17,7 +17,6 @@ import { HOSTED_RUNNER_BOUND_USER_ID_HEADER } from "./runner-outbound/headers.ts
 const HOSTED_CONTAINER_FATAL_STAGES = [
   "ambiguous_abort_poison",
   "entrypoint_start_failed",
-  "shell_isolation_poison",
   "uncaught_exception",
   "unhandled_rejection",
 ] as const;

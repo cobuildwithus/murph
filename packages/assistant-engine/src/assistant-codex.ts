@@ -1,12 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import type {
-  HostedExpectedCodexRootProcess,
-} from '@murphai/hosted-execution/runtime-control'
 import type {
   HostedCodexAuthAction,
 } from '@murphai/hosted-execution/contracts'
@@ -1016,36 +1013,6 @@ class CodexAppServerProcess {
       this.child.exitCode === null &&
       this.child.signalCode === null
     )
-  }
-
-  async snapshotExpectedRootProcess(): Promise<HostedExpectedCodexRootProcess | null> {
-    const pid = this.child.pid
-    if (
-      typeof pid !== 'number' ||
-      !Number.isSafeInteger(pid) ||
-      pid <= 0 ||
-      this.child.exitCode !== null ||
-      this.child.signalCode !== null
-    ) {
-      return null
-    }
-
-    const procState = await readCodexProcState(pid)
-    if (
-      !procState?.commandLineDigest ||
-      !procState?.startTimeTicksFromProcStat
-    ) {
-      return null
-    }
-
-    return {
-      commandLineDigest: procState.commandLineDigest,
-      owner: 'codex-app-server',
-      pid,
-      processGroupId: this.processGroupPid,
-      startTimeTicksFromProcStat: procState.startTimeTicksFromProcStat,
-      uid: procState.uid,
-    }
   }
 
   private closeStdin(): VaultCliError | null {
@@ -2088,19 +2055,6 @@ export async function compactWarmCodexThread(input: {
   }
 }
 
-export async function snapshotExpectedCodexRootProcess(): Promise<
-  HostedExpectedCodexRootProcess | null
-> {
-  return await withWarmCodexSlotLock(async () => {
-    const processInstance = warmCodexProcess
-    if (!processInstance?.isReusableFor(processInstance.launchKey)) {
-      return null
-    }
-
-    return await processInstance.snapshotExpectedRootProcess()
-  })
-}
-
 function hashCodexRawString(value: string): string {
   return createHash('sha256')
     .update(value)
@@ -2123,47 +2077,6 @@ function isCodexTurnStartedMethod(method: string | null): boolean {
 
 function isCodexTurnCompletedMethod(method: string | null): boolean {
   return method === 'turn/completed' || method === 'turn.completed'
-}
-
-async function readCodexProcState(pid: number): Promise<{
-  commandLineDigest: string | null
-  startTimeTicksFromProcStat: string | null
-  uid: number | null
-} | null> {
-  try {
-    const [cmdline, stat, status] = await Promise.all([
-      readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => null),
-      readFile(`/proc/${pid}/stat`, 'utf8'),
-      readFile(`/proc/${pid}/status`, 'utf8').catch(() => null),
-    ])
-    return {
-      commandLineDigest: cmdline ? hashCodexRawString(cmdline) : null,
-      startTimeTicksFromProcStat: readCodexProcStartTimeTicks(stat),
-      uid: status ? readCodexProcUid(status) : null,
-    }
-  } catch {
-    return null
-  }
-}
-
-function readCodexProcStartTimeTicks(stat: string): string | null {
-  const commandEnd = stat.lastIndexOf(') ')
-  if (commandEnd === -1 || commandEnd + 2 >= stat.length) {
-    return null
-  }
-
-  const fields = stat.slice(commandEnd + 2).trim().split(/\s+/u)
-  const startTime = fields[19]
-  return typeof startTime === 'string' && /^[0-9]+$/u.test(startTime)
-    ? startTime
-    : null
-}
-
-function readCodexProcUid(status: string): number | null {
-  const uidLine = status.split('\n').find((line) => line.startsWith('Uid:'))
-  const uidRaw = uidLine?.trim().split(/\s+/u)[1]
-  const uid = Number.parseInt(uidRaw ?? '', 10)
-  return Number.isInteger(uid) && uid >= 0 ? uid : null
 }
 
 async function runCodexAppServerTurnOnProcess(

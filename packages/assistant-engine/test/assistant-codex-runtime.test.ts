@@ -38,7 +38,6 @@ import {
   executeCodexManagedAccountOperation,
   readCodexAppServerTurnFailureContext,
   resolveCodexDisplayOptions,
-  snapshotExpectedCodexRootProcess,
   stopWarmCodexAppServer,
 } from '../src/assistant-codex.ts'
 import type {
