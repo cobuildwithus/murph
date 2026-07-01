@@ -2,7 +2,7 @@ import {
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
 } from "@murphai/device-syncd/hosted-runtime";
-import { isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 
 import {
   InvalidRouteParamEncodingError,
@@ -11,7 +11,7 @@ import {
   providerCallbackRedirect,
   resolveDecodedRouteParam,
 } from "@/src/lib/device-sync/http";
-import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
+import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
 
 const HOSTED_DEVICE_SYNC_CALLBACK_FAILURE_MESSAGE =
   "Something went wrong while finishing the device connection. Please retry from Murph.";
@@ -24,8 +24,8 @@ export async function GET(
 
   try {
     providerName = await resolveDecodedRouteParam(context.params, "provider");
-    const controlPlane = createHostedDeviceSyncControlPlane(request);
-    const result = await controlPlane.handleConnectionCallback(providerName);
+    const publicIngress = createHostedDeviceSyncPublicIngressService(request);
+    const result = await publicIngress.handleConnectionCallback(providerName);
     const redirect = providerCallbackRedirect({
       returnTo: result.returnTo,
       provider: result.account.provider,

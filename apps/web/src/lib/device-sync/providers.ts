@@ -1,8 +1,6 @@
-import {
-  deviceSyncError,
-} from "@murphai/device-syncd/public-ingress";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { createConfiguredDeviceSyncRegistry } from "@murphai/device-syncd/config";
-import type { DeviceSyncProvider, DeviceSyncRegistry } from "@murphai/device-syncd/public-ingress";
+import type { DeviceSyncProvider, DeviceSyncRegistry } from "@murphai/device-syncd/types";
 
 export function createHostedDeviceSyncRegistry(
   env: NodeJS.ProcessEnv = process.env,

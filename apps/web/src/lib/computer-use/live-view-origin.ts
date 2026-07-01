@@ -1,11 +1,7 @@
-export const KERNEL_COMPUTER_LIVE_VIEW_FRAME_SOURCES = [
-  "https://*.onkernel.com:8443",
-] as const;
-
-export const KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES = [
-  "https://*.onkernel.com:8443",
-  "wss://*.onkernel.com:8443",
-] as const;
+export {
+  KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES,
+  KERNEL_COMPUTER_LIVE_VIEW_FRAME_SOURCES,
+} from "../../../kernel-live-view-origin";
 
 export function isAllowedComputerLiveViewUrl(input: {
   url: string;

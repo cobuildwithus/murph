@@ -29,7 +29,7 @@ import {
 import {
   JUNCTION_DEFAULT_PROVIDER_FILTER,
   normalizeJunctionProviderFilter,
-} from "../src/providers/junction-connect-sources.ts";
+} from "../src/config/junction-connect-sources.ts";
 import { computeRetryDelayMs } from "../src/shared.ts";
 import { createDeviceSyncEnv, requireValue } from "./helpers.ts";
 

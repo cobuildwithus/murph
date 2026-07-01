@@ -1058,6 +1058,15 @@ describe("buildHostedLocalDevOverrides", () => {
 
     expect(overrides.HOSTED_ONBOARDING_PUBLIC_BASE_URL).toBe("http://localhost:3000");
     expect(overrides.HOSTED_WEB_BASE_URL).toBe("http://localhost:3000");
+    expect(overrides.RETELL_WEBHOOK_PUBLIC_BASE_URL).toBeUndefined();
+  });
+
+  it("sets the Retell webhook public base from the managed public tunnel", () => {
+    const overrides = buildHostedLocalDevOverrides(localConfig, {}, {
+      retellWebhookPublicBaseUrl: " https://tunnel.example.test ",
+    });
+
+    expect(overrides.RETELL_WEBHOOK_PUBLIC_BASE_URL).toBe("https://tunnel.example.test");
   });
 
   it("falls back from malformed local contact privacy overrides", () => {

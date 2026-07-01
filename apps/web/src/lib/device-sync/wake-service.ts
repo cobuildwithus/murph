@@ -2,17 +2,18 @@ import {
   buildJunctionProviderSourceInstanceKey,
   normalizeJunctionProviderSlug,
 } from "@murphai/device-syncd/connect-config";
+import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
+import type {
+  DeviceSyncIngressWebhook,
+  DeviceSyncJobInput,
+  DeviceSyncRegistry,
+  DeviceSyncWebhookAcceptanceMode,
+  ProviderConnectionResult,
+  PublicDeviceSyncAccount,
+} from "@murphai/device-syncd/types";
 import {
-  deviceSyncError,
-  isDeviceSyncError,
-  type DeviceSyncIngressWebhook,
-  type DeviceSyncJobInput,
-  type DeviceSyncRegistry,
-  type DeviceSyncWebhookAcceptanceMode,
-  type ProviderConnectionResult,
-  type PublicDeviceSyncAccount,
-} from "@murphai/device-syncd/public-ingress";
-import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
+  shapeHostedDeviceSyncJobHintPayload,
+} from "@murphai/device-syncd/hosted-hints";
 import {
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,

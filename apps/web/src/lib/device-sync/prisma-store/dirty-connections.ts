@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 
 import { Prisma, PrismaClient } from "@prisma/client";
-import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
   type HostedExecutionDeviceSyncStagedDirtyAck,

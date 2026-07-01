@@ -2316,6 +2316,9 @@ describe("hosted local dev stack", () => {
     expect(environmentModule.buildHostedLocalDevOverrides).toHaveBeenCalledWith(
       expect.any(Object),
       expect.any(Object),
+      {
+        retellWebhookPublicBaseUrl: "https://tunnel.example.test",
+      },
     );
     expect(spawnChildProcess).toHaveBeenCalledWith(
       "linq-tunnel",

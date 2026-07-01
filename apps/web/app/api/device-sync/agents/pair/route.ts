@@ -1,6 +1,10 @@
-import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 
-import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
+import { createHostedDeviceSyncAgentSessionContext } from "@/src/lib/device-sync/agent-session-service";
+import {
+  assertBrowserMutationOrigin,
+  requireAuthenticatedHostedUser,
+} from "@/src/lib/device-sync/auth";
 import { jsonOk, postOnlyJson, readOptionalJsonObject, withJsonError } from "@/src/lib/device-sync/http";
 
 const HOSTED_DEVICE_SYNC_AGENT_PAIR_BODY_LIMIT_BYTES = 1024;
@@ -10,12 +14,14 @@ export function GET() {
 }
 
 export const POST = withJsonError(async (request: Request) => {
-  const controlPlane = createHostedDeviceSyncControlPlane(request);
-  controlPlane.assertBrowserMutationOrigin();
-  const user = await controlPlane.requireAuthenticatedUser();
+  const context = createHostedDeviceSyncAgentSessionContext(request);
+  assertBrowserMutationOrigin(request, context.env);
+  const user = await requireAuthenticatedHostedUser(request, context.env, {
+    nonceStore: context.store,
+  });
   const body = await readAgentPairRequestBody(request);
   const label = typeof body.label === "string" ? body.label : null;
-  return jsonOk(await controlPlane.pairAgent(user, label));
+  return jsonOk(await context.agentSessions.createAgentSession(user, label));
 });
 
 async function readAgentPairRequestBody(request: Request): Promise<Record<string, unknown>> {

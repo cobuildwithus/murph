@@ -1,26 +1,16 @@
-import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
-import { buildHostedDeviceSyncSettingsSources } from "@/src/lib/device-sync/settings-surface";
+import { buildHostedDeviceSyncSidebarStatusResponse } from "@/src/lib/device-sync/sidebar-status-service";
+import { readHostedDeviceSyncEnvironment } from "@/src/lib/device-sync/env";
+import { resolveHostedDeviceSyncPublicBaseUrl } from "@/src/lib/device-sync/public-base-url";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
-import {
-  summarizeSidebarDeviceSyncStatus,
-  type SidebarDeviceSyncStatusResponse,
-} from "@/src/lib/device-sync/sidebar-status";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 
 export const GET = withJsonError(async (request: Request) => {
   const auth = await requireActiveHostedAppSessionFromRequest(request);
-  const controlPlane = createHostedDeviceSyncControlPlane(request);
-  const { connectionSources, connections, providers } =
-    await controlPlane.listConnections(auth.member.id);
-  const sources = buildHostedDeviceSyncSettingsSources({
-    connectionSources,
-    connections,
-    providers,
-  });
+  const env = readHostedDeviceSyncEnvironment(process.env);
+  const publicBaseUrl = resolveHostedDeviceSyncPublicBaseUrl(request, env).baseUrl;
 
-  return jsonOk({
-    generatedAt: new Date().toISOString(),
-    ok: true,
-    status: summarizeSidebarDeviceSyncStatus(sources),
-  } satisfies SidebarDeviceSyncStatusResponse);
+  return jsonOk(await buildHostedDeviceSyncSidebarStatusResponse({
+    memberId: auth.member.id,
+    publicBaseUrl,
+  }));
 });

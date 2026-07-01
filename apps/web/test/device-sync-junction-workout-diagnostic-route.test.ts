@@ -19,8 +19,8 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
 }));
 
-vi.mock("@murphai/device-syncd/config", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@murphai/device-syncd/config")>()),
+vi.mock("@murphai/device-syncd/providers/junction-config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@murphai/device-syncd/providers/junction-config")>()),
   readConfiguredJunctionDeviceSyncProviderConfig: mocks.readConfiguredJunctionDeviceSyncProviderConfig,
 }));
 

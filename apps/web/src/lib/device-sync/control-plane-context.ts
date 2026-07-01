@@ -1,16 +1,15 @@
-import { deviceSyncError, type DeviceSyncRegistry } from "@murphai/device-syncd/public-ingress";
-
 import { getPrisma } from "../prisma";
 import { readHostedDeviceSyncEnvironment, type HostedDeviceSyncEnvironment } from "./env";
-import { createHostedDeviceSyncRegistry } from "./providers";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
-
-export type HostedDeviceSyncPublicBaseUrlSource = "configured" | "request";
+import {
+  resolveHostedDeviceSyncAllowedReturnOrigins,
+  resolveHostedDeviceSyncPublicBaseUrl,
+  type HostedDeviceSyncPublicBaseUrlSource,
+} from "./public-base-url";
 
 export interface HostedDeviceSyncControlPlaneContext {
   readonly request: Request;
   readonly env: HostedDeviceSyncEnvironment;
-  readonly registry: DeviceSyncRegistry;
   readonly store: PrismaDeviceSyncControlPlaneStore;
   readonly publicIngressBaseUrl: string;
   readonly publicIngressBaseUrlSource: HostedDeviceSyncPublicBaseUrlSource;
@@ -22,67 +21,22 @@ export function createHostedDeviceSyncControlPlaneContext(
 ): HostedDeviceSyncControlPlaneContext {
   const envSource = process.env;
   const env = readHostedDeviceSyncEnvironment(envSource);
-  const publicBaseUrl = resolveHostedPublicBaseUrl(request, env.publicBaseUrl, env.isProduction);
+  const publicBaseUrl = resolveHostedDeviceSyncPublicBaseUrl(request, env);
 
   return {
     request,
     env,
-    registry: createHostedDeviceSyncRegistry(envSource),
     store: new PrismaDeviceSyncControlPlaneStore({
       providerAccountBlindIndexKey: env.routingIndexKey,
       prisma: getPrisma(),
     }),
     publicIngressBaseUrl: publicBaseUrl.baseUrl,
     publicIngressBaseUrlSource: publicBaseUrl.source,
-    allowedReturnOrigins: resolveAllowedReturnOrigins(
+    allowedReturnOrigins: resolveHostedDeviceSyncAllowedReturnOrigins({
+      configuredOrigins: env.allowedReturnOrigins,
+      publicBaseUrl: publicBaseUrl.baseUrl,
+      publicBaseUrlSource: publicBaseUrl.source,
       request,
-      publicBaseUrl.baseUrl,
-      publicBaseUrl.source,
-      env.allowedReturnOrigins,
-    ),
+    }),
   };
-}
-
-function resolveHostedPublicBaseUrl(
-  request: Request,
-  configuredBaseUrl: string | null,
-  isProduction: boolean,
-): { baseUrl: string; source: HostedDeviceSyncPublicBaseUrlSource } {
-  if (configuredBaseUrl) {
-    return {
-      baseUrl: configuredBaseUrl.replace(/\/+$/u, ""),
-      source: "configured",
-    };
-  }
-
-  if (isProduction) {
-    throw deviceSyncError({
-      code: "DEVICE_SYNC_PUBLIC_BASE_URL_REQUIRED",
-      message:
-        "Hosted device-sync public callback and webhook routes require DEVICE_SYNC_PUBLIC_BASE_URL or a canonical hosted public URL in production.",
-      retryable: false,
-      httpStatus: 500,
-    });
-  }
-
-  return {
-    baseUrl: `${new URL(request.url).origin}/api/device-sync`,
-    source: "request",
-  };
-}
-
-function resolveAllowedReturnOrigins(
-  request: Request,
-  publicBaseUrl: string,
-  publicBaseUrlSource: HostedDeviceSyncPublicBaseUrlSource,
-  configuredOrigins: readonly string[],
-): string[] {
-  const publicOrigin = new URL(publicBaseUrl).origin;
-  const requestOrigin = new URL(request.url).origin;
-
-  return [...new Set([
-    ...(publicBaseUrlSource === "request" ? [requestOrigin] : []),
-    publicOrigin,
-    ...configuredOrigins,
-  ])];
 }

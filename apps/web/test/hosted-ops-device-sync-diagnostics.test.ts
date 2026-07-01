@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createHostedBrowserConnectionId } from "../src/lib/device-sync/public-connection";
 import { createJsonPostRequest } from "./route-test-helpers";
 
 vi.mock("server-only", () => ({}));
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   diagnoseBackfill: vi.fn(),
   getStoredConnectionAccountForUser: vi.fn(),
+  listConnectionSources: vi.fn(),
   listConnections: vi.fn(),
   listConnectionsForUser: vi.fn(),
   probeRest: vi.fn(),
@@ -19,6 +21,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
+}));
+
+vi.mock("@/src/lib/device-sync/providers", () => ({
+  createHostedDeviceSyncRegistry: vi.fn(() => ({
+    get: mocks.registryGet,
+  })),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -35,6 +43,14 @@ type HostedOpsJunctionDiagnosticsRouteModule =
 let hostedOpsJunctionDiagnosticsRoute: HostedOpsJunctionDiagnosticsRouteModule;
 
 const SELECTED_SOURCE_PROVIDER = "oura";
+const ROUTING_INDEX_KEY = Buffer.from(
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "hex",
+);
+const JUNCTION_PUBLIC_CONNECTION_ID = createHostedBrowserConnectionId(
+  ROUTING_INDEX_KEY,
+  "dsc_junction_123",
+);
 
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const originalDeviceSyncBackfillDiagnosticEnabled =
@@ -59,17 +75,15 @@ describe("hosted ops Junction diagnostics", () => {
       connectionId === "dsc_junction_123" ? "dspc_junction_123" : connectionId
     );
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      connections: {
-        createBrowserConnectionId: mocks.createBrowserConnectionId,
-      },
-      listConnections: mocks.listConnections,
+      createBrowserConnectionId: mocks.createBrowserConnectionId,
       publicIngressBaseUrl: "https://join.example.test/api/device-sync",
       publicIngressBaseUrlSource: "request",
-      registry: {
-        get: mocks.registryGet,
+      env: {
+        routingIndexKey: ROUTING_INDEX_KEY,
       },
       store: {
         getStoredConnectionAccountForUser: mocks.getStoredConnectionAccountForUser,
+        listConnectionSources: mocks.listConnectionSources,
         listConnectionsForUser: mocks.listConnectionsForUser,
       },
     });
@@ -92,6 +106,25 @@ describe("hosted ops Junction diagnostics", () => {
       provider: "junction",
     });
     mocks.getStoredConnectionAccountForUser.mockResolvedValue(null);
+    mocks.listConnectionSources.mockResolvedValue([
+      {
+        connectionId: "dsc_junction_123",
+        createdAt: "2026-06-27T18:49:38.000Z",
+        displayName: null,
+        firstSeenAt: "2026-06-27T18:49:38.000Z",
+        id: "dcs_junction_123",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-06-28T08:50:56.000Z",
+        resourceAvailabilitySummary: Object.fromEntries(
+          Array.from({ length: 18 }, (_, index) => [`resource_${index}`, true]),
+        ),
+        sourceInstanceKey: "oura:default",
+        sourceProviderSlug: SELECTED_SOURCE_PROVIDER,
+        status: "connected",
+        updatedAt: "2026-06-28T08:50:56.000Z",
+      },
+    ]);
     mocks.listConnections.mockResolvedValue({
       connectionSources: [
         {
@@ -291,7 +324,7 @@ describe("hosted ops Junction diagnostics", () => {
     const request = createJsonPostRequest(
       "https://join.example.test/api/ops/device-sync/junction-diagnostics",
       {
-        connectionId: "dspc_junction_123",
+        connectionId: JUNCTION_PUBLIC_CONNECTION_ID,
         memberId: "member_target",
         sourceProvider: SELECTED_SOURCE_PROVIDER,
         windowEnd: "2026-06-28T23:59:59.999Z",
@@ -308,7 +341,7 @@ describe("hosted ops Junction diagnostics", () => {
     expect(response.status).toBe(200);
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(request);
     expect(mocks.requireActiveHostedAppSessionFromRequest).toHaveBeenCalledWith(request);
-    expect(mocks.listConnections).toHaveBeenCalledWith("member_target");
+    expect(mocks.listConnectionsForUser).toHaveBeenCalledWith("member_target");
     expect(mocks.getStoredConnectionAccountForUser).toHaveBeenCalledWith(
       "member_target",
       "dsc_junction_123",
@@ -401,7 +434,7 @@ describe("hosted ops Junction diagnostics", () => {
       createJsonPostRequest(
         "https://join.example.test/api/ops/device-sync/junction-diagnostics",
         {
-          connectionId: "dspc_junction_123",
+          connectionId: JUNCTION_PUBLIC_CONNECTION_ID,
           memberId: "member_target",
           sourceProvider: "garmin",
         },
@@ -414,9 +447,8 @@ describe("hosted ops Junction diagnostics", () => {
     );
 
     expect(response.status).toBe(409);
-    expect(mocks.listConnections).toHaveBeenCalledWith("member_target");
+    expect(mocks.listConnectionsForUser).toHaveBeenCalledWith("member_target");
     expect(mocks.registryGet).not.toHaveBeenCalled();
-    expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
     expect(mocks.getStoredConnectionAccountForUser).not.toHaveBeenCalled();
     expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
     expect(mocks.probeRest).not.toHaveBeenCalled();

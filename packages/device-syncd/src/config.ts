@@ -151,15 +151,21 @@ export {
 export {
   deviceSyncProviderManifests,
   getConfiguredDeviceSyncProviderManifest,
-  getConfiguredDeviceSyncProviderJobDefinition,
   listDeviceSyncProviderCatalog,
   listConfiguredDeviceSyncProviderManifests,
-  normalizeConfiguredDeviceSyncJobInput,
-  normalizeConfiguredDeviceSyncJobRecord,
   requireConfiguredDeviceSyncProviderManifest,
   resolveConfiguredDeviceSyncProviderManifest,
-  shapeConfiguredDeviceSyncHostedHintPayload,
 } from "./config/provider-manifests.ts";
+export {
+  getConfiguredDeviceSyncProviderJobDefinition,
+  normalizeConfiguredDeviceSyncJobInput,
+  normalizeConfiguredDeviceSyncJobRecord,
+  shapeConfiguredDeviceSyncHostedHintPayload,
+} from "./provider-job-definitions.ts";
+export {
+  resolveConfiguredDeviceSyncProviderCredentialPolicy,
+  resolveDeviceSyncProviderCredentialPolicy,
+} from "./provider-credential-policy.ts";
 export {
   createConfiguredDeviceSyncProviders,
   createConfiguredDeviceSyncProvidersFromConfigs,
@@ -204,7 +210,7 @@ export {
   JUNCTION_LINK_PROVIDER_SLUGS,
   resolveJunctionConnectSourceLabel,
   resolveJunctionConnectTargetForSourceId,
-} from "./providers/junction-connect-sources.ts";
+} from "./config/junction-connect-sources.ts";
 
 export type {
   ConfiguredDeviceSyncProviderConfigByKey,
@@ -226,7 +232,7 @@ export type {
 } from "./config/connect-routes.ts";
 export type {
   JunctionConnectSourceTarget,
-} from "./providers/junction-connect-sources.ts";
+} from "./config/junction-connect-sources.ts";
 export type {
   ConfiguredDeviceSyncProviderCapabilities,
   DeviceSyncProviderCatalogEntry,

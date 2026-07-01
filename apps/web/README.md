@@ -312,6 +312,10 @@ Hosted onboarding extras:
   custom-function verification, and signed Retell lifecycle webhooks. Keep the
   published Retell agent configured for basic-attributes-only storage and point
   function/webhook URLs at the deployed `apps/web` routes.
+- `RETELL_WEBHOOK_PUBLIC_BASE_URL` optionally overrides the Retell lifecycle
+  webhook origin per created call. Leave it unset in production unless you are
+  deliberately overriding the published agent webhook; root `pnpm dev` sets it
+  from the managed local public tunnel when that tunnel is running.
 - `MURPH_TELEGRAM_USERNAME_OVERRIDE` optionally overrides user-facing Murph Telegram links. It is not a secret and is exposed to the browser bundle so local Vercel dev can point links at a development bot, for example `@murphdevelopment_bot`.
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY`

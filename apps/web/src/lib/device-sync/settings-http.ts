@@ -1,7 +1,7 @@
 import {
   isDeviceSyncError,
   type DeviceSyncError,
-} from "@murphai/device-syncd/public-ingress";
+} from "@murphai/device-syncd/errors";
 
 import {
   createJsonRouteHelpers,

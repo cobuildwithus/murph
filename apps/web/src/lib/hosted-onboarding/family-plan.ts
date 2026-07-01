@@ -1155,7 +1155,10 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     currentBillingPhase:
       input.subscription.status === "active" && activeMembersFitPaidSeats ? "paid" : null,
     currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
-    ...buildHostedFamilyStripeSubscriptionPeriodSnapshot(input.subscription),
+    ...buildHostedFamilyStripeSubscriptionPeriodSnapshot(
+      input.subscription,
+      familySeatItem.stripeSubscriptionItem,
+    ),
     billedSeatCount: familySeatItem.billedSeatCount,
     groupId: group.id,
     stripeCustomerId: coerceStripeObjectId(input.subscription.customer),
@@ -1701,7 +1704,10 @@ async function reconcileHostedFamilyDirectPaidUpgrade(input: {
       currentBillingPhase:
         input.subscription.status === "active" && activeMembersFitPaidSeats ? "paid" : null,
       currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
-      ...buildHostedFamilyStripeSubscriptionPeriodSnapshot(input.subscription),
+      ...buildHostedFamilyStripeSubscriptionPeriodSnapshot(
+        input.subscription,
+        familySeatItem.stripeSubscriptionItem,
+      ),
       billedSeatCount: familySeatItem.billedSeatCount,
       groupId: input.group.id,
       stripeCustomerId: coerceStripeObjectId(input.subscription.customer),
@@ -3794,20 +3800,23 @@ function isHostedFamilyStripeEventStale(input: {
 
 function buildHostedFamilyStripeSubscriptionPeriodSnapshot(
   subscription: Stripe.Subscription,
+  subscriptionItem?: Stripe.SubscriptionItem | null,
 ): {
   currentPeriodEnd?: Date | null;
   currentPeriodStart?: Date | null;
 } {
-  const periodStart = readHostedFamilyStripeTimestamp(subscription, "current_period_start");
-  const periodEnd = readHostedFamilyStripeTimestamp(subscription, "current_period_end");
+  const subscriptionPeriod = readHostedFamilyStripePeriod(subscription);
+  const period = subscriptionPeriod ?? (
+    subscriptionItem ? readHostedFamilyStripePeriod(subscriptionItem) : null
+  );
 
-  if (!periodStart || !periodEnd || periodStart.getTime() >= periodEnd.getTime()) {
+  if (!period) {
     return {};
   }
 
   return {
-    currentPeriodEnd: periodEnd,
-    currentPeriodStart: periodStart,
+    currentPeriodEnd: period.end,
+    currentPeriodStart: period.start,
   };
 }
 
@@ -3830,7 +3839,11 @@ function isHostedFamilyCheckoutSession(session: Stripe.Checkout.Session): boolea
 
 function readHostedFamilyStripeSeatSubscriptionItem(
   subscription: Stripe.Subscription,
-): { billedSeatCount: number; stripeSubscriptionItemId: string } | null {
+): {
+  billedSeatCount: number;
+  stripeSubscriptionItem: Stripe.SubscriptionItem;
+  stripeSubscriptionItemId: string;
+} | null {
   const familySeatPriceId = requireHostedFamilyStripePriceId();
   const matchingItems = (subscription.items?.data ?? []).filter(
     (item) => item.price?.id === familySeatPriceId,
@@ -3852,6 +3865,7 @@ function readHostedFamilyStripeSeatSubscriptionItem(
 
   return {
     billedSeatCount,
+    stripeSubscriptionItem: item,
     stripeSubscriptionItemId: item.id,
   };
 }
@@ -3863,11 +3877,27 @@ function buildEmptyHostedFamilyStripeSubscriptionResult(): HostedFamilyStripeSub
   };
 }
 
+function readHostedFamilyStripePeriod(
+  object: Stripe.Subscription | Stripe.SubscriptionItem,
+): { end: Date; start: Date } | null {
+  const periodStart = readHostedFamilyStripeTimestamp(object, "current_period_start");
+  const periodEnd = readHostedFamilyStripeTimestamp(object, "current_period_end");
+
+  if (!periodStart || !periodEnd || periodStart.getTime() >= periodEnd.getTime()) {
+    return null;
+  }
+
+  return {
+    end: periodEnd,
+    start: periodStart,
+  };
+}
+
 function readHostedFamilyStripeTimestamp(
-  object: Stripe.Subscription,
+  object: Stripe.Subscription | Stripe.SubscriptionItem,
   key: "current_period_end" | "current_period_start",
 ): Date | null {
-  const periodSource = object as Stripe.Subscription & {
+  const periodSource = object as (Stripe.Subscription | Stripe.SubscriptionItem) & {
     current_period_end?: unknown;
     current_period_start?: unknown;
   };

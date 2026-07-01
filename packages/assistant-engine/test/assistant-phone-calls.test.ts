@@ -54,7 +54,7 @@ describe("assistant phone calls", () => {
     })).not.toContain(MURPH_CREATE_PHONE_CALL_TOOL);
   });
 
-  it("uses only user/manual accepted input as phone-call authority", () => {
+  it("uses only eligible user-sourced accepted input as phone-call authority", () => {
     const acceptedInputItems = [
       { id: "initial_user", source: "initial" as const },
       { id: "initial", source: "manual" as const },
@@ -74,7 +74,7 @@ describe("assistant phone calls", () => {
     expect(resolveAssistantPhoneCallAcceptedInputIds({
       acceptedInputItems,
       turnTrigger: "automation-auto-reply",
-    })).toEqual([]);
+    })).toEqual(["assistant_input", "manual_input"]);
   });
 
   it("keys calls by accepted input and the exact bounded brief", () => {
@@ -174,7 +174,7 @@ describe("assistant phone calls", () => {
       success: false,
     });
     expect(result.rpcResult.contentItems[0]?.text).toContain(
-      "user-approved manual input",
+      "user-sourced input",
     );
   });
 

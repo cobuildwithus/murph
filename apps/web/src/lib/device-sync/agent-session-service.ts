@@ -1,20 +1,23 @@
 import { randomUUID } from "node:crypto";
 
-import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import type {
   DeviceSyncRegistry,
+  DeviceSyncProvider,
   PublicDeviceSyncAccount,
-} from "@murphai/device-syncd/public-ingress";
+} from "@murphai/device-syncd/types";
 import {
   HostedAgentSessionService,
   type HostedAgentUser,
 } from "../hosted-agent-sessions";
+import { getPrisma } from "../prisma";
 import {
   requireHostedDeviceSyncStoredTokenBundle,
 } from "./internal-runtime";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
-import { requireHostedDeviceSyncProvider } from "./providers";
+import { readHostedDeviceSyncEnvironment } from "./env";
+import type { HostedDeviceSyncEnvironment } from "./env";
 import {
   type HostedAgentSessionRecord,
   type HostedPrismaTransactionClient,
@@ -48,6 +51,16 @@ export interface HostedTokenBundleRefreshResponse extends HostedTokenBundleExpor
   tokenVersionChanged: boolean;
 }
 
+export interface HostedDeviceSyncAgentSessionContext {
+  readonly agentSessions: HostedDeviceSyncAgentSessionService;
+  readonly env: HostedDeviceSyncEnvironment;
+  readonly store: PrismaDeviceSyncControlPlaneStore;
+}
+
+export interface HostedDeviceSyncAgentSessionOptions {
+  readonly registry?: DeviceSyncRegistry | null;
+}
+
 const HOSTED_DEVICE_SYNC_AGENT_PAIR_PATH = "/api/device-sync/agents/pair";
 const HOSTED_DEVICE_TOKEN_REFRESH_LEASE_TTL_MS = 5 * 60_000;
 const HOSTED_DEVICE_TOKEN_REFRESH_PERSIST_ATTEMPTS = 3;
@@ -66,13 +79,15 @@ type HostedTokenRefreshSuccess = {
   tokenVersionChanged: boolean;
 };
 
+type HostedTokenRefreshRequiredResult = {
+  status: "refresh_required";
+  account: HostedStoredDeviceSyncAccount;
+  currentTokenBundle: HostedStoredTokenBundle;
+};
+
 type HostedTokenRefreshCurrentResult =
   | HostedTokenRefreshSuccess
-  | {
-      status: "refresh_required";
-      account: HostedStoredDeviceSyncAccount;
-      currentTokenBundle: HostedStoredTokenBundle;
-    };
+  | HostedTokenRefreshRequiredResult;
 
 type HostedTokenRefreshLockResult =
   | HostedTokenRefreshCurrentResult
@@ -116,16 +131,16 @@ type HostedTokenExportLockResult =
 
 export class HostedDeviceSyncAgentSessionService {
   readonly store: PrismaDeviceSyncControlPlaneStore;
-  readonly registry: DeviceSyncRegistry;
   readonly agentSessions: HostedAgentSessionService;
+  private registry: DeviceSyncRegistry | null;
 
   constructor(input: {
     request: Request;
     store: PrismaDeviceSyncControlPlaneStore;
-    registry: DeviceSyncRegistry;
+    registry?: DeviceSyncRegistry | null;
   }) {
     this.store = input.store;
-    this.registry = input.registry;
+    this.registry = input.registry ?? null;
     this.agentSessions = new HostedAgentSessionService({
       request: input.request,
       store: input.store,
@@ -536,24 +551,30 @@ export class HostedDeviceSyncAgentSessionService {
     session: HostedAgentSessionRecord;
   }): Promise<HostedTokenRefreshSuccess> {
     const leaseOwner = `agent-refresh:${randomUUID()}`;
-    const currentRefreshState = await this.claimRefreshLeaseOrResolveCurrent({
-      ...input,
-      leaseOwner,
-    });
+    const currentRefreshState = await this.resolveCurrentRefreshState(input);
 
     if (currentRefreshState.status === "success") {
       return currentRefreshState;
     }
 
-    const provider = requireHostedDeviceSyncProvider(this.registry, currentRefreshState.account.provider);
+    const provider = await this.requireConfiguredRefreshProvider(currentRefreshState.account.provider);
+    const leasedRefreshState = await this.claimRefreshLeaseOrResolveCurrent({
+      ...input,
+      currentRefreshState,
+      leaseOwner,
+    });
+
+    if (leasedRefreshState.status === "success") {
+      return leasedRefreshState;
+    }
     const refreshResult = await refreshProviderTokens({
-      account: currentRefreshState.account,
+      account: leasedRefreshState.account,
       provider,
     });
 
     const persistedResult = await this.persistProviderRefreshResultWithLease({
       ...input,
-      leaseOwner: currentRefreshState.leaseOwner,
+      leaseOwner: leasedRefreshState.leaseOwner,
       refreshResult,
     });
 
@@ -634,23 +655,12 @@ export class HostedDeviceSyncAgentSessionService {
   private async claimRefreshLeaseOrResolveCurrent(input: {
     baseTokenBundle: HostedStoredTokenBundle;
     connectionId: string;
+    currentRefreshState: HostedTokenRefreshRequiredResult;
     forceRefresh: boolean;
     leaseOwner: string;
     now: string;
     session: HostedAgentSessionRecord;
   }): Promise<HostedTokenRefreshLeaseResult> {
-    const currentRefreshState = await this.resolveCurrentRefreshState({
-      baseTokenBundle: input.baseTokenBundle,
-      connectionId: input.connectionId,
-      forceRefresh: input.forceRefresh,
-      now: input.now,
-      session: input.session,
-    });
-
-    if (currentRefreshState.status === "success") {
-      return currentRefreshState;
-    }
-
     const nowMs = Date.parse(input.now);
     const leaseExpiresAt = new Date(nowMs + HOSTED_DEVICE_TOKEN_REFRESH_LEASE_TTL_MS).toISOString();
     const claim = await this.store.withConnectionMutationLock(input.connectionId, async (tx) =>
@@ -669,8 +679,8 @@ export class HostedDeviceSyncAgentSessionService {
       case "claimed":
         return {
           status: "lease_claimed",
-          account: currentRefreshState.account,
-          currentTokenBundle: currentRefreshState.currentTokenBundle,
+          account: input.currentRefreshState.account,
+          currentTokenBundle: input.currentRefreshState.currentTokenBundle,
           leaseOwner: input.leaseOwner,
         };
       case "version_changed": {
@@ -1115,6 +1125,62 @@ export class HostedDeviceSyncAgentSessionService {
   private async assertCurrentAgentSessionStillActive(): Promise<void> {
     await this.agentSessions.requireAgentSession();
   }
+
+  private async requireRegistry(): Promise<DeviceSyncRegistry> {
+    if (!this.registry) {
+      throw deviceSyncError({
+        code: "DEVICE_SYNC_PROVIDER_RUNTIME_UNAVAILABLE",
+        message: "Hosted device-sync provider runtime is unavailable for this route.",
+        retryable: false,
+        httpStatus: 500,
+      });
+    }
+
+    return this.registry;
+  }
+
+  private async requireConfiguredRefreshProvider(providerId: string): Promise<DeviceSyncProvider> {
+    const provider = (await this.requireRegistry()).get(providerId);
+    if (!provider) {
+      throw deviceSyncError({
+        code: "PROVIDER_NOT_CONFIGURED",
+        message:
+          `Hosted device-sync provider ${providerId} is not configured in the shared device-sync provider registry.`,
+        retryable: false,
+        httpStatus: 404,
+      });
+    }
+
+    return provider;
+  }
+}
+
+export function createHostedDeviceSyncAgentSessionService(
+  request: Request,
+  options: HostedDeviceSyncAgentSessionOptions = {},
+): HostedDeviceSyncAgentSessionService {
+  return createHostedDeviceSyncAgentSessionContext(request, options).agentSessions;
+}
+
+export function createHostedDeviceSyncAgentSessionContext(
+  request: Request,
+  options: HostedDeviceSyncAgentSessionOptions = {},
+): HostedDeviceSyncAgentSessionContext {
+  const env = readHostedDeviceSyncEnvironment(process.env);
+  const store = new PrismaDeviceSyncControlPlaneStore({
+    providerAccountBlindIndexKey: env.routingIndexKey,
+    prisma: getPrisma(),
+  });
+
+  return {
+    agentSessions: new HostedDeviceSyncAgentSessionService({
+      registry: options.registry ?? null,
+      request,
+      store,
+    }),
+    env,
+    store,
+  };
 }
 
 function toPublicHostedDeviceSyncAccount(

@@ -1,4 +1,4 @@
-import type { DeviceSyncProvider } from "@murphai/device-syncd/public-ingress";
+import type { DeviceSyncProvider } from "@murphai/device-syncd/types";
 
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
 import {

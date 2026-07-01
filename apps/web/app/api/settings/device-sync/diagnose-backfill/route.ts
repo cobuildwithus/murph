@@ -7,7 +7,7 @@ import {
   runHostedDeviceSyncBackfillDiagnostic,
 } from "@/src/lib/device-sync/backfill-diagnostic";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
-import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 

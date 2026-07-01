@@ -1,4 +1,4 @@
-import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
+import { createHostedDeviceSyncAgentSessionService } from "@/src/lib/device-sync/agent-session-service";
 import { jsonOk, postOnlyJson, readOptionalJsonObject, resolveDecodedRouteParam, withJsonError } from "@/src/lib/device-sync/http";
 import { parseHostedLocalHeartbeatPatch } from "@/src/lib/device-sync/local-heartbeat";
 
@@ -10,12 +10,12 @@ export const POST = withJsonError(async (
   request: Request,
   context: { params: Promise<{ connectionId: string }> },
 ) => {
-  const controlPlane = createHostedDeviceSyncControlPlane(request);
-  const session = await controlPlane.requireAgentSession();
+  const agentSessions = createHostedDeviceSyncAgentSessionService(request);
+  const session = await agentSessions.requireAgentSession();
   const body = await readOptionalJsonObject(request);
   const patch = parseHostedLocalHeartbeatPatch(body, new Date());
   const connectionId = await resolveDecodedRouteParam(context.params, "connectionId");
   return jsonOk(
-    await controlPlane.recordLocalHeartbeat(session.userId, connectionId, patch),
+    await agentSessions.recordLocalHeartbeat(session.userId, connectionId, patch),
   );
 });
