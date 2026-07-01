@@ -9,6 +9,7 @@ import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption"
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   createHostedExternalThreadLookupKey,
+  createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -2435,6 +2436,74 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "unassignable-home-line",
     });
     expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the inbound chat is already another member's home chat", async () => {
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id",
+        memberId: "member_other",
+        value: "chat_123",
+      }),
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-recipient-phone",
+        memberId: "member_other",
+        value: "+15550000000",
+      }),
+      linqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15550000000"),
+      memberId: "member_other",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedLinqLine: buildHostedLinqLineFixture({
+        phoneNumber: "+15550000000",
+      }),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_home_chat_owner_mismatch",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "home-chat-owner-mismatch",
+    });
+    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(hostedMemberRouting.updateMany).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
@@ -7534,7 +7603,25 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
 function createStatefulHostedMemberRoutingMock(initialRecord: Record<string, unknown> | null = null) {
   let hostedMemberRoutingRecord = initialRecord;
   return {
-    findFirst: vi.fn(async () => withHostedMemberRoutingMember(hostedMemberRoutingRecord)),
+    findFirst: vi.fn(async ({ where }: { where?: Record<string, unknown> } = {}) => {
+      const record = withHostedMemberRoutingMember(hostedMemberRoutingRecord);
+      if (!record) {
+        return null;
+      }
+      const excluded = where?.NOT;
+      if (
+        typeof excluded === "object"
+        && excluded !== null
+        && "memberId" in excluded
+        && record.memberId === (excluded as { memberId?: unknown }).memberId
+      ) {
+        return null;
+      }
+      if (typeof where?.memberId === "string" && record.memberId !== where.memberId) {
+        return null;
+      }
+      return record;
+    }),
     findMany: vi.fn(async () => {
       const record = withHostedMemberRoutingMember(hostedMemberRoutingRecord);
       return record ? [record] : [];

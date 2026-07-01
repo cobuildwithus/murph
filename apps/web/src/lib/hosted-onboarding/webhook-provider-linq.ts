@@ -251,12 +251,13 @@ export async function planHostedOnboardingLinqWebhook(input: {
         contact: participantContact,
         prisma: input.prisma,
       });
+  const incomingHomeLinqChatOwnerLookup = await lookupHostedMemberRoutingByHomeLinqChatId({
+    linqChatId: summary.chatId,
+    prisma: input.prisma,
+  });
   const existingHomeLinqChatLookup = existingMemberLookup || existingPendingLinqContactLookup
     ? null
-    : await lookupHostedMemberRoutingByHomeLinqChatId({
-        linqChatId: summary.chatId,
-        prisma: input.prisma,
-      });
+    : incomingHomeLinqChatOwnerLookup;
   const existingMember =
     existingMemberLookup?.core
     ?? existingPendingLinqContactLookup?.core
@@ -272,6 +273,24 @@ export async function planHostedOnboardingLinqWebhook(input: {
     existingMemberMatch,
     participantContact,
   });
+
+  // Durable authority: a chat that is already another member's home chat must
+  // never be rebound through a participant identity/pending-contact match.
+  if (
+    existingMember
+    && incomingHomeLinqChatOwnerLookup
+    && incomingHomeLinqChatOwnerLookup.routing.memberId !== existingMember.id
+  ) {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("home-chat-owner-mismatch"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: false,
+        existingMemberMatch,
+        reason: "home-chat-owner-mismatch",
+        routeStage: "ignored-home-chat-owner-mismatch",
+      }),
+    );
+  }
   const existingMemberSuspended = existingMember
     ? isHostedMemberSuspended(existingMember.suspendedAt)
     : false;

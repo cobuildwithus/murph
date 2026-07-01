@@ -16,6 +16,7 @@ import {
   type HostedLinqParticipantContact,
 } from "./linq-participant-contact";
 import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
+import { hostedOnboardingError } from "./errors";
 import { normalizePhoneNumber } from "./phone";
 import { type HostedOnboardingReadClient } from "./shared";
 
@@ -778,7 +779,9 @@ async function clearHostedMemberLinqChatConflicts(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
-  await input.tx.hostedMemberRouting.updateMany({
+  // Another member's home route is durable authority; binding over it must
+  // fail closed instead of silently clearing that member's route.
+  const conflictingHomeRoute = await input.tx.hostedMemberRouting.findFirst({
     where: {
       linqChatLookupKey: {
         in: [...input.linqChatLookupKeys],
@@ -787,15 +790,18 @@ async function clearHostedMemberLinqChatConflicts(input: {
         memberId: input.memberId,
       },
     },
-    data: {
-      linqChatIdEncrypted: null,
-      linqChatLookupKey: null,
-      linqHomeLineAssignedAt: null,
-      linqRecipientPhoneEncrypted: null,
-      linqRecipientPhoneLookupKey: null,
-      linqLastInboundAt: null,
+    select: {
+      memberId: true,
     },
   });
+  if (conflictingHomeRoute && conflictingHomeRoute.memberId !== input.memberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_CHAT_HOME_ROUTE_CONFLICT",
+      httpStatus: 409,
+      message: "Linq chat is already bound as another member's home chat.",
+      retryable: false,
+    });
+  }
 
   await input.tx.hostedMemberRouting.updateMany({
     where: {
