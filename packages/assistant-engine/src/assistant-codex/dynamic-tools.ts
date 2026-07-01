@@ -2,11 +2,14 @@ import { z } from 'zod'
 import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_KINDS,
   sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
+import { HOSTED_VAULT_SHARE_PROJECTION_KINDS } from '@murphai/hosted-execution/vault-share'
 import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
@@ -310,14 +313,36 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group for the connected group-chat runtime. This does not create groups, create join links, manage members, grant Family billing access, grant private chat access, grant raw vault access, share health data, or opt anyone into email.',
+    'Read the current hosted group for the connected group-chat runtime with action="read_current", or mint the shareable group join link with action="create_join_link" and include the returned join URL plainly in your reply. Joining through that link grants group membership only. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, share health data, or opt anyone into email.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       action: {
         type: 'string',
-        enum: ['read_current'],
+        enum: ['read_current', 'create_join_link'],
+      },
+      displayName: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+        description:
+          'Optional group display name shown on the join page when creating a join link.',
+      },
+      kind: {
+        type: 'string',
+        enum: [...HOSTED_RUNTIME_GROUP_KINDS],
+        description: 'Optional group kind when creating a join link.',
+      },
+      requestedVaultShareProjectionKinds: {
+        type: 'array',
+        maxItems: 8,
+        items: {
+          type: 'string',
+          enum: [...HOSTED_VAULT_SHARE_PROJECTION_KINDS],
+        },
+        description:
+          'Optional bounded health projections the join page may offer joining members. Joining never shares them automatically; each member approves their own selection.',
       },
     },
     required: ['action'],
@@ -646,11 +671,29 @@ const generateImageArgumentsSchema = z
   })
   .strict()
 
-const groupArgumentsSchema = z
-  .object({
-    action: z.literal('read_current'),
-  })
-  .strict()
+const groupArgumentsSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('read_current'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('create_join_link'),
+      displayName: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH)
+        .optional(),
+      kind: z.enum(HOSTED_RUNTIME_GROUP_KINDS).optional(),
+      requestedVaultShareProjectionKinds: z
+        .array(z.enum(HOSTED_VAULT_SHARE_PROJECTION_KINDS))
+        .max(8)
+        .optional(),
+    })
+    .strict(),
+])
 
 const sendVaultFileArgumentsSchema = z
   .object({
@@ -2440,6 +2483,27 @@ function parseGroupArguments(
         schemaRootKeys: ['action'],
         toolName: 'murph.group',
       }),
+    }
+  }
+  if (parsed.data.action === 'create_join_link') {
+    const joinLink = {
+      ...(parsed.data.displayName !== undefined
+        ? { displayName: parsed.data.displayName }
+        : {}),
+      ...(parsed.data.kind !== undefined ? { kind: parsed.data.kind } : {}),
+      ...(parsed.data.requestedVaultShareProjectionKinds !== undefined
+        ? {
+            requestedVaultShareProjectionKinds:
+              parsed.data.requestedVaultShareProjectionKinds,
+          }
+        : {}),
+    }
+    return {
+      ok: true,
+      request:
+        Object.keys(joinLink).length > 0
+          ? { action: 'create_join_link', joinLink }
+          : { action: 'create_join_link' },
     }
   }
   return { ok: true, request: { action: 'read_current' } }

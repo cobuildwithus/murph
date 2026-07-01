@@ -1,12 +1,10 @@
-export const HOSTED_GROUP_KINDS = [
-  "custom",
-  "family",
-  "couple",
-  "friends",
-  "household",
-  "team",
-] as const;
-export type HostedGroupKind = (typeof HOSTED_GROUP_KINDS)[number];
+import {
+  HOSTED_RUNTIME_GROUP_KINDS,
+  type HostedRuntimeGroupKind,
+} from "@murphai/hosted-execution/runtime-control";
+
+export const HOSTED_GROUP_KINDS = HOSTED_RUNTIME_GROUP_KINDS;
+export type HostedGroupKind = HostedRuntimeGroupKind;
 
 export const HOSTED_GROUP_MEMBER_ROLES = ["owner", "member"] as const;
 export type HostedGroupMemberRole = (typeof HOSTED_GROUP_MEMBER_ROLES)[number];

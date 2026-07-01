@@ -40,6 +40,7 @@ function buildTx(input?: {
   activeDestinationGrantCount?: number;
   activeGroupGrantCount?: number;
   existingMembershipId?: string | null;
+  runtimeMemberId?: string | null;
 }): Prisma.TransactionClient & {
   hostedVaultShare: {
     count: ReturnType<typeof vi.fn>;
@@ -57,7 +58,9 @@ function buildTx(input?: {
           return {
             id: "group_1",
             joinPolicyJson: JOIN_POLICY,
-            runtimeMemberId: "member_group_runtime",
+            runtimeMemberId: input?.runtimeMemberId === undefined
+              ? "member_group_runtime"
+              : input.runtimeMemberId,
           };
         }
         return null;
@@ -105,6 +108,63 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       cleanupSignals: [],
       revokedCount: 0,
     });
+  });
+
+  it("rejects membership when the group runtime is inactive even with no selected permissions", async () => {
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+    const tx = buildTx();
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_RUNTIME_UNSUPPORTED",
+      httpStatus: 409,
+    });
+
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects membership when the group has lost its runtime member", async () => {
+    const tx = buildTx({ runtimeMemberId: null });
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_NOT_ACTIVE",
+      httpStatus: 410,
+    });
+
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+  });
+
+  it("creates membership without launch consent when no permissions are selected", async () => {
+    const tx = buildTx();
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      joinCode: "join_1",
+      memberId: "member_joiner",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: false,
+      membershipId: "membership_created",
+    });
+
+    expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledWith(
+      "member_group_runtime",
+      expect.anything(),
+    );
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
   });
 
   it("refuses to add a group vault-share grant beyond the bounded fan-out cap", async () => {
