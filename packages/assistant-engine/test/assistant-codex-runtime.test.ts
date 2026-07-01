@@ -4688,7 +4688,7 @@ describe('assistant codex runtime', () => {
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
   })
 
-  it('poisons reused warm processes on untagged parent-thread server requests', async () => {
+  it('rejects untagged parent-thread server requests on reused warm processes', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-untagged-request-work-')
     const codexHome = await createTempDir('assistant-codex-local-untagged-request-home-')
     const progressDelivery = createProgressDeliveryMock()
@@ -4813,14 +4813,16 @@ describe('assistant codex runtime', () => {
         ...stableInput,
         prompt: 'second local turn should reject untagged server request',
       }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_APP_SERVER_UNSCOPED_PARENT_TURN_MESSAGE',
+    ).resolves.toMatchObject({
+      finalMessage: 'Current turn rejected untagged request',
+      sessionId: 'thread-local-untagged-request',
+      turnId: 'turn-local-untagged-request-2',
     })
     expect(progressDelivery.send).not.toHaveBeenCalled()
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
   })
 
-  it('poisons reused warm processes on untagged parent-thread assistant output', async () => {
+  it('drops untagged parent-thread assistant output on reused warm processes', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-untagged-output-work-')
     const codexHome = await createTempDir('assistant-codex-local-untagged-output-home-')
     const spawnedChildren: MockChildProcess[] = []
@@ -4882,6 +4884,18 @@ describe('assistant codex runtime', () => {
             },
           }))
           child.stdout.write(jsonLine({
+            method: 'assistant.message.delta',
+            params: {
+              delta: 'Current turn ignored untagged output',
+              item: {
+                id: 'assistant-local-untagged-output-current',
+                type: 'assistant_message',
+              },
+              threadId: 'thread-local-untagged-output',
+              turnId: 'turn-local-untagged-output-2',
+            },
+          }))
+          child.stdout.write(jsonLine({
             method: 'turn/completed',
             params: {
               threadId: 'thread-local-untagged-output',
@@ -4920,10 +4934,12 @@ describe('assistant codex runtime', () => {
     await expect(
       executeCodexAppServerTurn({
         ...stableInput,
-        prompt: 'second local turn should fail on untagged assistant output',
+        prompt: 'second local turn should ignore untagged assistant output',
       }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_APP_SERVER_UNSCOPED_PARENT_TURN_MESSAGE',
+    ).resolves.toMatchObject({
+      finalMessage: 'Current turn ignored untagged output',
+      sessionId: 'thread-local-untagged-output',
+      turnId: 'turn-local-untagged-output-2',
     })
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
   })
