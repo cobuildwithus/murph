@@ -380,11 +380,13 @@ async function createHostedOpsOnboardingNewLinqChatAndBindPendingTx(input: {
   request: NormalizedHostedOpsOnboardingInviteInput;
   senderPhoneNumber: string;
 }): Promise<HostedOpsOnboardingInviteDelivery> {
+  // The open key must survive a rolled-back transaction: a freshly generated
+  // member id does not, so key the provider chat open on the stable line and
+  // recipient phone pair only.
   const createdChat = await createHostedLinqChat({
     from: input.senderPhoneNumber,
     idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
       parts: [
-        input.memberId,
         input.senderPhoneNumber,
         input.request.recipientPhoneNumber,
       ],

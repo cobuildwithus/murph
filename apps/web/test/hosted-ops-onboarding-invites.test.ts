@@ -802,6 +802,39 @@ describe("hosted ops onboarding invites", () => {
     expect(secondKey).not.toContain("+15559876543");
   });
 
+  it("keeps the new-chat opener idempotency key stable when a rolled-back retry regenerates the member id", async () => {
+    mocks.ensureHostedMemberForPhoneTx
+      .mockResolvedValueOnce({ id: "member_attempt_a" })
+      .mockResolvedValueOnce({ id: "member_attempt_b" });
+    mocks.createHostedLinqChat
+      .mockRejectedValueOnce(new Error("provider timed out after creating chat"))
+      .mockResolvedValueOnce({
+        chatId: "chat_created_retry",
+        messageId: "message_open_retry",
+      });
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-rollback-retry",
+    })).rejects.toThrow("provider timed out after creating chat");
+
+    routingState = null;
+    await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-rollback-retry",
+    });
+
+    const firstKey = readIdempotencyKey(mocks.createHostedLinqChat, 0);
+    const secondKey = readIdempotencyKey(mocks.createHostedLinqChat, 1);
+
+    expect(firstKey).toMatch(/^ops-onboarding-invite:open:[a-f0-9]{64}$/u);
+    expect(secondKey).toBe(firstKey);
+  });
+
   it("reuses an existing pending Linq chat when retrying a new-chat invite send", async () => {
     mocks.sendHostedLinqChatMessage
       .mockRejectedValueOnce(new Error("provider timed out after sending invite"))
