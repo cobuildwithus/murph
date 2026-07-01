@@ -308,9 +308,16 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
 }): Promise<{ homeLineAssignedAt?: Date; recipientPhone: string | null }> {
   const existingRecipientPhone = normalizePhoneNumber(input.member.routing?.linqRecipientPhone);
   if (existingRecipientPhone) {
-    return {
-      recipientPhone: existingRecipientPhone,
-    };
+    const existingRecipientLine = await readHostedLinqAssignableHomeLineByPhone({
+      phoneNumber: existingRecipientPhone,
+      prisma: input.prisma,
+    });
+
+    if (existingRecipientLine) {
+      return {
+        recipientPhone: existingRecipientLine.phoneNumber,
+      };
+    }
   }
 
   const reservation = await reserveHostedLinqHomeLineFromPoolTx({

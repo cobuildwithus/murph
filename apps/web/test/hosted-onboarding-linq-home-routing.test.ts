@@ -265,7 +265,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
   });
 
-  it("does not promote a pending Linq thread when its recipient is not an assignable DB line", async () => {
+  it("does not reuse a reserved pending Linq line when it is no longer assignable", async () => {
     mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(null);
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
       buildLine("+15550100002"),
@@ -274,6 +274,8 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     await expect(
       resolveHostedMemberActivationLinqRoute({
         member: buildMember({
+          linqHomeLineAssignedAt: new Date("2026-06-30T14:15:00.000Z"),
+          linqRecipientPhone: "+15550100001",
           pendingLinqChatId: "chat_pending",
           pendingLinqRecipientPhone: "+15550100001",
         }),
