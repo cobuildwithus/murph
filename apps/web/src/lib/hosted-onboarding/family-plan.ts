@@ -1948,21 +1948,35 @@ export async function updateHostedFamilySeatCount(input: {
     }
 
     // Stripe confirmed the quantity synchronously, so persist it now instead of
-    // waiting for the subscription webhook. Advance the reconciler fence to the
-    // start of the current second so a delayed, older Stripe event cannot revert
-    // this seat count (and revoke the invite it enabled). Flooring to the second
-    // matches Stripe's second-granular event.created, so the webhook for this
-    // same change is not mistaken for stale and still reconciles period/phase.
+    // waiting for the subscription webhook. Take the same owner-row lock the
+    // webhook reconciler uses so a delayed webhook cannot interleave and revert
+    // this count. Advance the fence to the start of the current second: flooring
+    // matches Stripe's second-granular event.created so the webhook for this same
+    // change still reconciles, while older events are rejected as stale. Skip the
+    // write only if a newer event already advanced the fence past our confirmation.
     const fenceAt = new Date(Math.floor(now.getTime() / 1_000) * 1_000);
-    await prisma.hostedAccountGroupBillingRef.update({
-      data: {
-        billedSeatCount: targetSeatCount,
-        lastStripeEventCreatedAt: fenceAt,
-      },
-      where: {
-        groupId: input.groupId,
-      },
-    });
+    await prisma.$transaction(async (tx) => {
+      await lockHostedMemberRow(tx, seatChange.group.ownerMemberId);
+      const current = await tx.hostedAccountGroupBillingRef.findUnique({
+        select: { lastStripeEventCreatedAt: true },
+        where: { groupId: input.groupId },
+      });
+      if (
+        current?.lastStripeEventCreatedAt &&
+        current.lastStripeEventCreatedAt.getTime() > fenceAt.getTime()
+      ) {
+        return;
+      }
+      await tx.hostedAccountGroupBillingRef.update({
+        data: {
+          billedSeatCount: targetSeatCount,
+          lastStripeEventCreatedAt: fenceAt,
+        },
+        where: {
+          groupId: input.groupId,
+        },
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   }
 
   const snapshot = await readHostedFamilyOwnerSnapshotForMember({
