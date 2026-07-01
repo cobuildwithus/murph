@@ -81,6 +81,59 @@ describe("listHostedLinqContactCardLines", () => {
 });
 
 describe("upsertHostedLinqLineForPhoneTx", () => {
+  it("keeps the advisory lock, candidate lookup, and upsert inside one transaction for plain clients", async () => {
+    const events: string[] = [];
+    const transactionClient = {
+      $executeRaw: vi.fn().mockImplementation(() => {
+        events.push("lock");
+        return Promise.resolve([]);
+      }),
+      hostedLinqLine: {
+        findMany: vi.fn().mockImplementation(() => {
+          events.push("candidate-read");
+          return Promise.resolve([]);
+        }),
+        upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) => {
+          events.push("write");
+          return Promise.resolve({
+            phoneNumberLookupKey: input.create.phoneNumberLookupKey,
+          });
+        }),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (
+        callback: (tx: typeof transactionClient) => Promise<unknown>,
+      ) => {
+        events.push("transaction:start");
+        const result = await callback(transactionClient);
+        events.push("transaction:commit");
+        return result;
+      }),
+    };
+
+    await expect(
+      upsertHostedLinqLineForPhoneTx({
+        observedAt: new Date("2026-06-30T12:00:00.000Z"),
+        phoneNumber: "+15550100001",
+        prisma: prisma as never,
+        source: "webhook",
+      }),
+    ).resolves.toEqual({
+      phoneNumberLookupKey: expect.stringMatching(/^hbidx:phone:/u),
+    });
+
+    expect(events).toEqual([
+      "transaction:start",
+      "lock",
+      "candidate-read",
+      "write",
+      "transaction:commit",
+    ]);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(transactionClient.hostedLinqLine.upsert).toHaveBeenCalledTimes(1);
+  });
+
   it("updates an existing legacy lookup-key row after contact privacy key rotation", async () => {
     restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",

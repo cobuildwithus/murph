@@ -3,7 +3,10 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import { hostedOnboardingError } from "./errors";
 import { listHostedLinqContactCardLines } from "./linq-line-store";
-import { syncHostedLinqPhoneNumberInventory } from "./linq-phone-number-inventory";
+import {
+  HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT,
+  syncHostedLinqPhoneNumberInventory,
+} from "./linq-phone-number-inventory";
 import { normalizePhoneNumber } from "./phone";
 import {
   getHostedOnboardingEnvironment,
@@ -202,7 +205,7 @@ async function listHostedLinqConfiguredContactCardLines(input: {
   const maxLines = normalizeLineLimit(input.maxLines);
 
   await syncHostedLinqPhoneNumberInventory({
-    maxLines,
+    maxLines: HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT,
     observedAt: input.observedAt,
     prisma: input.prisma,
     signal: input.signal,

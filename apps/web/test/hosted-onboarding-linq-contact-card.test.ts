@@ -28,6 +28,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-phone-number-inventory", () => ({
+  HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT: 250,
   syncHostedLinqPhoneNumberInventory: linqInventoryMocks.syncHostedLinqPhoneNumberInventory,
 }));
 
@@ -290,7 +291,7 @@ describe("hosted Linq contact card client", () => {
     });
 
     expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).toHaveBeenCalledWith(expect.objectContaining({
-      maxLines: 50,
+      maxLines: 250,
       observedAt,
       prisma,
     }));
@@ -358,7 +359,7 @@ describe("hosted Linq contact card client", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).toHaveBeenCalledWith(expect.objectContaining({
-      maxLines: 50,
+      maxLines: 250,
       observedAt,
       prisma,
     }));

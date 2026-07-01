@@ -45,6 +45,26 @@ export async function upsertHostedLinqLineForPhoneTx(input: {
   providerStatus?: string | null;
   source: "configured" | "provider" | "webhook";
 }) {
+  if ("$transaction" in input.prisma && typeof input.prisma.$transaction === "function") {
+    return input.prisma.$transaction((tx) => upsertHostedLinqLineForPhoneInTransaction({
+      ...input,
+      prisma: tx,
+    }));
+  }
+
+  return upsertHostedLinqLineForPhoneInTransaction(input);
+}
+
+async function upsertHostedLinqLineForPhoneInTransaction(input: {
+  activeMemberLimit?: number | null;
+  observedAt: Date;
+  phoneNumber: string;
+  prisma: HostedLinqLineClient;
+  providerPhoneNumberId?: string | null;
+  providerReason?: string | null;
+  providerStatus?: string | null;
+  source: "configured" | "provider" | "webhook";
+}) {
   const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
   const lookupKey = createHostedPhoneLookupKey(normalizedPhoneNumber);
   const lookupKeyReadCandidates = createHostedPhoneLookupKeyReadCandidates(normalizedPhoneNumber);
