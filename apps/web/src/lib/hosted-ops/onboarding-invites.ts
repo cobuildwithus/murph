@@ -100,6 +100,11 @@ interface HostedOpsOnboardingInviteDelivery {
   openerMessageId: string | null;
 }
 
+interface HostedOpsOnboardingNewChatReservation {
+  assignedAt: Date;
+  linePhoneNumber: string;
+}
+
 interface HostedOpsOnboardingVoiceMemoContentType {
   contentType: SupportedContentType;
   extension: string;
@@ -192,14 +197,12 @@ export async function sendHostedOpsOnboardingInvite(
   await sendHostedLinqChatMessage({
     chatId: delivery.chatId,
     idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
-      idempotencyParts: [
+      parts: [
         request.requestId,
-      ],
-      step: "invite",
-      targetParts: [
         issued.memberId,
         delivery.chatId,
       ],
+      step: "invite",
     }),
     message: inviteMessage,
   });
@@ -339,8 +342,7 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
           invite,
           memberId,
         },
-        lineAssignedAt: reservedReservation.assignedAt,
-        linePhoneNumber: reservedReservation.linePhoneNumber,
+        reservation: reservedReservation,
       };
     }
 
@@ -365,8 +367,10 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
         invite,
         memberId,
       },
-      lineAssignedAt: assignment.assignedAt,
-      linePhoneNumber: assignment.line.phoneNumber,
+      reservation: {
+        assignedAt: assignment.assignedAt,
+        linePhoneNumber: assignment.line.phoneNumber,
+      },
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
@@ -378,17 +382,15 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
   }
 
   const createdChat = await createHostedLinqChat({
-    from: prepared.linePhoneNumber,
+    from: prepared.reservation.linePhoneNumber,
     idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
-      idempotencyParts: [
+      parts: [
         prepared.issued.memberId,
+        prepared.reservation.linePhoneNumber,
+        input.request.recipientPhoneNumber,
+        prepared.reservation.assignedAt.toISOString(),
       ],
       step: "open",
-      targetParts: [
-        prepared.linePhoneNumber,
-        input.request.recipientPhoneNumber,
-        prepared.lineAssignedAt.toISOString(),
-      ],
     }),
     message: input.request.newChatOpeningMessage,
     to: [input.request.recipientPhoneNumber],
@@ -408,13 +410,13 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
     await assertHostedOpsOnboardingNewChatReservationTx({
       memberId: prepared.issued.memberId,
       prisma: tx,
-      recipientPhone: prepared.linePhoneNumber,
+      recipientPhone: prepared.reservation.linePhoneNumber,
     });
     await upsertHostedMemberPendingLinqBindingTx({
       linqChatId: chatId,
       memberId: prepared.issued.memberId,
       prisma: tx,
-      recipientPhone: prepared.linePhoneNumber,
+      recipientPhone: prepared.reservation.linePhoneNumber,
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
@@ -454,7 +456,7 @@ function resolveHostedOpsOnboardingReusableNewChatDelivery(input: {
 function resolveHostedOpsOnboardingReusableNewChatReservation(input: {
   routing: Awaited<ReturnType<typeof readHostedMemberRoutingState>>;
   senderPhone: string;
-}): { assignedAt: Date; linePhoneNumber: string } | null {
+}): HostedOpsOnboardingNewChatReservation | null {
   const senderPhone = normalizePhoneNumber(input.senderPhone);
   const homeRecipientPhone = normalizePhoneNumber(input.routing?.linqRecipientPhone);
 
@@ -980,13 +982,12 @@ function buildHostedOpsOnboardingInviteMessage(input: {
 }
 
 function buildHostedOpsOnboardingIdempotencyKey(input: {
-  idempotencyParts: readonly string[];
+  parts: readonly string[];
   step: "invite" | "open";
-  targetParts: readonly string[];
 }): string {
   const digest = createHash("sha256");
 
-  for (const part of [...input.idempotencyParts, ...input.targetParts]) {
+  for (const part of input.parts) {
     digest.update(`${part.length}:`, "utf8");
     digest.update(part, "utf8");
     digest.update("\n", "utf8");

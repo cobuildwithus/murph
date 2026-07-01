@@ -181,6 +181,22 @@ async function upsertHostedLinqLineForPhoneInTransaction(input: {
     });
   }
 
+  if (
+    input.source === "configured"
+    && input.activeMemberLimit !== undefined
+    && input.activeMemberLimit !== null
+  ) {
+    await input.prisma.hostedLinqLine.updateMany({
+      where: {
+        activeMemberLimit: null,
+        phoneNumberLookupKey: line.phoneNumberLookupKey,
+      },
+      data: {
+        activeMemberLimit: input.activeMemberLimit,
+      },
+    });
+  }
+
   return line;
 }
 

@@ -270,7 +270,7 @@ describe("upsertHostedLinqLineForPhoneTx", () => {
     expect(transactionClient.hostedLinqLine.upsert).toHaveBeenCalledTimes(1);
   });
 
-  it("updates an existing legacy lookup-key row after contact privacy key rotation", async () => {
+  it("updates an existing legacy lookup-key row and bootstraps missing configured caps", async () => {
     restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
       entries: TEST_KEYRING_ENTRIES,
@@ -342,8 +342,16 @@ describe("upsertHostedLinqLineForPhoneTx", () => {
       }),
     }));
     expect(update.mock.calls[0]?.[0].data).not.toHaveProperty("activeMemberLimit");
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        activeMemberLimit: null,
+        phoneNumberLookupKey: legacyLookupKey,
+      },
+      data: {
+        activeMemberLimit: 250,
+      },
+    });
     expect(create).not.toHaveBeenCalled();
-    expect(updateMany).not.toHaveBeenCalled();
   });
 });
 
