@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   grantHostedVaultShareTx: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   readActiveHostedVaultShareProjectionKinds: vi.fn(),
-  revokeHostedVaultSharesTx: vi.fn(),
+  revokeHostedVaultSharesWithCleanupTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -20,7 +20,7 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
   grantHostedVaultShareTx: mocks.grantHostedVaultShareTx,
   readActiveHostedVaultShareProjectionKinds: mocks.readActiveHostedVaultShareProjectionKinds,
-  revokeHostedVaultSharesTx: mocks.revokeHostedVaultSharesTx,
+  revokeHostedVaultSharesWithCleanupTx: mocks.revokeHostedVaultSharesWithCleanupTx,
 }));
 
 import {
@@ -96,7 +96,10 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
-    mocks.revokeHostedVaultSharesTx.mockResolvedValue(0);
+    mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValue({
+      cleanupSignals: [],
+      revokedCount: 0,
+    });
   });
 
   it("refuses to add a group vault-share grant beyond the bounded fan-out cap", async () => {
@@ -151,6 +154,47 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       grantorMemberId: "member_grantor",
       now: new Date("2026-07-01T00:00:00.000Z"),
       projectionKind: "sleep-times.v0",
+      source: "hosted-group.join",
+      tx,
+    });
+  });
+
+  it("returns cleanup signals when a member unselects a previously granted group share", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      existingMembershipId: "membership_existing",
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+    mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValue({
+      cleanupSignals: [{
+        mailboxItemId: "mailbox_item_revoke_1",
+        memberId: "member_group_runtime",
+      }],
+      revokedCount: 1,
+    });
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      joinCode: "join_1",
+      memberId: "member_grantor",
+      now,
+      selectedVaultShareProjectionKinds: [],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: true,
+      grantedVaultShareProjectionKinds: [],
+      membershipId: "membership_existing",
+      revokedVaultShareProjectionKinds: ["sleep-times.v0"],
+      vaultShareCleanupSignals: [{
+        mailboxItemId: "mailbox_item_revoke_1",
+        memberId: "member_group_runtime",
+      }],
+    });
+
+    expect(mocks.revokeHostedVaultSharesWithCleanupTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionKinds: ["sleep-times.v0"],
       source: "hosted-group.join",
       tx,
     });

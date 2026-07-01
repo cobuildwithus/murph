@@ -17,7 +17,8 @@ import { getPrisma } from "../prisma";
 import {
   grantHostedVaultShareTx,
   readActiveHostedVaultShareProjectionKinds,
-  revokeHostedVaultSharesTx,
+  revokeHostedVaultSharesWithCleanupTx,
+  type HostedVaultShareCleanupSignal,
 } from "../hosted-vault-share/share-grant-store";
 import {
   emptyHostedGroupJoinPolicy,
@@ -57,6 +58,11 @@ export interface HostedGroupJoinAcceptanceResult {
   groupId: string;
   membershipId: string;
   revokedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+}
+
+export interface HostedGroupJoinAcceptanceTxResult
+  extends HostedGroupJoinAcceptanceResult {
+  vaultShareCleanupSignals: HostedVaultShareCleanupSignal[];
 }
 
 const HOSTED_GROUP_VAULT_SHARE_SOURCE = "hosted-group.join";
@@ -320,7 +326,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   memberId: string;
   now: Date;
   selectedVaultShareProjectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
-}): Promise<HostedGroupJoinAcceptanceResult> {
+}): Promise<HostedGroupJoinAcceptanceTxResult> {
   const groupLookup = await input.tx.hostedGroup.findUnique({
     where: { joinCode: input.joinCode },
     select: { id: true },
@@ -409,6 +415,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
 
   const grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[] = [];
   const revokedVaultShareProjectionKinds: HostedVaultShareProjectionKind[] = [];
+  const vaultShareCleanupSignals: HostedVaultShareCleanupSignal[] = [];
   if (group.runtimeMemberId && policy.requestedVaultShareProjectionKinds.length > 0) {
     for (const projectionKind of policy.requestedVaultShareProjectionKinds) {
       if (selected.includes(projectionKind)) {
@@ -427,7 +434,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
         });
         grantedVaultShareProjectionKinds.push(projectionKind);
       } else {
-        const revoked = await revokeHostedVaultSharesTx({
+        const revoked = await revokeHostedVaultSharesWithCleanupTx({
           destinationMemberId: group.runtimeMemberId,
           grantorMemberId: input.memberId,
           now: input.now,
@@ -435,7 +442,8 @@ export async function acceptHostedGroupJoinCodeTx(input: {
           source: HOSTED_GROUP_VAULT_SHARE_SOURCE,
           tx: input.tx,
         });
-        if (revoked > 0) {
+        vaultShareCleanupSignals.push(...revoked.cleanupSignals);
+        if (revoked.revokedCount > 0) {
           revokedVaultShareProjectionKinds.push(projectionKind);
         }
       }
@@ -448,6 +456,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
     groupId: group.id,
     membershipId,
     revokedVaultShareProjectionKinds,
+    vaultShareCleanupSignals,
   };
 }
 

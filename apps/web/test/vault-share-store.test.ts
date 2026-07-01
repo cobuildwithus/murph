@@ -3,10 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
+  hasHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
+  hasHostedRuntimeActiveAccessForUpdateTx:
+    mocks.hasHostedRuntimeActiveAccessForUpdateTx,
 }));
 
 import { deliverHostedVaultShareRecords } from "@/src/lib/hosted-mailbox/vault-share-store";
@@ -79,6 +85,7 @@ function fakePrisma(
 describe("deliverHostedVaultShareRecords", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.hasHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(true);
   });
 
   it("appends every record in one transaction and reports the last inserted item id", async () => {
@@ -97,6 +104,10 @@ describe("deliverHostedVaultShareRecords", () => {
 
     expect(result).toEqual({ lastAppendedMailboxItemId: "mailbox_item_3" });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(mocks.hasHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
+      "member_referee",
+      { prisma: TX },
+    );
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(3);
     // Every append runs on the single transaction client, not the base prisma client.
     for (const call of mocks.appendHostedMailboxEnvelopeTx.mock.calls) {
@@ -172,6 +183,29 @@ describe("deliverHostedVaultShareRecords", () => {
     expect(Array.from(TX.$queryRaw.mock.calls[0]?.[0] ?? []).join("?"))
       .toContain("FOR UPDATE");
     expect(TX.$queryRaw.mock.calls[0]?.[1]).toBe("share_1");
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("rechecks destination runtime authority inside the append transaction", async () => {
+    const prisma = fakePrisma();
+    mocks.hasHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(false);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      inserted: true,
+      item: { id: "mailbox_item_1" },
+    });
+
+    const result = await deliverHostedVaultShareRecords({
+      prisma,
+      records: RECORDS,
+      share: SHARE,
+    });
+
+    expect(result).toEqual({ lastAppendedMailboxItemId: null });
+    expect(mocks.hasHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
+      "member_referee",
+      { prisma: TX },
+    );
+    expect(TX.$queryRaw).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 });

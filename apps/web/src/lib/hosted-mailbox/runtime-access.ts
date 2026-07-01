@@ -72,6 +72,51 @@ export async function requireHostedRuntimeActiveAccess(
   });
 }
 
+export async function requireHostedRuntimeActiveAccessForUpdateTx(
+  userId: string,
+  options: Omit<HostedRuntimeActiveAccessOptions, "prisma"> & {
+    prisma: Prisma.TransactionClient;
+  },
+): Promise<void> {
+  await options.prisma.$queryRaw`
+    SELECT id
+    FROM hosted_member
+    WHERE id = ${userId}
+    FOR UPDATE
+  `;
+  const containers = await options.prisma.$queryRaw<Array<{ ownerMemberId: string }>>`
+    SELECT owner_member_id AS "ownerMemberId"
+    FROM hosted_thread_container
+    WHERE member_id = ${userId}
+    FOR UPDATE
+  `;
+  const ownerMemberId = containers[0]?.ownerMemberId;
+  if (ownerMemberId) {
+    await options.prisma.$queryRaw`
+      SELECT id
+      FROM hosted_member
+      WHERE id = ${ownerMemberId}
+      FOR UPDATE
+    `;
+  }
+
+  await requireHostedRuntimeActiveAccess(userId, options);
+}
+
+export async function hasHostedRuntimeActiveAccessForUpdateTx(
+  userId: string,
+  options: Omit<HostedRuntimeActiveAccessOptions, "prisma"> & {
+    prisma: Prisma.TransactionClient;
+  },
+): Promise<boolean> {
+  try {
+    await requireHostedRuntimeActiveAccessForUpdateTx(userId, options);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function requireHostedRuntimeMailboxActiveAccess(
   userId: string,
   options: HostedRuntimeActiveAccessOptions = {},

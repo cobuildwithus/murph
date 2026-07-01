@@ -23,6 +23,11 @@ export interface HostedVaultShareCleanupSignal {
   memberId: string;
 }
 
+export interface HostedVaultShareRevocationResult {
+  cleanupSignals: HostedVaultShareCleanupSignal[];
+  revokedCount: number;
+}
+
 interface RevocableHostedVaultShare {
   destinationMemberId: string;
   grantorMemberId: string;
@@ -122,12 +127,23 @@ export async function revokeHostedVaultSharesTx(input: {
   source: string;
   now: Date;
 }): Promise<number> {
+  return (await revokeHostedVaultSharesWithCleanupTx(input)).revokedCount;
+}
+
+export async function revokeHostedVaultSharesWithCleanupTx(input: {
+  tx: Prisma.TransactionClient;
+  destinationMemberId: string;
+  grantorMemberId?: string | null;
+  projectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
+  source: string;
+  now: Date;
+}): Promise<HostedVaultShareRevocationResult> {
   const projectionKinds = input.projectionKinds?.map((kind) => {
     assertSupportedProjectionKind(kind);
     return kind;
   }) ?? null;
   if (projectionKinds && projectionKinds.length === 0) {
-    return 0;
+    return { cleanupSignals: [], revokedCount: 0 };
   }
 
   const shares = await input.tx.hostedVaultShare.findMany({
@@ -149,15 +165,15 @@ export async function revokeHostedVaultSharesTx(input: {
   }).then((rows) => normalizeRevocableHostedVaultShareRows(rows));
 
   if (shares.length === 0) {
-    return 0;
+    return { cleanupSignals: [], revokedCount: 0 };
   }
 
-  return (await revokeHostedVaultShareRowsTx({
+  return revokeHostedVaultShareRowsTx({
     now: input.now,
     shares,
     source: input.source,
     tx: input.tx,
-  })).revokedCount;
+  });
 }
 
 export async function revokeOutgoingHostedVaultSharesForMemberDeletionTx(input: {

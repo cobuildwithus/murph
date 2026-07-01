@@ -10,7 +10,10 @@ import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/enti
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
-import { signalHostedRuntimeMaintenanceRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
+import {
+  signalHostedMailboxAppendRuntime,
+  signalHostedRuntimeMaintenanceRuntime,
+} from "@/src/lib/hosted-orchestration/signal-runtime";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -43,6 +46,10 @@ export const POST = withJsonError(async (
     selectedVaultShareProjectionKinds,
     tx,
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  const {
+    vaultShareCleanupSignals,
+    ...responseResult
+  } = result;
 
   if (result.grantedVaultShareProjectionKinds.length > 0) {
     try {
@@ -52,8 +59,26 @@ export const POST = withJsonError(async (
     }
   }
 
-  return jsonOk({ ok: true, ...result });
+  await signalVaultShareCleanupRuntimesBestEffort(vaultShareCleanupSignals);
+
+  return jsonOk({ ok: true, ...responseResult });
 });
+
+async function signalVaultShareCleanupRuntimesBestEffort(
+  signals: readonly { mailboxItemId: string; memberId: string }[],
+): Promise<void> {
+  await Promise.all(signals.map(async (signal) => {
+    try {
+      await signalHostedMailboxAppendRuntime({
+        expectedUserId: signal.memberId,
+        mailboxItemId: signal.mailboxItemId,
+      });
+    } catch {
+      // The revoke mailbox item is durable; the destination runtime will import it on a
+      // later wake if this best-effort signal fails.
+    }
+  }));
+}
 
 function parseSelectedVaultShareProjectionKinds(value: unknown): HostedVaultShareProjectionKind[] {
   if (value === undefined || value === null) return [];

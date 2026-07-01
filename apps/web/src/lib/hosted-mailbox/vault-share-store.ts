@@ -13,6 +13,7 @@ import {
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import { hasHostedRuntimeActiveAccessForUpdateTx } from "./runtime-access";
 import { appendHostedMailboxEnvelopeTx } from "./store";
 
 export interface ActiveHostedVaultShare {
@@ -90,6 +91,13 @@ export async function deliverHostedVaultShareRecords(input: {
 
   return prisma.$transaction(async (tx) => {
     let lastAppendedMailboxItemId: string | null = null;
+    if (!await hasHostedRuntimeActiveAccessForUpdateTx(
+      input.share.destinationMemberId,
+      { prisma: tx },
+    )) {
+      return { lastAppendedMailboxItemId };
+    }
+
     const share = await readGrantedHostedVaultShareForUpdateTx({
       share: input.share,
       tx,
