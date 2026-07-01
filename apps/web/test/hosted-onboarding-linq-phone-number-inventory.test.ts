@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { parseHostedLinqPhoneNumberInventory } from "@/src/lib/hosted-onboarding/linq-phone-number-inventory";
 
 describe("parseHostedLinqPhoneNumberInventory", () => {
-  it("normalizes common provider response shapes and deduplicates phone numbers", () => {
+  it("normalizes the documented provider response shape and deduplicates phone numbers", () => {
     expect(
       parseHostedLinqPhoneNumberInventory({
         phone_numbers: [
@@ -11,23 +11,27 @@ describe("parseHostedLinqPhoneNumberInventory", () => {
             id: "line_1",
             phone_number: "+1 (555) 000-0001",
             reputation: {
+              reason: "warmup",
               status: "AT_RISK",
             },
-            status_reason: "warmup",
           },
           {
             id: "duplicate",
-            number: "+15550000001",
-            status: "ACTIVE",
+            phone_number: "+15550000001",
+            reputation: {
+              status: "HEALTHY",
+            },
           },
           {
-            phoneNumberId: "line_2",
-            phoneNumber: "+15550000002",
-            status: "ACTIVE",
+            health_status: "HEALTHY",
+            id: "line_2",
+            phone_number: "+15550000002",
           },
           {
             phone_number: "not-a-phone",
-            status: "ACTIVE",
+            reputation: {
+              status: "HEALTHY",
+            },
           },
         ],
       }),
@@ -42,8 +46,22 @@ describe("parseHostedLinqPhoneNumberInventory", () => {
         phoneNumber: "+15550000002",
         providerPhoneNumberId: "line_2",
         providerReason: null,
-        providerStatus: "ACTIVE",
+        providerStatus: "HEALTHY",
       },
     ]);
+  });
+
+  it("does not accept ad hoc collection or phone field aliases", () => {
+    expect(
+      parseHostedLinqPhoneNumberInventory({
+        data: [
+          {
+            id: "line_1",
+            number: "+15550000001",
+            status: "ACTIVE",
+          },
+        ],
+      }),
+    ).toEqual([]);
   });
 });

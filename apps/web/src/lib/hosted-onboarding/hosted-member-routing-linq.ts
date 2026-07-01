@@ -191,7 +191,7 @@ export async function upsertHostedMemberHomeLinqBindingTx(input: {
 
 export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
   clearPending?: boolean;
-  homeLineAssignedAt?: Date | null;
+  homeLineAssignedAt?: Date;
   memberId: string;
   prisma: Prisma.TransactionClient;
   recipientPhone: string;

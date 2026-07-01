@@ -75,13 +75,8 @@ export function parseHostedLinqPhoneNumberInventory(
   const seenPhones = new Set<string>();
 
   for (const record of records) {
-    const phoneNumber = normalizePhoneNumber(readFirstString(record, [
-      "phone_number",
-      "phoneNumber",
-      "number",
-      "e164",
-      "handle",
-    ]));
+    const reputation = readRecord(record.reputation);
+    const phoneNumber = normalizePhoneNumber(readString(record.phone_number));
     if (!phoneNumber || seenPhones.has(phoneNumber)) {
       continue;
     }
@@ -89,23 +84,11 @@ export function parseHostedLinqPhoneNumberInventory(
 
     lines.push({
       phoneNumber,
-      providerPhoneNumberId: normalizeNullableString(readFirstString(record, [
-        "id",
-        "phone_number_id",
-        "phoneNumberId",
-      ])),
-      providerReason: normalizeNullableString(readFirstString(record, [
-        "reason",
-        "status_reason",
-        "statusReason",
-      ])),
-      providerStatus: normalizeNullableString(readFirstString(record, [
-        "health_status",
-        "healthStatus",
-        "reputation_status",
-        "reputationStatus",
-        "status",
-      ])),
+      providerPhoneNumberId: normalizeNullableString(readString(record.id)),
+      providerReason: normalizeNullableString(readString(reputation?.reason)),
+      providerStatus: normalizeNullableString(
+        readString(reputation?.status) ?? readString(record.health_status),
+      ),
     });
   }
 
@@ -113,47 +96,24 @@ export function parseHostedLinqPhoneNumberInventory(
 }
 
 function readInventoryRecords(payload: unknown): Record<string, unknown>[] {
-  if (Array.isArray(payload)) {
-    return payload.filter(isRecord);
-  }
   if (!isRecord(payload)) {
     return [];
   }
 
-  for (const key of ["phone_numbers", "phoneNumbers", "data", "items", "results"]) {
-    const value = payload[key];
-    if (Array.isArray(value)) {
-      return value.filter(isRecord);
-    }
-  }
+  const value = payload.phone_numbers;
 
-  return [];
+  return Array.isArray(value) ? value.filter(isRecord) : [];
 }
 
-function readFirstString(
-  record: Record<string, unknown>,
-  keys: readonly string[],
-): string | null {
-  for (const key of keys) {
-    const value = readNested(record, key);
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value;
-    }
+function readRecord(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? value : null;
+}
+
+function readString(value: unknown): string | null {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value;
   }
   return null;
-}
-
-function readNested(record: Record<string, unknown>, key: string): unknown {
-  if (Object.hasOwn(record, key)) {
-    return record[key];
-  }
-  if (key === "reputation_status" || key === "reputationStatus") {
-    const reputation = record.reputation;
-    if (isRecord(reputation)) {
-      return reputation.status;
-    }
-  }
-  return undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -75,6 +75,42 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
   });
 
+  it("preserves the existing assignment timestamp when a home recipient exists before chat binding", async () => {
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member: buildMember({
+          linqRecipientPhone: "+15550100001",
+        }),
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      welcomeRoute: {
+        actorId: hashHostedLinqRouteIdentifier("+15551234567"),
+        channel: "linq",
+        delivery: {
+          kind: "participant",
+          source: {
+            fromPhoneNumber: "+15550100001",
+            kind: "linq",
+          },
+          target: "+15551234567",
+        },
+        identityId: hashHostedLinqRouteIdentifier("hbidx:phone:v1:test"),
+        threadId: null,
+        threadIsDirect: true,
+      },
+    });
+
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      clearPending: true,
+      memberId: "member_123",
+      prisma: {} as never,
+      recipientPhone: "+15550100001",
+    });
+  });
+
   it("reuses a pending Linq thread when its recipient matches the chosen home line", async () => {
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
       buildLine("+15550100001", { activeMemberLimit: 3 }),

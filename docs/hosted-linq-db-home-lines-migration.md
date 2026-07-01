@@ -12,6 +12,8 @@ This cutover moves new hosted-member Linq home-line assignment from the env phon
 
 Member private phone fields remain encrypted through the hosted member secure-box path. `hosted_linq_line.phone_number_encrypted` stores provider-owned operational sending numbers encrypted with the hosted contact privacy keyring so the web app can create Linq chats without returning to the env pool after cutover.
 
+The provider inventory client intentionally stays on the existing web-owned Linq HTTP boundary instead of adding a second SDK/client surface for one read-only operation. Its parser is pinned to the documented `phone_numbers[].phone_number`, `phone_numbers[].id`, and `phone_numbers[].reputation.status` / `reputation.reason` shape, with `health_status` accepted only as the documented deprecated status alias.
+
 ## Deploy Order
 
 1. Deploy the web migration:

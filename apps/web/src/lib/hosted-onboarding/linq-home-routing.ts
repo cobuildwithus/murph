@@ -136,11 +136,10 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
 async function resolveHostedMemberActivationTargetRecipientPhone(input: {
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
-}): Promise<{ homeLineAssignedAt: Date | null; recipientPhone: string | null }> {
+}): Promise<{ homeLineAssignedAt?: Date; recipientPhone: string | null }> {
   const existingRecipientPhone = normalizePhoneNumber(input.member.routing?.linqRecipientPhone);
   if (existingRecipientPhone) {
     return {
-      homeLineAssignedAt: null,
       recipientPhone: existingRecipientPhone,
     };
   }
@@ -156,7 +155,6 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
 
   if (recipientPhones.length === 0) {
     return {
-      homeLineAssignedAt: null,
       recipientPhone: null,
     };
   }
@@ -181,7 +179,7 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
   });
 
   return {
-    homeLineAssignedAt: chosen ? now : null,
+    ...(chosen ? { homeLineAssignedAt: now } : {}),
     recipientPhone: chosen?.phoneNumber ?? null,
   };
 }

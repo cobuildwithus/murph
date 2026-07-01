@@ -213,12 +213,10 @@ export async function listHostedLinqContactCardLines(input: {
   limit?: number;
   prisma: HostedLinqLineClient;
 }): Promise<HostedLinqContactCardLine[]> {
-  const rows = await input.prisma.hostedLinqLine.findMany({
+  const take = input.limit && input.limit > 0 ? input.limit : undefined;
+  const configuredRows = await input.prisma.hostedLinqLine.findMany({
     where: {
-      OR: [
-        { configuredAt: { not: null } },
-        { providerSeenAt: { not: null } },
-      ],
+      configuredAt: { not: null },
       phoneNumberEncrypted: { not: null },
     },
     orderBy: [
@@ -226,7 +224,7 @@ export async function listHostedLinqContactCardLines(input: {
       { providerLastSeenAt: "desc" },
       { phoneNumberLookupKey: "asc" },
     ],
-    ...(input.limit ? { take: input.limit } : {}),
+    ...(take ? { take } : {}),
     select: {
       phoneNumberEncrypted: true,
       phoneNumberHint: true,
@@ -235,6 +233,41 @@ export async function listHostedLinqContactCardLines(input: {
     },
   });
 
+  if (take && configuredRows.length >= take) {
+    return mapHostedLinqContactCardRows(configuredRows);
+  }
+
+  const providerRows = await input.prisma.hostedLinqLine.findMany({
+    where: {
+      configuredAt: null,
+      phoneNumberEncrypted: { not: null },
+      providerSeenAt: { not: null },
+    },
+    orderBy: [
+      { providerLastSeenAt: "desc" },
+      { phoneNumberLookupKey: "asc" },
+    ],
+    ...(take ? { take: take - configuredRows.length } : {}),
+    select: {
+      phoneNumberEncrypted: true,
+      phoneNumberHint: true,
+      phoneNumberLookupKey: true,
+      providerStatus: true,
+    },
+  });
+
+  return mapHostedLinqContactCardRows([
+    ...configuredRows,
+    ...providerRows,
+  ]);
+}
+
+function mapHostedLinqContactCardRows(rows: readonly {
+  phoneNumberEncrypted: string | null;
+  phoneNumberHint: string;
+  phoneNumberLookupKey: string;
+  providerStatus: string | null;
+}[]): HostedLinqContactCardLine[] {
   return rows.flatMap((row) => {
     const phoneNumber = normalizePhoneNumber(
       decryptHostedLinqLinePhoneNumber(row.phoneNumberEncrypted),
