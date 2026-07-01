@@ -298,6 +298,9 @@ import {
   HostedDeviceSyncControlPlane,
 } from "@/src/lib/device-sync/control-plane";
 import {
+  createHostedDeviceSyncPublicIngressService,
+} from "@/src/lib/device-sync/public-ingress-service";
+import {
   appendHostedDeviceSyncScheduledReconcileWake,
 } from "@/src/lib/device-sync/wake-service";
 import { createHostedBrowserConnectionId } from "@/src/lib/device-sync/public-connection";
@@ -597,7 +600,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("appends one deterministic device-sync wake when a level webhook makes a connection dirty", async () => {
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         method: "POST",
       }),
@@ -645,7 +648,7 @@ describe("hosted device-sync wakes", () => {
 
   it("does not append another device-sync wake for level webhooks while dirty work is already pending", async () => {
     mocks.hasPendingDirtyConnection.mockResolvedValueOnce(true);
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         method: "POST",
       }),
@@ -690,7 +693,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("queues a disconnected signal and wake together inside the disconnect flow", async () => {
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
     const activeConnection = buildHostedConnection({
@@ -771,7 +774,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("re-reads inside the connection mutation lock before clearing refreshed tokens", async () => {
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
     const beforeRefresh = buildHostedConnection({
@@ -833,7 +836,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("revokes active provider-config connections during hosted disconnect", async () => {
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
     const activeConnection = buildHostedConnection({
@@ -891,7 +894,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("fails closed when revoked provider-config credential cleanup loses its fence", async () => {
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
     const activeConnection = buildHostedConnection({
@@ -934,7 +937,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("does not append duplicate disconnect wakes for disconnected tokenless provider-config connections", async () => {
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
     const disconnectedConnection = buildHostedConnection({
@@ -964,7 +967,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("retries remote revoke for disconnected provider-config connections without appending duplicate wakes", async () => {
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
     const disconnectedConnection = buildHostedConnection({
@@ -1017,7 +1020,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("sanitizes revoke failures before they fan out to runtime state, signals, dispatches, and the browser response", async () => {
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
     const activeConnection = buildHostedConnection();
@@ -1075,7 +1078,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("fails disconnect when the runtime no longer has provider identity to reseed", async () => {
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect"),
     );
     const activeConnection = buildHostedConnection();
@@ -1101,7 +1104,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("returns opaque browser connection ids and omits external account ids from browser reads", async () => {
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync"),
     );
     mocks.listConnectionsForUser.mockResolvedValue([
@@ -1169,7 +1172,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("projects reconnect-needed source errors without exposing raw source error codes", async () => {
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync"),
     );
     mocks.listConnectionsForUser.mockResolvedValue([
@@ -1218,7 +1221,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("resolves browser status reads through the opaque browser connection id", async () => {
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/settings/device-sync/connections/dspc_demo/status"),
     );
     mocks.listConnectionsForUser.mockResolvedValue([
@@ -1254,7 +1257,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("dispatches a wake from the connected ingress hook when an owner exists", async () => {
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
     );
 
@@ -1347,7 +1350,7 @@ describe("hosted device-sync wakes", () => {
       handleWebhook: vi.fn(),
       startConnection: vi.fn(),
     }));
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/connect/junction/callback?state=xyz"),
     );
 
@@ -1452,7 +1455,7 @@ describe("hosted device-sync wakes", () => {
         updatedAt: input.lastSeenAt,
       };
     });
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/oauth/junction/callback?code=abc&state=xyz"),
     );
 
@@ -1475,7 +1478,7 @@ describe("hosted device-sync wakes", () => {
     mocks.ensureWebhookSubscriptions.mockImplementation(() => {
       throw new Error("sync upkeep failure");
     });
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
     );
 
@@ -1499,7 +1502,7 @@ describe("hosted device-sync wakes", () => {
 
   it("wires an unknown webhook hook so verified orphan deliveries can be accepted", async () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/junction", {
         method: "POST",
         body: "{}",
@@ -1562,7 +1565,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("persists dirty state before sparse webhook audit and appends a mailbox wake only for dirty transitions", async () => {
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
           event: "sleep.updated",
@@ -1649,7 +1652,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("completes hosted webhook traces when audit and dirty state commit", async () => {
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
           event: "sleep.updated",
@@ -1680,7 +1683,7 @@ describe("hosted device-sync wakes", () => {
 
   it("does not rewrite dirty state when a level-triggered hint is already pending inside acceptance", async () => {
     mocks.hasPendingDirtyConnection.mockResolvedValueOnce(true);
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
           event: "sleep.updated",
@@ -1706,7 +1709,7 @@ describe("hosted device-sync wakes", () => {
 
   it("coalesces level-triggered webhooks after committed dirty state exists", async () => {
     mocks.hasPendingDirtyConnection.mockResolvedValueOnce(true);
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
           event: "sleep.updated",
@@ -1730,7 +1733,7 @@ describe("hosted device-sync wakes", () => {
 
   it("accepts level-triggered webhooks before dirty state commits", async () => {
     mocks.hasPendingDirtyConnection.mockResolvedValueOnce(false);
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
           event: "sleep.updated",
@@ -1754,7 +1757,7 @@ describe("hosted device-sync wakes", () => {
   it("keeps hosted webhook traces completed when the post-commit mailbox signal fails", async () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.signalHostedDeviceSyncMailboxRuntime.mockRejectedValueOnce(new Error("Temporal unavailable"));
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
           event: "sleep.updated",
@@ -1792,7 +1795,7 @@ describe("hosted device-sync wakes", () => {
 
   it("keeps webhook acceptance retryable when dirty wake mailbox append fails", async () => {
     mocks.appendHostedMailboxEnvelopeTx.mockRejectedValueOnce(new Error("mailbox append failed"));
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
           event: "sleep.updated",
@@ -1822,7 +1825,7 @@ describe("hosted device-sync wakes", () => {
         userId: "user-123",
       },
     });
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
           event: "sleep.updated",
@@ -1853,7 +1856,7 @@ describe("hosted device-sync wakes", () => {
       .mockResolvedValueOnce(true);
 
     for (let index = 0; index < 2; index += 1) {
-      const controlPlane = new HostedDeviceSyncControlPlane(
+      const controlPlane = createHostedDeviceSyncPublicIngressService(
         new Request("https://control.example.test/api/device-sync/webhooks/oura", {
           body: JSON.stringify({
             event: "sleep.updated",
@@ -1941,7 +1944,7 @@ describe("hosted device-sync wakes", () => {
     mocks.hasPendingDirtyConnection.mockImplementation(async () => dirtyRevision > 0n);
 
     for (let index = 0; index < 2_500; index += 1) {
-      const controlPlane = new HostedDeviceSyncControlPlane(
+      const controlPlane = createHostedDeviceSyncPublicIngressService(
         new Request("https://control.example.test/api/device-sync/webhooks/oura", {
           body: JSON.stringify({
             event: "historical.updated",
@@ -2025,7 +2028,7 @@ describe("hosted device-sync wakes", () => {
       });
 
     for (let index = 0; index < 2; index += 1) {
-      const controlPlane = new HostedDeviceSyncControlPlane(
+      const controlPlane = createHostedDeviceSyncPublicIngressService(
         new Request("https://control.example.test/api/device-sync/webhooks/oura", {
           body: JSON.stringify({
             event: "sleep.updated",
@@ -2047,7 +2050,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("rejects hosted webhook bodies above the shared device-sync limit before ingress parsing", async () => {
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: "x".repeat(DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES + 1),
         headers: {
@@ -2075,7 +2078,7 @@ describe("hosted device-sync wakes", () => {
 
   it("does not complete or nudge a hosted webhook trace when dirty-state persistence fails", async () => {
     mocks.upsertDirtyConnection.mockRejectedValueOnce(new Error("dirty upsert failed"));
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
           event: "sleep.updated",
@@ -2098,7 +2101,7 @@ describe("hosted device-sync wakes", () => {
 
   it("does not nudge after a hosted webhook trace claim is lost before completion", async () => {
     mocks.completeWebhookTrace.mockResolvedValueOnce(false);
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
           event: "sleep.updated",
@@ -2180,7 +2183,7 @@ describe("hosted device-sync wakes", () => {
       }),
       startConnection: vi.fn(),
     }));
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
           event: "sleep.updated",
@@ -2318,7 +2321,7 @@ describe("hosted device-sync wakes", () => {
       provider: "junction",
     }));
     mocks.getConnectionOwnerId.mockResolvedValueOnce("user-123");
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/junction", {
         body: JSON.stringify({
           event_type: "daily.data.steps.created",
@@ -2424,7 +2427,7 @@ describe("hosted device-sync wakes", () => {
       provider: "junction",
     }));
     mocks.getConnectionOwnerId.mockResolvedValueOnce("user-123");
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/junction", {
         body: JSON.stringify({
           event_type: "daily.data.steps.created",
@@ -2515,7 +2518,7 @@ describe("hosted device-sync wakes", () => {
       provider: "junction",
     }));
     mocks.getConnectionOwnerId.mockResolvedValueOnce("user-123");
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/junction", {
         body: JSON.stringify({
           event_type: "daily.data.steps.created",
@@ -2601,7 +2604,7 @@ describe("hosted device-sync wakes", () => {
       }),
       startConnection: vi.fn(),
     }));
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/whoop", {
         body: JSON.stringify({
           event: "workout.updated",
@@ -2673,7 +2676,7 @@ describe("hosted device-sync wakes", () => {
   it("keeps hosted webhook traces retryable when ingress hooks cannot resolve an owner", async () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.getConnectionOwnerId.mockResolvedValue(null);
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
           event: "sleep.updated",
@@ -2761,7 +2764,7 @@ describe("hosted device-sync wakes", () => {
       }),
       startConnection: vi.fn(),
     }));
-    const controlPlane = new HostedDeviceSyncControlPlane(
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
           event: "session.deleted",

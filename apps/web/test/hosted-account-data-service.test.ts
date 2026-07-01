@@ -8,6 +8,7 @@ const serviceMocks = vi.hoisted(() => ({
   },
   createComposioConnectedAppsClient: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
+  createHostedDeviceSyncRegistry: vi.fn(),
   deleteHostedPrivyUser: vi.fn(),
   deleteHostedRunnerUserDataBestEffort: vi.fn(),
   getHostedOnboardingStripe: vi.fn(),
@@ -27,6 +28,10 @@ vi.mock("@/src/lib/connected-apps/config", async (importOriginal) => ({
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: serviceMocks.createHostedDeviceSyncControlPlane,
+}));
+
+vi.mock("@/src/lib/device-sync/providers", () => ({
+  createHostedDeviceSyncRegistry: serviceMocks.createHostedDeviceSyncRegistry,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy", async (importOriginal) => ({
@@ -133,6 +138,10 @@ beforeEach(() => {
   serviceMocks.createComposioConnectedAppsClient.mockReset();
   serviceMocks.createComposioConnectedAppsClient.mockReturnValue(serviceMocks.connectedAppsClient);
   serviceMocks.createHostedDeviceSyncControlPlane.mockReset();
+  serviceMocks.createHostedDeviceSyncRegistry.mockReset();
+  serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+    get: vi.fn(() => null),
+  });
   serviceMocks.deleteHostedPrivyUser.mockReset();
   serviceMocks.deleteHostedPrivyUser.mockResolvedValue(true);
   serviceMocks.deleteHostedRunnerUserDataBestEffort.mockReset();
@@ -798,9 +807,6 @@ describe("deleteHostedAccountData", () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const operationOrder: string[] = [];
     serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValueOnce({
-      requireRegistry: vi.fn(async () => ({
-        get: vi.fn(() => null),
-      })),
       store: {
         getStoredConnectionAccountForUser: vi.fn(async () => null),
       },
@@ -852,9 +858,6 @@ describe("deleteHostedAccountData", () => {
   it("locks webhook trace owners in deterministic unique order before account deletion", async () => {
     const operationOrder: string[] = [];
     serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValueOnce({
-      requireRegistry: vi.fn(async () => ({
-        get: vi.fn(() => null),
-      })),
       store: {
         getStoredConnectionAccountForUser: vi.fn(async () => null),
       },
@@ -997,14 +1000,14 @@ describe("deleteHostedAccountData", () => {
       tokenVersion: null,
       updatedAt: "2026-04-27T00:07:00.000Z",
     }));
-    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      requireRegistry: vi.fn(async () => ({
-        get: vi.fn(() => ({
-          connectionHandler: {
-            revokeAccess,
-          },
-        })),
+    serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+      get: vi.fn(() => ({
+        connectionHandler: {
+          revokeAccess,
+        },
       })),
+    });
+    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       store: {
         getStoredConnectionAccountForUser,
       },
@@ -1381,14 +1384,14 @@ describe("deleteHostedAccountData", () => {
       tokenVersion: null,
       updatedAt: "2026-04-27T00:07:00.000Z",
     }));
-    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      requireRegistry: vi.fn(async () => ({
-        get: vi.fn(() => ({
-          connectionHandler: {
-            revokeAccess,
-          },
-        })),
+    serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+      get: vi.fn(() => ({
+        connectionHandler: {
+          revokeAccess,
+        },
       })),
+    });
+    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       store: {
         getStoredConnectionAccountForUser,
       },

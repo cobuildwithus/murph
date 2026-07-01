@@ -5,6 +5,7 @@ import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-la
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
+import { createHostedDeviceSyncRegistry } from "../device-sync/providers";
 import { ComputerUseService } from "../computer-use/service";
 import { PrismaComputerUseStore } from "../computer-use/store";
 import {
@@ -1515,6 +1516,7 @@ async function revokeDeviceProvidersBestEffort(input: {
   }
 
   const results: HostedAccountProviderRevocationResult[] = [];
+  const registry = createHostedDeviceSyncRegistry(process.env);
   for (const connection of input.connections) {
     try {
       const storedAccount = await controlPlane.store.getStoredConnectionAccountForUser(
@@ -1533,7 +1535,7 @@ async function revokeDeviceProvidersBestEffort(input: {
         continue;
       }
 
-      const provider = (await controlPlane.requireRegistry()).get(connection.provider);
+      const provider = registry.get(connection.provider);
       const revokeAccess = provider?.connectionHandler?.revokeAccess;
 
       if (!revokeAccess) {

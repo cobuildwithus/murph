@@ -4,12 +4,12 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRouteContext } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
-  createHostedDeviceSyncControlPlane: vi.fn(),
+  createHostedDeviceSyncPublicIngressService: vi.fn(),
   handleConnectionCallback: vi.fn(),
 }));
 
-vi.mock("@/src/lib/device-sync/control-plane", () => ({
-  createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
+vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
+  createHostedDeviceSyncPublicIngressService: mocks.createHostedDeviceSyncPublicIngressService,
 }));
 
 type CallbackRouteModule = typeof import("../app/api/device-sync/oauth/[provider]/callback/route");
@@ -26,7 +26,7 @@ describe("hosted device-sync callback route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+    mocks.createHostedDeviceSyncPublicIngressService.mockReturnValue({
       handleConnectionCallback: mocks.handleConnectionCallback,
     });
     mocks.handleConnectionCallback.mockResolvedValue({
@@ -307,7 +307,7 @@ describe("hosted device-sync callback route", () => {
     const html = await response.text();
     expect(html).toContain("Device connection failed");
     expect(html).toContain("callback URL was invalid");
-    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+    expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
     expect(errorSpy).not.toHaveBeenCalled();
   });
 

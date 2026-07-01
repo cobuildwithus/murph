@@ -56,6 +56,10 @@ export interface HostedDeviceSyncAgentSessionContext {
   readonly store: PrismaDeviceSyncControlPlaneStore;
 }
 
+export interface HostedDeviceSyncAgentSessionOptions {
+  readonly registry?: DeviceSyncRegistry | null;
+}
+
 const HOSTED_DEVICE_SYNC_AGENT_PAIR_PATH = "/api/device-sync/agents/pair";
 const HOSTED_DEVICE_TOKEN_REFRESH_LEASE_TTL_MS = 5 * 60_000;
 const HOSTED_DEVICE_TOKEN_REFRESH_PERSIST_ATTEMPTS = 3;
@@ -553,11 +557,16 @@ export class HostedDeviceSyncAgentSessionService {
       return currentRefreshState;
     }
 
-    const { requireHostedDeviceSyncProvider } = await import("./providers");
-    const provider = requireHostedDeviceSyncProvider(
-      await this.requireRegistry(),
-      currentRefreshState.account.provider,
-    );
+    const provider = (await this.requireRegistry()).get(currentRefreshState.account.provider);
+    if (!provider) {
+      throw deviceSyncError({
+        code: "PROVIDER_NOT_CONFIGURED",
+        message:
+          `Hosted device-sync provider ${currentRefreshState.account.provider} is not configured in the shared device-sync provider registry.`,
+        retryable: false,
+        httpStatus: 404,
+      });
+    }
     const refreshResult = await refreshProviderTokens({
       account: currentRefreshState.account,
       provider,
@@ -1130,8 +1139,12 @@ export class HostedDeviceSyncAgentSessionService {
 
   private async requireRegistry(): Promise<DeviceSyncRegistry> {
     if (!this.registry) {
-      const { createHostedDeviceSyncRegistry } = await import("./providers");
-      this.registry = createHostedDeviceSyncRegistry(process.env);
+      throw deviceSyncError({
+        code: "DEVICE_SYNC_PROVIDER_RUNTIME_UNAVAILABLE",
+        message: "Hosted device-sync provider runtime is unavailable for this route.",
+        retryable: false,
+        httpStatus: 500,
+      });
     }
 
     return this.registry;
@@ -1140,12 +1153,14 @@ export class HostedDeviceSyncAgentSessionService {
 
 export function createHostedDeviceSyncAgentSessionService(
   request: Request,
+  options: HostedDeviceSyncAgentSessionOptions = {},
 ): HostedDeviceSyncAgentSessionService {
-  return createHostedDeviceSyncAgentSessionContext(request).agentSessions;
+  return createHostedDeviceSyncAgentSessionContext(request, options).agentSessions;
 }
 
 export function createHostedDeviceSyncAgentSessionContext(
   request: Request,
+  options: HostedDeviceSyncAgentSessionOptions = {},
 ): HostedDeviceSyncAgentSessionContext {
   const env = readHostedDeviceSyncEnvironment(process.env);
   const store = new PrismaDeviceSyncControlPlaneStore({
@@ -1155,6 +1170,7 @@ export function createHostedDeviceSyncAgentSessionContext(
 
   return {
     agentSessions: new HostedDeviceSyncAgentSessionService({
+      registry: options.registry ?? null,
       request,
       store,
     }),

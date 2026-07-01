@@ -1,6 +1,6 @@
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 
-import { createHostedDeviceSyncAgentSessionService } from "@/src/lib/device-sync/agent-session-service";
+import { createHostedDeviceSyncProviderAgentSessionService } from "@/src/lib/device-sync/agent-session-provider-service";
 import {
   jsonOk,
   postOnlyJson,
@@ -17,7 +17,7 @@ export const POST = withJsonError(async (
   request: Request,
   context: { params: Promise<{ connectionId: string }> },
 ) => {
-  const agentSessions = createHostedDeviceSyncAgentSessionService(request);
+  const agentSessions = createHostedDeviceSyncProviderAgentSessionService(request);
   const session = await agentSessions.requireAgentSession();
   const body = await readOptionalJsonObject(request);
   const expectedTokenVersion = readExpectedTokenVersion(body);

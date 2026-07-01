@@ -9,7 +9,9 @@ const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncAgentSessionContext: vi.fn(),
   createHostedDeviceSyncAgentSessionService: vi.fn(),
   assertBrowserMutationOrigin: vi.fn(),
+  createHostedDeviceSyncProviderAgentSessionService: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
+  createHostedDeviceSyncPublicIngressService: vi.fn(),
   exportTokenBundle: vi.fn(),
   handleWebhook: vi.fn(),
   pairAgent: vi.fn(),
@@ -24,9 +26,15 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
 }));
+vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
+  createHostedDeviceSyncPublicIngressService: mocks.createHostedDeviceSyncPublicIngressService,
+}));
 vi.mock("@/src/lib/device-sync/agent-session-service", () => ({
   createHostedDeviceSyncAgentSessionContext: mocks.createHostedDeviceSyncAgentSessionContext,
   createHostedDeviceSyncAgentSessionService: mocks.createHostedDeviceSyncAgentSessionService,
+}));
+vi.mock("@/src/lib/device-sync/agent-session-provider-service", () => ({
+  createHostedDeviceSyncProviderAgentSessionService: mocks.createHostedDeviceSyncProviderAgentSessionService,
 }));
 vi.mock("@/src/lib/device-sync/auth", () => ({
   assertBrowserMutationOrigin: mocks.assertBrowserMutationOrigin,
@@ -55,14 +63,21 @@ describe("hosted device-sync agent and webhook routes", () => {
     vi.clearAllMocks();
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       assertBrowserMutationOrigin: mocks.assertBrowserMutationOrigin,
-      handleWebhook: mocks.handleWebhook,
       pairAgent: mocks.pairAgent,
-      readWebhookRawBody: mocks.readWebhookRawBody,
       requireAuthenticatedUser: mocks.requireAuthenticatedUser,
       requireRegistry: mocks.requireRegistry,
+    });
+    mocks.createHostedDeviceSyncPublicIngressService.mockReturnValue({
+      handleWebhook: mocks.handleWebhook,
+      readWebhookRawBody: mocks.readWebhookRawBody,
       resolveWebhookPreflight: mocks.resolveWebhookPreflight,
     });
     mocks.createHostedDeviceSyncAgentSessionService.mockReturnValue({
+      exportTokenBundle: mocks.exportTokenBundle,
+      refreshTokenBundle: mocks.refreshTokenBundle,
+      requireAgentSession: mocks.requireAgentSession,
+    });
+    mocks.createHostedDeviceSyncProviderAgentSessionService.mockReturnValue({
       exportTokenBundle: mocks.exportTokenBundle,
       refreshTokenBundle: mocks.refreshTokenBundle,
       requireAgentSession: mocks.requireAgentSession,

@@ -12,7 +12,15 @@ import {
   createHostedDeviceSyncControlPlane,
   type HostedDeviceSyncControlPlane,
 } from "./control-plane";
-import type { HostedBrowserDeviceSyncConnection } from "./public-connection";
+import {
+  toHostedBrowserDeviceSyncConnectionSource,
+  type HostedBrowserDeviceSyncConnectionSource,
+} from "./browser-connection-source";
+import {
+  toHostedBrowserDeviceSyncConnection,
+  type HostedBrowserDeviceSyncConnection,
+} from "./public-connection";
+import { createHostedDeviceSyncRegistry } from "./providers";
 import { sha256Hex } from "./shared";
 
 export interface HostedDeviceSyncBackfillRestProbe {
@@ -88,12 +96,17 @@ export async function runHostedDeviceSyncBackfillDiagnostic(
   }
 
   const connectionId = normalizeQueryString(input.connectionId ?? null);
-  const settings = await input.controlPlane.listConnections(input.memberId);
-  const candidates = settings.connections.filter((connection) =>
-    connection.provider === providerName
-    && (!connectionId || connection.id === connectionId)
+  const connectionEntries = await listDiagnosticConnectionEntries({
+    controlPlane: input.controlPlane,
+    memberId: input.memberId,
+  });
+  const candidates = connectionEntries.filter((entry) =>
+    entry.browserConnection.provider === providerName
+    && (!connectionId || entry.browserConnection.id === connectionId)
   );
-  const activeCandidates = candidates.filter((entry) => entry.status === "active");
+  const activeCandidates = candidates.filter((entry) =>
+    entry.browserConnection.status === "active"
+  );
 
   if (candidates.length === 0) {
     throw deviceSyncError({
@@ -122,10 +135,9 @@ export async function runHostedDeviceSyncBackfillDiagnostic(
     });
   }
 
-  const connection = activeCandidates[0];
-  const connectionSources = settings.connectionSources.filter(
-    (source) => source.connectionId === connection.id,
-  );
+  const selectedEntry = activeCandidates[0];
+  const connection = selectedEntry.browserConnection;
+  const connectionSources = selectedEntry.browserConnectionSources;
   const restProbeSourceProviderSlug = normalizeQueryString(input.restProbe?.sourceProviderSlug ?? null);
   if (
     restProbeSourceProviderSlug
@@ -139,7 +151,7 @@ export async function runHostedDeviceSyncBackfillDiagnostic(
     });
   }
 
-  const provider = (await input.controlPlane.requireRegistry()).get(connection.provider);
+  const provider = createHostedDeviceSyncRegistry(process.env).get(connection.provider);
   if (!provider) {
     throw deviceSyncError({
       code: "DEVICE_SYNC_DIAGNOSTIC_PROVIDER_UNAVAILABLE",
@@ -149,11 +161,7 @@ export async function runHostedDeviceSyncBackfillDiagnostic(
     });
   }
 
-  const durableAccount = await resolveDurableConnectionForBrowserConnection({
-    browserConnection: connection,
-    controlPlane: input.controlPlane,
-    userId: input.memberId,
-  });
+  const durableAccount = selectedEntry.durableConnection;
   if (!durableAccount) {
     throw deviceSyncError({
       code: "DEVICE_SYNC_DIAGNOSTIC_CONNECTION_UNRESOLVED",
@@ -425,6 +433,35 @@ function describeDiagnosticWebSourceProjection(
   }));
 }
 
+async function listDiagnosticConnectionEntries(input: {
+  controlPlane: HostedDeviceSyncControlPlane;
+  memberId: string;
+}): Promise<Array<{
+  browserConnection: HostedBrowserDeviceSyncConnection;
+  browserConnectionSources: HostedBrowserDeviceSyncConnectionSource[];
+  durableConnection: PublicDeviceSyncAccount;
+}>> {
+  const durableConnections = await input.controlPlane.store.listConnectionsForUser(input.memberId);
+
+  return Promise.all(
+    durableConnections.map(async (durableConnection) => {
+      const browserConnection = toHostedBrowserDeviceSyncConnection(
+        durableConnection,
+        input.controlPlane.env.routingIndexKey,
+      );
+      const sources = await input.controlPlane.store.listConnectionSources(durableConnection.id);
+
+      return {
+        browserConnection,
+        browserConnectionSources: sources.map((source) =>
+          toHostedBrowserDeviceSyncConnectionSource(source, browserConnection.id)
+        ),
+        durableConnection,
+      };
+    }),
+  );
+}
+
 function redactDiagnosticProviderIdentifiers(value: Record<string, unknown>): Record<string, unknown> {
   const redacted = redactDiagnosticValue(value, new Map());
   return isDiagnosticRecord(redacted) ? redacted : {};
@@ -628,20 +665,6 @@ function isPrivateNetworkHostname(hostname: string): boolean {
   return first === 10
     || (first === 172 && second >= 16 && second <= 31)
     || (first === 192 && second === 168);
-}
-
-async function resolveDurableConnectionForBrowserConnection(input: {
-  browserConnection: HostedBrowserDeviceSyncConnection;
-  controlPlane: HostedDeviceSyncControlPlane;
-  userId: string;
-}): Promise<PublicDeviceSyncAccount | null> {
-  const durableConnections = await input.controlPlane.store.listConnectionsForUser(input.userId);
-
-  return durableConnections.find((candidate) =>
-    candidate.provider === input.browserConnection.provider
-    && input.controlPlane.createBrowserConnectionId(candidate.id)
-      === input.browserConnection.id
-  ) ?? null;
 }
 
 function buildDiagnosticAccountFromDurableConnection(

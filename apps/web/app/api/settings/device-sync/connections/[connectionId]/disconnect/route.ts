@@ -1,4 +1,4 @@
-import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
+import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
@@ -11,7 +11,7 @@ export const POST = withJsonError(async (
   assertHostedOnboardingMutationOrigin(request);
   const auth = await requireActiveHostedAppSessionFromRequest(request);
   const connectionId = await resolveDecodedRouteParam(context.params, "connectionId");
-  const controlPlane = createHostedDeviceSyncControlPlane(request);
+  const publicIngress = createHostedDeviceSyncPublicIngressService(request);
 
-  return jsonOk(await controlPlane.disconnectConnection(auth.member.id, connectionId));
+  return jsonOk(await publicIngress.disconnectConnection(auth.member.id, connectionId));
 });

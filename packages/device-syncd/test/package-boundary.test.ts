@@ -122,28 +122,17 @@ const webRoot = resolve(repoRoot, "apps/web");
 
 const WEB_SAFE_DEVICE_SYNC_GRAPH_ROOTS = [
   "apps/web/app/api/device-sync/route.ts",
-  "apps/web/app/api/device-sync/agent/connections/[connectionId]/export-token-bundle/route.ts",
   "apps/web/app/api/device-sync/agent/connections/[connectionId]/local-heartbeat/route.ts",
-  "apps/web/app/api/device-sync/agent/connections/[connectionId]/refresh-token-bundle/route.ts",
   "apps/web/app/api/device-sync/agent/session/revoke/route.ts",
   "apps/web/app/api/device-sync/agents/pair/route.ts",
-  "apps/web/app/api/device-sync/companion/sign-in-token/route.ts",
   "apps/web/app/api/device-sync/companion/status/route.ts",
-  "apps/web/app/api/device-sync/connect/[provider]/callback/route.ts",
   "apps/web/app/api/device-sync/messaging-return/route.ts",
-  "apps/web/app/api/device-sync/oauth/[provider]/callback/route.ts",
-  "apps/web/app/api/device-sync/webhooks/[provider]/route.ts",
-  "apps/web/app/api/internal/device-sync/connect-targets/[connectTarget]/connect-link/route.ts",
-  "apps/web/app/api/internal/device-sync/junction/workouts/raw/route.ts",
   "apps/web/app/api/internal/device-sync/recovery-sweep/route.ts",
   "apps/web/app/api/internal/device-sync/runtime/apply/route.ts",
   "apps/web/app/api/internal/device-sync/runtime/dirty-ack/route.ts",
   "apps/web/app/api/internal/device-sync/runtime/dirty-pending/route.ts",
   "apps/web/app/api/internal/device-sync/runtime/snapshot/route.ts",
-  "apps/web/app/api/ops/device-sync/junction-diagnostics/route.ts",
-  "apps/web/app/api/settings/device-sync/connections/[connectionId]/disconnect/route.ts",
   "apps/web/app/api/settings/device-sync/connections/[connectionId]/status/route.ts",
-  "apps/web/app/api/settings/device-sync/diagnose-backfill/route.ts",
   "apps/web/app/api/settings/device-sync/route.ts",
   "apps/web/app/api/settings/device-sync/sidebar-status/route.ts",
   "apps/web/src/lib/device-sync/control-plane.ts",
@@ -209,6 +198,7 @@ function readModuleSpecifiers(source: string): string[] {
   const specifiers = new Set<string>();
   const patterns = [
     /\bimport\s+(?!type\b)(?:[^'";]*?\s+from\s+)?["']([^"']+)["']/gu,
+    /\bimport\s*\(\s*["']([^"']+)["']\s*\)/gu,
     /\bexport\s+(?!type\b)[^'";]*?\s+from\s+["']([^"']+)["']/gu,
   ];
 

@@ -354,6 +354,28 @@ test("next.config traces generated Health Commons route files without the monoli
       "../../packages/health-commons/generated/web/bundles/measurement_method/**/*.json",
     ],
   );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/biomarkers"],
+    [
+      "../../packages/health-commons/generated/web/browse/biomarkers.json",
+    ],
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/biomarkers/[biomarkerId]"],
+    [
+      "../../packages/health-commons/generated/web/routes/index.json",
+      "../../packages/health-commons/generated/web/shell/biomarkers/**/*.json",
+      "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
+    ],
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/biomarkers/[biomarkerId]/research"],
+    [
+      "../../packages/health-commons/generated/web/routes/index.json",
+      "../../packages/health-commons/generated/web/shell/biomarkers/**/*.json",
+      "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
+    ],
+  );
   assert.doesNotMatch(
     JSON.stringify(productionNextConfig.outputFileTracingIncludes),
     /generated\/catalog\.json/u,

@@ -17,6 +17,7 @@ import {
 } from "@murphai/device-syncd/types";
 
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
+import { createHostedDeviceSyncControlPlaneContext } from "./control-plane-context";
 import {
   toHostedBrowserDeviceSyncConnectionSource,
   type HostedBrowserDeviceSyncConnectionSource,
@@ -34,6 +35,7 @@ import {
 } from "./wake-service";
 import { readRawBodyBuffer } from "./http";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
+import { createHostedDeviceSyncRegistry } from "./providers";
 
 export class HostedDeviceSyncPublicIngressService {
   private readonly ingress;
@@ -280,4 +282,14 @@ export class HostedDeviceSyncPublicIngressService {
     });
   }
 
+}
+
+export function createHostedDeviceSyncPublicIngressService(
+  request: Request,
+): HostedDeviceSyncPublicIngressService {
+  const context = createHostedDeviceSyncControlPlaneContext(request);
+  const webhookAdmin = new HostedDeviceSyncWebhookAdminService(context);
+  const registry = createHostedDeviceSyncRegistry(process.env);
+
+  return new HostedDeviceSyncPublicIngressService(context, webhookAdmin, registry);
 }
