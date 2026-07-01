@@ -66,6 +66,9 @@ RUN apt-get update \
 # The hosted assistant harness is Codex app-server itself; repo-local helpers
 # only coordinate the mailbox/runtime around this pinned CLI.
 RUN npm install --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${CODEX_CLI_VERSION}" \
+  && native_codex="$(find "$(npm root -g)/@openai" -path '*/vendor/*/bin/codex' -type f -perm /111 -print -quit)" \
+  && test -n "${native_codex}" \
+  && ln -sfn "${native_codex}" /usr/local/bin/codex \
   && npm cache clean --force
 
 WORKDIR /app

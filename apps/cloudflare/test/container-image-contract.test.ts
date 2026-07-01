@@ -451,6 +451,10 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain(
       'npm install --global --omit=dev --no-audit --no-fund --ignore-scripts "@openai/codex@${CODEX_CLI_VERSION}"',
     );
+    expect(baseDockerfile).toContain(
+      'native_codex="$(find "$(npm root -g)/@openai" -path \'*/vendor/*/bin/codex\' -type f -perm /111 -print -quit)"',
+    );
+    expect(baseDockerfile).toContain('ln -sfn "${native_codex}" /usr/local/bin/codex');
     expect(baseDockerfile).toContain("npm cache clean --force");
     expect(baseDockerfile).toContain("PATH=/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
     expect(baseDockerfile).not.toContain("/etc/profile.d/murph-runner-path.sh");
