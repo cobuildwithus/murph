@@ -181,7 +181,7 @@ export default async function SettingsPage() {
             <HostedPasskeySettings authenticated={authenticated} />
           </section>
 
-          <section className="flex flex-col gap-4">
+          <section id="data-privacy" className="flex scroll-mt-24 flex-col gap-4">
             <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
               Data & privacy
             </div>
@@ -189,7 +189,7 @@ export default async function SettingsPage() {
           </section>
         </HostedPrivyProvider>
       ) : (
-        <section className="flex flex-col gap-4">
+        <section id="data-privacy" className="flex scroll-mt-24 flex-col gap-4">
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
             Data & privacy
           </div>
