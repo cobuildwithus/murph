@@ -1210,13 +1210,20 @@ function normalizeDeviceEventInputs(
       errorMessage: `Device event ${index + 1} relatedIds is no longer supported; use links.`,
     });
     const normalizedLegacyExternalRefs = normalizeLegacyExternalRefs(eventInput.legacyExternalRefs, index);
+    const inputDayKey = typeof eventInput.dayKey === "string" ? eventInput.dayKey : undefined;
+    const inputTimeZone = typeof eventInput.timeZone === "string" ? eventInput.timeZone : undefined;
+    const preservesProviderDayWithoutTimeZone = Boolean(
+      inputDayKey &&
+        !inputTimeZone &&
+        isJunctionSleepStageExternalRefInput(eventInput.externalRef),
+    );
     const seed = buildNormalizedEventSeed({
       kind,
       occurredAt: eventInput.occurredAt ?? eventInput.recordedAt ?? context.importedAt,
       recordedAt: eventInput.recordedAt ?? eventInput.occurredAt,
-      dayKey: typeof eventInput.dayKey === "string" ? eventInput.dayKey : undefined,
-      timeZone: typeof eventInput.timeZone === "string" ? eventInput.timeZone : undefined,
-      defaultTimeZone: context.defaultTimeZone,
+      dayKey: inputDayKey,
+      timeZone: inputTimeZone,
+      defaultTimeZone: preservesProviderDayWithoutTimeZone ? undefined : context.defaultTimeZone,
       source: eventInput.source ?? context.source,
       title: typeof eventInput.title === "string" ? eventInput.title : undefined,
       note: eventInput.note,
@@ -1722,6 +1729,64 @@ function isSameObservationValue(existing: EventRecord, incoming: EventRecord): b
     existing.value === incoming.value;
 }
 
+const DEVICE_EXTERNAL_REF_PRIORITY_VERSION_PATTERN = /^priority:(\d{1,3})$/u;
+const JUNCTION_SLEEP_STAGE_METRIC_FACETS = new Set([
+  "sleep-awake-minutes",
+  "sleep-light-minutes",
+  "sleep-deep-minutes",
+  "sleep-rem-minutes",
+]);
+
+function deviceExternalRefPriority(externalRef: ExternalRef | undefined): number | null {
+  const version = externalRef?.version;
+  if (!version) {
+    return null;
+  }
+
+  const match = DEVICE_EXTERNAL_REF_PRIORITY_VERSION_PATTERN.exec(version);
+  if (!match) {
+    return null;
+  }
+
+  const priority = Number.parseInt(match[1] as string, 10);
+  return Number.isFinite(priority) ? priority : null;
+}
+
+function shouldKeepExistingHigherPriorityDeviceObservation(
+  existing: EventRecord,
+  incoming: EventRecord,
+): boolean {
+  if (!isSameObservationFacet(existing, incoming)) {
+    return false;
+  }
+
+  const existingPriority = deviceExternalRefPriority(existing.externalRef);
+  const incomingPriority = deviceExternalRefPriority(incoming.externalRef);
+  return existingPriority !== null &&
+    incomingPriority !== null &&
+    existingPriority > incomingPriority;
+}
+
+function canCollapseHigherPriorityDeviceObservationAlias(input: {
+  incoming: EventRecord;
+  legacyMatches: readonly { indexedMatch: IndexedEventExternalRefMatch; refKey: string }[];
+  primaryMatch: IndexedEventExternalRefMatch | undefined;
+}): boolean {
+  if (!input.primaryMatch || input.legacyMatches.length !== 1) {
+    return false;
+  }
+
+  const incomingPriority = deviceExternalRefPriority(input.incoming.externalRef);
+  const primaryPriority = deviceExternalRefPriority(input.primaryMatch.record.externalRef);
+  const [legacyMatch] = input.legacyMatches;
+  return incomingPriority !== null &&
+    primaryPriority !== null &&
+    incomingPriority > primaryPriority &&
+    isSameObservationFacet(input.primaryMatch.record, input.incoming) &&
+    legacyMatch !== undefined &&
+    isSameObservationFacet(legacyMatch.indexedMatch.record, input.incoming);
+}
+
 function deviceDataOriginSourceMatches(
   existing: DeviceDataOrigin | undefined,
   incoming: DeviceDataOrigin | undefined,
@@ -1769,6 +1834,46 @@ function isWhoopBodyMeasurementDateOnlyLegacyRef(
     isScopedDateLikeWhoopBodyMeasurementResourceId(incoming.externalRef.resourceId);
 }
 
+function isJunctionSleepStageSummaryLegacyMigrationRef(
+  legacyExternalRef: ExternalRef,
+  incoming: EventRecord,
+): boolean {
+  return legacyExternalRef.system === "junction" &&
+    incoming.externalRef?.system === "junction" &&
+    legacyExternalRef.resourceType === incoming.externalRef.resourceType &&
+    /^junction-[a-z0-9-]+-sleep$/u.test(legacyExternalRef.resourceType) &&
+    legacyExternalRef.facet !== undefined &&
+    legacyExternalRef.facet === incoming.externalRef.facet &&
+    JUNCTION_SLEEP_STAGE_METRIC_FACETS.has(legacyExternalRef.facet) &&
+    deviceExternalRefPriority(incoming.externalRef) === 20;
+}
+
+function isJunctionSleepStageExternalRefInput(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const externalRef = value as UnknownRecord;
+  return externalRef.system === "junction" &&
+    typeof externalRef.resourceType === "string" &&
+    /^junction-[a-z0-9-]+-sleep$/u.test(externalRef.resourceType) &&
+    typeof externalRef.facet === "string" &&
+    JUNCTION_SLEEP_STAGE_METRIC_FACETS.has(externalRef.facet);
+}
+
+function hasStableJunctionSleepStageLegacyOccurrenceProof(
+  existing: IndexedEventExternalRefMatch,
+  incoming: EventRecord,
+): boolean {
+  if (!isSameObservationFacet(existing.record, incoming)) {
+    return false;
+  }
+
+  const existingDataOrigin = existing.indexedRecord.dataOrigin ?? existing.record.dataOrigin;
+  return existing.record.occurredAt === incoming.occurredAt &&
+    deviceDataOriginSourceMatches(existingDataOrigin, incoming.dataOrigin);
+}
+
 function hasStableLegacyOccurrenceProof(
   existing: IndexedEventExternalRefMatch,
   incoming: EventRecord,
@@ -1813,6 +1918,10 @@ function isCompatibleLegacyExternalRefMatch(
   if (isWhoopBodyMeasurementDateOnlyLegacyRef(legacyExternalRef, incoming)) {
     return isSameObservationFacet(existing.record, incoming) &&
       hasStableLegacyOccurrenceProof(existing, incoming, legacyExternalRef);
+  }
+
+  if (isJunctionSleepStageSummaryLegacyMigrationRef(legacyExternalRef, incoming)) {
+    return hasStableJunctionSleepStageLegacyOccurrenceProof(existing, incoming);
   }
 
   return existing.record.dayKey === incoming.dayKey ||
@@ -1978,7 +2087,8 @@ async function reconcileDeviceEventEntriesByExternalRef(
       ...legacyMatchedEntries,
     ];
     const selectedPrimaryMatch = matchedEntries.find((match) => match.refKey === refKey);
-    const latest = selectedPrimaryMatch?.indexedMatch.record ?? matchedEntries[0]?.indexedMatch.record;
+    let aliasCollapseTombstoneMatches: Array<{ indexedMatch: IndexedEventExternalRefMatch; refKey: string }> = [];
+    let latest = selectedPrimaryMatch?.indexedMatch.record ?? matchedEntries[0]?.indexedMatch.record;
 
     if (!latest) {
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
@@ -2003,10 +2113,29 @@ async function reconcileDeviceEventEntriesByExternalRef(
 
     const matchedIds = new Set(matchedEntries.map((match) => match.indexedMatch.record.id));
     if (matchedIds.size > 1) {
+      if (canCollapseHigherPriorityDeviceObservationAlias({
+        incoming: entry.record,
+        legacyMatches: legacyMatchedEntries,
+        primaryMatch,
+      })) {
+        const [legacyMatch] = legacyMatchedEntries;
+        latest = legacyMatch?.indexedMatch.record;
+        aliasCollapseTombstoneMatches = primaryMatch ? [{ indexedMatch: primaryMatch, refKey }] : [];
+      } else {
+        throw new VaultError(
+          "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+          `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+            `${externalRef.facet ? `#${externalRef.facet}` : ""}" matched multiple live event IDs; ` +
+            "ambiguous legacy cleanup must be repaired explicitly.",
+        );
+      }
+    }
+
+    if (!latest) {
       throw new VaultError(
         "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
         `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
-          `${externalRef.facet ? `#${externalRef.facet}` : ""}" matched multiple live event IDs; ` +
+          `${externalRef.facet ? `#${externalRef.facet}` : ""}" could not select a canonical alias owner; ` +
           "ambiguous legacy cleanup must be repaired explicitly.",
       );
     }
@@ -2036,6 +2165,11 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
+    if (shouldKeepExistingHigherPriorityDeviceObservation(latest, entry.record)) {
+      records.push(latest);
+      continue;
+    }
+
     const historicalUserEditMatch = matchedEntries.find((match) =>
       hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
     );
@@ -2059,6 +2193,25 @@ async function reconcileDeviceEventEntriesByExternalRef(
     };
 
     forceAppendIds.add(latest.id);
+    for (const match of aliasCollapseTombstoneMatches) {
+      const tombstoneRevision = Math.max(
+        eventSpineRevision(match.indexedMatch.record),
+        index.maxRevisionById.get(match.indexedMatch.record.id) ?? 0,
+      ) + 1;
+      const tombstone: EventRecord = {
+        ...match.indexedMatch.record,
+        recordedAt: entry.record.recordedAt,
+        lifecycle: buildEventSpineLifecycle(tombstoneRevision, "deleted"),
+      };
+
+      forceAppendIds.add(tombstone.id);
+      appendEntries.push({ relativePath: match.indexedMatch.relativePath, record: tombstone });
+      index.latestByRefKey.set(
+        match.refKey,
+        toIndexedExternalRefMatch(tombstone, match.indexedMatch.indexedExternalRef, match.indexedMatch.relativePath),
+      );
+      index.maxRevisionById.set(tombstone.id, tombstoneRevision);
+    }
     index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(superseding, externalRef));
     for (const { refKey: matchedRefKey, indexedMatch } of matchedEntries) {
       const currentMatch = index.latestByRefKey.get(matchedRefKey);

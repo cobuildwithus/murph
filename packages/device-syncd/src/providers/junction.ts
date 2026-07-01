@@ -3,6 +3,7 @@ import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 import type { Junction } from "@junction-api/sdk";
 import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
 import type * as JunctionSerialization from "@junction-api/sdk/serialization";
+import { canNormalizeJunctionSleepCycleRecordToCompactStages } from "@murphai/importers";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 import {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
@@ -817,6 +818,12 @@ export function createJunctionDeviceSyncProvider(
     if (!sourceProviderSlug) {
       return null;
     }
+    if (
+      resource === "sleep_cycle"
+      && !hasNormalizableJunctionDirectSleepCycleRecord(record, sourceProviderSlug)
+    ) {
+      return null;
+    }
 
     return {
       record,
@@ -1111,15 +1118,24 @@ export function createJunctionDeviceSyncProvider(
     const resource = normalizeJunctionResourceName(job.payload.resource);
     const resourceCategory = normalizeString(job.payload.resourceCategory);
     const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
+    let listedSourceProviders: readonly JunctionProviderConnection[] | null = null;
     let projectedSourceProviders: readonly JunctionProviderConnection[] | null = null;
-    const loadAndProjectSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
-      if (projectedSourceProviders) {
-        return projectedSourceProviders;
+    const loadSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
+      if (listedSourceProviders) {
+        return listedSourceProviders;
       }
 
       const sourceProviders = await client.listUserProviders(context.account.externalAccountId, {
         signal: context.signal ?? null,
       });
+      listedSourceProviders = sourceProviders;
+      return sourceProviders;
+    };
+    const loadAndProjectSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
+      if (projectedSourceProviders) {
+        return projectedSourceProviders;
+      }
+      const sourceProviders = await loadSourceProviders();
       await projectJunctionSources(context, sourceProviders);
       projectedSourceProviders = sourceProviders;
       return sourceProviders;
@@ -1185,9 +1201,12 @@ export function createJunctionDeviceSyncProvider(
 
       const directInput = readJunctionDirectResourceJobInput(job, window);
       if (directInput) {
+        const sourceProviders = directInput.resource === "sleep_cycle"
+          ? await loadSourceProviders()
+          : [];
         await importJunctionDirectResourceSnapshot(
           context,
-          [],
+          sourceProviders,
           directInput.windowStart,
           directInput.windowEnd,
           directInput.resource,
@@ -3903,21 +3922,45 @@ function hasUsefulJunctionSleepCycleStageRecord(
   );
 }
 
+function hasNormalizableJunctionDirectSleepCycleRecord(
+  record: Record<string, unknown>,
+  sourceProviderSlug: string,
+): boolean {
+  return canNormalizeJunctionSleepCycleRecordToCompactStages(record, sourceProviderSlug);
+}
+
 function hasJunctionSleepStageValue(entry: Record<string, unknown>): boolean {
-  return JUNCTION_SLEEP_STAGE_VALUE_PATHS.some((path) =>
-    normalizeJunctionSleepStageValue(readJunctionRecordPath(entry, path)) !== null
-  );
+  return firstJunctionSleepStageFromPaths(entry) !== null;
+}
+
+function firstJunctionSleepStageFromPaths(entry: Record<string, unknown>) {
+  for (const path of JUNCTION_SLEEP_STAGE_VALUE_PATHS) {
+    const stage = normalizeJunctionSleepStageValue(readJunctionRecordPath(entry, path));
+    if (stage !== null) {
+      return stage;
+    }
+  }
+
+  return null;
 }
 
 function collectJunctionSleepCycleStageRecords(value: unknown): Record<string, unknown>[] {
+  return collectJunctionSleepCycleStageRecordsWithSeen(value, new Set());
+}
+
+function collectJunctionSleepCycleStageRecordsWithSeen(
+  value: unknown,
+  seen: Set<Record<string, unknown>>,
+): Record<string, unknown>[] {
   if (Array.isArray(value)) {
-    return value.flatMap((entry) => collectJunctionSleepCycleStageRecords(entry));
+    return value.flatMap((entry) => collectJunctionSleepCycleStageRecordsWithSeen(entry, seen));
   }
 
   const entry = readPlainObject(value);
-  if (!entry) {
+  if (!entry || seen.has(entry)) {
     return [];
   }
+  seen.add(entry);
 
   if (hasJunctionSleepStageValue(entry)) {
     return [entry];
@@ -3925,7 +3968,7 @@ function collectJunctionSleepCycleStageRecords(value: unknown): Record<string, u
 
   return JUNCTION_SLEEP_STAGE_ARRAY_PATHS.flatMap((path) => {
     const nested = readJunctionRecordPath(entry, path);
-    return nested === value ? [] : collectJunctionSleepCycleStageRecords(nested);
+    return nested === value ? [] : collectJunctionSleepCycleStageRecordsWithSeen(nested, seen);
   });
 }
 

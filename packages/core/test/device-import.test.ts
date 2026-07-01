@@ -17,6 +17,7 @@ import {
   readIntegrationIngestById,
   readJsonlRecords,
   repairJunctionWorkoutHeartRateZones,
+  updateVaultSummary,
   upsertEvent,
   VaultError,
 } from "../src/index.ts";
@@ -66,6 +67,10 @@ async function readRequiredIntegrationIngest(vaultRoot: string, ingestId: string
 
 function invalidTestValue<T>(value: unknown): T {
   return value as T;
+}
+
+function eventObservationValue(record: EventRecord | undefined): unknown {
+  return record?.kind === "observation" ? record.value : undefined;
 }
 
 const DENSE_TELEMETRY_NOT_ALLOWED_CODE = "VAULT_DENSE_DEVICE_TELEMETRY_NOT_ALLOWED";
@@ -3564,6 +3569,346 @@ test("importDeviceBatch supersedes in place when the provider bumps externalRef.
   assert.equal(rescored.events[0]?.lifecycle?.revision, 2);
   assert.equal(replay.events[0]?.id, first.events[0]?.id);
   assert.equal(records.length, 2, "expected original + one supersede, no duplicate live events");
+  assert.equal(new Set(records.map((record) => record.id)).size, 1);
+});
+
+test("importDeviceBatch keeps higher-priority device observations for the same externalRef", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-priority-version");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const buildInput = (version: string, value: number, importedAt: string) => ({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt,
+    events: [
+      {
+        kind: "observation",
+        occurredAt: "2026-06-03T07:30:00.000Z",
+        recordedAt: "2026-06-03T07:30:00.000Z",
+        title: "Junction deep sleep",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-garmin-sleep",
+          resourceId: "sleep-stage-window-1",
+          version,
+          facet: "sleep-deep-minutes",
+        },
+        fields: {
+          metric: "sleep-deep-minutes",
+          observationGrain: "summary",
+          value,
+          unit: "minutes",
+        },
+      },
+    ],
+  });
+
+  const summary = await importDeviceBatch(buildInput("priority:20", 90, "2026-06-03T11:00:00.000Z"));
+  const fallback = await importDeviceBatch(buildInput("priority:10", 75, "2026-06-03T11:05:00.000Z"));
+  const summaryRescore = await importDeviceBatch(buildInput("priority:20", 92, "2026-06-03T11:10:00.000Z"));
+
+  const records = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: summary.eventShardPaths[0] as string,
+  })) as EventRecord[];
+
+  assert.equal(fallback.events[0]?.id, summary.events[0]?.id);
+  assert.equal(eventObservationValue(fallback.events[0]), 90);
+  assert.equal(summaryRescore.events[0]?.id, summary.events[0]?.id);
+  assert.equal(eventObservationValue(summaryRescore.events[0]), 92);
+  assert.equal(records.length, 2, "expected original summary + one summary rescore; fallback should not append");
+  assert.deepEqual(records.map(eventObservationValue), [90, 92]);
+});
+
+test("importDeviceBatch lets higher-priority device observations supersede fallback facts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-priority-upgrade");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const buildInput = (version: string, value: number, importedAt: string) => ({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt,
+    events: [
+      {
+        kind: "observation",
+        occurredAt: "2026-06-03T07:30:00.000Z",
+        recordedAt: "2026-06-03T07:30:00.000Z",
+        title: "Junction deep sleep",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-garmin-sleep",
+          resourceId: "sleep-stage-window-1",
+          version,
+          facet: "sleep-deep-minutes",
+        },
+        fields: {
+          metric: "sleep-deep-minutes",
+          observationGrain: "summary",
+          value,
+          unit: "minutes",
+        },
+      },
+    ],
+  });
+
+  const fallback = await importDeviceBatch(buildInput("priority:10", 75, "2026-06-03T11:00:00.000Z"));
+  const summary = await importDeviceBatch(buildInput("priority:20", 90, "2026-06-03T11:05:00.000Z"));
+
+  const records = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: fallback.eventShardPaths[0] as string,
+  })) as EventRecord[];
+
+  assert.equal(summary.events[0]?.id, fallback.events[0]?.id);
+  assert.equal(eventObservationValue(summary.events[0]), 90);
+  assert.equal(records.length, 2, "expected fallback + higher-priority summary supersede");
+  assert.deepEqual(records.map(eventObservationValue), [75, 90]);
+});
+
+test("importDeviceBatch collapses higher-priority aliases across legacy summary and fallback facts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-priority-legacy-collapse");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const legacyExternalRef = {
+    system: "junction",
+    resourceType: "junction-garmin-sleep",
+    resourceId: "legacy-summary-stage-window-1",
+    facet: "sleep-deep-minutes",
+  };
+  const canonicalExternalRef = {
+    system: "junction",
+    resourceType: "junction-garmin-sleep",
+    resourceId: "sleep-stage-window-1",
+    facet: "sleep-deep-minutes",
+  };
+  const dataOrigin = {
+    version: 1 as const,
+    aggregatorProvider: "junction",
+    sourceProviderSlug: "garmin",
+    sourceType: "watch",
+    sourceInstanceId: "garmin-watch-1",
+    observedAtRaw: "2026-06-03T07:30:00.000Z",
+    timestampSemantics: "utc" as const,
+  };
+  const buildEvent = (input: {
+    legacyExternalRefs?: Array<typeof legacyExternalRef>;
+    title: string;
+    value: number;
+    version?: string;
+  }) => ({
+    kind: "observation",
+    occurredAt: "2026-06-03T07:30:00.000Z",
+    recordedAt: "2026-06-03T07:30:00.000Z",
+    title: input.title,
+    externalRef: input.version
+      ? { ...canonicalExternalRef, version: input.version }
+      : legacyExternalRef,
+    legacyExternalRefs: input.legacyExternalRefs,
+    dataOrigin,
+    fields: {
+      metric: "sleep-deep-minutes",
+      observationGrain: "summary",
+      value: input.value,
+      unit: "minutes",
+    },
+  });
+
+  const legacySummary = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-06-03T11:00:00.000Z",
+    events: [buildEvent({ title: "Legacy Junction deep sleep", value: 90 })],
+  });
+  const fallback = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-06-03T11:05:00.000Z",
+    events: [buildEvent({ title: "Junction fallback deep sleep", value: 75, version: "priority:10" })],
+  });
+  const summary = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-06-03T11:10:00.000Z",
+    events: [
+      buildEvent({
+        legacyExternalRefs: [legacyExternalRef],
+        title: "Junction summary deep sleep",
+        value: 90,
+        version: "priority:20",
+      }),
+    ],
+  });
+
+  const records = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: legacySummary.eventShardPaths[0] as string,
+  })) as EventRecord[];
+  const deletedIds = new Set(
+    records.filter((record) => record.lifecycle?.state === "deleted").map((record) => record.id),
+  );
+  const liveRecordById = new Map<string, EventRecord>();
+  for (const record of records) {
+    if (deletedIds.has(record.id)) {
+      continue;
+    }
+
+    const existing = liveRecordById.get(record.id);
+    if (!existing || (record.lifecycle?.revision ?? 1) > (existing.lifecycle?.revision ?? 1)) {
+      liveRecordById.set(record.id, record);
+    }
+  }
+  const liveRecords = [...liveRecordById.values()];
+
+  assert.equal(summary.events[0]?.id, legacySummary.events[0]?.id);
+  assert.equal(eventObservationValue(summary.events[0]), 90);
+  assert.ok(deletedIds.has(fallback.events[0]?.id as string));
+  assert.equal(liveRecords.length, 1);
+  assert.equal(liveRecords[0]?.id, legacySummary.events[0]?.id);
+  assert.equal(eventObservationValue(liveRecords[0]), 90);
+});
+
+test("importDeviceBatch preserves explicit device dayKey without vault timezone backfill", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-explicit-day-no-timezone");
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-06-01T12:00:00.000Z",
+    timezone: "America/New_York",
+  });
+
+  const buildInput = (importedAt: string) => ({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt,
+    events: [
+      {
+        kind: "observation",
+        occurredAt: "2026-06-25T03:00:00.000Z",
+        recordedAt: "2026-06-25T03:00:00.000Z",
+        dayKey: "2026-06-24",
+        title: "Junction light sleep",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-whoop-sleep",
+          resourceId: "sleep-stage-window-1",
+          version: "priority:10",
+          facet: "sleep-light-minutes",
+        },
+        fields: {
+          metric: "sleep-light-minutes",
+          observationGrain: "summary",
+          value: 30,
+          unit: "minutes",
+        },
+      },
+    ],
+  });
+
+  const initial = await importDeviceBatch(buildInput("2026-06-25T12:00:00.000Z"));
+  await updateVaultSummary({ vaultRoot, timezone: "UTC" });
+  const replay = await importDeviceBatch(buildInput("2026-06-25T12:05:00.000Z"));
+
+  const records = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: initial.eventShardPaths[0] as string,
+  })) as EventRecord[];
+
+  assert.equal(initial.events[0]?.timeZone, undefined);
+  assert.equal(initial.events[0]?.dayKey, "2026-06-24");
+  assert.equal(replay.events[0]?.id, initial.events[0]?.id);
+  assert.equal(replay.events[0]?.timeZone, undefined);
+  assert.equal(records.length, 1, "vault timezone changes should not rewrite explicit provider dayKey events");
+});
+
+test("importDeviceBatch migrates rescored Junction sleep summary legacy refs across day drift", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-junction-summary-day-drift");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const legacyExternalRef = {
+    system: "junction",
+    resourceType: "junction-garmin-sleep",
+    resourceId: "legacy-summary-stage-window-2",
+    facet: "sleep-deep-minutes",
+  };
+  const canonicalExternalRef = {
+    system: "junction",
+    resourceType: "junction-garmin-sleep",
+    resourceId: "sleep-stage-window-2",
+    version: "priority:20",
+    facet: "sleep-deep-minutes",
+  };
+  const dataOrigin = {
+    version: 1 as const,
+    aggregatorProvider: "junction",
+    sourceProviderSlug: "garmin",
+    sourceType: "watch",
+    sourceInstanceId: "garmin-watch-1",
+    observedAtRaw: "2026-06-25T03:00:00.000Z",
+    timestampSemantics: "utc" as const,
+  };
+  const buildEvent = (input: {
+    dayKey: string;
+    externalRef: typeof legacyExternalRef | typeof canonicalExternalRef;
+    legacyExternalRefs?: Array<typeof legacyExternalRef>;
+    value: number;
+  }) => ({
+    kind: "observation",
+    occurredAt: "2026-06-25T03:00:00.000Z",
+    recordedAt: "2026-06-25T03:00:00.000Z",
+    dayKey: input.dayKey,
+    title: "Junction deep sleep",
+    externalRef: input.externalRef,
+    legacyExternalRefs: input.legacyExternalRefs,
+    dataOrigin,
+    fields: {
+      metric: "sleep-deep-minutes",
+      observationGrain: "summary",
+      value: input.value,
+      unit: "minutes",
+    },
+  });
+
+  const legacySummary = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-06-25T11:00:00.000Z",
+    events: [
+      buildEvent({
+        dayKey: "2026-06-25",
+        externalRef: legacyExternalRef,
+        value: 90,
+      }),
+    ],
+  });
+  const canonicalSummary = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-06-25T11:05:00.000Z",
+    events: [
+      buildEvent({
+        dayKey: "2026-06-24",
+        externalRef: canonicalExternalRef,
+        legacyExternalRefs: [legacyExternalRef],
+        value: 92,
+      }),
+    ],
+  });
+  const records = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: legacySummary.eventShardPaths[0] as string,
+  })) as EventRecord[];
+
+  assert.equal(canonicalSummary.events[0]?.id, legacySummary.events[0]?.id);
+  assert.equal(canonicalSummary.events[0]?.dayKey, "2026-06-24");
+  assert.equal(eventObservationValue(canonicalSummary.events[0]), 92);
+  assert.equal(records.length, 2);
   assert.equal(new Set(records.map((record) => record.id)).size, 1);
 });
 
