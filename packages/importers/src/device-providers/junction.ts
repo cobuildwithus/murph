@@ -812,7 +812,8 @@ export function canNormalizeJunctionSleepCycleRecordToCompactStages(
   record: Record<string, unknown>,
   sourceProviderSlug: string,
 ): boolean {
-  return resourceEntries(record, "sleep_cycle").some(({ entry }) => {
+  const entries = resourceEntries(record, "sleep_cycle");
+  return entries.length > 0 && entries.every(({ entry }) => {
     const coverageWindow = resolveSleepStageCoverageWindow(entry, sourceProviderSlug);
     return coverageWindow
       ? sleepStageCoverageIntervalsCoverWindow(

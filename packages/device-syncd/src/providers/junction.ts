@@ -1672,14 +1672,7 @@ export function createJunctionDeviceSyncProvider(
     resource: string,
     records: readonly Record<string, unknown>[],
   ): Promise<void> {
-    const redactedRecords = records.map((record) =>
-      readPlainObject(sanitizeJunctionImportSnapshotValue(
-        record,
-        new Map(),
-        { blockedStringValues: [context.account.externalAccountId] },
-      )) ?? record
-    );
-    const snapshots = { [resource]: redactedRecords };
+    const snapshots: Record<string, unknown[]> = { [resource]: [...records] };
 
     await context.importSnapshot({
       provider: "junction",
@@ -1689,7 +1682,9 @@ export function createJunctionDeviceSyncProvider(
       windowStart,
       windowEnd,
       connections: sanitizeJunctionImportConnections(sourceProviders),
-      summaries: sanitizeJunctionImportSnapshots(snapshots, sourceProviders),
+      summaries: sanitizeJunctionImportSnapshots(snapshots, sourceProviders, {
+        blockedStringValues: [context.account.externalAccountId],
+      }),
       timeseries: {},
     });
   }
@@ -3304,13 +3299,14 @@ function sanitizeJunctionImportConnections(
 function sanitizeJunctionImportSnapshots(
   snapshots: Record<string, unknown[]>,
   providers: readonly JunctionProviderConnection[],
+  options: JunctionImportSnapshotSanitizeOptions = {},
 ): Record<string, unknown[]> {
   const sourceReferences = buildJunctionSourceReferenceMap(providers);
 
   return Object.fromEntries(
     Object.entries(snapshots).map(([resource, records]) => [
       resource,
-      records.map((record) => sanitizeJunctionImportSnapshotValue(record, sourceReferences)),
+      records.map((record) => sanitizeJunctionImportSnapshotValue(record, sourceReferences, options)),
     ]),
   );
 }
@@ -3341,10 +3337,15 @@ function buildJunctionSourceReferenceMap(
   return references;
 }
 
+interface JunctionImportSnapshotSanitizeOptions {
+  blockedStringValues?: readonly string[];
+  preserveSourceReferenceKeys?: boolean;
+}
+
 function sanitizeJunctionImportSnapshotValue(
   value: unknown,
   sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
-  options: { blockedStringValues?: readonly string[] } = {},
+  options: JunctionImportSnapshotSanitizeOptions = {},
 ): unknown {
   if (Array.isArray(value)) {
     return value.map((entry) => sanitizeJunctionImportSnapshotValue(entry, sourceReferences, options));
@@ -3397,13 +3398,16 @@ function readJunctionSourceReference(
 function stripJunctionRawSourceIdentityFields(
   record: Record<string, unknown>,
   sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
-  options: { blockedStringValues?: readonly string[] },
+  options: JunctionImportSnapshotSanitizeOptions,
 ): Record<string, unknown> {
   const sanitized: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(record)) {
     if (
-      isBlockedJunctionImportSourceIdentityKey(key)
+      (
+        isBlockedJunctionImportSourceIdentityKey(key)
+        && !(options.preserveSourceReferenceKeys && isJunctionSourceReferenceIdentityKey(key))
+      )
       || isBlockedJunctionImportSourceIdentityContainerKey(key)
     ) {
       continue;
@@ -3456,6 +3460,13 @@ function isBlockedJunctionImportSourceIdentityKey(key: string): boolean {
     || normalized.includes("providername")
     || normalized.includes("devicename")
     || normalized.includes("appname");
+}
+
+function isJunctionSourceReferenceIdentityKey(key: string): boolean {
+  const normalized = normalizeJunctionImportSourceIdentityKey(key);
+  return normalized === "connectionid"
+    || normalized === "providerconnectionid"
+    || normalized === "sourceid";
 }
 
 function isBlockedJunctionImportSourceIdentityContainerKey(key: string): boolean {
@@ -4605,7 +4616,10 @@ function buildJunctionWebhookDataJobJsons(input: {
   const sanitized = sanitizeJunctionImportSnapshotValue(
     input.data,
     new Map(),
-    { blockedStringValues: [input.externalAccountId] },
+    {
+      blockedStringValues: [input.externalAccountId],
+      preserveSourceReferenceKeys: true,
+    },
   );
   const record = readPlainObject(sanitized);
   if (!record) {

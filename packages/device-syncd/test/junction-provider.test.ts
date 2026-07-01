@@ -6104,7 +6104,54 @@ test("Junction resource jobs import direct Garmin sleep-cycle stage payloads wit
   }, {
     summaryResources: ["sleep_cycle"],
     timeseriesResources: [],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
   });
+
+  const directSleepCycleData = {
+    end: "2026-06-30T11:00:00.000Z",
+    id: "sleep-cycle-cross-midnight-1",
+    provider_connection_id: "provider-garmin-1",
+    sourceProviderSlug: "garmin",
+    stages: [
+      {
+        endAt: "2026-06-30T06:30:00.000Z",
+        stage: "light",
+        startAt: "2026-06-30T03:30:00.000Z",
+      },
+      {
+        endAt: "2026-06-30T11:00:00.000Z",
+        stage: "deep",
+        startAt: "2026-06-30T06:30:00.000Z",
+      },
+    ],
+    start: "2026-06-30T03:30:00.000Z",
+    timeZone: "America/New_York",
+  };
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.sleep_cycle.created",
+      user_id: "junction-user-1",
+      client_user_id: "murph_blinded",
+      data: directSleepCycleData,
+    },
+    messageId: "msg_sleep_cycle_cross_midnight_1",
+    timestamp: String(Math.floor(Date.parse("2026-06-30T11:30:00.000Z") / 1000)),
+  });
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-06-30T11:31:00.000Z",
+  });
+  const parsedJob = parsed.jobs[0];
+  assert.ok(parsedJob);
+  assert.equal(parsedJob.kind, "resource");
+  const parsedPayload = parsedJob.payload;
+  assert.ok(parsedPayload);
+  assert.equal(typeof parsedPayload.webhookDataJson, "string");
+  const queuedWebhookData = JSON.parse(String(parsedPayload.webhookDataJson)) as Record<string, unknown>;
+  assert.equal(queuedWebhookData.provider_connection_id, "provider-garmin-1");
+  assert.equal(JSON.stringify(queuedWebhookData).includes("junction-user-1"), false);
+  assert.equal(JSON.stringify(queuedWebhookData).includes("murph_blinded"), false);
 
   await executeJunctionJob(
     provider,
@@ -6117,36 +6164,7 @@ test("Junction resource jobs import direct Garmin sleep-cycle stage payloads wit
         throw new Error("Direct sleep_cycle imports should not project Junction source state.");
       },
     }),
-    createJob("resource", {
-      eventType: "daily.data.sleep_cycle.created",
-      objectId: "sleep-cycle-cross-midnight-1",
-      occurredAt: "2026-06-30T11:00:00.000Z",
-      resource: "sleep_cycle",
-      resourceCategory: "summary",
-      sourceProviderSlug: "garmin",
-      webhookDataJson: JSON.stringify({
-        end: "2026-06-30T11:00:00.000Z",
-        id: "sleep-cycle-cross-midnight-1",
-        provider_connection_id: "provider-garmin-1",
-        sourceProviderSlug: "garmin",
-        stages: [
-          {
-            endAt: "2026-06-30T06:30:00.000Z",
-            stage: "light",
-            startAt: "2026-06-30T03:30:00.000Z",
-          },
-          {
-            endAt: "2026-06-30T11:00:00.000Z",
-            stage: "deep",
-            startAt: "2026-06-30T06:30:00.000Z",
-          },
-        ],
-        start: "2026-06-30T03:30:00.000Z",
-        timeZone: "America/New_York",
-      }),
-      windowStart: "2026-06-30T00:00:00.000Z",
-      windowEnd: "2026-07-01T00:00:00.000Z",
-    }),
+    createJob(parsedJob.kind, parsedPayload),
   );
 
   assert.equal(importedSnapshots.length, 1);
@@ -6162,6 +6180,8 @@ test("Junction resource jobs import direct Garmin sleep-cycle stage payloads wit
   assert.equal(requests.some((url) => url.includes("/v2/summary/sleep_cycle/")), false);
   assert.equal(typeof sourceInstanceId, "string");
   assert.equal(typeof sourceInstanceId === "string" && sourceInstanceId.startsWith("source-"), true);
+  assert.equal(sleepCycleRecord?.sourceInstanceId, sourceInstanceId);
+  assert.equal("provider_connection_id" in (sleepCycleRecord ?? {}), false);
   assert.equal(sleepCycleRecord?.sourceProviderSlug, "garmin");
   assert.equal(sleepCycleRecord?.id, "sleep-cycle-cross-midnight-1");
   assert.equal(stages?.[0]?.stage, "light");
@@ -6246,6 +6266,44 @@ test("Junction direct Garmin sleep-cycle payloads without normalizable coverage 
         start: "2026-06-30T03:30:00.000Z",
       },
       label: "overlapping-parent-coverage",
+    },
+    {
+      directRecord: {
+        data: [
+          {
+            end: "2026-06-30T11:00:00.000Z",
+            id: "sleep-cycle-inline-complete-sibling",
+            sourceProviderSlug: "garmin",
+            stages: [
+              {
+                endAt: "2026-06-30T06:30:00.000Z",
+                stage: "light",
+                startAt: "2026-06-30T03:30:00.000Z",
+              },
+              {
+                endAt: "2026-06-30T11:00:00.000Z",
+                stage: "deep",
+                startAt: "2026-06-30T06:30:00.000Z",
+              },
+            ],
+            start: "2026-06-30T03:30:00.000Z",
+          },
+          {
+            end: "2026-06-30T11:00:00.000Z",
+            id: "sleep-cycle-inline-incomplete-sibling",
+            sourceProviderSlug: "garmin",
+            stages: [{
+              endAt: "2026-06-30T06:30:00.000Z",
+              stage: "light",
+              startAt: "2026-06-30T03:30:00.000Z",
+            }],
+            start: "2026-06-30T03:30:00.000Z",
+          },
+        ],
+        id: "sleep-cycle-webhook-mixed-complete-incomplete",
+        sourceProviderSlug: "garmin",
+      },
+      label: "mixed-complete-incomplete-children",
     },
   ];
 
