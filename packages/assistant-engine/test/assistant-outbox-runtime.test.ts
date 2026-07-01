@@ -2277,6 +2277,64 @@ describe('assistant outbox runtime', () => {
     expect(persisted?.lastError).toBeNull()
   })
 
+  it('persists non-rethrown hosted foreground yield as retryable', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-yield-retryable-')
+    const seeded = await createIntent(vaultRoot, {
+      message: 'hosted yield retryable',
+      sessionId: 'session-yield-retryable',
+      turnId: 'turn-yield-retryable',
+    })
+    const foregroundYieldError = new VaultCliError(
+      'HOSTED_BACKGROUND_DELIVERY_YIELDED',
+      'Hosted background delivery yielded to fresh foreground input.',
+      {
+        assistantDeliveryFailureClass: 'transient',
+        assistantDeliveryResumeTrigger: 'fresh_foreground_input',
+        retryable: true,
+      },
+    )
+    const shouldRethrowDispatchError = vi.fn((input: {
+      error: unknown
+      intent: AssistantOutboxIntent
+      vault: string
+    }) => {
+      expect(input.error).toBe(foregroundYieldError)
+      expect(input.intent.intentId).toBe(seeded.intentId)
+      expect(input.vault).toBe(vaultRoot)
+      return false
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      foregroundYieldError,
+    )
+
+    const result = await dispatchAssistantOutboxIntent({
+      dispatchHooks: {
+        shouldRethrowDispatchError,
+      },
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:25:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(shouldRethrowDispatchError).toHaveBeenCalledTimes(1)
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+    expect(result.intent.status).toBe('retryable')
+    expect(result.intent.lastError).toMatchObject({
+      code: 'HOSTED_BACKGROUND_DELIVERY_YIELDED',
+      diagnosticContext: {
+        assistantDeliveryFailureClass: 'transient',
+        assistantDeliveryResumeTrigger: 'fresh_foreground_input',
+        retryable: true,
+      },
+      message: 'Hosted background delivery yielded to fresh foreground input.',
+    })
+    expect(result.deliveryError).toEqual(result.intent.lastError)
+    const persisted = await readAssistantOutboxIntent(vaultRoot, seeded.intentId)
+    expect(persisted?.status).toBe('retryable')
+    expect(persisted?.lastError).toEqual(result.intent.lastError)
+  })
+
   it('preserves diagnostic context in high-level delivery helper results', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-helper-error-')
 

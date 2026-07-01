@@ -3237,6 +3237,108 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
+  it("leaves unprepared provider-entry foreground yield retryable in the outbox", async () => {
+    const effect = buildHostedAssistantDeliveryEffect({
+      dedupeKey: "dedupe_unprepared_yield_at_provider_entry",
+      deliveryPhase: "background_retry",
+      effectId: "intent_unprepared_yield_at_provider_entry",
+      payload: createPayload({
+        idempotencyKey: "assistant-outbox:intent_unprepared_yield_at_provider_entry",
+        transportIdempotent: false,
+      }),
+    });
+    let yieldChecks = 0;
+    let providerEntryYieldWasRethrown = true;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(
+        {
+          delivery: null,
+          deliveryIdempotencyKey: "assistant-outbox:intent_unprepared_yield_at_provider_entry",
+          deliveryTransportIdempotent: false,
+          intentId: effect.effectId,
+          lastError: null,
+          status: "pending",
+        },
+        {
+          sendingStartedAt: null,
+        },
+      ),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async (request) => {
+      expect(request).toEqual(expect.objectContaining({
+        intentId: "intent_unprepared_yield_at_provider_entry",
+      }));
+      expect(request).not.toHaveProperty("allowPreparedSending");
+      expect(request).not.toHaveProperty("preparedDispatch");
+      try {
+        await request.dependencies.sendTelegram({
+          idempotencyKey: "assistant-outbox:intent_unprepared_yield_at_provider_entry",
+          message: "hello from hosted",
+          replyToMessageId: null,
+          target: "chat_123",
+        });
+      } catch (error) {
+        providerEntryYieldWasRethrown =
+          request.dispatchHooks?.shouldRethrowDispatchError?.({
+            error,
+            intent: {
+              intentId: "intent_unprepared_yield_at_provider_entry",
+            },
+            vault: HOSTED_WAKE.vaultRoot,
+          }) === true;
+        expect(providerEntryYieldWasRethrown).toBe(false);
+        return createDispatchResult(
+          {
+            intentId: "intent_unprepared_yield_at_provider_entry",
+            lastError: {
+              code: "HOSTED_BACKGROUND_DELIVERY_YIELDED",
+              diagnosticContext: {
+                retryable: true,
+              },
+              message: "Hosted background delivery yielded to fresh foreground input.",
+            },
+            nextAttemptAt: "2026-04-08T00:00:30.000Z",
+            status: "retryable",
+          },
+          {
+            code: "HOSTED_BACKGROUND_DELIVERY_YIELDED",
+            diagnosticContext: {
+              retryable: true,
+            },
+            message: "Hosted background delivery yielded to fresh foreground input.",
+          },
+        );
+      }
+      throw new Error("expected provider-entry foreground yield");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      allowPreparedSending: true,
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      providerFetch: vi.fn<typeof fetch>(),
+      shouldYieldBackgroundDelivery: () => {
+        yieldChecks += 1;
+        return yieldChecks === 3;
+      },
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "HOSTED_BACKGROUND_DELIVERY_YIELDED",
+        deliveryStatus: "retryable",
+        effectId: "intent_unprepared_yield_at_provider_entry",
+        retryable: true,
+      }),
+    ]);
+    expect(providerEntryYieldWasRethrown).toBe(false);
+    expect(mocks.dispatchAssistantOutboxIntent).toHaveBeenCalledTimes(1);
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+    expect(mocks.resetAssistantOutboxPreparedDispatchById).not.toHaveBeenCalled();
+  });
+
   it("throws after pre-provider abort when owned prepared reset is a no-op", async () => {
     const abortReason = new Error("lease expired before no-op reset");
     const preparedAt = "2026-04-08T00:00:05.000Z";

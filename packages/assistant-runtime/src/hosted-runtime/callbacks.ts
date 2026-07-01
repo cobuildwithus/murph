@@ -1636,6 +1636,11 @@ class HostedBackgroundDeliveryYieldedError extends VaultCliError {
     super(
       "HOSTED_BACKGROUND_DELIVERY_YIELDED",
       "Hosted background delivery yielded to fresh foreground input.",
+      {
+        assistantDeliveryFailureClass: "transient",
+        assistantDeliveryResumeTrigger: "fresh_foreground_input",
+        retryable: true,
+      },
     );
   }
 }
@@ -1781,7 +1786,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             vaultRoot: vault,
           }),
         shouldRethrowDispatchError: ({ error }) =>
-          isHostedBackgroundDeliveryYieldedError(error),
+          input.preparedDispatch !== null
+          && isHostedBackgroundDeliveryYieldedError(error),
       },
       dependencies: {
         sendEmail: async (request) => {
