@@ -718,7 +718,10 @@ export async function runHostedWorkspaceAssistantPhase(
         canConsumeWorkspaceAssistantWake: true,
         input,
         providerCleanup: providerCleanupPhase.deferProviderCleanup
-          ? { mode: "defer" }
+          ? {
+              deferredWakeAt: providerCleanupPhase.deferredProviderCleanupWakeAt,
+              mode: "defer",
+            }
           : {
               checkpoint: providerCleanupCheckpoint,
               mode: "drain",
@@ -892,7 +895,10 @@ export async function runHostedWorkspaceAssistantPhase(
                 canConsumeWorkspaceAssistantWake: true,
                 input,
                 providerCleanup: providerCleanupPhase.deferProviderCleanup
-                  ? { mode: "defer" }
+                  ? {
+                      deferredWakeAt: deferredProviderCleanupWakeAt,
+                      mode: "defer",
+                    }
                   : {
                       checkpoint: providerCleanupCheckpoint,
                       mode: "drain",
@@ -3271,6 +3277,7 @@ async function runForegroundAssistantReplyPhase(input: {
       input: input.input,
       linqDeliveryContexts: input.linqDeliveryContexts,
       providerCleanup: {
+        deferredWakeAt: input.deferredProviderCleanupWakeAt,
         mode: "defer",
       },
       redactedStatus: null,
@@ -3426,6 +3433,7 @@ async function runForegroundAssistantReplyPhase(input: {
               input: input.input,
               linqDeliveryContexts: input.linqDeliveryContexts,
               providerCleanup: {
+                deferredWakeAt: input.deferredProviderCleanupWakeAt,
                 mode: "defer",
               },
               redactedStatus: null,
@@ -3468,7 +3476,7 @@ async function drainHostedPostCheckpointDelivery(input: {
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   providerCleanup:
     | { checkpoint: HostedProviderCleanupCheckpoint | null; mode: "drain" }
-    | { mode: "defer" };
+    | { deferredWakeAt?: string | null; mode: "defer" };
   redactedStatus: HostedRuntimeRedactedJson | null;
   wake: Parameters<typeof drainHostedPreparedAssistantDeliveries>[0]["wake"];
 }): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
@@ -3562,6 +3570,13 @@ async function drainHostedPostCheckpointDelivery(input: {
         phaseInput: input.input,
       })
     : null;
+  const deferredProviderCleanupWake = input.providerCleanup.mode === "defer"
+    && providerCleanupNextWakeAt === null
+      ? createHostedRuntimeWakeCandidate(
+          input.providerCleanup.deferredWakeAt ?? null,
+          HOSTED_ASSISTANT_WAKE_REASON,
+        )
+      : null;
   const postOutboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
@@ -3606,6 +3621,7 @@ async function drainHostedPostCheckpointDelivery(input: {
     createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(providerCleanupNextWakeAt, "assistant"),
     providerCleanupSchedulingWake,
+    deferredProviderCleanupWake,
   ]);
   const postNextWakeAt = postNextWake.at;
   if (input.assistantDeliveryEffects.length > 0) {
@@ -3849,10 +3865,16 @@ async function buildHostedMemberChannelDeliveryBarrierResult(input: {
     );
     providerCleanupRedactedStatus = buildHostedProviderCleanupRedactedStatus(providerCleanup);
   } else {
-    providerCleanupWake = await resolveHostedProviderCleanupSchedulingWakeCandidate({
-      deferDueOrInvalid: true,
-      phaseInput: input.input.input,
-    });
+    providerCleanupWake = selectHostedRuntimeWakeCandidate([
+      await resolveHostedProviderCleanupSchedulingWakeCandidate({
+        deferDueOrInvalid: true,
+        phaseInput: input.input.input,
+      }),
+      createHostedRuntimeWakeCandidate(
+        input.input.providerCleanup.deferredWakeAt ?? null,
+        HOSTED_ASSISTANT_WAKE_REASON,
+      ),
+    ]);
   }
   const baseNextWake = dropConsumedPostDeliveryWorkspaceAssistantWake({
     candidate: resolveHostedPostDeliveryBaseNextWake(input.input),
