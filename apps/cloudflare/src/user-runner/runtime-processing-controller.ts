@@ -38,6 +38,7 @@ import {
 } from "./runtime-fence-liveness.js";
 import {
   ensureActiveRuntimeProcessing,
+  readActiveRuntimeRunnerContainerName,
 } from "./runtime-container-wake.js";
 import {
   computeRuntimeProcessingOwnerRecheckAt as computeRuntimeProcessingOwnerRecheckAtValue,
@@ -414,11 +415,13 @@ export class RuntimeProcessingController {
     runtimeWakeStartedAt: number;
   }): Promise<HostedRuntimeEnsureProcessingResponse> {
     const { activeFence, record } = input;
+    const runnerContainerName = this.readActiveRuntimeFenceContainerName(input);
     const activeRuntimeState =
       await this.readActiveRuntimeFenceLiveness({
         activeFence,
         commandBudget: input.commandBudget,
         record,
+        runnerContainerName,
       });
     if (activeRuntimeState.outcome === "inactive") {
       return await this.replaceStartRequiredRuntimeFence({
@@ -442,6 +445,7 @@ export class RuntimeProcessingController {
       activeFence,
       commandBudget: input.commandBudget,
       record,
+      runnerContainerName,
     });
     if (!abortResult.aborted) {
       return abortResult.response;
@@ -461,6 +465,7 @@ export class RuntimeProcessingController {
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
     commandBudget: RuntimeProcessingCommandBudget;
     record: RunnerStateRecord;
+    runnerContainerName?: string | null;
   }): Promise<
     | { aborted: true }
     | {
@@ -468,7 +473,8 @@ export class RuntimeProcessingController {
         response: HostedRuntimeEnsureProcessingResponse;
       }
   > {
-    const containerName = input.activeFence.runnerContainerName;
+    const containerName =
+      input.runnerContainerName ?? input.activeFence.runnerContainerName;
     const namespace = this.input.runnerContainerNamespace;
     if (!namespace || !containerName) {
       await this.syncRunnerAlarm(input.record);
@@ -552,6 +558,7 @@ export class RuntimeProcessingController {
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
     commandBudget: RuntimeProcessingCommandBudget;
     record: RunnerStateRecord;
+    runnerContainerName?: string | null;
   }): Promise<RuntimeFenceLivenessReadResult> {
     const result = await readRuntimeFenceLivenessBestEffort({
       commandBudget: input.commandBudget,
@@ -560,7 +567,8 @@ export class RuntimeProcessingController {
         leaseGeneration: String(input.activeFence.generation),
         userId: input.record.userId,
       },
-      runnerContainerName: input.activeFence.runnerContainerName,
+      runnerContainerName:
+        input.runnerContainerName ?? input.activeFence.runnerContainerName,
       runnerContainerNamespace: this.input.runnerContainerNamespace,
       stepTimeoutMs: this.input.env.webControlTimeoutMs,
     });
@@ -575,6 +583,21 @@ export class RuntimeProcessingController {
       });
     }
     return result;
+  }
+
+  private readActiveRuntimeFenceContainerName(input: {
+    activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
+    record: RunnerStateRecord;
+  }): string | null {
+    return readActiveRuntimeRunnerContainerName({
+      activeRuntime: {
+        attemptId: input.activeFence.attemptId,
+        leaseGeneration: String(input.activeFence.generation),
+        userId: input.record.userId,
+      },
+      runnerContainerName: input.activeFence.runnerContainerName,
+      runnerRuntimeEnvSource: this.input.runnerRuntimeEnvSource,
+    });
   }
 
   private async startRuntimeProcessing(input: {

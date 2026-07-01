@@ -169,7 +169,7 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readActiveRuntimeRunnerContainerName(input: {
+export function readActiveRuntimeRunnerContainerName(input: {
   activeRuntime: RunnerRuntimeWakeInput;
   runnerContainerName: string | null;
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
