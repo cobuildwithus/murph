@@ -356,9 +356,14 @@ describe("hosted ops onboarding invites", () => {
       recipientPhone: "+15557654321",
     });
     expect(
+      mocks.createHostedLinqChat.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mock.invocationCallOrder[0],
+    );
+    expect(
       mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.createHostedLinqChat.mock.invocationCallOrder[0],
+      mocks.upsertHostedMemberPendingLinqBindingTx.mock.invocationCallOrder[0],
     );
     expect(
       mocks.upsertHostedMemberPendingLinqBindingTx.mock.invocationCallOrder[0],
@@ -428,39 +433,49 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
   });
 
-  it("lazy-syncs env-configured Linq lines during new-chat DB cutover", async () => {
-    mocks.listHostedLinqAssignableHomeLines
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        buildHomeLine("+15557654321", {
-          activeMemberLimit: 250,
-        }),
-      ]);
+  it("does not write route or assignment state when Linq chat creation fails", async () => {
+    mocks.createHostedLinqChat.mockResolvedValueOnce({
+      chatId: null,
+      messageId: null,
+    });
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-create-missing-chat",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_CHAT_CREATE_FAILED",
+    });
+
+    expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not runtime-sync env-configured Linq lines during new-chat assignment", async () => {
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
     mocks.getHostedOnboardingEnvironment.mockReturnValue({
       linqConversationPhoneNumbers: ["+15557654321"],
       linqMaxActiveMembersPerConversationPhone: 250,
     });
 
-    await service.sendHostedOpsOnboardingInvite({
+    await expect(service.sendHostedOpsOnboardingInvite({
       deliveryMode: "new_chat",
       linqFromPhoneNumber: "+15557654321",
       recipientPhoneNumber: "+15551234567",
       requestId: "request-cutover-sync",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_UNAUTHORIZED",
     });
 
-    expect(mocks.syncHostedLinqConfiguredLinesTx).toHaveBeenCalledWith({
-      activeMemberLimit: 250,
-      phoneNumbers: ["+15557654321"],
-      prisma: tx,
-    });
-    expect(mocks.listHostedLinqAssignableHomeLines).toHaveBeenCalledTimes(2);
-    expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
-      homeLineAssignedAt: expect.any(Date),
-      memberId: "member_123",
-      prisma: tx,
-      recipientPhone: "+15557654321",
-    });
+    expect(mocks.syncHostedLinqConfiguredLinesTx).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
   });
 
   it("rejects a new chat opener that includes a URL before issuing an invite", async () => {

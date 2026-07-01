@@ -20,7 +20,6 @@ import {
 import {
   type HostedLinqAssignableHomeLine,
   listHostedLinqAssignableHomeLines,
-  syncHostedLinqConfiguredLinesTx,
 } from "../hosted-onboarding/linq-line-store";
 import { chooseHostedLinqHomeLine } from "../hosted-onboarding/linq-routing-policy";
 import {
@@ -39,7 +38,6 @@ import {
 } from "../hosted-onboarding/shared";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
-import { getHostedOnboardingEnvironment } from "../hosted-onboarding/runtime";
 
 export const HOSTED_OPS_ONBOARDING_VOICE_MEMO_MAX_BYTES = 10 * 1024 * 1024;
 
@@ -93,6 +91,12 @@ export interface HostedOpsOnboardingInviteResult {
     requested: boolean;
     sent: boolean;
   };
+}
+
+interface HostedOpsOnboardingInviteDelivery {
+  chatId: string;
+  newChatCreated: boolean;
+  openerMessageId: string | null;
 }
 
 interface HostedOpsOnboardingVoiceMemoContentType {
@@ -167,20 +171,34 @@ export async function sendHostedOpsOnboardingInvite(
   const prisma = input.prisma ?? getPrisma();
   const request = normalizeHostedOpsOnboardingInviteInput(input);
 
-  const issued = await issueHostedOpsOnboardingInviteForRequest({
-    prisma,
-    request,
-  });
+  const issuedWithDelivery = request.deliveryMode === "new_chat"
+    ? await issueHostedOpsOnboardingInviteAndCreateNewChatForRequest({
+        prisma,
+        request,
+      })
+    : await issueHostedOpsOnboardingInviteAndResolveExistingChatForRequest({
+        prisma,
+        request,
+      });
+  const issued = issuedWithDelivery.issued;
+  const delivery = issuedWithDelivery.delivery;
   const inviteUrl = buildHostedInviteUrl(issued.invite.inviteCode);
   const inviteMessage = buildHostedOpsOnboardingInviteMessage({
     inviteMessage: request.inviteMessage,
     inviteUrl,
   });
-  const delivery = await resolveHostedOpsOnboardingInviteDelivery({
-    inviteMessage,
-    memberId: issued.memberId,
-    prisma,
-    request,
+
+  await sendHostedLinqChatMessage({
+    chatId: delivery.chatId,
+    idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
+      requestId: request.requestId,
+      step: "invite",
+      targetParts: [
+        issued.memberId,
+        delivery.chatId,
+      ],
+    }),
+    message: inviteMessage,
   });
   const sentAt = new Date();
 
@@ -232,12 +250,6 @@ async function issueHostedOpsOnboardingInviteForRequest(input: {
   memberId: string;
 }> {
   return input.prisma.$transaction(async (tx) => {
-    const newChatAssignment = input.request.deliveryMode === "new_chat"
-      ? await resolveHostedOpsOnboardingNewChatLineAssignmentTx({
-          prisma: tx,
-          senderPhone: input.request.linqFromPhoneNumber,
-        })
-      : null;
     const memberId = input.request.deliveryMode === "existing_chat"
       ? await resolveHostedOpsOnboardingExistingChatMemberId({
           linqChatId: input.request.linqChatId,
@@ -248,16 +260,6 @@ async function issueHostedOpsOnboardingInviteForRequest(input: {
           phoneNumber: input.request.recipientPhoneNumber,
           prisma: tx,
         })).id;
-
-    if (newChatAssignment) {
-      await upsertHostedMemberHomeLinqRecipientPhoneTx({
-        homeLineAssignedAt: newChatAssignment.assignedAt,
-        memberId,
-        prisma: tx,
-        recipientPhone: newChatAssignment.line.phoneNumber,
-      });
-    }
-
     const invite = await issueHostedInviteTx({
       channel: "linq",
       memberId,
@@ -267,6 +269,95 @@ async function issueHostedOpsOnboardingInviteForRequest(input: {
     return {
       invite,
       memberId,
+    };
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function issueHostedOpsOnboardingInviteAndResolveExistingChatForRequest(input: {
+  prisma: PrismaClient;
+  request: NormalizedHostedOpsOnboardingInviteInput;
+}): Promise<{
+  delivery: HostedOpsOnboardingInviteDelivery;
+  issued: Awaited<ReturnType<typeof issueHostedOpsOnboardingInviteForRequest>>;
+}> {
+  const issued = await issueHostedOpsOnboardingInviteForRequest(input);
+  return {
+    delivery: resolveHostedOpsOnboardingInviteDelivery({
+      memberId: issued.memberId,
+      request: input.request,
+    }),
+    issued,
+  };
+}
+
+async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
+  prisma: PrismaClient;
+  request: NormalizedHostedOpsOnboardingInviteInput;
+}): Promise<{
+  delivery: HostedOpsOnboardingInviteDelivery;
+  issued: Awaited<ReturnType<typeof issueHostedOpsOnboardingInviteForRequest>>;
+}> {
+  return input.prisma.$transaction(async (tx) => {
+    const assignment = await resolveHostedOpsOnboardingNewChatLineAssignmentTx({
+      prisma: tx,
+      senderPhone: input.request.linqFromPhoneNumber,
+    });
+    const memberId = (await ensureHostedMemberForPhoneTx({
+      phoneNumber: input.request.recipientPhoneNumber,
+      prisma: tx,
+    })).id;
+    const invite = await issueHostedInviteTx({
+      channel: "linq",
+      memberId,
+      prisma: tx,
+    });
+    const createdChat = await createHostedLinqChat({
+      from: assignment.line.phoneNumber,
+      idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
+        requestId: input.request.requestId,
+        step: "open",
+        targetParts: [
+          assignment.line.phoneNumber,
+          input.request.recipientPhoneNumber,
+        ],
+      }),
+      message: input.request.newChatOpeningMessage,
+      to: [input.request.recipientPhoneNumber],
+    });
+    const chatId = normalizeNullableString(createdChat.chatId);
+
+    if (!chatId) {
+      throw hostedOnboardingError({
+        code: "HOSTED_OPS_ONBOARDING_CHAT_CREATE_FAILED",
+        httpStatus: 502,
+        message: "Linq did not return a chat id for the onboarding invite.",
+        retryable: true,
+      });
+    }
+
+    await upsertHostedMemberHomeLinqRecipientPhoneTx({
+      homeLineAssignedAt: assignment.assignedAt,
+      memberId,
+      prisma: tx,
+      recipientPhone: assignment.line.phoneNumber,
+    });
+    await upsertHostedMemberPendingLinqBindingTx({
+      linqChatId: chatId,
+      memberId,
+      prisma: tx,
+      recipientPhone: assignment.line.phoneNumber,
+    });
+
+    return {
+      delivery: {
+        chatId,
+        newChatCreated: true,
+        openerMessageId: normalizeNullableString(createdChat.messageId),
+      },
+      issued: {
+        invite,
+        memberId,
+      },
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
@@ -318,30 +409,11 @@ export function buildHostedOpsOnboardingVoiceMemoFilename(extension: string): st
   return `murph-ops-voice-memo.${normalizedExtension}`;
 }
 
-async function resolveHostedOpsOnboardingInviteDelivery(input: {
-  inviteMessage: string;
+function resolveHostedOpsOnboardingInviteDelivery(input: {
   memberId: string;
-  prisma: PrismaClient;
   request: NormalizedHostedOpsOnboardingInviteInput;
-}): Promise<{
-  chatId: string;
-  newChatCreated: boolean;
-  openerMessageId: string | null;
-}> {
+}): HostedOpsOnboardingInviteDelivery {
   if (input.request.deliveryMode === "existing_chat") {
-    await sendHostedLinqChatMessage({
-      chatId: input.request.linqChatId,
-      idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
-        requestId: input.request.requestId,
-        step: "invite",
-        targetParts: [
-          input.memberId,
-          input.request.linqChatId,
-        ],
-      }),
-      message: input.inviteMessage,
-    });
-
     return {
       chatId: input.request.linqChatId,
       newChatCreated: false,
@@ -349,57 +421,7 @@ async function resolveHostedOpsOnboardingInviteDelivery(input: {
     };
   }
 
-  const createdChat = await createHostedLinqChat({
-    from: input.request.linqFromPhoneNumber,
-    idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
-      requestId: input.request.requestId,
-      step: "open",
-      targetParts: [
-        input.request.linqFromPhoneNumber,
-        input.request.recipientPhoneNumber,
-      ],
-    }),
-    message: input.request.newChatOpeningMessage,
-    to: [input.request.recipientPhoneNumber],
-  });
-  const chatId = normalizeNullableString(createdChat.chatId);
-
-  if (!chatId) {
-    throw hostedOnboardingError({
-      code: "HOSTED_OPS_ONBOARDING_CHAT_CREATE_FAILED",
-      httpStatus: 502,
-      message: "Linq did not return a chat id for the onboarding invite.",
-      retryable: true,
-    });
-  }
-
-  await input.prisma.$transaction(async (tx) => {
-    await upsertHostedMemberPendingLinqBindingTx({
-      linqChatId: chatId,
-      memberId: input.memberId,
-      prisma: tx,
-      recipientPhone: input.request.linqFromPhoneNumber,
-    });
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-
-  await sendHostedLinqChatMessage({
-    chatId,
-    idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
-      requestId: input.request.requestId,
-      step: "invite",
-      targetParts: [
-        input.memberId,
-        chatId,
-      ],
-    }),
-    message: input.inviteMessage,
-  });
-
-  return {
-    chatId,
-    newChatCreated: true,
-    openerMessageId: normalizeNullableString(createdChat.messageId),
-  };
+  throw new TypeError("New-chat onboarding invite delivery must be resolved in the line-assignment transaction.");
 }
 
 async function sendHostedOpsOnboardingVoiceMemoBestEffort(input: {
@@ -558,33 +580,10 @@ async function resolveHostedOpsOnboardingAssignableLinqLineTx(input: {
   prisma: Prisma.TransactionClient;
   senderPhone: string;
 }): Promise<HostedLinqAssignableHomeLine | null> {
-  let lines = await listHostedLinqAssignableHomeLines({
+  const lines = await listHostedLinqAssignableHomeLines({
     prisma: input.prisma,
   });
-  let line = findHostedOpsOnboardingLineByPhone(lines, input.senderPhone);
-
-  if (line) {
-    return line;
-  }
-
-  const environment = getHostedOnboardingEnvironment();
-  if (
-    environment.linqConversationPhoneNumbers.some((phoneNumber) =>
-      normalizePhoneNumber(phoneNumber) === input.senderPhone
-    )
-  ) {
-    await syncHostedLinqConfiguredLinesTx({
-      activeMemberLimit: environment.linqMaxActiveMembersPerConversationPhone,
-      phoneNumbers: environment.linqConversationPhoneNumbers,
-      prisma: input.prisma,
-    });
-    lines = await listHostedLinqAssignableHomeLines({
-      prisma: input.prisma,
-    });
-    line = findHostedOpsOnboardingLineByPhone(lines, input.senderPhone);
-  }
-
-  return line ?? null;
+  return findHostedOpsOnboardingLineByPhone(lines, input.senderPhone);
 }
 
 function findHostedOpsOnboardingLineByPhone(
