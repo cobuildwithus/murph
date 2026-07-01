@@ -270,12 +270,16 @@ describe("vault-share deliver route", () => {
         expectedUserId: "member_other_referee",
         mailboxItemId: "mailbox_item_2",
       });
-      // The operator log carries ids only — never payload fields, timestamps, or the
-      // raw error message, which could echo destination state back into shared logs.
+      // The operator log carries structured error details only — never payload fields,
+      // timestamps, or the raw share id linking grantor and destination state.
       expect(consoleError).toHaveBeenCalledTimes(1);
       expect(consoleError).toHaveBeenCalledWith(
         "Hosted vault-share delivery to a destination share failed.",
-        { errorName: "Error", shareId: "share_1" },
+        {
+          errorCode: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
+          errorMessage: "destination mailbox down",
+          errorType: "Error",
+        },
       );
     } finally {
       consoleError.mockRestore();

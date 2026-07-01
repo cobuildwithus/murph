@@ -105,6 +105,10 @@ describe("deliverHostedVaultShareRecords", () => {
     expect(result).toEqual({ lastAppendedMailboxItemId: "mailbox_item_3" });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(mocks.hasHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
+      "member_grantor",
+      { prisma: TX },
+    );
+    expect(mocks.hasHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
       "member_referee",
       { prisma: TX },
     );
@@ -223,7 +227,9 @@ describe("deliverHostedVaultShareRecords", () => {
 
   it("rechecks destination runtime authority inside the append transaction", async () => {
     const prisma = fakePrisma();
-    mocks.hasHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(false);
+    mocks.hasHostedRuntimeActiveAccessForUpdateTx.mockImplementation(
+      async (memberId: string) => memberId !== "member_referee",
+    );
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       inserted: true,
       item: { id: "mailbox_item_1" },
@@ -237,7 +243,36 @@ describe("deliverHostedVaultShareRecords", () => {
 
     expect(result).toEqual({ lastAppendedMailboxItemId: null });
     expect(mocks.hasHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
+      "member_grantor",
+      { prisma: TX },
+    );
+    expect(mocks.hasHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
       "member_referee",
+      { prisma: TX },
+    );
+    expect(TX.$queryRaw).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("rechecks grantor runtime authority inside the append transaction", async () => {
+    const prisma = fakePrisma();
+    mocks.hasHostedRuntimeActiveAccessForUpdateTx.mockImplementation(
+      async (memberId: string) => memberId !== "member_grantor",
+    );
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      inserted: true,
+      item: { id: "mailbox_item_1" },
+    });
+
+    const result = await deliverHostedVaultShareRecords({
+      prisma,
+      records: RECORDS,
+      share: SHARE,
+    });
+
+    expect(result).toEqual({ lastAppendedMailboxItemId: null });
+    expect(mocks.hasHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
+      "member_grantor",
       { prisma: TX },
     );
     expect(TX.$queryRaw).not.toHaveBeenCalled();

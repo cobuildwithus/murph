@@ -8,6 +8,9 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
+  formatHostedExecutionSafeLogErrorDetails,
+} from "@/src/lib/hosted-execution/logging";
+import {
   hasHostedMemberEffectiveActiveAccessForMember,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import {
@@ -119,12 +122,12 @@ export const POST = withJsonError(async (request: Request) => {
       }
     } catch (error) {
       // Best-effort per destination: one failing share must not block delivery to the
-      // others, and the next wake re-offers (already-appended records dedupe). Log ids
-      // only — never payload fields or timestamps — so a persistently failing destination
-      // stays visible to operators.
+      // others, and the next wake re-offers (already-appended records dedupe). Log only
+      // redacted error details — never payload fields, timestamps, or raw share ids.
       console.error("Hosted vault-share delivery to a destination share failed.", {
-        errorName: error instanceof Error ? error.name : "unknown",
-        shareId: share.id,
+        ...formatHostedExecutionSafeLogErrorDetails(error, {
+          code: "HOSTED_VAULT_SHARE_DESTINATION_DELIVERY_FAILED",
+        }),
       });
     }
   }

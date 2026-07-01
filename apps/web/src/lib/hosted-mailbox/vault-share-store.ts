@@ -93,6 +93,13 @@ export async function deliverHostedVaultShareRecords(input: {
   return prisma.$transaction(async (tx) => {
     let lastAppendedMailboxItemId: string | null = null;
     if (!await hasHostedRuntimeActiveAccessForUpdateTx(
+      input.share.grantorMemberId,
+      { prisma: tx },
+    )) {
+      return { lastAppendedMailboxItemId };
+    }
+
+    if (!await hasHostedRuntimeActiveAccessForUpdateTx(
       input.share.destinationMemberId,
       { prisma: tx },
     )) {
