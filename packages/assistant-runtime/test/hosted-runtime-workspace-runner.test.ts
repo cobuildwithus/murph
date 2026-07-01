@@ -834,6 +834,125 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("pre-auto-reply delivery preparation yields when a foreground wake arrives after observer stop", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items: HostedMailboxItem[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const yieldStates: boolean[] = [];
+    const providerEntries: string[] = [];
+    let lateWakeInjected = false;
+    const { mailboxPort } = createMailboxPort({
+      beforeFetch(request) {
+        const lane = request.lanes[0];
+        if (
+          lateWakeInjected
+          || request.lanes.length !== 1
+          || lane?.lane !== "system"
+          || !request.requestId.includes(":pre-auto-reply-system:")
+        ) {
+          return;
+        }
+
+        lateWakeInjected = true;
+        items.push(createMailboxItem({
+          id: "mailbox_item_runner_pre_auto_reply_after_observer_stop",
+          laneSeq: "1",
+          occurredAt: "2026-04-26T00:00:02.000Z",
+        }));
+        runtimeWakeSignal.notify();
+      },
+      fetchRequests,
+      items,
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_pre_auto_reply_late_wake",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          if (item.item.lane === "conversation") {
+            const staged = await upsertAssistantInputEvent({
+              event: createStoredAssistantInputEventForMailboxItem(
+                item.item,
+                `late pre-auto-reply input ${item.item.laneSeq}`,
+              ),
+              vault: vaultRoot,
+            });
+            await enqueueHostedPendingAssistantInputId({
+              inputId: staged.inputId,
+              vaultRoot,
+            });
+            return {
+              assistantInputId: staged.inputId,
+              status: "imported",
+            };
+          }
+
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_pre_auto_reply_late_wake",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          const deliveryBarrier = await input.prepareAutoReplyDelivery?.() ?? null;
+          assert.equal(deliveryBarrier, null);
+          const shouldYield = input.shouldYieldBackgroundMaintenance?.() ?? false;
+          yieldStates.push(shouldYield);
+          if (!shouldYield) {
+            providerEntries.push("auto-reply-provider-entry");
+          }
+
+          return {
+            checkpointReason: "assistant_runtime_commit",
+            nextWakeAt: TEST_NOW,
+            nextWakeReason: "assistant",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(lateWakeInjected, true);
+      assert.deepEqual(yieldStates, [false, true]);
+      assert.deepEqual(providerEntries, []);
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
+      ]);
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("pre-auto-reply delivery preparation follows empty system pages with a higher high-water mark", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const fetchRequests: HostedMailboxFetchRequest[] = [];
@@ -6404,6 +6523,7 @@ function createRunnerConversationWake(): HostedExecutionConversationMessageWake 
 }
 
 function createMailboxPort(input: {
+  beforeFetch?: (request: HostedMailboxFetchRequest) => Promise<void> | void;
   consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"];
   consumeError?: Error;
   consumeRequests?: HostedMailboxConsumeRequest[];
@@ -6439,6 +6559,7 @@ function createMailboxPort(input: {
         : {}),
       async fetch(request): Promise<HostedMailboxFetchResponse> {
         fetchRequests.push(request);
+        await input.beforeFetch?.(request);
         const consumedSeqByLane = input.resolveConsumedSeqByLane?.(request)
           ?? input.consumedSeqByLane;
         return {

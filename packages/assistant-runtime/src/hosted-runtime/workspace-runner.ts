@@ -616,6 +616,23 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     await foregroundMailboxImportLoop.stop();
     foregroundMailboxImportLoopStopped = true;
   };
+  let foregroundRuntimeWakeObservedAfterStop = false;
+  const shouldYieldBackgroundMaintenance = (): boolean => {
+    if (foregroundConversationWorkObserved || foregroundRuntimeWakeObservedAfterStop) {
+      return true;
+    }
+
+    if (!foregroundMailboxImportLoopStopped) {
+      return false;
+    }
+
+    if (!input.runtimeWakeSignal?.consumePending()) {
+      return false;
+    }
+
+    foregroundRuntimeWakeObservedAfterStop = true;
+    return true;
+  };
   const stopForegroundMailboxImportLoopAndNotify = async (): Promise<void> => {
     await stopForegroundMailboxImportLoop();
     if (!foregroundConversationWorkObserved) {
@@ -639,8 +656,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     prepareAutoReplyDelivery: async () =>
       await prepareHostedAutoReplyDeliveryForWorkspaceRunner({
         checkpointRequestBuilder: checkpointRequestSession,
-        foregroundMailboxImportLoop,
         input,
+        stopForegroundMailboxImportLoop,
       }),
     recordDeferredUsage(record: AssistantUsageRecord): void {
       if (deferredUsageCaptureStarted) {
@@ -650,8 +667,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
 
       deferredUsageRecords.push(record);
     },
-    shouldYieldBackgroundMaintenance: () =>
-      foregroundConversationWorkObserved,
+    shouldYieldBackgroundMaintenance,
     workspace: input.workspace,
   };
   let assistantContextSnapshotDirty = false;
@@ -939,10 +955,10 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
 
 async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
-  foregroundMailboxImportLoop: { stop(): Promise<void> };
   input: HostedWorkspaceRunnerInput;
+  stopForegroundMailboxImportLoop: () => Promise<void>;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null> {
-  await input.foregroundMailboxImportLoop.stop();
+  await input.stopForegroundMailboxImportLoop();
 
   let previousSystemSeq: string | null = null;
   let importPage = 0;
