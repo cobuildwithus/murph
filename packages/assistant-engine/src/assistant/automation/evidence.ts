@@ -173,6 +173,11 @@ async function assistantAutoReplyTerminalEvidenceGroupComplete(input: {
   return groupEvidence.every((item) => item !== null)
 }
 
+export interface AssistantTerminalLinqCleanupRef {
+  captureIds: string[]
+  linqMessageIds: string[]
+}
+
 export async function writeAssistantAutoReplyReplyIntentEvidence(input: {
   captureIds: readonly string[]
   inputIds?: readonly string[]
@@ -181,7 +186,7 @@ export async function writeAssistantAutoReplyReplyIntentEvidence(input: {
   recordedAt: string
   result: Awaited<ReturnType<typeof sendAssistantMessage>>
   vault: string
-}): Promise<boolean> {
+}): Promise<AssistantTerminalLinqCleanupRef | null> {
   const terminalKind =
     input.outcome === 'deferred' && input.result.deliveryIntentId
       ? 'reply_intent_committed'
@@ -209,7 +214,7 @@ export async function writeAssistantAutoReplyReplyTerminalEvidence(input: {
   sessionId: string
   terminalKind?: 'deferred' | 'replied' | 'reply_intent_committed'
   vault: string
-}): Promise<boolean> {
+}): Promise<AssistantTerminalLinqCleanupRef | null> {
   const group = normalizeEvidenceGroup({
     captureIds: input.captureIds,
     inputIds: input.inputIds,
@@ -239,7 +244,7 @@ export async function writeAssistantAutoReplyReplyTerminalEvidence(input: {
       }),
     ),
   )
-  return providerCleanup.linqMessageIds.length > 0
+  return createTerminalLinqCleanupRef(group.evidenceIds, providerCleanup)
 }
 
 export async function writeAssistantAutoReplySuppressionEvidence(input: {
@@ -249,7 +254,7 @@ export async function writeAssistantAutoReplySuppressionEvidence(input: {
   reason: string
   recordedAt?: string
   vault: string
-}): Promise<boolean> {
+}): Promise<AssistantTerminalLinqCleanupRef | null> {
   const group = normalizeEvidenceGroup({
     captureIds: input.captureIds,
     inputIds: input.inputIds,
@@ -276,7 +281,7 @@ export async function writeAssistantAutoReplySuppressionEvidence(input: {
       }),
     ),
   )
-  return providerCleanup.linqMessageIds.length > 0
+  return createTerminalLinqCleanupRef(group.evidenceIds, providerCleanup)
 }
 
 export async function listPendingAssistantAutoReplyLinqCleanupEvidence(input: {
@@ -400,6 +405,18 @@ function normalizeEvidenceGroup(input: {
     primaryCaptureId,
     primaryInputId,
   }
+}
+
+function createTerminalLinqCleanupRef(
+  evidenceIds: readonly string[],
+  providerCleanup: AssistantAutoReplyTerminalEvidence['providerCleanup'],
+): AssistantTerminalLinqCleanupRef | null {
+  return providerCleanup.linqMessageIds.length > 0
+    ? {
+        captureIds: [...evidenceIds],
+        linqMessageIds: providerCleanup.linqMessageIds,
+      }
+    : null
 }
 
 function createProviderCleanupState(messageIds: readonly string[]): AssistantAutoReplyTerminalEvidence['providerCleanup'] {

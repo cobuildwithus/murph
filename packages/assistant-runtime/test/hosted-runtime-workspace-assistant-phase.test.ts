@@ -340,11 +340,38 @@ beforeEach(() => {
     idleCheckpointDelayMs?: number | null;
     initialCheckpoint?: { nextWakeAt?: string | null } | null;
     nowMs: number;
-    terminalCleanupEvidencePending?: boolean;
+    terminalCleanup?: {
+      captureIds: readonly string[];
+      linqMessageIds: readonly string[];
+    } | null;
     vaultRoot: string;
   }) => {
     let checkpoint = input.initialCheckpoint ?? null;
     let stateQueued = false;
+    if (input.deferred && (input.terminalCleanup?.linqMessageIds.length ?? 0) > 0) {
+      const queuedCheckpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
+        checkpoint: {
+          nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
+            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            nowMs: input.nowMs,
+          }),
+        },
+        linqMessageIds: input.terminalCleanup?.linqMessageIds ?? [],
+        vaultRoot: input.vaultRoot,
+      });
+      await mocks.markAssistantAutoReplyLinqCleanupQueued({
+        captureIds: input.terminalCleanup?.captureIds ?? [],
+        vault: input.vaultRoot,
+      });
+      return {
+        checkpoint: queuedCheckpoint,
+        deferred: true,
+        due: false,
+        requiresCheckpoint: true,
+        stateQueued: true,
+        wakeAt: queuedCheckpoint?.nextWakeAt ?? null,
+      };
+    }
     if (!input.deferred) {
       checkpoint ??= await mocks.readHostedProviderCleanupCheckpoint(input.vaultRoot);
       const terminalCleanup =
@@ -369,19 +396,12 @@ beforeEach(() => {
         });
       }
     }
-    const scheduledWakeAt = await mocks.resolveHostedProviderCleanupScheduledWakeAt({
+    const wakeAt = await mocks.resolveHostedProviderCleanupScheduledWakeAt({
       deferDueOrInvalid: input.deferred,
       idleCheckpointDelayMs: input.idleCheckpointDelayMs,
       nowMs: input.nowMs,
       vaultRoot: input.vaultRoot,
     });
-    const wakeAt = scheduledWakeAt
-      ?? (input.deferred && input.terminalCleanupEvidencePending
-        ? mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
-            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
-            nowMs: input.nowMs,
-          })
-        : null);
     const wakeMs = Date.parse(checkpoint?.nextWakeAt ?? "");
     const due = !input.deferred
       && checkpoint !== null
@@ -2808,12 +2828,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("projects a future cleanup wake when a foreground turn terminalizes Linq input without delivery effects", async () => {
+  it("durably queues cleanup with a future wake when a foreground turn terminalizes Linq input without delivery effects", async () => {
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       activeTurnInputIngested: true,
       assistantAutomationCurrentTurnDeliveryIntentIds: [],
       assistantAutomationProgressed: true,
-      assistantAutomationTerminalLinqCleanupPending: true,
+      assistantAutomationTerminalLinqCleanup: {
+        captureIds: ["capture_terminal_1"],
+        linqMessageIds: ["linq_terminal_1"],
+      },
       nextWakeAt: null,
       redactedLogEntries: [],
     });
@@ -2826,15 +2849,27 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.prepareHostedProviderCleanupPlan).toHaveBeenCalledWith(
       expect.objectContaining({
         deferred: true,
-        terminalCleanupEvidencePending: true,
+        terminalCleanup: {
+          captureIds: ["capture_terminal_1"],
+          linqMessageIds: ["linq_terminal_1"],
+        },
       }),
     );
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: "2026-04-27T00:14:00.000Z",
+      },
+      linqMessageIds: ["linq_terminal_1"],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).toHaveBeenCalledWith({
+      captureIds: ["capture_terminal_1"],
+      vault: "/tmp/murph-vault",
+    });
     expect(result).toEqual(expect.objectContaining({
       nextWakeAt: "2026-04-27T00:14:00.000Z",
       progressed: true,
     }));
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
-    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
   });
 

@@ -18,6 +18,7 @@ import {
 
 import type {
   HostedAssistantDeliveryOutcome,
+  HostedTerminalLinqCleanupRef,
 } from "./models.ts";
 import { deleteHostedLinqMessages } from "./message-cleanup.ts";
 import {
@@ -100,29 +101,44 @@ export async function prepareHostedProviderCleanupPlan(input: {
   idleCheckpointDelayMs?: number | null;
   initialCheckpoint?: HostedProviderCleanupCheckpoint | null;
   nowMs: number;
-  terminalCleanupEvidencePending?: boolean;
+  terminalCleanup?: HostedTerminalLinqCleanupRef | null;
   vaultRoot: string;
 }): Promise<HostedProviderCleanupPlan> {
   if (input.deferred) {
-    const scheduledWakeAt = await resolveHostedProviderCleanupScheduledWakeAt({
-      deferDueOrInvalid: true,
-      idleCheckpointDelayMs: input.idleCheckpointDelayMs,
-      nowMs: input.nowMs,
-      vaultRoot: input.vaultRoot,
-    });
+    const pendingLinqMessageIds =
+      normalizeHostedProviderMessageIds([...(input.terminalCleanup?.linqMessageIds ?? [])]);
+    if (pendingLinqMessageIds.length > 0) {
+      const checkpoint = await queueHostedTerminalLinqCleanup({
+        captureIds: input.terminalCleanup?.captureIds ?? [],
+        linqMessageIds: pendingLinqMessageIds,
+        nextWakeAt: resolveHostedProviderCleanupFirstDeferredWakeAt({
+          idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+          nowMs: input.nowMs,
+        }),
+        vaultRoot: input.vaultRoot,
+      });
+      return {
+        checkpoint,
+        deferred: true,
+        due: false,
+        requiresCheckpoint: true,
+        stateQueued: true,
+        wakeAt: checkpoint.nextWakeAt ?? null,
+      };
+    }
+
     return {
       checkpoint: input.initialCheckpoint ?? null,
       deferred: true,
       due: false,
       requiresCheckpoint: false,
       stateQueued: false,
-      wakeAt: scheduledWakeAt
-        ?? (input.terminalCleanupEvidencePending
-          ? resolveHostedProviderCleanupFirstDeferredWakeAt({
-              idleCheckpointDelayMs: input.idleCheckpointDelayMs,
-              nowMs: input.nowMs,
-            })
-          : null),
+      wakeAt: await resolveHostedProviderCleanupScheduledWakeAt({
+        deferDueOrInvalid: true,
+        idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+        nowMs: input.nowMs,
+        vaultRoot: input.vaultRoot,
+      }),
     };
   }
 
@@ -132,16 +148,11 @@ export async function prepareHostedProviderCleanupPlan(input: {
   const terminalCleanupMessageIds = terminalCleanup.linqMessageIds;
   const terminalCleanupQueued = terminalCleanupMessageIds.length > 0;
   if (terminalCleanupQueued) {
-    await recordHostedProviderCleanupBeforeCommit({
-      checkpoint: {
-        nextWakeAt: null,
-      },
-      linqMessageIds: terminalCleanupMessageIds,
-      vaultRoot: input.vaultRoot,
-    });
-    await markAssistantAutoReplyLinqCleanupQueued({
+    await queueHostedTerminalLinqCleanup({
       captureIds: terminalCleanup.captureIds,
-      vault: input.vaultRoot,
+      linqMessageIds: terminalCleanupMessageIds,
+      nextWakeAt: null,
+      vaultRoot: input.vaultRoot,
     });
   }
 
@@ -319,6 +330,26 @@ export function resolveHostedProviderCleanupCheckpointWakeAt(input: {
   }
 
   return checkpointWakeAt;
+}
+
+async function queueHostedTerminalLinqCleanup(input: {
+  captureIds: readonly string[];
+  linqMessageIds: readonly string[];
+  nextWakeAt: string | null;
+  vaultRoot: string;
+}): Promise<HostedProviderCleanupCheckpoint> {
+  const checkpoint = await recordHostedProviderCleanupBeforeCommit({
+    checkpoint: {
+      nextWakeAt: input.nextWakeAt,
+    },
+    linqMessageIds: input.linqMessageIds,
+    vaultRoot: input.vaultRoot,
+  });
+  await markAssistantAutoReplyLinqCleanupQueued({
+    captureIds: input.captureIds,
+    vault: input.vaultRoot,
+  });
+  return checkpoint;
 }
 
 function buildHostedProviderCleanupPlan(input: {

@@ -206,7 +206,7 @@ test("hosted provider cleanup deferred plan re-arms due cleanup without scanning
   }
 });
 
-test("hosted provider cleanup deferred plan projects a first wake for terminal cleanup evidence written this turn", async () => {
+test("hosted provider cleanup deferred plan durably queues terminal cleanup written this turn", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
 
   try {
@@ -214,21 +214,72 @@ test("hosted provider cleanup deferred plan projects a first wake for terminal c
       deferred: true,
       idleCheckpointDelayMs: 1_000,
       nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
-      terminalCleanupEvidencePending: true,
+      terminalCleanup: {
+        captureIds: ["capture_terminal_1"],
+        linqMessageIds: ["linq_terminal_1", "linq_terminal_1"],
+      },
       vaultRoot,
     });
 
     assert.deepEqual(plan, {
-      checkpoint: null,
+      checkpoint: {
+        nextWakeAt: "2026-07-01T00:09:02.000Z",
+      },
       deferred: true,
       due: false,
-      requiresCheckpoint: false,
-      stateQueued: false,
+      requiresCheckpoint: true,
+      stateQueued: true,
       wakeAt: "2026-07-01T00:09:02.000Z",
     });
     expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
-    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
-    assert.equal(await readHostedProviderCleanupCheckpoint(vaultRoot), null);
+    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).toHaveBeenCalledWith({
+      captureIds: ["capture_terminal_1"],
+      vault: vaultRoot,
+    });
+    const raw = await readHostedProviderCleanupFile(vaultRoot);
+    assert.deepEqual(raw.linqMessageIds, ["linq_terminal_1"]);
+    assert.deepEqual(raw.checkpoint, {
+      nextWakeAt: "2026-07-01T00:09:02.000Z",
+    });
+  } finally {
+    await cleanup();
+  }
+});
+
+test("hosted provider cleanup queued this turn survives a foreground preemption that consumes the wake", async () => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+
+  try {
+    await prepareHostedProviderCleanupPlan({
+      deferred: true,
+      idleCheckpointDelayMs: 1_000,
+      nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
+      terminalCleanup: {
+        captureIds: ["capture_terminal_1"],
+        linqMessageIds: ["linq_terminal_1"],
+      },
+      vaultRoot,
+    });
+
+    const preemptedPlan = await prepareHostedProviderCleanupPlan({
+      deferred: true,
+      idleCheckpointDelayMs: 1_000,
+      nowMs: Date.parse("2026-07-01T00:09:01.000Z"),
+      vaultRoot,
+    });
+
+    assert.equal(preemptedPlan.wakeAt, "2026-07-01T00:09:02.000Z");
+    const raw = await readHostedProviderCleanupFile(vaultRoot);
+    assert.deepEqual(raw.linqMessageIds, ["linq_terminal_1"]);
+
+    const duePlan = await prepareHostedProviderCleanupPlan({
+      deferred: true,
+      idleCheckpointDelayMs: 1_000,
+      nowMs: Date.parse("2026-07-01T00:10:00.000Z"),
+      vaultRoot,
+    });
+
+    assert.equal(duePlan.wakeAt, "2026-07-01T00:10:02.000Z");
   } finally {
     await cleanup();
   }

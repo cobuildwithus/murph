@@ -673,7 +673,10 @@ describe('assistant auto-reply event-first path', () => {
 
     expect(result).toMatchObject({
       replied: 1,
-      terminalLinqCleanupPending: true,
+      terminalLinqCleanup: {
+        captureIds: ['ain_11111111111111111111111111111111'],
+        linqMessageIds: ['linq-user-message-1'],
+      },
     })
   })
 
@@ -699,7 +702,7 @@ describe('assistant auto-reply event-first path', () => {
     })
 
     expect(result.replied).toBe(1)
-    expect(result.terminalLinqCleanupPending).toBeUndefined()
+    expect(result.terminalLinqCleanup).toBeUndefined()
   })
 
   it('uses the conversation thread only as legacy outbox-history fallback', async () => {

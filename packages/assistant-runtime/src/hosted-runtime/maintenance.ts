@@ -33,6 +33,7 @@ import type {
   HostedAssistantAutomationLaneMetrics,
   HostedAssistantRuntimeDeviceSyncConfig,
   HostedMaintenanceMetrics,
+  HostedTerminalLinqCleanupRef,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
 import {
@@ -245,7 +246,7 @@ export async function runHostedAssistantAutomationLane(input: {
         progressed: false,
         redactedLogEntries: [],
         replyFailed: 0,
-        terminalLinqCleanupPending: false,
+        terminalLinqCleanup: null,
         timings: undefined,
       };
   const assistantAutomationElapsedMs = elapsedSince(assistantStartedAt);
@@ -265,8 +266,7 @@ export async function runHostedAssistantAutomationLane(input: {
     assistantAutomationCronProcessed: assistantResult.cronProcessed,
     assistantAutomationProgressed: assistantResult.progressed,
     assistantAutomationReplyFailed: assistantResult.replyFailed,
-    assistantAutomationTerminalLinqCleanupPending:
-      assistantResult.terminalLinqCleanupPending,
+    assistantAutomationTerminalLinqCleanup: assistantResult.terminalLinqCleanup,
     assistantAutomationTotalElapsedMs: assistantResult.timings?.totalElapsedMs ?? null,
     assistantInputCandidateListed:
       assistantResult.timings?.inputCandidateListed ?? false,
@@ -300,7 +300,7 @@ export async function runHostedAssistantAutomation(
   progressed: boolean;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   replyFailed: number;
-  terminalLinqCleanupPending: boolean;
+  terminalLinqCleanup: HostedTerminalLinqCleanupRef | null;
   timings?: {
     activeTurnInputIngested?: boolean | null;
     afterStateElapsedMs: number;
@@ -578,7 +578,7 @@ export async function runHostedAssistantAutomation(
       progressed: result.progressed,
       redactedLogEntries,
       replyFailed: replies.failed,
-      terminalLinqCleanupPending: replies.terminalLinqCleanupPending === true,
+      terminalLinqCleanup: replies.terminalLinqCleanup ?? null,
       timings: {
         activeTurnInputIngested,
         afterStateElapsedMs,
@@ -614,7 +614,7 @@ export async function runHostedAssistantAutomation(
         progressed: true,
         redactedLogEntries,
         replyFailed: 0,
-        terminalLinqCleanupPending: false,
+        terminalLinqCleanup: null,
       };
     }
 
