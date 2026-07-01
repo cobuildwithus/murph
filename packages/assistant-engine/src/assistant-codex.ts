@@ -3358,6 +3358,21 @@ async function runCodexAppServerTurnOnProcess(
     })
   }
 
+  const handleStaleParentTurnMessage = (message: CodexRpcMessage): void => {
+    const requestId = readCodexRpcServerRequestId(message)
+    if (requestId === null) {
+      return
+    }
+
+    void tryWriteRpcMessage({
+      id: requestId,
+      error: {
+        code: -32000,
+        message: 'Codex message turn id does not match the active turn.',
+      },
+    })
+  }
+
   const handleParsedMessage = (message: CodexRpcMessage) => {
     const responseId = readCodexRpcResponseId(message)
     if (responseId !== null) {
@@ -3399,6 +3414,16 @@ async function runCodexAppServerTurnOnProcess(
       messageThreadId !== knownParentThreadId
     ) {
       handleSubagentThreadMessage(messageThreadId, message)
+      return
+    }
+
+    const messageTurnId = extractCodexTurnIdFromMessage(message)
+    if (
+      messageTurnId !== null &&
+      turnId !== null &&
+      messageTurnId !== turnId
+    ) {
+      handleStaleParentTurnMessage(message)
       return
     }
 

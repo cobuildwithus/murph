@@ -4542,6 +4542,140 @@ describe('assistant codex runtime', () => {
     expect(progressUpdates).toEqual(['Starting early work'])
   })
 
+  it('ignores stale same-thread messages tagged with an older turn id', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-local-stale-turn-id-work-')
+    const codexHome = await createTempDir('assistant-codex-local-stale-turn-id-home-')
+    const progressDelivery = createProgressDeliveryMock()
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 25_940 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-local-stale-turn-id',
+            turnId: 'turn-local-stale-turn-id-1',
+          })
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-local-stale-turn-id',
+              turn: {
+                id: 'turn-local-stale-turn-id-1',
+                status: 'completed',
+              },
+            },
+          }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 2,
+            threadId: 'thread-local-stale-turn-id',
+            turnId: 'turn-local-stale-turn-id-2',
+          })
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-local-stale-turn-id',
+              turn: {
+                id: 'turn-local-stale-turn-id-1',
+                status: 'completed',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 99,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                text: 'This stale progress must not send',
+              },
+              namespace: 'murph',
+              threadId: 'thread-local-stale-turn-id',
+              tool: 'send_progress_update',
+              turnId: 'turn-local-stale-turn-id-1',
+            },
+          }))
+
+          await expect(waitForRpcResponse(child, 99)).resolves.toMatchObject({
+            error: {
+              code: -32000,
+              message: 'Codex message turn id does not match the active turn.',
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            method: 'assistant.message.delta',
+            params: {
+              item: {
+                id: 'assistant-local-stale-turn-id-2',
+                type: 'assistant_message',
+              },
+              delta: 'Current turn survived stale output',
+              threadId: 'thread-local-stale-turn-id',
+              turnId: 'turn-local-stale-turn-id-2',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-local-stale-turn-id',
+              turn: {
+                id: 'turn-local-stale-turn-id-2',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const stableInput = {
+      approvalPolicy: 'never',
+      codexHome,
+      env: {
+        PATH: '/custom/bin',
+      },
+      progressDelivery,
+      sandbox: 'workspace-write' as const,
+      workingDirectory,
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        prompt: 'first local turn before stale same-thread output',
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-local-stale-turn-id',
+      turnId: 'turn-local-stale-turn-id-1',
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        prompt: 'second local turn should ignore stale same-thread output',
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Current turn survived stale output',
+      sessionId: 'thread-local-stale-turn-id',
+      turnId: 'turn-local-stale-turn-id-2',
+    })
+    expect(progressDelivery.send).not.toHaveBeenCalled()
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps live steering closed after a pre-lifecycle computer pause request', async () => {
     const workingDirectory = await createTempDir('assistant-codex-prestart-pause-live-turn-work-')
     const codexHome = await createTempDir('assistant-codex-prestart-pause-live-turn-home-')

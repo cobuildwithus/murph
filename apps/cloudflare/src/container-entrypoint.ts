@@ -2612,7 +2612,7 @@ function listExpectedHostedCodexProcessIds(
     return new Set();
   }
 
-  return listHostedContainerProcessTreeIds(processStates, expectedCodexRoot.pid);
+  return new Set([expectedCodexRoot.pid]);
 }
 
 function listHostedContainerProcessTreeIds(
