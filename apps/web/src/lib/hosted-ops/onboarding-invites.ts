@@ -21,11 +21,10 @@ import {
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqChatId,
   readHostedMemberRoutingState,
-  upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberPendingLinqBindingTx,
 } from "../hosted-onboarding/hosted-member-routing-store";
 import {
-  reserveHostedLinqHomeLineForPhoneTx,
+  assignHostedMemberLinqHomeLineForPhoneTx,
   type HostedLinqHomeLineAssignmentReservation,
 } from "../hosted-onboarding/linq-home-routing";
 import { ensureHostedMemberForPhoneTx } from "../hosted-onboarding/member-identity-service";
@@ -94,11 +93,6 @@ interface HostedOpsOnboardingInviteDelivery {
   chatId: string;
   newChatCreated: boolean;
   openerMessageId: string | null;
-}
-
-interface HostedOpsOnboardingNewChatReservation {
-  assignedAt: Date;
-  linePhoneNumber: string;
 }
 
 interface HostedOpsOnboardingVoiceMemoContentType {
@@ -327,34 +321,14 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
         },
       };
     }
-    const reservedReservation = resolveHostedOpsOnboardingReusableNewChatReservation({
-      routing,
-      senderPhone: input.request.linqFromPhoneNumber,
-    });
-    if (reservedReservation) {
-      return {
-        kind: "create_chat" as const,
-        issued: {
-          invite,
-          memberId,
-        },
-        reservation: reservedReservation,
-      };
-    }
-
     await assertHostedOpsOnboardingMemberCanReceiveNewChatTx({
       memberId,
       prisma: tx,
     });
     const assignment = await resolveHostedOpsOnboardingNewChatLineAssignmentTx({
-      prisma: tx,
-      senderPhone: input.request.linqFromPhoneNumber,
-    });
-    await upsertHostedMemberHomeLinqRecipientPhoneTx({
-      homeLineAssignedAt: assignment.assignedAt,
       memberId,
       prisma: tx,
-      recipientPhone: assignment.line.phoneNumber,
+      senderPhone: input.request.linqFromPhoneNumber,
     });
 
     return {
@@ -384,7 +358,6 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
         prepared.issued.memberId,
         prepared.reservation.linePhoneNumber,
         input.request.recipientPhoneNumber,
-        prepared.reservation.assignedAt.toISOString(),
       ],
       step: "open",
     }),
@@ -449,26 +422,6 @@ function resolveHostedOpsOnboardingReusableNewChatDelivery(input: {
   return null;
 }
 
-function resolveHostedOpsOnboardingReusableNewChatReservation(input: {
-  routing: Awaited<ReturnType<typeof readHostedMemberRoutingState>>;
-  senderPhone: string;
-}): HostedOpsOnboardingNewChatReservation | null {
-  const senderPhone = normalizePhoneNumber(input.senderPhone);
-  const homeRecipientPhone = normalizePhoneNumber(input.routing?.linqRecipientPhone);
-
-  return input.routing
-    && !input.routing.linqChatId
-    && input.routing.linqHomeLineAssignedAt
-    && !input.routing.pendingLinqChatId
-    && senderPhone
-    && homeRecipientPhone === senderPhone
-    ? {
-        assignedAt: input.routing.linqHomeLineAssignedAt,
-        linePhoneNumber: homeRecipientPhone,
-      }
-    : null;
-}
-
 async function assertHostedOpsOnboardingNewChatReservationTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
@@ -508,14 +461,12 @@ async function assertHostedOpsOnboardingMemberCanReceiveNewChatTx(input: {
     },
     select: {
       linqChatLookupKey: true,
-      linqRecipientPhoneLookupKey: true,
       pendingLinqChatLookupKey: true,
     },
   });
 
   if (
     routing?.linqChatLookupKey
-    || routing?.linqRecipientPhoneLookupKey
     || routing?.pendingLinqChatLookupKey
   ) {
     throw hostedOnboardingError({
@@ -688,8 +639,10 @@ async function resolveHostedOpsOnboardingExistingLinqChatMemberId(input: {
 async function resolveHostedOpsOnboardingNewChatLineAssignmentTx(input: {
   prisma: Prisma.TransactionClient;
   senderPhone: string;
+  memberId: string;
 }): Promise<HostedLinqHomeLineAssignmentReservation> {
-  const reservationResult = await reserveHostedLinqHomeLineForPhoneTx({
+  const reservationResult = await assignHostedMemberLinqHomeLineForPhoneTx({
+    memberId: input.memberId,
     phoneNumber: input.senderPhone,
     prisma: input.prisma,
   });

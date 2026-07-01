@@ -636,7 +636,6 @@ describe("hosted ops onboarding invites", () => {
       },
       select: {
         linqChatLookupKey: true,
-        linqRecipientPhoneLookupKey: true,
         pendingLinqChatLookupKey: true,
       },
     });
@@ -744,8 +743,107 @@ describe("hosted ops onboarding invites", () => {
     expect(readIdempotencyKey(mocks.createHostedLinqChat, 1)).toBe(
       readIdempotencyKey(mocks.createHostedLinqChat, 0),
     );
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledTimes(1);
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalledTimes(1);
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledTimes(2);
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reuse a bare new-chat reservation after its sender line is disabled", async () => {
+    routingState = {
+      linqChatId: null,
+      linqHomeLineAssignedAt: new Date("2026-03-26T12:00:00.000Z"),
+      linqRecipientPhone: "+15557654321",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+    };
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(null);
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-disabled-bare-reservation",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_UNAUTHORIZED",
+    });
+
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
+  });
+
+  it("does not reuse a previous-day bare new-chat reservation after the daily cap is exhausted", async () => {
+    routingState = {
+      linqChatId: null,
+      linqHomeLineAssignedAt: new Date("2026-03-25T12:00:00.000Z"),
+      linqRecipientPhone: "+15557654321",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+    };
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(
+      buildHomeLine("+15557654321", {
+        maxNewConversationsPerDay: 1,
+      }),
+    );
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
+      new Map([["+15557654321", 1]]),
+    );
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-previous-day-bare-reservation",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_CAPACITY_EXHAUSTED",
+      httpStatus: 429,
+    });
+
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalled();
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
+  });
+
+  it("can replace a failed bare new-chat reservation with a different sender line", async () => {
+    routingState = {
+      linqChatId: null,
+      linqHomeLineAssignedAt: new Date("2026-03-26T12:00:00.000Z"),
+      linqRecipientPhone: "+15550000000",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+    };
+    tx.hostedMemberRouting.findUnique.mockResolvedValue({
+      linqChatLookupKey: null,
+      linqRecipientPhoneLookupKey: "+lookup:old-reservation",
+      pendingLinqChatLookupKey: null,
+    });
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-replace-bare-reservation",
+    })).resolves.toMatchObject({
+      chatId: "chat_created",
+      deliveryMode: "new_chat",
+      newChatCreated: true,
+    });
+
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma: tx,
+      recipientPhone: "+15557654321",
+    });
+    expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
   });
 
   it("does not runtime-sync env-configured Linq lines during new-chat assignment", async () => {

@@ -4,6 +4,7 @@ import {
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   readHostedMemberRoutingState,
+  type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
 } from "./hosted-member-routing-store";
@@ -86,65 +87,43 @@ export async function reserveOrReuseHostedMemberLinqHomeLineForRouteTx(input: {
   phoneNumber: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLinePhoneReservationResult> {
-  const phoneNumber = normalizePhoneNumber(input.phoneNumber);
-  if (!phoneNumber) {
-    return {
-      kind: "unassignable",
-    };
-  }
-
-  await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
+  return reserveOrReuseHostedMemberLinqHomeLineForPhoneTx({
+    memberId: input.memberId,
+    phoneNumber: input.phoneNumber,
     prisma: input.prisma,
+    resolveReusableAssignedAt: (routing, phoneNumber) =>
+      resolveReusableHostedMemberLinqHomeLineRouteAssignedAt({
+        chatId: input.chatId,
+        phoneNumber,
+        routing,
+      }),
+  });
+}
+
+export async function assignHostedMemberLinqHomeLineForPhoneTx(input: {
+  memberId: string;
+  phoneNumber: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedLinqHomeLinePhoneReservationResult> {
+  const reservationResult = await reserveOrReuseHostedMemberLinqHomeLineForPhoneTx({
+    memberId: input.memberId,
+    phoneNumber: input.phoneNumber,
+    prisma: input.prisma,
+    resolveReusableAssignedAt: resolveReusableHostedMemberBareHomeLineAssignedAt,
   });
 
-  const routing = await readHostedMemberRoutingState({
+  if (reservationResult.kind !== "reserved") {
+    return reservationResult;
+  }
+
+  await upsertHostedMemberHomeLinqRecipientPhoneTx({
+    homeLineAssignedAt: reservationResult.reservation.assignedAt,
     memberId: input.memberId,
     prisma: input.prisma,
-  });
-  const existingAssignedAt = routing?.linqHomeLineAssignedAt ?? null;
-  const existingRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
-  const routeMatches =
-    existingAssignedAt !== null
-    && existingRecipientPhone === phoneNumber
-    && (routing?.linqChatId === input.chatId || routing?.pendingLinqChatId === input.chatId);
-
-  const line = await readHostedLinqAssignableHomeLineByPhone({
-    phoneNumber,
-    prisma: input.prisma,
+    recipientPhone: reservationResult.reservation.line.phoneNumber,
   });
 
-  if (!line) {
-    return {
-      kind: "unassignable",
-    };
-  }
-
-  if (routeMatches) {
-    return {
-      kind: "reserved",
-      reservation: {
-        assignedAt: existingAssignedAt,
-        line,
-      },
-    };
-  }
-
-  const reservation = await reserveHostedLinqHomeLineFromCandidatesTx({
-    lines: [line],
-    preferredRecipientPhone: line.phoneNumber,
-    prisma: input.prisma,
-  });
-
-  if (!reservation) {
-    return {
-      kind: "capacity_exhausted",
-    };
-  }
-
-  return {
-    kind: "reserved",
-    reservation,
-  };
+  return reservationResult;
 }
 
 export async function reserveHostedLinqHomeLineFromPoolTx(input: {
@@ -285,6 +264,7 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
 
 async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
   lines: readonly HostedLinqAssignableHomeLine[];
+  now?: Date;
   preferredRecipientPhone?: string | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLineAssignmentReservation | null> {
@@ -294,7 +274,7 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
     return null;
   }
 
-  const now = new Date();
+  const now = input.now ?? new Date();
   const activeMembersByRecipientPhone = await countHostedMemberHomeLinqBindingsByRecipientPhone({
     now,
     prisma: input.prisma,
@@ -342,6 +322,114 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
     ...(reservation ? { homeLineAssignedAt: reservation.assignedAt } : {}),
     recipientPhone: reservation?.line.phoneNumber ?? null,
   };
+}
+
+async function reserveOrReuseHostedMemberLinqHomeLineForPhoneTx(input: {
+  memberId: string;
+  phoneNumber: string;
+  prisma: Prisma.TransactionClient;
+  resolveReusableAssignedAt: (
+    routing: HostedMemberRoutingStateSnapshot | null,
+    phoneNumber: string,
+    now: Date,
+  ) => Date | null;
+}): Promise<HostedLinqHomeLinePhoneReservationResult> {
+  const phoneNumber = normalizePhoneNumber(input.phoneNumber);
+  if (!phoneNumber) {
+    return {
+      kind: "unassignable",
+    };
+  }
+
+  await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
+    prisma: input.prisma,
+  });
+
+  const now = new Date();
+  const routing = await readHostedMemberRoutingState({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const reusableAssignedAt = input.resolveReusableAssignedAt(routing, phoneNumber, now);
+  const line = await readHostedLinqAssignableHomeLineByPhone({
+    phoneNumber,
+    prisma: input.prisma,
+  });
+
+  if (!line) {
+    return {
+      kind: "unassignable",
+    };
+  }
+
+  if (reusableAssignedAt) {
+    return {
+      kind: "reserved",
+      reservation: {
+        assignedAt: reusableAssignedAt,
+        line,
+      },
+    };
+  }
+
+  const reservation = await reserveHostedLinqHomeLineFromCandidatesTx({
+    lines: [line],
+    now,
+    preferredRecipientPhone: line.phoneNumber,
+    prisma: input.prisma,
+  });
+
+  if (!reservation) {
+    return {
+      kind: "capacity_exhausted",
+    };
+  }
+
+  return {
+    kind: "reserved",
+    reservation,
+  };
+}
+
+function resolveReusableHostedMemberLinqHomeLineRouteAssignedAt(input: {
+  chatId: string;
+  phoneNumber: string;
+  routing: HostedMemberRoutingStateSnapshot | null;
+}): Date | null {
+  const existingAssignedAt = input.routing?.linqHomeLineAssignedAt ?? null;
+  const existingRecipientPhone = normalizePhoneNumber(input.routing?.linqRecipientPhone);
+
+  return existingAssignedAt
+    && existingRecipientPhone === input.phoneNumber
+    && (
+      input.routing?.linqChatId === input.chatId
+      || input.routing?.pendingLinqChatId === input.chatId
+    )
+    ? existingAssignedAt
+    : null;
+}
+
+function resolveReusableHostedMemberBareHomeLineAssignedAt(
+  routing: HostedMemberRoutingStateSnapshot | null,
+  phoneNumber: string,
+  now: Date,
+): Date | null {
+  const assignedAt = routing?.linqHomeLineAssignedAt ?? null;
+  const homeRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
+
+  return assignedAt
+    && !routing?.linqChatId
+    && !routing?.pendingLinqChatId
+    && homeRecipientPhone === phoneNumber
+    && isSameUtcDay(assignedAt, now)
+    ? assignedAt
+    : null;
+}
+
+function isSameUtcDay(left: Date, right: Date): boolean {
+  return left.getUTCFullYear() === right.getUTCFullYear()
+    && left.getUTCMonth() === right.getUTCMonth()
+    && left.getUTCDate() === right.getUTCDate();
 }
 
 function startOfUtcDay(value: Date): Date {
