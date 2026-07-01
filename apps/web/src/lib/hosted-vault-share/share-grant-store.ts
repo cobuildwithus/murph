@@ -28,6 +28,10 @@ export interface HostedVaultShareRevocationResult {
   revokedCount: number;
 }
 
+export interface HostedVaultShareGrantResult {
+  status: "already-granted" | "foreign-active-grant" | "granted";
+}
+
 interface RevocableHostedVaultShare {
   destinationMemberId: string;
   grantorMemberId: string;
@@ -42,7 +46,7 @@ export async function grantHostedVaultShareTx(input: {
   projectionKind: HostedVaultShareProjectionKind;
   source: string;
   now: Date;
-}): Promise<void> {
+}): Promise<HostedVaultShareGrantResult> {
   assertSupportedProjectionKind(input.projectionKind);
   if (input.grantorMemberId === input.destinationMemberId) {
     throw hostedOnboardingError({
@@ -61,7 +65,7 @@ export async function grantHostedVaultShareTx(input: {
         projectionKind: input.projectionKind,
       },
     },
-    select: { id: true, status: true },
+    select: { id: true, source: true, status: true },
   });
 
   if (!existing) {
@@ -78,7 +82,7 @@ export async function grantHostedVaultShareTx(input: {
           status: "granted",
         },
       });
-      return;
+      return { status: "granted" };
     } catch (error) {
       if (!isPrismaUniqueConstraintError(error)) {
         throw error;
@@ -91,12 +95,19 @@ export async function grantHostedVaultShareTx(input: {
             projectionKind: input.projectionKind,
           },
         },
-        select: { id: true, status: true },
+        select: { id: true, source: true, status: true },
       });
       if (!existing) {
         throw error;
       }
     }
+  }
+
+  if (existing.status === "granted") {
+    if (existing.source !== input.source) {
+      return { status: "foreign-active-grant" };
+    }
+    return { status: "already-granted" };
   }
 
   await input.tx.hostedVaultShare.update({
@@ -107,16 +118,15 @@ export async function grantHostedVaultShareTx(input: {
         projectionKind: input.projectionKind,
       },
     },
-    data: existing?.status === "granted"
-      ? { source: input.source }
-      : {
-          id: generateHostedVaultShareId(),
-          grantedAt: input.now,
-          revokedAt: null,
-          source: input.source,
-          status: "granted",
-        },
+    data: {
+      id: generateHostedVaultShareId(),
+      grantedAt: input.now,
+      revokedAt: null,
+      source: input.source,
+      status: "granted",
+    },
   });
+  return { status: "granted" };
 }
 
 export async function revokeHostedVaultSharesTx(input: {
@@ -160,6 +170,7 @@ export async function revokeHostedVaultSharesWithCleanupTx(input: {
       ...(projectionKinds && projectionKinds.length > 0
         ? { projectionKind: { in: [...projectionKinds] } }
         : {}),
+      source: input.source,
       status: "granted",
     },
   }).then((rows) => normalizeRevocableHostedVaultShareRows(rows));
@@ -298,6 +309,7 @@ export async function readActiveHostedVaultShareProjectionKinds(input: {
   grantorMemberId: string;
   destinationMemberId: string;
   projectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
+  source?: string | null;
 }): Promise<HostedVaultShareProjectionKind[]> {
   const prisma = input.prisma ?? getPrisma();
   const projectionKinds = input.projectionKinds?.map((kind) => {
@@ -314,6 +326,7 @@ export async function readActiveHostedVaultShareProjectionKinds(input: {
       ...(projectionKinds && projectionKinds.length > 0
         ? { projectionKind: { in: [...projectionKinds] } }
         : {}),
+      ...(input.source ? { source: input.source } : {}),
       status: "granted",
     },
     select: { projectionKind: true },

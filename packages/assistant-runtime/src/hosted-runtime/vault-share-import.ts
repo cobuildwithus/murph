@@ -1,4 +1,5 @@
-import { readFile, rm } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { readdir, readFile, rm, rmdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { normalizeOpaquePathSegment } from "@murphai/core";
@@ -136,6 +137,13 @@ export async function applyHostedVaultShareRevokeWake(input: {
       };
     }
 
+    await removeLegacySharedVaultShareProjectionRecords({
+      grantorMemberId: revoke.grantorMemberId,
+      projectionKind: revoke.projectionKind,
+      shareId: revoke.shareId,
+      vaultRoot: input.vaultRoot,
+    });
+
     const projection = store.projections[revoke.projectionKind];
     const grantor = projection?.grantors[revoke.grantorMemberId];
     if (!projection || !grantor) {
@@ -265,6 +273,75 @@ async function writeSharedVaultShareProjectionStore(
 
 function resolveSharedVaultShareProjectionStorePath(vaultRoot: string): string {
   return join(vaultRoot, "derived", "vault-share", "projections.json");
+}
+
+async function removeLegacySharedVaultShareProjectionRecords(input: {
+  vaultRoot: string;
+  grantorMemberId: string;
+  projectionKind: HostedVaultShareProjectionKind;
+  shareId: string;
+}): Promise<void> {
+  const directory = resolveLegacySharedVaultShareProjectionDirectory(input);
+  let entries: Dirent[];
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (hasNodeErrorCode(error, "ENOENT")) {
+      return;
+    }
+    throw error;
+  }
+
+  let removedAny = false;
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) {
+      continue;
+    }
+    const path = join(directory, entry.name);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await readFile(path, "utf8"));
+    } catch {
+      continue;
+    }
+    if (!legacySharedVaultShareRecordMatchesShareId(parsed, input.shareId)) {
+      continue;
+    }
+    await rm(path, { force: true });
+    removedAny = true;
+  }
+
+  if (!removedAny) {
+    return;
+  }
+  try {
+    await rmdir(directory);
+  } catch (error) {
+    if (!hasNodeErrorCode(error, "ENOENT") && !hasNodeErrorCode(error, "ENOTEMPTY")) {
+      throw error;
+    }
+  }
+}
+
+function resolveLegacySharedVaultShareProjectionDirectory(input: {
+  vaultRoot: string;
+  grantorMemberId: string;
+  projectionKind: HostedVaultShareProjectionKind;
+}): string {
+  return join(
+    input.vaultRoot,
+    "raw",
+    "shared",
+    input.projectionKind,
+    input.grantorMemberId,
+  );
+}
+
+function legacySharedVaultShareRecordMatchesShareId(
+  value: unknown,
+  shareId: string,
+): boolean {
+  return isPlainRecord(value) && value.shareId === shareId;
 }
 
 function parseSharedVaultShareProjectionStore(

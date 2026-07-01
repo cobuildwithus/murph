@@ -304,6 +304,7 @@ export async function readHostedGroupJoinView(input: {
         grantorMemberId: input.memberId,
         prisma,
         projectionKinds: policy.requestedVaultShareProjectionKinds,
+        source: HOSTED_GROUP_VAULT_SHARE_SOURCE,
       })
     : [];
 
@@ -425,7 +426,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
           grantorMemberId: input.memberId,
           projectionKind,
         });
-        await grantHostedVaultShareTx({
+        const grant = await grantHostedVaultShareTx({
           destinationMemberId: group.runtimeMemberId,
           grantorMemberId: input.memberId,
           now: input.now,
@@ -433,7 +434,9 @@ export async function acceptHostedGroupJoinCodeTx(input: {
           source: HOSTED_GROUP_VAULT_SHARE_SOURCE,
           tx: input.tx,
         });
-        grantedVaultShareProjectionKinds.push(projectionKind);
+        if (grant.status !== "foreign-active-grant") {
+          grantedVaultShareProjectionKinds.push(projectionKind);
+        }
       } else {
         const revoked = await revokeHostedVaultSharesWithCleanupTx({
           destinationMemberId: group.runtimeMemberId,

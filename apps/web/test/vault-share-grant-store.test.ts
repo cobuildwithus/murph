@@ -61,6 +61,15 @@ describe("revokeHostedVaultSharesTx", () => {
       tx,
     })).resolves.toBe(1);
 
+    expect(tx.hostedVaultShare.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        destinationMemberId: "member_referee",
+        grantorMemberId: "member_grantor",
+        projectionKind: { in: ["sleep-times.v0"] },
+        source: "hosted-group",
+        status: "granted",
+      },
+    }));
     expect(tx.hostedVaultShare.updateMany).toHaveBeenCalledWith({
       data: {
         revokedAt: now,
@@ -124,14 +133,14 @@ describe("grantHostedVaultShareTx", () => {
     };
     const now = new Date("2026-07-02T00:00:00.000Z");
 
-    await grantHostedVaultShareTx({
+    await expect(grantHostedVaultShareTx({
       destinationMemberId: "member_referee",
       grantorMemberId: "member_grantor",
       now,
       projectionKind: "sleep-times.v0",
       source: "hosted-group",
       tx,
-    });
+    })).resolves.toEqual({ status: "granted" });
 
     expect(tx.hostedVaultShare.update).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -151,6 +160,70 @@ describe("grantHostedVaultShareTx", () => {
     });
     const updateArg = tx.hostedVaultShare.update.mock.calls[0]?.[0];
     expect(updateArg.data.id).not.toBe("share_old");
+  });
+
+  it("leaves an active grant from another source unchanged", async () => {
+    const tx = {
+      hostedVaultShare: {
+        create: vi.fn(),
+        findUnique: vi.fn(async () => ({
+          id: "share_direct",
+          source: "operator-direct",
+          status: "granted",
+        })),
+        update: vi.fn(async () => undefined),
+      },
+    } as unknown as Prisma.TransactionClient & {
+      hostedVaultShare: {
+        create: ReturnType<typeof vi.fn>;
+        findUnique: ReturnType<typeof vi.fn>;
+        update: ReturnType<typeof vi.fn>;
+      };
+    };
+
+    await expect(grantHostedVaultShareTx({
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      now: new Date("2026-07-02T00:00:00.000Z"),
+      projectionKind: "sleep-times.v0",
+      source: "hosted-group",
+      tx,
+    })).resolves.toEqual({ status: "foreign-active-grant" });
+
+    expect(tx.hostedVaultShare.create).not.toHaveBeenCalled();
+    expect(tx.hostedVaultShare.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps an existing active grant from the same source idempotent", async () => {
+    const tx = {
+      hostedVaultShare: {
+        create: vi.fn(),
+        findUnique: vi.fn(async () => ({
+          id: "share_group",
+          source: "hosted-group",
+          status: "granted",
+        })),
+        update: vi.fn(async () => undefined),
+      },
+    } as unknown as Prisma.TransactionClient & {
+      hostedVaultShare: {
+        create: ReturnType<typeof vi.fn>;
+        findUnique: ReturnType<typeof vi.fn>;
+        update: ReturnType<typeof vi.fn>;
+      };
+    };
+
+    await expect(grantHostedVaultShareTx({
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      now: new Date("2026-07-02T00:00:00.000Z"),
+      projectionKind: "sleep-times.v0",
+      source: "hosted-group",
+      tx,
+    })).resolves.toEqual({ status: "already-granted" });
+
+    expect(tx.hostedVaultShare.create).not.toHaveBeenCalled();
+    expect(tx.hostedVaultShare.update).not.toHaveBeenCalled();
   });
 });
 

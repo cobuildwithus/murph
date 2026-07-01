@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -274,6 +274,62 @@ describe("importHostedVaultShareDeliveryWake", () => {
     const grantor = stored.projections["sleep-times.v0"].grantors.member_grantor;
     expect(grantor.shareId).toBe("share_2");
     expect(grantor.records).toHaveLength(1);
+  });
+
+  it("removes matching legacy raw shared records when a share is revoked", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
+    const legacyDirectory = join(vaultRoot, "raw", "shared", "sleep-times.v0", "member_grantor");
+    const revokedLegacyPath = join(legacyDirectory, "2026-06-09.json");
+    const activeLegacyPath = join(legacyDirectory, "2026-06-10.json");
+    await mkdir(legacyDirectory, { recursive: true });
+    await writeFile(
+      revokedLegacyPath,
+      JSON.stringify({
+        grantorMemberId: "member_grantor",
+        projectionKind: "sleep-times.v0",
+        receivedEventId: "vault-share:share_1:2026-06-09",
+        record: RECORD,
+        schema: "murph.vault-share.delivery.v1",
+        shareId: "share_1",
+      }),
+    );
+    await writeFile(
+      activeLegacyPath,
+      JSON.stringify({
+        grantorMemberId: "member_grantor",
+        projectionKind: "sleep-times.v0",
+        receivedEventId: "vault-share:share_2:2026-06-10",
+        record: {
+          ...RECORD,
+          recordKey: "2026-06-10",
+        },
+        schema: "murph.vault-share.delivery.v1",
+        shareId: "share_2",
+      }),
+    );
+
+    await expect(applyHostedVaultShareRevokeWake({
+      vaultRoot,
+      wake: {
+        eventId: "vault-share-revoke:share_1:2026-07-01T00:00:00.000Z",
+        kind: "vault-share.revoke",
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        revoke: {
+          grantorMemberId: "member_grantor",
+          projectionKind: "sleep-times.v0",
+          revokedAt: "2026-07-01T00:00:00.000Z",
+          schema: "murph.vault-share.revoke.v1",
+          shareId: "share_1",
+        },
+        userId: "member_referee",
+      },
+    })).resolves.toEqual({ status: "imported" });
+
+    await expect(readFile(revokedLegacyPath, "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(activeLegacyPath, "utf8")).resolves.toContain("share_2");
+    await expect(readFile(storePath(vaultRoot), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("starts a fresh record list when a delivery arrives for a new grant epoch", async () => {

@@ -99,7 +99,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
-    mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
+    mocks.grantHostedVaultShareTx.mockResolvedValue({ status: "granted" });
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.revokeHostedVaultSharesWithCleanupTx.mockResolvedValue({
       cleanupSignals: [],
@@ -182,6 +182,38 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     expect(tx.hostedVaultShare.count).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      projectionKind: "sleep-times.v0",
+      source: "hosted-group.join",
+      tx,
+    });
+  });
+
+  it("does not report a group grant when the tuple is already owned by another share source", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      existingMembershipId: "membership_existing",
+    });
+    mocks.grantHostedVaultShareTx.mockResolvedValueOnce({
+      status: "foreign-active-grant",
+    });
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      joinCode: "join_1",
+      memberId: "member_grantor",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      selectedVaultShareProjectionKinds: ["sleep-times.v0"],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: true,
+      grantedVaultShareProjectionKinds: [],
+      membershipId: "membership_existing",
+      revokedVaultShareProjectionKinds: [],
+    });
+
     expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_grantor",
