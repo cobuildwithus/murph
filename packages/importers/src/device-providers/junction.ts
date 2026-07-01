@@ -672,6 +672,7 @@ const JUNCTION_SLEEP_COVERAGE_END_TIMESTAMP_PATHS = [
   "session_end",
 ] as const;
 const SLEEP_STAGE_COVERAGE_TOLERANCE_MS = 1000;
+const JUNCTION_SLEEP_STAGES: readonly JunctionSleepStage[] = ["awake", "light", "deep", "rem"];
 
 type JunctionSleepStage = JunctionSleepStageValue;
 
@@ -727,6 +728,17 @@ interface JunctionSleepStageSegment {
 interface JunctionSleepStageCoverageWindow {
   endAt: string;
   startAt: string;
+}
+
+interface JunctionSleepStageAggregateBucket {
+  dataOriginEntry: PlainObject;
+  endAt: string;
+  parentResourceId: string;
+  recordedAt?: string;
+  resourceContext: ResourceContext;
+  startAt: string;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+  timeZone?: string;
 }
 
 interface JunctionSleepSummaryStageMetricOwner {
@@ -1963,23 +1975,53 @@ function collectJunctionSleepStageAggregates(
   const parentTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
   const intervals = collectJunctionSleepStageIntervals(entry, resourceContext, context, parentTimestamp);
   const parentResourceId = resolveSleepCycleParentResourceId(resourceContext, entry, parentTimestamp);
-  if (!parentResourceId || !sleepStageIntervalsCoverParentWindow(entry, resourceContext, intervals)) {
+  const coveredIntervals = collectCoveredSleepStageIntervals(entry, resourceContext, intervals);
+  if (!parentResourceId || !coveredIntervals) {
     return;
   }
 
-  for (const interval of intervals) {
+  const buckets = new Map<string, JunctionSleepStageAggregateBucket>();
+  for (const interval of coveredIntervals) {
     for (const segment of splitJunctionSleepStageInterval(interval, entry, parentTimestamp, context.defaultTimeZone)) {
       const stageTimestamp = withTimestampOverride(interval.timestamp, {
         occurredAt: segment.endAt,
         dayKey: segment.dayKey,
       });
-      const aggregateKey = [
-        resourceContext.externalRefResourceType,
+      const bucketKey = sleepStageBucketKey(
+        resourceContext,
+        parentResourceId,
+        stageTimestamp.dayKey,
+        interval.timeZone,
+      );
+      const aggregateKey = sleepStageAggregateKey(
+        resourceContext,
         parentResourceId,
         interval.stage,
-        stageTimestamp.dayKey ?? "",
-        interval.timeZone ?? "",
-      ].join("|");
+        stageTimestamp.dayKey,
+        interval.timeZone,
+      );
+      const existingBucket = buckets.get(bucketKey);
+      if (existingBucket) {
+        existingBucket.startAt = earlierIsoTimestamp(existingBucket.startAt, segment.startAt);
+        existingBucket.endAt = laterIsoTimestamp(existingBucket.endAt, segment.endAt);
+        existingBucket.recordedAt = laterOptionalIsoTimestamp(existingBucket.recordedAt, stageTimestamp.recordedAt);
+        existingBucket.timestamp = withTimestampOverride(existingBucket.timestamp, {
+          occurredAt: existingBucket.endAt,
+          recordedAt: existingBucket.recordedAt,
+        });
+      } else {
+        buckets.set(bucketKey, {
+          dataOriginEntry: interval.dataOriginEntry,
+          endAt: segment.endAt,
+          parentResourceId,
+          recordedAt: stageTimestamp.recordedAt,
+          resourceContext,
+          startAt: segment.startAt,
+          timestamp: stageTimestamp,
+          timeZone: interval.timeZone,
+        });
+      }
+
       const existing = aggregates.get(aggregateKey);
 
       if (existing) {
@@ -2008,19 +2050,77 @@ function collectJunctionSleepStageAggregates(
       });
     }
   }
+
+  for (const bucket of buckets.values()) {
+    for (const stage of JUNCTION_SLEEP_STAGES) {
+      const aggregateKey = sleepStageAggregateKey(
+        bucket.resourceContext,
+        bucket.parentResourceId,
+        stage,
+        bucket.timestamp.dayKey,
+        bucket.timeZone,
+      );
+      if (aggregates.has(aggregateKey)) {
+        continue;
+      }
+
+      aggregates.set(aggregateKey, {
+        dataOriginEntry: bucket.dataOriginEntry,
+        durationMinutes: 0,
+        endAt: bucket.endAt,
+        parentResourceId: bucket.parentResourceId,
+        recordedAt: bucket.recordedAt,
+        resourceContext: bucket.resourceContext,
+        stage,
+        startAt: bucket.startAt,
+        timestamp: bucket.timestamp,
+        timeZone: bucket.timeZone,
+      });
+    }
+  }
 }
 
-function sleepStageIntervalsCoverParentWindow(
+function sleepStageBucketKey(
+  resourceContext: ResourceContext,
+  parentResourceId: string,
+  dayKey: string | undefined,
+  timeZone: string | undefined,
+): string {
+  return [
+    resourceContext.externalRefResourceType,
+    parentResourceId,
+    dayKey ?? "",
+    timeZone ?? "",
+  ].join("|");
+}
+
+function sleepStageAggregateKey(
+  resourceContext: ResourceContext,
+  parentResourceId: string,
+  stage: JunctionSleepStage,
+  dayKey: string | undefined,
+  timeZone: string | undefined,
+): string {
+  return [
+    resourceContext.externalRefResourceType,
+    parentResourceId,
+    stage,
+    dayKey ?? "",
+    timeZone ?? "",
+  ].join("|");
+}
+
+function collectCoveredSleepStageIntervals(
   entry: PlainObject,
   resourceContext: ResourceContext,
   intervals: readonly JunctionSleepStageInterval[],
-): boolean {
+): JunctionSleepStageInterval[] | undefined {
   const coverageWindow = resolveSleepStageCoverageWindow(entry, resourceContext.sourceProviderSlug);
   if (!coverageWindow || intervals.length === 0) {
-    return false;
+    return undefined;
   }
 
-  return sleepStageIntervalsCoverWindow(intervals, coverageWindow);
+  return clipSleepStageIntervalsToWindow(intervals, coverageWindow);
 }
 
 function resolveSleepStageCoverageWindow(
@@ -2043,36 +2143,61 @@ function resolveSleepStageCoverageWindow(
   return { endAt, startAt };
 }
 
-function sleepStageIntervalsCoverWindow(
+function clipSleepStageIntervalsToWindow(
   intervals: readonly JunctionSleepStageInterval[],
   coverageWindow: JunctionSleepStageCoverageWindow,
-): boolean {
+): JunctionSleepStageInterval[] | undefined {
   const windowStartMs = Date.parse(coverageWindow.startAt);
   const windowEndMs = Date.parse(coverageWindow.endAt);
   if (!Number.isFinite(windowStartMs) || !Number.isFinite(windowEndMs) || windowEndMs <= windowStartMs) {
-    return false;
+    return undefined;
   }
 
   let coveredUntilMs = windowStartMs;
+  const coveredIntervals: JunctionSleepStageInterval[] = [];
   const orderedIntervals = [...intervals].sort((left, right) => Date.parse(left.startAt) - Date.parse(right.startAt));
   for (const interval of orderedIntervals) {
-    const intervalStartMs = Math.max(Date.parse(interval.startAt), windowStartMs);
-    const intervalEndMs = Math.min(Date.parse(interval.endAt), windowEndMs);
-    if (!Number.isFinite(intervalStartMs) || !Number.isFinite(intervalEndMs) || intervalEndMs <= intervalStartMs) {
+    const rawStartMs = Date.parse(interval.startAt);
+    const rawEndMs = Date.parse(interval.endAt);
+    if (!Number.isFinite(rawStartMs) || !Number.isFinite(rawEndMs)) {
+      continue;
+    }
+
+    const intervalStartMs = Math.max(rawStartMs, windowStartMs);
+    const intervalEndMs = Math.min(rawEndMs, windowEndMs);
+    if (intervalEndMs <= intervalStartMs) {
       continue;
     }
 
     if (intervalStartMs - coveredUntilMs > SLEEP_STAGE_COVERAGE_TOLERANCE_MS) {
-      return false;
+      return undefined;
     }
 
-    coveredUntilMs = Math.max(coveredUntilMs, intervalEndMs);
+    if (intervalStartMs < coveredUntilMs - SLEEP_STAGE_COVERAGE_TOLERANCE_MS) {
+      return undefined;
+    }
+
+    const clippedStartMs = Math.max(intervalStartMs, coveredUntilMs);
+    const clippedEndMs = intervalEndMs;
+    if (clippedEndMs <= clippedStartMs) {
+      continue;
+    }
+
+    coveredIntervals.push({
+      ...interval,
+      durationMinutes: (clippedEndMs - clippedStartMs) / 60000,
+      endAt: new Date(clippedEndMs).toISOString(),
+      startAt: new Date(clippedStartMs).toISOString(),
+    });
+    coveredUntilMs = clippedEndMs;
     if (windowEndMs - coveredUntilMs <= SLEEP_STAGE_COVERAGE_TOLERANCE_MS) {
-      return true;
+      return coveredIntervals;
     }
   }
 
-  return windowEndMs - coveredUntilMs <= SLEEP_STAGE_COVERAGE_TOLERANCE_MS;
+  return windowEndMs - coveredUntilMs <= SLEEP_STAGE_COVERAGE_TOLERANCE_MS
+    ? coveredIntervals
+    : undefined;
 }
 
 function collectJunctionSleepStageIntervals(
