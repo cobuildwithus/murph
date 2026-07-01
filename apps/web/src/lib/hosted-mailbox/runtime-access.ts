@@ -78,29 +78,73 @@ export async function requireHostedRuntimeActiveAccessForUpdateTx(
     prisma: Prisma.TransactionClient;
   },
 ): Promise<void> {
-  await options.prisma.$queryRaw`
-    SELECT id
-    FROM hosted_member
-    WHERE id = ${userId}
-    FOR UPDATE
-  `;
-  const containers = await options.prisma.$queryRaw<Array<{ ownerMemberId: string }>>`
-    SELECT owner_member_id AS "ownerMemberId"
-    FROM hosted_thread_container
-    WHERE member_id = ${userId}
-    FOR UPDATE
-  `;
-  const ownerMemberId = containers[0]?.ownerMemberId;
+  const ownerMemberId = await readHostedThreadContainerOwnerMemberIdTx({
+    prisma: options.prisma,
+    userId,
+  });
   if (ownerMemberId) {
-    await options.prisma.$queryRaw`
-      SELECT id
-      FROM hosted_member
-      WHERE id = ${ownerMemberId}
-      FOR UPDATE
-    `;
+    await lockHostedRuntimeMemberForUpdateTx({
+      memberId: ownerMemberId,
+      prisma: options.prisma,
+    });
+  }
+  await lockHostedRuntimeMemberForUpdateTx({
+    memberId: userId,
+    prisma: options.prisma,
+  });
+  const lockedOwnerMemberId = await lockHostedThreadContainerOwnerMemberIdTx({
+    prisma: options.prisma,
+    userId,
+  });
+  if (lockedOwnerMemberId !== ownerMemberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_RUNTIME_ACCESS_AUTHORITY_CHANGED",
+      httpStatus: 409,
+      message: "Hosted runtime access changed while validating authority. Retry the request.",
+      retryable: true,
+    });
   }
 
   await requireHostedRuntimeActiveAccess(userId, options);
+}
+
+async function lockHostedRuntimeMemberForUpdateTx(input: {
+  prisma: Prisma.TransactionClient;
+  memberId: string;
+}): Promise<void> {
+  await input.prisma.$queryRaw`
+    SELECT id
+    FROM hosted_member
+    WHERE id = ${input.memberId}
+    FOR UPDATE
+  `;
+}
+
+async function readHostedThreadContainerOwnerMemberIdTx(input: {
+  prisma: Prisma.TransactionClient;
+  userId: string;
+}): Promise<string | null> {
+  const containers = await input.prisma.$queryRaw<Array<{ ownerMemberId: string }>>`
+    SELECT owner_member_id AS "ownerMemberId"
+    FROM hosted_thread_container
+    WHERE member_id = ${input.userId}
+  `;
+
+  return containers[0]?.ownerMemberId ?? null;
+}
+
+async function lockHostedThreadContainerOwnerMemberIdTx(input: {
+  prisma: Prisma.TransactionClient;
+  userId: string;
+}): Promise<string | null> {
+  const containers = await input.prisma.$queryRaw<Array<{ ownerMemberId: string }>>`
+    SELECT owner_member_id AS "ownerMemberId"
+    FROM hosted_thread_container
+    WHERE member_id = ${input.userId}
+    FOR UPDATE
+  `;
+
+  return containers[0]?.ownerMemberId ?? null;
 }
 
 export async function hasHostedRuntimeActiveAccessForUpdateTx(
