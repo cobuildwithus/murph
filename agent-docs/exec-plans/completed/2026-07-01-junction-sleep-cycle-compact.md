@@ -19,11 +19,11 @@ Fix Junction `sleep_cycle` normalization so provider imports keep dense stage in
 
 ## State
 
-Implemented. Review follow-ups addressed: parentless, incomplete, and overlapping stage timelines remain raw-only; complete parented cycles emit clipped, zero-inclusive compact fallback facts; and sleep summary stage metrics keep ownership when present for the same sleep window.
+Implemented. Review follow-ups addressed: parentless, incomplete, and overlapping stage timelines remain raw-only; stable direct sleep-cycle children can derive coverage from contained intervals; complete parented cycles emit clipped, zero-inclusive compact fallback facts; and sleep summary stage metrics supersede fallback cycle facts when present for the same sleep window.
 
 ## Verification
 
-- `pnpm --filter @murphai/importers test -- device-providers-junction` passed: 13 files, 264 tests.
+- `pnpm --filter @murphai/importers test -- device-providers-junction` passed: 13 files, 265 tests.
 - `pnpm --filter @murphai/importers typecheck` passed.
 - `pnpm build:workspace:incremental` passed.
 - `pnpm test:diff packages/importers/src/device-providers/junction.ts packages/importers/test/device-providers-junction.test.ts` was attempted after generating Health Commons artifacts. It passed dependency policy, workspace boundaries, guards, affected package typechecks, affected package tests, apps/cloudflare verify, and then failed in apps/web verify when local dev smoke exited early. A direct `pnpm --dir apps/web dev:smoke` rerun failed because the isolated worktree is not linked to a Vercel project; this is a local worktree setup blocker, not importer behavior.

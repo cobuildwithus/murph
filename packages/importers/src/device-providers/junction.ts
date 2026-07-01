@@ -1882,9 +1882,11 @@ function pushSleepCycleEntries(
 
   for (const aggregate of aggregates.values()) {
     const metric = sleepStageMetricDescriptor(aggregate.stage);
-    if (isSleepStageMetricOwnedBySleepSummary(aggregate, metric.metric, sleepSummaryStageMetricOwners)) {
-      continue;
-    }
+    const ownedBySleepSummary = isSleepStageMetricOwnedBySleepSummary(
+      aggregate,
+      metric.metric,
+      sleepSummaryStageMetricOwners,
+    );
 
     context.events.push(stripUndefined({
       kind: "observation",
@@ -1900,7 +1902,7 @@ function pushSleepCycleEntries(
       fields: {
         metric: metric.metric,
         observationGrain: "summary",
-        value: Number(aggregate.durationMinutes.toFixed(4)),
+        value: ownedBySleepSummary ? 0 : Number(aggregate.durationMinutes.toFixed(4)),
         unit: "minutes",
       },
     }));
@@ -2115,7 +2117,8 @@ function collectCoveredSleepStageIntervals(
   resourceContext: ResourceContext,
   intervals: readonly JunctionSleepStageInterval[],
 ): JunctionSleepStageInterval[] | undefined {
-  const coverageWindow = resolveSleepStageCoverageWindow(entry, resourceContext.sourceProviderSlug);
+  const coverageWindow = resolveSleepStageCoverageWindow(entry, resourceContext.sourceProviderSlug)
+    ?? resolveDerivedSleepStageCoverageWindow(entry, resourceContext, intervals);
   if (!coverageWindow || intervals.length === 0) {
     return undefined;
   }
@@ -2135,6 +2138,33 @@ function resolveSleepStageCoverageWindow(
     firstValueFromPaths(entry, JUNCTION_SLEEP_COVERAGE_END_TIMESTAMP_PATHS),
     sourceProviderSlug,
   );
+
+  if (!startAt || !endAt || Date.parse(endAt) <= Date.parse(startAt)) {
+    return undefined;
+  }
+
+  return { endAt, startAt };
+}
+
+function resolveDerivedSleepStageCoverageWindow(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  intervals: readonly JunctionSleepStageInterval[],
+): JunctionSleepStageCoverageWindow | undefined {
+  if (
+    resourceContext.resource !== "sleep_cycle" ||
+    isDirectSleepStageIntervalEntry(entry) ||
+    !firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS)
+  ) {
+    return undefined;
+  }
+
+  let startAt: string | undefined;
+  let endAt: string | undefined;
+  for (const interval of intervals) {
+    startAt = startAt ? earlierIsoTimestamp(startAt, interval.startAt) : interval.startAt;
+    endAt = endAt ? laterIsoTimestamp(endAt, interval.endAt) : interval.endAt;
+  }
 
   if (!startAt || !endAt || Date.parse(endAt) <= Date.parse(startAt)) {
     return undefined;
