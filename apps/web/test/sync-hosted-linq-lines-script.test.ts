@@ -28,8 +28,8 @@ describe("sync-hosted-linq-lines script", () => {
     expect(assignablePoolCheckIndex).toBeGreaterThan(inventorySkipIndex);
   });
 
-  it("redacts malformed configured line values from stderr", () => {
-    const rawLine = "+15551234567";
+  it("omits malformed configured line values from stderr", () => {
+    const rawLine = "15551234567";
     const result = spawnSync(
       "pnpm",
       [
@@ -56,7 +56,8 @@ describe("sync-hosted-linq-lines script", () => {
     );
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("<redacted-phone>");
+    expect(result.stderr).toContain("HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS");
+    expect(result.stderr).not.toContain("bad");
     expect(result.stderr).not.toContain(rawLine);
   });
 });
