@@ -1947,8 +1947,17 @@ export async function updateHostedFamilySeatCount(input: {
       });
     }
 
-    // Stripe owns the durable seat quantity. The subscription webhook reconciler
-    // is the only local writer of billedSeatCount so event freshness has one fence.
+    // Stripe confirmed the quantity synchronously, so persist it now instead of
+    // waiting for the subscription webhook. lastStripeEventCreatedAt stays
+    // untouched, so the webhook reconciler fence still orders later events.
+    await prisma.hostedAccountGroupBillingRef.update({
+      data: {
+        billedSeatCount: targetSeatCount,
+      },
+      where: {
+        groupId: input.groupId,
+      },
+    });
   }
 
   const snapshot = await readHostedFamilyOwnerSnapshotForMember({

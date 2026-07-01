@@ -6,6 +6,8 @@ import {
   buildHostedFamilyTelegramInviteUrl,
   ensureHostedAccountGroupForOwnerTx,
   issueHostedFamilyInviteTx,
+  readHostedFamilyOwnerSnapshotForMember,
+  updateHostedFamilySeatCount,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -33,6 +35,25 @@ export const POST = withJsonError(async (request: Request) => {
       httpStatus: 400,
       message: "Add a phone number, email, Telegram username, or name for the person you are inviting.",
     });
+  }
+
+  if (body.addSeatIfNeeded === true) {
+    const snapshot = await readHostedFamilyOwnerSnapshotForMember({
+      memberId: auth.member.id,
+      prisma,
+    });
+    if (
+      snapshot?.billingActive &&
+      snapshot.seats.remaining <= 0 &&
+      snapshot.seats.billed < snapshot.seats.max
+    ) {
+      await updateHostedFamilySeatCount({
+        groupId: snapshot.groupId,
+        ownerMemberId: auth.member.id,
+        prisma,
+        targetSeatCount: snapshot.seats.billed + 1,
+      });
+    }
   }
 
   const invite = await prisma.$transaction(async (tx) => {
