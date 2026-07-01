@@ -434,10 +434,7 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       memberId: "member_123",
       prisma: {} as never,
     });
-    expect(mocks.readHostedLinqAssignableHomeLineByPhone).toHaveBeenCalledWith({
-      phoneNumber: "+15550100001",
-      prisma: {} as never,
-    });
+    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
   });
@@ -516,6 +513,38 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
   });
 
+  it("rejects an unattested pending-route rebind before reserving line capacity", async () => {
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: null,
+      linqHomeLineAssignedAt: null,
+      linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqChatId: "chat_pending",
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: "+15550100001",
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+
+    await expect(
+      resolveHostedMemberLinqHomeLineRouteBindingTx({
+        incomingChatId: "chat_possible_group",
+        incomingDirectAttested: false,
+        incomingRecipientPhone: "+15550100001",
+        memberId: "member_123",
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      kind: "ignore_unattested_direct",
+    });
+
+    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
+  });
+
   it("preserves a migrated same-phone route claim without consuming capacity", async () => {
     const line = buildLine("+15550100001", {
       activeMemberLimit: 1,
@@ -555,6 +584,44 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       kind: "bind",
       recipientPhone: line.phoneNumber,
     });
+  });
+
+  it("does not treat a stale bare same-phone reservation as routed line ownership", async () => {
+    const line = buildLine("+15550100001", {
+      maxNewConversationsPerDay: 1,
+    });
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: null,
+      linqHomeLineAssignedAt: null,
+      linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(line);
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
+      new Map([[line.phoneNumber, 1]]),
+    );
+
+    await expect(
+      resolveHostedMemberLinqHomeLineRouteBindingTx({
+        incomingChatId: "chat_new",
+        incomingDirectAttested: true,
+        incomingRecipientPhone: "+15550100001",
+        memberId: "member_123",
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      kind: "capacity_exhausted",
+    });
+
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalled();
   });
 });
 

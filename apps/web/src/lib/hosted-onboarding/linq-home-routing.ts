@@ -93,9 +93,13 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
+  const routedChatId = routing?.linqChatId ?? routing?.pendingLinqChatId ?? null;
+  const routedRecipientPhone =
+    normalizePhoneNumber(routing?.linqRecipientPhone)
+    ?? normalizePhoneNumber(routing?.pendingLinqRecipientPhone);
   const routeDecision = resolveHostedLinqActiveRouteDecision({
-    homeChatId: routing?.linqChatId ?? null,
-    homeRecipientPhone: routing?.linqRecipientPhone ?? null,
+    homeChatId: routedChatId,
+    homeRecipientPhone: routedRecipientPhone,
     incomingChatId: input.incomingChatId,
     incomingDirectAttested: input.incomingDirectAttested,
     incomingRecipientPhone: input.incomingRecipientPhone,
@@ -106,15 +110,15 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
   }
 
   const recipientPhone = resolveHostedLinqHomeBindingRecipientPhone({
-    homeChatId: routing?.linqChatId ?? null,
-    homeRecipientPhone: routing?.linqRecipientPhone ?? null,
+    homeChatId: routedChatId,
+    homeRecipientPhone: routedRecipientPhone,
     incomingChatId: input.incomingChatId,
     incomingRecipientPhone: input.incomingRecipientPhone,
   });
 
-  if (routing?.linqChatId === input.incomingChatId) {
+  if (routedChatId === input.incomingChatId) {
     return {
-      homeLineAssignedAt: null,
+      homeLineAssignedAt: routing?.linqHomeLineAssignedAt ?? null,
       kind: "bind",
       recipientPhone,
     };
@@ -137,10 +141,22 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
     };
   }
 
-  const homeRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
-  if (routing && homeRecipientPhone === line.phoneNumber) {
+  if (routing && routedChatId && routedRecipientPhone === line.phoneNumber) {
     return {
       homeLineAssignedAt: routing.linqHomeLineAssignedAt ?? null,
+      kind: "bind",
+      recipientPhone: line.phoneNumber,
+    };
+  }
+
+  const reusableBareAssignedAt = resolveReusableBareSameDayHomeLineAssignedAt({
+    now,
+    phoneNumber: line.phoneNumber,
+    routing,
+  });
+  if (reusableBareAssignedAt) {
+    return {
+      homeLineAssignedAt: reusableBareAssignedAt,
       kind: "bind",
       recipientPhone: line.phoneNumber,
     };
