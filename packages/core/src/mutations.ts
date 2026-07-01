@@ -1813,6 +1813,33 @@ function isJunctionSleepStageCycleFallbackObservation(record: EventRecord): bool
     record.dataOrigin?.normalizerVersion === JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION;
 }
 
+function isJunctionSleepStageSummaryLegacyRef(
+  legacyExternalRef: ExternalRef,
+  incoming: EventRecord,
+): boolean {
+  return isJunctionSleepStageSummaryObservation(incoming) &&
+    legacyExternalRef.system === "junction" &&
+    incoming.externalRef?.system === "junction" &&
+    legacyExternalRef.resourceType === incoming.externalRef.resourceType &&
+    /^junction-[a-z0-9-]+-sleep$/u.test(legacyExternalRef.resourceType) &&
+    legacyExternalRef.facet !== undefined &&
+    legacyExternalRef.facet === incoming.externalRef.facet &&
+    JUNCTION_SLEEP_STAGE_METRIC_FACETS.has(legacyExternalRef.facet);
+}
+
+function hasStableJunctionSleepStageSummaryLegacyProof(
+  existing: IndexedEventExternalRefMatch,
+  incoming: EventRecord,
+): boolean {
+  if (!isSameObservationFacet(existing.record, incoming)) {
+    return false;
+  }
+
+  const existingDataOrigin = existing.indexedRecord.dataOrigin ?? existing.record.dataOrigin;
+  return existing.record.occurredAt === incoming.occurredAt &&
+    deviceDataOriginSourceMatches(existingDataOrigin, incoming.dataOrigin);
+}
+
 function shouldKeepExistingJunctionSleepStageSummaryObservation(
   existing: EventRecord,
   incoming: EventRecord,
@@ -1869,6 +1896,10 @@ function isCompatibleLegacyExternalRefMatch(
   if (isWhoopBodyMeasurementDateOnlyLegacyRef(legacyExternalRef, incoming)) {
     return isSameObservationFacet(existing.record, incoming) &&
       hasStableLegacyOccurrenceProof(existing, incoming, legacyExternalRef);
+  }
+
+  if (isJunctionSleepStageSummaryLegacyRef(legacyExternalRef, incoming)) {
+    return hasStableJunctionSleepStageSummaryLegacyProof(existing, incoming);
   }
 
   return existing.record.dayKey === incoming.dayKey ||

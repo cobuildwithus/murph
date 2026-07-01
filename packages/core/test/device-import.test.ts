@@ -3745,6 +3745,93 @@ test("importDeviceBatch preserves explicit device dayKey without vault timezone 
   assert.equal(records.length, 1, "vault timezone changes should not rewrite explicit provider dayKey events");
 });
 
+test("importDeviceBatch migrates rescored Junction sleep summary legacy refs across day drift", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-junction-summary-day-drift");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+
+  const legacyExternalRef = {
+    system: "junction",
+    resourceType: "junction-garmin-sleep",
+    resourceId: "legacy-summary-stage-window-2",
+    facet: "sleep-deep-minutes",
+  };
+  const canonicalExternalRef = {
+    system: "junction",
+    resourceType: "junction-garmin-sleep",
+    resourceId: "sleep-stage-window-2",
+    facet: "sleep-deep-minutes",
+  };
+  const dataOrigin = {
+    version: 1 as const,
+    aggregatorProvider: "junction",
+    sourceProviderSlug: "garmin",
+    sourceType: "watch",
+    sourceInstanceId: "garmin-watch-1",
+    observedAtRaw: "2026-06-25T03:00:00.000Z",
+    timestampSemantics: "utc" as const,
+    normalizerVersion: "junction-sleep-stage-summary.v1",
+  };
+  const buildEvent = (input: {
+    dayKey: string;
+    externalRef: typeof legacyExternalRef | typeof canonicalExternalRef;
+    legacyExternalRefs?: Array<typeof legacyExternalRef>;
+    value: number;
+  }) => ({
+    kind: "observation",
+    occurredAt: "2026-06-25T03:00:00.000Z",
+    recordedAt: "2026-06-25T03:00:00.000Z",
+    dayKey: input.dayKey,
+    title: "Junction deep sleep",
+    externalRef: input.externalRef,
+    legacyExternalRefs: input.legacyExternalRefs,
+    dataOrigin,
+    fields: {
+      metric: "sleep-deep-minutes",
+      observationGrain: "summary",
+      value: input.value,
+      unit: "minutes",
+    },
+  });
+
+  const legacySummary = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-06-25T11:00:00.000Z",
+    events: [
+      buildEvent({
+        dayKey: "2026-06-25",
+        externalRef: legacyExternalRef,
+        value: 90,
+      }),
+    ],
+  });
+  const canonicalSummary = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    accountId: "junction-user-1",
+    importedAt: "2026-06-25T11:05:00.000Z",
+    events: [
+      buildEvent({
+        dayKey: "2026-06-24",
+        externalRef: canonicalExternalRef,
+        legacyExternalRefs: [legacyExternalRef],
+        value: 92,
+      }),
+    ],
+  });
+  const records = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: legacySummary.eventShardPaths[0] as string,
+  })) as EventRecord[];
+
+  assert.equal(canonicalSummary.events[0]?.id, legacySummary.events[0]?.id);
+  assert.equal(canonicalSummary.events[0]?.dayKey, "2026-06-24");
+  assert.equal(eventObservationValue(canonicalSummary.events[0]), 92);
+  assert.equal(records.length, 2);
+  assert.equal(new Set(records.map((record) => record.id)).size, 1);
+});
+
 test("importDeviceBatch never reuses a revision number taken by a no-externalRef edit", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-revision-collision");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
