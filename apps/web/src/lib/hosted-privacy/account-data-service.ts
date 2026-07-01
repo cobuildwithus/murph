@@ -1516,7 +1516,7 @@ async function revokeDeviceProvidersBestEffort(input: {
   }
 
   const results: HostedAccountProviderRevocationResult[] = [];
-  const registry = createHostedDeviceSyncRegistry(process.env);
+  let registry: ReturnType<typeof createHostedDeviceSyncRegistry> | null = null;
   for (const connection of input.connections) {
     try {
       const storedAccount = await controlPlane.store.getStoredConnectionAccountForUser(
@@ -1535,6 +1535,7 @@ async function revokeDeviceProvidersBestEffort(input: {
         continue;
       }
 
+      registry ??= createHostedDeviceSyncRegistry(process.env);
       const provider = registry.get(connection.provider);
       const revokeAccess = provider?.connectionHandler?.revokeAccess;
 
