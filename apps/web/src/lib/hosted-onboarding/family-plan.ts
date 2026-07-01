@@ -257,6 +257,26 @@ export interface HostedAccountGroupBillingLookup {
   matchedBy: "stripeCustomerId" | "stripeSubscriptionId" | "stripeSubscriptionItemId";
 }
 
+export interface HostedFamilyBillingPeriodRepairCandidate {
+  groupId: string;
+}
+
+export type HostedFamilyBillingPeriodRepairReason =
+  | "billing_period_current"
+  | "billing_ref_not_found"
+  | "billing_ref_not_repairable"
+  | "reconciled_current_period"
+  | "reconciled_without_current_period"
+  | "stripe_subscription_missing"
+  | "stripe_subscription_not_family";
+
+export interface HostedFamilyBillingPeriodRepairResult {
+  billingRef: HostedAccountGroupBillingRefSnapshot | null;
+  groupId: string;
+  reason: HostedFamilyBillingPeriodRepairReason;
+  repaired: boolean;
+}
+
 interface HostedAccountGroupStripeObjectMatch {
   billingRef: HostedAccountGroupBillingRefSnapshot | null;
   group: HostedAccountGroupAccessSnapshot;
@@ -862,6 +882,155 @@ export async function lookupHostedAccountGroupStripeBillingRefByStripeSubscripti
     "stripeSubscriptionItemId",
     input.prisma,
   );
+}
+
+const HOSTED_FAMILY_BILLING_PERIOD_REPAIR_DEFAULT_LIMIT = 100;
+const HOSTED_FAMILY_BILLING_PERIOD_REPAIR_MAX_LIMIT = 500;
+
+export async function listHostedFamilyBillingPeriodRepairCandidates(input: {
+  limit?: number;
+  now?: Date;
+  prisma?: HostedOnboardingReadClient;
+} = {}): Promise<HostedFamilyBillingPeriodRepairCandidate[]> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+  const limit = normalizeHostedFamilyBillingPeriodRepairLimit(input.limit);
+  const billingRefs = await prisma.hostedAccountGroupBillingRef.findMany({
+    orderBy: {
+      groupId: "asc",
+    },
+    select: {
+      groupId: true,
+    },
+    take: limit,
+    where: {
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: HOSTED_FAMILY_BILLING_PLAN_CODE,
+      group: {
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+      },
+      OR: [
+        {
+          currentPeriodStart: null,
+        },
+        {
+          currentPeriodEnd: null,
+        },
+        {
+          currentPeriodEnd: {
+            lte: now,
+          },
+        },
+      ],
+      stripeSubscriptionLookupKey: {
+        not: null,
+      },
+    },
+  });
+
+  return billingRefs.map((billingRef) => ({
+    groupId: billingRef.groupId,
+  }));
+}
+
+export async function repairHostedFamilyBillingPeriodForGroup(input: {
+  groupId: string;
+  now?: Date;
+  prisma?: PrismaClient;
+  stripe?: Stripe;
+}): Promise<HostedFamilyBillingPeriodRepairResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+  const initialBillingRef = await readHostedAccountGroupStripeBillingRef({
+    groupId: input.groupId,
+    prisma,
+  });
+  const initialRepairState = resolveHostedFamilyBillingPeriodRepairState(
+    initialBillingRef,
+    now,
+  );
+  if (initialRepairState !== "repairable") {
+    return {
+      billingRef: initialBillingRef,
+      groupId: input.groupId,
+      reason: initialRepairState,
+      repaired: false,
+    };
+  }
+
+  const stripeSubscriptionId = initialBillingRef?.stripeSubscriptionId;
+  if (!stripeSubscriptionId) {
+    return {
+      billingRef: initialBillingRef,
+      groupId: input.groupId,
+      reason: "stripe_subscription_missing",
+      repaired: false,
+    };
+  }
+
+  const stripe = input.stripe ?? requireHostedStripeApi();
+  const subscription = await stripe.subscriptions.retrieve(stripeSubscriptionId, {
+    expand: ["items.data.price"],
+  });
+  if (!isHostedFamilyStripeSubscriptionMetadata(subscription)) {
+    return {
+      billingRef: initialBillingRef,
+      groupId: input.groupId,
+      reason: "stripe_subscription_not_family",
+      repaired: false,
+    };
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const lockedBillingRef = await readHostedAccountGroupStripeBillingRef({
+      groupId: input.groupId,
+      prisma: tx,
+    });
+    const lockedRepairState = resolveHostedFamilyBillingPeriodRepairState(
+      lockedBillingRef,
+      now,
+    );
+    if (lockedRepairState !== "repairable") {
+      return {
+        billingRef: lockedBillingRef,
+        groupId: input.groupId,
+        reason: lockedRepairState,
+        repaired: false,
+      };
+    }
+    if (lockedBillingRef?.stripeSubscriptionId !== stripeSubscriptionId) {
+      return {
+        billingRef: lockedBillingRef,
+        groupId: input.groupId,
+        reason: "billing_ref_not_repairable",
+        repaired: false,
+      };
+    }
+
+    await applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt: lockedBillingRef?.lastStripeEventCreatedAt ?? null,
+      },
+      subscription,
+      tx,
+    });
+
+    const repairedBillingRef = await readHostedAccountGroupStripeBillingRef({
+      groupId: input.groupId,
+      prisma: tx,
+    });
+    const repaired = isHostedFamilyBillingRefPeriodCurrent(repairedBillingRef, now);
+
+    return {
+      billingRef: repairedBillingRef,
+      groupId: input.groupId,
+      reason: repaired
+        ? "reconciled_current_period"
+        : "reconciled_without_current_period",
+      repaired,
+    };
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export async function writeHostedAccountGroupStripeBillingTx(input: {
@@ -3795,6 +3964,68 @@ function isHostedFamilyStripeEventStale(input: {
     input.eventCreatedAt &&
       input.billingRef?.lastStripeEventCreatedAt &&
       input.billingRef.lastStripeEventCreatedAt.getTime() > input.eventCreatedAt.getTime(),
+  );
+}
+
+function resolveHostedFamilyBillingPeriodRepairState(
+  billingRef: HostedAccountGroupBillingRefSnapshot | null,
+  now: Date,
+): HostedFamilyBillingPeriodRepairReason | "repairable" {
+  if (!billingRef) {
+    return "billing_ref_not_found";
+  }
+
+  if (
+    billingRef.currentBillingPlanCode !== HOSTED_FAMILY_BILLING_PLAN_CODE ||
+    billingRef.currentBillingPhase !== "paid" ||
+    billingRef.group.billingStatus !== HostedBillingStatus.active ||
+    billingRef.group.suspendedAt !== null
+  ) {
+    return "billing_ref_not_repairable";
+  }
+
+  if (isHostedFamilyBillingRefPeriodCurrent(billingRef, now)) {
+    return "billing_period_current";
+  }
+
+  if (!billingRef.stripeSubscriptionId) {
+    return "stripe_subscription_missing";
+  }
+
+  return "repairable";
+}
+
+function isHostedFamilyBillingRefPeriodCurrent(
+  billingRef: Pick<
+    HostedAccountGroupBillingRefSnapshot,
+    "currentPeriodEnd" | "currentPeriodStart"
+  > | null,
+  now: Date,
+): boolean {
+  const periodStart = billingRef?.currentPeriodStart ?? null;
+  const periodEnd = billingRef?.currentPeriodEnd ?? null;
+
+  return Boolean(
+    periodStart &&
+      periodEnd &&
+      periodStart.getTime() < periodEnd.getTime() &&
+      now.getTime() >= periodStart.getTime() &&
+      now.getTime() < periodEnd.getTime(),
+  );
+}
+
+function normalizeHostedFamilyBillingPeriodRepairLimit(value: number | undefined): number {
+  if (value === undefined) {
+    return HOSTED_FAMILY_BILLING_PERIOD_REPAIR_DEFAULT_LIMIT;
+  }
+
+  if (!Number.isFinite(value)) {
+    return HOSTED_FAMILY_BILLING_PERIOD_REPAIR_DEFAULT_LIMIT;
+  }
+
+  return Math.min(
+    HOSTED_FAMILY_BILLING_PERIOD_REPAIR_MAX_LIMIT,
+    Math.max(1, Math.trunc(value)),
   );
 }
 
