@@ -60,6 +60,7 @@ export interface HostedGroupJoinAcceptanceResult {
 }
 
 const HOSTED_GROUP_VAULT_SHARE_SOURCE = "hosted-group.join";
+export const HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION = 25;
 
 export async function ensureHostedGroupForThreadContainerTx(input: {
   tx: Prisma.TransactionClient;
@@ -110,7 +111,7 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
       });
     }
     const summary = await readHostedGroupSummaryById(input.tx, existing.id);
-    if (!summary || summary.status !== "active") {
+    if (!summary) {
       throw hostedOnboardingError({
         code: "HOSTED_GROUP_NOT_ACTIVE",
         httpStatus: 410,
@@ -133,7 +134,6 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
       kind: normalizeHostedGroupKind(input.kind),
       ownerMemberId: container.ownerMemberId,
       runtimeMemberId: container.memberId,
-      status: "active",
     },
     select: { id: true },
   });
@@ -175,9 +175,9 @@ export async function createOrReadHostedGroupJoinLinkTx(input: {
   await lockHostedGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedGroup.findUnique({
     where: { id: input.groupId },
-    select: { id: true, joinCode: true, ownerMemberId: true, status: true },
+    select: { id: true, joinCode: true, ownerMemberId: true },
   });
-  if (!group || group.status !== "active") {
+  if (!group) {
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_NOT_ACTIVE",
       httpStatus: 410,
@@ -224,16 +224,15 @@ export async function readHostedGroupJoinView(input: {
       joinPolicyJson: true,
       kind: true,
       runtimeMemberId: true,
-      status: true,
-      _count: { select: { members: { where: { status: "active" } } } },
+      _count: { select: { members: true } },
       members: {
         where: { memberId: viewerMemberId },
-        select: { status: true },
+        select: { id: true },
         take: 1,
       },
     },
   });
-  if (!group || group.status !== "active") {
+  if (!group) {
     return null;
   }
 
@@ -257,7 +256,7 @@ export async function readHostedGroupJoinView(input: {
       policy.requestedVaultShareProjectionKinds,
     ),
     status: "active",
-    viewerMembershipStatus: group.members[0]?.status ?? null,
+    viewerMembershipStatus: group.members.length > 0 ? "active" : null,
   };
 }
 
@@ -282,15 +281,16 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   await lockHostedGroupRow(input.tx, groupLookup.id);
   const group = await input.tx.hostedGroup.findUnique({
     where: { id: groupLookup.id },
-    select: { id: true, joinPolicyJson: true, runtimeMemberId: true, status: true },
+    select: { id: true, joinPolicyJson: true, runtimeMemberId: true },
   });
-  if (!group || group.status !== "active") {
+  if (!group) {
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_NOT_ACTIVE",
       httpStatus: 410,
       message: "This group is no longer active.",
     });
   }
+  await lockHostedMemberRow(input.tx, input.memberId);
   const member = await input.tx.hostedMember.findUnique({
     where: { id: input.memberId },
     select: { suspendedAt: true },
@@ -332,7 +332,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
 
   const existingMembership = await input.tx.hostedGroupMember.findUnique({
     where: { groupId_memberId: { groupId: group.id, memberId: input.memberId } },
-    select: { id: true, status: true },
+    select: { id: true },
   });
   let membershipId: string;
   let alreadyMember = false;
@@ -344,24 +344,10 @@ export async function acceptHostedGroupJoinCodeTx(input: {
         joinedAt: input.now,
         memberId: input.memberId,
         role: "member",
-        status: "active",
       },
       select: { id: true },
     });
     membershipId = created.id;
-  } else if (existingMembership.status === "removed") {
-    throw hostedOnboardingError({
-      code: "HOSTED_GROUP_MEMBER_REMOVED",
-      httpStatus: 403,
-      message: "You cannot rejoin this group with this link.",
-    });
-  } else if (existingMembership.status === "left") {
-    const updated = await input.tx.hostedGroupMember.update({
-      where: { id: existingMembership.id },
-      data: { joinedAt: input.now, leftAt: null, removedAt: null, status: "active" },
-      select: { id: true },
-    });
-    membershipId = updated.id;
   } else {
     alreadyMember = true;
     membershipId = existingMembership.id;
@@ -372,6 +358,11 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   if (group.runtimeMemberId && policy.requestedVaultShareProjectionKinds.length > 0) {
     for (const projectionKind of policy.requestedVaultShareProjectionKinds) {
       if (selected.includes(projectionKind)) {
+        await assertHostedGroupVaultShareGrantLimitTx(input.tx, {
+          destinationMemberId: group.runtimeMemberId,
+          grantorMemberId: input.memberId,
+          projectionKind,
+        });
         await grantHostedVaultShareTx({
           destinationMemberId: group.runtimeMemberId,
           grantorMemberId: input.memberId,
@@ -406,103 +397,6 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   };
 }
 
-export async function leaveHostedGroupTx(input: {
-  tx: Prisma.TransactionClient;
-  groupId: string;
-  memberId: string;
-  now: Date;
-}): Promise<void> {
-  await lockHostedGroupRow(input.tx, input.groupId);
-  const group = await input.tx.hostedGroup.findUnique({
-    where: { id: input.groupId },
-    select: { ownerMemberId: true, runtimeMemberId: true },
-  });
-  if (!group) throw hostedOnboardingError({ code: "HOSTED_GROUP_NOT_FOUND", httpStatus: 404, message: "Hosted group not found." });
-  if (group.ownerMemberId === input.memberId) {
-    throw hostedOnboardingError({
-      code: "HOSTED_GROUP_OWNER_CANNOT_LEAVE",
-      httpStatus: 409,
-      message: "Transfer or archive the group before leaving as owner.",
-    });
-  }
-  await input.tx.hostedGroupMember.update({
-    where: { groupId_memberId: { groupId: input.groupId, memberId: input.memberId } },
-    data: { leftAt: input.now, status: "left" },
-  });
-  if (group.runtimeMemberId) {
-    await revokeHostedVaultSharesTx({
-      destinationMemberId: group.runtimeMemberId,
-      grantorMemberId: input.memberId,
-      now: input.now,
-      source: HOSTED_GROUP_VAULT_SHARE_SOURCE,
-      tx: input.tx,
-    });
-  }
-}
-
-export async function removeHostedGroupMemberTx(input: {
-  tx: Prisma.TransactionClient;
-  actorMemberId: string;
-  groupId: string;
-  now: Date;
-  targetMemberId: string;
-}): Promise<void> {
-  await lockHostedGroupRow(input.tx, input.groupId);
-  const group = await input.tx.hostedGroup.findUnique({
-    where: { id: input.groupId },
-    select: { ownerMemberId: true, runtimeMemberId: true },
-  });
-  if (!group) throw hostedOnboardingError({ code: "HOSTED_GROUP_NOT_FOUND", httpStatus: 404, message: "Hosted group not found." });
-  if (group.ownerMemberId !== input.actorMemberId) {
-    throw hostedOnboardingError({ code: "HOSTED_GROUP_OWNER_REQUIRED", httpStatus: 403, message: "Only the group owner can remove members." });
-  }
-  if (group.ownerMemberId === input.targetMemberId) {
-    throw hostedOnboardingError({ code: "HOSTED_GROUP_OWNER_CANNOT_BE_REMOVED", httpStatus: 409, message: "The group owner cannot be removed." });
-  }
-  await input.tx.hostedGroupMember.update({
-    where: { groupId_memberId: { groupId: input.groupId, memberId: input.targetMemberId } },
-    data: { removedAt: input.now, status: "removed" },
-  });
-  if (group.runtimeMemberId) {
-    await revokeHostedVaultSharesTx({
-      destinationMemberId: group.runtimeMemberId,
-      grantorMemberId: input.targetMemberId,
-      now: input.now,
-      source: HOSTED_GROUP_VAULT_SHARE_SOURCE,
-      tx: input.tx,
-    });
-  }
-}
-
-export async function archiveHostedGroupTx(input: {
-  tx: Prisma.TransactionClient;
-  actorMemberId: string;
-  groupId: string;
-  now: Date;
-}): Promise<void> {
-  await lockHostedGroupRow(input.tx, input.groupId);
-  const group = await input.tx.hostedGroup.findUnique({
-    where: { id: input.groupId },
-    select: { ownerMemberId: true, runtimeMemberId: true },
-  });
-  if (!group) throw hostedOnboardingError({ code: "HOSTED_GROUP_NOT_FOUND", httpStatus: 404, message: "Hosted group not found." });
-  if (group.ownerMemberId !== input.actorMemberId) {
-    throw hostedOnboardingError({ code: "HOSTED_GROUP_OWNER_REQUIRED", httpStatus: 403, message: "Only the group owner can archive this group." });
-  }
-  await input.tx.hostedGroup.update({
-    where: { id: input.groupId },
-    data: { joinCode: null, joinCodeCreatedAt: null, status: "archived" },
-  });
-  if (group.runtimeMemberId) {
-    await revokeHostedVaultSharesTx({
-      destinationMemberId: group.runtimeMemberId,
-      now: input.now,
-      source: HOSTED_GROUP_VAULT_SHARE_SOURCE,
-      tx: input.tx,
-    });
-  }
-}
-
 async function ensureHostedGroupOwnerMembershipTx(
   tx: Prisma.TransactionClient,
   input: { groupId: string; memberId: string; now: Date },
@@ -514,14 +408,10 @@ async function ensureHostedGroupOwnerMembershipTx(
       joinedAt: input.now,
       memberId: input.memberId,
       role: "owner",
-      status: "active",
     },
     update: {
       joinedAt: input.now,
-      leftAt: null,
-      removedAt: null,
       role: "owner",
-      status: "active",
     },
     where: { groupId_memberId: { groupId: input.groupId, memberId: input.memberId } },
   });
@@ -578,8 +468,7 @@ async function readHostedGroupSummaryById(
       id: true,
       joinPolicyJson: true,
       kind: true,
-      status: true,
-      _count: { select: { members: { where: { status: "active" } } } },
+      _count: { select: { members: true } },
     },
   });
   if (!group) return null;
@@ -590,7 +479,7 @@ async function readHostedGroupSummaryById(
     memberCount: group._count.members,
     requestedVaultShareProjectionKinds:
       readHostedGroupJoinPolicy(group.joinPolicyJson).requestedVaultShareProjectionKinds,
-    status: group.status,
+    status: "active",
   };
 }
 
@@ -611,8 +500,55 @@ async function assertHostedGroupRuntimeDestinationTx(
   }
 }
 
+async function assertHostedGroupVaultShareGrantLimitTx(
+  tx: Prisma.TransactionClient,
+  input: {
+    destinationMemberId: string;
+    grantorMemberId: string;
+    projectionKind: HostedVaultShareProjectionKind;
+  },
+): Promise<void> {
+  const existing = await tx.hostedVaultShare.findUnique({
+    where: {
+      grantorMemberId_projectionKind_destinationMemberId: {
+        destinationMemberId: input.destinationMemberId,
+        grantorMemberId: input.grantorMemberId,
+        projectionKind: input.projectionKind,
+      },
+    },
+    select: { status: true },
+  });
+
+  if (existing?.status === "granted") {
+    return;
+  }
+
+  const activeGroupGrantCount = await tx.hostedVaultShare.count({
+    where: {
+      grantorMemberId: input.grantorMemberId,
+      projectionKind: input.projectionKind,
+      source: HOSTED_GROUP_VAULT_SHARE_SOURCE,
+      status: "granted",
+    },
+  });
+
+  if (activeGroupGrantCount >= HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_REACHED",
+      httpStatus: 409,
+      message:
+        "You have reached the group health-sharing limit for this permission. Turn off this permission in another group before sharing it here.",
+      retryable: false,
+    });
+  }
+}
+
 async function lockHostedGroupRow(tx: Prisma.TransactionClient, groupId: string): Promise<void> {
   await tx.$queryRaw`select 1 from "hosted_group" where "id" = ${groupId} for update`;
+}
+
+async function lockHostedMemberRow(tx: Prisma.TransactionClient, memberId: string): Promise<void> {
+  await tx.$queryRaw`select 1 from "hosted_member" where "id" = ${memberId} for update`;
 }
 
 async function lockHostedThreadContainerRow(
