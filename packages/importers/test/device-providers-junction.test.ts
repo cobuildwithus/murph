@@ -4572,6 +4572,80 @@ test("Junction sleep_cycle normalizer emits compact sleep-stage observations", (
   assert.equal(observations[4]?.dataOrigin?.sourceProviderSlug, "garmin");
 });
 
+test("Junction sleep_cycle fills missing sleep summary stages without duplicating cross-midnight stages", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-07-01T12:00:00.000Z",
+    summaries: {
+      sleep_cycle: [{
+        id: "sleep-cycle-garmin-1",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        timeZone: "America/New_York",
+        observedAt: "2026-07-01T11:00:00.000Z",
+        stages: [
+          {
+            start: "2026-07-01T03:45:00.000Z",
+            end: "2026-07-01T04:15:00.000Z",
+            stage: "deep",
+          },
+          {
+            start: "2026-07-01T10:30:00.000Z",
+            end: "2026-07-01T10:45:00.000Z",
+            stage: "awake",
+          },
+        ],
+      }],
+      sleep: [{
+        id: "sleep-garmin-1",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        timeZone: "America/New_York",
+        bedtime_start: "2026-06-30T23:30:00-04:00",
+        bedtime_stop: "2026-07-01T07:00:00-04:00",
+        deep: 3600,
+        rem: 5400,
+        light: 18000,
+      }],
+    },
+  });
+  const stageMetricNames = new Set([
+    "sleep-awake-minutes",
+    "sleep-light-minutes",
+    "sleep-deep-minutes",
+    "sleep-rem-minutes",
+  ]);
+  const stageObservations = (payload.events ?? []).filter((event) =>
+    event.kind === "observation" &&
+    typeof event.fields?.metric === "string" &&
+    stageMetricNames.has(event.fields.metric)
+  );
+  const stageObservationsFor = (metric: string) =>
+    stageObservations.filter((event) => event.fields?.metric === metric);
+
+  assert.equal(payload.samples?.length ?? 0, 0);
+  assert.equal(
+    payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"),
+    true,
+  );
+  assert.deepEqual(stageObservations.map((event) => event.fields?.metric).sort(), [
+    "sleep-awake-minutes",
+    "sleep-deep-minutes",
+    "sleep-light-minutes",
+    "sleep-rem-minutes",
+  ]);
+
+  const deepObservations = stageObservationsFor("sleep-deep-minutes");
+  assert.equal(deepObservations.length, 1);
+  assert.equal(deepObservations[0]?.externalRef?.resourceType, "junction-garmin-sleep");
+  assert.equal(deepObservations[0]?.fields?.value, 60);
+
+  const awakeObservations = stageObservationsFor("sleep-awake-minutes");
+  assert.equal(awakeObservations.length, 1);
+  assert.equal(awakeObservations[0]?.externalRef?.resourceType, "junction-garmin-sleep-cycle");
+  assert.equal(awakeObservations[0]?.fields?.value, 15);
+  assert.equal(awakeObservations[0]?.dayKey, "2026-07-01");
+});
+
 test("Junction sleep_cycle normalizer vectorizes parallel offset stage arrays", () => {
   const payload = normalizeJunctionSnapshot(
     {
