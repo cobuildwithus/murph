@@ -4580,8 +4580,8 @@ test("Junction sleep_cycle normalizer emits compact sleep-stage observations", (
   assert.ok(observations.every((event) => event.externalRef?.system === "junction"));
   assert.equal(observations.some((event) => event.externalRef?.resourceType.includes("hypnogram")), false);
   assert.deepEqual([...new Set(observations.map((event) => event.externalRef?.resourceType))].sort(), [
-    "junction-garmin-sleep-cycle",
-    "junction-oura-sleep-cycle",
+    "junction-garmin-sleep-stage",
+    "junction-oura-sleep-stage",
   ]);
   assert.ok(observations.slice(0, 4).every((event) => event.dataOrigin?.sourceProviderSlug === "oura"));
   assert.ok(observations.slice(0, 4).every((event) => event.dataOrigin?.sourceType === "ring"));
@@ -4680,19 +4680,13 @@ test("Junction sleep_cycle fills missing sleep summary stages without duplicatin
 
   const positiveDeepObservations = stageObservationsFor("sleep-deep-minutes")
     .filter((event) => Number(event.fields?.value ?? 0) > 0);
-  const cycleDeepZeroObservations = stageObservationsFor("sleep-deep-minutes")
-    .filter((event) =>
-      event.externalRef?.resourceType === "junction-garmin-sleep-cycle" &&
-      event.fields?.value === 0
-    );
   assert.equal(positiveDeepObservations.length, 1);
-  assert.equal(positiveDeepObservations[0]?.externalRef?.resourceType, "junction-garmin-sleep");
+  assert.equal(positiveDeepObservations[0]?.externalRef?.resourceType, "junction-garmin-sleep-stage");
   assert.equal(positiveDeepObservations[0]?.fields?.value, 60);
-  assert.equal(cycleDeepZeroObservations.length, 2);
 
   const awakeObservations = stageObservationsFor("sleep-awake-minutes");
   assert.equal(awakeObservations.length, 2);
-  assert.ok(awakeObservations.every((event) => event.externalRef?.resourceType === "junction-garmin-sleep-cycle"));
+  assert.ok(awakeObservations.every((event) => event.externalRef?.resourceType === "junction-garmin-sleep-stage"));
   assert.deepEqual(
     awakeObservations.map((event) => [event.dayKey, event.fields?.value]).sort(),
     [
@@ -4742,7 +4736,7 @@ test("Junction sleep_cycle normalizer vectorizes parallel offset stage arrays", 
     "2026-06-24",
   ]);
   assert.ok(observations.every((event) => event.timeZone === "America/New_York"));
-  assert.ok(observations.every((event) => event.externalRef?.resourceType === "junction-garmin-sleep-cycle"));
+  assert.ok(observations.every((event) => event.externalRef?.resourceType === "junction-garmin-sleep-stage"));
   assert.deepEqual(observations.map((event) => event.externalRef?.facet), [
     "sleep-light-minutes",
     "sleep-rem-minutes",
@@ -5311,11 +5305,10 @@ test("Junction sleep_cycle direct webhook envelopes collect nested stages once",
       snapshot,
     });
     const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
-    const deepObservation = observations.find((event) => event.fields?.metric === "sleep-deep-minutes");
 
     assert.equal(payload.samples?.length ?? 0, 0);
-    assert.equal(observations.length, 4);
-    assert.equal(deepObservation?.fields?.value, 45);
+    assert.equal(observations.length, 0);
+    assert.ok(payload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
 
     const firstImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
       {
@@ -5344,19 +5337,9 @@ test("Junction sleep_cycle direct webhook envelopes collect nested stages once",
         ),
       )
     ).flat();
-    const liveDeepRecords = latestLiveRecords(records).filter(
-      (record) => record.kind === "observation" && record.metric === "sleep-deep-minutes",
-    );
-    const replayDeepEvent = replayImport.events.find((event) =>
-      event.kind === "observation" && event.metric === "sleep-deep-minutes"
-    );
-    const firstDeepEvent = firstImport.events.find((event) =>
-      event.kind === "observation" && event.metric === "sleep-deep-minutes"
-    );
-
-    assert.equal(replayDeepEvent?.id, firstDeepEvent?.id);
-    assert.equal(liveDeepRecords.length, 1);
-    assert.equal(storedObservationValue(liveDeepRecords[0]), 45);
+    assert.equal(firstImport.events.length, 0);
+    assert.equal(replayImport.events.length, 0);
+    assert.equal(latestLiveRecords(records).length, 0);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -5853,7 +5836,6 @@ test("Junction sleep summary supersedes prior sleep_cycle fallback stage facts",
               bedtime_stop: "2026-05-20T01:00:00.000Z",
               deep: 3600,
             }],
-            sleep_cycle: [sleepCycleEntry],
           },
         },
       },
@@ -5871,14 +5853,11 @@ test("Junction sleep summary supersedes prior sleep_cycle fallback stage facts",
     const liveDeepRecords = latestLiveRecords(records).filter(
       (record) => record.kind === "observation" && record.metric === "sleep-deep-minutes",
     );
-    const cycleDeep = liveDeepRecords.find((record) =>
-      storedExternalRefResourceType(record) === "junction-garmin-sleep-cycle"
-    );
     const summaryDeep = liveDeepRecords.find((record) =>
-      storedExternalRefResourceType(record) === "junction-garmin-sleep"
+      storedExternalRefResourceType(record) === "junction-garmin-sleep-stage"
     );
 
-    assert.equal(storedObservationValue(cycleDeep), 0);
+    assert.equal(liveDeepRecords.length, 1);
     assert.equal(storedObservationValue(summaryDeep), 60);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -5940,6 +5919,89 @@ test("Junction sleep_cycle clips parent-window intervals and rejects overlapping
   assert.equal(overlappingPayload.samples?.length ?? 0, 0);
   assert.equal(overlappingPayload.events?.length ?? 0, 0);
   assert.ok(overlappingPayload.evidenceParts?.some((artifact) => artifact.role === "junction-summary-sleep-cycle"));
+});
+
+test("Junction sleep_cycle no-window direct fragments cannot overwrite complete facts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-direct-sleep-cycle-fragment");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-05-20T00:00:00.000Z",
+      timezone: "UTC",
+    });
+
+    const completeImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          importedAt: "2026-05-20T18:00:00.000Z",
+          summaries: {
+            sleep_cycle: [{
+              id: "sleep-cycle-direct-fragment-1",
+              source_provider: "garmin",
+              source_type: "watch",
+              time_zone: "UTC",
+              start: "2026-05-20T00:00:00.000Z",
+              end: "2026-05-20T01:00:00.000Z",
+              stages: [{
+                start: "2026-05-20T00:00:00.000Z",
+                end: "2026-05-20T01:00:00.000Z",
+                stage: "light",
+              }],
+            }],
+          },
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const directFragmentImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          importedAt: "2026-05-20T18:01:00.000Z",
+          summaries: {
+            sleep_cycle: [{
+              id: "sleep-cycle-direct-fragment-1",
+              sourceProviderSlug: "garmin",
+              sourceType: "watch",
+              time_zone: "UTC",
+              data: [{
+                id: "sleep-cycle-direct-fragment-1",
+                stages: [{
+                  startAt: "2026-05-20T00:00:00.000Z",
+                  endAt: "2026-05-20T00:30:00.000Z",
+                  stage: "light",
+                }],
+              }],
+            }],
+          },
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([...completeImport.eventShardPaths, ...directFragmentImport.eventShardPaths])].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ),
+      )
+    ).flat();
+    const liveLightRecords = latestLiveRecords(records).filter(
+      (record) => record.kind === "observation" && record.metric === "sleep-light-minutes",
+    );
+
+    assert.equal(directFragmentImport.events.length, 0);
+    assert.equal(liveLightRecords.length, 1);
+    assert.equal(storedObservationValue(liveLightRecords[0]), 60);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("Junction sleep-stage observations keep stable replay identity with parent offset metadata", async () => {
@@ -6563,6 +6625,12 @@ test("Junction normalizer maps documented sleep summary scalar fields", () => {
   const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
   const metricValue = (metric: string) =>
     observations.find((event) => event.fields?.metric === metric)?.fields?.value;
+  const stageMetricNames = new Set([
+    "sleep-awake-minutes",
+    "sleep-light-minutes",
+    "sleep-deep-minutes",
+    "sleep-rem-minutes",
+  ]);
 
   assert.equal(metricValue("sleep-total-minutes"), 420);
   assert.equal(metricValue("sleep-deep-minutes"), 90);
@@ -6582,7 +6650,12 @@ test("Junction normalizer maps documented sleep summary scalar fields", () => {
   assert.equal(metricValue("temperature"), 36.5);
   assert.equal(metricValue("temperature-deviation"), -0.2);
   assert.ok(observations.every((event) => event.fields?.observationGrain === "summary"));
-  assert.ok(observations.every((event) => event.externalRef?.resourceType === "junction-oura-sleep"));
+  assert.ok(observations.every((event) =>
+    ["junction-oura-sleep", "junction-oura-sleep-stage"].includes(String(event.externalRef?.resourceType))
+  ));
+  assert.ok(observations
+    .filter((event) => typeof event.fields?.metric === "string" && stageMetricNames.has(event.fields.metric))
+    .every((event) => event.externalRef?.resourceType === "junction-oura-sleep-stage"));
 });
 
 test("Junction normalizer maps documented activity and body summary scalar fields", () => {

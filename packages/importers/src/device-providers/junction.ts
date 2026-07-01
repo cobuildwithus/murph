@@ -266,6 +266,7 @@ const SLEEP_STAGE_METRIC_NAMES = new Set([
   "sleep-rem-minutes",
 ]);
 const SLEEP_STAGE_METRICS = SLEEP_METRICS.filter((metric) => SLEEP_STAGE_METRIC_NAMES.has(metric.metric));
+const SLEEP_NON_STAGE_METRICS = SLEEP_METRICS.filter((metric) => !SLEEP_STAGE_METRIC_NAMES.has(metric.metric));
 
 type WorkoutSessionMetrics = NonNullable<WorkoutSession["metrics"]>;
 type WorkoutHeartRateZone = NonNullable<WorkoutSession["heartRateZones"]>[number];
@@ -694,6 +695,8 @@ interface JunctionDailyTimeseriesAggregate {
 }
 
 interface JunctionSleepStageAggregate {
+  coverageEndAt: string;
+  coverageStartAt: string;
   dataOriginEntry: PlainObject;
   durationMinutes: number;
   endAt: string;
@@ -730,7 +733,14 @@ interface JunctionSleepStageCoverageWindow {
   startAt: string;
 }
 
+interface JunctionCoveredSleepStageIntervals {
+  coverageWindow: JunctionSleepStageCoverageWindow;
+  intervals: JunctionSleepStageInterval[];
+}
+
 interface JunctionSleepStageAggregateBucket {
+  coverageEndAt: string;
+  coverageStartAt: string;
   dataOriginEntry: PlainObject;
   endAt: string;
   parentResourceId: string;
@@ -1865,8 +1875,72 @@ function pushSleepSummary(
     }));
   }
 
-  pushObservationMetrics(entry, resourceContext, context, SLEEP_METRICS, sleepTimestamp);
+  pushObservationMetrics(entry, resourceContext, context, SLEEP_NON_STAGE_METRICS, sleepTimestamp);
+  pushSleepSummaryStageMetrics(entry, resourceContext, context, sleepTimestamp, startAt, endAt);
   pushJunctionRecoveryReadinessScore(entry, resourceContext, context, sleepTimestamp);
+}
+
+function pushSleepSummaryStageMetrics(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+  context: NormalizationContext,
+  timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  startAt: string | undefined,
+  endAt: string | undefined,
+): void {
+  const occurredAt = timestamp.occurredAt;
+  if (!occurredAt) {
+    return;
+  }
+
+  const timeZone = resolveSleepSummaryStageTimeZone(entry);
+  const dayKey = timestamp.dayKey ?? extractIsoDatePrefix(occurredAt) ?? undefined;
+  for (const metric of SLEEP_STAGE_METRICS) {
+    const resolved = resolveMetricDescriptorValue(entry, metric);
+    if (!resolved) {
+      continue;
+    }
+
+    context.events.push(stripUndefined({
+      kind: "observation",
+      occurredAt,
+      recordedAt: timestamp.recordedAt,
+      dayKey,
+      timeZone,
+      source: "device",
+      title: metric.title,
+      evidenceRoles: resourceContext.evidenceRoles,
+      externalRef: startAt && endAt
+        ? makeJunctionCanonicalSleepStageExternalRef(resourceContext, {
+            coverageEndAt: endAt,
+            coverageStartAt: startAt,
+            dayKey,
+            metric: metric.metric,
+            timeZone,
+          })
+        : makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric),
+      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      fields: {
+        metric: metric.metric,
+        observationGrain: "summary",
+        value: resolved.value,
+        unit: resolved.unit,
+      },
+    }));
+  }
+}
+
+function resolveSleepSummaryStageTimeZone(entry: PlainObject): string | undefined {
+  const explicitTimeZone = firstStringFromPaths(entry, ["timeZone", "timezone", "time_zone"]);
+  if (explicitTimeZone) {
+    return explicitTimeZone;
+  }
+
+  const rawStartAt = firstStringFromPaths(entry, JUNCTION_SLEEP_START_TIMESTAMP_PATHS);
+  const rawEndAt = firstStringFromPaths(entry, JUNCTION_SLEEP_END_TIMESTAMP_PATHS);
+  return inferTimestampSemantics(rawStartAt) === "utc" && inferTimestampSemantics(rawEndAt) === "utc"
+    ? "UTC"
+    : undefined;
 }
 
 function pushSleepCycleEntries(
@@ -1882,11 +1956,9 @@ function pushSleepCycleEntries(
 
   for (const aggregate of aggregates.values()) {
     const metric = sleepStageMetricDescriptor(aggregate.stage);
-    const ownedBySleepSummary = isSleepStageMetricOwnedBySleepSummary(
-      aggregate,
-      metric.metric,
-      sleepSummaryStageMetricOwners,
-    );
+    if (isSleepStageMetricOwnedBySleepSummary(aggregate, metric.metric, sleepSummaryStageMetricOwners)) {
+      continue;
+    }
 
     context.events.push(stripUndefined({
       kind: "observation",
@@ -1902,7 +1974,7 @@ function pushSleepCycleEntries(
       fields: {
         metric: metric.metric,
         observationGrain: "summary",
-        value: ownedBySleepSummary ? 0 : Number(aggregate.durationMinutes.toFixed(4)),
+        value: Number(aggregate.durationMinutes.toFixed(4)),
         unit: "minutes",
       },
     }));
@@ -1977,13 +2049,13 @@ function collectJunctionSleepStageAggregates(
   const parentTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
   const intervals = collectJunctionSleepStageIntervals(entry, resourceContext, context, parentTimestamp);
   const parentResourceId = resolveSleepCycleParentResourceId(resourceContext, entry, parentTimestamp);
-  const coveredIntervals = collectCoveredSleepStageIntervals(entry, resourceContext, intervals);
-  if (!parentResourceId || !coveredIntervals) {
+  const covered = collectCoveredSleepStageIntervals(entry, resourceContext, intervals);
+  if (!parentResourceId || !covered) {
     return;
   }
 
   const buckets = new Map<string, JunctionSleepStageAggregateBucket>();
-  for (const interval of coveredIntervals) {
+  for (const interval of covered.intervals) {
     for (const segment of splitJunctionSleepStageInterval(interval, entry, parentTimestamp, context.defaultTimeZone)) {
       const stageTimestamp = withTimestampOverride(interval.timestamp, {
         occurredAt: segment.endAt,
@@ -2013,6 +2085,8 @@ function collectJunctionSleepStageAggregates(
         });
       } else {
         buckets.set(bucketKey, {
+          coverageEndAt: covered.coverageWindow.endAt,
+          coverageStartAt: covered.coverageWindow.startAt,
           dataOriginEntry: interval.dataOriginEntry,
           endAt: segment.endAt,
           parentResourceId,
@@ -2039,6 +2113,8 @@ function collectJunctionSleepStageAggregates(
       }
 
       aggregates.set(aggregateKey, {
+        coverageEndAt: covered.coverageWindow.endAt,
+        coverageStartAt: covered.coverageWindow.startAt,
         dataOriginEntry: interval.dataOriginEntry,
         durationMinutes: segment.durationMinutes,
         endAt: segment.endAt,
@@ -2067,6 +2143,8 @@ function collectJunctionSleepStageAggregates(
       }
 
       aggregates.set(aggregateKey, {
+        coverageEndAt: bucket.coverageEndAt,
+        coverageStartAt: bucket.coverageStartAt,
         dataOriginEntry: bucket.dataOriginEntry,
         durationMinutes: 0,
         endAt: bucket.endAt,
@@ -2116,14 +2194,14 @@ function collectCoveredSleepStageIntervals(
   entry: PlainObject,
   resourceContext: ResourceContext,
   intervals: readonly JunctionSleepStageInterval[],
-): JunctionSleepStageInterval[] | undefined {
-  const coverageWindow = resolveSleepStageCoverageWindow(entry, resourceContext.sourceProviderSlug)
-    ?? resolveDerivedSleepStageCoverageWindow(entry, resourceContext, intervals);
+): JunctionCoveredSleepStageIntervals | undefined {
+  const coverageWindow = resolveSleepStageCoverageWindow(entry, resourceContext.sourceProviderSlug);
   if (!coverageWindow || intervals.length === 0) {
     return undefined;
   }
 
-  return clipSleepStageIntervalsToWindow(intervals, coverageWindow);
+  const coveredIntervals = clipSleepStageIntervalsToWindow(intervals, coverageWindow);
+  return coveredIntervals ? { coverageWindow, intervals: coveredIntervals } : undefined;
 }
 
 function resolveSleepStageCoverageWindow(
@@ -2138,33 +2216,6 @@ function resolveSleepStageCoverageWindow(
     firstValueFromPaths(entry, JUNCTION_SLEEP_COVERAGE_END_TIMESTAMP_PATHS),
     sourceProviderSlug,
   );
-
-  if (!startAt || !endAt || Date.parse(endAt) <= Date.parse(startAt)) {
-    return undefined;
-  }
-
-  return { endAt, startAt };
-}
-
-function resolveDerivedSleepStageCoverageWindow(
-  entry: PlainObject,
-  resourceContext: ResourceContext,
-  intervals: readonly JunctionSleepStageInterval[],
-): JunctionSleepStageCoverageWindow | undefined {
-  if (
-    resourceContext.resource !== "sleep_cycle" ||
-    isDirectSleepStageIntervalEntry(entry) ||
-    !firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS)
-  ) {
-    return undefined;
-  }
-
-  let startAt: string | undefined;
-  let endAt: string | undefined;
-  for (const interval of intervals) {
-    startAt = startAt ? earlierIsoTimestamp(startAt, interval.startAt) : interval.startAt;
-    endAt = endAt ? laterIsoTimestamp(endAt, interval.endAt) : interval.endAt;
-  }
 
   if (!startAt || !endAt || Date.parse(endAt) <= Date.parse(startAt)) {
     return undefined;
@@ -2337,17 +2388,39 @@ function makeJunctionSleepStageAggregateExternalRef(
   aggregate: JunctionSleepStageAggregate,
   metric: string,
 ): DeviceExternalRefPayload {
+  return makeJunctionCanonicalSleepStageExternalRef(resourceContext, {
+    coverageEndAt: aggregate.coverageEndAt,
+    coverageStartAt: aggregate.coverageStartAt,
+    dayKey: aggregate.timestamp.dayKey,
+    metric,
+    timeZone: aggregate.timeZone,
+  });
+}
+
+function makeJunctionCanonicalSleepStageExternalRef(
+  resourceContext: ResourceContext,
+  input: {
+    coverageEndAt: string;
+    coverageStartAt: string;
+    dayKey?: string;
+    metric: string;
+    timeZone?: string;
+  },
+): DeviceExternalRefPayload {
   return makeProviderExternalRef(
     "junction",
-    resourceContext.externalRefResourceType,
-    `${resourceContext.resourceSlug}-stage-${shortHash([
-      aggregate.parentResourceId,
-      metric,
-      aggregate.timestamp.dayKey ?? "",
-      aggregate.timeZone ?? "",
+    buildJunctionResourceType(resourceContext.sourceProviderSlug, "sleep-stage"),
+    `sleep-stage-${shortHash([
+      resourceContext.sourceProviderSlug,
+      resourceContext.origin.sourceType,
+      resourceContext.origin.sourceInstanceId,
+      input.coverageStartAt,
+      input.coverageEndAt,
+      input.dayKey ?? "",
+      input.timeZone ?? "",
     ])}`,
     undefined,
-    slugify(metric, "value"),
+    slugify(input.metric, "value"),
   );
 }
 
