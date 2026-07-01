@@ -5547,6 +5547,116 @@ describe('assistant auto-reply runtime', () => {
     }
   })
 
+  it('defers hosted queue-only cron when the caller observes foreground work', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-08T16:00:00.000Z'))
+    try {
+      runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+        currentTurnDeliveryIntentIds: [],
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+        replies: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 0,
+          skipped: 0,
+        },
+      })
+      runLoopMocks.getAssistantCronStatus.mockResolvedValueOnce({
+        dueJobs: 1,
+        nextRunAt: '2026-05-08T15:59:00.000Z',
+      })
+      const shouldDeferCron = vi.fn().mockReturnValue(true)
+      const runLoop = await vi.importActual<
+        typeof import('../src/assistant/automation/run-loop.ts')
+      >('../src/assistant/automation/run-loop.ts')
+
+      const result = await runLoop.runAssistantAutomationPass({
+        deliveryDispatchMode: 'queue-only',
+        executionContext: {
+          hosted: {
+            memberId: 'member-test',
+            userEnvKeys: [],
+          },
+        },
+        requestId: 'request-hosted-foreground-yield-cron',
+        shouldDeferCron,
+        vault: '/tmp/assistant-automation-vault',
+      })
+
+      expect(shouldDeferCron).toHaveBeenCalledOnce()
+      expect(runLoopMocks.processDueAssistantCronJobs).not.toHaveBeenCalled()
+      expect(result.cronProcessed).toBe(0)
+      expect(result.nextWakeAt).toBe('2026-05-08T16:00:10.000Z')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('threads caller foreground-yield checks into hosted queue-only cron processing', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-08T16:00:00.000Z'))
+    try {
+      runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+        currentTurnDeliveryIntentIds: [],
+        routing: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+        replies: {
+          considered: 0,
+          failed: 0,
+          nextWakeAt: null,
+          replied: 0,
+          skipped: 0,
+        },
+      })
+      runLoopMocks.getAssistantCronStatus.mockResolvedValueOnce({
+        dueJobs: 1,
+        nextRunAt: '2026-05-08T15:59:00.000Z',
+      })
+      const shouldDeferCron = vi.fn().mockReturnValue(false)
+      const runLoop = await vi.importActual<
+        typeof import('../src/assistant/automation/run-loop.ts')
+      >('../src/assistant/automation/run-loop.ts')
+
+      const result = await runLoop.runAssistantAutomationPass({
+        deliveryDispatchMode: 'queue-only',
+        executionContext: {
+          hosted: {
+            memberId: 'member-test',
+            userEnvKeys: [],
+          },
+        },
+        requestId: 'request-hosted-foreground-yield-cron-started',
+        shouldDeferCron,
+        vault: '/tmp/assistant-automation-vault',
+      })
+
+      expect(shouldDeferCron).toHaveBeenCalledOnce()
+      expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledWith(
+        expect.objectContaining({
+          shouldYield: shouldDeferCron,
+        }),
+      )
+      expect(result.cronProcessed).toBe(0)
+      expect(result.nextWakeAt).toBe('2026-05-08T15:59:00.000Z')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('skips canonical automation branches for no-canonical-write automation passes', async () => {
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')
