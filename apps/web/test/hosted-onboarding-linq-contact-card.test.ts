@@ -290,6 +290,7 @@ describe("hosted Linq contact card client", () => {
     });
 
     expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).toHaveBeenCalledWith(expect.objectContaining({
+      maxLines: 50,
       observedAt,
       prisma,
     }));
@@ -357,6 +358,7 @@ describe("hosted Linq contact card client", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).toHaveBeenCalledWith(expect.objectContaining({
+      maxLines: 50,
       observedAt,
       prisma,
     }));

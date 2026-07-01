@@ -47,10 +47,16 @@ export async function upsertHostedLinqLineForPhoneTx(input: {
 }) {
   const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
   const lookupKey = createHostedPhoneLookupKey(normalizedPhoneNumber);
+  const lookupKeyReadCandidates = createHostedPhoneLookupKeyReadCandidates(normalizedPhoneNumber);
 
-  if (!normalizedPhoneNumber || !lookupKey) {
+  if (!normalizedPhoneNumber || !lookupKey || lookupKeyReadCandidates.length === 0) {
     throw new TypeError("Hosted Linq line upsert requires a valid phone number.");
   }
+
+  await acquireHostedLinqLinePhoneLockTx({
+    phoneNumber: normalizedPhoneNumber,
+    prisma: input.prisma,
+  });
 
   const providerStatus = normalizeNullableString(input.providerStatus);
   const providerEgressPolicy = deriveHostedLinqEgressPolicy(providerStatus);
@@ -58,62 +64,86 @@ export async function upsertHostedLinqLineForPhoneTx(input: {
     ? classifyHostedLinqProviderStatus(providerStatus)
     : null;
   const phoneNumberEncrypted = encryptHostedLinqLinePhoneNumber(normalizedPhoneNumber);
-
-  const line = await input.prisma.hostedLinqLine.upsert({
+  const existingLines = await input.prisma.hostedLinqLine.findMany({
     where: {
-      phoneNumberLookupKey: lookupKey,
+      phoneNumberLookupKey: {
+        in: lookupKeyReadCandidates,
+      },
     },
-    create: {
-      assignmentWeight: 100,
-      ...(input.activeMemberLimit === undefined ? {} : { activeMemberLimit: input.activeMemberLimit }),
-      configuredAt: input.source === "configured" ? input.observedAt : null,
-      egressPolicy: providerEgressPolicy ?? "enabled",
-      healthStatus: providerHealthStatus ?? "unknown",
-      phoneNumberEncrypted,
-      phoneNumberHint: readHostedPhoneHint(normalizedPhoneNumber),
-      phoneNumberLookupKey: lookupKey,
-      providerFirstSeenAt: input.source === "provider" ? input.observedAt : null,
-      providerLastSeenAt: input.source === "provider" ? input.observedAt : null,
-      providerPhoneNumberId: normalizeNullableString(input.providerPhoneNumberId),
-      providerReason: normalizeNullableString(input.providerReason),
-      providerSeenAt: input.source === "provider" ? input.observedAt : null,
-      providerStatus,
-      providerUpdatedAt: input.providerStatus === undefined ? null : input.observedAt,
-      source: input.source,
-    },
-    update: {
-      ...(input.activeMemberLimit === undefined ? {} : { activeMemberLimit: input.activeMemberLimit }),
-      ...(input.source === "configured" ? { configuredAt: input.observedAt } : {}),
-      ...(input.source === "provider"
-        ? {
-            providerLastSeenAt: input.observedAt,
-            providerSeenAt: input.observedAt,
-          }
-        : {}),
-      phoneNumberEncrypted,
-      phoneNumberHint: readHostedPhoneHint(normalizedPhoneNumber),
-      ...(input.providerPhoneNumberId === undefined
-        ? {}
-        : { providerPhoneNumberId: normalizeNullableString(input.providerPhoneNumberId) }),
-      ...(input.providerReason === undefined
-        ? {}
-        : { providerReason: normalizeNullableString(input.providerReason) }),
-      ...(input.providerStatus === undefined
-        ? {}
-        : {
-            ...(providerEgressPolicy ? { egressPolicy: providerEgressPolicy } : {}),
-            ...(providerHealthStatus ? { healthStatus: providerHealthStatus } : {}),
-            providerStatus,
-            providerUpdatedAt: input.observedAt,
-          }),
-      ...(input.source === "configured" ? { source: input.source } : {}),
+    select: {
+      phoneNumberLookupKey: true,
     },
   });
+  const targetLookupKey =
+    chooseHostedLinqLineWriteLookupKey(existingLines, lookupKeyReadCandidates, lookupKey)
+    ?? lookupKey;
+
+  const updateData = {
+    ...(input.activeMemberLimit === undefined ? {} : { activeMemberLimit: input.activeMemberLimit }),
+    ...(input.source === "configured" ? { configuredAt: input.observedAt } : {}),
+    ...(input.source === "provider"
+      ? {
+          providerLastSeenAt: input.observedAt,
+          providerSeenAt: input.observedAt,
+        }
+      : {}),
+    phoneNumberEncrypted,
+    phoneNumberHint: readHostedPhoneHint(normalizedPhoneNumber),
+    ...(input.providerPhoneNumberId === undefined
+      ? {}
+      : { providerPhoneNumberId: normalizeNullableString(input.providerPhoneNumberId) }),
+    ...(input.providerReason === undefined
+      ? {}
+      : { providerReason: normalizeNullableString(input.providerReason) }),
+    ...(input.providerStatus === undefined
+      ? {}
+      : {
+          ...(providerEgressPolicy ? { egressPolicy: providerEgressPolicy } : {}),
+          ...(providerHealthStatus ? { healthStatus: providerHealthStatus } : {}),
+          providerStatus,
+          providerUpdatedAt: input.observedAt,
+        }),
+    ...(input.source === "configured" ? { source: input.source } : {}),
+  } satisfies Prisma.HostedLinqLineUpdateInput;
+
+  const createData = {
+    assignmentWeight: 100,
+    ...(input.activeMemberLimit === undefined ? {} : { activeMemberLimit: input.activeMemberLimit }),
+    configuredAt: input.source === "configured" ? input.observedAt : null,
+    egressPolicy: providerEgressPolicy ?? "enabled",
+    healthStatus: providerHealthStatus ?? "unknown",
+    phoneNumberEncrypted,
+    phoneNumberHint: readHostedPhoneHint(normalizedPhoneNumber),
+    phoneNumberLookupKey: lookupKey,
+    providerFirstSeenAt: input.source === "provider" ? input.observedAt : null,
+    providerLastSeenAt: input.source === "provider" ? input.observedAt : null,
+    providerPhoneNumberId: normalizeNullableString(input.providerPhoneNumberId),
+    providerReason: normalizeNullableString(input.providerReason),
+    providerSeenAt: input.source === "provider" ? input.observedAt : null,
+    providerStatus,
+    providerUpdatedAt: input.providerStatus === undefined ? null : input.observedAt,
+    source: input.source,
+  } satisfies Prisma.HostedLinqLineCreateInput;
+
+  const line = targetLookupKey === lookupKey && existingLines.length === 0
+    ? await input.prisma.hostedLinqLine.upsert({
+        where: {
+          phoneNumberLookupKey: lookupKey,
+        },
+        create: createData,
+        update: updateData,
+      })
+    : await input.prisma.hostedLinqLine.update({
+        where: {
+          phoneNumberLookupKey: targetLookupKey,
+        },
+        data: updateData,
+      });
 
   if (input.source === "provider") {
     await input.prisma.hostedLinqLine.updateMany({
       where: {
-        phoneNumberLookupKey: lookupKey,
+        phoneNumberLookupKey: line.phoneNumberLookupKey,
         providerFirstSeenAt: null,
       },
       data: {
@@ -123,6 +153,32 @@ export async function upsertHostedLinqLineForPhoneTx(input: {
   }
 
   return line;
+}
+
+async function acquireHostedLinqLinePhoneLockTx(input: {
+  phoneNumber: string;
+  prisma: HostedLinqLineClient;
+}): Promise<void> {
+  await input.prisma.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtext('hosted_linq_line_phone'),
+      hashtext(${input.phoneNumber})
+    )
+  `;
+}
+
+function chooseHostedLinqLineWriteLookupKey(
+  existingLines: readonly { phoneNumberLookupKey: string }[],
+  lookupKeyReadCandidates: readonly string[],
+  currentLookupKey: string,
+): string | null {
+  const existingLookupKeys = new Set(
+    existingLines.map((line) => line.phoneNumberLookupKey),
+  );
+  if (existingLookupKeys.has(currentLookupKey)) {
+    return currentLookupKey;
+  }
+  return lookupKeyReadCandidates.find((candidate) => existingLookupKeys.has(candidate)) ?? null;
 }
 
 export async function syncHostedLinqConfiguredLinesTx(input: {

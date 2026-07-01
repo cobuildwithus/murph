@@ -202,6 +202,7 @@ async function listHostedLinqConfiguredContactCardLines(input: {
   const maxLines = normalizeLineLimit(input.maxLines);
 
   await syncHostedLinqPhoneNumberInventory({
+    maxLines,
     observedAt: input.observedAt,
     prisma: input.prisma,
     signal: input.signal,

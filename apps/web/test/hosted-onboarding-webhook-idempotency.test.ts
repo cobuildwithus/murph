@@ -855,6 +855,7 @@ function buildLinqProviderWebhookBody(input: {
 
 function createPrismaStub() {
   const prisma = {
+    $executeRaw: vi.fn().mockResolvedValue([]),
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
     hostedLinqAlert: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -868,6 +869,7 @@ function createPrismaStub() {
       upsert: vi.fn().mockResolvedValue({ id: "hld_123" }),
     },
     hostedLinqLine: {
+      findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
         Promise.resolve({

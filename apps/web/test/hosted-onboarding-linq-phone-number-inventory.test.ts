@@ -64,4 +64,21 @@ describe("parseHostedLinqPhoneNumberInventory", () => {
       }),
     ).toEqual([]);
   });
+
+  it("fails visibly when provider inventory exceeds the configured sync limit", () => {
+    expect(() => parseHostedLinqPhoneNumberInventory({
+      phone_numbers: [
+        {
+          id: "line_1",
+          phone_number: "+15550000001",
+        },
+        {
+          id: "line_2",
+          phone_number: "+15550000002",
+        },
+      ],
+    }, {
+      maxLines: 1,
+    })).toThrow(/exceeds the configured 1 line limit/u);
+  });
 });

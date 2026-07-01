@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
+import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   applyHostedLinqDeliveryReceiptTx,
   claimHostedLinqDeliveryProviderDispatchTx,
@@ -620,56 +621,82 @@ describe("hosted Linq observability stores", () => {
   });
 
   it("preserves the stored line lookup key when the phone blind-index key rotated", async () => {
+    const restore = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: OBSERVABILITY_TEST_KEYRING_ENTRIES,
+    });
+    const legacyLineLookupKey = createHostedPhoneLookupKey("+15550000000");
+    process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
+
+    if (!legacyLineLookupKey) {
+      throw new Error("Expected legacy line lookup key.");
+    }
+
     const fixture = createObservabilityPrismaFixture();
-    fixture.hostedLinqLineUpsert.mockResolvedValueOnce({
-      phoneNumberLookupKey: "hbidx:phone:v1-line-key",
-    });
-    const event = requireParsedProviderEvent(buildProviderEvent({
-      data: {
-        changed_at: "2026-03-26T12:00:00.000Z",
-        new_reputation: "CRITICAL",
-        phone_number: "+15550000000",
-      },
-      eventId: "evt_status_rotated_key",
-      eventType: "phone_number.status_updated",
-    }));
+    fixture.hostedLinqLineFindMany.mockResolvedValueOnce([{
+      phoneNumberLookupKey: legacyLineLookupKey,
+    }]);
 
-    await ingestHostedLinqProviderEventTx({
-      event,
-      prisma: fixture.prisma as never,
-    });
-
-    expect(fixture.hostedLinqLineUpsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          phoneNumberLookupKey: event.phoneNumberLookupKey,
+    try {
+      const event = requireParsedProviderEvent(buildProviderEvent({
+        data: {
+          changed_at: "2026-03-26T12:00:00.000Z",
+          new_reputation: "CRITICAL",
+          phone_number: "+15550000000",
         },
-      }),
-    );
-    expect(JSON.stringify(fixture.hostedLinqLineUpsert.mock.calls[0]?.[0]))
-      .not.toContain("+15550000000");
-    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          phoneNumberLookupKey: "hbidx:phone:v1-line-key",
+        eventId: "evt_status_rotated_key",
+        eventType: "phone_number.status_updated",
+      }));
+
+      await ingestHostedLinqProviderEventTx({
+        event,
+        prisma: fixture.prisma as never,
+      });
+
+      expect(fixture.hostedLinqLineFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            phoneNumberLookupKey: {
+              in: expect.arrayContaining([event.phoneNumberLookupKey, legacyLineLookupKey]),
+            },
+          },
         }),
-      }),
-    );
-    expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          eventId: createHostedLinqProviderEventLookupKey("evt_status_rotated_key"),
-          phoneNumberLookupKey: "hbidx:phone:v1-line-key",
+      );
+      expect(fixture.hostedLinqLineUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            phoneNumberLookupKey: legacyLineLookupKey,
+          },
         }),
-      }),
-    );
-    expect(fixture.hostedLinqAlertCreateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          phoneNumberLookupKey: "hbidx:phone:v1-line-key",
+      );
+      expect(fixture.hostedLinqLineUpsert).not.toHaveBeenCalled();
+      expect(JSON.stringify(fixture.hostedLinqLineUpdate.mock.calls[0]?.[0]))
+        .not.toContain("+15550000000");
+      expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            phoneNumberLookupKey: legacyLineLookupKey,
+          }),
         }),
-      }),
-    );
+      );
+      expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            eventId: createHostedLinqProviderEventLookupKey("evt_status_rotated_key"),
+            phoneNumberLookupKey: legacyLineLookupKey,
+          }),
+        }),
+      );
+      expect(fixture.hostedLinqAlertCreateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            phoneNumberLookupKey: legacyLineLookupKey,
+          }),
+        }),
+      );
+    } finally {
+      restore();
+    }
   });
 
   it("projects production-shape critical reputation status updates", async () => {
@@ -1818,6 +1845,7 @@ describe("hosted Linq observability stores", () => {
 });
 
 function createObservabilityPrismaFixture() {
+  const executeRaw = vi.fn().mockResolvedValue([]);
   const hostedLinqAlertCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqDeliveryCreate = vi.fn().mockResolvedValue({ id: "hld_random" });
   const hostedLinqDeliveryFindFirst = vi.fn().mockResolvedValue(null);
@@ -1825,6 +1853,7 @@ function createObservabilityPrismaFixture() {
   const hostedLinqDeliveryUpdate = vi.fn().mockResolvedValue(undefined);
   const hostedLinqDeliveryUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqDeliveryUpsert = vi.fn().mockResolvedValue({ id: "hld_123" });
+  const hostedLinqLineFindMany = vi.fn().mockResolvedValue([]);
   const hostedLinqLineFindUnique = vi.fn().mockResolvedValue(null);
   const hostedLinqLineUpdate = vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
     Promise.resolve({
@@ -1839,6 +1868,7 @@ function createObservabilityPrismaFixture() {
   const hostedLinqProviderEventFindFirst = vi.fn().mockResolvedValue(null);
   const hostedLinqProviderEventFindMany = vi.fn().mockResolvedValue([]);
   const prisma = {
+    $executeRaw: executeRaw,
     hostedLinqAlert: {
       createMany: hostedLinqAlertCreateMany,
     },
@@ -1851,6 +1881,7 @@ function createObservabilityPrismaFixture() {
       upsert: hostedLinqDeliveryUpsert,
     },
     hostedLinqLine: {
+      findMany: hostedLinqLineFindMany,
       findUnique: hostedLinqLineFindUnique,
       update: hostedLinqLineUpdate,
       updateMany: hostedLinqLineUpdateMany,
@@ -1864,6 +1895,7 @@ function createObservabilityPrismaFixture() {
   };
 
   return {
+    executeRaw,
     hostedLinqAlertCreateMany,
     hostedLinqDeliveryCreate,
     hostedLinqDeliveryFindFirst,
@@ -1871,6 +1903,7 @@ function createObservabilityPrismaFixture() {
     hostedLinqDeliveryUpdate,
     hostedLinqDeliveryUpdateMany,
     hostedLinqDeliveryUpsert,
+    hostedLinqLineFindMany,
     hostedLinqLineFindUnique,
     hostedLinqLineUpdate,
     hostedLinqLineUpdateMany,

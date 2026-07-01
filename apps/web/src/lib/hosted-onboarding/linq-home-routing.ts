@@ -12,9 +12,14 @@ import {
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "./messaging-state";
-import { listHostedLinqAssignableHomeLines } from "./linq-line-store";
+import {
+  type HostedLinqAssignableHomeLine,
+  listHostedLinqAssignableHomeLines,
+  syncHostedLinqConfiguredLinesTx,
+} from "./linq-line-store";
 import { normalizePhoneNumber } from "./phone";
 import { hostedOnboardingError } from "./errors";
+import { getHostedOnboardingEnvironment } from "./runtime";
 import type { Prisma } from "@prisma/client";
 
 export interface HostedMemberActivationLinqRouteResolution {
@@ -148,7 +153,7 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
     prisma: input.prisma,
   });
 
-  const lines = await listHostedLinqAssignableHomeLines({
+  const lines = await listHostedLinqAssignableHomeLinesForAssignmentTx({
     prisma: input.prisma,
   });
   const recipientPhones = lines.map((line) => line.phoneNumber);
@@ -182,6 +187,32 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
     ...(chosen ? { homeLineAssignedAt: now } : {}),
     recipientPhone: chosen?.phoneNumber ?? null,
   };
+}
+
+async function listHostedLinqAssignableHomeLinesForAssignmentTx(input: {
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedLinqAssignableHomeLine[]> {
+  const lines = await listHostedLinqAssignableHomeLines({
+    prisma: input.prisma,
+  });
+  if (lines.length > 0) {
+    return lines;
+  }
+
+  const environment = getHostedOnboardingEnvironment();
+  if (environment.linqConversationPhoneNumbers.length === 0) {
+    return lines;
+  }
+
+  await syncHostedLinqConfiguredLinesTx({
+    activeMemberLimit: environment.linqMaxActiveMembersPerConversationPhone,
+    phoneNumbers: environment.linqConversationPhoneNumbers,
+    prisma: input.prisma,
+  });
+
+  return listHostedLinqAssignableHomeLines({
+    prisma: input.prisma,
+  });
 }
 
 function startOfUtcDay(value: Date): Date {

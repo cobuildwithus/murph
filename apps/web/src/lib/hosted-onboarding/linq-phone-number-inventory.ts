@@ -12,12 +12,16 @@ import { normalizeNullableString } from "./shared";
 
 type HostedLinqInventoryClient = PrismaClient | Prisma.TransactionClient;
 
+export const HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT = 250;
+
 export async function syncHostedLinqPhoneNumberInventory(input: {
+  maxLines?: number;
   observedAt?: Date;
   prisma: HostedLinqInventoryClient;
   signal?: AbortSignal;
 }): Promise<{ syncedCount: number }> {
   const lines = await listHostedLinqPhoneNumberInventory({
+    maxLines: input.maxLines,
     signal: input.signal,
   });
   const syncedCount = await syncHostedLinqProviderLineInventoryTx({
@@ -29,6 +33,7 @@ export async function syncHostedLinqPhoneNumberInventory(input: {
 }
 
 export async function listHostedLinqPhoneNumberInventory(input: {
+  maxLines?: number;
   signal?: AbortSignal;
 } = {}): Promise<HostedLinqProviderInventoryLine[]> {
   const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
@@ -64,13 +69,28 @@ export async function listHostedLinqPhoneNumberInventory(input: {
   }
 
   const payload = await response.json();
-  return parseHostedLinqPhoneNumberInventory(payload);
+  return parseHostedLinqPhoneNumberInventory(payload, {
+    maxLines: input.maxLines,
+  });
 }
 
 export function parseHostedLinqPhoneNumberInventory(
   payload: unknown,
+  input: {
+    maxLines?: number;
+  } = {},
 ): HostedLinqProviderInventoryLine[] {
   const records = readInventoryRecords(payload);
+  const maxLines = normalizeInventoryLineLimit(input.maxLines);
+  if (records.length > maxLines) {
+    throw hostedOnboardingError({
+      code: "LINQ_PHONE_NUMBER_INVENTORY_LIMIT_EXCEEDED",
+      httpStatus: 502,
+      message: `Linq phone-number inventory returned ${records.length} line(s), which exceeds the configured ${maxLines} line limit.`,
+      retryable: false,
+    });
+  }
+
   const lines: HostedLinqProviderInventoryLine[] = [];
   const seenPhones = new Set<string>();
 
@@ -93,6 +113,13 @@ export function parseHostedLinqPhoneNumberInventory(
   }
 
   return lines;
+}
+
+function normalizeInventoryLineLimit(value: number | null | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT;
+  }
+  return Math.floor(value);
 }
 
 function readInventoryRecords(payload: unknown): Record<string, unknown>[] {
