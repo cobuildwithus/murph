@@ -1,6 +1,9 @@
 import { getPrisma } from "../src/lib/prisma";
 import { readHostedPhoneHint } from "../src/lib/hosted-onboarding/contact-privacy";
-import { syncHostedLinqConfiguredLinesTx } from "../src/lib/hosted-onboarding/linq-line-store";
+import {
+  assertHostedLinqAssignableHomeLinePoolReady,
+  syncHostedLinqConfiguredLinesTx,
+} from "../src/lib/hosted-onboarding/linq-line-store";
 import {
   HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT,
   syncHostedLinqPhoneNumberInventory,
@@ -30,6 +33,9 @@ async function main(): Promise<void> {
       configuredHints.length > 0 ? `: ${configuredHints.join(", ")}` : "."
     }`,
   );
+  await assertHostedLinqAssignableHomeLinePoolReady({
+    prisma,
+  });
 
   const inventory = await syncHostedLinqPhoneNumberInventory({
     maxLines: HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT,

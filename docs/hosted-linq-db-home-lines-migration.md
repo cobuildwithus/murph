@@ -16,13 +16,15 @@ The provider inventory client intentionally stays on the existing web-owned Linq
 
 ## Deploy Order
 
-1. Deploy the web migration:
+1. Deploy through the normal production web build path.
 
    ```bash
-   pnpm --dir apps/web prisma:migrate:deploy
+   pnpm release:production:migrate && pnpm build
    ```
 
-2. Backfill current env-configured lines into the DB and sync provider inventory:
+   On main-branch Vercel production deploys, `release:production:migrate` runs Prisma migrations, then runs `pnpm --dir apps/web linq:sync-lines`. The line sync backfills current env-configured lines, verifies at least one configured assignable DB line exists, and syncs provider inventory before DB-backed assignment code serves traffic.
+
+2. For an explicit operator repair or a one-off cutover outside the guarded production deploy path, run:
 
    ```bash
    pnpm --dir apps/web linq:sync-lines

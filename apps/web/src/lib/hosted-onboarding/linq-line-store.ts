@@ -14,10 +14,13 @@ import {
   decryptHostedLinqLinePhoneNumber,
   encryptHostedLinqLinePhoneNumber,
 } from "./linq-line-phone-codec";
+import { hostedOnboardingError } from "./errors";
 import { normalizePhoneNumber } from "./phone";
 import { normalizeNullableString } from "./shared";
 
 type HostedLinqLineClient = PrismaClient | Prisma.TransactionClient;
+
+export const HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT = 250;
 
 export type HostedLinqAssignableHomeLine = {
   activeMemberLimit: number | null;
@@ -33,6 +36,15 @@ export type HostedLinqContactCardLine = {
   phoneNumberHint: string;
   phoneNumberLookupKey: string;
   providerStatus: string | null;
+};
+
+type HostedLinqAssignableHomeLineRow = {
+  activeMemberLimit: number | null;
+  assignmentWeight: number;
+  maxNewConversationsPerDay: number | null;
+  phoneNumberEncrypted: string | null;
+  phoneNumberHint: string;
+  phoneNumberLookupKey: string;
 };
 
 export async function upsertHostedLinqLineForPhoneTx(input: {
@@ -244,6 +256,7 @@ export async function syncHostedLinqProviderLineInventoryTx(input: {
 export async function listHostedLinqAssignableHomeLines(input: {
   prisma: HostedLinqLineClient;
 }): Promise<HostedLinqAssignableHomeLine[]> {
+  const limit = HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT;
   const rows = await input.prisma.hostedLinqLine.findMany({
     where: {
       configuredAt: { not: null },
@@ -255,6 +268,7 @@ export async function listHostedLinqAssignableHomeLines(input: {
       { assignmentWeight: "desc" },
       { phoneNumberLookupKey: "asc" },
     ],
+    take: limit + 1,
     select: {
       activeMemberLimit: true,
       assignmentWeight: true,
@@ -265,6 +279,84 @@ export async function listHostedLinqAssignableHomeLines(input: {
     },
   });
 
+  if (rows.length > limit) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_ASSIGNABLE_LINE_LIMIT_EXCEEDED",
+      httpStatus: 500,
+      message: `Hosted Linq assignment has more than ${limit} configured assignable line(s). Reduce the assignable pool or raise the reviewed limit before serving assignments.`,
+      retryable: false,
+    });
+  }
+
+  return mapHostedLinqAssignableHomeLineRows(rows);
+}
+
+export async function readHostedLinqAssignableHomeLineByPhone(input: {
+  phoneNumber: string;
+  prisma: HostedLinqLineClient;
+}): Promise<HostedLinqAssignableHomeLine | null> {
+  const phoneNumber = normalizePhoneNumber(input.phoneNumber);
+  const lookupKeys = createHostedPhoneLookupKeyReadCandidates(phoneNumber);
+  if (!phoneNumber || lookupKeys.length === 0) {
+    return null;
+  }
+
+  const rows = await input.prisma.hostedLinqLine.findMany({
+    where: {
+      configuredAt: { not: null },
+      egressPolicy: "enabled",
+      healthStatus: { in: ["healthy", "unknown"] },
+      phoneNumberEncrypted: { not: null },
+      phoneNumberLookupKey: {
+        in: lookupKeys,
+      },
+    },
+    orderBy: [
+      { phoneNumberLookupKey: "asc" },
+    ],
+    take: lookupKeys.length,
+    select: {
+      activeMemberLimit: true,
+      assignmentWeight: true,
+      maxNewConversationsPerDay: true,
+      phoneNumberEncrypted: true,
+      phoneNumberHint: true,
+      phoneNumberLookupKey: true,
+    },
+  });
+
+  return mapHostedLinqAssignableHomeLineRows(rows)
+    .find((line) => line.phoneNumber === phoneNumber) ?? null;
+}
+
+export async function assertHostedLinqAssignableHomeLinePoolReady(input: {
+  prisma: HostedLinqLineClient;
+}): Promise<void> {
+  const line = await input.prisma.hostedLinqLine.findFirst({
+    where: {
+      configuredAt: { not: null },
+      egressPolicy: "enabled",
+      healthStatus: { in: ["healthy", "unknown"] },
+      phoneNumberEncrypted: { not: null },
+    },
+    select: {
+      phoneNumberLookupKey: true,
+    },
+  });
+
+  if (!line) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_ASSIGNABLE_LINE_POOL_REQUIRED",
+      httpStatus: 500,
+      message: "Hosted Linq DB home-line cutover requires at least one configured, enabled, healthy assignable line.",
+      retryable: false,
+    });
+  }
+}
+
+function mapHostedLinqAssignableHomeLineRows(
+  rows: readonly HostedLinqAssignableHomeLineRow[],
+): HostedLinqAssignableHomeLine[] {
   return rows.flatMap((row) => {
     const phoneNumber = normalizePhoneNumber(
       decryptHostedLinqLinePhoneNumber(row.phoneNumberEncrypted),

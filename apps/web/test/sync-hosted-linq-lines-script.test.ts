@@ -11,10 +11,13 @@ describe("sync-hosted-linq-lines script", () => {
     const mainBody = source.slice(source.indexOf("async function main"));
     const configuredWriteIndex = mainBody.indexOf("syncHostedLinqConfiguredLinesTx({");
     const configuredLogIndex = mainBody.indexOf("Configured ${environment.linqConversationPhoneNumbers.length}");
+    const assignablePoolCheckIndex =
+      mainBody.indexOf("assertHostedLinqAssignableHomeLinePoolReady({");
     const inventorySyncIndex = mainBody.indexOf("syncHostedLinqPhoneNumberInventory({");
 
     expect(configuredWriteIndex).toBeGreaterThanOrEqual(0);
     expect(configuredLogIndex).toBeGreaterThan(configuredWriteIndex);
-    expect(inventorySyncIndex).toBeGreaterThan(configuredLogIndex);
+    expect(assignablePoolCheckIndex).toBeGreaterThan(configuredLogIndex);
+    expect(inventorySyncIndex).toBeGreaterThan(assignablePoolCheckIndex);
   });
 });

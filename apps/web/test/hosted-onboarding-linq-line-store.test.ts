@@ -6,7 +6,11 @@ import {
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  assertHostedLinqAssignableHomeLinePoolReady,
+  HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT,
+  listHostedLinqAssignableHomeLines,
   listHostedLinqContactCardLines,
+  readHostedLinqAssignableHomeLineByPhone,
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
@@ -77,6 +81,138 @@ describe("listHostedLinqContactCardLines", () => {
         providerSeenAt: { not: null },
       },
     }));
+  });
+});
+
+describe("listHostedLinqAssignableHomeLines", () => {
+  it("bounds the assignable pool read before decrypting line phones", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      buildAssignableLineRow("+15550100001"),
+    ]);
+    const prisma = {
+      hostedLinqLine: {
+        findMany,
+      },
+    } as never;
+
+    await expect(
+      listHostedLinqAssignableHomeLines({
+        prisma,
+      }),
+    ).resolves.toMatchObject([
+      {
+        phoneNumber: "+15550100001",
+        phoneNumberHint: "*** 0001",
+      },
+    ]);
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT + 1,
+      where: {
+        configuredAt: { not: null },
+        egressPolicy: "enabled",
+        healthStatus: { in: ["healthy", "unknown"] },
+        phoneNumberEncrypted: { not: null },
+      },
+    }));
+  });
+
+  it("fails closed when the configured assignable pool exceeds the reviewed cap", async () => {
+    const findMany = vi.fn().mockResolvedValue(
+      Array.from(
+        { length: HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT + 1 },
+        (_, index) => buildAssignableLineRow(`+1555010${String(index).padStart(4, "0")}`),
+      ),
+    );
+    const prisma = {
+      hostedLinqLine: {
+        findMany,
+      },
+    } as never;
+
+    await expect(
+      listHostedLinqAssignableHomeLines({
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_ASSIGNABLE_LINE_LIMIT_EXCEEDED",
+      httpStatus: 500,
+    });
+  });
+});
+
+describe("readHostedLinqAssignableHomeLineByPhone", () => {
+  it("looks up a sender line by readable phone blind indexes instead of scanning the pool", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      buildAssignableLineRow("+15550100001"),
+    ]);
+    const prisma = {
+      hostedLinqLine: {
+        findMany,
+      },
+    } as never;
+
+    await expect(
+      readHostedLinqAssignableHomeLineByPhone({
+        phoneNumber: "+1 (555) 010-0001",
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      phoneNumber: "+15550100001",
+      phoneNumberHint: "*** 0001",
+    });
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      take: expect.any(Number),
+      where: expect.objectContaining({
+        configuredAt: { not: null },
+        egressPolicy: "enabled",
+        healthStatus: { in: ["healthy", "unknown"] },
+        phoneNumberEncrypted: { not: null },
+        phoneNumberLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:phone:/u),
+          ]),
+        },
+      }),
+    }));
+  });
+});
+
+describe("assertHostedLinqAssignableHomeLinePoolReady", () => {
+  it("passes when at least one configured assignable DB line exists", async () => {
+    const findFirst = vi.fn().mockResolvedValue({
+      phoneNumberLookupKey: "lookup:line",
+    });
+    const prisma = {
+      hostedLinqLine: {
+        findFirst,
+      },
+    } as never;
+
+    await expect(
+      assertHostedLinqAssignableHomeLinePoolReady({
+        prisma,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("fails visibly when production cutover would leave the DB line pool empty", async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+    const prisma = {
+      hostedLinqLine: {
+        findFirst,
+      },
+    } as never;
+
+    await expect(
+      assertHostedLinqAssignableHomeLinePoolReady({
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_ASSIGNABLE_LINE_POOL_REQUIRED",
+      httpStatus: 500,
+    });
   });
 });
 
@@ -224,6 +360,17 @@ function buildLineRow(
     phoneNumberLookupKey: `lookup:${phoneNumber}`,
     providerLastSeenAt: input.providerLastSeenAt,
     providerStatus: input.providerStatus,
+  };
+}
+
+function buildAssignableLineRow(phoneNumber: string) {
+  return {
+    activeMemberLimit: null,
+    assignmentWeight: 100,
+    maxNewConversationsPerDay: null,
+    phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),
+    phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
+    phoneNumberLookupKey: createHostedPhoneLookupKey(phoneNumber) ?? `lookup:${phoneNumber}`,
   };
 }
 

@@ -12,11 +12,11 @@ const mocks = vi.hoisted(() => ({
   getHostedOnboardingEnvironment: vi.fn(),
   getPrisma: vi.fn(),
   issueHostedInviteTx: vi.fn(),
-  listHostedLinqAssignableHomeLines: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqChatId: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
+  readHostedLinqAssignableHomeLineByPhone: vi.fn(),
   requireHostedOpsRequestAccess: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   sendHostedLinqVoiceMemo: vi.fn(),
@@ -57,7 +57,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
-  listHostedLinqAssignableHomeLines: mocks.listHostedLinqAssignableHomeLines,
+  readHostedLinqAssignableHomeLineByPhone: mocks.readHostedLinqAssignableHomeLineByPhone,
   syncHostedLinqConfiguredLinesTx: mocks.syncHostedLinqConfiguredLinesTx,
 }));
 
@@ -107,6 +107,14 @@ type MockedPrisma = {
 
 let prisma: MockedPrisma;
 let tx: MockedTx;
+let routingState: {
+  linqChatId: string | null;
+  linqRecipientPhone: string | null;
+  pendingLinqChatId: string | null;
+  pendingLinqParticipantContact: null;
+  pendingLinqRecipientPhone: string | null;
+  telegramThreadId: null;
+} | null;
 
 describe("hosted ops onboarding invites", () => {
   beforeAll(async () => {
@@ -116,6 +124,7 @@ describe("hosted ops onboarding invites", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    routingState = null;
     tx = {
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
@@ -145,9 +154,9 @@ describe("hosted ops onboarding invites", () => {
       linqConversationPhoneNumbers: [],
       linqMaxActiveMembersPerConversationPhone: null,
     });
-    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(
       buildHomeLine("+15557654321"),
-    ]);
+    );
     mocks.requireHostedOpsRequestAccess.mockResolvedValue({ member: { id: "member_ops" } });
     mocks.ensureHostedMemberForPhoneTx.mockResolvedValue({ id: "member_123" });
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
@@ -166,15 +175,40 @@ describe("hosted ops onboarding invites", () => {
       },
     });
     mocks.lookupHostedMemberRoutingByPendingLinqChatId.mockResolvedValue(null);
-    mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+    mocks.readHostedMemberRoutingState.mockImplementation(async () => routingState);
     mocks.sendHostedLinqChatMessage.mockResolvedValue(undefined);
     mocks.createHostedLinqChat.mockResolvedValue({
       chatId: "chat_created",
       messageId: "message_open",
     });
     mocks.syncHostedLinqConfiguredLinesTx.mockResolvedValue(undefined);
-    mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockResolvedValue(undefined);
-    mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
+    mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockImplementation(
+      async (input: { recipientPhone: string }) => {
+        routingState = {
+          linqChatId: null,
+          linqRecipientPhone: input.recipientPhone,
+          pendingLinqChatId: null,
+          pendingLinqParticipantContact: null,
+          pendingLinqRecipientPhone: null,
+          telegramThreadId: null,
+        };
+      },
+    );
+    mocks.upsertHostedMemberPendingLinqBindingTx.mockImplementation(
+      async (input: { linqChatId: string; recipientPhone: string | null }) => {
+        routingState = {
+          ...(routingState ?? {
+            linqChatId: null,
+            linqRecipientPhone: null,
+            pendingLinqParticipantContact: null,
+            telegramThreadId: null,
+          }),
+          pendingLinqChatId: input.linqChatId,
+          pendingLinqParticipantContact: null,
+          pendingLinqRecipientPhone: input.recipientPhone,
+        };
+      },
+    );
     mocks.uploadHostedLinqAttachment.mockResolvedValue({ attachmentId: "attachment_123" });
     mocks.sendHostedLinqVoiceMemo.mockResolvedValue(undefined);
   });
@@ -324,7 +358,8 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledWith({
       prisma: tx,
     });
-    expect(mocks.listHostedLinqAssignableHomeLines).toHaveBeenCalledWith({
+    expect(mocks.readHostedLinqAssignableHomeLineByPhone).toHaveBeenCalledWith({
+      phoneNumber: "+15557654321",
       prisma: tx,
     });
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledWith({
@@ -372,12 +407,12 @@ describe("hosted ops onboarding invites", () => {
       recipientPhone: "+15557654321",
     });
     expect(
-      mocks.createHostedLinqChat.mock.invocationCallOrder[0],
-    ).toBeLessThan(
       mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.createHostedLinqChat.mock.invocationCallOrder[0],
     );
     expect(
-      mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mock.invocationCallOrder[0],
+      mocks.createHostedLinqChat.mock.invocationCallOrder[0],
     ).toBeLessThan(
       mocks.upsertHostedMemberPendingLinqBindingTx.mock.invocationCallOrder[0],
     );
@@ -397,13 +432,19 @@ describe("hosted ops onboarding invites", () => {
     expect(JSON.stringify(result)).not.toContain("+15557654321");
   });
 
-  it("keeps one durable owner while creating a Linq chat", async () => {
+  it("does not hold the assignment transaction open while creating a Linq chat", async () => {
     const events: string[] = [];
     prisma.$transaction
       .mockImplementationOnce(async (callback: (transaction: MockedTx) => Promise<unknown>) => {
         events.push("owner:start");
         const result = await callback(tx);
         events.push("owner:commit");
+        return result;
+      })
+      .mockImplementationOnce(async (callback: (transaction: MockedTx) => Promise<unknown>) => {
+        events.push("binding:start");
+        const result = await callback(tx);
+        events.push("binding:commit");
         return result;
       });
     mocks.createHostedLinqChat.mockImplementationOnce(async () => {
@@ -423,13 +464,15 @@ describe("hosted ops onboarding invites", () => {
 
     expect(events).toEqual([
       "owner:start",
-      "provider:create",
       "owner:commit",
+      "provider:create",
+      "binding:start",
+      "binding:commit",
     ]);
   });
 
   it("rejects a new chat sender that is not a configured hosted Linq conversation phone", async () => {
-    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(null);
 
     await expect(service.sendHostedOpsOnboardingInvite({
       deliveryMode: "new_chat",
@@ -443,7 +486,8 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledWith({
       prisma: tx,
     });
-    expect(mocks.listHostedLinqAssignableHomeLines).toHaveBeenCalledWith({
+    expect(mocks.readHostedLinqAssignableHomeLineByPhone).toHaveBeenCalledWith({
+      phoneNumber: "+15557654321",
       prisma: tx,
     });
     expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
@@ -455,11 +499,11 @@ describe("hosted ops onboarding invites", () => {
   });
 
   it("rejects a new chat sender that has exhausted its daily new-conversation cap", async () => {
-    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(
       buildHomeLine("+15557654321", {
         maxNewConversationsPerDay: 1,
       }),
-    ]);
+    );
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
       new Map([["+15557654321", 1]]),
     );
@@ -550,15 +594,24 @@ describe("hosted ops onboarding invites", () => {
     });
 
     expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
-    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.issueHostedInviteTx).toHaveBeenCalledWith({
+      channel: "linq",
+      memberId: "member_123",
+      prisma: tx,
+    });
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma: tx,
+      recipientPhone: "+15557654321",
+    });
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
   });
 
   it("does not runtime-sync env-configured Linq lines during new-chat assignment", async () => {
-    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(null);
     mocks.getHostedOnboardingEnvironment.mockReturnValue({
       linqConversationPhoneNumbers: ["+15557654321"],
       linqMaxActiveMembersPerConversationPhone: 250,
@@ -610,6 +663,7 @@ describe("hosted ops onboarding invites", () => {
       requestId: "request-retry-open",
     })).rejects.toThrow("provider timed out after creating chat");
 
+    routingState = null;
     await service.sendHostedOpsOnboardingInvite({
       deliveryMode: "new_chat",
       linqFromPhoneNumber: "+15557654321",
@@ -631,16 +685,6 @@ describe("hosted ops onboarding invites", () => {
     mocks.sendHostedLinqChatMessage
       .mockRejectedValueOnce(new Error("provider timed out after sending invite"))
       .mockResolvedValueOnce(undefined);
-    mocks.readHostedMemberRoutingState
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        linqChatId: null,
-        linqRecipientPhone: "+15557654321",
-        pendingLinqChatId: "chat_created",
-        pendingLinqParticipantContact: null,
-        pendingLinqRecipientPhone: "+15557654321",
-        telegramThreadId: null,
-      });
 
     await expect(service.sendHostedOpsOnboardingInvite({
       deliveryMode: "new_chat",
