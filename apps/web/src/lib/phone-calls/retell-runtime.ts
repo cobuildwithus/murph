@@ -21,6 +21,9 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 const RETELL_API_BASE_URL = "https://api.retellai.com";
 const RETELL_START_TIMEOUT_MS = 15_000;
 const RETELL_BASIC_ATTRIBUTES_ONLY_STORAGE_SETTING = "basic_attributes_only";
+const RETELL_WEBHOOK_PATH = "/api/retell/webhook";
+const RETELL_PUBLIC_BASE_DYNAMIC_VARIABLE = "murph_public_base_url";
+const RETELL_WEBHOOK_EVENTS = ["call_ended", "call_analyzed"] as const;
 
 export function createRetellPhoneCallRuntime(input: {
   fetchImpl?: typeof fetch;
@@ -126,17 +129,66 @@ function buildRetellStorageModeMismatchError(input: {
 
 function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): CallCreatePhoneCallParams {
   assertRetellAgentDataStorageSetting();
+  const publicBaseOrigin = readRetellPublicBaseOrigin();
+  const agentOverride = buildRetellAgentOverride(publicBaseOrigin);
 
   return {
     from_number: requireEnv("RETELL_FROM_NUMBER"),
     to_number: call.brief.to.phoneNumber,
     override_agent_id: requireEnv("RETELL_AGENT_ID"),
     override_agent_version: process.env.RETELL_AGENT_VERSION?.trim() || "prod",
+    ...(agentOverride ? { agent_override: agentOverride } : {}),
     metadata: {
       murph_phone_call_id: call.id,
     },
-    retell_llm_dynamic_variables: buildRetellDynamicVariables(call),
+    retell_llm_dynamic_variables: buildRetellDynamicVariables(call, publicBaseOrigin),
   };
+}
+
+type RetellAgentOverride = NonNullable<CallCreatePhoneCallParams["agent_override"]>;
+
+function buildRetellAgentOverride(publicBaseOrigin: string | null): RetellAgentOverride | null {
+  if (!publicBaseOrigin) {
+    return null;
+  }
+
+  return {
+    agent: {
+      webhook_events: [...RETELL_WEBHOOK_EVENTS],
+      webhook_url: buildRetellCallbackUrl(publicBaseOrigin, RETELL_WEBHOOK_PATH),
+    },
+  };
+}
+
+function readRetellPublicBaseOrigin(): string | null {
+  const value = process.env.RETELL_WEBHOOK_PUBLIC_BASE_URL?.trim();
+  if (!value) {
+    return null;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new TypeError("RETELL_WEBHOOK_PUBLIC_BASE_URL must be a valid HTTPS origin.");
+  }
+
+  if (
+    parsed.protocol !== "https:"
+    || parsed.username
+    || parsed.password
+    || parsed.search
+    || parsed.hash
+    || (parsed.pathname !== "" && parsed.pathname !== "/")
+  ) {
+    throw new TypeError("RETELL_WEBHOOK_PUBLIC_BASE_URL must be a valid HTTPS origin.");
+  }
+
+  return parsed.origin;
+}
+
+function buildRetellCallbackUrl(publicBaseOrigin: string, pathname: string): string {
+  return new URL(pathname, `${publicBaseOrigin}/`).toString();
 }
 
 function assertRetellAgentDataStorageSetting(): void {
@@ -148,12 +200,20 @@ function assertRetellAgentDataStorageSetting(): void {
   }
 }
 
-function buildRetellDynamicVariables(call: HostedPhoneCallRuntimeRecord): Record<string, string> {
+function buildRetellDynamicVariables(
+  call: HostedPhoneCallRuntimeRecord,
+  publicBaseOrigin: string | null,
+): Record<string, string> {
   const brief = call.brief;
   return {
     call_brief: JSON.stringify(brief),
     murph_timezone: brief.timeZone,
     opening_line: renderOpeningLine(brief),
+    ...(publicBaseOrigin
+      ? {
+        [RETELL_PUBLIC_BASE_DYNAMIC_VARIABLE]: publicBaseOrigin,
+      }
+      : {}),
     transfer_number: brief.allowTransferToUser
       ? call.transferNumber ?? ""
       : "",

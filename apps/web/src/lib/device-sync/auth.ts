@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import type { HostedDeviceSyncEnvironment } from "./env";
 import { isRecord, normalizeNullableString, sha256Hex, toIsoTimestamp } from "./shared";
@@ -314,7 +314,7 @@ function resolveAllowedBrowserOrigins(
 
   if (configuredOrigin) {
     allowedOrigins.add(configuredOrigin);
-  } else {
+  } else if (!env.isProduction) {
     allowedOrigins.add(new URL(request.url).origin);
   }
 

@@ -3,6 +3,7 @@ import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 import type { Junction } from "@junction-api/sdk";
 import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
 import type * as JunctionSerialization from "@junction-api/sdk/serialization";
+import { canNormalizeJunctionSleepCycleRecordToCompactStages } from "@murphai/importers";
 import { resolveJunctionOrigin } from "@murphai/importers/device-providers/junction-origin";
 import {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
@@ -27,6 +28,10 @@ import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-p
 import { deviceSyncError, isDeviceSyncError, type DeviceSyncError } from "../errors.ts";
 import { sanitizeHostedRuntimeDiagnosticText } from "../hosted-runtime.ts";
 import {
+  assertValidJunctionClientUserIdSecret,
+  normalizeJunctionDeviceSyncRuntimeConfig,
+} from "../configured-provider-runtime-descriptors.ts";
+import {
   addMilliseconds,
   normalizeString,
   sha256Text,
@@ -36,15 +41,17 @@ import {
   JunctionClient,
   type JunctionClientConfig,
   type JunctionDateQueryFormat,
-  type JunctionEnvironment,
   type JunctionProviderConnection,
-  type JunctionRegion,
 } from "./junction-client.ts";
 import {
   buildJunctionProviderSourceInstanceKey,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
   normalizeJunctionProviderFilter,
-} from "./junction-connect-sources.ts";
+} from "../config/junction-connect-sources.ts";
+import type {
+  JunctionDeviceSyncProviderConfig,
+  JunctionEnvironment,
+} from "../config/provider-types.ts";
 
 import type {
   DeviceConnectionSourceStatus,
@@ -69,6 +76,7 @@ import type {
 } from "../types.ts";
 import { classifyDeviceSyncWebhookAcceptanceMode } from "../types.ts";
 
+export type { JunctionDeviceSyncProviderConfig } from "../config/provider-types.ts";
 export { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR };
 export {
   JUNCTION_CONNECT_SOURCE_TARGETS,
@@ -77,27 +85,8 @@ export {
   normalizeJunctionProviderFilter,
   resolveJunctionConnectSourceLabel,
   resolveJunctionConnectTargetForSourceId,
-} from "./junction-connect-sources.ts";
-export type { JunctionConnectSourceTarget } from "./junction-connect-sources.ts";
-
-export interface JunctionDeviceSyncProviderConfig {
-  apiKey: string;
-  clientUserIdSecret: string;
-  environment: JunctionEnvironment;
-  region: JunctionRegion;
-  allowedLinkHosts?: readonly string[];
-  providerFilter?: string[];
-  summaryResources?: string[];
-  timeseriesResources?: string[];
-  summaryBackfillDays?: number;
-  timeseriesBackfillDays?: number;
-  reconcileDays?: number;
-  reconcileIntervalMs?: number;
-  requestTimeoutMs?: number;
-  webhookSecret?: string;
-  webhookTimestampToleranceMs?: number;
-  fetchImpl?: typeof fetch;
-}
+} from "../config/junction-connect-sources.ts";
+export type { JunctionConnectSourceTarget } from "../config/junction-connect-sources.ts";
 
 export const JUNCTION_PROVIDER_CONFIG_KEY = "junction";
 export {
@@ -459,25 +448,9 @@ type JunctionHistoricalBackfillStatus = "complete" | "exhausted" | "retrying";
 export function createJunctionDeviceSyncProvider(
   config: JunctionDeviceSyncProviderConfig,
 ): DeviceSyncProvider {
-  assertValidJunctionClientUserIdSecret(config.clientUserIdSecret);
+  const runtimeConfig = normalizeJunctionDeviceSyncRuntimeConfig(config);
   const client = new JunctionClient(toClientConfig(config));
-  const summaryResources = normalizeRequiredResourceList(
-    config.summaryResources,
-    JUNCTION_DEFAULT_SUMMARY_RESOURCES,
-    JUNCTION_ALLOWED_SUMMARY_RESOURCES,
-    "summary",
-  );
-  const timeseriesResources = normalizeOptionalResourceList(
-    config.timeseriesResources,
-    JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-    JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
-    JUNCTION_KNOWN_TIMESERIES_RESOURCES,
-    "timeseries",
-  );
-  const providerFilter = normalizeJunctionProviderFilter(config.providerFilter);
-  if (providerFilter.length === 0) {
-    throw new TypeError("Junction provider filter must include at least one hosted Link provider.");
-  }
+  const { providerFilter, summaryResources, timeseriesResources } = runtimeConfig;
   const summaryBackfillDays = config.summaryBackfillDays ?? DEFAULT_SUMMARY_BACKFILL_DAYS;
   const timeseriesBackfillDays = config.timeseriesBackfillDays ?? DEFAULT_TIMESERIES_BACKFILL_DAYS;
   const reconcileDays = config.reconcileDays ?? DEFAULT_RECONCILE_DAYS;
@@ -845,6 +818,12 @@ export function createJunctionDeviceSyncProvider(
     if (!sourceProviderSlug) {
       return null;
     }
+    if (
+      resource === "sleep_cycle"
+      && !hasNormalizableJunctionDirectSleepCycleRecord(record, sourceProviderSlug)
+    ) {
+      return null;
+    }
 
     return {
       record,
@@ -854,6 +833,11 @@ export function createJunctionDeviceSyncProvider(
       windowEnd: window.windowEnd,
       windowStart: window.windowStart,
     };
+  }
+
+  function shouldLoadJunctionDirectResourceSourceProviders(input: JunctionDirectResourceJobInput): boolean {
+    return input.resource === "sleep_cycle" ||
+      (input.resource === "sleep" && hasJunctionSourceReferenceIdentity(input.record));
   }
 
   async function diagnoseBackfill(
@@ -1139,15 +1123,24 @@ export function createJunctionDeviceSyncProvider(
     const resource = normalizeJunctionResourceName(job.payload.resource);
     const resourceCategory = normalizeString(job.payload.resourceCategory);
     const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
+    let listedSourceProviders: readonly JunctionProviderConnection[] | null = null;
     let projectedSourceProviders: readonly JunctionProviderConnection[] | null = null;
-    const loadAndProjectSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
-      if (projectedSourceProviders) {
-        return projectedSourceProviders;
+    const loadSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
+      if (listedSourceProviders) {
+        return listedSourceProviders;
       }
 
       const sourceProviders = await client.listUserProviders(context.account.externalAccountId, {
         signal: context.signal ?? null,
       });
+      listedSourceProviders = sourceProviders;
+      return sourceProviders;
+    };
+    const loadAndProjectSourceProviders = async (): Promise<readonly JunctionProviderConnection[]> => {
+      if (projectedSourceProviders) {
+        return projectedSourceProviders;
+      }
+      const sourceProviders = await loadSourceProviders();
       await projectJunctionSources(context, sourceProviders);
       projectedSourceProviders = sourceProviders;
       return sourceProviders;
@@ -1213,9 +1206,12 @@ export function createJunctionDeviceSyncProvider(
 
       const directInput = readJunctionDirectResourceJobInput(job, window);
       if (directInput) {
+        const sourceProviders = shouldLoadJunctionDirectResourceSourceProviders(directInput)
+          ? await loadSourceProviders()
+          : [];
         await importJunctionDirectResourceSnapshot(
           context,
-          [],
+          sourceProviders,
           directInput.windowStart,
           directInput.windowEnd,
           directInput.resource,
@@ -1681,14 +1677,7 @@ export function createJunctionDeviceSyncProvider(
     resource: string,
     records: readonly Record<string, unknown>[],
   ): Promise<void> {
-    const redactedRecords = records.map((record) =>
-      readPlainObject(sanitizeJunctionImportSnapshotValue(
-        record,
-        new Map(),
-        { blockedStringValues: [context.account.externalAccountId] },
-      )) ?? record
-    );
-    const snapshots = { [resource]: redactedRecords };
+    const snapshots: Record<string, unknown[]> = { [resource]: [...records] };
 
     await context.importSnapshot({
       provider: "junction",
@@ -1698,7 +1687,9 @@ export function createJunctionDeviceSyncProvider(
       windowStart,
       windowEnd,
       connections: sanitizeJunctionImportConnections(sourceProviders),
-      summaries: sanitizeJunctionImportSnapshots(snapshots, sourceProviders),
+      summaries: sanitizeJunctionImportSnapshots(snapshots, sourceProviders, {
+        blockedStringValues: [context.account.externalAccountId],
+      }),
       timeseries: {},
     });
   }
@@ -3290,54 +3281,6 @@ function toClientConfig(config: JunctionDeviceSyncProviderConfig): JunctionClien
   };
 }
 
-function normalizeRequiredResourceList(
-  value: string[] | undefined,
-  defaults: readonly string[],
-  allowedResources: readonly string[],
-  label: string,
-): string[] {
-  const normalized = (value && value.length > 0 ? value : defaults)
-    .map(normalizeJunctionResourceName)
-    .filter((entry): entry is string => entry !== null);
-  const allowedResourceSet = new Set<string>(allowedResources);
-  const unsupportedResources = normalized.filter((entry) => !allowedResourceSet.has(entry));
-
-  if (unsupportedResources.length > 0) {
-    throw new TypeError(
-      `Junction ${label} resources include unsupported resource(s): ${[...new Set(unsupportedResources)].join(", ")}.`,
-    );
-  }
-
-  if (normalized.length === 0) {
-    throw new TypeError(`Junction ${label} resources must include at least one supported resource.`);
-  }
-
-  return [...new Set(normalized)];
-}
-
-function normalizeOptionalResourceList(
-  value: string[] | undefined,
-  defaults: readonly string[],
-  allowedResources: readonly string[],
-  knownResources: readonly string[],
-  label: string,
-): string[] {
-  const normalized = (value === undefined ? defaults : value)
-    .map(normalizeJunctionResourceName)
-    .filter((entry): entry is string => entry !== null);
-  const allowedResourceSet = new Set<string>(allowedResources);
-  const knownResourceSet = new Set<string>([...allowedResources, ...knownResources]);
-  const unsupportedResources = normalized.filter((entry) => !knownResourceSet.has(entry));
-
-  if (unsupportedResources.length > 0) {
-    throw new TypeError(
-      `Junction ${label} resources include unsupported resource(s): ${[...new Set(unsupportedResources)].join(", ")}.`,
-    );
-  }
-
-  return [...new Set(normalized.filter((entry) => allowedResourceSet.has(entry)))];
-}
-
 function normalizeProviderSlug(value: unknown): string | null {
   const normalized = normalizeString(value)?.toLowerCase().replace(/[^a-z0-9_]+/gu, "_").replace(/^_+|_+$/gu, "");
   return normalized || null;
@@ -3361,13 +3304,14 @@ function sanitizeJunctionImportConnections(
 function sanitizeJunctionImportSnapshots(
   snapshots: Record<string, unknown[]>,
   providers: readonly JunctionProviderConnection[],
+  options: JunctionImportSnapshotSanitizeOptions = {},
 ): Record<string, unknown[]> {
   const sourceReferences = buildJunctionSourceReferenceMap(providers);
 
   return Object.fromEntries(
     Object.entries(snapshots).map(([resource, records]) => [
       resource,
-      records.map((record) => sanitizeJunctionImportSnapshotValue(record, sourceReferences)),
+      records.map((record) => sanitizeJunctionImportSnapshotValue(record, sourceReferences, options)),
     ]),
   );
 }
@@ -3398,10 +3342,15 @@ function buildJunctionSourceReferenceMap(
   return references;
 }
 
+interface JunctionImportSnapshotSanitizeOptions {
+  blockedStringValues?: readonly string[];
+  preserveSourceReferenceKeys?: boolean;
+}
+
 function sanitizeJunctionImportSnapshotValue(
   value: unknown,
   sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
-  options: { blockedStringValues?: readonly string[] } = {},
+  options: JunctionImportSnapshotSanitizeOptions = {},
 ): unknown {
   if (Array.isArray(value)) {
     return value.map((entry) => sanitizeJunctionImportSnapshotValue(entry, sourceReferences, options));
@@ -3419,12 +3368,19 @@ function sanitizeJunctionImportSnapshotValue(
   const fallback = readJunctionSourceReference(record, sourceReferences);
   const origin = resolveJunctionOrigin(record, fallback);
   const sanitized = stripJunctionRawSourceIdentityFields(record, sourceReferences, options);
+  const fallbackSourceInstanceId = normalizeString(fallback.sourceInstanceId);
+  const unresolvedPreservedSourceReference =
+    options.preserveSourceReferenceKeys === true &&
+    !fallbackSourceInstanceId &&
+    hasJunctionSourceReferenceIdentity(record);
+  const sourceInstanceId = fallbackSourceInstanceId ??
+    (unresolvedPreservedSourceReference ? undefined : origin.sourceInstanceId);
 
   return stripUndefined({
     ...sanitized,
     sourceProviderSlug: normalizeProviderSlug(origin.sourceProviderSlug) ?? sanitized.sourceProviderSlug,
     sourceType: origin.sourceType ?? sanitized.sourceType,
-    sourceInstanceId: origin.sourceInstanceId ?? sanitized.sourceInstanceId,
+    sourceInstanceId: sourceInstanceId ?? sanitized.sourceInstanceId,
   });
 }
 
@@ -3454,13 +3410,16 @@ function readJunctionSourceReference(
 function stripJunctionRawSourceIdentityFields(
   record: Record<string, unknown>,
   sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
-  options: { blockedStringValues?: readonly string[] },
+  options: JunctionImportSnapshotSanitizeOptions,
 ): Record<string, unknown> {
   const sanitized: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(record)) {
     if (
-      isBlockedJunctionImportSourceIdentityKey(key)
+      (
+        isBlockedJunctionImportSourceIdentityKey(key)
+        && !(options.preserveSourceReferenceKeys && isJunctionSourceReferenceIdentityKey(key))
+      )
       || isBlockedJunctionImportSourceIdentityContainerKey(key)
     ) {
       continue;
@@ -3513,6 +3472,33 @@ function isBlockedJunctionImportSourceIdentityKey(key: string): boolean {
     || normalized.includes("providername")
     || normalized.includes("devicename")
     || normalized.includes("appname");
+}
+
+function isJunctionSourceReferenceIdentityKey(key: string): boolean {
+  const normalized = normalizeJunctionImportSourceIdentityKey(key);
+  return normalized === "connectionid"
+    || normalized === "providerconnectionid"
+    || normalized === "sourceid";
+}
+
+function hasJunctionSourceReferenceIdentity(
+  value: unknown,
+  seen: Set<Record<string, unknown>> = new Set(),
+): boolean {
+  if (Array.isArray(value)) {
+    return value.some((entry) => hasJunctionSourceReferenceIdentity(entry, seen));
+  }
+
+  const record = readPlainObject(value);
+  if (!record || seen.has(record)) {
+    return false;
+  }
+  seen.add(record);
+
+  return Object.entries(record).some(([key, nested]) =>
+    (isJunctionSourceReferenceIdentityKey(key) && normalizeString(nested) !== undefined) ||
+    hasJunctionSourceReferenceIdentity(nested, seen)
+  );
 }
 
 function isBlockedJunctionImportSourceIdentityContainerKey(key: string): boolean {
@@ -3979,21 +3965,45 @@ function hasUsefulJunctionSleepCycleStageRecord(
   );
 }
 
+function hasNormalizableJunctionDirectSleepCycleRecord(
+  record: Record<string, unknown>,
+  sourceProviderSlug: string,
+): boolean {
+  return canNormalizeJunctionSleepCycleRecordToCompactStages(record, sourceProviderSlug);
+}
+
 function hasJunctionSleepStageValue(entry: Record<string, unknown>): boolean {
-  return JUNCTION_SLEEP_STAGE_VALUE_PATHS.some((path) =>
-    normalizeJunctionSleepStageValue(readJunctionRecordPath(entry, path)) !== null
-  );
+  return firstJunctionSleepStageFromPaths(entry) !== null;
+}
+
+function firstJunctionSleepStageFromPaths(entry: Record<string, unknown>) {
+  for (const path of JUNCTION_SLEEP_STAGE_VALUE_PATHS) {
+    const stage = normalizeJunctionSleepStageValue(readJunctionRecordPath(entry, path));
+    if (stage !== null) {
+      return stage;
+    }
+  }
+
+  return null;
 }
 
 function collectJunctionSleepCycleStageRecords(value: unknown): Record<string, unknown>[] {
+  return collectJunctionSleepCycleStageRecordsWithSeen(value, new Set());
+}
+
+function collectJunctionSleepCycleStageRecordsWithSeen(
+  value: unknown,
+  seen: Set<Record<string, unknown>>,
+): Record<string, unknown>[] {
   if (Array.isArray(value)) {
-    return value.flatMap((entry) => collectJunctionSleepCycleStageRecords(entry));
+    return value.flatMap((entry) => collectJunctionSleepCycleStageRecordsWithSeen(entry, seen));
   }
 
   const entry = readPlainObject(value);
-  if (!entry) {
+  if (!entry || seen.has(entry)) {
     return [];
   }
+  seen.add(entry);
 
   if (hasJunctionSleepStageValue(entry)) {
     return [entry];
@@ -4001,7 +4011,7 @@ function collectJunctionSleepCycleStageRecords(value: unknown): Record<string, u
 
   return JUNCTION_SLEEP_STAGE_ARRAY_PATHS.flatMap((path) => {
     const nested = readJunctionRecordPath(entry, path);
-    return nested === value ? [] : collectJunctionSleepCycleStageRecords(nested);
+    return nested === value ? [] : collectJunctionSleepCycleStageRecordsWithSeen(nested, seen);
   });
 }
 
@@ -4638,7 +4648,10 @@ function buildJunctionWebhookDataJobJsons(input: {
   const sanitized = sanitizeJunctionImportSnapshotValue(
     input.data,
     new Map(),
-    { blockedStringValues: [input.externalAccountId] },
+    {
+      blockedStringValues: [input.externalAccountId],
+      preserveSourceReferenceKeys: true,
+    },
   );
   const record = readPlainObject(sanitized);
   if (!record) {
@@ -4801,16 +4814,7 @@ function inferJunctionWebhookResource(
   };
 }
 
-export { normalizeJunctionResourceName } from "@murphai/importers/device-providers/junction-resources";
-
-/**
- * Resolves the normalized Junction resource name carried by a webhook event
- * type such as `daily.data.sleep.created`. Lifecycle events (for example
- * `provider.connection.created`) carry no data resource and resolve to null.
- */
-export function readJunctionWebhookResourceName(eventType: string): string | null {
-  return normalizeJunctionResourceName(readJunctionWebhookResourceFromEventType(eventType));
-}
+export { normalizeJunctionResourceName, readJunctionWebhookResourceName } from "../junction-resources.ts";
 
 function readJunctionWebhookResourceFromEventType(eventType: string): string | null {
   const parts = eventType.split(".").map((part) => part.trim()).filter(Boolean);
@@ -5701,16 +5705,6 @@ function readPlainObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
-}
-
-function assertValidJunctionClientUserIdSecret(secret: string): string {
-  const normalizedSecret = normalizeString(secret);
-
-  if (!normalizedSecret || normalizedSecret.length < 16) {
-    throw new TypeError("JUNCTION_CLIENT_USER_ID_SECRET must be at least 16 characters.");
-  }
-
-  return normalizedSecret;
 }
 
 function base32UrlEncode(input: Buffer): string {

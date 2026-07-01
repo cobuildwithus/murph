@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
@@ -40,6 +40,12 @@ describe("device-sync root route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv(
+      "HOSTED_DEVICE_ROUTING_INDEX_KEY",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    vi.stubEnv("OURA_CLIENT_ID", "oura-client");
+    vi.stubEnv("OURA_CLIENT_SECRET", "oura-secret");
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       describeProviders: mocks.describeProviders,
     });
@@ -56,6 +62,10 @@ describe("device-sync root route", () => {
     ]);
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("returns hosted device-sync provider descriptors without caching", async () => {
     const request = new Request("https://join.example.test/api/device-sync");
 
@@ -63,29 +73,29 @@ describe("device-sync root route", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.createHostedDeviceSyncControlPlane).toHaveBeenCalledWith(request);
-    expect(mocks.describeProviders).toHaveBeenCalledTimes(1);
+    expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+    expect(mocks.describeProviders).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       ok: true,
       providers: [
         {
           callbackPath: "/oauth/oura/callback",
-          callbackUrl: "https://join.example.test/oauth/oura/callback",
-          defaultScopes: ["daily"],
+          callbackUrl: "https://join.example.test/api/device-sync/oauth/oura/callback",
+          connectionKind: "oauth2",
+          credentialPolicy: "oauth_tokens",
+          defaultScopes: ["personal", "daily", "workout", "session", "spo2"],
           provider: "oura",
           supportsWebhooks: true,
           webhookPath: "/webhooks/oura",
-          webhookUrl: "https://join.example.test/webhooks/oura",
+          webhookUrl: "https://join.example.test/api/device-sync/webhooks/oura",
         },
       ],
     });
   });
 
-  it("maps route wrapper request errors to a no-store JSON error", async () => {
+  it("does not advertise providers when authoritative provider config is invalid", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    mocks.describeProviders.mockImplementationOnce(() => {
-      throw new TypeError("invalid provider request");
-    });
+    vi.stubEnv("OURA_RECONCILE_DAYS", "soon");
 
     try {
       const response = await deviceSyncRootRoute.GET(
@@ -94,6 +104,31 @@ describe("device-sync root route", () => {
 
       expect(response.status).toBe(400);
       expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
+      expect(mocks.describeProviders).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "INVALID_REQUEST",
+          message: "Invalid request.",
+        },
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("maps route wrapper request errors to a no-store JSON error", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
+
+    try {
+      const response = await deviceSyncRootRoute.GET(
+        new Request("https://join.example.test/api/device-sync"),
+      );
+
+      expect(response.status).toBe(400);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
       await expect(response.json()).resolves.toEqual({
         error: {
           code: "INVALID_REQUEST",

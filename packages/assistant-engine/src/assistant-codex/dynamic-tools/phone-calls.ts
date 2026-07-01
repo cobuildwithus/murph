@@ -37,6 +37,9 @@ export const MURPH_CREATE_PHONE_CALL_TOOL = {
     'Use only when the user asked Murph to call or clearly approved this call.',
     'Resolve relative dates and times before creating the brief.',
     'Put only user-approved, call-relevant, disclosable facts in shareableFacts.',
+    'Set allowTransferToUser=true for calls likely to require live user identity verification, personal consent, or in-the-moment judgment unless the user says not to transfer.',
+    'Set allowTransferToUser=false for info-only calls, simple status checks, or calls where transfer would surprise the user.',
+    'Do not put the user transfer phone number in shareableFacts; Murph resolves verified transfer numbers server-side.',
     'Facts outside shareableFacts require Murph consultation during the call.',
   ].join(' '),
   inputSchema: z.toJSONSchema(hostedPhoneCallBriefSchema, { io: 'input' }),
@@ -111,7 +114,7 @@ function isAssistantPhoneCallAcceptedInputEligible(input: {
   source: AssistantAcceptedTurnInputSource
   turnTrigger: string | null
 }): boolean {
-  if (!isManualPhoneCallTurnTrigger(input.turnTrigger)) {
+  if (!isPhoneCallTurnTriggerEligibleForUserInput(input.turnTrigger)) {
     return false
   }
   if (input.id === SYNTHETIC_INITIAL_ACCEPTED_INPUT_ID) {
@@ -129,10 +132,11 @@ function isAssistantPhoneCallAcceptedInputEligible(input: {
   }
 }
 
-function isManualPhoneCallTurnTrigger(turnTrigger: string | null): boolean {
+function isPhoneCallTurnTriggerEligibleForUserInput(turnTrigger: string | null): boolean {
   return turnTrigger === null ||
     turnTrigger === 'manual-ask' ||
-    turnTrigger === 'manual-deliver'
+    turnTrigger === 'manual-deliver' ||
+    turnTrigger === 'automation-auto-reply'
 }
 
 function stableJson(value: unknown): string {

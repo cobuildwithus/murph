@@ -9,6 +9,10 @@ import {
 
 import { deviceSyncError } from "../errors.ts";
 import {
+  buildWhoopDeviceSyncRuntimeDescriptor,
+  buildWhoopDeviceSyncScopes,
+} from "../configured-provider-runtime-descriptors.ts";
+import {
   addMilliseconds,
   coerceRecord,
   normalizeIdentifier,
@@ -40,6 +44,9 @@ import {
 } from "./provider-diagnostics.ts";
 
 import type {
+  WhoopDeviceSyncProviderConfig,
+} from "../config/provider-types.ts";
+import type {
   DeviceSyncAccount,
   DeviceSyncJobInput,
   DeviceSyncJobRecord,
@@ -56,6 +63,8 @@ import type {
 } from "../types.ts";
 import { classifyDeviceSyncWebhookAcceptanceMode, getDeviceSyncAccountOAuthTokens } from "../types.ts";
 
+export type { WhoopDeviceSyncProviderConfig } from "../config/provider-types.ts";
+
 const WHOOP_AUTH_PATH = "/oauth/oauth2/auth";
 const WHOOP_TOKEN_PATH = "/oauth/oauth2/token";
 const WHOOP_API_PREFIX = "/developer";
@@ -71,8 +80,6 @@ const DEFAULT_WEBHOOK_TOLERANCE_MS = 5 * 60_000;
 const DEFAULT_BACKFILL_DAYS = WHOOP_SYNC.windows.backfillDays;
 const DEFAULT_RECONCILE_DAYS = WHOOP_SYNC.windows.reconcileDays;
 const DEFAULT_RECONCILE_INTERVAL_MS = WHOOP_SYNC.windows.reconcileIntervalMs;
-const WHOOP_DEFAULT_SCOPES = Object.freeze([...WHOOP_OAUTH.defaultScopes]);
-const WHOOP_REQUIRED_SCOPES = Object.freeze(["offline", "read:profile"] as const);
 const WHOOP_MAX_COLLECTION_PAGES = 100;
 const WHOOP_MAX_COLLECTION_RECORDS = 25_000;
 const WHOOP_OAUTH_TOKEN_ENDPOINT_KIND = "whoop_oauth_token";
@@ -98,19 +105,6 @@ interface WhoopCollectionResponse<TRecord extends Record<string, unknown>> {
   records?: TRecord[];
   next_token?: string | null;
   nextToken?: string | null;
-}
-
-export interface WhoopDeviceSyncProviderConfig {
-  clientId: string;
-  clientSecret: string;
-  baseUrl?: string;
-  scopes?: string[];
-  backfillDays?: number;
-  reconcileDays?: number;
-  reconcileIntervalMs?: number;
-  webhookTimestampToleranceMs?: number;
-  requestTimeoutMs?: number;
-  fetchImpl?: typeof fetch;
 }
 
 interface WhoopDeleteMarker {
@@ -275,11 +269,6 @@ function whoopBaseUrl(config: WhoopDeviceSyncProviderConfig): string {
   return (config.baseUrl ?? DEFAULT_WHOOP_BASE_URL).replace(/\/+$/u, "");
 }
 
-function buildWhoopScopes(input: string[] | undefined): string[] {
-  const requested = input === undefined ? [...WHOOP_DEFAULT_SCOPES] : input;
-  return [...new Set([...WHOOP_REQUIRED_SCOPES, ...requested].map((scope) => scope.trim()).filter(Boolean))];
-}
-
 function hasWhoopScope(account: Pick<DeviceSyncAccount, "scopes">, scope: WhoopScope): boolean {
   return account.scopes.includes(scope);
 }
@@ -421,27 +410,13 @@ function safeProviderPathname(path: string): string {
 export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderConfig): DeviceSyncOAuthProvider {
   const fetchImpl = config.fetchImpl ?? fetch;
   const baseUrl = whoopBaseUrl(config);
-  const scopes = buildWhoopScopes(config.scopes);
+  const scopes = buildWhoopDeviceSyncScopes(config.scopes);
   const backfillDays = Math.max(1, config.backfillDays ?? DEFAULT_BACKFILL_DAYS);
   const reconcileDays = Math.max(1, config.reconcileDays ?? DEFAULT_RECONCILE_DAYS);
   const reconcileIntervalMs = Math.max(60_000, config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS);
   const webhookToleranceMs = Math.max(1_000, config.webhookTimestampToleranceMs ?? DEFAULT_WEBHOOK_TOLERANCE_MS);
   const timeoutMs = Math.max(1_000, config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
-  const descriptor = {
-    ...WHOOP_PROVIDER_DESCRIPTOR,
-    oauth: {
-      ...WHOOP_OAUTH,
-      defaultScopes: [...scopes],
-    },
-    sync: {
-      ...WHOOP_SYNC,
-      windows: {
-        backfillDays,
-        reconcileDays,
-        reconcileIntervalMs,
-      },
-    },
-  };
+  const descriptor = buildWhoopDeviceSyncRuntimeDescriptor(config);
 
   async function postTokenRequest(
     parameters: Record<string, string>,

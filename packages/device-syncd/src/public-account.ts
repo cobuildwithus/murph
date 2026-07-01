@@ -17,3 +17,5 @@ export function toRedactedPublicDeviceSyncAccount(
     metadata: redactPublicDeviceSyncMetadata(account.metadata),
   } satisfies PublicDeviceSyncAccount;
 }
+
+export { sanitizeStoredDeviceSyncMetadata } from "./shared.ts";

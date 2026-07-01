@@ -27,7 +27,7 @@ import {
 } from "./retell-payloads";
 
 interface HostedPhoneCallWebhookTx {
-  appendResultNotification(call: HostedPhoneCall): Promise<void>;
+  appendResultNotification(call: HostedPhoneCall): Promise<HostedPhoneCallResultNotificationAppend>;
   hostedPhoneCall: {
     findUnique(input: {
       where:
@@ -72,6 +72,16 @@ interface RetellWebhookCallTarget {
   providerCallIdData: {
     providerCallId?: string;
   };
+}
+
+export interface RetellCallAnalyzedHandlingResult {
+  notificationMailboxItemId: string | null;
+  notificationUserId: string | null;
+}
+
+interface HostedPhoneCallResultNotificationAppend {
+  notificationMailboxItemId: string;
+  notificationUserId: string;
 }
 
 const HOSTED_PHONE_CALL_RESULT_SUMMARY_MAX_LENGTH = 2_000;
@@ -122,23 +132,22 @@ export async function handleRetellCallEnded(input: {
 export async function handleRetellCallAnalyzed(input: {
   call: RetellCallPayload;
   prisma?: HostedPhoneCallWebhookStore;
-}): Promise<void> {
+}): Promise<RetellCallAnalyzedHandlingResult> {
   assertRetellStorageMode(input.call);
   const prisma = resolveHostedPhoneCallWebhookStore(input.prisma);
   const result = mapRetellCallAnalysis(input.call);
 
-  await prisma.$transaction(async (tx) => {
+  return await prisma.$transaction(async (tx) => {
     const target = await readRetellWebhookCallTarget({
       call: input.call,
       prisma: tx,
     });
     if (!target) {
-      return;
+      return emptyRetellCallAnalyzedHandlingResult();
     }
 
     if (target.call.analyzedAt && target.call.resultJson) {
-      await tx.appendResultNotification(target.call);
-      return;
+      return await tx.appendResultNotification(target.call);
     }
 
     const authorityWhere = readRetellCallAnalyzedAuthorityWhere({
@@ -146,7 +155,7 @@ export async function handleRetellCallAnalyzed(input: {
       providerCallId: input.call.call_id,
     });
     if (!authorityWhere) {
-      return;
+      return emptyRetellCallAnalyzedHandlingResult();
     }
 
     const updated = await tx.hostedPhoneCall.updateMany({
@@ -172,9 +181,9 @@ export async function handleRetellCallAnalyzed(input: {
         },
       });
       if (stored.analyzedAt && stored.resultJson) {
-        await tx.appendResultNotification(stored);
+        return await tx.appendResultNotification(stored);
       }
-      return;
+      return emptyRetellCallAnalyzedHandlingResult();
     }
 
     const stored = await tx.hostedPhoneCall.findUniqueOrThrow({
@@ -182,14 +191,14 @@ export async function handleRetellCallAnalyzed(input: {
         id: target.call.id,
       },
     });
-    await tx.appendResultNotification(stored);
+    return await tx.appendResultNotification(stored);
   });
 }
 
 async function appendPhoneCallResultNotificationTx(input: {
   call: HostedPhoneCall;
   prisma: Prisma.TransactionClient;
-}): Promise<void> {
+}): Promise<HostedPhoneCallResultNotificationAppend> {
   const call = input.call;
   if (!call?.resultJson) {
     throw hostedPhoneCallResultNotificationError(
@@ -224,7 +233,7 @@ async function appendPhoneCallResultNotificationTx(input: {
     result: result.data,
   });
   const notificationKey = `phone-call-result:${call.id}`;
-  await appendHostedMailboxEnvelopeTx({
+  const appended = await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: `assistant.notification.requested:${notificationKey}`,
       memberId: call.memberId,
@@ -242,6 +251,17 @@ async function appendPhoneCallResultNotificationTx(input: {
     }),
     tx: input.prisma,
   });
+  return {
+    notificationMailboxItemId: appended.item.id,
+    notificationUserId: appended.item.userId,
+  };
+}
+
+function emptyRetellCallAnalyzedHandlingResult(): RetellCallAnalyzedHandlingResult {
+  return {
+    notificationMailboxItemId: null,
+    notificationUserId: null,
+  };
 }
 
 function hostedPhoneCallResultNotificationError(

@@ -1186,6 +1186,28 @@ describe("resolveHostedAiUsageGate", () => {
     }));
   });
 
+  it("denies Family-sponsored members when the group billing period is missing", async () => {
+    const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.not_started,
+      familyAccessActive: true,
+      familyPeriodEnd: null,
+      familyPeriodStart: null,
+      findUniquePeriod: null,
+      spentUsdMicros: 0n,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-09T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: false,
+      reason: "hosted_access_inactive",
+      userNotice: null,
+    });
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+  });
+
   it("does not treat non-Family group billing as sponsored access", async () => {
     const prisma = createGatePrisma({
       billingPhase: "trial",
@@ -2164,6 +2186,8 @@ function createGatePrisma(input: {
   executeRaw?: ReturnType<typeof vi.fn>;
   familyAccessActive?: boolean;
   familyBillingPlanCode?: string | null;
+  familyPeriodEnd?: Date | null;
+  familyPeriodStart?: Date | null;
   findUniquePeriod?: {
     billingPlanCode: string;
     blockedAt?: Date | null;
@@ -2193,6 +2217,12 @@ function createGatePrisma(input: {
 }) {
   const periodStart = input.periodStart ?? new Date("2026-03-01T00:00:00.000Z");
   const periodEnd = input.periodEnd ?? new Date("2026-04-01T00:00:00.000Z");
+  const familyPeriodStart = input.familyPeriodStart === undefined
+    ? periodStart
+    : input.familyPeriodStart;
+  const familyPeriodEnd = input.familyPeriodEnd === undefined
+    ? periodEnd
+    : input.familyPeriodEnd;
   const threadContainer = input.threadContainerLimitUsdMicros == null
     ? null
     : {
@@ -2280,8 +2310,8 @@ function createGatePrisma(input: {
             billedSeatCount: 2,
             currentBillingPlanCode: input.familyBillingPlanCode ?? "launch_family_monthly",
             currentBillingPhase: "paid",
-            currentPeriodEnd: periodEnd,
-            currentPeriodStart: periodStart,
+            currentPeriodEnd: familyPeriodEnd,
+            currentPeriodStart: familyPeriodStart,
           }
         : null),
     },

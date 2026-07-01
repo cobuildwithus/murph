@@ -35,6 +35,25 @@ type NotificationTurnProviderInput = Parameters<
   typeof executeCodexTurnWithRecovery
 >[0]
 
+type NotificationTurnDeliverMessageResult =
+  | {
+    delivery: null
+    intent: {
+      intentId: string
+    }
+    kind: 'sent'
+    session: AssistantSession | null
+  }
+  | {
+    delivery: null
+    deliveryError: null
+    intent: {
+      intentId: string
+    }
+    kind: 'queued'
+    session: AssistantSession | null
+  }
+
 const CODEX_MODEL_PROVIDER_CONFIG = {
   id: 'vercel-ai-gateway',
   name: 'Vercel AI Gateway',
@@ -52,6 +71,7 @@ afterEach(() => {
   vi.doUnmock('@murphai/operator-config/assistant-backend')
   vi.doUnmock('../src/assistant/runtime-state-service.js')
   vi.doUnmock('../src/assistant/execution-context.js')
+  vi.doUnmock('../src/assistant/outbox.js')
   vi.doUnmock('../src/assistant/session-resolution.js')
   vi.doUnmock('../src/assistant/turn-plan.js')
   vi.doUnmock('../src/assistant/codex-turn-runner.js')
@@ -372,6 +392,48 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   expect(JSON.stringify(rawEvent)).not.toContain('identity-initial')
   expect(JSON.stringify(rawEvent)).not.toContain('thread-initial')
   expect(JSON.stringify(rawEvent)).not.toContain(initialSession.sessionId)
+})
+
+test('sendAssistantNotificationLocal aborts before outbound delivery when the provider signal trips', async () => {
+  const abortController = new AbortController()
+  const abortError = new VaultCliError(
+    'ASSISTANT_CRON_FOREGROUND_YIELDED',
+    'Assistant cron yielded to fresh foreground input.',
+  )
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'summary',
+      text: 'stale reminder text',
+    }),
+  })
+  const {
+    deliverMessage,
+    mocks,
+    sendAssistantNotificationLocal,
+  } = await loadNotificationTurnHarness({
+    onExecuteCodexTurnWithRecovery: async () => {
+      abortController.abort(abortError)
+      return {
+        kind: 'succeeded',
+        providerTurn: providerResult,
+      }
+    },
+    providerResult,
+    turnId: 'turn-notification-aborted-before-delivery',
+  })
+
+  await expect(
+    sendAssistantNotificationLocal({
+      abortSignal: abortController.signal,
+      instructions: 'Send the scheduled reminder.',
+      vault: '/vaults/notification-abort-test',
+    }),
+  ).rejects.toBe(abortError)
+
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(mocks.createAssistantRuntimeStateService).not.toHaveBeenCalled()
 })
 
 test('sendAssistantNotificationLocal sends required exact text without a provider turn', async () => {
@@ -1540,6 +1602,164 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
   expect(deliverMessage).not.toHaveBeenCalled()
 })
 
+test('sendAssistantNotificationLocal defers queue-only notification commit until delivery is accepted', async () => {
+  const providerSession = createAssistantSession()
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Queued scheduled reminder.',
+      text: 'Remember to sleep.',
+    }),
+    session: providerSession,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-notification-deferred-queue',
+    })
+  const events: string[] = []
+  deliverMessage.mockImplementationOnce(async () => {
+    events.push('deliver')
+    return {
+      delivery: null,
+      deliveryError: null,
+      intent: {
+        intentId: 'intent-queued-before-commit',
+      },
+      kind: 'queued',
+      session: providerSession,
+    }
+  })
+  const commitError = new VaultCliError(
+    'ASSISTANT_CRON_FOREGROUND_YIELDED',
+    'Assistant cron yielded to fresh foreground input.',
+  )
+
+  await expect(
+    sendAssistantNotificationLocal({
+      beforeCommit: (context) => {
+        events.push('beforeCommit')
+        expect(context).toEqual(expect.objectContaining({
+          deliveryOutcome: expect.objectContaining({
+            intentId: 'intent-queued-before-commit',
+            kind: 'queued',
+          }),
+          response: 'Remember to sleep.',
+        }))
+        throw commitError
+      },
+      deferCommitUntilDeliveryAccepted: true,
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: null,
+      },
+      instructions: 'Queue this scheduled reminder.',
+      vault: '/vaults/deferred-queue',
+    }),
+  ).rejects.toBe(commitError)
+
+  expect(events).toEqual(['deliver', 'beforeCommit'])
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  const runtimeState = mocks.createAssistantRuntimeStateService.mock.results[0]?.value
+  expect(runtimeState?.turns.createReceipt).not.toHaveBeenCalled()
+  expect(runtimeState?.turns.finalizeReceipt).not.toHaveBeenCalled()
+})
+
+test('sendAssistantNotificationLocal abandons queued delivery when deferred commit fails', async () => {
+  const providerSession = createAssistantSession()
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Queued scheduled reminder.',
+      text: 'Remember to sleep.',
+    }),
+    session: providerSession,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-notification-deferred-queue-commit-failure',
+    })
+  deliverMessage.mockResolvedValueOnce({
+    delivery: null,
+    deliveryError: null,
+    intent: {
+      intentId: 'intent-queued-commit-failure',
+    },
+    kind: 'queued',
+    session: providerSession,
+  })
+  const commitError = new Error('durable notification commit failed')
+  mocks.persistAssistantTurnAndSession.mockRejectedValueOnce(commitError)
+
+  await expect(
+    sendAssistantNotificationLocal({
+      deferCommitUntilDeliveryAccepted: true,
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: null,
+      },
+      instructions: 'Queue this scheduled reminder.',
+      vault: '/vaults/deferred-queue-commit-failure',
+    }),
+  ).rejects.toBe(commitError)
+
+  const runtimeState = mocks.createAssistantRuntimeStateService.mock.results[0]?.value
+  expect(runtimeState?.turns.createReceipt).toHaveBeenCalledOnce()
+  expect(runtimeState?.turns.finalizeReceipt).not.toHaveBeenCalled()
+  expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith({
+    error: commitError,
+    intentId: 'intent-queued-commit-failure',
+    onlyCurrentStatuses: ['pending', 'retryable', 'awaiting_approval'],
+    status: 'abandoned',
+    vault: '/vaults/deferred-queue-commit-failure',
+  })
+})
+
+test('sendAssistantNotificationLocal runs beforeCommit before persisting skip decisions', async () => {
+  const providerSession = createAssistantSession()
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'skip',
+      privateSummary: 'No notification required.',
+    }),
+    session: providerSession,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-notification-skip-before-commit',
+    })
+  const commitError = new VaultCliError(
+    'ASSISTANT_CRON_FOREGROUND_YIELDED',
+    'Assistant cron yielded to fresh foreground input.',
+  )
+
+  await expect(
+    sendAssistantNotificationLocal({
+      beforeCommit: (context) => {
+        expect(context).toEqual({
+          decision: {
+            kind: 'skip',
+            privateSummary: 'No notification required.',
+          },
+          deliveryOutcome: null,
+          response: null,
+        })
+        throw commitError
+      },
+      executionContext: {
+        hosted: null,
+      },
+      instructions: 'Decide if the operator should be interrupted.',
+      vault: '/vaults/skip-before-commit',
+    }),
+  ).rejects.toBe(commitError)
+
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+})
+
 test('sendAssistantNotificationLocal lets hosted shared planning stabilize provider cwd', async () => {
   const previousCwd = process.cwd()
   const vault = await mkdtemp(path.join(tmpdir(), 'assistant-notification-hosted-cwd-'))
@@ -2415,7 +2635,7 @@ async function loadNotificationTurnHarness(input: {
   providerResult: ExecutedAssistantProviderTurnResult
   turnId: string
 }) {
-  const deliverMessage = vi.fn(async () => ({
+  const deliverMessage = vi.fn(async (): Promise<NotificationTurnDeliverMessageResult> => ({
     delivery: null,
     intent: {
       intentId: 'intent-notification-test',
@@ -2453,6 +2673,7 @@ async function loadNotificationTurnHarness(input: {
       async (clearInput: { session: AssistantSession }) => clearInput.session,
     ),
     normalizeAssistantExecutionContext: vi.fn((value) => value),
+    markAssistantOutboxIntentMirrorTerminalById: vi.fn(async () => null),
     resolveAssistantExecutionDefaultTarget: vi.fn((targetInput) =>
       targetInput.executionContext?.hosted?.defaultTarget ?? targetInput.fallbackTarget,
     ),
@@ -2488,6 +2709,14 @@ async function loadNotificationTurnHarness(input: {
   vi.doMock('../src/assistant/runtime-state-service.js', () => ({
     createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
   }))
+  vi.doMock('../src/assistant/outbox.js', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../src/assistant/outbox.js')>()
+    return {
+      ...actual,
+      markAssistantOutboxIntentMirrorTerminalById:
+        mocks.markAssistantOutboxIntentMirrorTerminalById,
+    }
+  })
   vi.doMock('../src/assistant/execution-context.js', () => ({
     normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
     resolveAssistantExecutionDefaultTarget:

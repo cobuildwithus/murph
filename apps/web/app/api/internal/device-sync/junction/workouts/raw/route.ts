@@ -1,7 +1,5 @@
-import { readConfiguredJunctionDeviceSyncProviderConfig } from "@murphai/device-syncd/config";
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
-import { JunctionClient } from "@murphai/device-syncd/providers/junction-client";
-import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
+import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
 
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/http";
@@ -16,6 +14,9 @@ type HostedDeviceSyncControlPlane = ReturnType<typeof createHostedDeviceSyncCont
 export const GET = withJsonError(async (request: Request): Promise<Response> => {
   assertJunctionRawWorkoutDiagnosticAllowed(request);
 
+  const { readConfiguredJunctionDeviceSyncProviderConfig } = await import(
+    "@murphai/device-syncd/providers/junction-config"
+  );
   const config = readConfiguredJunctionDeviceSyncProviderConfig(process.env);
   if (!config) {
     throw deviceSyncError({
@@ -43,6 +44,7 @@ export const GET = withJsonError(async (request: Request): Promise<Response> => 
     });
   }
 
+  const { JunctionClient } = await import("@murphai/device-syncd/providers/junction-client");
   const records = await new JunctionClient(config).listSummary({
     resource: "workouts",
     sourceProviderSlug,

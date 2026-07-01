@@ -1,10 +1,10 @@
-import {
-  deviceSyncError,
-  sanitizeStoredDeviceSyncMetadata,
-  type DeviceSyncAccount,
-  type PublicDeviceSyncAccount,
-} from "@murphai/device-syncd/public-ingress";
-import type { DeviceAccountCredentialKind } from "@murphai/device-syncd/types";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
+import { sanitizeStoredDeviceSyncMetadata } from "@murphai/device-syncd/public-account";
+import type {
+  DeviceAccountCredentialKind,
+  DeviceSyncAccount,
+  PublicDeviceSyncAccount,
+} from "@murphai/device-syncd/types";
 import {
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,

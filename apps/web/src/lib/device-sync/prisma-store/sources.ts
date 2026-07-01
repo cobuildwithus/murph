@@ -3,7 +3,7 @@ import type {
   DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceStatus,
 } from "@murphai/device-syncd/client";
-import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import {
   generateHostedRandomPrefixedId,

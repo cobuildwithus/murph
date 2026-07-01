@@ -16,9 +16,17 @@ import {
   buildProviderRequestDiagnostics,
   extractProviderQueryParameterNames,
 } from "./provider-diagnostics.ts";
+import {
+  assertValidJunctionClientConfig,
+  resolveJunctionBaseUrl,
+} from "../config/junction-client-config.ts";
+import type { JunctionEnvironment, JunctionRegion } from "../config/provider-types.ts";
 
-export type JunctionEnvironment = "sandbox" | "production";
-export type JunctionRegion = "us" | "eu";
+export {
+  assertValidJunctionClientConfig,
+  resolveJunctionBaseUrl,
+} from "../config/junction-client-config.ts";
+export type { JunctionEnvironment, JunctionRegion } from "../config/provider-types.ts";
 
 export interface JunctionClientConfig {
   apiKey: string;
@@ -113,52 +121,6 @@ export const JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS = Object.freeze([
   "junction.com",
   "tryvital.io",
 ] as const);
-
-const JUNCTION_ENVIRONMENT_MATRIX: Readonly<Record<
-  `${JunctionEnvironment}:${JunctionRegion}`,
-  { apiKeyPrefix: string; baseUrl: string }
->> = Object.freeze({
-  "production:us": {
-    apiKeyPrefix: "pk_us_",
-    baseUrl: "https://api.us.junction.com/",
-  },
-  "production:eu": {
-    apiKeyPrefix: "pk_eu_",
-    baseUrl: "https://api.eu.junction.com/",
-  },
-  "sandbox:us": {
-    apiKeyPrefix: "sk_us_",
-    baseUrl: "https://api.sandbox.us.junction.com/",
-  },
-  "sandbox:eu": {
-    apiKeyPrefix: "sk_eu_",
-    baseUrl: "https://api.sandbox.eu.junction.com/",
-  },
-});
-
-export function resolveJunctionBaseUrl(
-  config: Pick<JunctionClientConfig, "environment" | "region">,
-): string {
-  const expected = requireJunctionEnvironmentProfile(config.environment, config.region);
-  return normalizeJunctionBaseUrl(expected.baseUrl);
-}
-
-export function assertValidJunctionClientConfig(config: JunctionClientConfig): void {
-  const profile = requireJunctionEnvironmentProfile(config.environment, config.region);
-  const apiKey = normalizeString(config.apiKey);
-
-  if (!apiKey) {
-    throw new TypeError("JUNCTION_API_KEY must be a non-empty string.");
-  }
-
-  if (!apiKey.startsWith(profile.apiKeyPrefix)) {
-    throw new TypeError(
-      `JUNCTION_API_KEY must start with ${profile.apiKeyPrefix} for ${config.environment}/${config.region}.`,
-    );
-  }
-
-  resolveJunctionBaseUrl(config);
-}
 
 export class JunctionClient {
   private readonly allowedLinkHosts: readonly string[];
@@ -703,32 +665,6 @@ function safeProviderPathname(path: string): string {
   }
 }
 
-function requireJunctionEnvironmentProfile(environment: JunctionEnvironment, region: JunctionRegion) {
-  const profile = JUNCTION_ENVIRONMENT_MATRIX[`${environment}:${region}`];
-  if (!profile) {
-    throw new TypeError("Junction environment and region must be one of sandbox|production and us|eu.");
-  }
-
-  return profile;
-}
-
-function normalizeJunctionBaseUrl(value: string): string {
-  let url: URL;
-
-  try {
-    url = new URL(value);
-  } catch (error) {
-    throw new TypeError("Junction API base URL must be a valid absolute URL.", { cause: error });
-  }
-
-  if (url.search || url.hash) {
-    throw new TypeError("Junction API base URL must not include a query string or fragment.");
-  }
-
-  url.pathname = `${url.pathname.replace(/\/+$/u, "")}/`;
-  return url.toString();
-}
-
 export function isAllowedJunctionLinkHost(
   hostname: string,
   allowedLinkHosts: readonly string[] = JUNCTION_DEFAULT_ALLOWED_LINK_HOSTS,
@@ -829,25 +765,29 @@ function parseJunctionProviderConnection(value: unknown): JunctionProviderConnec
   }
 
   const record = value as Record<string, unknown>;
-  const origin = resolveJunctionOrigin(record);
+  const rawOrigin = resolveJunctionOrigin(record);
   const slug =
     normalizeSourceSlug(record.slug)
     ?? normalizeSourceSlug(record.sourceProviderSlug)
     ?? normalizeSourceSlug(record.source_provider_slug)
     ?? normalizeSourceSlug(record.provider_slug)
     ?? normalizeSourceSlug(record.provider)
-    ?? normalizeSourceSlug(origin.sourceProviderSlug);
+    ?? normalizeSourceSlug(rawOrigin.sourceProviderSlug);
 
   if (!slug) {
     return null;
   }
+  const source = readJunctionProviderConnectionSource(record);
+  const origin = resolveJunctionOrigin(record, {
+    sourceProviderSlug: rawOrigin.sourceProviderSlug ?? slug,
+  });
 
   return {
     id: readJunctionProviderConnectionId(record),
     slug,
     name: normalizeString(record.name) ?? normalizeString(record.display_name) ?? null,
     status: normalizeString(record.status) ?? "unknown",
-    source: readJunctionProviderConnectionSource(record),
+    source,
     origin: {
       sourceProviderSlug: origin.sourceProviderSlug,
       sourceInstanceId: origin.sourceInstanceId,

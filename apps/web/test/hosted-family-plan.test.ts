@@ -76,6 +76,10 @@ import {
 } from "@/src/lib/hosted-onboarding/family-plan";
 
 const TEST_CONTACT_PRIVACY_KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=";
+const FAMILY_STRIPE_PERIOD_START_SECONDS = 1_771_948_800;
+const FAMILY_STRIPE_PERIOD_END_SECONDS = 1_774_540_800;
+const FAMILY_STRIPE_PERIOD_START = new Date(FAMILY_STRIPE_PERIOD_START_SECONDS * 1000);
+const FAMILY_STRIPE_PERIOD_END = new Date(FAMILY_STRIPE_PERIOD_END_SECONDS * 1000);
 type MockFn = ReturnType<typeof vi.fn>;
 type FamilyPlanTxMock = Prisma.TransactionClient & {
   $queryRaw: MockFn;
@@ -1224,6 +1228,39 @@ describe("hosted Family plan", () => {
     );
   });
 
+  it("stores Family billing periods from the seat item when Stripe omits top-level periods", async () => {
+    const tx = createTxMock();
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      },
+      subscription: makeFamilyStripeSubscription({
+        periodLocation: "subscription_item",
+      }),
+      tx,
+    })).resolves.toMatchObject({
+      activations: [
+        { memberId: "member_owner" },
+        { memberId: "member_mom" },
+      ],
+      groupId: "hbag_family",
+    });
+
+    expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        currentBillingPhase: "paid",
+        currentPeriodEnd: FAMILY_STRIPE_PERIOD_END,
+        currentPeriodStart: FAMILY_STRIPE_PERIOD_START,
+      }),
+      update: expect.objectContaining({
+        currentBillingPhase: "paid",
+        currentPeriodEnd: FAMILY_STRIPE_PERIOD_END,
+        currentPeriodStart: FAMILY_STRIPE_PERIOD_START,
+      }),
+    }));
+  });
+
   it("reconciles active Family billing while skipping direct-paid members during activation", async () => {
     const tx = createTxMock();
     const eventCreatedAt = new Date("2026-06-18T12:30:00.000Z");
@@ -1709,6 +1746,7 @@ describe("hosted Family plan", () => {
         kind: "hosted_family_plan",
         ownerMemberId: "member_owner",
       },
+      periodLocation: "subscription_item",
       priceId: "price_family",
       subscriptionId: "sub_direct",
     });
@@ -1763,6 +1801,8 @@ describe("hosted Family plan", () => {
       create: expect.objectContaining({
         billedSeatCount: 2,
         currentBillingPhase: "paid",
+        currentPeriodEnd: FAMILY_STRIPE_PERIOD_END,
+        currentPeriodStart: FAMILY_STRIPE_PERIOD_START,
         stripeSubscriptionLookupKey: expect.stringMatching(/^hbidx:stripe-subscription:v1:/u),
       }),
     }));
@@ -2586,21 +2626,29 @@ function makeFamilyStripeSubscription(input: {
   duplicateFamilyItems?: boolean;
   itemQuantity?: number;
   metadata?: Stripe.Metadata;
+  periodLocation?: "subscription" | "subscription_item";
   priceId?: string;
   subscriptionId?: string;
 } = {}): Stripe.Subscription {
   const subscriptionId = input.subscriptionId ?? "sub_family";
   const priceId = input.priceId ?? "price_family";
+  const periodOnSubscriptionItem = input.periodLocation === "subscription_item";
   const familyItem = {
     id: "si_family",
     quantity: input.itemQuantity ?? 4,
     price: {
       id: priceId,
     },
+    ...(periodOnSubscriptionItem
+      ? {
+          current_period_end: FAMILY_STRIPE_PERIOD_END_SECONDS,
+          current_period_start: FAMILY_STRIPE_PERIOD_START_SECONDS,
+        }
+      : {}),
   } as Stripe.SubscriptionItem;
   const subscription: Stripe.Subscription & {
-    current_period_end: number;
-    current_period_start: number;
+    current_period_end?: number;
+    current_period_start?: number;
   } = {
     application: null,
     application_fee_percent: null,
@@ -2625,8 +2673,12 @@ function makeFamilyStripeSubscription(input: {
     currency: "usd",
     customer: input.customerId ?? "cus_family",
     customer_account: null,
-    current_period_end: 1_774_540_800,
-    current_period_start: 1_771_948_800,
+    ...(periodOnSubscriptionItem
+      ? {}
+      : {
+          current_period_end: FAMILY_STRIPE_PERIOD_END_SECONDS,
+          current_period_start: FAMILY_STRIPE_PERIOD_START_SECONDS,
+        }),
     days_until_due: null,
     default_payment_method: null,
     default_source: null,
@@ -2704,7 +2756,7 @@ function createPendingInvite(overrides: Partial<{
     acceptedByMemberId: null,
     channel: "family",
     createdAt: new Date("2026-06-18T12:00:00.000Z"),
-    expiresAt: new Date("2026-07-01T12:00:00.000Z"),
+    expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
     group: {
       billingStatus: HostedBillingStatus.active,
       id: "hbag_family",

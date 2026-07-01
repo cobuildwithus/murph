@@ -1,25 +1,15 @@
-import {
-  resolveDeviceSyncWebhookPreflightResponse,
-} from "@murphai/device-syncd/public-ingress";
 import type { DeviceSyncWebhookPreflightResponse } from "@murphai/device-syncd/types";
 
-import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
 import { jsonOk, resolveDecodedRouteParam, withJsonError } from "@/src/lib/device-sync/http";
+import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
 
 export const GET = withJsonError(async (
   request: Request,
   context: { params: Promise<{ provider: string }> },
 ) => {
   const decodedProvider = await resolveDecodedRouteParam(context.params, "provider");
-  const controlPlane = createHostedDeviceSyncControlPlane(request);
-  const preflight = await resolveDeviceSyncWebhookPreflightResponse({
-    provider: decodedProvider,
-    registry: controlPlane.registry,
-    method: request.method,
-    url: new URL(request.url),
-    headers: request.headers,
-    rawBody: Buffer.alloc(0),
-  });
+  const publicIngress = createHostedDeviceSyncPublicIngressService(request);
+  const preflight = await publicIngress.resolveWebhookPreflight(decodedProvider, Buffer.alloc(0));
 
   if (preflight) {
     return createWebhookPreflightResponse(preflight);
@@ -36,22 +26,15 @@ export const POST = withJsonError(async (
   context: { params: Promise<{ provider: string }> },
 ) => {
   const provider = await resolveDecodedRouteParam(context.params, "provider");
-  const controlPlane = createHostedDeviceSyncControlPlane(request);
-  const rawBody = await controlPlane.readWebhookRawBody();
-  const preflight = await resolveDeviceSyncWebhookPreflightResponse({
-    provider,
-    registry: controlPlane.registry,
-    method: request.method,
-    url: new URL(request.url),
-    headers: request.headers,
-    rawBody,
-  });
+  const publicIngress = createHostedDeviceSyncPublicIngressService(request);
+  const rawBody = await publicIngress.readWebhookRawBody();
+  const preflight = await publicIngress.resolveWebhookPreflight(provider, rawBody);
 
   if (preflight) {
     return createWebhookPreflightResponse(preflight);
   }
 
-  const result = await controlPlane.handleWebhook(provider, rawBody);
+  const result = await publicIngress.handleWebhook(provider, rawBody);
   return jsonOk(result, result.orphaned ? 202 : 200);
 });
 

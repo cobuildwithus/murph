@@ -185,9 +185,11 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
   });
   if (existingRegistration !== null) {
     const existingWebhookSecret = existingRegistration.subscription.signingSecret;
-    if (
+    const existingRegistrationIsExact =
       existingRegistration.eventStatus === "exact"
-      && existingRegistration.phoneNumberStatus === "exact"
+      && existingRegistration.phoneNumberStatus === "exact";
+    if (
+      existingRegistrationIsExact
       && existingWebhookSecret !== null
     ) {
       if (cachePath) {
@@ -214,6 +216,44 @@ export async function registerHostedLocalLinqWebhookSubscription(input: {
       return {
         webhookSecret: existingWebhookSecret,
         webhookSecretSource: "existing-provider",
+      };
+    }
+    if (
+      existingRegistrationIsExact
+      && existingRegistration.secretStatus === "unavailable"
+    ) {
+      if (!configuredWebhookSecret) {
+        throw new Error(
+          [
+            `Local webhook target ${input.setup.targetUrl} is already registered for ${phoneNumberLabel},`,
+            "but Linq did not return its signing secret and no local LINQ_WEBHOOK_SECRET is configured.",
+            "Set LINQ_WEBHOOK_SECRET to the existing subscription secret or recreate the subscription manually.",
+          ].join(" "),
+        );
+      }
+      const hasVerifiedLocalSecret = cachePath
+        ? await readVerifiedLinqWebhookRegistrationCache(cachePath, {
+          phoneNumbers: input.setup.phoneNumbers,
+          subscriptionId: existingRegistration.subscription.id,
+          targetUrl: input.setup.targetUrl,
+          webhookSecret: configuredWebhookSecret,
+        })
+        : false;
+      if (!hasVerifiedLocalSecret) {
+        throw new Error(
+          [
+            `Local webhook target ${input.setup.targetUrl} is already registered for ${phoneNumberLabel},`,
+            "but Linq did not return its signing secret and the local LINQ_WEBHOOK_SECRET could not be verified against the registration cache.",
+            "Refusing to create a duplicate exact subscription.",
+          ].join(" "),
+        );
+      }
+      (input.stderrTarget ?? process.stderr).write(
+        `[linq] Local webhook target ${input.setup.targetUrl} is already registered for ${phoneNumberLabel}; using verified local signing secret.\n`,
+      );
+      return {
+        webhookSecret: configuredWebhookSecret,
+        webhookSecretSource: "configured",
       };
     }
     if (existingRegistration.eventStatus === "different") {
@@ -604,12 +644,56 @@ function createLinqWebhookRegistrationFingerprint(input: {
 }): string {
   const payload = JSON.stringify({
     event: HOSTED_LOCAL_LINQ_WEBHOOK_EVENT,
-    phoneNumbers: input.phoneNumbers ?? null,
+    phoneNumbers: input.phoneNumbers === null
+      ? null
+      : normalizeStringSet(input.phoneNumbers),
     targetUrl: input.targetUrl,
   });
   return createHmac("sha256", input.webhookSecret)
     .update(payload)
     .digest("hex");
+}
+
+async function readVerifiedLinqWebhookRegistrationCache(
+  cachePath: string,
+  input: {
+    phoneNumbers: readonly string[] | null;
+    subscriptionId: string | null;
+    targetUrl: string;
+    webhookSecret: string;
+  },
+): Promise<boolean> {
+  let text: string;
+  try {
+    text = await readFile(cachePath, "utf8");
+  } catch {
+    return false;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return false;
+  }
+  if (!isPlainRecord(parsed) || parsed.secretVerified !== true) {
+    return false;
+  }
+  if (normalizeOptionalString(parsed.targetUrl) !== input.targetUrl) {
+    return false;
+  }
+
+  const cachedSubscriptionId = normalizeOptionalString(parsed.subscriptionId);
+  if (
+    cachedSubscriptionId !== null
+    && input.subscriptionId !== null
+    && cachedSubscriptionId !== input.subscriptionId
+  ) {
+    return false;
+  }
+
+  return normalizeOptionalString(parsed.fingerprint)
+    === createLinqWebhookRegistrationFingerprint(input);
 }
 
 async function writeLinqWebhookRegistrationCache(

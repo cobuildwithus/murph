@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import { createBearerRequest, createRouteContext } from "./route-test-helpers";
 
@@ -15,15 +15,15 @@ function createJsonPostBearerRequest(url: string, bearerToken: string, body: unk
 }
 
 const mocks = vi.hoisted(() => ({
-  createHostedDeviceSyncControlPlane: vi.fn(),
+  createHostedDeviceSyncAgentSessionService: vi.fn(),
   exportTokenBundle: vi.fn(),
   refreshTokenBundle: vi.fn(),
   requireAgentSession: vi.fn(),
   revokeAgentSession: vi.fn(),
 }));
 
-vi.mock("@/src/lib/device-sync/control-plane", () => ({
-  createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
+vi.mock("@/src/lib/device-sync/agent-session-service", () => ({
+  createHostedDeviceSyncAgentSessionService: mocks.createHostedDeviceSyncAgentSessionService,
 }));
 
 type ExportRouteModule = typeof import("../app/api/device-sync/agent/connections/[connectionId]/export-token-bundle/route");
@@ -56,7 +56,7 @@ describe("hosted device-sync agent token routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+    mocks.createHostedDeviceSyncAgentSessionService.mockReturnValue({
       requireAgentSession: mocks.requireAgentSession,
       exportTokenBundle: mocks.exportTokenBundle,
       refreshTokenBundle: mocks.refreshTokenBundle,

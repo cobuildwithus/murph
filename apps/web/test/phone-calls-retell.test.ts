@@ -110,6 +110,68 @@ describe("Retell phone-call runtime", () => {
     expect(body).not.toHaveProperty("agent_override");
   });
 
+  it("passes a configured Retell webhook public base as a per-call agent override", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
+    vi.stubEnv("RETELL_AGENT_ID", "agent_123");
+    vi.stubEnv("RETELL_AGENT_VERSION", "prod");
+    vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+    vi.stubEnv("RETELL_WEBHOOK_PUBLIC_BASE_URL", "https://local-tunnel.example.test");
+    const fetchCalls: Array<{
+      init?: RequestInit;
+      url: RequestInfo | URL;
+    }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      fetchCalls.push({ init, url });
+      return new Response(JSON.stringify({
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      }), {
+        headers: {
+          "content-type": "application/json",
+        },
+        status: 200,
+      });
+    };
+
+    await createRetellPhoneCallRuntime({ fetchImpl }).start({
+      brief: VALID_BRIEF,
+      id: "hpc_123",
+      memberId: "member_123",
+      transferNumber: null,
+    });
+
+    const body = JSON.parse(String(fetchCalls[0]!.init?.body));
+    expect(body.agent_override).toEqual({
+      agent: {
+        webhook_events: ["call_ended", "call_analyzed"],
+        webhook_url: "https://local-tunnel.example.test/api/retell/webhook",
+      },
+    });
+    expect(body.retell_llm_dynamic_variables).toMatchObject({
+      murph_public_base_url: "https://local-tunnel.example.test",
+    });
+  });
+
+  it("rejects malformed Retell webhook public bases before creating a call", async () => {
+    vi.stubEnv("RETELL_API_KEY", "retell-api-key");
+    vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
+    vi.stubEnv("RETELL_AGENT_ID", "agent_123");
+    vi.stubEnv("RETELL_AGENT_VERSION", "prod");
+    vi.stubEnv("RETELL_AGENT_DATA_STORAGE_SETTING", "basic_attributes_only");
+    vi.stubEnv("RETELL_WEBHOOK_PUBLIC_BASE_URL", "http://localhost:3000");
+    const fetchImpl = vi.fn<typeof fetch>();
+
+    await expect(createRetellPhoneCallRuntime({ fetchImpl }).start({
+      brief: VALID_BRIEF,
+      id: "hpc_123",
+      memberId: "member_123",
+      transferNumber: null,
+    })).rejects.toThrow("RETELL_WEBHOOK_PUBLIC_BASE_URL must be a valid HTTPS origin.");
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("stops the Retell call and fails when the returned storage mode is not basic attributes only", async () => {
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
     vi.stubEnv("RETELL_FROM_NUMBER", "+12125559999");
@@ -388,15 +450,23 @@ describe("Retell phone-call result handling", () => {
       data_storage_setting: "basic_attributes_only",
     };
 
-    await handleRetellCallAnalyzed({
+    const firstResult = await handleRetellCallAnalyzed({
       call,
       prisma: store.prisma,
     });
-    await handleRetellCallAnalyzed({
+    const secondResult = await handleRetellCallAnalyzed({
       call,
       prisma: store.prisma,
     });
 
+    expect(firstResult).toEqual({
+      notificationMailboxItemId: "mailbox_hpc_123",
+      notificationUserId: "member_123",
+    });
+    expect(secondResult).toEqual({
+      notificationMailboxItemId: "mailbox_hpc_123",
+      notificationUserId: "member_123",
+    });
     expect(store.updateManyCalls).toHaveLength(1);
     expect(store.updateManyCalls[0]).toMatchObject({
       data: {
@@ -924,6 +994,10 @@ function createWebhookStore(input: {
     appendResultNotification: async (call) => {
       appendResultNotificationCalls.push(call);
       await input.appendResultNotification?.(call);
+      return {
+        notificationMailboxItemId: `mailbox_${call.id}`,
+        notificationUserId: call.memberId,
+      };
     },
     hostedPhoneCall: {
       findUnique: async (args) => {

@@ -1,12 +1,12 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
-import { getGeneratedHealthCommonsWebBiomarkerIndex } from "@murphai/health-commons/runtime";
 
 import {
   UploadLabsActionFallback,
   UploadLabsMurphContactAction,
 } from "@/src/components/home/upload-labs-action";
 import { shouldShowHomeDeviceSyncStep } from "@/src/lib/device-sync/home-onboarding";
+import { getGeneratedBiomarkerIndex } from "@/src/lib/health-commons/generated-biomarker-artifacts";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
@@ -23,7 +23,7 @@ export const metadata: Metadata = createMurphPageMetadata({
 
 export default async function BiomarkersPage() {
   const auth = await getHostedDashboardPageAuthSnapshot();
-  const index = getGeneratedHealthCommonsWebBiomarkerIndex();
+  const index = getGeneratedBiomarkerIndex();
   const biomarkers: BiomarkerBrowseEntry[] = index.biomarkers
     .filter((entry) => entry.published && !entry.hidden)
     .map((entry) => ({

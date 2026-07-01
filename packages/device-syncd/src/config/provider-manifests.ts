@@ -1,102 +1,53 @@
 import {
-  junctionProviderAdapter,
-  ouraProviderAdapter,
-  stravaProviderAdapter,
-  whoopProviderAdapter,
-  type DeviceProviderAdapter,
-} from "@murphai/importers";
+  JUNCTION_ALLOWED_SUMMARY_RESOURCES,
+  JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+  JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+  JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+  JUNCTION_KNOWN_TIMESERIES_RESOURCES,
+  normalizeJunctionResourceName,
+} from "@murphai/importers/device-providers/junction-resources";
 import {
   JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
   OURA_DEVICE_PROVIDER_DESCRIPTOR,
   STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
   WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
   normalizeDeviceProviderKey,
+  requireDeviceProviderOAuthDescriptor,
+  requireDeviceProviderSyncDescriptor,
   resolveDeviceProviderConnectionDescriptor,
   type DeviceProviderDescriptor,
 } from "@murphai/importers/device-providers/provider-descriptors";
 
 import {
-  createJunctionDeviceSyncProvider,
-  JUNCTION_PROVIDER_CONFIG_KEY,
-} from "../providers/junction.ts";
-import { assertValidJunctionClientConfig } from "../providers/junction-client.ts";
-import { createOuraDeviceSyncProvider } from "../providers/oura.ts";
-import { createStravaDeviceSyncProvider } from "../providers/strava.ts";
-import { createWhoopDeviceSyncProvider } from "../providers/whoop.ts";
-
-import {
-  optionalEnv,
-  parseCsvEnv,
-  parseIntegerEnv,
-  readOptionalCredentialPair,
-} from "./provider-config-helpers.ts";
+  readConfiguredJunctionDeviceSyncProviderConfig,
+  readConfiguredOuraDeviceSyncProviderConfig,
+  readConfiguredStravaDeviceSyncProviderConfig,
+  readConfiguredWhoopDeviceSyncProviderConfig,
+} from "./provider-configs.ts";
 import {
   configuredDeviceSyncProviderKeys,
   listConfiguredDeviceSyncProviderNames,
 } from "./provider-keys.ts";
 import {
-  JUNCTION_API_KEY_ENV_KEYS,
-  JUNCTION_CLIENT_USER_ID_SECRET_ENV_KEYS,
   JUNCTION_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  JUNCTION_ENV_ENV_KEYS,
-  JUNCTION_PROVIDER_FILTER_ENV_KEYS,
-  JUNCTION_RECONCILE_DAYS_ENV_KEYS,
-  JUNCTION_RECONCILE_INTERVAL_MS_ENV_KEYS,
-  JUNCTION_REGION_ENV_KEYS,
-  JUNCTION_REQUEST_TIMEOUT_MS_ENV_KEYS,
-  JUNCTION_SUMMARY_BACKFILL_DAYS_ENV_KEYS,
-  JUNCTION_SUMMARY_RESOURCES_ENV_KEYS,
-  JUNCTION_TIMESERIES_BACKFILL_DAYS_ENV_KEYS,
-  JUNCTION_TIMESERIES_RESOURCES_ENV_KEYS,
-  JUNCTION_WEBHOOK_SECRET_ENV_KEYS,
-  JUNCTION_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
-  OURA_API_BASE_URL_ENV_KEYS,
-  OURA_AUTH_BASE_URL_ENV_KEYS,
-  OURA_BACKFILL_DAYS_ENV_KEYS,
-  OURA_CLIENT_ID_ENV_KEYS,
-  OURA_CLIENT_SECRET_ENV_KEYS,
   OURA_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  OURA_RECONCILE_DAYS_ENV_KEYS,
-  OURA_RECONCILE_INTERVAL_MS_ENV_KEYS,
-  OURA_REQUEST_TIMEOUT_MS_ENV_KEYS,
-  OURA_SCOPES_ENV_KEYS,
-  OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
-  OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS,
-  STRAVA_API_BASE_URL_ENV_KEYS,
-  STRAVA_AUTH_BASE_URL_ENV_KEYS,
-  STRAVA_BACKFILL_DAYS_ENV_KEYS,
-  STRAVA_CLIENT_ID_ENV_KEYS,
-  STRAVA_CLIENT_SECRET_ENV_KEYS,
   STRAVA_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  STRAVA_RECONCILE_DAYS_ENV_KEYS,
-  STRAVA_RECONCILE_INTERVAL_MS_ENV_KEYS,
-  STRAVA_REQUEST_TIMEOUT_MS_ENV_KEYS,
-  STRAVA_SCOPES_ENV_KEYS,
-  STRAVA_WEBHOOK_SIGNING_SECRET_ENV_KEYS,
-  STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
-  STRAVA_WEBHOOK_VERIFY_TOKEN_ENV_KEYS,
-  WHOOP_BACKFILL_DAYS_ENV_KEYS,
-  WHOOP_BASE_URL_ENV_KEYS,
-  WHOOP_CLIENT_ID_ENV_KEYS,
-  WHOOP_CLIENT_SECRET_ENV_KEYS,
   WHOOP_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  WHOOP_RECONCILE_DAYS_ENV_KEYS,
-  WHOOP_RECONCILE_INTERVAL_MS_ENV_KEYS,
-  WHOOP_REQUEST_TIMEOUT_MS_ENV_KEYS,
-  WHOOP_SCOPES_ENV_KEYS,
-  WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS,
   type DeviceSyncProviderEnvSpec,
 } from "./provider-env.ts";
+import { normalizeJunctionProviderFilter } from "./junction-connect-sources.ts";
+import { normalizeString } from "../shared.ts";
 
-import { deviceSyncError } from "../errors.ts";
-
-import type { DeviceSyncJobInput, DeviceSyncJobRecord, DeviceSyncProvider } from "../types.ts";
 import type {
   ConfiguredDeviceSyncProviderConfigByKey,
   ConfiguredDeviceSyncProviderKey,
   ConfiguredDeviceSyncProviderPresence,
   DeviceSyncEnvSource,
+  JunctionDeviceSyncProviderConfig,
+  OuraDeviceSyncProviderConfig,
   SerializableConfiguredDeviceSyncProviderConfigByKey,
+  StravaDeviceSyncProviderConfig,
+  WhoopDeviceSyncProviderConfig,
 } from "./provider-types.ts";
 import type { DeviceSyncProviderCredentialPolicy } from "../types.ts";
 
@@ -144,11 +95,9 @@ export interface DeviceSyncConfiguredProviderManifest<
   provider: TProvider;
   capabilities: ConfiguredDeviceSyncProviderCapabilities;
   credentialPolicy: DeviceSyncProviderCredentialPolicy;
-  createProvider(config: TConfig): DeviceSyncProvider;
   descriptor: DeviceProviderDescriptor;
   disallowedSerializableFields?: Readonly<Record<string, string>>;
   env: DeviceSyncProviderEnvSpec;
-  importer: DeviceProviderAdapter;
   jobs: DeviceSyncProviderJobDefinitionMap;
   readConfig(env: DeviceSyncEnvSource): TConfig | null;
   serializableFields: Readonly<Record<Extract<keyof TSerializableConfig, string>, SerializableConfigFieldKind>>;
@@ -177,27 +126,22 @@ export interface DeviceSyncConfiguredProviderManifestByKey {
   >;
 }
 
+const OURA_OAUTH = requireDeviceProviderOAuthDescriptor(OURA_DEVICE_PROVIDER_DESCRIPTOR);
+const OURA_SYNC = requireDeviceProviderSyncDescriptor(OURA_DEVICE_PROVIDER_DESCRIPTOR);
+const OURA_DEFAULT_SCOPES = Object.freeze([...OURA_OAUTH.defaultScopes]);
+
+const STRAVA_OAUTH = requireDeviceProviderOAuthDescriptor(STRAVA_DEVICE_PROVIDER_DESCRIPTOR);
+const STRAVA_SYNC = requireDeviceProviderSyncDescriptor(STRAVA_DEVICE_PROVIDER_DESCRIPTOR);
+const STRAVA_DEFAULT_SCOPES = Object.freeze([...STRAVA_OAUTH.defaultScopes]);
+
+const WHOOP_OAUTH = requireDeviceProviderOAuthDescriptor(WHOOP_DEVICE_PROVIDER_DESCRIPTOR);
+const WHOOP_SYNC = requireDeviceProviderSyncDescriptor(WHOOP_DEVICE_PROVIDER_DESCRIPTOR);
+const WHOOP_DEFAULT_SCOPES = Object.freeze([...WHOOP_OAUTH.defaultScopes]);
+const WHOOP_REQUIRED_SCOPES = Object.freeze(["offline", "read:profile"] as const);
+
 const DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS = Object.freeze({
   fetchImpl: "is not supported in serialized runtime config.",
 });
-
-function booleanJobField(
-  options: Pick<DeviceSyncJobPayloadFieldSpec, "includeInHostedHint" | "required"> = {},
-): DeviceSyncJobPayloadFieldSpec {
-  return {
-    kind: "boolean",
-    ...options,
-  };
-}
-
-function stringJobField(
-  options: Pick<DeviceSyncJobPayloadFieldSpec, "includeInHostedHint" | "required"> = {},
-): DeviceSyncJobPayloadFieldSpec {
-  return {
-    kind: "string",
-    ...options,
-  };
-}
 
 const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
   "junction",
@@ -207,49 +151,11 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
   provider: "junction",
   credentialPolicy: {
     kind: "provider_config",
-    providerConfigKey: JUNCTION_PROVIDER_CONFIG_KEY,
+    providerConfigKey: "junction",
   },
   descriptor: JUNCTION_DEVICE_PROVIDER_DESCRIPTOR,
-  importer: junctionProviderAdapter,
   env: JUNCTION_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  readConfig(env) {
-    const apiKey = optionalEnv(env, JUNCTION_API_KEY_ENV_KEYS);
-    const clientUserIdSecret = optionalEnv(env, JUNCTION_CLIENT_USER_ID_SECRET_ENV_KEYS);
-    const environment = optionalEnv(env, JUNCTION_ENV_ENV_KEYS);
-    const region = optionalEnv(env, JUNCTION_REGION_ENV_KEYS);
-    const webhookSecret = optionalEnv(env, JUNCTION_WEBHOOK_SECRET_ENV_KEYS);
-
-    if (!apiKey && !clientUserIdSecret && !environment && !region && !webhookSecret) {
-      return null;
-    }
-
-    if (!apiKey || !clientUserIdSecret || !environment || !region) {
-      throw new TypeError(
-        "Junction configuration is incomplete. Set JUNCTION_API_KEY, JUNCTION_CLIENT_USER_ID_SECRET, JUNCTION_ENV, and JUNCTION_REGION together.",
-      );
-    }
-
-    const config = {
-      apiKey,
-      clientUserIdSecret,
-      environment: parseJunctionEnvironment(environment),
-      region: parseJunctionRegion(region),
-      providerFilter: parseCsvEnv(env, JUNCTION_PROVIDER_FILTER_ENV_KEYS),
-      summaryResources: parseCsvEnv(env, JUNCTION_SUMMARY_RESOURCES_ENV_KEYS),
-      timeseriesResources: parseCsvEnv(env, JUNCTION_TIMESERIES_RESOURCES_ENV_KEYS),
-      summaryBackfillDays: parseIntegerEnv(env, JUNCTION_SUMMARY_BACKFILL_DAYS_ENV_KEYS),
-      timeseriesBackfillDays: parseIntegerEnv(env, JUNCTION_TIMESERIES_BACKFILL_DAYS_ENV_KEYS),
-      reconcileDays: parseIntegerEnv(env, JUNCTION_RECONCILE_DAYS_ENV_KEYS),
-      reconcileIntervalMs: parseIntegerEnv(env, JUNCTION_RECONCILE_INTERVAL_MS_ENV_KEYS),
-      requestTimeoutMs: parseIntegerEnv(env, JUNCTION_REQUEST_TIMEOUT_MS_ENV_KEYS),
-      webhookSecret,
-      webhookTimestampToleranceMs: parseIntegerEnv(env, JUNCTION_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
-    };
-
-    assertValidJunctionClientConfig(config);
-    return config;
-  },
-  createProvider: createJunctionDeviceSyncProvider,
+  readConfig: readConfiguredJunctionDeviceSyncProviderConfig,
   serializableFields: {
     allowedLinkHosts: "string[]",
     environment: "string",
@@ -273,7 +179,7 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
     webhookSecret:
       "is a provider-owned webhook secret and is not supported in serialized runtime config.",
   },
-  jobs: {
+  jobs: freezeConfiguredDeviceSyncProviderJobDefinitions({
     backfill: {
       payload: {
         windowEnd: stringJobField({ includeInHostedHint: true }),
@@ -299,7 +205,7 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
         windowStart: stringJobField({ includeInHostedHint: true }),
       },
     },
-  },
+  }),
 });
 
 const OURA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
@@ -312,35 +218,8 @@ const OURA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderMan
     kind: "oauth_tokens",
   },
   descriptor: OURA_DEVICE_PROVIDER_DESCRIPTOR,
-  importer: ouraProviderAdapter,
   env: OURA_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  readConfig(env) {
-    const credentials = readOptionalCredentialPair(
-      env,
-      OURA_CLIENT_ID_ENV_KEYS,
-      OURA_CLIENT_SECRET_ENV_KEYS,
-      "Oura",
-    );
-
-    if (!credentials) {
-      return null;
-    }
-
-    return {
-      clientId: credentials.clientId,
-      clientSecret: credentials.clientSecret,
-      authBaseUrl: optionalEnv(env, OURA_AUTH_BASE_URL_ENV_KEYS),
-      apiBaseUrl: optionalEnv(env, OURA_API_BASE_URL_ENV_KEYS),
-      scopes: parseCsvEnv(env, OURA_SCOPES_ENV_KEYS),
-      backfillDays: parseIntegerEnv(env, OURA_BACKFILL_DAYS_ENV_KEYS),
-      reconcileDays: parseIntegerEnv(env, OURA_RECONCILE_DAYS_ENV_KEYS),
-      reconcileIntervalMs: parseIntegerEnv(env, OURA_RECONCILE_INTERVAL_MS_ENV_KEYS),
-      webhookTimestampToleranceMs: parseIntegerEnv(env, OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
-      requestTimeoutMs: parseIntegerEnv(env, OURA_REQUEST_TIMEOUT_MS_ENV_KEYS),
-      webhookVerificationToken: optionalEnv(env, OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS),
-    };
-  },
-  createProvider: createOuraDeviceSyncProvider,
+  readConfig: readConfiguredOuraDeviceSyncProviderConfig,
   serializableFields: {
     apiBaseUrl: "string",
     authBaseUrl: "string",
@@ -358,7 +237,7 @@ const OURA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderMan
     webhookVerificationToken:
       "is a provider-owned admin secret and is not supported in serialized runtime config.",
   },
-  jobs: {
+  jobs: freezeConfiguredDeviceSyncProviderJobDefinitions({
     backfill: {
       payload: {
         includePersonalInfo: booleanJobField({ includeInHostedHint: true }),
@@ -391,7 +270,7 @@ const OURA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderMan
         sourceEventType: stringJobField({ includeInHostedHint: true }),
       },
     },
-  },
+  }),
 });
 
 const WHOOP_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
@@ -404,33 +283,8 @@ const WHOOP_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderMa
     kind: "oauth_tokens",
   },
   descriptor: WHOOP_DEVICE_PROVIDER_DESCRIPTOR,
-  importer: whoopProviderAdapter,
   env: WHOOP_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  readConfig(env) {
-    const credentials = readOptionalCredentialPair(
-      env,
-      WHOOP_CLIENT_ID_ENV_KEYS,
-      WHOOP_CLIENT_SECRET_ENV_KEYS,
-      "WHOOP",
-    );
-
-    if (!credentials) {
-      return null;
-    }
-
-    return {
-      clientId: credentials.clientId,
-      clientSecret: credentials.clientSecret,
-      baseUrl: optionalEnv(env, WHOOP_BASE_URL_ENV_KEYS),
-      scopes: parseCsvEnv(env, WHOOP_SCOPES_ENV_KEYS),
-      backfillDays: parseIntegerEnv(env, WHOOP_BACKFILL_DAYS_ENV_KEYS),
-      reconcileDays: parseIntegerEnv(env, WHOOP_RECONCILE_DAYS_ENV_KEYS),
-      reconcileIntervalMs: parseIntegerEnv(env, WHOOP_RECONCILE_INTERVAL_MS_ENV_KEYS),
-      webhookTimestampToleranceMs: parseIntegerEnv(env, WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
-      requestTimeoutMs: parseIntegerEnv(env, WHOOP_REQUEST_TIMEOUT_MS_ENV_KEYS),
-    };
-  },
-  createProvider: createWhoopDeviceSyncProvider,
+  readConfig: readConfiguredWhoopDeviceSyncProviderConfig,
   serializableFields: {
     backfillDays: "number",
     baseUrl: "string",
@@ -443,7 +297,7 @@ const WHOOP_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderMa
     webhookTimestampToleranceMs: "number",
   },
   disallowedSerializableFields: DEFAULT_DISALLOWED_SERIALIZABLE_FIELDS,
-  jobs: {
+  jobs: freezeConfiguredDeviceSyncProviderJobDefinitions({
     backfill: {
       payload: {
         windowEnd: stringJobField({ includeInHostedHint: true }),
@@ -472,7 +326,7 @@ const WHOOP_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderMa
         resourceType: stringJobField({ includeInHostedHint: true, required: true }),
       },
     },
-  },
+  }),
 });
 
 const STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderManifest<
@@ -485,36 +339,8 @@ const STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderM
     kind: "oauth_tokens",
   },
   descriptor: STRAVA_DEVICE_PROVIDER_DESCRIPTOR,
-  importer: stravaProviderAdapter,
   env: STRAVA_DEVICE_SYNC_PROVIDER_ENV_SPEC,
-  readConfig(env) {
-    const credentials = readOptionalCredentialPair(
-      env,
-      STRAVA_CLIENT_ID_ENV_KEYS,
-      STRAVA_CLIENT_SECRET_ENV_KEYS,
-      "Strava",
-    );
-
-    if (!credentials) {
-      return null;
-    }
-
-    return {
-      clientId: credentials.clientId,
-      clientSecret: credentials.clientSecret,
-      authBaseUrl: optionalEnv(env, STRAVA_AUTH_BASE_URL_ENV_KEYS),
-      apiBaseUrl: optionalEnv(env, STRAVA_API_BASE_URL_ENV_KEYS),
-      scopes: parseCsvEnv(env, STRAVA_SCOPES_ENV_KEYS),
-      backfillDays: parseIntegerEnv(env, STRAVA_BACKFILL_DAYS_ENV_KEYS),
-      reconcileDays: parseIntegerEnv(env, STRAVA_RECONCILE_DAYS_ENV_KEYS),
-      reconcileIntervalMs: parseIntegerEnv(env, STRAVA_RECONCILE_INTERVAL_MS_ENV_KEYS),
-      requestTimeoutMs: parseIntegerEnv(env, STRAVA_REQUEST_TIMEOUT_MS_ENV_KEYS),
-      webhookSigningSecret: optionalEnv(env, STRAVA_WEBHOOK_SIGNING_SECRET_ENV_KEYS),
-      webhookTimestampToleranceMs: parseIntegerEnv(env, STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
-      webhookVerifyToken: optionalEnv(env, STRAVA_WEBHOOK_VERIFY_TOKEN_ENV_KEYS),
-    };
-  },
-  createProvider: createStravaDeviceSyncProvider,
+  readConfig: readConfiguredStravaDeviceSyncProviderConfig,
   serializableFields: {
     apiBaseUrl: "string",
     authBaseUrl: "string",
@@ -534,7 +360,7 @@ const STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderM
     webhookVerifyToken:
       "is a provider-owned admin secret and is not supported in serialized runtime config.",
   },
-  jobs: {
+  jobs: freezeConfiguredDeviceSyncProviderJobDefinitions({
     backfill: {
       payload: {
         includeAthlete: booleanJobField(),
@@ -575,7 +401,7 @@ const STRAVA_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProviderM
         resourceType: stringJobField({ includeInHostedHint: true, required: true }),
       },
     },
-  },
+  }),
 });
 
 export const deviceSyncProviderManifestByKey = Object.freeze({
@@ -621,23 +447,6 @@ export function resolveConfiguredDeviceSyncProviderManifest(
   return deviceSyncProviderManifestByKey[key];
 }
 
-export function resolveDeviceSyncProviderCredentialPolicy(
-  provider: Pick<DeviceSyncProvider, "credentialPolicy" | "descriptor" | "provider">,
-): DeviceSyncProviderCredentialPolicy {
-  const manifest = resolveConfiguredDeviceSyncProviderManifest(provider.provider);
-  if (manifest) {
-    return manifest.credentialPolicy;
-  }
-
-  if (provider.credentialPolicy) {
-    return provider.credentialPolicy;
-  }
-
-  return provider.descriptor.oauth
-    ? { kind: "oauth_tokens" }
-    : { kind: "none" };
-}
-
 export function requireConfiguredDeviceSyncProviderManifest(
   provider: string,
 ): DeviceSyncConfiguredProviderManifest {
@@ -675,114 +484,290 @@ export function listDeviceSyncProviderCatalog(): DeviceSyncProviderCatalogEntry[
   });
 }
 
-export function getConfiguredDeviceSyncProviderJobDefinition(
-  provider: string,
-  kind: string,
-): DeviceSyncProviderJobDefinition | undefined {
-  const manifest = resolveConfiguredDeviceSyncProviderManifest(provider);
-  return manifest?.jobs[kind];
-}
-
-export function normalizeConfiguredDeviceSyncJobInput(
-  provider: string,
-  job: DeviceSyncJobInput,
-  context: string,
-): DeviceSyncJobInput {
-  return {
-    ...job,
-    payload: normalizeConfiguredDeviceSyncJobPayload(provider, job.kind, job.payload, context),
-  };
-}
-
-export function normalizeConfiguredDeviceSyncJobRecord(
-  provider: string,
-  job: DeviceSyncJobRecord,
-  context: string,
-): DeviceSyncJobRecord {
-  return {
-    ...job,
-    payload: normalizeConfiguredDeviceSyncJobPayload(provider, job.kind, job.payload, context),
-  };
-}
-
-export function shapeConfiguredDeviceSyncHostedHintPayload(
-  provider: string,
-  job: Pick<DeviceSyncJobInput, "kind" | "payload">,
-): Record<string, unknown> {
-  const definition = getConfiguredDeviceSyncProviderJobDefinition(provider, job.kind);
-
-  if (!definition) {
-    return {};
-  }
-
-  return pickConfiguredDeviceSyncHostedHintPayload(
-    normalizeJobPayloadRecord(job.payload, `${provider} ${job.kind} hosted hint payload`),
-    definition,
-  );
-}
-
-function defineConfiguredDeviceSyncProviderManifest<
+export function getConfiguredDeviceSyncProviderDescriptor<
   TProvider extends ConfiguredDeviceSyncProviderKey,
-  TConfig extends ConfiguredDeviceSyncProviderConfigByKey[TProvider],
-  TSerializableConfig extends SerializableConfiguredDeviceSyncProviderConfigByKey[TProvider],
->(
-  input: Omit<
-    DeviceSyncConfiguredProviderManifest<TProvider, TConfig, TSerializableConfig>,
-    "capabilities"
-  >,
-): DeviceSyncConfiguredProviderManifest<TProvider, TConfig, TSerializableConfig> {
-  return Object.freeze({
-    ...input,
-    capabilities: Object.freeze(deriveConfiguredDeviceSyncProviderCapabilities(input.descriptor)),
-    disallowedSerializableFields: input.disallowedSerializableFields
-      ? Object.freeze({ ...input.disallowedSerializableFields })
-      : undefined,
-    env: freezeDeviceSyncProviderEnvSpec(input.env),
-    jobs: freezeConfiguredDeviceSyncProviderJobDefinitions(input.jobs),
-    serializableFields: Object.freeze({ ...input.serializableFields }),
-  });
+>(provider: TProvider): DeviceSyncConfiguredProviderManifestByKey[TProvider]["descriptor"] {
+  return deviceSyncProviderManifestByKey[provider].descriptor;
 }
 
-function deriveConfiguredDeviceSyncProviderCapabilities(
-  descriptor: DeviceProviderDescriptor,
-): ConfiguredDeviceSyncProviderCapabilities {
+export function resolveConfiguredDeviceSyncProviderDescriptor(
+  provider: string,
+): DeviceProviderDescriptor | undefined {
+  return resolveConfiguredDeviceSyncProviderManifest(provider)?.descriptor;
+}
+
+export interface NormalizedJunctionDeviceSyncRuntimeConfig {
+  clientUserIdSecret: string;
+  providerFilter: string[];
+  summaryResources: string[];
+  timeseriesResources: string[];
+}
+
+export function buildConfiguredDeviceSyncProviderRuntimeDescriptor<
+  TProvider extends ConfiguredDeviceSyncProviderKey,
+>(
+  provider: TProvider,
+  config: ConfiguredDeviceSyncProviderConfigByKey[TProvider],
+): DeviceProviderDescriptor {
+  switch (provider) {
+    case "junction":
+      normalizeJunctionDeviceSyncRuntimeConfig(
+        config as ConfiguredDeviceSyncProviderConfigByKey["junction"],
+      );
+      return getConfiguredDeviceSyncProviderDescriptor("junction");
+    case "oura":
+      return buildOuraDeviceSyncRuntimeDescriptor(
+        config as ConfiguredDeviceSyncProviderConfigByKey["oura"],
+      );
+    case "whoop":
+      return buildWhoopDeviceSyncRuntimeDescriptor(
+        config as ConfiguredDeviceSyncProviderConfigByKey["whoop"],
+      );
+    case "strava":
+      return buildStravaDeviceSyncRuntimeDescriptor(
+        config as ConfiguredDeviceSyncProviderConfigByKey["strava"],
+      );
+  }
+}
+
+export function normalizeJunctionDeviceSyncRuntimeConfig(
+  config: JunctionDeviceSyncProviderConfig,
+): NormalizedJunctionDeviceSyncRuntimeConfig {
+  const clientUserIdSecret = assertValidJunctionClientUserIdSecret(config.clientUserIdSecret);
+  const summaryResources = normalizeRequiredJunctionResourceList(
+    config.summaryResources,
+    JUNCTION_DEFAULT_SUMMARY_RESOURCES,
+    JUNCTION_ALLOWED_SUMMARY_RESOURCES,
+    "summary",
+  );
+  const timeseriesResources = normalizeOptionalJunctionResourceList(
+    config.timeseriesResources,
+    JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
+    JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+    JUNCTION_KNOWN_TIMESERIES_RESOURCES,
+    "timeseries",
+  );
+  const providerFilter = normalizeJunctionProviderFilter(config.providerFilter);
+
+  if (providerFilter.length === 0) {
+    throw new TypeError("Junction provider filter must include at least one hosted Link provider.");
+  }
+
   return {
-    remoteDisconnect: Boolean(descriptor.sync?.supportsRemoteDisconnect),
-    scheduledPoll: descriptor.transportModes.includes("scheduled_poll"),
-    tokenRefresh: Boolean(descriptor.sync?.supportsTokenRefresh),
-    webhookAdmin: Boolean(descriptor.webhook?.supportsAdmin),
-    webhookPush: descriptor.transportModes.includes("webhook_push"),
+    clientUserIdSecret,
+    providerFilter,
+    summaryResources,
+    timeseriesResources,
   };
 }
 
-function isConfiguredDeviceSyncProviderKey(
-  value: string,
-): value is ConfiguredDeviceSyncProviderKey {
-  return Object.prototype.hasOwnProperty.call(deviceSyncProviderManifestByKey, value);
-}
+export function assertValidJunctionClientUserIdSecret(secret: string): string {
+  const normalizedSecret = normalizeString(secret);
 
-function parseJunctionEnvironment(value: string): "sandbox" | "production" {
-  if (value === "sandbox" || value === "production") {
-    return value;
+  if (!normalizedSecret || normalizedSecret.length < 16) {
+    throw new TypeError("JUNCTION_CLIENT_USER_ID_SECRET must be at least 16 characters.");
   }
 
-  throw new TypeError("JUNCTION_ENV must be sandbox or production.");
+  return normalizedSecret;
 }
 
-function parseJunctionRegion(value: string): "us" | "eu" {
-  if (value === "us" || value === "eu") {
-    return value;
+export function buildOuraDeviceSyncScopes(input: string[] | undefined): string[] {
+  const requested = [...OURA_DEFAULT_SCOPES, ...(input ?? [])];
+  return [...new Set(
+    requested
+      .map((scope) => scope.trim())
+      .filter((scope) => scope && !isDeprecatedOuraScope(scope)),
+  )];
+}
+
+export function buildOuraDeviceSyncRuntimeDescriptor(
+  config: OuraDeviceSyncProviderConfig,
+): DeviceProviderDescriptor {
+  const backfillDays = Math.max(1, config.backfillDays ?? OURA_SYNC.windows.backfillDays);
+  const reconcileDays = Math.max(1, config.reconcileDays ?? OURA_SYNC.windows.reconcileDays);
+  const reconcileIntervalMs = Math.max(
+    60_000,
+    config.reconcileIntervalMs ?? OURA_SYNC.windows.reconcileIntervalMs,
+  );
+
+  return {
+    ...getConfiguredDeviceSyncProviderDescriptor("oura"),
+    oauth: {
+      ...OURA_OAUTH,
+      defaultScopes: buildOuraDeviceSyncScopes(config.scopes),
+    },
+    sync: {
+      ...OURA_SYNC,
+      windows: {
+        backfillDays,
+        reconcileDays,
+        reconcileIntervalMs,
+      },
+    },
+  };
+}
+
+export function normalizeStravaDeviceSyncScopes(value: unknown): string[] {
+  if (!Array.isArray(value) && typeof value !== "string") {
+    return [];
   }
 
-  throw new TypeError("JUNCTION_REGION must be us or eu.");
+  const rawScopes = Array.isArray(value) ? value : [value];
+  const deduped = new Set<string>();
+
+  for (const entry of rawScopes) {
+    if (typeof entry !== "string") {
+      continue;
+    }
+
+    for (const scope of entry.split(/[\s,]+/u)) {
+      const normalized = scope.trim();
+
+      if (normalized) {
+        deduped.add(normalized);
+      }
+    }
+  }
+
+  return [...deduped];
 }
 
-function freezeDeviceSyncProviderEnvSpec(env: DeviceSyncProviderEnvSpec): DeviceSyncProviderEnvSpec {
-  return Object.freeze({
-    configKeys: Object.freeze([...env.configKeys]),
-    secretKeys: Object.freeze([...env.secretKeys]),
-    variableKeys: Object.freeze([...env.variableKeys]),
-  });
+export function buildStravaDeviceSyncScopes(input: string[] | undefined): string[] {
+  const scopes = normalizeStravaDeviceSyncScopes(input);
+  return scopes.length > 0 ? scopes : [...STRAVA_DEFAULT_SCOPES];
+}
+
+export function buildStravaDeviceSyncRuntimeDescriptor(
+  config: StravaDeviceSyncProviderConfig,
+): DeviceProviderDescriptor {
+  const backfillDays = Math.max(1, config.backfillDays ?? STRAVA_SYNC.windows.backfillDays);
+  const reconcileDays = Math.max(1, config.reconcileDays ?? STRAVA_SYNC.windows.reconcileDays);
+  const reconcileIntervalMs = Math.max(
+    60_000,
+    config.reconcileIntervalMs ?? STRAVA_SYNC.windows.reconcileIntervalMs,
+  );
+
+  return {
+    ...getConfiguredDeviceSyncProviderDescriptor("strava"),
+    oauth: {
+      ...STRAVA_OAUTH,
+      defaultScopes: buildStravaDeviceSyncScopes(config.scopes),
+    },
+    sync: {
+      ...STRAVA_SYNC,
+      windows: {
+        backfillDays,
+        reconcileDays,
+        reconcileIntervalMs,
+      },
+    },
+  };
+}
+
+export function buildWhoopDeviceSyncScopes(input: string[] | undefined): string[] {
+  const requested = input === undefined ? [...WHOOP_DEFAULT_SCOPES] : input;
+  return [...new Set(
+    [...WHOOP_REQUIRED_SCOPES, ...requested]
+      .map((scope) => scope.trim())
+      .filter(Boolean),
+  )];
+}
+
+export function buildWhoopDeviceSyncRuntimeDescriptor(
+  config: WhoopDeviceSyncProviderConfig,
+): DeviceProviderDescriptor {
+  const backfillDays = Math.max(1, config.backfillDays ?? WHOOP_SYNC.windows.backfillDays);
+  const reconcileDays = Math.max(1, config.reconcileDays ?? WHOOP_SYNC.windows.reconcileDays);
+  const reconcileIntervalMs = Math.max(
+    60_000,
+    config.reconcileIntervalMs ?? WHOOP_SYNC.windows.reconcileIntervalMs,
+  );
+
+  return {
+    ...getConfiguredDeviceSyncProviderDescriptor("whoop"),
+    oauth: {
+      ...WHOOP_OAUTH,
+      defaultScopes: buildWhoopDeviceSyncScopes(config.scopes),
+    },
+    sync: {
+      ...WHOOP_SYNC,
+      windows: {
+        backfillDays,
+        reconcileDays,
+        reconcileIntervalMs,
+      },
+    },
+  };
+}
+
+function isDeprecatedOuraScope(scope: string): boolean {
+  return scope.replace(/^extapi:/u, "") === "heartrate";
+}
+
+function normalizeRequiredJunctionResourceList(
+  value: string[] | undefined,
+  defaults: readonly string[],
+  allowedResources: readonly string[],
+  label: string,
+): string[] {
+  const normalized = (value && value.length > 0 ? value : defaults)
+    .map(normalizeJunctionResourceName)
+    .filter((entry): entry is string => entry !== null);
+  const allowedResourceSet = new Set<string>(allowedResources);
+  const unsupportedResources = normalized.filter((entry) => !allowedResourceSet.has(entry));
+
+  if (unsupportedResources.length > 0) {
+    throw new TypeError(
+      `Junction ${label} resources include unsupported resource(s): ${[...new Set(unsupportedResources)].join(", ")}.`,
+    );
+  }
+
+  if (normalized.length === 0) {
+    throw new TypeError(`Junction ${label} resources must include at least one supported resource.`);
+  }
+
+  return [...new Set(normalized)];
+}
+
+function normalizeOptionalJunctionResourceList(
+  value: string[] | undefined,
+  defaults: readonly string[],
+  allowedResources: readonly string[],
+  knownResources: readonly string[],
+  label: string,
+): string[] {
+  const normalized = (value === undefined ? defaults : value)
+    .map(normalizeJunctionResourceName)
+    .filter((entry): entry is string => entry !== null);
+  const allowedResourceSet = new Set<string>(allowedResources);
+  const knownResourceSet = new Set<string>([...allowedResources, ...knownResources]);
+  const unsupportedResources = normalized.filter((entry) => !knownResourceSet.has(entry));
+
+  if (unsupportedResources.length > 0) {
+    throw new TypeError(
+      `Junction ${label} resources include unsupported resource(s): ${[...new Set(unsupportedResources)].join(", ")}.`,
+    );
+  }
+
+  return [...new Set(normalized.filter((entry) => allowedResourceSet.has(entry)))];
+}
+
+function booleanJobField(
+  options: Pick<DeviceSyncJobPayloadFieldSpec, "includeInHostedHint" | "required"> = {},
+): DeviceSyncJobPayloadFieldSpec {
+  return {
+    kind: "boolean",
+    ...options,
+  };
+}
+
+function stringJobField(
+  options: Pick<DeviceSyncJobPayloadFieldSpec, "includeInHostedHint" | "required"> = {},
+): DeviceSyncJobPayloadFieldSpec {
+  return {
+    kind: "string",
+    ...options,
+  };
 }
 
 function freezeConfiguredDeviceSyncProviderJobDefinitions(
@@ -813,133 +798,52 @@ function freezeConfiguredDeviceSyncProviderJobDefinitions(
   );
 }
 
-function normalizeConfiguredDeviceSyncJobPayload(
-  provider: string,
-  kind: string,
-  payload: Record<string, unknown> | undefined,
-  context: string,
-): Record<string, unknown> {
-  const normalizedPayload = normalizeJobPayloadRecord(payload, `${provider} ${kind} ${context} payload`);
-  const manifest = resolveConfiguredDeviceSyncProviderManifest(provider);
-
-  if (!manifest) {
-    return normalizedPayload;
-  }
-
-  const definition = manifest.jobs[kind];
-
-  if (!definition) {
-    throw deviceSyncError({
-      code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
-      message: `Device sync provider ${provider} job kind ${kind} is not declared in the provider manifest.`,
-      retryable: false,
-    });
-  }
-
-  const output: Record<string, unknown> = {};
-
-  for (const key of Object.keys(normalizedPayload)) {
-    if (!Object.prototype.hasOwnProperty.call(definition.payload, key)) {
-      throw deviceSyncError({
-        code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
-        message: `Device sync provider ${provider} job ${kind} ${context} payload field ${key} is not declared in the provider manifest.`,
-        retryable: false,
-      });
-    }
-  }
-
-  for (const [field, spec] of Object.entries(definition.payload)) {
-    const value = normalizedPayload[field];
-
-    if (value === undefined) {
-      if (spec.required) {
-        throw deviceSyncError({
-          code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
-          message: `Device sync provider ${provider} job ${kind} ${context} payload field ${field} is required.`,
-          retryable: false,
-        });
-      }
-
-      continue;
-    }
-
-    if (!matchesConfiguredDeviceSyncJobFieldKind(value, spec.kind)) {
-      throw deviceSyncError({
-        code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
-        message:
-          `Device sync provider ${provider} job ${kind} ${context} payload field ${field} must be ${describeConfiguredDeviceSyncJobFieldKind(spec.kind)}.`,
-        retryable: false,
-      });
-    }
-
-    output[field] = spec.kind === "string[]" && Array.isArray(value) ? [...value] : value;
-  }
-
-  return output;
+function defineConfiguredDeviceSyncProviderManifest<
+  TProvider extends ConfiguredDeviceSyncProviderKey,
+  TConfig extends ConfiguredDeviceSyncProviderConfigByKey[TProvider],
+  TSerializableConfig extends SerializableConfiguredDeviceSyncProviderConfigByKey[TProvider],
+>(
+  input: Omit<
+    DeviceSyncConfiguredProviderManifest<TProvider, TConfig, TSerializableConfig>,
+    "capabilities"
+  >,
+): DeviceSyncConfiguredProviderManifest<TProvider, TConfig, TSerializableConfig> {
+  return Object.freeze({
+    ...input,
+    capabilities: Object.freeze(deriveConfiguredDeviceSyncProviderCapabilities(input.descriptor)),
+    disallowedSerializableFields: input.disallowedSerializableFields
+      ? Object.freeze({ ...input.disallowedSerializableFields })
+      : undefined,
+    env: freezeDeviceSyncProviderEnvSpec(input.env),
+    jobs: input.jobs,
+    serializableFields: Object.freeze({ ...input.serializableFields }),
+  });
 }
 
-function normalizeJobPayloadRecord(
-  payload: Record<string, unknown> | undefined,
-  context: string,
-): Record<string, unknown> {
-  if (payload === undefined) {
-    return {};
-  }
-
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw deviceSyncError({
-      code: "DEVICE_SYNC_JOB_PAYLOAD_INVALID",
-      message: `Device sync ${context} must be an object payload.`,
-      retryable: false,
-    });
-  }
-
-  return { ...payload };
+function deriveConfiguredDeviceSyncProviderCapabilities(
+  descriptor: DeviceProviderDescriptor,
+): ConfiguredDeviceSyncProviderCapabilities {
+  return {
+    remoteDisconnect: Boolean(descriptor.sync?.supportsRemoteDisconnect),
+    scheduledPoll: descriptor.transportModes.includes("scheduled_poll"),
+    tokenRefresh: Boolean(descriptor.sync?.supportsTokenRefresh),
+    webhookAdmin: Boolean(descriptor.webhook?.supportsAdmin),
+    webhookPush: descriptor.transportModes.includes("webhook_push"),
+  };
 }
 
-function matchesConfiguredDeviceSyncJobFieldKind(
-  value: unknown,
-  kind: DeviceSyncJobPayloadFieldKind,
-): value is boolean | number | string | string[] {
-  switch (kind) {
-    case "boolean":
-      return value === true || value === false;
-    case "number":
-      return typeof value === "number" && Number.isFinite(value);
-    case "string":
-      return typeof value === "string";
-    case "string[]":
-      return Array.isArray(value) && value.every((entry) => typeof entry === "string");
-  }
+function isConfiguredDeviceSyncProviderKey(
+  value: string,
+): value is ConfiguredDeviceSyncProviderKey {
+  return Object.prototype.hasOwnProperty.call(deviceSyncProviderManifestByKey, value);
 }
 
-function describeConfiguredDeviceSyncJobFieldKind(kind: DeviceSyncJobPayloadFieldKind): string {
-  return kind === "string[]" ? "an array of strings" : `a ${kind}`;
-}
-
-function pickConfiguredDeviceSyncHostedHintPayload(
-  payload: Record<string, unknown>,
-  definition: DeviceSyncProviderJobDefinition,
-): Record<string, unknown> {
-  const shaped: Record<string, unknown> = {};
-
-  for (const [field, spec] of Object.entries(definition.payload)) {
-    if (!spec.includeInHostedHint || spec.kind === "string[]") {
-      continue;
-    }
-
-    const value = payload[field];
-
-    if (spec.kind === "string" && value === "") {
-      continue;
-    }
-
-    if (matchesConfiguredDeviceSyncJobFieldKind(value, spec.kind)) {
-      shaped[field] = value;
-    }
-  }
-
-  return shaped;
+function freezeDeviceSyncProviderEnvSpec(env: DeviceSyncProviderEnvSpec): DeviceSyncProviderEnvSpec {
+  return Object.freeze({
+    configKeys: Object.freeze([...env.configKeys]),
+    secretKeys: Object.freeze([...env.secretKeys]),
+    variableKeys: Object.freeze([...env.variableKeys]),
+  });
 }
 
 function uniqueDeviceSyncProviderEnvKeys(keys: readonly string[]): string[] {

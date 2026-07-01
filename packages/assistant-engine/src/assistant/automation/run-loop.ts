@@ -96,6 +96,7 @@ export interface RunAssistantAutomationInput {
   onInboxEvent?: (event: InboxRunEvent) => void
   once?: boolean
   requestId?: string | null
+  shouldDeferCron?: (() => boolean) | null
   signal?: AbortSignal
   startDaemon?: boolean
   sessionMaxAgeMs?: number | null
@@ -973,12 +974,19 @@ export async function runAssistantAutomationPass(
     executionContext?.hosted != null &&
     input.deliveryDispatchMode === 'queue-only' &&
     scanResult.replies.replied > 0
-  const cronResult = applyCanonicalWrites && !shouldDeferCronAfterHostedReply
+  const shouldDeferCronByCaller =
+    executionContext?.hosted != null &&
+    input.deliveryDispatchMode === 'queue-only' &&
+    input.shouldDeferCron?.() === true
+  const shouldDeferCron =
+    shouldDeferCronAfterHostedReply || shouldDeferCronByCaller
+  const cronResult = applyCanonicalWrites && !shouldDeferCron
     ? await processDueAssistantCronJobs({
         deliveryDispatchMode: input.deliveryDispatchMode,
         executionContext,
         onEvent: input.onEvent,
         onTraceEvent: input.onTraceEvent,
+        shouldYield: input.shouldDeferCron ?? null,
         vault: input.vault,
         signal: input.signal,
         turnEnvironment: input.turnEnvironment ?? null,
@@ -1010,7 +1018,7 @@ export async function runAssistantAutomationPass(
   const cronNextRunAt = resolveAssistantCronNextWakeAt({
     applyCanonicalWrites,
     cronStatus,
-    shouldDeferCronAfterHostedReply,
+    shouldDeferCron,
   })
   const outboxNextAttemptAt = input.drainOutbox ?? true
     ? (await buildAssistantOutboxSummary(input.vault)).nextAttemptAt
@@ -1061,14 +1069,14 @@ function appendHostedDynamicContextPrompt(input: {
 function resolveAssistantCronNextWakeAt(input: {
   applyCanonicalWrites: boolean
   cronStatus: Awaited<ReturnType<typeof getAssistantCronStatus>>
-  shouldDeferCronAfterHostedReply: boolean
+  shouldDeferCron: boolean
 }): string | null {
   if (!input.applyCanonicalWrites) {
     return null
   }
 
   if (
-    input.shouldDeferCronAfterHostedReply &&
+    input.shouldDeferCron &&
     (input.cronStatus.dueJobs ?? 0) > 0
   ) {
     return computeAssistantAutomationRetryAt(
