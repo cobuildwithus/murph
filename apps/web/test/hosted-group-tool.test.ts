@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  hasHostedRuntimeActiveAccess: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
+  hasHostedRuntimeActiveAccess: mocks.hasHostedRuntimeActiveAccess,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
@@ -27,6 +32,7 @@ const GROUP_SUMMARY = {
 describe("handleHostedRuntimeGroupTool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(GROUP_SUMMARY);
   });
 
@@ -45,6 +51,24 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.readHostedGroupByRuntimeMemberId).toHaveBeenCalledWith({
       runtimeMemberId: "member_group_runtime",
     });
+  });
+
+  it("does not read group state when runtime access is inactive", async () => {
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "read_current" },
+    })).resolves.toEqual({
+      action: "read_current",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "runtime_inactive",
+      },
+    });
+
+    expect(mocks.readHostedGroupByRuntimeMemberId).not.toHaveBeenCalled();
   });
 
   it("reports no group when the runtime member is not attached to one", async () => {
