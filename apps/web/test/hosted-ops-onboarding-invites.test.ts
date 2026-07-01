@@ -91,6 +91,9 @@ type RouteModule = typeof import("../app/api/ops/onboarding-invites/route");
 let service: ServiceModule;
 let route: RouteModule;
 type MockedTx = {
+  hostedMemberRouting: {
+    findUnique: ReturnType<typeof vi.fn>;
+  };
   transaction: true;
 };
 type MockedPrisma = {
@@ -112,6 +115,11 @@ describe("hosted ops onboarding invites", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     tx = {
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          linqChatLookupKey: null,
+        }),
+      },
       transaction: true,
     };
     prisma = {
@@ -356,12 +364,12 @@ describe("hosted ops onboarding invites", () => {
       recipientPhone: "+15557654321",
     });
     expect(
-      mocks.createHostedLinqChat.mock.invocationCallOrder[0],
-    ).toBeLessThan(
       mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.createHostedLinqChat.mock.invocationCallOrder[0],
     );
     expect(
-      mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mock.invocationCallOrder[0],
+      mocks.createHostedLinqChat.mock.invocationCallOrder[0],
     ).toBeLessThan(
       mocks.upsertHostedMemberPendingLinqBindingTx.mock.invocationCallOrder[0],
     );
@@ -379,6 +387,45 @@ describe("hosted ops onboarding invites", () => {
       recipientPhoneHint: "*** 4567",
     });
     expect(JSON.stringify(result)).not.toContain("+15557654321");
+  });
+
+  it("does not hold the assignment transaction open while creating a Linq chat", async () => {
+    const events: string[] = [];
+    prisma.$transaction
+      .mockImplementationOnce(async (callback: (transaction: MockedTx) => Promise<unknown>) => {
+        events.push("reservation:start");
+        const result = await callback(tx);
+        events.push("reservation:commit");
+        return result;
+      })
+      .mockImplementationOnce(async (callback: (transaction: MockedTx) => Promise<unknown>) => {
+        events.push("binding:start");
+        const result = await callback(tx);
+        events.push("binding:commit");
+        return result;
+      });
+    mocks.createHostedLinqChat.mockImplementationOnce(async () => {
+      events.push("provider:create");
+      return {
+        chatId: "chat_created",
+        messageId: "message_open",
+      };
+    });
+
+    await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-provider-outside-tx",
+    });
+
+    expect(events).toEqual([
+      "reservation:start",
+      "reservation:commit",
+      "provider:create",
+      "binding:start",
+      "binding:commit",
+    ]);
   });
 
   it("rejects a new chat sender that is not a configured hosted Linq conversation phone", async () => {
@@ -433,7 +480,36 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
   });
 
-  it("does not write route or assignment state when Linq chat creation fails", async () => {
+  it("rejects new-chat sends for members that already have a home Linq chat", async () => {
+    tx.hostedMemberRouting.findUnique.mockResolvedValue({
+      linqChatLookupKey: "lookup:existing-home-chat",
+    });
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-member-home-bound",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_MEMBER_ALREADY_HOME_CHAT_BOUND",
+      httpStatus: 409,
+    });
+
+    expect(tx.hostedMemberRouting.findUnique).toHaveBeenCalledWith({
+      where: {
+        memberId: "member_123",
+      },
+      select: {
+        linqChatLookupKey: true,
+      },
+    });
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
+  });
+
+  it("does not write pending route state when Linq chat creation fails", async () => {
     mocks.createHostedLinqChat.mockResolvedValueOnce({
       chatId: null,
       messageId: null,
@@ -449,7 +525,12 @@ describe("hosted ops onboarding invites", () => {
     });
 
     expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma: tx,
+      recipientPhone: "+15557654321",
+    });
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();

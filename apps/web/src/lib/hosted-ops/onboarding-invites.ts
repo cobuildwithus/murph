@@ -297,7 +297,7 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
   delivery: HostedOpsOnboardingInviteDelivery;
   issued: Awaited<ReturnType<typeof issueHostedOpsOnboardingInviteForRequest>>;
 }> {
-  return input.prisma.$transaction(async (tx) => {
+  const reserved = await input.prisma.$transaction(async (tx) => {
     const assignment = await resolveHostedOpsOnboardingNewChatLineAssignmentTx({
       prisma: tx,
       senderPhone: input.request.linqFromPhoneNumber,
@@ -306,34 +306,15 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
       phoneNumber: input.request.recipientPhoneNumber,
       prisma: tx,
     })).id;
+    await assertHostedOpsOnboardingMemberCanReceiveNewChatTx({
+      memberId,
+      prisma: tx,
+    });
     const invite = await issueHostedInviteTx({
       channel: "linq",
       memberId,
       prisma: tx,
     });
-    const createdChat = await createHostedLinqChat({
-      from: assignment.line.phoneNumber,
-      idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
-        requestId: input.request.requestId,
-        step: "open",
-        targetParts: [
-          assignment.line.phoneNumber,
-          input.request.recipientPhoneNumber,
-        ],
-      }),
-      message: input.request.newChatOpeningMessage,
-      to: [input.request.recipientPhoneNumber],
-    });
-    const chatId = normalizeNullableString(createdChat.chatId);
-
-    if (!chatId) {
-      throw hostedOnboardingError({
-        code: "HOSTED_OPS_ONBOARDING_CHAT_CREATE_FAILED",
-        httpStatus: 502,
-        message: "Linq did not return a chat id for the onboarding invite.",
-        retryable: true,
-      });
-    }
 
     await upsertHostedMemberHomeLinqRecipientPhoneTx({
       homeLineAssignedAt: assignment.assignedAt,
@@ -341,25 +322,80 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
       prisma: tx,
       recipientPhone: assignment.line.phoneNumber,
     });
-    await upsertHostedMemberPendingLinqBindingTx({
-      linqChatId: chatId,
-      memberId,
-      prisma: tx,
-      recipientPhone: assignment.line.phoneNumber,
-    });
 
     return {
-      delivery: {
-        chatId,
-        newChatCreated: true,
-        openerMessageId: normalizeNullableString(createdChat.messageId),
-      },
+      assignment,
       issued: {
         invite,
         memberId,
       },
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  const createdChat = await createHostedLinqChat({
+    from: reserved.assignment.line.phoneNumber,
+    idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
+      requestId: input.request.requestId,
+      step: "open",
+      targetParts: [
+        reserved.assignment.line.phoneNumber,
+        input.request.recipientPhoneNumber,
+      ],
+    }),
+    message: input.request.newChatOpeningMessage,
+    to: [input.request.recipientPhoneNumber],
+  });
+  const chatId = normalizeNullableString(createdChat.chatId);
+
+  if (!chatId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_OPS_ONBOARDING_CHAT_CREATE_FAILED",
+      httpStatus: 502,
+      message: "Linq did not return a chat id for the onboarding invite.",
+      retryable: true,
+    });
+  }
+
+  await input.prisma.$transaction(async (tx) => {
+    await upsertHostedMemberPendingLinqBindingTx({
+      linqChatId: chatId,
+      memberId: reserved.issued.memberId,
+      prisma: tx,
+      recipientPhone: reserved.assignment.line.phoneNumber,
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  return {
+    delivery: {
+      chatId,
+      newChatCreated: true,
+      openerMessageId: normalizeNullableString(createdChat.messageId),
+    },
+    issued: reserved.issued,
+  };
+}
+
+async function assertHostedOpsOnboardingMemberCanReceiveNewChatTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const routing = await input.prisma.hostedMemberRouting.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: {
+      linqChatLookupKey: true,
+    },
+  });
+
+  if (routing?.linqChatLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_OPS_ONBOARDING_MEMBER_ALREADY_HOME_CHAT_BOUND",
+      httpStatus: 409,
+      message: "Member already has a Linq home chat. Send the invite to the existing chat instead.",
+      retryable: false,
+    });
+  }
 }
 
 export function resolveHostedOpsOnboardingVoiceMemoContentType(input: {
