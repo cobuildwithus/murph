@@ -118,6 +118,8 @@ describe("hosted ops onboarding invites", () => {
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({
           linqChatLookupKey: null,
+          linqRecipientPhoneLookupKey: null,
+          pendingLinqChatLookupKey: null,
         }),
       },
       transaction: true,
@@ -501,8 +503,33 @@ describe("hosted ops onboarding invites", () => {
       },
       select: {
         linqChatLookupKey: true,
+        linqRecipientPhoneLookupKey: true,
+        pendingLinqChatLookupKey: true,
       },
     });
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects new-chat sends for members that already have a pending Linq chat", async () => {
+    tx.hostedMemberRouting.findUnique.mockResolvedValue({
+      linqChatLookupKey: null,
+      linqRecipientPhoneLookupKey: "+lookup:reserved",
+      pendingLinqChatLookupKey: "lookup:pending-chat",
+    });
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-member-pending-bound",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_MEMBER_ALREADY_HOME_CHAT_BOUND",
+      httpStatus: 409,
+    });
+
     expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();

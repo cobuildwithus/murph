@@ -385,14 +385,20 @@ async function assertHostedOpsOnboardingMemberCanReceiveNewChatTx(input: {
     },
     select: {
       linqChatLookupKey: true,
+      linqRecipientPhoneLookupKey: true,
+      pendingLinqChatLookupKey: true,
     },
   });
 
-  if (routing?.linqChatLookupKey) {
+  if (
+    routing?.linqChatLookupKey
+    || routing?.linqRecipientPhoneLookupKey
+    || routing?.pendingLinqChatLookupKey
+  ) {
     throw hostedOnboardingError({
       code: "HOSTED_OPS_ONBOARDING_MEMBER_ALREADY_HOME_CHAT_BOUND",
       httpStatus: 409,
-      message: "Member already has a Linq home chat. Send the invite to the existing chat instead.",
+      message: "Member already has a Linq onboarding route. Send the invite to the existing chat instead.",
       retryable: false,
     });
   }
