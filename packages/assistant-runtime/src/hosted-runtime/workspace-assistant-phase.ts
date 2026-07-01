@@ -3654,11 +3654,37 @@ async function buildHostedMemberChannelDeliveryBarrierResult(input: {
   nextWakeReason?: string | null;
   redactedStatus: HostedRuntimeRedactedJson;
 }): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
-  const providerCleanupSchedulingWake =
-    await resolveHostedProviderCleanupSchedulingWakeCandidate({
+  let providerCleanupWake: HostedRuntimeWakeCandidate | null = null;
+  let providerCleanupRedactedStatus: HostedRuntimeRedactedJson = {};
+  if (input.input.providerCleanup.mode === "drain") {
+    const providerCleanup = await drainHostedProviderCleanupAfterCommit({
+      assistantDeliveryOutcomes: [],
+      assertLiveness: async () => {
+        assertHostedAssistantPhaseLiveness(input.input.input.signal);
+      },
+      checkpoint: input.input.providerCleanup.checkpoint ?? {
+        nextWakeAt: null,
+      },
+      env: buildHostedLinqChannelEnv({
+        forwardedEnv: input.input.input.runtime.forwardedEnv,
+        userEnv: input.input.input.runtime.userEnv,
+      }) as NodeJS.ProcessEnv,
+      fetchImplementation: input.input.input.runtime.platform.providerFetch ?? null,
+      signal: input.input.input.signal ?? null,
+      vaultRoot: input.input.input.restored.vaultRoot,
+      wake: input.input.wake,
+    });
+    providerCleanupWake = createHostedRuntimeWakeCandidate(
+      providerCleanup.nextWakeAt,
+      HOSTED_ASSISTANT_WAKE_REASON,
+    );
+    providerCleanupRedactedStatus = buildHostedProviderCleanupRedactedStatus(providerCleanup);
+  } else {
+    providerCleanupWake = await resolveHostedProviderCleanupSchedulingWakeCandidate({
       deferDueOrInvalid: true,
       phaseInput: input.input.input,
     });
+  }
   const baseNextWake = dropConsumedPostDeliveryWorkspaceAssistantWake({
     candidate: resolveHostedPostDeliveryBaseNextWake(input.input),
     canConsumeWorkspaceAssistantWake: input.input.canConsumeWorkspaceAssistantWake,
@@ -3667,7 +3693,7 @@ async function buildHostedMemberChannelDeliveryBarrierResult(input: {
   const nextWake = selectHostedRuntimeWakeCandidate([
     baseNextWake,
     createHostedRuntimeWakeCandidate(input.nextWakeAt, input.nextWakeReason ?? "assistant"),
-    providerCleanupSchedulingWake,
+    providerCleanupWake,
   ]);
   return {
     ...(input.input.afterDurableCheckpoint
@@ -3677,6 +3703,7 @@ async function buildHostedMemberChannelDeliveryBarrierResult(input: {
     nextWakeAt: nextWake.at,
     nextWakeReason: nextWake.reason,
     redactedStatus: {
+      ...providerCleanupRedactedStatus,
       ...(input.input.redactedStatus ?? {}),
       ...input.redactedStatus,
       nextWakeAt: nextWake.at,
