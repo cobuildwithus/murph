@@ -3417,7 +3417,94 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("runtime wake interrupts background maintenance before late assistant input import completes", async () => {
+  test("generic runtime wake without mailbox work does not interrupt background maintenance", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_generic_runtime_wake_initial",
+        laneSeq: "1",
+      }),
+    ];
+    const importedSeqs: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const yieldStates: boolean[] = [];
+
+    try {
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: TEST_NOW,
+        }],
+        updatedAt: TEST_NOW,
+        version: 1,
+      });
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_generic_runtime_wake",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          importedSeqs.push(item.item.laneSeq);
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_generic_runtime_wake",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          runtimeWakeSignal.notify();
+          await waitForCondition(() => fetchRequests.length >= 2);
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 0);
+          });
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(importedSeqs, ["1"]);
+      assert.deepEqual(yieldStates, [false, false]);
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "1");
+      assert.equal(result.runtimeStateDirty, true);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+      ]);
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
+          { importedSeq: "1", lane: "conversation" },
+        ],
+      ]);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("runtime wake waits for late assistant input import before interrupting background maintenance", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
       createMailboxItem({
@@ -3503,13 +3590,17 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           }));
           runtimeWakeSignal.notify();
           await lateImportStartedPromise;
+          assert.deepEqual(importedSeqs, ["1"]);
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          if (input.shouldYieldBackgroundMaintenance?.() !== false) {
+            throw new Error("Foreground yield must wait for the mailbox import result.");
+          }
+          releaseLateImport();
+          await waitForCondition(() => importedSeqs.includes("2"));
           await waitForCondition(() =>
             input.shouldYieldBackgroundMaintenance?.() === true
           );
           yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
-          assert.deepEqual(importedSeqs, ["1"]);
-          releaseLateImport();
-          await waitForCondition(() => importedSeqs.includes("2"));
           return {
             checkpointReason: "canonical_runtime_commit",
             progressed: true,
@@ -3522,7 +3613,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(importStartedSeqs, ["1", "2"]);
       assert.deepEqual(importedSeqs, ["1", "2"]);
-      assert.deepEqual(yieldStates, [false, true]);
+      assert.deepEqual(yieldStates, [false, false, true]);
       assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
       assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [

@@ -17,7 +17,10 @@ import { buildAssistantAutomationTurnEnvelope } from '../automation/turn-envelop
 import type { AssistantExecutionContext } from '../execution-context.js'
 import { readAssistantOnboardingState } from '../onboarding-state.js'
 import { runExperimentLifecycleOutcomePrecondition } from '../experiment-support-automations.js'
-import type { AssistantOutboxDispatchMode } from '../outbox.js'
+import {
+  markAssistantOutboxIntentMirrorTerminalById,
+  type AssistantOutboxDispatchMode,
+} from '../outbox.js'
 import type { AssistantProviderServiceTier } from '../providers/types.js'
 import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
@@ -451,17 +454,41 @@ export async function executeClaimedAssistantCronJob(input: {
 
           sessionId = result.session.sessionId
           response = result.response ?? result.decision.privateSummary
+          const foregroundYieldedAfterNotification =
+            foregroundPreemption.wasForegroundYielded() ||
+            input.shouldYield?.() === true
           if (result.deliveryOutcome?.kind === 'queued') {
-            pendingDeliveryIntentId = result.deliveryOutcome.intentId
+            const queuedIntentId = result.deliveryOutcome.intentId
+            let queuedDeliveryPreempted = false
+            if (foregroundYieldedAfterNotification) {
+              const abandonedIntent =
+                await markAssistantOutboxIntentMirrorTerminalById({
+                  error: buildAssistantCronForegroundYieldedError(claimedJob.name),
+                  intentId: queuedIntentId,
+                  onlyCurrentStatuses: ['pending', 'retryable', 'awaiting_approval'],
+                  status: 'abandoned',
+                  vault: input.vault,
+                })
+              if (
+                abandonedIntent === null ||
+                abandonedIntent.status === 'abandoned'
+              ) {
+                queuedDeliveryPreempted = true
+              }
+            }
+            if (queuedDeliveryPreempted) {
+              throw buildAssistantCronForegroundYieldedError(claimedJob.name)
+            }
+            pendingDeliveryIntentId = queuedIntentId
             status = 'skipped'
           } else {
             status = 'succeeded'
-          }
-          if (
-            foregroundPreemption.wasForegroundYielded() &&
-            !result.deliveryOutcome
-          ) {
-            throw buildAssistantCronForegroundYieldedError(claimedJob.name)
+            if (
+              foregroundYieldedAfterNotification &&
+              result.deliveryOutcome?.kind !== 'sent'
+            ) {
+              throw buildAssistantCronForegroundYieldedError(claimedJob.name)
+            }
           }
         }
       }

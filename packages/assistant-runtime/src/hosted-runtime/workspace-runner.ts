@@ -598,15 +598,11 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       once: true,
     });
   }
-  let foregroundRuntimeWakeObserved = false;
   let foregroundConversationWorkObserved = false;
   const foregroundMailboxImportLoop =
     startHostedForegroundConversationMailboxImportLoop({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
-      onForegroundRuntimeWakeObserved: () => {
-        foregroundRuntimeWakeObserved = true;
-      },
       onForegroundConversationWorkObserved: () => {
         foregroundConversationWorkObserved = true;
       },
@@ -631,7 +627,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       deferredUsageRecords.push(record);
     },
     shouldYieldBackgroundMaintenance: () =>
-      foregroundRuntimeWakeObserved || foregroundConversationWorkObserved,
+      foregroundConversationWorkObserved,
     workspace: input.workspace,
   };
   let assistantContextSnapshotDirty = false;
@@ -821,7 +817,6 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   input: HostedWorkspaceRunnerInput;
   onForegroundConversationWorkObserved?: (() => void) | null;
-  onForegroundRuntimeWakeObserved?: (() => void) | null;
 }): {
   stop(): Promise<void>;
 } {
@@ -856,7 +851,6 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
         continue;
       }
       wakeOrdinal += 1;
-      input.onForegroundRuntimeWakeObserved?.();
       const requestId = `${input.input.requestId}:runtime-wake:${wakeOrdinal}`;
       const waitResolvedAtEpochMs = Date.now();
       const latencyMilestones = createHostedForegroundMailboxImportLatencyMilestones({

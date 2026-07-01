@@ -167,6 +167,7 @@ import {
   dispatchAssistantOutboxIntent,
   markAssistantOutboxIntentMirrorTerminalById,
   markAssistantOutboxIntentSentById,
+  readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -2112,6 +2113,88 @@ describe('assistant cron runtime orchestration', () => {
       expect(current.state.lastFailedAt).toBeNull()
       expect(current.state.consecutiveFailures).toBe(0)
       expect(current.state.nextRunAt).toBe('2026-04-08T10:20:10.050Z')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('abandons a queued cron outbox intent when foreground work appears after provider decision', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    try {
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-yield-queued-outbox-',
+      )
+      const canonicalJob = await createCanonicalJob(vaultRoot, 'yield-queued-outbox')
+      const queuedIntentId = 'outbox_yield_queued_delivery'
+      let shouldYield = false
+      cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async () => {
+        await saveAssistantOutboxIntent(
+          vaultRoot,
+          buildTestLinqOutboxIntent({
+            createdAt: '2026-04-08T10:20:00.000Z',
+            intentId: queuedIntentId,
+          }),
+        )
+        shouldYield = true
+        return {
+          decision: {
+            kind: 'send_message',
+            privateSummary: 'Queued scheduled reminder.',
+            text: 'Remember to sleep.',
+          },
+          deliveryOutcome: {
+            kind: 'queued',
+            error: null,
+            intentId: queuedIntentId,
+            session: {
+              sessionId: 'session-default',
+            },
+          },
+          response: 'Remember to sleep.',
+          session: {
+            sessionId: 'session-default',
+          },
+        }
+      })
+
+      const summary = await processDueAssistantCronJobsLocal({
+        deliveryDispatchMode: 'queue-only',
+        limit: 1,
+        shouldYield: () => shouldYield,
+        vault: vaultRoot,
+      })
+
+      expect(summary).toEqual({
+        failed: 1,
+        processed: 1,
+        succeeded: 0,
+      })
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+      const intent = await readAssistantOutboxIntent(vaultRoot, queuedIntentId)
+      expect(intent?.status).toBe('abandoned')
+      expect(intent?.lastError).toMatchObject({
+        code: 'ASSISTANT_CRON_FOREGROUND_YIELDED',
+      })
+      await expect(
+        listAssistantCronRuns({
+          job: canonicalJob.jobId,
+          vault: vaultRoot,
+        }),
+      ).resolves.toMatchObject({
+        jobId: canonicalJob.jobId,
+        runs: [{
+          error: 'Assistant cron yielded to fresh foreground input.',
+          status: 'failed',
+        }],
+      })
+
+      const current = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
+      expect(current.state.pendingDeliveryIntentId).toBeUndefined()
+      expect(current.state.runningAt).toBeNull()
+      expect(current.state.lastFailedAt).toBeNull()
+      expect(current.state.consecutiveFailures).toBe(0)
+      expect(current.state.nextRunAt).toBe('2026-04-08T10:20:10.000Z')
     } finally {
       vi.useRealTimers()
     }

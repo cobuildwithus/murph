@@ -1649,6 +1649,7 @@ export async function markAssistantOutboxIntentMirrorTerminalById(input: {
   error: unknown
   failedAt?: Date
   intentId: string
+  onlyCurrentStatuses?: readonly AssistantOutboxIntent['status'][]
   status: 'abandoned' | 'failed'
   vault: string
 }): Promise<AssistantOutboxIntent | null> {
@@ -1667,6 +1668,9 @@ export async function markAssistantOutboxIntentMirrorTerminalById(input: {
     failedAt: input.failedAt ?? new Date(),
     intent,
     intentPath,
+    ...(input.onlyCurrentStatuses
+      ? { onlyCurrentStatuses: input.onlyCurrentStatuses }
+      : {}),
     status: input.status,
     vault: input.vault,
   })
