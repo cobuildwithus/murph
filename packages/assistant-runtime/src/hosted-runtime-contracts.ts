@@ -20,6 +20,7 @@ export type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
   HostedRuntimeDeviceSyncPort,
   HostedRuntimeEffectsPort,
+  HostedRuntimeGroupToolPort,
   HostedRuntimeIssueExportPort,
   HostedRuntimeIssueRecordResponse,
   HostedRuntimeLinqChatActionRequest,

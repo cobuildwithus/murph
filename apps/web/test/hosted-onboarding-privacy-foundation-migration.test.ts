@@ -138,6 +138,11 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedAccountGroupBillingRef",
   "HostedAccountGroupInvite",
   "HostedAccountGroupMembership",
+  // Generic hosted groups: relation-only back-references from HostedMember.
+  // Group membership rows stay in dedicated group tables; optional sharing
+  // remains explicit through HostedVaultShare grants.
+  "HostedGroup",
+  "HostedGroupMember",
   // VaultShare v0: consent-grant relation only (grantor/destination back-references).
   // No new scalar member data; share payloads stay on the encrypted mailbox path.
   "HostedVaultShare",
@@ -548,6 +553,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260628000000_linq_first_contact_scrub_rejected_message_text",
       "20260628010000_linq_first_contact_drop_rejected_message_text",
       "20260629160000_computer_handoff_viewport_session_hint",
+      "20260701040000_hosted_groups",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');

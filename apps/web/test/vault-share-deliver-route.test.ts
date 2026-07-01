@@ -1,13 +1,14 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  deliverHostedVaultShareRecords: vi.fn(),
-  findActiveHostedVaultShares: vi.fn(),
-  getPrisma: vi.fn(),
-  hasHostedMemberEffectiveActiveAccessForMember: vi.fn(),
-  readHostedMemberCoreState: vi.fn(),
-  requireHostedCloudflareCallbackRequest: vi.fn(),
-  signalHostedMailboxAppendRuntime: vi.fn(),
+	deliverHostedVaultShareRecords: vi.fn(),
+	findActiveHostedVaultShares: vi.fn(),
+	getPrisma: vi.fn(),
+	hasHostedMemberEffectiveActiveAccessForMember: vi.fn(),
+	hasHostedRuntimeActiveAccess: vi.fn(),
+	readHostedMemberCoreState: vi.fn(),
+	requireHostedCloudflareCallbackRequest: vi.fn(),
+	signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -15,13 +16,17 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/vault-share-store", () => ({
-  deliverHostedVaultShareRecords: mocks.deliverHostedVaultShareRecords,
-  findActiveHostedVaultShares: mocks.findActiveHostedVaultShares,
+	deliverHostedVaultShareRecords: mocks.deliverHostedVaultShareRecords,
+	findActiveHostedVaultShares: mocks.findActiveHostedVaultShares,
+}));
+
+vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
+	hasHostedRuntimeActiveAccess: mocks.hasHostedRuntimeActiveAccess,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
-  hasHostedMemberEffectiveActiveAccessForMember:
-    mocks.hasHostedMemberEffectiveActiveAccessForMember,
+	hasHostedMemberEffectiveActiveAccessForMember:
+		mocks.hasHostedMemberEffectiveActiveAccessForMember,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
@@ -111,12 +116,13 @@ describe("vault-share deliver route", () => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_grantor");
     mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE]);
-    mocks.getPrisma.mockReturnValue({ kind: "prisma" });
-    mocks.readHostedMemberCoreState.mockResolvedValue({ id: "member_referee" });
-    mocks.hasHostedMemberEffectiveActiveAccessForMember.mockResolvedValue(true);
-    mocks.deliverHostedVaultShareRecords.mockResolvedValue({
-      lastAppendedMailboxItemId: "mailbox_item_1",
-    });
+		mocks.getPrisma.mockReturnValue({ kind: "prisma" });
+		mocks.readHostedMemberCoreState.mockResolvedValue({ id: "member_referee" });
+		mocks.hasHostedMemberEffectiveActiveAccessForMember.mockResolvedValue(true);
+		mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+		mocks.deliverHostedVaultShareRecords.mockResolvedValue({
+			lastAppendedMailboxItemId: "mailbox_item_1",
+		});
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({ signaled: true });
   });
 
@@ -129,14 +135,18 @@ describe("vault-share deliver route", () => {
       grantorMemberId: "member_grantor",
       projectionKind: "sleep-times.v0",
     });
-    expect(mocks.deliverHostedVaultShareRecords).toHaveBeenCalledWith({
-      records: VALID_BODY.records,
-      share: ACTIVE_SHARE,
-    });
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_referee",
-      mailboxItemId: "mailbox_item_1",
-    });
+		expect(mocks.deliverHostedVaultShareRecords).toHaveBeenCalledWith({
+			records: VALID_BODY.records,
+			share: ACTIVE_SHARE,
+		});
+		expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledWith(
+			"member_referee",
+			{ prisma: { kind: "prisma" } },
+		);
+		expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+			expectedUserId: "member_referee",
+			mailboxItemId: "mailbox_item_1",
+		});
   });
 
   it("returns no-active-share and appends nothing when no grant exists", async () => {
@@ -157,12 +167,23 @@ describe("vault-share deliver route", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "no-active-share" });
-    expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
-  });
+		expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
+	});
 
-  it("silently drops an all-stale offer instead of erroring", async () => {
-    const response = await deliverRoute.POST(
-      buildRequest({
+	it("treats an inactive destination runtime exactly like a missing grant", async () => {
+		mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+
+		const response = await deliverRoute.POST(buildRequest(VALID_BODY));
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({ status: "no-active-share" });
+		expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
+		expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+	});
+
+	it("silently drops an all-stale offer instead of erroring", async () => {
+		const response = await deliverRoute.POST(
+			buildRequest({
         projectionKind: "sleep-times.v0",
         records: [STALE_RECORD],
       }),

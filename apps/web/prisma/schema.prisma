@@ -360,6 +360,9 @@ model HostedMember {
   consentGrants                  HostedConsentGrant[]
   vaultSharesGranted             HostedVaultShare[]              @relation("VaultShareGrantor")
   vaultSharesReceived            HostedVaultShare[]              @relation("VaultShareDestination")
+  hostedGroupsOwned              HostedGroup[]                   @relation("HostedGroupOwner")
+  hostedGroupMemberships         HostedGroupMember[]             @relation("HostedGroupMember")
+  hostedGroupRuntime             HostedGroup?                    @relation("HostedGroupRuntimeMember")
   hostedCryptoEnvelopes          HostedUserCryptoEnvelope[]
   hostedCryptoAudits             HostedUserCryptoAudit[]
   webSessions                    HostedWebSession[]
@@ -1021,6 +1024,48 @@ model HostedConsentGrant {
   @@index([memberId, status])
   @@index([scope, status])
   @@map("hosted_consent_grant")
+}
+
+
+model HostedGroup {
+  id                String              @id
+  ownerMemberId     String              @map("owner_member_id")
+  runtimeMemberId   String?             @unique @map("runtime_member_id")
+  kind              String              @default("custom")
+  displayName       String?             @map("display_name")
+  status            String              @default("active")
+  joinCode          String?             @unique @map("join_code")
+  joinCodeCreatedAt DateTime?           @map("join_code_created_at")
+  joinPolicyJson    Json?               @map("join_policy_json")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+  owner             HostedMember        @relation("HostedGroupOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
+  runtimeMember     HostedMember?       @relation("HostedGroupRuntimeMember", fields: [runtimeMemberId], references: [id], onDelete: SetNull)
+  members           HostedGroupMember[]
+
+  @@index([ownerMemberId, status])
+  @@index([kind, status])
+  @@map("hosted_group")
+}
+
+model HostedGroupMember {
+  id        String       @id
+  groupId   String       @map("group_id")
+  memberId  String       @map("member_id")
+  role      String       @default("member")
+  status    String       @default("active")
+  joinedAt  DateTime?    @map("joined_at")
+  leftAt    DateTime?    @map("left_at")
+  removedAt DateTime?    @map("removed_at")
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+  group     HostedGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  member    HostedMember @relation("HostedGroupMember", fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, memberId])
+  @@index([memberId, status])
+  @@index([groupId, status])
+  @@map("hosted_group_member")
 }
 
 model HostedVaultShare {

@@ -14,6 +14,8 @@ import type {
   HostedRuntimeProductFeedbackRecordResponse,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
+  HostedRuntimeGroupToolRequest,
+  HostedRuntimeGroupToolResponse,
 } from '@murphai/hosted-execution/runtime-control'
 import type {
   HostedPhoneCallStartRequest,
@@ -71,6 +73,12 @@ export interface AssistantHostedFamilyPlanTool {
   ): Promise<HostedRuntimeFamilyPlanToolResponse>
 }
 
+export interface AssistantHostedGroupTool {
+  request(
+    request: HostedRuntimeGroupToolRequest,
+  ): Promise<HostedRuntimeGroupToolResponse>
+}
+
 export interface AssistantPhoneCallPort {
   start(
     request: HostedPhoneCallStartRequest,
@@ -116,6 +124,7 @@ export interface AssistantHostedExecutionContext {
   defaultTarget?: AssistantModelTarget | null
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
   familyPlanTool?: AssistantHostedFamilyPlanTool | null
+  groupTool?: AssistantHostedGroupTool | null
   dynamicContextPrompts?: readonly string[] | null
   issueDeviceConnectLink?(
     input: AssistantHostedDeviceConnectRequest,
@@ -163,6 +172,7 @@ export function normalizeAssistantExecutionContext(
     hosted?.generatedImageUploader,
   )
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
+  const groupTool = normalizeAssistantGroupTool(hosted?.groupTool)
   const phoneCalls = normalizeAssistantPhoneCallPort(hosted?.phoneCalls)
   const productFeedbackRecorder = normalizeAssistantProductFeedbackRecorder(
     hosted?.productFeedbackRecorder,
@@ -185,6 +195,7 @@ export function normalizeAssistantExecutionContext(
         : {}),
       ...(generatedImageUploader ? { generatedImageUploader } : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
+      ...(groupTool ? { groupTool } : {}),
       ...(hosted?.generatedImageUploaderRequired === true
         ? { generatedImageUploaderRequired: true }
         : {}),
@@ -295,6 +306,18 @@ function normalizeAssistantProductFeedbackRecorder(
 function normalizeAssistantFamilyPlanTool(
   input: AssistantHostedExecutionContext['familyPlanTool'] | undefined,
 ): AssistantHostedFamilyPlanTool | undefined {
+  if (!input || typeof input.request !== 'function') {
+    return undefined
+  }
+
+  return {
+    request: input.request.bind(input),
+  }
+}
+
+function normalizeAssistantGroupTool(
+  input: AssistantHostedExecutionContext['groupTool'] | undefined,
+): AssistantHostedGroupTool | undefined {
   if (!input || typeof input.request !== 'function') {
     return undefined
   }

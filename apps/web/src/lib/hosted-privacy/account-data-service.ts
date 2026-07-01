@@ -126,6 +126,18 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes local Family Stripe references for groups owned by the member. Family billing cancellation runs before local deletion so sponsored access cannot keep billing after owner deletion.",
   },
   {
+    slug: "prisma.hosted_group",
+    label: "Generic hosted groups",
+    deletion: "live-delete",
+    note: "Deletes generic hosted groups owned by the member or backed by one of the member's runtimes. Export omits join codes and other members' private data.",
+  },
+  {
+    slug: "prisma.hosted_group_member",
+    label: "Generic hosted group memberships",
+    deletion: "live-delete",
+    note: "Deletes the member's generic group memberships and memberships in groups they own. Export reports role/status metadata only.",
+  },
+  {
     slug: "prisma.hosted_mailbox_item",
     label: "Hosted mailbox envelopes",
     deletion: "live-delete",
@@ -1057,6 +1069,8 @@ async function countHostedAccountData(input: {
     hostedAccountGroupMembership,
     hostedAccountGroupInvite,
     hostedAccountGroupBillingRef,
+    hostedGroup,
+    hostedGroupMember,
     hostedMemberEmailAuthorization,
     hostedConnectedAppsSession,
     hostedConnectedAppConnectIntent,
@@ -1118,6 +1132,23 @@ async function countHostedAccountData(input: {
         group: {
           ownerMemberId: memberIdFilter,
         },
+      },
+    }),
+    input.prisma.hostedGroup.count({
+      where: {
+        OR: [
+          { ownerMemberId: memberIdFilter },
+          { runtimeMemberId: memberIdFilter },
+        ],
+      },
+    }),
+    input.prisma.hostedGroupMember.count({
+      where: {
+        OR: [
+          { memberId: memberIdFilter },
+          { group: { ownerMemberId: memberIdFilter } },
+          { group: { runtimeMemberId: memberIdFilter } },
+        ],
       },
     }),
     input.prisma.hostedMemberEmailAuthorization.count({ where: { memberId: memberIdFilter } }),
@@ -1206,6 +1237,8 @@ async function countHostedAccountData(input: {
     "prisma.hosted_account_group_billing_ref": hostedAccountGroupBillingRef,
     "prisma.hosted_account_group_invite": hostedAccountGroupInvite,
     "prisma.hosted_account_group_membership": hostedAccountGroupMembership,
+    "prisma.hosted_group": hostedGroup,
+    "prisma.hosted_group_member": hostedGroupMember,
     "prisma.hosted_member_billing_ref": hostedMemberBillingRef,
     "prisma.hosted_member_email_authorization": hostedMemberEmailAuthorization,
     "prisma.hosted_member_identity": hostedMemberIdentity,
@@ -1276,6 +1309,23 @@ async function deleteHostedAccountPrismaRows(input: {
     },
   }));
   record("prisma.hosted_account_group", await input.prisma.hostedAccountGroup.deleteMany({ where: { ownerMemberId: memberIdFilter } }));
+  record("prisma.hosted_group_member", await input.prisma.hostedGroupMember.deleteMany({
+    where: {
+      OR: [
+        { memberId: memberIdFilter },
+        { group: { ownerMemberId: memberIdFilter } },
+        { group: { runtimeMemberId: memberIdFilter } },
+      ],
+    },
+  }));
+  record("prisma.hosted_group", await input.prisma.hostedGroup.deleteMany({
+    where: {
+      OR: [
+        { ownerMemberId: memberIdFilter },
+        { runtimeMemberId: memberIdFilter },
+      ],
+    },
+  }));
   record("prisma.hosted_member_routing", await input.prisma.hostedMemberRouting.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_sensitive_action_challenge", await input.prisma.hostedSensitiveActionChallenge.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_web_session", await input.prisma.hostedWebSession.deleteMany({ where: { memberId: memberIdFilter } }));

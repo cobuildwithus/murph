@@ -139,6 +139,8 @@ export {
   parseHostedRuntimeLinqContactCardShareAfterOutboundRequest,
   parseHostedRuntimeUsageRecordRequest,
   parseHostedRuntimeUsageRecordResponse,
+  parseHostedRuntimeGroupToolRequest,
+  parseHostedRuntimeGroupToolResponse,
   parseHostedRuntimeFamilyPlanToolRequest,
   parseHostedRuntimeFamilyPlanToolResponse,
   parseHostedRuntimeProductFeedbackRecordRequest,

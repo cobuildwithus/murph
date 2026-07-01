@@ -78,3 +78,15 @@ export async function requireHostedRuntimeMailboxActiveAccess(
 ): Promise<void> {
   await requireHostedRuntimeActiveAccess(userId, options);
 }
+
+export async function hasHostedRuntimeActiveAccess(
+  userId: string,
+  options: HostedRuntimeActiveAccessOptions = {},
+): Promise<boolean> {
+  try {
+    await requireHostedRuntimeActiveAccess(userId, options);
+    return true;
+  } catch {
+    return false;
+  }
+}

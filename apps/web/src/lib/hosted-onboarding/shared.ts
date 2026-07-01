@@ -65,12 +65,28 @@ export function generateHostedAccountGroupInviteId(): string {
   return `hbagi_${randomBytes(12).toString("base64url")}`;
 }
 
+export function generateHostedGroupId(): string {
+  return `hgrp_${randomBytes(12).toString("base64url")}`;
+}
+
+export function generateHostedGroupMemberId(): string {
+  return `hgrpm_${randomBytes(12).toString("base64url")}`;
+}
+
+export function generateHostedVaultShareId(): string {
+  return `hbvs_${randomBytes(12).toString("base64url")}`;
+}
+
 export function generateHostedFamilyCheckoutAttemptId(): string {
   return `hbfca_${randomBytes(12).toString("base64url")}`;
 }
 
 export function generateHostedInviteCode(): string {
   return randomBytes(15).toString("base64url");
+}
+
+export function generateHostedGroupJoinCode(): string {
+  return generateHostedInviteCode();
 }
 
 export function generateHostedPhoneCodeAttemptId(): string {

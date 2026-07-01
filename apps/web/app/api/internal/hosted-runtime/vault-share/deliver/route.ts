@@ -11,6 +11,9 @@ import {
   hasHostedMemberEffectiveActiveAccessForMember,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import {
+  hasHostedRuntimeActiveAccess,
+} from "@/src/lib/hosted-mailbox/runtime-access";
+import {
   readHostedMemberCoreState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
@@ -66,10 +69,14 @@ export const POST = withJsonError(async (request: Request) => {
       prisma,
     });
 
-    if (destination && await hasHostedMemberEffectiveActiveAccessForMember({
-      member: destination,
-      prisma,
-    })) {
+    if (
+      destination
+      && await hasHostedMemberEffectiveActiveAccessForMember({
+        member: destination,
+        prisma,
+      })
+      && await hasHostedRuntimeActiveAccess(share.destinationMemberId, { prisma })
+    ) {
       activeShares.push(share);
     }
   }
