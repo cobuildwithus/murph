@@ -956,6 +956,34 @@ describe("hosted ops onboarding invites", () => {
     );
   });
 
+  it("does not reuse an existing pending Linq chat after its sender line is disabled", async () => {
+    mocks.sendHostedLinqChatMessage
+      .mockRejectedValueOnce(new Error("provider timed out after sending invite"));
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-retry-disabled-pending-chat",
+    })).rejects.toThrow("provider timed out after sending invite");
+
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(null);
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-retry-disabled-pending-chat",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_UNAUTHORIZED",
+    });
+
+    expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+  });
+
   it("changes the invite text idempotency key when a post-send failed retry targets a different chat", async () => {
     prisma.hostedInvite.updateMany.mockRejectedValueOnce(new Error("database went away"));
 

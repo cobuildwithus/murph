@@ -367,6 +367,66 @@ export async function planHostedOnboardingLinqWebhook(input: {
           incomingRecipientPhone: recipientPhoneNumber,
         });
         if (existingFamilyHomeRoute?.linqChatId !== summary.chatId) {
+          if (existingMember) {
+            const routeDecision = resolveHostedLinqActiveRouteDecision({
+              homeChatId: existingFamilyHomeRoute?.linqChatId ?? null,
+              homeRecipientPhone: existingFamilyHomeRoute?.linqRecipientPhone ?? null,
+              incomingChatId: summary.chatId,
+              incomingDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
+              incomingRecipientPhone: recipientPhoneNumber,
+            });
+
+            if (routeDecision.kind === "redirect_to_home") {
+              return logHostedLinqWebhookPlannerDecisionAndReturn(
+                buildConversationHomeRedirectResponse({
+                  chatId: summary.chatId,
+                  homeRecipientPhone: routeDecision.homeRecipientPhone,
+                  memberId: existingMember.id,
+                  messageId: summary.messageId,
+                  service: messageEvent.data.service ?? null,
+                  sourceEventId: input.event.event_id,
+                  threadIsDirect: isHostedLinqDirectChatAttested(messageEvent),
+                }),
+                buildHostedLinqWebhookPlannerDetails(input.event, context, {
+                  existingMemberActive: existingMemberEffectiveActive,
+                  existingMemberMatch,
+                  homeRoutePresent: Boolean(existingFamilyHomeRoute?.linqChatId),
+                  reason: "redirect-to-home",
+                  routeDecision: routeDecision.kind,
+                  routeStage: "family-invite-redirect",
+                }),
+              );
+            }
+
+            if (routeDecision.kind === "ignore_unattested_direct") {
+              return logHostedLinqWebhookPlannerDecisionAndReturn(
+                buildIgnoredLinqWebhookPlan("unattested-direct-chat"),
+                buildHostedLinqWebhookPlannerDetails(input.event, context, {
+                  existingMemberActive: existingMemberEffectiveActive,
+                  existingMemberMatch,
+                  homeRoutePresent: Boolean(existingFamilyHomeRoute?.linqChatId),
+                  reason: "unattested-direct-chat",
+                  routeDecision: routeDecision.kind,
+                  routeStage: "family-invite-ignored-unattested-direct",
+                }),
+              );
+            }
+
+            if (routeDecision.kind === "ignore_unknown_home") {
+              return logHostedLinqWebhookPlannerDecisionAndReturn(
+                buildIgnoredLinqWebhookPlan("unknown-home-line"),
+                buildHostedLinqWebhookPlannerDetails(input.event, context, {
+                  existingMemberActive: existingMemberEffectiveActive,
+                  existingMemberMatch,
+                  homeRoutePresent: Boolean(existingFamilyHomeRoute?.linqChatId),
+                  reason: "unknown-home-line",
+                  routeDecision: routeDecision.kind,
+                  routeStage: "family-invite-ignored-home-line",
+                }),
+              );
+            }
+          }
+
           if (!familyHomeRecipientPhone) {
             return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
           }

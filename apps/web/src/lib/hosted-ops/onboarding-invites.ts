@@ -24,6 +24,9 @@ import {
   upsertHostedMemberPendingLinqBindingTx,
 } from "../hosted-onboarding/hosted-member-routing-store";
 import {
+  readHostedLinqAssignableHomeLineByPhone,
+} from "../hosted-onboarding/linq-line-store";
+import {
   assignHostedMemberLinqHomeLineForPhoneTx,
   type HostedLinqHomeLineAssignmentReservation,
 } from "../hosted-onboarding/linq-home-routing";
@@ -312,6 +315,11 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
       senderPhone: input.request.linqFromPhoneNumber,
     });
     if (existingDelivery) {
+      await assertHostedOpsOnboardingSenderLineAssignableTx({
+        prisma: tx,
+        senderPhone: input.request.linqFromPhoneNumber,
+      });
+
       return {
         kind: "existing_delivery" as const,
         delivery: existingDelivery,
@@ -404,12 +412,14 @@ function resolveHostedOpsOnboardingReusableNewChatDelivery(input: {
   senderPhone: string;
 }): HostedOpsOnboardingInviteDelivery | null {
   const senderPhone = normalizePhoneNumber(input.senderPhone);
+  const homeRecipientPhone = normalizePhoneNumber(input.routing?.linqRecipientPhone);
   const pendingRecipientPhone =
     normalizePhoneNumber(input.routing?.pendingLinqRecipientPhone);
 
   if (
     input.routing?.pendingLinqChatId
     && senderPhone
+    && homeRecipientPhone === senderPhone
     && pendingRecipientPhone === senderPhone
   ) {
     return {
@@ -420,6 +430,27 @@ function resolveHostedOpsOnboardingReusableNewChatDelivery(input: {
   }
 
   return null;
+}
+
+async function assertHostedOpsOnboardingSenderLineAssignableTx(input: {
+  prisma: Prisma.TransactionClient;
+  senderPhone: string;
+}): Promise<void> {
+  const line = await readHostedLinqAssignableHomeLineByPhone({
+    phoneNumber: input.senderPhone,
+    prisma: input.prisma,
+  });
+
+  if (line) {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_UNAUTHORIZED",
+    httpStatus: 400,
+    message: "Linq sender phone must be a configured hosted Linq line.",
+    retryable: false,
+  });
 }
 
 async function assertHostedOpsOnboardingNewChatReservationTx(input: {
