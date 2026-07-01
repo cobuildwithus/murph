@@ -4656,6 +4656,133 @@ test("Junction sleep_cycle direct intervals use timezone for local sleep-stage d
   assert.equal(observations[1]?.timeZone, undefined);
 });
 
+test("Junction sleep_cycle keeps same-stage day aggregates distinct across timezones", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-sleep-stage-midnight");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-01-02T00:00:00.000Z",
+      timezone: "America/New_York",
+    });
+
+    const snapshot = {
+      importedAt: "2026-01-02T12:00:00.000Z",
+      summaries: {
+        sleep_cycle: [{
+          id: "sleep-cross-midnight-1",
+          source_provider: "garmin",
+          source_type: "watch",
+          time_zone: "America/New_York",
+          stages: [
+            {
+              start: "2026-01-02T04:30:00.000Z",
+              end: "2026-01-02T04:50:00.000Z",
+              stage: "light",
+            },
+            {
+              start: "2026-01-02T05:10:00.000Z",
+              end: "2026-01-02T05:40:00.000Z",
+              stage: "light",
+            },
+          ],
+        }, {
+          id: "sleep-cross-midnight-utc-1",
+          source_provider: "garmin",
+          source_type: "watch",
+          time_zone: "UTC",
+          stages: [
+            {
+              start: "2026-01-01T23:30:00.000Z",
+              end: "2026-01-01T23:50:00.000Z",
+              stage: "light",
+            },
+            {
+              start: "2026-01-02T00:10:00.000Z",
+              end: "2026-01-02T00:40:00.000Z",
+              stage: "light",
+            },
+          ],
+        }],
+      },
+    };
+    const payload = await prepareDeviceProviderSnapshotImport({
+      provider: "junction",
+      vaultRoot,
+      snapshot,
+    });
+    const observations = (payload.events ?? [])
+      .filter((event) => event.kind === "observation" && event.fields?.metric === "sleep-light-minutes")
+      .sort((left, right) =>
+        `${left.timeZone}:${left.dayKey}`.localeCompare(`${right.timeZone}:${right.dayKey}`)
+      );
+
+    assert.equal(payload.samples?.length ?? 0, 0);
+    assert.equal(observations.length, 4);
+    assert.deepEqual(
+      observations.map((event) => [event.timeZone, event.dayKey, event.fields?.value]),
+      [
+        ["America/New_York", "2026-01-01", 20],
+        ["America/New_York", "2026-01-02", 30],
+        ["UTC", "2026-01-01", 20],
+        ["UTC", "2026-01-02", 30],
+      ],
+    );
+    assert.equal(new Set(observations.map((event) => event.externalRef?.resourceId)).size, 4);
+
+    const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const importedLightEvents = result.events
+      .filter((event) => event.kind === "observation" && event.metric === "sleep-light-minutes")
+      .sort((left, right) =>
+        `${left.timeZone}:${left.dayKey}`.localeCompare(`${right.timeZone}:${right.dayKey}`)
+      );
+    const records = (
+      await Promise.all(
+        result.eventShardPaths.map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
+      )
+    ).flat();
+    const liveLightRecords = latestLiveRecords(records)
+      .filter((record) => record.kind === "observation" && record.metric === "sleep-light-minutes")
+      .sort((left, right) =>
+        `${left.timeZone}:${left.dayKey}`.localeCompare(`${right.timeZone}:${right.dayKey}`)
+      );
+
+    assert.equal(importedLightEvents.length, 4);
+    assert.deepEqual(
+      importedLightEvents.map((event) => [event.timeZone, event.dayKey]),
+      [
+        ["America/New_York", "2026-01-01"],
+        ["America/New_York", "2026-01-02"],
+        ["UTC", "2026-01-01"],
+        ["UTC", "2026-01-02"],
+      ],
+    );
+    assert.equal(new Set(importedLightEvents.map((event) => event.id)).size, 4);
+    assert.equal(liveLightRecords.length, 4);
+    assert.deepEqual(
+      liveLightRecords.map((record) => [record.timeZone, record.dayKey]),
+      [
+        ["America/New_York", "2026-01-01"],
+        ["America/New_York", "2026-01-02"],
+        ["UTC", "2026-01-01"],
+        ["UTC", "2026-01-02"],
+      ],
+    );
+    assert.equal(new Set(liveLightRecords.map((record) => record.id)).size, 4);
+    assert.equal(new Set(liveLightRecords.map((record) => storedExternalRefResourceId(record))).size, 4);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("Junction hypnogram alias emits canonical compact sleep-stage observations", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "junction",

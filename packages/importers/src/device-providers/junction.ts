@@ -673,6 +673,7 @@ interface JunctionSleepStageAggregate {
   dataOriginEntry: PlainObject;
   durationMinutes: number;
   endAt: string;
+  parentResourceId: string;
   recordedAt?: string;
   stage: JunctionSleepStage;
   startAt: string;
@@ -1733,6 +1734,7 @@ function pushSleepCycle(
   context: NormalizationContext,
 ): void {
   const parentTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
+  const parentResourceId = buildStableResourceId(resourceContext, entry, parentTimestamp);
   const aggregates = new Map<string, JunctionSleepStageAggregate>();
 
   for (const intervalEntry of sleepStageIntervalEntries(entry)) {
@@ -1799,6 +1801,7 @@ function pushSleepCycle(
       dataOriginEntry: originEntry,
       durationMinutes,
       endAt: resolvedEndAt,
+      parentResourceId,
       recordedAt: stageTimestamp.recordedAt,
       stage,
       startAt: resolvedStartAt,
@@ -1819,7 +1822,7 @@ function pushSleepCycle(
       source: "device",
       title: metric.title,
       evidenceRoles: resourceContext.evidenceRoles,
-      externalRef: makeJunctionExternalRef(resourceContext, aggregate.dataOriginEntry, aggregate.timestamp, metric.metric),
+      externalRef: makeJunctionSleepStageAggregateExternalRef(resourceContext, aggregate, metric.metric),
       dataOrigin: buildDataOrigin(aggregate.dataOriginEntry, resourceContext, aggregate.timestamp),
       fields: {
         metric: metric.metric,
@@ -1829,6 +1832,25 @@ function pushSleepCycle(
       },
     }));
   }
+}
+
+function makeJunctionSleepStageAggregateExternalRef(
+  resourceContext: ResourceContext,
+  aggregate: JunctionSleepStageAggregate,
+  metric: string,
+): DeviceExternalRefPayload {
+  return makeProviderExternalRef(
+    "junction",
+    resourceContext.externalRefResourceType,
+    `${resourceContext.resourceSlug}-stage-${shortHash([
+      aggregate.parentResourceId,
+      metric,
+      aggregate.timestamp.dayKey ?? "",
+      aggregate.timeZone ?? "",
+    ])}`,
+    undefined,
+    slugify(metric, "value"),
+  );
 }
 
 function sleepStageMetricDescriptor(stage: JunctionSleepStage): Pick<MetricDescriptor, "metric" | "title"> {
