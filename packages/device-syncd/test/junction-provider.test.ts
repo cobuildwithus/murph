@@ -5703,7 +5703,6 @@ test("Junction resource jobs import direct daily data webhook payloads without J
     }),
   );
 
-  assert.deepEqual(requests, []);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, Array<Record<string, unknown>>>;
@@ -5802,7 +5801,7 @@ test("Junction imports multiple direct daily payloads via per-job execution with
   assert.deepEqual(records.map((record) => record.sourceProviderSlug), ["garmin", "garmin"]);
 });
 
-test("Junction resource jobs import direct Garmin sleep webhook payloads without Junction HTTP requests", async () => {
+test("Junction resource jobs import direct Garmin sleep webhook payloads without source references", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -5870,7 +5869,6 @@ test("Junction resource jobs import direct Garmin sleep webhook payloads without
     }),
   );
 
-  assert.deepEqual(requests, []);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, Array<Record<string, unknown>>>;
@@ -5884,7 +5882,7 @@ test("Junction resource jobs import direct Garmin sleep webhook payloads without
   assert.deepEqual(snapshot.timeseries, {});
 });
 
-test("Junction resource jobs import direct Garmin sleep webhook object data without Junction HTTP requests", async () => {
+test("Junction resource jobs import direct Garmin sleep webhook object data without source references", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -5950,7 +5948,6 @@ test("Junction resource jobs import direct Garmin sleep webhook object data with
     }),
   );
 
-  assert.deepEqual(requests, []);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, Array<Record<string, unknown>>>;
@@ -5964,7 +5961,91 @@ test("Junction resource jobs import direct Garmin sleep webhook object data with
   assert.deepEqual(snapshot.timeseries, {});
 });
 
-test("Junction resource jobs import direct Garmin sleep-cycle stage payloads without Junction HTTP requests", async () => {
+test("Junction resource jobs resolve direct Garmin sleep provider references before import", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            source: {
+              device_id: "garmin-watch-1",
+            },
+            status: "connected",
+            resource_availability: {
+              sleep: true,
+            },
+          },
+        ],
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep"],
+    timeseriesResources: [],
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      upsertConnectionSource: () => {
+        throw new Error("Direct sleep imports should not project Junction source state.");
+      },
+    }),
+    createJob("resource", {
+      eventType: "daily.data.sleep.created",
+      objectId: "sleep-provider-reference-1",
+      occurredAt: "2026-04-02T11:00:00.000Z",
+      resource: "sleep",
+      resourceCategory: "summary",
+      sourceProviderSlug: "garmin",
+      webhookDataJson: JSON.stringify({
+        average_hrv: 42,
+        bedtime_start: "2026-04-02T03:00:00.000Z",
+        bedtime_stop: "2026-04-02T11:00:00.000Z",
+        deep: 5400,
+        duration: 28800,
+        id: "sleep-provider-reference-1",
+        light: 12600,
+        provider_connection_id: "provider-garmin-1",
+        rem: 7200,
+        sourceProviderSlug: "garmin",
+        total: 25200,
+      }),
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-05T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    connections?: Array<Record<string, unknown>>;
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+    timeseries?: Record<string, unknown[]>;
+  };
+  const sleepRecord = snapshot.summaries?.sleep?.[0];
+  const sourceInstanceId = snapshot.connections?.[0]?.sourceInstanceId;
+  assert.ok(requests.some((url) => url.includes("/v2/user/providers/")));
+  assert.equal(requests.some((url) => url.includes("/v2/summary/sleep/")), false);
+  assert.equal(typeof sourceInstanceId, "string");
+  assert.equal(sleepRecord?.sourceInstanceId, sourceInstanceId);
+  assert.equal("provider_connection_id" in (sleepRecord ?? {}), false);
+  assert.deepEqual(snapshot.timeseries, {});
+});
+
+test("Junction resource jobs fetch direct Garmin sleep-cycle stage payloads without parent coverage", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -5983,6 +6064,25 @@ test("Junction resource jobs import direct Garmin sleep-cycle stage payloads wit
             },
           },
         ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        data: [{
+          id: "sleep-cycle-fetched-1",
+          provider_connection_id: "provider-garmin-1",
+          sourceProviderSlug: "garmin",
+          start: "2026-04-02T04:45:00.000Z",
+          end: "2026-04-02T05:30:00.000Z",
+          stages: [
+            {
+              endAt: "2026-04-02T05:30:00.000Z",
+              stage: "deep",
+              startAt: "2026-04-02T04:45:00.000Z",
+            },
+          ],
+        }],
       });
     }
 
@@ -6028,26 +6128,262 @@ test("Junction resource jobs import direct Garmin sleep-cycle stage payloads wit
     }),
   );
 
-  assert.deepEqual(requests, []);
   assert.equal(importedSnapshots.length, 1);
   const snapshot = importedSnapshots[0] as {
     summaries?: Record<string, Array<Record<string, unknown>>>;
     timeseries?: Record<string, unknown[]>;
   };
   const sleepCycleRecord = snapshot.summaries?.sleep_cycle?.[0];
-  const sleepCycleData = sleepCycleRecord?.data as Array<Record<string, unknown>> | undefined;
-  const stages = sleepCycleData?.[0]?.stages as Array<Record<string, unknown>> | undefined;
+  const stages = sleepCycleRecord?.stages as Array<Record<string, unknown>> | undefined;
+  assert.ok(requests.some((url) => url.includes("/v2/summary/sleep_cycle/")));
   assert.equal(sleepCycleRecord?.sourceProviderSlug, "garmin");
+  assert.equal(sleepCycleRecord?.id, "sleep-cycle-fetched-1");
   assert.equal(stages?.[0]?.stage, "deep");
   assert.deepEqual(snapshot.timeseries, {});
 });
 
-test("Junction direct Garmin sleep-cycle payloads import inline once the usefulness gate is removed", async () => {
-  // Pre-P3 these stage-interval-free sleep_cycle payloads were dropped to a REST
-  // summary read by the usefulness gate. The gate was removed in P3: a
-  // configured summary payload with a single consistent source imports inline,
-  // and the normalizer downstream decides meaning (as it does for fetched
-  // records). No REST fallback fires.
+test("Junction resource jobs import direct Garmin sleep-cycle stage payloads with parent coverage", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            source: {
+              device_id: "garmin-watch-1",
+            },
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        data: [{
+          id: "sleep-cycle-stale-rest-1",
+          sourceProviderSlug: "garmin",
+          start: "2026-06-29T04:00:00.000Z",
+          end: "2026-06-29T05:00:00.000Z",
+          stages: [{
+            endAt: "2026-06-29T05:00:00.000Z",
+            stage: "awake",
+            startAt: "2026-06-29T04:00:00.000Z",
+          }],
+        }],
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+
+  const directSleepCycleData = {
+    end: "2026-06-30T11:00:00.000Z",
+    id: "sleep-cycle-cross-midnight-1",
+    provider_connection_id: "provider-garmin-1",
+    sourceProviderSlug: "garmin",
+    stages: [
+      {
+        endAt: "2026-06-30T06:30:00.000Z",
+        stage: "light",
+        startAt: "2026-06-30T03:30:00.000Z",
+      },
+      {
+        endAt: "2026-06-30T11:00:00.000Z",
+        stage: "deep",
+        startAt: "2026-06-30T06:30:00.000Z",
+      },
+    ],
+    start: "2026-06-30T03:30:00.000Z",
+    timeZone: "America/New_York",
+  };
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "daily.data.sleep_cycle.created",
+      user_id: "junction-user-1",
+      client_user_id: "murph_blinded",
+      data: directSleepCycleData,
+    },
+    messageId: "msg_sleep_cycle_cross_midnight_1",
+    timestamp: String(Math.floor(Date.parse("2026-06-30T11:30:00.000Z") / 1000)),
+  });
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-06-30T11:31:00.000Z",
+  });
+  const parsedJob = parsed.jobs[0];
+  assert.ok(parsedJob);
+  assert.equal(parsedJob.kind, "resource");
+  const parsedPayload = parsedJob.payload;
+  assert.ok(parsedPayload);
+  assert.equal(typeof parsedPayload.webhookDataJson, "string");
+  const queuedWebhookData = JSON.parse(String(parsedPayload.webhookDataJson)) as Record<string, unknown>;
+  assert.equal(queuedWebhookData.provider_connection_id, "provider-garmin-1");
+  assert.equal(JSON.stringify(queuedWebhookData).includes("junction-user-1"), false);
+  assert.equal(JSON.stringify(queuedWebhookData).includes("murph_blinded"), false);
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      upsertConnectionSource: () => {
+        throw new Error("Direct sleep_cycle imports should not project Junction source state.");
+      },
+    }),
+    createJob(parsedJob.kind, parsedPayload),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    connections?: Array<Record<string, unknown>>;
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+    timeseries?: Record<string, unknown[]>;
+  };
+  const sleepCycleRecord = snapshot.summaries?.sleep_cycle?.[0];
+  const stages = sleepCycleRecord?.stages as Array<Record<string, unknown>> | undefined;
+  const sourceInstanceId = snapshot.connections?.[0]?.sourceInstanceId;
+  assert.ok(requests.some((url) => url.includes("/v2/user/providers/")));
+  assert.equal(requests.some((url) => url.includes("/v2/summary/sleep_cycle/")), false);
+  assert.equal(typeof sourceInstanceId, "string");
+  assert.equal(typeof sourceInstanceId === "string" && sourceInstanceId.startsWith("source-"), true);
+  assert.equal(sleepCycleRecord?.sourceInstanceId, sourceInstanceId);
+  assert.equal("provider_connection_id" in (sleepCycleRecord ?? {}), false);
+  assert.equal(sleepCycleRecord?.sourceProviderSlug, "garmin");
+  assert.equal(sleepCycleRecord?.id, "sleep-cycle-cross-midnight-1");
+  assert.equal(stages?.[0]?.stage, "light");
+  assert.equal(stages?.[1]?.stage, "deep");
+  assert.deepEqual(snapshot.timeseries, {});
+});
+
+test("Junction signed direct sleep-cycle source reference aliases resolve at execution", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            source: {
+              device_id: "garmin-watch-1",
+            },
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+
+  for (const sourceReferenceKey of ["connection_id", "source_id"] as const) {
+    const directSleepCycleData: Record<string, unknown> = {
+      end: "2026-06-30T11:00:00.000Z",
+      id: `sleep-cycle-${sourceReferenceKey}`,
+      sourceProviderSlug: "garmin",
+      stages: [
+        {
+          endAt: "2026-06-30T06:30:00.000Z",
+          stage: "light",
+          startAt: "2026-06-30T03:30:00.000Z",
+        },
+        {
+          endAt: "2026-06-30T11:00:00.000Z",
+          stage: "deep",
+          startAt: "2026-06-30T06:30:00.000Z",
+        },
+      ],
+      start: "2026-06-30T03:30:00.000Z",
+      timeZone: "America/New_York",
+      [sourceReferenceKey]: "provider-garmin-1",
+    };
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: "daily.data.sleep_cycle.created",
+        user_id: "junction-user-1",
+        client_user_id: "murph_blinded",
+        data: directSleepCycleData,
+      },
+      messageId: `msg_sleep_cycle_${sourceReferenceKey}`,
+      timestamp: String(Math.floor(Date.parse("2026-06-30T11:30:00.000Z") / 1000)),
+    });
+    const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-06-30T11:31:00.000Z",
+    });
+    const parsedJob = parsed.jobs[0];
+    assert.ok(parsedJob);
+    assert.equal(parsedJob.kind, "resource");
+    const parsedPayload = parsedJob.payload;
+    assert.ok(parsedPayload);
+    assert.equal(typeof parsedPayload.webhookDataJson, "string");
+    const queuedWebhookData = JSON.parse(String(parsedPayload.webhookDataJson)) as Record<string, unknown>;
+    assert.equal(queuedWebhookData[sourceReferenceKey], "provider-garmin-1", sourceReferenceKey);
+    assert.equal(queuedWebhookData.sourceInstanceId, undefined, sourceReferenceKey);
+
+    await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          return { imported: true };
+        },
+        upsertConnectionSource: () => {
+          throw new Error("Direct sleep_cycle imports should not project Junction source state.");
+        },
+      }),
+      createJob(parsedJob.kind, parsedPayload),
+    );
+
+    const snapshot = importedSnapshots[importedSnapshots.length - 1] as {
+      connections?: Array<Record<string, unknown>>;
+      summaries?: Record<string, Array<Record<string, unknown>>>;
+      timeseries?: Record<string, unknown[]>;
+    } | undefined;
+    const sleepCycleRecord = snapshot?.summaries?.sleep_cycle?.[0];
+    const sourceInstanceId = snapshot?.connections?.[0]?.sourceInstanceId;
+    assert.equal(typeof sourceInstanceId, "string", sourceReferenceKey);
+    assert.equal(sleepCycleRecord?.sourceInstanceId, sourceInstanceId, sourceReferenceKey);
+    assert.equal(sourceReferenceKey in (sleepCycleRecord ?? {}), false, sourceReferenceKey);
+    assert.deepEqual(snapshot?.timeseries, {}, sourceReferenceKey);
+  }
+
+  assert.ok(requests.some((url) => url.includes("/v2/user/providers/")));
+  assert.equal(requests.some((url) => url.includes("/v2/summary/sleep_cycle/")), false);
+});
+
+test("Junction direct Garmin sleep-cycle payloads without normalizable coverage fall back to fetch", async () => {
   const cases: Array<{ directRecord: Record<string, unknown>; label: string }> = [
     {
       directRecord: {
@@ -6090,6 +6426,91 @@ test("Junction direct Garmin sleep-cycle payloads import inline once the usefuln
       },
       label: "generic-type",
     },
+    {
+      directRecord: {
+        end: "2026-06-30T11:00:00.000Z",
+        id: "sleep-cycle-inline-incomplete-parent",
+        sourceProviderSlug: "garmin",
+        stages: [{
+          endAt: "2026-06-30T06:30:00.000Z",
+          stage: "light",
+          startAt: "2026-06-30T03:30:00.000Z",
+        }],
+        start: "2026-06-30T03:30:00.000Z",
+      },
+      label: "incomplete-parent-coverage",
+    },
+    {
+      directRecord: {
+        end: "2026-06-30T11:00:00.000Z",
+        id: "sleep-cycle-inline-overlapping-parent",
+        sourceProviderSlug: "garmin",
+        stages: [
+          {
+            endAt: "2026-06-30T11:00:00.000Z",
+            stage: "light",
+            startAt: "2026-06-30T03:30:00.000Z",
+          },
+          {
+            endAt: "2026-06-30T07:00:00.000Z",
+            stage: "deep",
+            startAt: "2026-06-30T06:00:00.000Z",
+          },
+        ],
+        start: "2026-06-30T03:30:00.000Z",
+      },
+      label: "overlapping-parent-coverage",
+    },
+    {
+      directRecord: {
+        data: [
+          {
+            end: "2026-06-30T11:00:00.000Z",
+            id: "sleep-cycle-inline-complete-sibling",
+            sourceProviderSlug: "garmin",
+            stages: [
+              {
+                endAt: "2026-06-30T06:30:00.000Z",
+                stage: "light",
+                startAt: "2026-06-30T03:30:00.000Z",
+              },
+              {
+                endAt: "2026-06-30T11:00:00.000Z",
+                stage: "deep",
+                startAt: "2026-06-30T06:30:00.000Z",
+              },
+            ],
+            start: "2026-06-30T03:30:00.000Z",
+          },
+          {
+            end: "2026-06-30T11:00:00.000Z",
+            id: "sleep-cycle-inline-incomplete-sibling",
+            sourceProviderSlug: "garmin",
+            stages: [{
+              endAt: "2026-06-30T06:30:00.000Z",
+              stage: "light",
+              startAt: "2026-06-30T03:30:00.000Z",
+            }],
+            start: "2026-06-30T03:30:00.000Z",
+          },
+        ],
+        id: "sleep-cycle-webhook-mixed-complete-incomplete",
+        sourceProviderSlug: "garmin",
+      },
+      label: "mixed-complete-incomplete-children",
+    },
+    {
+      directRecord: {
+        object_id: "sleep-cycle-object-session-only",
+        session_end: "2026-06-25T03:00:00.000Z",
+        session_start: "2026-06-25T02:00:00.000Z",
+        sourceProviderSlug: "garmin",
+        stage_end_offset_second: [1800, 3600],
+        stage_start_offset_second: [0, 1800],
+        stage_type: [2, 1],
+      },
+      label: "session-offsets-without-normalizer-parent-id",
+    },
   ];
 
   for (const testCase of cases) {
@@ -6098,6 +6519,39 @@ test("Junction direct Garmin sleep-cycle payloads import inline once the usefuln
     const provider = createJunctionProvider(async (input) => {
       const url = readUrl(input);
       requests.push(url);
+
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [
+            {
+              id: "provider-garmin-1",
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: {
+                sleep_cycle: true,
+              },
+            },
+          ],
+        });
+      }
+
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+        return createJsonResponse({
+          data: [{
+            id: `sleep-cycle-fetched-${testCase.label}`,
+            provider_connection_id: "provider-garmin-1",
+            sourceProviderSlug: "garmin",
+            start: "2026-04-02T04:45:00.000Z",
+            end: "2026-04-02T05:30:00.000Z",
+            stages: [{
+              endAt: "2026-04-02T05:30:00.000Z",
+              stage: "deep",
+              startAt: "2026-04-02T04:45:00.000Z",
+            }],
+          }],
+        });
+      }
 
       throw new Error(`Unexpected request: ${url}`);
     }, {
@@ -6126,13 +6580,13 @@ test("Junction direct Garmin sleep-cycle payloads import inline once the usefuln
       }),
     );
 
-    assert.deepEqual(requests, [], testCase.label);
     assert.equal(importedSnapshots.length, 1, testCase.label);
     const snapshot = importedSnapshots[0] as {
       summaries?: Record<string, Array<Record<string, unknown>>>;
       timeseries?: Record<string, unknown[]>;
     };
-    assert.equal(snapshot.summaries?.sleep_cycle?.[0]?.id, testCase.directRecord.id, testCase.label);
+    assert.ok(requests.some((url) => url.includes("/v2/summary/sleep_cycle/")), testCase.label);
+    assert.equal(snapshot.summaries?.sleep_cycle?.[0]?.id, `sleep-cycle-fetched-${testCase.label}`, testCase.label);
     assert.equal(snapshot.summaries?.sleep_cycle?.[0]?.sourceProviderSlug, "garmin", testCase.label);
     assert.deepEqual(snapshot.timeseries, {}, testCase.label);
   }
