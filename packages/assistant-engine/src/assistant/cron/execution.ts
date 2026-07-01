@@ -357,10 +357,24 @@ export async function executeClaimedAssistantCronJob(input: {
         input.job.kind === 'canonical' &&
         input.job.source.kind === 'scheduledLog'
       ) {
+        assertAssistantCronForegroundNotYielded({
+          jobName: claimedJob.name,
+          shouldYield: input.shouldYield ?? null,
+        })
         response = await runScheduledLogCronJob({
           vault: input.vault,
           scheduledLogId: input.job.source.scheduledLogId,
           occurrenceAt,
+          beforeWrite: async () => {
+            assertAssistantCronForegroundNotYielded({
+              jobName: claimedJob.name,
+              shouldYield: input.shouldYield ?? null,
+            })
+          },
+        })
+        assertAssistantCronForegroundNotYielded({
+          jobName: claimedJob.name,
+          shouldYield: input.shouldYield ?? null,
         })
         status = 'succeeded'
       } else {

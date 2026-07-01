@@ -45,6 +45,7 @@ export function normalizeCanonicalScheduledLogCronRecord(
 }
 
 export async function runScheduledLogCronJob(input: {
+  beforeWrite?: () => Promise<void> | void
   occurrenceAt: string
   scheduledLogId: string
   vault: string
@@ -53,6 +54,7 @@ export async function runScheduledLogCronJob(input: {
     vaultRoot: input.vault,
     scheduledLogId: input.scheduledLogId,
     occurrenceAt: input.occurrenceAt,
+    ...(input.beforeWrite ? { beforeWrite: input.beforeWrite } : {}),
   })
 
   return result.message

@@ -2970,11 +2970,12 @@ describe('assistant cron runtime orchestration', () => {
       succeeded: 1,
     })
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
-    expect(cronMocks.executeScheduledLogOccurrence).toHaveBeenCalledWith({
+    expect(cronMocks.executeScheduledLogOccurrence).toHaveBeenCalledWith(expect.objectContaining({
+      beforeWrite: expect.any(Function),
       occurrenceAt: '2026-04-08T09:00:00.000Z',
       scheduledLogId: 'slog_01JX8VCQY2M5ZBV64ZP4N1DRBC',
       vaultRoot,
-    })
+    }))
     expect(cronMocks.setScheduledLogStatus).toHaveBeenCalledWith({
       scheduledLogId: 'slog_01JX8VCQY2M5ZBV64ZP4N1DRBC',
       status: 'archived',
@@ -2995,6 +2996,107 @@ describe('assistant cron runtime orchestration', () => {
         }),
       ],
     })
+  })
+
+  it('yields canonical scheduled-log cron before writing when foreground work appears after claim', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
+    try {
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-yield-scheduled-log-',
+      )
+      const scheduledLogId = 'slog_01JX8VCQY2M5ZBV64ZP4N1DRBD'
+      getVaultScheduledLogStore(vaultRoot).push({
+        action: {
+          kind: 'measurement.add',
+          measurements: [
+            {
+              metric: 'body-weight',
+              unit: 'lb',
+              value: 180.8,
+            },
+          ],
+        },
+        body: 'Write the morning measurement event.',
+        createdAt: '2026-04-08T08:00:00.000Z',
+        docType: 'scheduled_log',
+        markdown: 'scheduled log markdown',
+        relativePath: 'bank/scheduled-logs/morning-measurement-yield.md',
+        schedule: {
+          at: '2026-04-08T09:00:00.000Z',
+          kind: 'at',
+        },
+        schemaVersion: 'murph.frontmatter.scheduled-log.v1',
+        scheduledLogId,
+        slug: 'morning-measurement-yield',
+        status: 'active',
+        summary: 'Record the morning measurement.',
+        tags: ['measurement'],
+        title: 'Morning measurement',
+        updatedAt: '2026-04-08T08:00:00.000Z',
+      })
+      let shouldYield = false
+      let scheduledEventWriteAttempted = false
+      cronMocks.executeScheduledLogOccurrence.mockImplementationOnce(async (input: {
+        beforeWrite?: () => Promise<void> | void
+      }) => {
+        shouldYield = true
+        await input.beforeWrite?.()
+        scheduledEventWriteAttempted = true
+        return {
+          message: 'Unexpected scheduled event write.',
+        }
+      })
+
+      const summary = await processDueAssistantCronJobsLocal({
+        limit: 1,
+        shouldYield: () => shouldYield,
+        vault: vaultRoot,
+      })
+
+      expect(summary).toEqual({
+        failed: 1,
+        processed: 1,
+        succeeded: 0,
+      })
+      expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+      expect(cronMocks.executeScheduledLogOccurrence).toHaveBeenCalledWith(expect.objectContaining({
+        beforeWrite: expect.any(Function),
+        occurrenceAt: '2026-04-08T09:00:00.000Z',
+        scheduledLogId,
+        vaultRoot,
+      }))
+      expect(scheduledEventWriteAttempted).toBe(false)
+      expect(cronMocks.setScheduledLogStatus).not.toHaveBeenCalled()
+      await expect(
+        listAssistantCronRuns({
+          job: scheduledLogId,
+          vault: vaultRoot,
+        }),
+      ).resolves.toMatchObject({
+        jobId: scheduledLogId,
+        runs: [{
+          error: 'Assistant cron yielded to fresh foreground input.',
+          status: 'failed',
+        }],
+      })
+
+      const current = await getAssistantCronJob(vaultRoot, scheduledLogId)
+      expect(current.state.runningAt).toBeNull()
+      expect(current.state.lastFailedAt).toBeNull()
+      expect(current.state.consecutiveFailures).toBe(0)
+      expect(current.state.nextRunAt).toBe('2026-04-08T13:00:10.000Z')
+      const runtimeStore = await readAssistantCronCanonicalRuntimeStore(
+        resolveAssistantStatePaths(vaultRoot),
+      )
+      const runtimeRecord = runtimeStore.jobs.find((record) =>
+        record.jobId === scheduledLogId
+      )
+      expect(runtimeRecord?.state.pendingOccurrenceAt).toBe('2026-04-08T09:00:00.000Z')
+      expect(runtimeRecord?.state.retryAfterAt).toBe('2026-04-08T13:00:10.000Z')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('processes due jobs across local and canonical stores and reports mixed outcomes', async () => {

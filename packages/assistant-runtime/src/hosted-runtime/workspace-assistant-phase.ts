@@ -812,6 +812,7 @@ export async function runHostedWorkspaceAssistantPhase(
     const result = mergeContinuingSystemMailboxResult({
       ...(hasPostCommitProviderCleanup
         ? {
+            afterCheckpointKeepsForegroundImportLoop: true,
             afterCheckpoint: async () => {
               assertHostedAssistantPhaseLiveness(input.signal);
               const baseNextWake = selectHostedRuntimeWakeCandidate([
@@ -3282,6 +3283,9 @@ async function drainHostedPostCheckpointDelivery(input: {
 
   let memberChannelBarrier: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null = null;
   try {
+    if (input.shouldYieldBackgroundDrain?.() === true) {
+      return await yieldHostedBackgroundPostCheckpointDrain(input);
+    }
     memberChannelBarrier = input.assistantDeliveryEffects.length > 0
       ? await flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(input)
       : null;
@@ -3313,6 +3317,9 @@ async function drainHostedPostCheckpointDelivery(input: {
     });
     return memberChannelBarrier;
   }
+  if (input.shouldYieldBackgroundDrain?.() === true) {
+    return await yieldHostedBackgroundPostCheckpointDrain(input);
+  }
 
   const outcomes = input.assistantDeliveryEffects.length > 0
     ? await drainHostedPreparedAssistantDeliveries({
@@ -3338,25 +3345,33 @@ async function drainHostedPostCheckpointDelivery(input: {
   let providerCleanupNextWakeAt: string | null;
   let providerCleanupRedactedStatus: HostedRuntimeRedactedJson = {};
   if (input.providerCleanup.mode === "drain") {
-    const providerCleanup = await drainHostedProviderCleanupAfterCommit({
-      assistantDeliveryOutcomes: outcomes,
-      assertLiveness: async () => {
-        assertHostedAssistantPhaseLiveness(input.input.signal);
-      },
-      checkpoint: input.providerCleanup.checkpoint ?? {
-        nextWakeAt: null,
-      },
-      env: buildHostedLinqChannelEnv({
-        forwardedEnv: input.input.runtime.forwardedEnv,
-        userEnv: input.input.runtime.userEnv,
-      }) as NodeJS.ProcessEnv,
-      fetchImplementation: input.input.runtime.platform.providerFetch ?? null,
-      signal: input.input.signal ?? null,
-      vaultRoot: input.input.restored.vaultRoot,
-      wake: input.wake,
-    });
-    providerCleanupNextWakeAt = providerCleanup.nextWakeAt;
-    providerCleanupRedactedStatus = buildHostedProviderCleanupRedactedStatus(providerCleanup);
+    if (input.shouldYieldBackgroundDrain?.() === true) {
+      providerCleanupNextWakeAt =
+        new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString();
+      providerCleanupRedactedStatus = {
+        hostedProviderCleanupYielded: 1,
+      };
+    } else {
+      const providerCleanup = await drainHostedProviderCleanupAfterCommit({
+        assistantDeliveryOutcomes: outcomes,
+        assertLiveness: async () => {
+          assertHostedAssistantPhaseLiveness(input.input.signal);
+        },
+        checkpoint: input.providerCleanup.checkpoint ?? {
+          nextWakeAt: null,
+        },
+        env: buildHostedLinqChannelEnv({
+          forwardedEnv: input.input.runtime.forwardedEnv,
+          userEnv: input.input.runtime.userEnv,
+        }) as NodeJS.ProcessEnv,
+        fetchImplementation: input.input.runtime.platform.providerFetch ?? null,
+        signal: input.input.signal ?? null,
+        vaultRoot: input.input.restored.vaultRoot,
+        wake: input.wake,
+      });
+      providerCleanupNextWakeAt = providerCleanup.nextWakeAt;
+      providerCleanupRedactedStatus = buildHostedProviderCleanupRedactedStatus(providerCleanup);
+    }
   } else {
     const providerCleanup = await deferHostedProviderCleanupAfterDelivery({
       input: input.input,
