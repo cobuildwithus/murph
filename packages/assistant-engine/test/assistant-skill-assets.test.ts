@@ -32,6 +32,15 @@ type AssistantSkillMetadata = {
   readonly name: string
 }
 
+function expectRecord(
+  value: unknown,
+  label: string,
+): asserts value is Record<string, unknown> {
+  expect(value, `${label} must be an object`).toBeTruthy()
+  expect(typeof value, `${label} must be an object`).toBe('object')
+  expect(Array.isArray(value), `${label} must not be an array`).toBe(false)
+}
+
 function parseAssistantSkillFrontmatter(raw: string): AssistantSkillMetadata {
   const normalized = raw.replace(/\r\n/gu, '\n')
   if (!normalized.startsWith('---\n')) {
@@ -364,6 +373,122 @@ describe('assistant skill assets', () => {
     )
     expect(raw).not.toContain('/tmp/')
     expect(raw).not.toContain('.codex-hosted')
+  })
+
+  it('keeps red light device seeds parseable and manufacturer-claim scoped', async () => {
+    const redLightSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'red-light-therapy',
+    )
+    expect(redLightSkill).toBeTruthy()
+    if (!redLightSkill) {
+      return
+    }
+
+    const raw = await readFile(
+      path.join(
+        resolveAssistantSkillsRoot(),
+        redLightSkill.slug,
+        'device-seeds.json',
+      ),
+      'utf8',
+    )
+    const parsed: unknown = JSON.parse(raw)
+    expectRecord(parsed, 'red light device seed root')
+
+    expect(parsed.schemaVersion).toBe(
+      'murph.assistant.skill.red-light-device-seeds.v1',
+    )
+    expect(Array.isArray(parsed.sourcePolicy)).toBe(true)
+    expect(JSON.stringify(parsed.sourcePolicy)).toContain(
+      'manufacturer-claim examples',
+    )
+    expect(JSON.stringify(parsed.sourcePolicy)).toContain(
+      'Do not extrapolate',
+    )
+
+    const devices = parsed.devices
+    expect(Array.isArray(devices)).toBe(true)
+    if (!Array.isArray(devices)) {
+      return
+    }
+    expect(devices.length).toBeGreaterThanOrEqual(8)
+
+    const aliases = new Set<string>()
+    const models = new Set<string>()
+
+    for (const [deviceIndex, deviceValue] of devices.entries()) {
+      expectRecord(deviceValue, `device ${deviceIndex}`)
+      expect(typeof deviceValue.brand).toBe('string')
+      expect(typeof deviceValue.model).toBe('string')
+      expect(typeof deviceValue.deviceClass).toBe('string')
+      models.add(String(deviceValue.model))
+
+      const deviceClass = deviceValue.deviceClass
+      expect(['panel', 'contact_wrap', 'contact_mat']).toContain(deviceClass)
+
+      expect(Array.isArray(deviceValue.aliases)).toBe(true)
+      if (Array.isArray(deviceValue.aliases)) {
+        for (const alias of deviceValue.aliases) {
+          expect(typeof alias).toBe('string')
+          expect(aliases.has(String(alias))).toBe(false)
+          aliases.add(String(alias))
+        }
+      }
+
+      expect(Array.isArray(deviceValue.wavelengthsNm)).toBe(true)
+      if (Array.isArray(deviceValue.wavelengthsNm)) {
+        for (const wavelength of deviceValue.wavelengthsNm) {
+          expect(typeof wavelength).toBe('number')
+          expect(wavelength).toBeGreaterThan(0)
+        }
+      }
+
+      expect(Array.isArray(deviceValue.irradianceReadings)).toBe(true)
+      if (!Array.isArray(deviceValue.irradianceReadings)) {
+        continue
+      }
+
+      for (const [
+        readingIndex,
+        readingValue,
+      ] of deviceValue.irradianceReadings.entries()) {
+        expectRecord(
+          readingValue,
+          `device ${deviceIndex} reading ${readingIndex}`,
+        )
+        expect(readingValue.sourceType).toBe('manufacturer_claim')
+        expect(String(readingValue.sourceUrl)).toMatch(
+          /^https:\/\/www\.bestqool\.com\/products\//u,
+        )
+        expect(typeof readingValue.distanceCm).toBe('number')
+        expect(typeof readingValue.distanceLabel).toBe('string')
+        expect(typeof readingValue.irradianceMwPerCm2).toBe('number')
+        expect(Number(readingValue.irradianceMwPerCm2)).toBeGreaterThan(0)
+        expect(typeof readingValue.measurementContext).toBe('string')
+
+        if (deviceClass === 'panel') {
+          expect(Number(readingValue.distanceCm)).toBeGreaterThan(0)
+        } else {
+          expect(readingValue.distanceCm).toBe(0)
+          expect(String(readingValue.distanceLabel)).toContain('surface')
+        }
+      }
+    }
+
+    expect(models).toEqual(
+      new Set([
+        'BQ40',
+        'BQ60',
+        'BQ60Pro',
+        'BQ150',
+        'Pro100',
+        'Pro200',
+        'Pro300',
+        'Redot S',
+        'Redot M',
+        'Redot L',
+      ]),
+    )
   })
 
   it('keeps behavior follow-through policy in the skill file with only compact bridges elsewhere', async () => {
