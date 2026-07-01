@@ -147,6 +147,13 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
 
 import { buildHostedInviteReply } from "@/src/lib/hosted-onboarding/linq";
 import {
+  createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  encryptHostedLinqLinePhoneNumber,
+} from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
+import {
   createHostedLinqProviderEventLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
@@ -868,7 +875,25 @@ function createPrismaStub() {
       upsert: vi.fn().mockResolvedValue({ id: "hld_123" }),
     },
     hostedLinqLine: {
-      findMany: vi.fn().mockResolvedValue([]),
+      findMany: vi.fn(async (query: { where?: { phoneNumberLookupKey?: { in?: string[] } } }) => {
+        const phoneNumber = "+15550000000";
+        const lookupKeys = new Set(query.where?.phoneNumberLookupKey?.in ?? []);
+        if (
+          !createHostedPhoneLookupKeyReadCandidates(phoneNumber).some((lookupKey) =>
+            lookupKeys.has(lookupKey)
+          )
+        ) {
+          return [];
+        }
+        return [{
+          activeMemberLimit: null,
+          assignmentWeight: 1,
+          maxNewConversationsPerDay: null,
+          phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),
+          phoneNumberHint: "*** 0000",
+          phoneNumberLookupKey: createHostedPhoneLookupKey(phoneNumber),
+        }];
+      }),
       findUnique: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
         Promise.resolve({

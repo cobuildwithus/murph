@@ -465,36 +465,6 @@ function mapHostedLinqContactCardRows(rows: readonly {
   });
 }
 
-export async function isHostedLinqConfiguredLinePhone(input: {
-  phoneNumber: string;
-  prisma: HostedLinqLineClient;
-}): Promise<boolean> {
-  const phoneNumber = normalizePhoneNumber(input.phoneNumber);
-  const lookupKeys = createHostedPhoneLookupKeyReadCandidates(phoneNumber);
-  if (!phoneNumber || lookupKeys.length === 0) {
-    return false;
-  }
-
-  const lines = await input.prisma.hostedLinqLine.findMany({
-    where: {
-      configuredAt: { not: null },
-      egressPolicy: "enabled",
-      healthStatus: { in: ["healthy", "unknown"] },
-      phoneNumberEncrypted: { not: null },
-      phoneNumberLookupKey: {
-        in: lookupKeys,
-      },
-    },
-    select: {
-      phoneNumberEncrypted: true,
-    },
-  });
-
-  return lines.some((line) => normalizePhoneNumber(
-    decryptHostedLinqLinePhoneNumber(line.phoneNumberEncrypted),
-  ) === phoneNumber);
-}
-
 export type HostedLinqProviderInventoryLine = {
   phoneNumber: string;
   providerPhoneNumberId: string | null;

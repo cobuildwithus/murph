@@ -10,7 +10,11 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   createHostedExternalThreadLookupKey,
   createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  encryptHostedLinqLinePhoneNumber,
+} from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
 import {
   buildHostedInviteReply,
   parseHostedLinqWebhookEvent,
@@ -396,6 +400,7 @@ type HostedLinqDeliveryFixture = {
 };
 
 type HostedLinqLineFixture = {
+  findMany?: MockedFunction;
   findUnique?: MockedFunction;
   update?: MockedFunction;
   updateMany?: MockedFunction;
@@ -2594,6 +2599,82 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       mocks.markHostedLinqOnboardingLinkNoticeSent.mock.invocationCallOrder[0],
     );
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+  });
+
+  it("does not create a pending signup route when the inbound Linq line is not assignable", async () => {
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqLine: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue({ phoneNumberLookupKey: "lookup:line" }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        upsert: vi.fn().mockResolvedValue({ phoneNumberLookupKey: "lookup:line" }),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMemberRouting: {
+        upsert: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [
+            {
+              type: "text",
+              value: "hello there",
+            },
+          ],
+        },
+        eventId: "evt_unassignable_line_first_contact",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "unassignable-home-line",
+    });
+    expect(prismaMocks.hostedLinqLine.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        configuredAt: { not: null },
+        egressPolicy: "enabled",
+        healthStatus: { in: ["healthy", "unknown"] },
+        phoneNumberEncrypted: { not: null },
+      }),
+    }));
+    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("stores iMessage email handles as pending Linq contact claims instead of verified emails", async () => {
@@ -6051,10 +6132,39 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
     });
   }
 
-  if (!hostedLinqLine?.upsert || !hostedLinqLine?.update || !hostedLinqLine?.findUnique) {
+  if (
+    !hostedLinqLine?.upsert
+    || !hostedLinqLine.update
+    || !hostedLinqLine.findUnique
+    || !hostedLinqLine.findMany
+  ) {
     Object.defineProperty(prisma, "hostedLinqLine", {
       configurable: true,
       value: {
+        findMany: vi.fn(async (query: { where?: { phoneNumberLookupKey?: { in?: string[] } } }) => {
+          const lookupKeys = new Set(query.where?.phoneNumberLookupKey?.in ?? []);
+          return [
+            "+15550000000",
+            "+15550100001",
+            "+15550100002",
+            "+15551234567",
+            "+15559876543",
+            "+15559999999",
+          ].flatMap((phoneNumber) =>
+            createHostedPhoneLookupKeyReadCandidates(phoneNumber).some((lookupKey) =>
+              lookupKeys.has(lookupKey)
+            )
+              ? [{
+                  activeMemberLimit: null,
+                  assignmentWeight: 1,
+                  maxNewConversationsPerDay: null,
+                  phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),
+                  phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
+                  phoneNumberLookupKey: createHostedPhoneLookupKey(phoneNumber),
+                }]
+              : []
+          );
+        }),
         findUnique: vi.fn().mockResolvedValue(null),
         update: vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
           Promise.resolve({

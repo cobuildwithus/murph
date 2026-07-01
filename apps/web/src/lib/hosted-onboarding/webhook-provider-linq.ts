@@ -79,6 +79,9 @@ import {
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
 import {
+  readHostedLinqAssignableHomeLineByPhone,
+} from "./linq-line-store";
+import {
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
 import type {
@@ -587,6 +590,24 @@ export async function planHostedOnboardingLinqWebhook(input: {
         existingMemberMatch,
         reason: "blocked-first-contact-content",
         routeStage: "ignored-blocked-first-contact-content",
+      }),
+    );
+  }
+
+  const recipientLine = recipientPhoneNumber
+    ? await readHostedLinqAssignableHomeLineByPhone({
+        phoneNumber: recipientPhoneNumber,
+        prisma: input.prisma,
+      })
+    : null;
+  if (recipientPhoneNumber && recipientLine === null) {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("unassignable-home-line"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: existingMemberEffectiveActive,
+        existingMemberMatch,
+        reason: "unassignable-home-line",
+        routeStage: "ignored-unassignable-home-line",
       }),
     );
   }

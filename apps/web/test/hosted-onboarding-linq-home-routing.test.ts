@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   listHostedLinqAssignableHomeLines: vi.fn(),
+  readHostedLinqAssignableHomeLineByPhone: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberHomeLinqRecipientPhoneTx: vi.fn(),
 }));
@@ -25,6 +26,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
   listHostedLinqAssignableHomeLines: mocks.listHostedLinqAssignableHomeLines,
+  readHostedLinqAssignableHomeLineByPhone: mocks.readHostedLinqAssignableHomeLineByPhone,
 }));
 
 import { resolveHostedMemberActivationLinqRoute } from "@/src/lib/hosted-onboarding/linq-home-routing";
@@ -36,6 +38,9 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockImplementation(({ phoneNumber }) =>
+      Promise.resolve(buildLine(phoneNumber))
+    );
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockResolvedValue(undefined);
   });
@@ -136,6 +141,10 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
 
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
     expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedLinqAssignableHomeLineByPhone).toHaveBeenCalledWith({
+      phoneNumber: "+15550100001",
+      prisma: {} as never,
+    });
     expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
       clearPending: true,
@@ -197,6 +206,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
 
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
     expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
     expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
       clearPending: true,
@@ -235,6 +245,10 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
 
     expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedLinqAssignableHomeLineByPhone).toHaveBeenCalledWith({
+      phoneNumber: "+15550100001",
+      prisma: {} as never,
+    });
     expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
       clearPending: true,
@@ -242,6 +256,46 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       memberId: "member_123",
       prisma: {} as never,
       recipientPhone: "+15550100001",
+    });
+  });
+
+  it("does not promote a pending Linq thread when its recipient is not an assignable DB line", async () => {
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(null);
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+      buildLine("+15550100002"),
+    ]);
+
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member: buildMember({
+          pendingLinqChatId: "chat_pending",
+          pendingLinqRecipientPhone: "+15550100001",
+        }),
+        prisma: {} as never,
+      }),
+    ).resolves.toMatchObject({
+      welcomeRoute: {
+        delivery: {
+          kind: "participant",
+          source: {
+            fromPhoneNumber: "+15550100002",
+            kind: "linq",
+          },
+        },
+      },
+    });
+
+    expect(mocks.readHostedLinqAssignableHomeLineByPhone).toHaveBeenCalledWith({
+      phoneNumber: "+15550100001",
+      prisma: {} as never,
+    });
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      clearPending: true,
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma: {} as never,
+      recipientPhone: "+15550100002",
     });
   });
 

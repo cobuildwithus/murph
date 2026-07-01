@@ -12,7 +12,10 @@ import {
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "./messaging-state";
-import { listHostedLinqAssignableHomeLines } from "./linq-line-store";
+import {
+  listHostedLinqAssignableHomeLines,
+  readHostedLinqAssignableHomeLineByPhone,
+} from "./linq-line-store";
 import { normalizePhoneNumber } from "./phone";
 import { hostedOnboardingError } from "./errors";
 import type { Prisma } from "@prisma/client";
@@ -60,9 +63,20 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
   }
 
   const pendingLinqRecipientPhone = normalizePhoneNumber(routing?.pendingLinqRecipientPhone);
+  const pendingLinqRecipientLine = pendingLinqRecipientPhone
+    ? await readHostedLinqAssignableHomeLineByPhone({
+        phoneNumber: pendingLinqRecipientPhone,
+        prisma: input.prisma,
+      })
+    : null;
   if (
     routing?.pendingLinqChatId
     && linqContactLookupKey
+    && (
+      pendingLinqRecipientPhone
+        ? pendingLinqRecipientLine !== null
+        : true
+    )
     && (
       memberPhoneNumber
         ? pendingLinqRecipientPhone !== null
