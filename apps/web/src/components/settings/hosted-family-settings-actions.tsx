@@ -170,7 +170,9 @@ export function HostedFamilyManager(props: {
       await requestHostedOnboardingJson({
         method: "POST",
         payload: {
-          addSeatIfNeeded: true,
+          // Only authorize buying a seat when the dialog actually showed the
+          // paid-seat cost, so a stale open-seat form never charges silently.
+          addSeatIfNeeded: inviteWillAddSeat,
           targetEmail: email.trim() || undefined,
           targetLabel: label.trim() || undefined,
           targetPhoneNumber: phone.trim() || undefined,
