@@ -646,6 +646,62 @@ describe('assistant auto-reply event-first path', () => {
     expect(replyEventPathMocks.sendAssistantMessage).not.toHaveBeenCalled()
   })
 
+  it('reports pending terminal Linq cleanup when reply evidence carries Linq provider message ids', async () => {
+    const vault = await createTempVault()
+    const candidate = createAssistantInputCandidate({
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'linq-user-message-1',
+        threadId: 'raw-linq-chat-1',
+      },
+      source: 'linq',
+      text: 'hey murph',
+      threadIsDirect: true,
+    })
+
+    const result = await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    expect(result).toMatchObject({
+      replied: 1,
+      terminalLinqCleanupPending: true,
+    })
+  })
+
+  it('does not report pending terminal Linq cleanup for reply evidence without Linq message ids', async () => {
+    const vault = await createTempVault()
+    const candidate = createAssistantInputCandidate({
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      replyTarget: null,
+      source: 'email',
+      text: 'hey murph',
+      threadIsDirect: true,
+    })
+
+    const result = await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['email'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    expect(result.replied).toBe(1)
+    expect(result.terminalLinqCleanupPending).toBeUndefined()
+  })
+
   it('uses the conversation thread only as legacy outbox-history fallback', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({

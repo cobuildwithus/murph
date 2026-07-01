@@ -245,6 +245,7 @@ export async function runHostedAssistantAutomationLane(input: {
         progressed: false,
         redactedLogEntries: [],
         replyFailed: 0,
+        terminalLinqCleanupPending: false,
         timings: undefined,
       };
   const assistantAutomationElapsedMs = elapsedSince(assistantStartedAt);
@@ -264,6 +265,8 @@ export async function runHostedAssistantAutomationLane(input: {
     assistantAutomationCronProcessed: assistantResult.cronProcessed,
     assistantAutomationProgressed: assistantResult.progressed,
     assistantAutomationReplyFailed: assistantResult.replyFailed,
+    assistantAutomationTerminalLinqCleanupPending:
+      assistantResult.terminalLinqCleanupPending,
     assistantAutomationTotalElapsedMs: assistantResult.timings?.totalElapsedMs ?? null,
     assistantInputCandidateListed:
       assistantResult.timings?.inputCandidateListed ?? false,
@@ -297,6 +300,7 @@ export async function runHostedAssistantAutomation(
   progressed: boolean;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   replyFailed: number;
+  terminalLinqCleanupPending: boolean;
   timings?: {
     activeTurnInputIngested?: boolean | null;
     afterStateElapsedMs: number;
@@ -574,6 +578,7 @@ export async function runHostedAssistantAutomation(
       progressed: result.progressed,
       redactedLogEntries,
       replyFailed: replies.failed,
+      terminalLinqCleanupPending: replies.terminalLinqCleanupPending === true,
       timings: {
         activeTurnInputIngested,
         afterStateElapsedMs,
@@ -609,6 +614,7 @@ export async function runHostedAssistantAutomation(
         progressed: true,
         redactedLogEntries,
         replyFailed: 0,
+        terminalLinqCleanupPending: false,
       };
     }
 

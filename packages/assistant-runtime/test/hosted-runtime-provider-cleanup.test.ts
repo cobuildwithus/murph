@@ -206,6 +206,52 @@ test("hosted provider cleanup deferred plan re-arms due cleanup without scanning
   }
 });
 
+test("hosted provider cleanup deferred plan projects a first wake for terminal cleanup evidence written this turn", async () => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+
+  try {
+    const plan = await prepareHostedProviderCleanupPlan({
+      deferred: true,
+      idleCheckpointDelayMs: 1_000,
+      nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
+      terminalCleanupEvidencePending: true,
+      vaultRoot,
+    });
+
+    assert.deepEqual(plan, {
+      checkpoint: null,
+      deferred: true,
+      due: false,
+      requiresCheckpoint: false,
+      stateQueued: false,
+      wakeAt: "2026-07-01T00:09:02.000Z",
+    });
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
+    assert.equal(await readHostedProviderCleanupCheckpoint(vaultRoot), null);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("hosted provider cleanup deferred plan stays wakeless without cleanup state or new terminal evidence", async () => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+
+  try {
+    const plan = await prepareHostedProviderCleanupPlan({
+      deferred: true,
+      idleCheckpointDelayMs: 1_000,
+      nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
+      vaultRoot,
+    });
+
+    assert.equal(plan.wakeAt, null);
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+  } finally {
+    await cleanup();
+  }
+});
+
 test("hosted provider cleanup plan queues terminal Linq cleanup as checkpoint work", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
   mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({

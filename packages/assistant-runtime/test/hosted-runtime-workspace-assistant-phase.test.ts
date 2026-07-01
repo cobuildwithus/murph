@@ -340,6 +340,7 @@ beforeEach(() => {
     idleCheckpointDelayMs?: number | null;
     initialCheckpoint?: { nextWakeAt?: string | null } | null;
     nowMs: number;
+    terminalCleanupEvidencePending?: boolean;
     vaultRoot: string;
   }) => {
     let checkpoint = input.initialCheckpoint ?? null;
@@ -368,12 +369,19 @@ beforeEach(() => {
         });
       }
     }
-    const wakeAt = await mocks.resolveHostedProviderCleanupScheduledWakeAt({
+    const scheduledWakeAt = await mocks.resolveHostedProviderCleanupScheduledWakeAt({
       deferDueOrInvalid: input.deferred,
       idleCheckpointDelayMs: input.idleCheckpointDelayMs,
       nowMs: input.nowMs,
       vaultRoot: input.vaultRoot,
     });
+    const wakeAt = scheduledWakeAt
+      ?? (input.deferred && input.terminalCleanupEvidencePending
+        ? mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
+            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            nowMs: input.nowMs,
+          })
+        : null);
     const wakeMs = Date.parse(checkpoint?.nextWakeAt ?? "");
     const due = !input.deferred
       && checkpoint !== null
@@ -2798,6 +2806,36 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeAt: null,
       progressed: true,
     }));
+  });
+
+  it("projects a future cleanup wake when a foreground turn terminalizes Linq input without delivery effects", async () => {
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      activeTurnInputIngested: true,
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      assistantAutomationTerminalLinqCleanupPending: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:09:00.000Z",
+    }));
+
+    expect(mocks.prepareHostedProviderCleanupPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deferred: true,
+        terminalCleanupEvidencePending: true,
+      }),
+    );
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      progressed: true,
+    }));
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
   });
 
   it("lets assistant work consume a legacy assistant-labeled alarm without running device-sync", async () => {

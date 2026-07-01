@@ -174,6 +174,7 @@ interface AssistantAutoReplySkipDecision {
   nextWakeAt: string | null
   reason: string
   stopScanning: boolean
+  terminalLinqCleanupPending?: true
   terminalSuppression: boolean
 }
 
@@ -202,6 +203,7 @@ interface AssistantAutoReplyResolvedGroupOutcome {
   context: AssistantAutoReplyGroupContext
   deferredTerminalSuppressionEvidence: AssistantAutoReplySuppressionEvidenceDraft[]
   outcome: AssistantAutoReplyGroupOutcome
+  terminalLinqCleanupPending: boolean
   terminalSuppressedInputIds: string[]
 }
 
@@ -254,6 +256,7 @@ interface AssistantAutoReplyGroupOutcome {
   nextWakeAt: string | null
   stopScanning: boolean
   summary: AssistantAutoReplyOutcomeSummary
+  terminalLinqCleanupPending?: true
   terminalSuppression: boolean
 }
 
@@ -267,6 +270,7 @@ export interface AssistantAutoReplyProcessResult {
   replied: number
   skipped: number
   stopScanning: boolean
+  terminalLinqCleanupPending?: true
 }
 
 export function applyAssistantAutoReplyProcessResult(input: {
@@ -276,6 +280,9 @@ export function applyAssistantAutoReplyProcessResult(input: {
 }): boolean {
   if (input.result.checkpointRequired) {
     input.summary.checkpointRequired = true
+  }
+  if (input.result.terminalLinqCleanupPending) {
+    input.summary.terminalLinqCleanupPending = true
   }
   input.summary.failed += input.result.failed
   input.summary.nextWakeAt = earliestAssistantAutomationWakeAt(
@@ -348,6 +355,7 @@ export async function processAssistantAutoReplyGroup(input: {
         resolved.deferredTerminalSuppressionEvidence,
       onEvent: input.onEvent,
       outcome: resolved.outcome,
+      terminalLinqCleanupPending: resolved.terminalLinqCleanupPending,
       terminalSuppressedInputIds: resolved.terminalSuppressedInputIds,
       vault: input.vault,
     })
@@ -438,6 +446,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       context,
       deferredTerminalSuppressionEvidence: [],
       outcome: createIgnoredGroupOutcome(),
+      terminalLinqCleanupPending: false,
       terminalSuppressedInputIds: [],
     }
   }
@@ -449,11 +458,13 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
         inputCount: context.inputCount,
         decision,
       }),
+      terminalLinqCleanupPending: false,
       terminalSuppressedInputIds: [],
     }
   }
 
   let acceptedContext = context
+  let terminalLinqCleanupPending = false
   const deferredTerminalSuppressionEvidence:
     AssistantAutoReplySuppressionEvidenceDraft[] = []
   const terminalSuppressedInputIds = new Set<string>()
@@ -531,10 +542,10 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       if (event.messageReactionsAvailable === true) {
         deferredTerminalSuppressionEvidence.push(evidenceDraft)
       } else {
-        await writeAssistantAutoReplySuppressionEvidence({
+        terminalLinqCleanupPending = (await writeAssistantAutoReplySuppressionEvidence({
           ...evidenceDraft,
           vault: input.vault,
-        })
+        })) || terminalLinqCleanupPending
       }
       for (const inputId of acceptedInputIds) {
         terminalSuppressedInputIds.add(inputId)
@@ -562,6 +573,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
         reason: ASSISTANT_NO_REPLY_SUPPRESSION_REASON,
         terminalSuppression: true,
       }),
+      terminalLinqCleanupPending,
       terminalSuppressedInputIds: [...terminalSuppressedInputIds],
     }
   }
@@ -573,6 +585,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       context: acceptedContext,
       deferredTerminalSuppressionEvidence,
       outcome: createDeferredDeliveryGroupOutcome(result),
+      terminalLinqCleanupPending,
       terminalSuppressedInputIds: [...terminalSuppressedInputIds],
     }
   }
@@ -581,6 +594,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     context: acceptedContext,
     deferredTerminalSuppressionEvidence,
     outcome: createSuccessfulReplyGroupOutcome(result),
+    terminalLinqCleanupPending,
     terminalSuppressedInputIds: [...terminalSuppressedInputIds],
   }
 }
@@ -590,16 +604,17 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
   deferredTerminalSuppressionEvidence?: readonly AssistantAutoReplySuppressionEvidenceDraft[]
   onEvent?: (event: AssistantRunEvent) => void
   outcome: AssistantAutoReplyGroupOutcome
+  terminalLinqCleanupPending?: boolean
   terminalSuppressedInputIds?: readonly string[]
   vault: string
 }): Promise<AssistantAutoReplyProcessResult> {
   const artifactResult = await writeAssistantAutoReplyOutcomeArtifacts(input).catch((error) => {
     if (input.outcome.artifact.kind === 'error') {
-      return { checkpointRequired: false }
+      return { checkpointRequired: false, terminalLinqCleanupPending: false }
     }
     throw error
   })
-  const deferredSuppressionCheckpointRequired =
+  const deferredSuppression =
     await writeDeferredAssistantAutoReplySuppressionEvidence(input)
   emitAssistantAutoReplyOutcomeEvent(input)
 
@@ -607,8 +622,14 @@ async function commitAssistantAutoReplyGroupOutcome(input: {
     advanceCursor: input.outcome.advanceCursor,
     ...(input.outcome.checkpointRequired ||
       artifactResult.checkpointRequired ||
-      deferredSuppressionCheckpointRequired
+      deferredSuppression.checkpointRequired
       ? { checkpointRequired: true }
+      : {}),
+    ...(input.outcome.terminalLinqCleanupPending ||
+      input.terminalLinqCleanupPending ||
+      artifactResult.terminalLinqCleanupPending ||
+      deferredSuppression.terminalLinqCleanupPending
+      ? { terminalLinqCleanupPending: true }
       : {}),
     currentTurnDeliveryIntentIds:
       collectAssistantAutoReplyOutcomeDeliveryIntentIds(input.outcome),
@@ -625,7 +646,7 @@ async function writeDeferredAssistantAutoReplySuppressionEvidence(input: {
   deferredTerminalSuppressionEvidence?: readonly AssistantAutoReplySuppressionEvidenceDraft[]
   outcome: AssistantAutoReplyGroupOutcome
   vault: string
-}): Promise<boolean> {
+}): Promise<{ checkpointRequired: boolean; terminalLinqCleanupPending: boolean }> {
   const evidence = input.deferredTerminalSuppressionEvidence ?? []
   if (
     evidence.length === 0 ||
@@ -634,16 +655,17 @@ async function writeDeferredAssistantAutoReplySuppressionEvidence(input: {
       input.outcome.artifact.kind !== 'deferred'
     )
   ) {
-    return false
+    return { checkpointRequired: false, terminalLinqCleanupPending: false }
   }
 
+  let terminalLinqCleanupPending = false
   for (const draft of evidence) {
-    await writeAssistantAutoReplySuppressionEvidence({
+    terminalLinqCleanupPending = (await writeAssistantAutoReplySuppressionEvidence({
       ...draft,
       vault: input.vault,
-    })
+    })) || terminalLinqCleanupPending
   }
-  return true
+  return { checkpointRequired: true, terminalLinqCleanupPending }
 }
 
 function collectAssistantAutoReplyOutcomeDeliveryIntentIds(
@@ -664,11 +686,11 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
   outcome: AssistantAutoReplyGroupOutcome
   terminalSuppressedInputIds?: readonly string[]
   vault: string
-}): Promise<{ checkpointRequired: boolean }> {
+}): Promise<{ checkpointRequired: boolean; terminalLinqCleanupPending?: boolean }> {
   switch (input.outcome.artifact.kind) {
     case 'none':
       if (input.outcome.kind === 'skipped' && input.outcome.terminalSuppression) {
-        await writeAssistantAutoReplySuppressionEvidence({
+        const terminalLinqCleanupPending = await writeAssistantAutoReplySuppressionEvidence({
           captureIds: input.context.optionalInboxCaptureIds,
           inputIds: input.context.inputIds,
           linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(input.context),
@@ -677,7 +699,7 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
           ),
           vault: input.vault,
         })
-        return { checkpointRequired: true }
+        return { checkpointRequired: true, terminalLinqCleanupPending }
       }
       return { checkpointRequired: false }
     case 'result': {
@@ -695,7 +717,7 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
         return { checkpointRequired: false }
       }
 
-      await writeAssistantAutoReplyReplyIntentEvidence({
+      const terminalLinqCleanupPending = await writeAssistantAutoReplyReplyIntentEvidence({
         captureIds: evidenceContext.optionalInboxCaptureIds,
         inputIds: evidenceContext.inputIds,
         linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(evidenceContext),
@@ -704,7 +726,7 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
         result: input.outcome.artifact.result,
         vault: input.vault,
       })
-      return { checkpointRequired: true }
+      return { checkpointRequired: true, terminalLinqCleanupPending }
     }
     case 'deferred': {
       const queuedAt = new Date().toISOString()
@@ -715,7 +737,7 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
       if (!evidenceContext) {
         return { checkpointRequired: false }
       }
-      await writeAssistantAutoReplyReplyIntentEvidence({
+      const terminalLinqCleanupPending = await writeAssistantAutoReplyReplyIntentEvidence({
         captureIds: evidenceContext.optionalInboxCaptureIds,
         inputIds: evidenceContext.inputIds,
         linqMessageIds: resolveAutoReplyLinqProviderMessageIdsFromContext(evidenceContext),
@@ -724,7 +746,7 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
         result: input.outcome.artifact.result,
         vault: input.vault,
       })
-      return { checkpointRequired: true }
+      return { checkpointRequired: true, terminalLinqCleanupPending }
     }
     case 'error':
       await writeAssistantChatErrorArtifacts({
@@ -800,6 +822,9 @@ function createSkippedDecisionOutcome(input: {
     return {
       ...outcome,
       ...(input.decision.checkpointRequired ? { checkpointRequired: true } : {}),
+      ...(input.decision.terminalLinqCleanupPending
+        ? { terminalLinqCleanupPending: true }
+        : {}),
     }
   }
 
@@ -1009,13 +1034,15 @@ async function evaluateAssistantAutoReplyGroup(input: {
     if (
       !(await terminalEvidenceExistsForEveryCapture(input.vault, repairCaptureIds))
     ) {
-      await backfillAssistantAutoReplyTerminalEvidenceFromTerminalEvidence({
-        captureIds: repairCaptureIds,
-        evidence: repairEvidence,
-        vault: input.vault,
-      })
+      const terminalLinqCleanupPending =
+        await backfillAssistantAutoReplyTerminalEvidenceFromTerminalEvidence({
+          captureIds: repairCaptureIds,
+          evidence: repairEvidence,
+          vault: input.vault,
+        })
       return createAdvancingSkipDecision('assistant reply already handled', {
         checkpointRequired: true,
+        terminalLinqCleanupPending,
         terminalSuppression: false,
       })
     }
@@ -1054,14 +1081,16 @@ async function evaluateAssistantAutoReplyGroup(input: {
       receipts,
     })
     if (handledReceipt) {
-      await backfillAssistantAutoReplyTerminalEvidenceFromTerminalSnapshot({
-        captureIds: input.group.optionalInboxCaptureIds,
-        context: input.group,
-        snapshot: handledReceipt,
-        vault: input.vault,
-      })
+      const terminalLinqCleanupPending =
+        await backfillAssistantAutoReplyTerminalEvidenceFromTerminalSnapshot({
+          captureIds: input.group.optionalInboxCaptureIds,
+          context: input.group,
+          snapshot: handledReceipt,
+          vault: input.vault,
+        })
       return createAdvancingSkipDecision('assistant reply already handled', {
         checkpointRequired: true,
+        terminalLinqCleanupPending,
         terminalSuppression: false,
       })
     }
@@ -2884,6 +2913,7 @@ function createAdvancingSkipDecision(
   reason: string,
   input?: {
     checkpointRequired?: true
+    terminalLinqCleanupPending?: boolean
     terminalSuppression?: boolean
   },
 ): AssistantAutoReplySkipDecision {
@@ -2894,6 +2924,9 @@ function createAdvancingSkipDecision(
     nextWakeAt: null,
     reason,
     stopScanning: false,
+    ...(input?.terminalLinqCleanupPending
+      ? { terminalLinqCleanupPending: true }
+      : {}),
     terminalSuppression: input?.terminalSuppression ?? true,
   }
 }
@@ -2972,22 +3005,21 @@ async function backfillAssistantAutoReplyTerminalEvidenceFromTerminalEvidence(in
   captureIds: readonly string[]
   evidence: AssistantAutoReplyTerminalEvidence
   vault: string
-}): Promise<void> {
+}): Promise<boolean> {
   if (
     input.evidence.terminal.kind === 'suppressed' ||
     input.evidence.terminal.kind === 'retry_exhausted'
   ) {
-    await writeAssistantAutoReplySuppressionEvidence({
+    return await writeAssistantAutoReplySuppressionEvidence({
       captureIds: input.captureIds,
       linqMessageIds: input.evidence.providerCleanup.linqMessageIds,
       reason: input.evidence.terminal.reason,
       recordedAt: input.evidence.recordedAt,
       vault: input.vault,
     })
-    return
   }
 
-  await writeAssistantAutoReplyReplyTerminalEvidence({
+  return await writeAssistantAutoReplyReplyTerminalEvidence({
     captureIds: input.captureIds,
     deliveryIntentId: input.evidence.terminal.deliveryIntentId,
     linqMessageIds: input.evidence.providerCleanup.linqMessageIds,
@@ -3004,8 +3036,8 @@ async function backfillAssistantAutoReplyTerminalEvidenceFromTerminalSnapshot(in
   context: AssistantAutoReplyGroupContext
   snapshot: AssistantAutoReplyTerminalSnapshot
   vault: string
-}): Promise<void> {
-  await writeAssistantAutoReplyReplyTerminalEvidence({
+}): Promise<boolean> {
+  return await writeAssistantAutoReplyReplyTerminalEvidence({
     captureIds: input.captureIds,
     deliveryIntentId: input.snapshot.deliveryIntentId,
     inputIds: input.context.inputIds,

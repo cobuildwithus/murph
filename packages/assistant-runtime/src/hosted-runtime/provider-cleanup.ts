@@ -100,21 +100,29 @@ export async function prepareHostedProviderCleanupPlan(input: {
   idleCheckpointDelayMs?: number | null;
   initialCheckpoint?: HostedProviderCleanupCheckpoint | null;
   nowMs: number;
+  terminalCleanupEvidencePending?: boolean;
   vaultRoot: string;
 }): Promise<HostedProviderCleanupPlan> {
   if (input.deferred) {
+    const scheduledWakeAt = await resolveHostedProviderCleanupScheduledWakeAt({
+      deferDueOrInvalid: true,
+      idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+      nowMs: input.nowMs,
+      vaultRoot: input.vaultRoot,
+    });
     return {
       checkpoint: input.initialCheckpoint ?? null,
       deferred: true,
       due: false,
       requiresCheckpoint: false,
       stateQueued: false,
-      wakeAt: await resolveHostedProviderCleanupScheduledWakeAt({
-        deferDueOrInvalid: true,
-        idleCheckpointDelayMs: input.idleCheckpointDelayMs,
-        nowMs: input.nowMs,
-        vaultRoot: input.vaultRoot,
-      }),
+      wakeAt: scheduledWakeAt
+        ?? (input.terminalCleanupEvidencePending
+          ? resolveHostedProviderCleanupFirstDeferredWakeAt({
+              idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+              nowMs: input.nowMs,
+            })
+          : null),
     };
   }
 

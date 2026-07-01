@@ -190,6 +190,7 @@ export interface HostedMaintenanceMetrics {
   assistantAutomationPassElapsedMs?: number | null;
   assistantAutomationProgressed?: boolean | null;
   assistantAutomationReplyFailed?: number | null;
+  assistantAutomationTerminalLinqCleanupPending?: boolean | null;
   assistantAutomationTotalElapsedMs?: number | null;
   assistantInputCandidateListed?: boolean | null;
   assistantInputCandidateQueryCount?: number | null;

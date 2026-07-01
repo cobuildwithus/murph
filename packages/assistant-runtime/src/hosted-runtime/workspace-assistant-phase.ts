@@ -585,6 +585,8 @@ export async function runHostedWorkspaceAssistantPhase(
       idleCheckpointDelayMs: input.request.idleCheckpointDelayMs,
       initialCheckpoint: initialProviderCleanupCheckpoint,
       nowMs: resolveHostedAssistantPhaseNowMs(input),
+      terminalCleanupEvidencePending:
+        assistantMetrics.assistantAutomationTerminalLinqCleanupPending === true,
       vaultRoot: input.restored.vaultRoot,
     });
     const providerCleanupOwnedByPostCheckpointDelivery =

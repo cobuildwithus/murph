@@ -57,6 +57,34 @@ test('auto-reply terminal evidence readers ignore malformed evidence files', asy
   }
 })
 
+test('auto-reply terminal evidence writers report whether pending Linq cleanup was recorded', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))
+  try {
+    assert.equal(
+      await writeAssistantAutoReplySuppressionEvidence({
+        captureIds: ['cap_linq_cleanup'],
+        linqMessageIds: ['linq_message_1'],
+        reason: 'channel cannot reply',
+        recordedAt: '2026-04-08T00:00:00.000Z',
+        vault: vaultRoot,
+      }),
+      true,
+    )
+    assert.equal(
+      await writeAssistantAutoReplySuppressionEvidence({
+        captureIds: ['cap_no_cleanup'],
+        linqMessageIds: [],
+        reason: 'channel cannot reply',
+        recordedAt: '2026-04-08T00:00:00.000Z',
+        vault: vaultRoot,
+      }),
+      false,
+    )
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
 test('auto-reply terminal evidence reader accepts historical retry-exhausted evidence', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'assistant-auto-reply-evidence-'))
   try {
