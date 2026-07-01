@@ -3979,10 +3979,11 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("post-checkpoint projected wakes wait for the idle checkpoint", async () => {
+  test("post-checkpoint projected wakes replace consumed phase wakes and wait for the idle checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-post-checkpoint-wake-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const phaseWakeAt = new Date(Date.now() + 30_000).toISOString();
     const postCheckpointWakeAt = new Date(Date.now() + 60_000).toISOString();
     let assistantPhaseCalls = 0;
 
@@ -4038,8 +4039,11 @@ describe("hosted workspace runtime entrypoint", () => {
                 nextWakeReason: "assistant",
               }),
               checkpointReason: "outbox_sending",
+              nextWakeAt: phaseWakeAt,
+              nextWakeReason: "assistant",
               progressed: true,
               redactedStatus: {
+                hostedAssistantNextWakeAt: phaseWakeAt,
                 hostedOutboxPendingDeliveryEffects: 1,
               },
             };
@@ -4054,6 +4058,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "idle_shutdown",
       ]);
+      assert.notEqual(result.nextWakeAt, phaseWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeAt, postCheckpointWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
     } finally {
