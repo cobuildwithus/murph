@@ -152,6 +152,11 @@ interface JunctionResourceEntry {
   originFallback?: JunctionOriginFallback;
 }
 
+interface JunctionResolvedResourceEntry {
+  entry: PlainObject;
+  resourceContext: ResourceContext;
+}
+
 interface MetricDescriptor {
   metric: string;
   unit: string;
@@ -675,6 +680,7 @@ interface JunctionSleepStageAggregate {
   endAt: string;
   parentResourceId: string;
   recordedAt?: string;
+  resourceContext: ResourceContext;
   stage: JunctionSleepStage;
   startAt: string;
   timestamp: ReturnType<typeof resolveRecordTimestamp>;
@@ -777,7 +783,7 @@ function normalizeSummaries(
       ),
     );
 
-    entries.forEach(({ entry, originFallback }, index) => {
+    const resolvedEntries = entries.flatMap(({ entry, originFallback }, index): JunctionResolvedResourceEntry[] => {
       const resourceContext = buildResourceContext({
         entry,
         originFallback,
@@ -791,9 +797,18 @@ function normalizeSummaries(
       });
 
       if (!resourceContext) {
-        return;
+        return [];
       }
 
+      return [{ entry, resourceContext }];
+    });
+
+    if (resource === "sleep_cycle") {
+      pushSleepCycleEntries(resolvedEntries, context);
+      continue;
+    }
+
+    resolvedEntries.forEach(({ entry, resourceContext }) => {
       switch (resource) {
         case "activity":
           pushObservationMetrics(entry, resourceContext, context, ACTIVITY_METRICS);
@@ -803,9 +818,6 @@ function normalizeSummaries(
           break;
         case "sleep":
           pushSleepSummary(entry, resourceContext, context);
-          break;
-        case "sleep_cycle":
-          pushSleepCycle(entry, resourceContext, context);
           break;
         case "workouts":
           pushWorkoutSummary(entry, resourceContext, context);
@@ -1747,19 +1759,49 @@ function pushSleepSummary(
   pushJunctionRecoveryReadinessScore(entry, resourceContext, context, sleepTimestamp);
 }
 
-function pushSleepCycle(
+function pushSleepCycleEntries(
+  entries: readonly JunctionResolvedResourceEntry[],
+  context: NormalizationContext,
+): void {
+  const aggregates = new Map<string, JunctionSleepStageAggregate>();
+
+  for (const { entry, resourceContext } of entries) {
+    collectJunctionSleepStageAggregates(entry, resourceContext, context, aggregates);
+  }
+
+  for (const aggregate of aggregates.values()) {
+    const metric = sleepStageMetricDescriptor(aggregate.stage);
+
+    context.events.push(stripUndefined({
+      kind: "observation",
+      occurredAt: aggregate.endAt,
+      recordedAt: aggregate.recordedAt,
+      dayKey: aggregate.timestamp.dayKey,
+      timeZone: aggregate.timeZone,
+      source: "device",
+      title: metric.title,
+      evidenceRoles: aggregate.resourceContext.evidenceRoles,
+      externalRef: makeJunctionSleepStageAggregateExternalRef(aggregate.resourceContext, aggregate, metric.metric),
+      dataOrigin: buildDataOrigin(aggregate.dataOriginEntry, aggregate.resourceContext, aggregate.timestamp),
+      fields: {
+        metric: metric.metric,
+        observationGrain: "summary",
+        value: Number(aggregate.durationMinutes.toFixed(4)),
+        unit: "minutes",
+      },
+    }));
+  }
+}
+
+function collectJunctionSleepStageAggregates(
   entry: PlainObject,
   resourceContext: ResourceContext,
   context: NormalizationContext,
+  aggregates: Map<string, JunctionSleepStageAggregate>,
 ): void {
   const parentTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
   const intervals = collectJunctionSleepStageIntervals(entry, resourceContext, context, parentTimestamp);
-  const parentResourceId = buildStableResourceId(
-    resourceContext,
-    entry,
-    resolveSleepCycleParentIdentityTimestamp(parentTimestamp, intervals),
-  );
-  const aggregates = new Map<string, JunctionSleepStageAggregate>();
+  const parentResourceId = resolveSleepCycleParentResourceId(resourceContext, entry, parentTimestamp);
 
   for (const interval of intervals) {
     for (const segment of splitJunctionSleepStageInterval(interval, entry, parentTimestamp, context.defaultTimeZone)) {
@@ -1768,6 +1810,8 @@ function pushSleepCycle(
         dayKey: segment.dayKey,
       });
       const aggregateKey = [
+        resourceContext.externalRefResourceType,
+        parentResourceId,
         interval.stage,
         stageTimestamp.dayKey ?? "",
         interval.timeZone ?? "",
@@ -1792,35 +1836,13 @@ function pushSleepCycle(
         endAt: segment.endAt,
         parentResourceId,
         recordedAt: stageTimestamp.recordedAt,
+        resourceContext,
         stage: interval.stage,
         startAt: segment.startAt,
         timestamp: stageTimestamp,
         timeZone: interval.timeZone,
       });
     }
-  }
-
-  for (const aggregate of aggregates.values()) {
-    const metric = sleepStageMetricDescriptor(aggregate.stage);
-
-    context.events.push(stripUndefined({
-      kind: "observation",
-      occurredAt: aggregate.endAt,
-      recordedAt: aggregate.recordedAt,
-      dayKey: aggregate.timestamp.dayKey,
-      timeZone: aggregate.timeZone,
-      source: "device",
-      title: metric.title,
-      evidenceRoles: resourceContext.evidenceRoles,
-      externalRef: makeJunctionSleepStageAggregateExternalRef(resourceContext, aggregate, metric.metric),
-      dataOrigin: buildDataOrigin(aggregate.dataOriginEntry, resourceContext, aggregate.timestamp),
-      fields: {
-        metric: metric.metric,
-        observationGrain: "summary",
-        value: Number(aggregate.durationMinutes.toFixed(4)),
-        unit: "minutes",
-      },
-    }));
   }
 }
 
@@ -1886,31 +1908,24 @@ function collectJunctionSleepStageIntervals(
   return intervals;
 }
 
-function resolveSleepCycleParentIdentityTimestamp(
+function resolveSleepCycleParentResourceId(
+  resourceContext: ResourceContext,
+  entry: PlainObject,
   parentTimestamp: ReturnType<typeof resolveRecordTimestamp>,
-  intervals: readonly JunctionSleepStageInterval[],
-): ReturnType<typeof resolveRecordTimestamp> {
-  if (parentTimestamp.observedAtRaw || intervals.length === 0) {
-    return parentTimestamp;
+): string {
+  if (
+    parentTimestamp.observedAtRaw ||
+    firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS)
+  ) {
+    return buildStableResourceId(resourceContext, entry, parentTimestamp);
   }
 
-  const firstStartAt = intervals.reduce(
-    (earliest, interval) => earlierIsoTimestamp(earliest, interval.startAt),
-    intervals[0]?.startAt ?? "",
-  );
-  const lastEndAt = intervals.reduce(
-    (latest, interval) => laterIsoTimestamp(latest, interval.endAt),
-    intervals[0]?.endAt ?? "",
-  );
-
-  if (!firstStartAt || !lastEndAt) {
-    return parentTimestamp;
-  }
-
-  return withTimestampOverride(parentTimestamp, {
-    occurredAt: lastEndAt,
-    observedAtRaw: `${firstStartAt}/${lastEndAt}`,
-  });
+  return `${resourceContext.resourceSlug}-stage-stream-${shortHash([
+    resourceContext.resourceSlug,
+    resourceContext.sourceProviderSlug,
+    resourceContext.origin.sourceType,
+    resourceContext.origin.sourceInstanceId,
+  ])}`;
 }
 
 function splitJunctionSleepStageInterval(
@@ -2017,11 +2032,13 @@ function resolveSleepStageBucketTimeZone(
 ): string | undefined {
   const explicitTimeZone = firstStringFromPaths(intervalEntry, ["timeZone", "timezone", "time_zone"])
     ?? firstStringFromPaths(parentEntry, ["timeZone", "timezone", "time_zone"]);
+  const intervalOffsetSeconds = readJunctionTimeZoneOffsetSeconds(intervalEntry);
+  const parentOffsetSeconds = readJunctionTimeZoneOffsetSeconds(parentEntry);
   // Offset-only sleep-stage rows keep their historic UTC-day identity for
   // stable replay; explicit IANA/UTC zones and vault defaults can be split.
   const hasOffsetOnlyEvidence = !explicitTimeZone && (
-    readJunctionTimeZoneOffsetSeconds(intervalEntry) !== undefined ||
-    readJunctionTimeZoneOffsetSeconds(parentEntry) !== undefined
+    intervalOffsetSeconds !== null && intervalOffsetSeconds !== undefined ||
+    parentOffsetSeconds !== null && parentOffsetSeconds !== undefined
   );
 
   return explicitTimeZone ?? (hasOffsetOnlyEvidence ? undefined : defaultTimeZone);
