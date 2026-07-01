@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Activity, ChevronsUpDown, FlaskConical, Home } from "lucide-react";
+import { Activity, BookOpenText, ChevronsUpDown, FlaskConical, Home } from "lucide-react";
 import {
   useEffect,
   useState,
@@ -66,6 +66,7 @@ const navItems: {
     icon: Activity,
   },
   { label: "Experiments", href: "/experiments", icon: FlaskConical },
+  { label: "Context", href: "/context", icon: BookOpenText },
 ];
 
 const sidebarThemeStyle = {
