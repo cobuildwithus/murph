@@ -9,7 +9,11 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
 }));
 
-import { revokeHostedVaultSharesTx } from "@/src/lib/hosted-vault-share/share-grant-store";
+import {
+  grantHostedVaultShareTx,
+  revokeHostedVaultSharesTx,
+  revokeOutgoingHostedVaultSharesForMemberDeletionTx,
+} from "@/src/lib/hosted-vault-share/share-grant-store";
 
 function buildTx(): Prisma.TransactionClient & {
   hostedVaultShare: {
@@ -100,5 +104,93 @@ describe("revokeHostedVaultSharesTx", () => {
 
     expect(tx.hostedVaultShare.updateMany).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+});
+
+describe("grantHostedVaultShareTx", () => {
+  it("rotates the share id when a revoked tuple is granted again", async () => {
+    const tx = {
+      hostedVaultShare: {
+        create: vi.fn(),
+        findUnique: vi.fn(async () => ({ id: "share_old", status: "revoked" })),
+        update: vi.fn(async () => undefined),
+      },
+    } as unknown as Prisma.TransactionClient & {
+      hostedVaultShare: {
+        create: ReturnType<typeof vi.fn>;
+        findUnique: ReturnType<typeof vi.fn>;
+        update: ReturnType<typeof vi.fn>;
+      };
+    };
+    const now = new Date("2026-07-02T00:00:00.000Z");
+
+    await grantHostedVaultShareTx({
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionKind: "sleep-times.v0",
+      source: "hosted-group",
+      tx,
+    });
+
+    expect(tx.hostedVaultShare.update).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        grantedAt: now,
+        id: expect.stringMatching(/^hbvs_/u),
+        revokedAt: null,
+        source: "hosted-group",
+        status: "granted",
+      }),
+      where: {
+        grantorMemberId_projectionKind_destinationMemberId: {
+          destinationMemberId: "member_referee",
+          grantorMemberId: "member_grantor",
+          projectionKind: "sleep-times.v0",
+        },
+      },
+    });
+    const updateArg = tx.hostedVaultShare.update.mock.calls[0]?.[0];
+    expect(updateArg.data.id).not.toBe("share_old");
+  });
+});
+
+describe("revokeOutgoingHostedVaultSharesForMemberDeletionTx", () => {
+  it("revokes outgoing shares only for surviving destinations and returns cleanup signals", async () => {
+    const tx = buildTx();
+    tx.hostedVaultShare.findMany.mockResolvedValue([{
+      destinationMemberId: "member_referee",
+      grantorMemberId: "member_grantor",
+      id: "share_1",
+      projectionKind: "sleep-times.v0",
+    }]);
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    await expect(revokeOutgoingHostedVaultSharesForMemberDeletionTx({
+      grantorMemberIds: ["member_grantor", "member_owned_runtime"],
+      now,
+      source: "hosted-account.delete",
+      tx,
+    })).resolves.toEqual({
+      cleanupSignals: [{
+        mailboxItemId: "mailbox_item_1",
+        memberId: "member_referee",
+      }],
+      revokedCount: 1,
+    });
+
+    expect(tx.hostedVaultShare.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        destinationMemberId: { notIn: ["member_grantor", "member_owned_runtime"] },
+        grantorMemberId: { in: ["member_grantor", "member_owned_runtime"] },
+        status: "granted",
+      },
+    }));
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith(expect.objectContaining({
+      envelope: expect.objectContaining({
+        kind: "vault-share.revoke",
+        userId: "member_referee",
+      }),
+      tx,
+    }));
   });
 });

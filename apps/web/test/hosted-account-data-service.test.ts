@@ -13,6 +13,8 @@ const serviceMocks = vi.hoisted(() => ({
   deleteHostedRunnerUserDataBestEffort: vi.fn(),
   getHostedOnboardingStripe: vi.fn(),
   readHostedConnectedAppsConfig: vi.fn(),
+  revokeOutgoingHostedVaultSharesForMemberDeletionTx: vi.fn(),
+  signalHostedMailboxAppendRuntime: vi.fn(),
   terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
 }));
 
@@ -51,6 +53,15 @@ vi.mock("@/src/lib/hosted-execution/user-data-delete", () => ({
 vi.mock("@/src/lib/hosted-orchestration/workflow-termination", () => ({
   terminateHostedUserRuntimeWorkflowBestEffort:
     serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedMailboxAppendRuntime: serviceMocks.signalHostedMailboxAppendRuntime,
+}));
+
+vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
+  revokeOutgoingHostedVaultSharesForMemberDeletionTx:
+    serviceMocks.revokeOutgoingHostedVaultSharesForMemberDeletionTx,
 }));
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -155,6 +166,13 @@ beforeEach(() => {
     maxAccountsPerToolkit: 5,
     toolkits: ["gmail", "googlecalendar"],
   });
+  serviceMocks.revokeOutgoingHostedVaultSharesForMemberDeletionTx.mockReset();
+  serviceMocks.revokeOutgoingHostedVaultSharesForMemberDeletionTx.mockResolvedValue({
+    cleanupSignals: [],
+    revokedCount: 0,
+  });
+  serviceMocks.signalHostedMailboxAppendRuntime.mockReset();
+  serviceMocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
   serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockReset();
   serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort.mockResolvedValue({
     configured: true,
@@ -372,6 +390,58 @@ describe("deleteHostedAccountData", () => {
         },
       },
     ]));
+  });
+
+  it("revokes outgoing vault shares before member rows cascade and wakes surviving destinations", async () => {
+    const operationOrder: string[] = [];
+    serviceMocks.revokeOutgoingHostedVaultSharesForMemberDeletionTx.mockImplementation(
+      async () => {
+        operationOrder.push("vault-share:revoke");
+        return {
+          cleanupSignals: [{
+            mailboxItemId: "mailbox_item_revoke_1",
+            memberId: "member_surviving_destination",
+          }],
+          revokedCount: 1,
+        };
+      },
+    );
+    serviceMocks.signalHostedMailboxAppendRuntime.mockImplementation(async () => {
+      operationOrder.push("vault-share:signal");
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      onTransaction: () => operationOrder.push("transaction"),
+      operationOrder,
+      ownedThreadContainerMemberIds: ["member_thread_container_123"],
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(serviceMocks.revokeOutgoingHostedVaultSharesForMemberDeletionTx)
+      .toHaveBeenCalledWith({
+        grantorMemberIds: ["member_123", "member_thread_container_123"],
+        now: expect.any(Date),
+        source: "hosted-account.delete",
+        tx: expect.any(Object),
+      });
+    expect(serviceMocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_surviving_destination",
+      mailboxItemId: "mailbox_item_revoke_1",
+    });
+    expect(result.deletedCounts["prisma.hosted_vault_share"]).toBe(1);
+    expect(operationOrder.indexOf("vault-share:revoke")).toBeLessThan(
+      operationOrder.indexOf("count:hostedVaultShare"),
+    );
+    expect(operationOrder.indexOf("count:hostedVaultShare")).toBeLessThan(
+      operationOrder.indexOf("delete:hostedMember"),
+    );
+    expect(operationOrder.indexOf("vault-share:signal")).toBeGreaterThan(
+      operationOrder.lastIndexOf("transaction"),
+    );
   });
 
   it("cancels the Stripe subscription before local deletion and deletes vendor accounts after it", async () => {
@@ -1507,6 +1577,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
   billingRefRecord?: Record<string, unknown> | null;
   connectedAppConnectIntentRows?: HostedAccountDeletionConnectedAppIntentRow[];
   connectedAppsSession?: boolean;
+  countResults?: Record<string, number>;
   deleteCalls?: HostedAccountDeletionPrismaDeleteCall[];
   deviceConnections?: Array<{
     id: string;
@@ -1530,6 +1601,10 @@ function createHostedAccountDeletionPrismaForTest(input: {
   }>;
 }): Parameters<typeof deleteHostedAccountData>[0]["prisma"] {
   const makeDeleteDelegate = (model: string): HostedAccountDeletionPrismaDeleteDelegate => ({
+    count: async () => {
+      input.operationOrder?.push(`count:${model}`);
+      return input.countResults?.[model] ?? 1;
+    },
     deleteMany: async (args) => {
       input.operationOrder?.push(`delete:${model}`);
       input.deleteCalls?.push({ model, where: args.where });
@@ -1752,6 +1827,7 @@ type HostedAccountDeletionConnectedAppIntentRow = {
 };
 
 type HostedAccountDeletionPrismaDeleteDelegate = {
+  count(args: { where: unknown }): Promise<number>;
   deleteMany(args: { where: unknown }): Promise<{ count: number }>;
 };
 

@@ -209,6 +209,60 @@ export async function createOrReadHostedGroupJoinLinkTx(input: {
   return { joinCode: updated.joinCode };
 }
 
+export async function createHostedGroupJoinLinkForOwnedThreadContainerTx(input: {
+  tx: Prisma.TransactionClient;
+  actorMemberId: string;
+  containerMemberId: string;
+  displayName?: string | null;
+  kind?: HostedGroupKind | string | null;
+  now: Date;
+  requestedVaultShareProjectionKinds?: readonly HostedVaultShareProjectionKind[] | null;
+}): Promise<{
+  group: HostedGroupSummary;
+  joinCode: string;
+}> {
+  await lockHostedThreadContainerRow(input.tx, input.containerMemberId);
+  const container = await input.tx.hostedThreadContainer.findUnique({
+    where: { memberId: input.containerMemberId },
+    select: { ownerMemberId: true },
+  });
+  if (!container) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_THREAD_CONTAINER_NOT_FOUND",
+      httpStatus: 404,
+      message: "This hosted runtime is not a connected group chat.",
+    });
+  }
+  if (container.ownerMemberId !== input.actorMemberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_OWNER_REQUIRED",
+      httpStatus: 403,
+      message: "Only the group owner can create a join link.",
+    });
+  }
+
+  const group = await ensureHostedGroupForThreadContainerTx({
+    containerMemberId: input.containerMemberId,
+    displayName: input.displayName ?? null,
+    kind: input.kind ?? null,
+    now: input.now,
+    requestedVaultShareProjectionKinds:
+      input.requestedVaultShareProjectionKinds ?? [],
+    tx: input.tx,
+  });
+  const link = await createOrReadHostedGroupJoinLinkTx({
+    actorMemberId: input.actorMemberId,
+    groupId: group.id,
+    now: input.now,
+    tx: input.tx,
+  });
+
+  return {
+    group,
+    joinCode: link.joinCode,
+  };
+}
+
 export async function readHostedGroupJoinView(input: {
   joinCode: string;
   memberId?: string | null;

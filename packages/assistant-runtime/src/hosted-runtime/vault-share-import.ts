@@ -137,7 +137,12 @@ export async function applyHostedVaultShareRevokeWake(input: {
     }
 
     const projection = store.projections[revoke.projectionKind];
-    if (!projection?.grantors[revoke.grantorMemberId]) {
+    const grantor = projection?.grantors[revoke.grantorMemberId];
+    if (!projection || !grantor) {
+      return { status: "imported" };
+    }
+
+    if (grantor.shareId !== revoke.shareId) {
       return { status: "imported" };
     }
 

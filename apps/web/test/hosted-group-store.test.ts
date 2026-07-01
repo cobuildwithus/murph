@@ -25,6 +25,7 @@ vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
 
 import {
   acceptHostedGroupJoinCodeTx,
+  createHostedGroupJoinLinkForOwnedThreadContainerTx,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
 } from "@/src/lib/hosted-groups/group-store";
 
@@ -155,3 +156,133 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 });
+
+describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+  });
+
+  it("requires the signed-in actor to own the thread container", async () => {
+    const tx = buildGroupLinkTx({ ownerMemberId: "member_owner" });
+
+    await expect(createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      actorMemberId: "member_other",
+      containerMemberId: "member_group_runtime",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_OWNER_REQUIRED",
+      httpStatus: 403,
+    });
+
+    expect(tx.hostedGroup.create).not.toHaveBeenCalled();
+    expect(tx.hostedGroup.update).not.toHaveBeenCalled();
+  });
+
+  it("creates or reads a join link through the owner-authorized path", async () => {
+    const tx = buildGroupLinkTx({
+      joinCode: null,
+      ownerMemberId: "member_owner",
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    await expect(createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      actorMemberId: "member_owner",
+      containerMemberId: "member_group_runtime",
+      displayName: "Sunday sleep crew",
+      kind: "friends",
+      now,
+      requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+      tx,
+    })).resolves.toEqual({
+      group: {
+        displayName: "Sunday sleep crew",
+        id: "group_1",
+        kind: "friends",
+        memberCount: 1,
+        requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+        status: "active",
+      },
+      joinCode: "join_created",
+    });
+
+    expect(tx.hostedGroup.update).toHaveBeenCalledWith({
+      data: {
+        joinCode: expect.any(String),
+        joinCodeCreatedAt: now,
+      },
+      select: { joinCode: true },
+      where: { id: "group_1" },
+    });
+  });
+});
+
+function buildGroupLinkTx(input: {
+  joinCode?: string | null;
+  ownerMemberId: string;
+}): Prisma.TransactionClient & {
+  hostedGroup: {
+    create: ReturnType<typeof vi.fn>;
+    findUnique: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+  };
+  hostedGroupMember: {
+    upsert: ReturnType<typeof vi.fn>;
+  };
+} {
+  return {
+    $queryRaw: vi.fn(async () => []),
+    hostedGroup: {
+      create: vi.fn(),
+      findUnique: vi.fn(async (args: {
+        select?: { joinCode?: boolean; ownerMemberId?: boolean };
+        where: { id?: string; runtimeMemberId?: string };
+      }) => {
+        if (args.where.runtimeMemberId) {
+          return { id: "group_1" };
+        }
+        if (args.where.id && args.select?.joinCode) {
+          return {
+            id: "group_1",
+            joinCode: input.joinCode ?? null,
+            ownerMemberId: input.ownerMemberId,
+          };
+        }
+        if (args.where.id) {
+          return {
+            _count: { members: 1 },
+            displayName: "Sunday sleep crew",
+            id: "group_1",
+            joinPolicyJson: {
+              requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+              schema: "murph.hosted-group.join-policy.v1",
+            },
+            kind: "friends",
+            runtimeMemberId: "member_group_runtime",
+          };
+        }
+        return null;
+      }),
+      update: vi.fn(async () => ({ joinCode: "join_created" })),
+    },
+    hostedGroupMember: {
+      upsert: vi.fn(async () => undefined),
+    },
+    hostedThreadContainer: {
+      findUnique: vi.fn(async () => ({
+        memberId: "member_group_runtime",
+        ownerMemberId: input.ownerMemberId,
+      })),
+    },
+  } as unknown as Prisma.TransactionClient & {
+    hostedGroup: {
+      create: ReturnType<typeof vi.fn>;
+      findUnique: ReturnType<typeof vi.fn>;
+      update: ReturnType<typeof vi.fn>;
+    };
+    hostedGroupMember: {
+      upsert: ReturnType<typeof vi.fn>;
+    };
+  };
+}
