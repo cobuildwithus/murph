@@ -3403,7 +3403,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toBeUndefined();
+    })).resolves.toBe("accepted");
 
     await expect(invokeResultPromise).resolves.toMatchObject({
       message: "workspace invocation preempted",
@@ -3480,7 +3480,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toBeUndefined();
+    })).resolves.toBe("accepted");
 
     await expect(invokeResultPromise).resolves.toMatchObject({
       message: "workspace invocation preempted",
@@ -3615,6 +3615,37 @@ describe("RunnerContainer", () => {
     await expect(container.readActiveRuntimeUserFence()).rejects.toThrow(
       "Hosted runner container health still reports active workspace work.",
     );
+  });
+
+  it("posts workspace abort when the local active pointer is missing but the child is running", async () => {
+    const request = createRunnerRequest("evt_missing_pointer_abort");
+    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          attemptId: request.attemptId,
+          leaseGeneration: request.leaseGeneration,
+          userId: "member_123",
+        });
+        return new Response(null, {
+          headers: {
+            "x-workspace-invocation-abort-status": "accepted",
+          },
+          status: 204,
+        });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    await expect(container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toBe("accepted");
+    expect(containerFetch).toHaveBeenCalledOnce();
   });
 
   it("reports inactive liveness from a missing local pointer only after running health is idle", async () => {
@@ -3752,7 +3783,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toBeUndefined();
+    })).resolves.toBe("accepted");
 
     expect(destroy).toHaveBeenCalledTimes(1);
     await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
@@ -3811,7 +3842,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toBeUndefined();
+    })).resolves.toBe("accepted");
 
     expect(abortPosted).toBe(true);
     expect(destroy).toHaveBeenCalledTimes(1);
@@ -5823,7 +5854,7 @@ describe("RunnerContainer", () => {
     const abortController = new AbortController();
     const abortWorkspaceInvocation = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
-    >(async () => {});
+    >(async () => "accepted");
     const destroyInstance = vi.fn(async () => {});
     const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
       async () => new Promise<never>(() => {}),
@@ -5866,7 +5897,7 @@ describe("RunnerContainer", () => {
     const abortController = new AbortController();
     const abortWorkspaceInvocation = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
-    >(async () => {});
+    >(async () => "accepted");
     const destroyInstance = vi.fn(async () => {
       await new Promise<void>(() => undefined);
     });

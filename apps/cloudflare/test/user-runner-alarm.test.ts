@@ -1671,7 +1671,7 @@ describe("HostedUserRunner execution coordination", () => {
     vi.setSystemTime(new Date(FIXED_NOW));
     const abortWorkspaceInvocation = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
-    >(async () => {});
+    >(async () => "accepted");
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
       async () => ({
         action: "woken" as const,
@@ -1739,6 +1739,59 @@ describe("HostedUserRunner execution coordination", () => {
         last_invocation_at: expect.any(String),
       })
     );
+  });
+
+  it("preempts retention work through abort when active liveness is indeterminate", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const abortWorkspaceInvocation = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
+    >(async () => "accepted");
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const readActiveRuntimeUserFence = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+    >(async () => {
+      throw new Error("container health still reports active workspace work");
+    });
+    const { invoke, runner, sql } = createRunnerHarness({
+      abortWorkspaceInvocation,
+      invocationResults: [invocationResult.promise],
+      readActiveRuntimeUserFence,
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      processingMode: "inbox_media_retention",
+      runnerContainerName: TEST_USER_ID,
+      workspaceVersion: "7",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-default-behind-indeterminate-retention",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "replaced",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: expect.not.stringMatching(token.attemptId),
+    });
+
+    expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
+    expect(abortWorkspaceInvocation).toHaveBeenCalledWith({
+      attemptId: token.attemptId,
+      leaseGeneration: String(token.generation),
+      userId: TEST_USER_ID,
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: expect.not.stringMatching(token.attemptId),
+      active_expires_at: null,
+      wake_at: null,
+    });
+
+    invocationResult.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
   });
 
   it("keeps opposite-mode runtime busy when the active child identity does not match the fence", async () => {

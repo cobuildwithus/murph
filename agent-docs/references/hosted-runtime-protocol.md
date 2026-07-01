@@ -177,6 +177,11 @@ completion or replacement policy: UserRunner maps inactive fences to the
 existing clear-and-start path, preserves or retries ambiguous/mismatched
 foreground ownership, and keeps transport-failure committed-progress recovery
 limited to the exact accepted attempt.
+For foreground/default work behind an `inbox_media_retention` fence, the
+existing workspace-invocation abort seam is the preemption authority when
+liveness is ambiguous: accepted, queued, or inactive abort status permits the
+durable fence CAS replacement; stale or failed status preserves the fence and
+retries.
 
 The foreground-priority rule does not weaken correctness checks. Wrong-user
 authority, invalid auth, undecryptable mailbox payloads, stale leases, and

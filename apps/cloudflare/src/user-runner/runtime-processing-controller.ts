@@ -430,7 +430,7 @@ export class RuntimeProcessingController {
         runtimeWakeStartedAt: input.runtimeWakeStartedAt,
       });
     }
-    if (activeRuntimeState.outcome !== "exact-active") {
+    if (activeRuntimeState.outcome === "mismatch") {
       await this.syncRunnerAlarm(record);
       return createRuntimeProcessingRetryLater({
         reason: "container_rpc_error",
@@ -494,7 +494,7 @@ export class RuntimeProcessingController {
     }
 
     try {
-      await runRuntimeProcessingCommandStep({
+      const abortStatus = await runRuntimeProcessingCommandStep({
         budget: input.commandBudget,
         operation: async () =>
           await container.abortWorkspaceInvocation!({
@@ -504,7 +504,23 @@ export class RuntimeProcessingController {
           }),
         stepTimeoutMs: this.input.env.webControlTimeoutMs,
       });
-      return { aborted: true };
+      if (
+        abortStatus === "accepted"
+        || abortStatus === "queued"
+        || abortStatus === "inactive"
+      ) {
+        return { aborted: true };
+      }
+      await this.syncRunnerAlarm(input.record);
+      return {
+        aborted: false,
+        response: createRuntimeProcessingRetryLater({
+          reason: abortStatus === "failed"
+            ? "container_rpc_error"
+            : "container_busy",
+          userId: input.record.userId,
+        }),
+      };
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",

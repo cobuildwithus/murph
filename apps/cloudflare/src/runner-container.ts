@@ -200,7 +200,7 @@ export interface HostedExecutionContainerStubLike {
     attemptId: string;
     leaseGeneration: string;
     userId: string;
-  }): Promise<void>;
+  }): Promise<RunnerWorkspaceInvocationAbortStatus>;
   destroyInstance(): Promise<void>;
   ensureReadyForProcessing?(
     input: RunnerContainerEnsureReadyForProcessingInput,
@@ -236,11 +236,15 @@ type RunnerContainerStartObservation =
   | "deploy-smoke-ready"
   | "onStart";
 
-type RunnerWorkspaceInvocationAbortPostStatus =
+export type RunnerWorkspaceInvocationAbortStatus =
   | "accepted"
   | "failed"
+  | "inactive"
   | "queued"
   | "stale";
+
+type RunnerWorkspaceInvocationAbortPostStatus =
+  Exclude<RunnerWorkspaceInvocationAbortStatus, "inactive">;
 
 type RunnerContainerDestroyReason =
   | "activity-expired"
@@ -477,18 +481,18 @@ export class RunnerContainer extends Container {
     attemptId: string;
     leaseGeneration: string;
     userId: string;
-  }): Promise<void> {
+  }): Promise<RunnerWorkspaceInvocationAbortStatus> {
     const active = this.workspaceInvocationActiveOperation;
     const abortController = this.workspaceInvocationAbortController;
     if (!active || !abortController) {
-      return;
+      return await this.abortWorkspaceInvocationWithoutLocalPointer(input);
     }
     if (
       active.attemptId !== input.attemptId
       || active.leaseGeneration !== input.leaseGeneration
       || active.userId !== input.userId
     ) {
-      return;
+      return "stale";
     }
     if (this.workspaceInvocationAbortEndpointReady) {
       await this.postWorkspaceInvocationAbort(input);
@@ -509,11 +513,12 @@ export class RunnerContainer extends Container {
         failClosed: true,
         reason: "invoke-failure",
       });
-      return;
+      return "accepted";
     }
     if (!abortController.signal.aborted) {
       abortController.abort(new Error(WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE));
     }
+    return "accepted";
   }
 
   async ensureProcessing(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult> {
@@ -1277,6 +1282,18 @@ export class RunnerContainer extends Container {
     this.workspaceInvocationAbortEndpointReady = false;
     this.workspaceInvocationActiveOperation = null;
     this.workspaceInvocationAbortController = null;
+  }
+
+  private async abortWorkspaceInvocationWithoutLocalPointer(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  }): Promise<RunnerWorkspaceInvocationAbortStatus> {
+    const status = await readRunnerContainerStatus(this);
+    if (isRunnerContainerStopped(status)) {
+      return "inactive";
+    }
+    return await this.postWorkspaceInvocationAbort(input);
   }
 
   private async postWorkspaceInvocationAbort(input: {
