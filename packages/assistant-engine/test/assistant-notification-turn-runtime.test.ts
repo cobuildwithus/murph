@@ -1648,6 +1648,10 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
       input: expect.objectContaining({
+        codexConfigOverrides: [
+          'memories.use_memories=false',
+          'memories.generate_memories=false',
+        ],
         suppressProviderFailureTranscriptAudit: true,
       }),
       profile: expect.objectContaining({

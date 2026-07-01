@@ -461,6 +461,7 @@ async function executeAssistantCodexAttempt(input: {
           session: attemptPlan.session,
           sharedPlan: executionPlan.sharedPlan,
         }),
+        codexConfigOverrides: executionPlan.input.codexConfigOverrides ?? null,
         conversationHistoryMessages:
           attemptPlan.routePlan.conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,

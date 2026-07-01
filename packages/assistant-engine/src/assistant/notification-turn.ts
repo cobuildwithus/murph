@@ -117,6 +117,10 @@ const ASSISTANT_NOTIFICATION_ISOLATED_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'notification-turn',
 }
+const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
+  'memories.use_memories=false',
+  'memories.generate_memories=false',
+] as const
 
 export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
@@ -1006,6 +1010,12 @@ function buildAssistantNotificationMessageInput(
     approvalPolicy: input.approvalPolicy,
     bindingDeliveryTarget: input.bindingDeliveryTarget,
     channel: input.channel,
+    ...(isAssistantNotificationMaintenanceExactSkip(input)
+      ? {
+          codexConfigOverrides:
+            ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
+        }
+      : {}),
     codexCommand: input.codexCommand,
     codexHome: input.codexHome,
     conversation: input.conversation,

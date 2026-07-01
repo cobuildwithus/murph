@@ -112,6 +112,8 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   // Automation-owned per-turn provider route override. It is execution input,
   // not durable session target state.
   assistantTargetOverride?: AutomationAssistantTargetOverride | null
+  // Codex --config overrides for this turn only; never part of route identity.
+  codexConfigOverrides?: readonly string[] | null
   codexCommand?: string
   deliverResponse?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
