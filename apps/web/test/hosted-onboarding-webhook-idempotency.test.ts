@@ -2,6 +2,7 @@ import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  acquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
   claimHostedLinqOnboardingLinkNotice: vi.fn(),
   claimHostedLinqQuotaReplyNotice: vi.fn(),
   markHostedLinqOnboardingLinkNoticeSent: vi.fn(),
@@ -17,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
+  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: vi.fn(),
+  countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   readHostedMailboxItemOwnerById: vi.fn(),
@@ -95,6 +98,12 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  acquireHostedMemberHomeLinqRecipientAssignmentLockTx:
+    mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
+  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince:
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
+  countHostedMemberHomeLinqBindingsByRecipientPhone:
+    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
   lookupHostedMemberRoutingByHomeLinqChatId: mocks.lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContact:
     mocks.lookupHostedMemberRoutingByPendingLinqParticipantContact,
@@ -167,6 +176,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.verifyAndParseHostedLinqWebhookRequest.mockImplementation((input: { rawBody: string }) =>
       linq.parseHostedLinqWebhookEvent(input.rawBody),
     );
+    mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
+    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({

@@ -81,6 +81,9 @@ import {
 import {
   readHostedLinqAssignableHomeLineByPhone,
 } from "./linq-line-store";
+import {
+  reserveHostedLinqHomeLineForPhoneTx,
+} from "./linq-home-routing";
 import { normalizePhoneNumber } from "./phone";
 import {
   createHostedPhoneLookupKeyReadCandidates,
@@ -327,6 +330,16 @@ export async function planHostedOnboardingLinqWebhook(input: {
         existingMemberActive: existingMemberEffectiveActive,
         existingMemberMatch,
         reason: "unassignable-home-line",
+        routeStage,
+      }),
+    );
+  const buildHomeLineCapacityExhaustedPlan = (routeStage: string) =>
+    logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("home-line-capacity-exhausted"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: existingMemberEffectiveActive,
+        existingMemberMatch,
+        reason: "home-line-capacity-exhausted",
         routeStage,
       }),
     );
@@ -654,22 +667,13 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
-  const member = existingMember
-    ?? (participantContact.kind === "phone"
-      ? await ensureHostedMemberForPhoneTx({
-          phoneNumber: participantContact.value,
-          prisma: input.prisma,
-        })
-      : await ensureHostedMemberForPendingLinqParticipantContactTx({
-          contact: participantContact,
-          observedAt: new Date(occurredAt),
-          prisma: input.prisma,
-        }));
-  const existingDailyState = await readHostedLinqDailyState({
-    memberId: member.id,
-    occurredAt,
-    prisma: input.prisma,
-  });
+  const existingDailyState = existingMember
+    ? await readHostedLinqDailyState({
+        memberId: existingMember.id,
+        occurredAt,
+        prisma: input.prisma,
+      })
+    : null;
 
   if (existingDailyState?.onboardingLinkSentAt) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
@@ -683,13 +687,43 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
+  if (!recipientPhoneNumber) {
+    return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
+  }
+
+  const reservationResult = await reserveHostedLinqHomeLineForPhoneTx({
+    phoneNumber: recipientPhoneNumber,
+    prisma: input.prisma,
+  });
+
+  if (reservationResult.kind === "unassignable") {
+    return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
+  }
+
+  if (reservationResult.kind === "capacity_exhausted") {
+    return buildHomeLineCapacityExhaustedPlan("ignored-home-line-capacity-exhausted");
+  }
+
+  const member = existingMember
+    ?? (participantContact.kind === "phone"
+      ? await ensureHostedMemberForPhoneTx({
+          phoneNumber: participantContact.value,
+          prisma: input.prisma,
+        })
+      : await ensureHostedMemberForPendingLinqParticipantContactTx({
+          contact: participantContact,
+          observedAt: new Date(occurredAt),
+          prisma: input.prisma,
+        }));
+
   const dailyState = await bindHostedMemberPendingLinqChatAndTrackInbound({
     chatId: summary.chatId,
+    homeLineAssignedAt: reservationResult.reservation.assignedAt,
     memberId: member.id,
     occurredAt,
     participantContact: participantContact.kind === "email" ? participantContact : null,
     prisma: input.prisma,
-    recipientPhone: recipientPhoneNumber,
+    recipientPhone: reservationResult.reservation.line.phoneNumber,
   });
 
   if (dailyState.onboardingLinkSentAt) {

@@ -18,20 +18,16 @@ import {
   uploadHostedLinqAttachment,
 } from "../hosted-onboarding/linq-client";
 import {
-  type HostedLinqAssignableHomeLine,
-  readHostedLinqAssignableHomeLineByPhone,
-} from "../hosted-onboarding/linq-line-store";
-import { chooseHostedLinqHomeLine } from "../hosted-onboarding/linq-routing-policy";
-import {
-  acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
-  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
-  countHostedMemberHomeLinqBindingsByRecipientPhone,
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqChatId,
   readHostedMemberRoutingState,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberPendingLinqBindingTx,
 } from "../hosted-onboarding/hosted-member-routing-store";
+import {
+  reserveHostedLinqHomeLineForPhoneTx,
+  type HostedLinqHomeLineAssignmentReservation,
+} from "../hosted-onboarding/linq-home-routing";
 import { ensureHostedMemberForPhoneTx } from "../hosted-onboarding/member-identity-service";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -692,17 +688,13 @@ async function resolveHostedOpsOnboardingExistingLinqChatMemberId(input: {
 async function resolveHostedOpsOnboardingNewChatLineAssignmentTx(input: {
   prisma: Prisma.TransactionClient;
   senderPhone: string;
-}): Promise<{
-  assignedAt: Date;
-  line: HostedLinqAssignableHomeLine;
-}> {
-  const now = new Date();
-  await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
+}): Promise<HostedLinqHomeLineAssignmentReservation> {
+  const reservationResult = await reserveHostedLinqHomeLineForPhoneTx({
+    phoneNumber: input.senderPhone,
     prisma: input.prisma,
   });
-  const line = await resolveHostedOpsOnboardingAssignableLinqLineTx(input);
 
-  if (!line) {
+  if (reservationResult.kind === "unassignable") {
     throw hostedOnboardingError({
       code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_UNAUTHORIZED",
       httpStatus: 400,
@@ -711,27 +703,7 @@ async function resolveHostedOpsOnboardingNewChatLineAssignmentTx(input: {
     });
   }
 
-  const recipientPhones = [line.phoneNumber];
-  const activeMembersByRecipientPhone =
-    await countHostedMemberHomeLinqBindingsByRecipientPhone({
-      now,
-      prisma: input.prisma,
-      recipientPhones,
-    });
-  const newAssignmentsByRecipientPhone =
-    await countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince({
-      prisma: input.prisma,
-      recipientPhones,
-      since: startOfUtcDay(now),
-    });
-  const chosen = chooseHostedLinqHomeLine({
-    activeMembersByRecipientPhone,
-    lines: [line],
-    newAssignmentsByRecipientPhone,
-    preferredRecipientPhone: line.phoneNumber,
-  });
-
-  if (!chosen) {
+  if (reservationResult.kind === "capacity_exhausted") {
     throw hostedOnboardingError({
       code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_CAPACITY_EXHAUSTED",
       httpStatus: 429,
@@ -740,28 +712,7 @@ async function resolveHostedOpsOnboardingNewChatLineAssignmentTx(input: {
     });
   }
 
-  return {
-    assignedAt: now,
-    line: chosen,
-  };
-}
-
-async function resolveHostedOpsOnboardingAssignableLinqLineTx(input: {
-  prisma: Prisma.TransactionClient;
-  senderPhone: string;
-}): Promise<HostedLinqAssignableHomeLine | null> {
-  return readHostedLinqAssignableHomeLineByPhone({
-    phoneNumber: input.senderPhone,
-    prisma: input.prisma,
-  });
-}
-
-function startOfUtcDay(value: Date): Date {
-  return new Date(Date.UTC(
-    value.getUTCFullYear(),
-    value.getUTCMonth(),
-    value.getUTCDate(),
-  ));
+  return reservationResult.reservation;
 }
 
 interface NormalizedHostedOpsOnboardingInviteInput {

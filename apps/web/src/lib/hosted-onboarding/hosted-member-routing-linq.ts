@@ -20,6 +20,7 @@ import { normalizePhoneNumber } from "./phone";
 import { type HostedOnboardingReadClient } from "./shared";
 
 export async function upsertHostedMemberPendingLinqBindingTx(input: {
+  homeLineAssignedAt?: Date | null;
   linqChatId: string;
   memberId: string;
   participantContact?: HostedLinqParticipantContact | null;
@@ -29,7 +30,7 @@ export async function upsertHostedMemberPendingLinqBindingTx(input: {
 }): Promise<void> {
   await writeHostedMemberLinqBindingTx({
     clearPending: false,
-    homeLineAssignedAt: null,
+    homeLineAssignedAt: input.homeLineAssignedAt ?? null,
     kind: "pending",
     linqChatId: input.linqChatId,
     memberId: input.memberId,
@@ -445,9 +446,10 @@ async function writeHostedMemberLinqBindingTx(input: {
     : [];
   const recipientPhone = normalizePhoneNumber(input.recipientPhone);
   const recipientPhoneLookupKey = createHostedPhoneLookupKey(recipientPhone);
+  const reservesHomeRecipient = input.kind === "home" || input.homeLineAssignedAt !== null;
   const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
     linqChatId: input.kind === "home" ? input.linqChatId : null,
-    linqRecipientPhone: input.kind === "home" ? recipientPhone : null,
+    linqRecipientPhone: reservesHomeRecipient ? recipientPhone : null,
     memberId: input.memberId,
     pendingLinqChatId: input.kind === "pending" ? input.linqChatId : null,
     pendingLinqParticipantContact: input.kind === "pending"
@@ -541,13 +543,13 @@ function buildHostedMemberLinqBindingCreateData(input: {
       ? input.routingPrivateColumns.linqChatIdEncrypted
       : null,
     linqChatLookupKey: input.kind === "home" ? input.linqChatLookupKey : null,
-    ...(input.kind === "home" && input.homeLineAssignedAt
+    ...(input.homeLineAssignedAt
       ? { linqHomeLineAssignedAt: input.homeLineAssignedAt }
       : {}),
-    linqRecipientPhoneEncrypted: input.kind === "home"
+    linqRecipientPhoneEncrypted: input.kind === "home" || input.homeLineAssignedAt
       ? input.routingPrivateColumns.linqRecipientPhoneEncrypted
       : null,
-    linqRecipientPhoneLookupKey: input.kind === "home"
+    linqRecipientPhoneLookupKey: input.kind === "home" || input.homeLineAssignedAt
       ? input.recipientPhoneLookupKey
       : null,
     memberId: input.memberId,
@@ -617,6 +619,13 @@ function buildHostedMemberLinqBindingUpdateData(input: {
   }
 
   return {
+    ...(input.homeLineAssignedAt
+      ? {
+          linqHomeLineAssignedAt: input.homeLineAssignedAt,
+          linqRecipientPhoneEncrypted: input.routingPrivateColumns.linqRecipientPhoneEncrypted,
+          linqRecipientPhoneLookupKey: input.recipientPhoneLookupKey,
+        }
+      : {}),
     pendingLinqChatIdEncrypted: input.routingPrivateColumns.pendingLinqChatIdEncrypted,
     pendingLinqChatLookupKey: input.linqChatLookupKey,
     ...(input.participantContact

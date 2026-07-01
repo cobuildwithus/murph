@@ -461,6 +461,7 @@ type HostedMemberRoutingFixture = {
   findFirst?: (input: { where: Record<string, unknown> }) => Promise<unknown>;
   findMany?: (input: { where: Record<string, unknown> }) => Promise<unknown[]>;
   findUnique?: (input: { where: Record<string, unknown> }) => Promise<unknown>;
+  groupBy?: MockedFunction;
   updateMany?: (input: {
     data: Record<string, unknown>;
     where: Record<string, unknown>;
@@ -2699,6 +2700,18 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
     });
     expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
+    expect(readHostedMemberRoutingUpsertMock(prisma)).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        linqHomeLineAssignedAt: expect.any(Date),
+        linqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15550000000"),
+        pendingLinqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15550000000"),
+      }),
+      update: expect.objectContaining({
+        linqHomeLineAssignedAt: expect.any(Date),
+        linqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15550000000"),
+        pendingLinqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15550000000"),
+      }),
+    }));
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
@@ -2791,6 +2804,81 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not create a pending signup route when the inbound Linq line has exhausted capacity", async () => {
+    const homeLinePhone = "+15550000000";
+    const homeLineLookupKey = createHostedPhoneLookupKey(homeLinePhone);
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqLine: buildHostedLinqLineFixture({
+        maxNewConversationsPerDay: 1,
+        phoneNumber: homeLinePhone,
+      }),
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMemberRouting: {
+        groupBy: vi.fn(async (input: { where?: { linqHomeLineAssignedAt?: unknown } }) =>
+          input.where?.linqHomeLineAssignedAt
+            ? [{
+                linqRecipientPhoneLookupKey: homeLineLookupKey,
+                _count: { _all: 1 },
+              }]
+            : []
+        ),
+        upsert: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_capacity_exhausted_first_contact",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "home-line-capacity-exhausted",
+    });
+    expect(prismaMocks.hostedMemberRouting.groupBy).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        linqHomeLineAssignedAt: {
+          gte: expect.any(Date),
+        },
+      }),
+    }));
+    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
@@ -6231,6 +6319,38 @@ function buildUnassignableHostedLinqLineFixture(): HostedLinqLineFixture {
   };
 }
 
+function buildHostedLinqLineFixture(input: {
+  activeMemberLimit?: number | null;
+  maxNewConversationsPerDay?: number | null;
+  phoneNumber: string;
+}): HostedLinqLineFixture {
+  return {
+    findMany: vi.fn(async (query: { where?: { phoneNumberLookupKey?: { in?: string[] } } }) => {
+      const lookupKeys = new Set(query.where?.phoneNumberLookupKey?.in ?? []);
+      return createHostedPhoneLookupKeyReadCandidates(input.phoneNumber).some((lookupKey) =>
+        lookupKeys.has(lookupKey)
+      )
+        ? [{
+            activeMemberLimit: input.activeMemberLimit ?? null,
+            assignmentWeight: 1,
+            maxNewConversationsPerDay: input.maxNewConversationsPerDay ?? null,
+            phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(input.phoneNumber),
+            phoneNumberHint: `*** ${input.phoneNumber.slice(-4)}`,
+            phoneNumberLookupKey: createHostedPhoneLookupKey(input.phoneNumber),
+          }]
+        : [];
+    }),
+    findUnique: vi.fn().mockResolvedValue(null),
+    update: vi.fn().mockResolvedValue({
+      phoneNumberLookupKey: createHostedPhoneLookupKey(input.phoneNumber),
+    }),
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    upsert: vi.fn().mockResolvedValue({
+      phoneNumberLookupKey: createHostedPhoneLookupKey(input.phoneNumber),
+    }),
+  };
+}
+
 function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   prisma: T,
 ): T & HostedOnboardingLinqWebhookPrismaFixture {
@@ -6471,6 +6591,9 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   if (prisma.hostedMemberRouting && !prisma.hostedMemberRouting.updateMany) {
     prisma.hostedMemberRouting.updateMany = vi.fn().mockResolvedValue({ count: 1 });
   }
+  if (prisma.hostedMemberRouting && !prisma.hostedMemberRouting.groupBy) {
+    prisma.hostedMemberRouting.groupBy = vi.fn().mockResolvedValue([]);
+  }
   if (prisma.hostedMemberRouting && !prisma.hostedMemberRouting.findMany) {
     prisma.hostedMemberRouting.findMany = vi.fn(async (input: { where: Record<string, unknown> }) => {
       const record = await readHostedMemberRoutingFromMockLookup({
@@ -6582,6 +6705,7 @@ function createStatefulHostedMemberRoutingMock(initialRecord: Record<string, unk
       return withHostedMemberRoutingMember(hostedMemberRoutingRecord);
     }),
     updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    groupBy: vi.fn().mockResolvedValue([]),
     upsert: vi.fn(async ({ create, update }: {
       create: Record<string, unknown>;
       update?: Record<string, unknown>;
