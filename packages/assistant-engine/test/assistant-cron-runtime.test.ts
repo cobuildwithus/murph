@@ -2131,7 +2131,7 @@ describe('assistant cron runtime orchestration', () => {
 
     expect(summary).toEqual({
       failed: 0,
-      processed: 0,
+      processed: 1,
       succeeded: 0,
     })
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
@@ -2144,9 +2144,22 @@ describe('assistant cron runtime orchestration', () => {
     expect(runtimeRecord?.state.runningClaimId).toBeNull()
     expect(runtimeRecord?.state.runningPid).toBeNull()
     expect(runtimeRecord?.state.pendingOccurrenceAt).not.toBeNull()
+    expect(runtimeRecord?.state.retryAfterAt).not.toBeNull()
     expect(runtimeRecord?.state.lastRunAt).toBeNull()
     expect(runtimeRecord?.state.lastSucceededAt).toBeNull()
     expect(runtimeRecord?.state.lastFailedAt).toBeNull()
+    await expect(getAssistantCronStatus(vaultRoot, {
+      executionContext: {
+        hosted: {
+          memberId: 'member-hosted',
+          userEnvKeys: [],
+        },
+      },
+      shouldYieldBackgroundMaintenance: () => true,
+    })).resolves.toMatchObject({
+      dueJobs: 0,
+      nextRunAt: runtimeRecord?.state.retryAfterAt,
+    })
     await expect(listAssistantCronRuns({
       job: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
       vault: vaultRoot,
@@ -2192,7 +2205,7 @@ describe('assistant cron runtime orchestration', () => {
 
     expect(summary).toEqual({
       failed: 0,
-      processed: 0,
+      processed: 1,
       succeeded: 0,
     })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)

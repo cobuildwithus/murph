@@ -1504,7 +1504,7 @@ function canonicalAssistantCronSourceRequiresHostedRuntime(
   return canonicalAssistantCronSourceIsBackgroundMaintenance(source)
 }
 
-function canonicalAssistantCronSourceIsBackgroundMaintenance(
+export function canonicalAssistantCronSourceIsBackgroundMaintenance(
   source: CanonicalAssistantCronJobRecord,
 ): boolean {
   return source.kind === 'automation' &&
