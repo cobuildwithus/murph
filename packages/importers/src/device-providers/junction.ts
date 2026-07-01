@@ -313,6 +313,30 @@ const JUNCTION_GENERIC_SUMMARY_ID_PATHS = [
   "providerId",
   "provider_id",
 ] as const;
+const JUNCTION_RECORD_TIMESTAMP_PATHS = [
+  "observedAtRaw",
+  "observed_at_raw",
+  "observedAt",
+  "observed_at",
+  "timestamp",
+  "time",
+  "date",
+  "day",
+  "end",
+  "endAt",
+  "end_at",
+  "timeEnd",
+  "time_end",
+  "bedtimeStop",
+  "bedtime_stop",
+  "start",
+  "startAt",
+  "start_at",
+  "timeStart",
+  "time_start",
+  "bedtimeStart",
+  "bedtime_start",
+] as const;
 const JUNCTION_MEAL_PROVIDER_ID_PATHS = [
   "mealId",
   "meal_id",
@@ -747,14 +771,12 @@ interface JunctionSleepStageAggregateBucket {
 }
 
 interface JunctionSleepSummaryStageMetricOwner {
-  dayKey?: string;
-  endAt?: string;
+  endAt: string;
   metric: string;
   sourceInstanceId?: string;
   sourceProviderSlug: string;
   sourceType?: string;
-  startAt?: string;
-  timeZone?: string;
+  startAt: string;
 }
 
 function parseJunctionSnapshot(snapshot: unknown): JunctionSnapshotInput {
@@ -814,6 +836,10 @@ export function canNormalizeJunctionSleepCycleRecordToCompactStages(
 ): boolean {
   const entries = resourceEntries(record, "sleep_cycle");
   return entries.length > 0 && entries.every(({ entry }) => {
+    if (!hasSleepCycleCompactParentIdentity(entry)) {
+      return false;
+    }
+
     const coverageWindow = resolveSleepStageCoverageWindow(entry, sourceProviderSlug);
     return coverageWindow
       ? sleepStageCoverageIntervalsCoverWindow(
@@ -938,7 +964,6 @@ function collectJunctionSleepSummaryStageMetricOwners(
       return;
     }
 
-    const timestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
     const startAt = resolveSafeTimestamp(
       firstValueFromPaths(entry, JUNCTION_SLEEP_START_TIMESTAMP_PATHS),
       resourceContext.sourceProviderSlug,
@@ -947,13 +972,9 @@ function collectJunctionSleepSummaryStageMetricOwners(
       firstValueFromPaths(entry, JUNCTION_SLEEP_END_TIMESTAMP_PATHS),
       resourceContext.sourceProviderSlug,
     );
-    const sleepTimestamp = withTimestampOverride(timestamp, {
-      occurredAt: endAt ?? startAt ?? timestamp.occurredAt,
-    });
-    const timeZone = resolveSleepStageCanonicalTimeZone(entry);
-    const dayKey = startAt && endAt
-      ? resolveSleepStageAnchorDayKey(endAt, timeZone, sleepTimestamp)
-      : sleepTimestamp.dayKey ?? extractIsoDatePrefix(sleepTimestamp.occurredAt) ?? undefined;
+    if (!startAt || !endAt) {
+      return;
+    }
 
     for (const metric of SLEEP_STAGE_METRICS) {
       if (!resolveMetricDescriptorValue(entry, metric)) {
@@ -961,14 +982,12 @@ function collectJunctionSleepSummaryStageMetricOwners(
       }
 
       owners.push(stripUndefined({
-        dayKey,
         endAt,
         metric: metric.metric,
         sourceInstanceId: resourceContext.origin.sourceInstanceId ?? undefined,
         sourceProviderSlug: resourceContext.sourceProviderSlug,
         sourceType: resourceContext.origin.sourceType,
         startAt,
-        timeZone,
       }));
     }
   });
@@ -2046,24 +2065,20 @@ function sleepStageOwnerSourceMatchesAggregate(
   }
 
   const aggregateSourceType = aggregate.resourceContext.origin.sourceType;
-  if (owner.sourceType && aggregateSourceType && owner.sourceType !== aggregateSourceType) {
+  if (owner.sourceType !== aggregateSourceType) {
     return false;
   }
 
   const aggregateSourceInstanceId = aggregate.resourceContext.origin.sourceInstanceId;
-  return !(owner.sourceInstanceId && aggregateSourceInstanceId && owner.sourceInstanceId !== aggregateSourceInstanceId);
+  return owner.sourceInstanceId === aggregateSourceInstanceId;
 }
 
 function sleepStageOwnerWindowMatchesAggregate(
   owner: JunctionSleepSummaryStageMetricOwner,
   aggregate: JunctionSleepStageAggregate,
 ): boolean {
-  if (owner.startAt && owner.endAt) {
-    return owner.startAt === aggregate.coverageStartAt &&
-      owner.endAt === aggregate.coverageEndAt;
-  }
-
-  return Boolean(owner.dayKey && owner.dayKey === aggregate.timestamp.dayKey);
+  return owner.startAt === aggregate.coverageStartAt &&
+    owner.endAt === aggregate.coverageEndAt;
 }
 
 function collectJunctionSleepStageAggregates(
@@ -2608,6 +2623,14 @@ function resolveSleepCycleParentResourceId(
   }
 
   return undefined;
+}
+
+function hasSleepCycleCompactParentIdentity(entry: PlainObject): boolean {
+  return !isDirectSleepStageIntervalEntry(entry) &&
+    Boolean(
+      firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS) ||
+        firstStringFromPaths(entry, JUNCTION_RECORD_TIMESTAMP_PATHS),
+    );
 }
 
 function makeJunctionSleepStageAggregateExternalRef(
@@ -4141,30 +4164,7 @@ function resolveRecordTimestamp(
   observedAtRaw?: string;
   timestampSemantics?: TimestampSemantics;
 } {
-  const rawObservedAt = firstStringFromPaths(entry, [
-    "observedAtRaw",
-    "observed_at_raw",
-    "observedAt",
-    "observed_at",
-    "timestamp",
-    "time",
-    "date",
-    "day",
-    "end",
-    "endAt",
-    "end_at",
-    "timeEnd",
-    "time_end",
-    "bedtimeStop",
-    "bedtime_stop",
-    "start",
-    "startAt",
-    "start_at",
-    "timeStart",
-    "time_start",
-    "bedtimeStart",
-    "bedtime_start",
-  ]);
+  const rawObservedAt = firstStringFromPaths(entry, JUNCTION_RECORD_TIMESTAMP_PATHS);
   const localCalendarDayKey = firstIsoDateFromPaths(entry, JUNCTION_LOCAL_CALENDAR_DATE_PATHS);
   const explicitSemantics = firstTimestampSemantics(entry);
   const hasSourceSpecificFloatingTime = hasFloatingTimestampSourceProvider(sourceProviderSlug);

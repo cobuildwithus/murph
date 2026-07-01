@@ -6263,6 +6263,90 @@ test("Junction sleep summary does not suppress sleep_cycle facts for a different
   }
 });
 
+test("Junction sleep summary only owns sleep_cycle facts with exact source and window identity", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-sleep-summary-exact-owner");
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-07-01T00:00:00.000Z",
+      timezone: "UTC",
+    });
+
+    const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot: {
+          importedAt: "2026-07-01T18:00:00.000Z",
+          summaries: {
+            sleep: [
+              {
+                date: "2026-07-01",
+                deep: 3600,
+                id: "sleep-summary-day-only-1",
+                source_provider: "garmin",
+                source_type: "watch",
+              },
+              {
+                bedtime_start: "2026-07-01T04:00:00.000Z",
+                bedtime_stop: "2026-07-01T05:00:00.000Z",
+                deep: 3600,
+                id: "sleep-summary-under-sourced-1",
+                source_provider: "garmin",
+                source_type: "watch",
+              },
+            ],
+            sleep_cycle: [
+              {
+                end: "2026-07-01T02:30:00.000Z",
+                id: "sleep-cycle-day-only-summary-peer-1",
+                source_provider: "garmin",
+                source_type: "watch",
+                stages: [{
+                  end: "2026-07-01T02:30:00.000Z",
+                  stage: "deep",
+                  start: "2026-07-01T02:00:00.000Z",
+                }],
+                start: "2026-07-01T02:00:00.000Z",
+              },
+              {
+                end: "2026-07-01T05:00:00.000Z",
+                id: "sleep-cycle-sourced-peer-1",
+                source_device_id: "garmin-watch-1",
+                source_provider: "garmin",
+                source_type: "watch",
+                stages: [{
+                  end: "2026-07-01T05:00:00.000Z",
+                  stage: "deep",
+                  start: "2026-07-01T04:00:00.000Z",
+                }],
+                start: "2026-07-01T04:00:00.000Z",
+              },
+            ],
+          },
+        },
+      },
+      {
+        corePort: coreRuntime,
+      },
+    );
+    const records = (
+      await Promise.all(
+        result.eventShardPaths.map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
+      )
+    ).flat();
+    const liveDeepRecords = latestLiveRecords(records).filter(
+      (record) => record.kind === "observation" && record.metric === "sleep-deep-minutes",
+    );
+
+    assert.equal(liveDeepRecords.length, 4);
+    assert.equal(new Set(liveDeepRecords.map((record) => storedExternalRefResourceId(record))).size, 4);
+    assert.deepEqual(liveDeepRecords.map((record) => storedObservationValue(record)).sort(), [30, 60, 60, 60]);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("Junction sleep summary stage aliases supersede pre-canonical summary facts", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-sleep-summary-stage-alias");
   try {

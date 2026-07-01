@@ -6305,6 +6305,18 @@ test("Junction direct Garmin sleep-cycle payloads without normalizable coverage 
       },
       label: "mixed-complete-incomplete-children",
     },
+    {
+      directRecord: {
+        object_id: "sleep-cycle-object-session-only",
+        session_end: "2026-06-25T03:00:00.000Z",
+        session_start: "2026-06-25T02:00:00.000Z",
+        sourceProviderSlug: "garmin",
+        stage_end_offset_second: [1800, 3600],
+        stage_start_offset_second: [0, 1800],
+        stage_type: [2, 1],
+      },
+      label: "session-offsets-without-normalizer-parent-id",
+    },
   ];
 
   for (const testCase of cases) {
