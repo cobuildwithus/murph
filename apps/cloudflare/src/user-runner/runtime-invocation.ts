@@ -62,6 +62,9 @@ import {
   readRuntimeProcessingCommandStepTimeoutMs,
   runRuntimeProcessingCommandStep,
 } from "./runtime-command-budget.js";
+import {
+  readRuntimeFenceLivenessBestEffort,
+} from "./runtime-fence-liveness.js";
 import type { RunnerWriteFenceToken } from "./runner-state-store.js";
 import { RunnerStateStore } from "./runner-state-store.js";
 import type { RunnerStateRecord } from "./types.js";
@@ -263,9 +266,15 @@ export class RuntimeInvocationService {
         throw error;
       }
 
-      if (input.acceptedProcessingAttempt) {
+      const livenessIndeterminate =
+        probeOutcome === "error" || probeOutcome === "timeout";
+      if (
+        input.acceptedProcessingAttempt
+        && !livenessIndeterminate
+        && probeOutcome !== "mismatch"
+      ) {
         const committedResult =
-          await this.recoverAcceptedRuntimeCompletionAfterTransportFailure({
+          await this.recoverAcceptedRuntimeCompletionFromCommittedProgress({
             executionInput,
             transportError: error,
             token,
@@ -277,32 +286,32 @@ export class RuntimeInvocationService {
         if (committedResult.kind === "unknown") {
           throw error;
         }
-        if (probeOutcome !== "mismatch") {
-          await this.recordAcceptedRuntimeAttemptFailureBestEffort({
-            error,
-            executionInput,
-            fenceCleared: false,
-            probeOutcome,
-            token,
+      }
+      if (input.acceptedProcessingAttempt && probeOutcome !== "mismatch") {
+        await this.recordAcceptedRuntimeAttemptFailureBestEffort({
+          error,
+          executionInput,
+          fenceCleared: false,
+          probeOutcome,
+          token,
+          workspaceVersion,
+        });
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+            orchestrationAttemptId: executionInput.orchestrationAttemptId,
+            transportFailureFenceCleared: false,
+            workspaceAttemptId: token.attemptId,
             workspaceVersion,
-          });
-          emitHostedExecutionStructuredLog({
-            component: "hosted.runner",
-            details: {
-              ...buildHostedRunnerMetadataOnlyErrorDetails(error),
-              orchestrationAttemptId: executionInput.orchestrationAttemptId,
-              transportFailureFenceCleared: false,
-              workspaceAttemptId: token.attemptId,
-              workspaceVersion,
-            },
-            level: "warn",
-            message:
-            "Hosted runner accepted runtime transport failed before committed progress was visible; preserving the write fence for identity-aware wake recovery.",
-            phase: "failed",
-            userId: executionInput.userId,
-          });
-          throw error;
-        }
+          },
+          level: "warn",
+          message:
+          "Hosted runner accepted runtime transport failed before committed progress was visible; preserving the write fence for identity-aware wake recovery.",
+          phase: "failed",
+          userId: executionInput.userId,
+        });
+        throw error;
       }
 
       const failed = await this.input.stateStore.clearWriteFenceAfterTransportFailure({
@@ -368,7 +377,8 @@ export class RuntimeInvocationService {
     return result;
   }
 
-  async recoverAcceptedRuntimeCompletionAfterTransportFailure(input: {
+  async recoverAcceptedRuntimeCompletionFromCommittedProgress(input: {
+    commandBudget?: RuntimeProcessingCommandBudget;
     executionInput: RuntimeInvocationInput;
     token: RunnerWriteFenceToken;
     transportError?: unknown;
@@ -379,6 +389,7 @@ export class RuntimeInvocationService {
     }
     const committedResult =
       await this.readAcceptedRuntimeCommittedProgressAfterTransportFailure({
+        commandBudget: input.commandBudget ?? null,
         executionInput: input.executionInput,
         workspaceVersion: input.workspaceVersion,
       });
@@ -408,7 +419,9 @@ export class RuntimeInvocationService {
         workspaceVersion: input.workspaceVersion,
       },
       level: "warn",
-      message: "Hosted runner accepted runtime attempt committed progress despite transport failure.",
+      message: input.transportError === undefined
+        ? "Hosted runner accepted runtime attempt committed progress; completing the active write fence."
+        : "Hosted runner accepted runtime attempt committed progress despite transport failure.",
       phase: "checkpoint",
       userId: input.executionInput.userId,
     });
@@ -419,15 +432,27 @@ export class RuntimeInvocationService {
   }
 
   private async readAcceptedRuntimeCommittedProgressAfterTransportFailure(input: {
+    commandBudget: RuntimeProcessingCommandBudget | null;
     executionInput: RuntimeInvocationInput;
     workspaceVersion: string;
   }): Promise<AcceptedRuntimeCompletionRecoveryResult> {
     let status: HostedRuntimeWebStatusResponse;
     try {
-      status = await this.input.readHostedRuntimeStatusFromWeb(
-        input.executionInput.userId,
-      );
+      const readStatus = async () =>
+        await this.input.readHostedRuntimeStatusFromWeb(
+          input.executionInput.userId,
+        );
+      status = input.commandBudget
+        ? await runRuntimeProcessingCommandStep({
+            budget: input.commandBudget,
+            operation: readStatus,
+            stepTimeoutMs: this.input.env.webControlTimeoutMs,
+          })
+        : await readStatus();
     } catch (error) {
+      if (isRuntimeProcessingCommandBudgetTimeout(error)) {
+        return { kind: "unknown" };
+      }
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
         details: {
@@ -780,54 +805,43 @@ export class RuntimeInvocationService {
   private async readPreparedAttemptLivenessBestEffort(
     prepared: PreparedRuntimeInvocation,
   ): Promise<RuntimeAttemptLivenessProbeOutcome> {
-    const namespace = this.input.runnerContainerNamespace;
-    if (!namespace) {
-      return "unsupported";
-    }
-    let probeTimer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const container = namespace.getByName(prepared.runnerContainerName);
-      if (!container.readActiveRuntimeUserFence) {
-        return "unsupported";
-      }
-      const active = await Promise.race([
-        container.readActiveRuntimeUserFence(),
-        new Promise<null>((resolve) => {
-          probeTimer = setTimeout(
-            () => resolve(null),
-            RUNTIME_ATTEMPT_LIVENESS_PROBE_TIMEOUT_MS,
-          );
-        }),
-      ]);
-      if (active === null) {
-        this.emitAttemptLivenessProbeUnconfirmedLog({
-          prepared,
-          probeOutcome: "timeout",
-        });
-        return "timeout";
-      }
-      if (!active.active) {
-        return "inactive";
-      }
-      return active.userId === prepared.input.userId
-        && active.attemptId === prepared.token.attemptId
+    const liveness = await readRuntimeFenceLivenessBestEffort({
+      commandBudget: null,
+      identity: {
+        attemptId: prepared.token.attemptId,
         // The container records the generation from the job request; compare
         // against that single source of truth.
-        && active.leaseGeneration === prepared.job.request.leaseGeneration
-        ? "active"
-        : "mismatch";
-    } catch (error) {
+        leaseGeneration: prepared.job.request.leaseGeneration,
+        userId: prepared.input.userId,
+      },
+      runnerContainerName: prepared.runnerContainerName,
+      runnerContainerNamespace: this.input.runnerContainerNamespace,
+      stepTimeoutMs: RUNTIME_ATTEMPT_LIVENESS_PROBE_TIMEOUT_MS,
+    });
+    if (liveness.outcome === "exact-active") {
+      return "active";
+    }
+    if (liveness.outcome === "inactive" || liveness.outcome === "mismatch") {
+      return liveness.outcome;
+    }
+
+    if (liveness.reason === "timeout") {
       this.emitAttemptLivenessProbeUnconfirmedLog({
-        error,
+        ...(liveness.error !== undefined ? { error: liveness.error } : {}),
+        prepared,
+        probeOutcome: "timeout",
+      });
+      return "timeout";
+    }
+    if (liveness.reason === "error") {
+      this.emitAttemptLivenessProbeUnconfirmedLog({
+        ...(liveness.error !== undefined ? { error: liveness.error } : {}),
         prepared,
         probeOutcome: "error",
       });
       return "error";
-    } finally {
-      if (probeTimer !== undefined) {
-        clearTimeout(probeTimer);
-      }
     }
+    return "unsupported";
   }
 
   private emitAttemptLivenessProbeUnconfirmedLog(input: {
