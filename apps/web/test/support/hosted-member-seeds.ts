@@ -31,6 +31,10 @@ const hostedMemberBillingStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-onboarding/hosted-member-billing-store.ts",
   import.meta.url,
 ).href;
+const hostedLinqLineStoreModuleSpecifier = new URL(
+  "../../src/lib/hosted-onboarding/linq-line-store.ts",
+  import.meta.url,
+).href;
 const hostedCryptoDomainRootStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-crypto/domain-root-store.ts",
   import.meta.url,
@@ -222,6 +226,15 @@ interface HostedMemberRoutingStoreModule {
   }): Promise<unknown>;
 }
 
+interface HostedLinqLineStoreModule {
+  upsertHostedLinqLineForPhoneTx(input: {
+    observedAt: Date;
+    phoneNumber: string;
+    prisma: unknown;
+    source: "configured";
+  }): Promise<unknown>;
+}
+
 interface HostedDeviceSyncControlPlaneStore {
   upsertConnection(input: {
     connectedAt: string;
@@ -282,6 +295,8 @@ interface HostedMemberSeedModules {
   upsertHostedMemberTelegramRoutingBindingTx:
     HostedMemberRoutingStoreModule["upsertHostedMemberTelegramRoutingBindingTx"];
   upsertHostedMemberIdentity: HostedMemberIdentityStoreModule["upsertHostedMemberIdentity"];
+  upsertHostedLinqLineForPhoneTx:
+    HostedLinqLineStoreModule["upsertHostedLinqLineForPhoneTx"];
   writeHostedMemberStripeBillingRefTx:
     HostedMemberBillingStoreModule["writeHostedMemberStripeBillingRefTx"];
 }
@@ -388,6 +403,14 @@ export async function seedHostedActiveLinqMember(
           walletChainType: input.walletAddress ? "ethereum" : null,
           walletCreatedAt: input.walletAddress ? new Date() : null,
           walletProvider: input.walletAddress ? "privy" : null,
+        });
+        // A member's assigned home phone must exist in the hosted_linq_line
+        // inventory; route binding rejects lines the DB does not know.
+        await modules.upsertHostedLinqLineForPhoneTx({
+          observedAt: new Date(),
+          phoneNumber: input.homePhone,
+          prisma: tx,
+          source: "configured",
         });
         await modules.upsertHostedMemberHomeLinqRecipientPhoneTx({
           clearPending: true,
@@ -767,6 +790,7 @@ async function loadHostedMemberSeedModules(
     hostedMemberRoutingStoreModule,
     hostedMemberStoreModule,
     hostedMemberBillingStoreModule,
+    hostedLinqLineStoreModule,
   ] = await Promise.all([
     import(prismaModuleSpecifier),
     import(contactPrivacyModuleSpecifier),
@@ -775,6 +799,7 @@ async function loadHostedMemberSeedModules(
     import(hostedMemberRoutingStoreModuleSpecifier),
     import(hostedMemberStoreModuleSpecifier),
     import(hostedMemberBillingStoreModuleSpecifier),
+    import(hostedLinqLineStoreModuleSpecifier),
   ]);
 
   if (environment.DATABASE_URL) {
@@ -792,6 +817,8 @@ async function loadHostedMemberSeedModules(
   const typedHostedMemberStoreModule = hostedMemberStoreModule as HostedMemberStoreModule;
   const typedHostedMemberBillingStoreModule =
     hostedMemberBillingStoreModule as HostedMemberBillingStoreModule;
+  const typedHostedLinqLineStoreModule =
+    hostedLinqLineStoreModule as HostedLinqLineStoreModule;
 
   return {
     createPrismaClient: typedPrismaModule.createPrismaClient,
@@ -807,6 +834,8 @@ async function loadHostedMemberSeedModules(
     upsertHostedMemberTelegramRoutingBindingTx:
       typedHostedMemberRoutingStoreModule.upsertHostedMemberTelegramRoutingBindingTx,
     upsertHostedMemberIdentity: typedHostedMemberIdentityStoreModule.upsertHostedMemberIdentity,
+    upsertHostedLinqLineForPhoneTx:
+      typedHostedLinqLineStoreModule.upsertHostedLinqLineForPhoneTx,
     writeHostedMemberStripeBillingRefTx:
       typedHostedMemberBillingStoreModule.writeHostedMemberStripeBillingRefTx,
   };
