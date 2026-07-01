@@ -10,6 +10,7 @@ const SIGN_IN_TOKEN = "junction-sdk-sign-in-token-do-not-log";
 const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
+  createHostedDeviceSyncPublicIngressService: vi.fn(),
   createSdkSignInSession: vi.fn(),
   getPrisma: vi.fn(),
   listConnectionSources: vi.fn(),
@@ -53,6 +54,10 @@ vi.mock("@/src/lib/legal/consent", () => ({
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
+}));
+
+vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
+  createHostedDeviceSyncPublicIngressService: mocks.createHostedDeviceSyncPublicIngressService,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -133,12 +138,14 @@ describe("device sync companion routes", () => {
     mocks.listConnectionSources.mockResolvedValue([]);
     mocks.listRecentConnectionWebhookSignals.mockResolvedValue([]);
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      createSdkSignInSession: mocks.createSdkSignInSession,
       store: {
         listConnectionSources: mocks.listConnectionSources,
         listConnectionsForUser: mocks.listConnectionsForUser,
         listRecentConnectionWebhookSignals: mocks.listRecentConnectionWebhookSignals,
       },
+    });
+    mocks.createHostedDeviceSyncPublicIngressService.mockReturnValue({
+      createSdkSignInSession: mocks.createSdkSignInSession,
     });
   });
 

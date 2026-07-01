@@ -2,9 +2,10 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
 import { formatDeviceSyncProviderLabel } from "@murphai/device-syncd/provider-label";
-import { isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
+import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
+import { createHostedDeviceSyncRegistry } from "../device-sync/providers";
 import { ComputerUseService } from "../computer-use/service";
 import { PrismaComputerUseStore } from "../computer-use/store";
 import {
@@ -1515,6 +1516,7 @@ async function revokeDeviceProvidersBestEffort(input: {
   }
 
   const results: HostedAccountProviderRevocationResult[] = [];
+  let registry: ReturnType<typeof createHostedDeviceSyncRegistry> | null = null;
   for (const connection of input.connections) {
     try {
       const storedAccount = await controlPlane.store.getStoredConnectionAccountForUser(
@@ -1533,7 +1535,8 @@ async function revokeDeviceProvidersBestEffort(input: {
         continue;
       }
 
-      const provider = controlPlane.registry.get(connection.provider);
+      registry ??= createHostedDeviceSyncRegistry(process.env);
+      const provider = registry.get(connection.provider);
       const revokeAccess = provider?.connectionHandler?.revokeAccess;
 
       if (!revokeAccess) {

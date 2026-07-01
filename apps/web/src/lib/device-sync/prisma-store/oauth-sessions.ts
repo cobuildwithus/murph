@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 
-import type { ConsumeOAuthStateResult, OAuthStateRecord } from "@murphai/device-syncd/public-ingress";
+import type { ConsumeOAuthStateResult, OAuthStateRecord } from "@murphai/device-syncd/types";
 
 import { toJsonRecord } from "../shared";
 import { toPrismaJsonObject } from "./prisma-json";

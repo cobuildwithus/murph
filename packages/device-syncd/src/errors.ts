@@ -51,6 +51,49 @@ export function formatDeviceSyncStartupError(error: unknown): string {
   return `NON_ERROR_THROW: ${sanitizeHostedRuntimeErrorText(String(error)) ?? "[redacted]"}`;
 }
 
+export function buildPublicDeviceSyncErrorPayload(error: DeviceSyncError): {
+  error: {
+    code: string;
+    message: string;
+    retryable: boolean;
+    details?: Record<string, unknown>;
+  };
+} {
+  return {
+    error: {
+      code: error.code,
+      message: sanitizeHostedRuntimeErrorText(error.message) ?? "Request failed.",
+      retryable: error.retryable,
+      details: buildPublicDeviceSyncErrorDetails(error.details),
+    },
+  };
+}
+
+function buildPublicDeviceSyncErrorDetails(
+  details: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  const status = readDeviceSyncErrorStatusDetail(details);
+  return status === null ? undefined : { status };
+}
+
+function readDeviceSyncErrorStatusDetail(
+  details: Record<string, unknown> | undefined,
+): number | null {
+  if (!details) {
+    return null;
+  }
+
+  const statusValue = details.status;
+  const status =
+    typeof statusValue === "number"
+      ? statusValue
+      : typeof statusValue === "string" && statusValue.trim()
+        ? Number(statusValue)
+        : Number.NaN;
+
+  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
+}
+
 function summarizeStartupErrorCause(error: Error): string | null {
   const cause = error.cause;
 

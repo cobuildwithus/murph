@@ -8,6 +8,7 @@ const serviceMocks = vi.hoisted(() => ({
   },
   createComposioConnectedAppsClient: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
+  createHostedDeviceSyncRegistry: vi.fn(),
   deleteHostedPrivyUser: vi.fn(),
   deleteHostedRunnerUserDataBestEffort: vi.fn(),
   getHostedOnboardingStripe: vi.fn(),
@@ -27,6 +28,10 @@ vi.mock("@/src/lib/connected-apps/config", async (importOriginal) => ({
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: serviceMocks.createHostedDeviceSyncControlPlane,
+}));
+
+vi.mock("@/src/lib/device-sync/providers", () => ({
+  createHostedDeviceSyncRegistry: serviceMocks.createHostedDeviceSyncRegistry,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy", async (importOriginal) => ({
@@ -133,6 +138,10 @@ beforeEach(() => {
   serviceMocks.createComposioConnectedAppsClient.mockReset();
   serviceMocks.createComposioConnectedAppsClient.mockReturnValue(serviceMocks.connectedAppsClient);
   serviceMocks.createHostedDeviceSyncControlPlane.mockReset();
+  serviceMocks.createHostedDeviceSyncRegistry.mockReset();
+  serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+    get: vi.fn(() => null),
+  });
   serviceMocks.deleteHostedPrivyUser.mockReset();
   serviceMocks.deleteHostedPrivyUser.mockResolvedValue(true);
   serviceMocks.deleteHostedRunnerUserDataBestEffort.mockReset();
@@ -798,9 +807,6 @@ describe("deleteHostedAccountData", () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const operationOrder: string[] = [];
     serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValueOnce({
-      registry: {
-        get: vi.fn(() => null),
-      },
       store: {
         getStoredConnectionAccountForUser: vi.fn(async () => null),
       },
@@ -852,9 +858,6 @@ describe("deleteHostedAccountData", () => {
   it("locks webhook trace owners in deterministic unique order before account deletion", async () => {
     const operationOrder: string[] = [];
     serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValueOnce({
-      registry: {
-        get: vi.fn(() => null),
-      },
       store: {
         getStoredConnectionAccountForUser: vi.fn(async () => null),
       },
@@ -997,14 +1000,14 @@ describe("deleteHostedAccountData", () => {
       tokenVersion: null,
       updatedAt: "2026-04-27T00:07:00.000Z",
     }));
+    serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+      get: vi.fn(() => ({
+        connectionHandler: {
+          revokeAccess,
+        },
+      })),
+    });
     serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      registry: {
-        get: vi.fn(() => ({
-          connectionHandler: {
-            revokeAccess,
-          },
-        })),
-      },
       store: {
         getStoredConnectionAccountForUser,
       },
@@ -1047,6 +1050,84 @@ describe("deleteHostedAccountData", () => {
         warningCode: null,
       },
     ]);
+  });
+
+  it("reports provider registry failures through the account-deletion revocation policy", async () => {
+    const order: string[] = [];
+    const getStoredConnectionAccountForUser = vi.fn(async () => ({
+      accessTokenExpiresAt: null,
+      connectedAt: "2026-04-27T00:07:00.000Z",
+      createdAt: "2026-04-27T00:07:00.000Z",
+      credential: {
+        kind: "provider_config" as const,
+        credentialMetadata: {},
+        providerConfigKey: "junction",
+      },
+      disconnectGeneration: 0,
+      displayName: "Junction",
+      externalAccountId: "junction-user-123",
+      id: "dsc_junction",
+      keyVersion: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: null,
+      lastWebhookAt: null,
+      metadata: {},
+      nextReconcileAt: null,
+      provider: "junction",
+      scopes: [],
+      setupExpiresAt: null,
+      setupPhase: null,
+      status: "active" as const,
+      tokenVersion: null,
+      updatedAt: "2026-04-27T00:07:00.000Z",
+    }));
+    serviceMocks.createHostedDeviceSyncRegistry.mockImplementation(() => {
+      throw Object.assign(new Error("invalid provider config"), {
+        name: "ProviderConfigError",
+      });
+    });
+    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      store: {
+        getStoredConnectionAccountForUser,
+      },
+    });
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deviceConnections: [
+        {
+          id: "dsc_junction",
+          provider: "junction",
+          providerAccountBlindIndex: "blind-index",
+          sources: [{ sourceProviderSlug: "garmin", status: "connected" }],
+        },
+      ],
+      onTransaction: () => order.push("prisma"),
+    });
+
+    let error: unknown;
+    try {
+      await deleteHostedAccountData({
+        memberId: "member_123",
+        prisma,
+        request: new Request("https://join.example.test/settings"),
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(HostedOnboardingError);
+    expect((error as HostedOnboardingError).code).toBe("ACCOUNT_DELETION_PROVIDER_REVOKE_FAILED");
+    expect((error as HostedOnboardingError).details).toEqual({
+      providerRevocations: [
+        {
+          errorCode: "ProviderConfigError",
+          providerLabel: "Garmin",
+        },
+      ],
+    });
+    expect(getStoredConnectionAccountForUser).toHaveBeenCalledWith("member_123", "dsc_junction");
+    expect(serviceMocks.createHostedDeviceSyncRegistry).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["prisma"]);
   });
 
   it("revokes connected apps before local account deletion removes ownership rows", async () => {
@@ -1381,14 +1462,14 @@ describe("deleteHostedAccountData", () => {
       tokenVersion: null,
       updatedAt: "2026-04-27T00:07:00.000Z",
     }));
+    serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
+      get: vi.fn(() => ({
+        connectionHandler: {
+          revokeAccess,
+        },
+      })),
+    });
     serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      registry: {
-        get: vi.fn(() => ({
-          connectionHandler: {
-            revokeAccess,
-          },
-        })),
-      },
       store: {
         getStoredConnectionAccountForUser,
       },

@@ -1,10 +1,12 @@
 import { createDeviceSyncRegistry } from "../registry.ts";
-
 import {
   configuredDeviceSyncProviderKeys,
-  getConfiguredDeviceSyncProviderManifest,
 } from "./provider-manifests.ts";
 import { readConfiguredDeviceSyncProviderConfigs } from "./provider-configs.ts";
+import { createJunctionDeviceSyncProvider } from "../providers/junction.ts";
+import { createOuraDeviceSyncProvider } from "../providers/oura.ts";
+import { createStravaDeviceSyncProvider } from "../providers/strava.ts";
+import { createWhoopDeviceSyncProvider } from "../providers/whoop.ts";
 
 import type {
   ConfiguredDeviceSyncProviderConfigByKey,
@@ -62,19 +64,19 @@ function createConfiguredDeviceSyncProviderFromConfig<
 ): DeviceSyncProvider {
   switch (provider) {
     case "junction":
-      return getConfiguredDeviceSyncProviderManifest("junction").createProvider(
+      return createJunctionDeviceSyncProvider(
         config as ConfiguredDeviceSyncProviderConfigByKey["junction"],
       );
     case "oura":
-      return getConfiguredDeviceSyncProviderManifest("oura").createProvider(
+      return createOuraDeviceSyncProvider(
         config as ConfiguredDeviceSyncProviderConfigByKey["oura"],
       );
     case "whoop":
-      return getConfiguredDeviceSyncProviderManifest("whoop").createProvider(
+      return createWhoopDeviceSyncProvider(
         config as ConfiguredDeviceSyncProviderConfigByKey["whoop"],
       );
     case "strava":
-      return getConfiguredDeviceSyncProviderManifest("strava").createProvider(
+      return createStravaDeviceSyncProvider(
         config as ConfiguredDeviceSyncProviderConfigByKey["strava"],
       );
   }

@@ -1,13 +1,13 @@
 import "server-only";
 
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
-  deviceSyncError,
   normalizeJunctionResourceName,
   readJunctionWebhookResourceName,
-} from "@murphai/device-syncd/public-ingress";
+} from "@murphai/device-syncd/junction-resources";
 
 import type { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
-import { isAvailableConnectionSourceResource } from "./public-ingress-service";
+import { isAvailableConnectionSourceResource } from "./browser-connection-source";
 
 /** The companion app's only device-sync provider. */
 export const COMPANION_DEVICE_SYNC_PROVIDER = "junction";

@@ -1,7 +1,5 @@
-import {
-  sanitizeStoredDeviceSyncMetadata,
-  type PublicDeviceSyncAccount,
-} from "@murphai/device-syncd/public-ingress";
+import { sanitizeStoredDeviceSyncMetadata } from "@murphai/device-syncd/public-account";
+import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
 import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
   parseHostedExecutionDeviceSyncDirtyAckRequest,
@@ -24,11 +22,11 @@ import {
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   type HostedExecutionDeviceSyncRuntimeTokenBundle,
 } from "@murphai/device-syncd/hosted-runtime";
-import {
-  resolveConfiguredDeviceSyncProviderManifest,
-  resolveDeviceProviderMatchKeys,
-} from "@murphai/device-syncd/config";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import {
+  resolveConfiguredDeviceSyncProviderCredentialPolicy,
+} from "@murphai/device-syncd/provider-credential-policy";
+import { resolveDeviceProviderMatchKeys } from "@murphai/device-syncd/provider-match";
 import type { HostedRuntimeRedactedJson } from "@murphai/hosted-execution/runtime-control";
 
 import { createHostedDeviceSyncControlPlane } from "./control-plane";
@@ -1163,8 +1161,7 @@ function validateHostedRuntimeCredentialMutation(input: {
     | Extract<HostedExecutionDeviceSyncRuntimeCredentialUpdate, { clearTokens: true; kind: "oauth_tokens" }>;
   provider: string;
 }): void {
-  const manifest = resolveConfiguredDeviceSyncProviderManifest(input.provider);
-  const policy = manifest?.credentialPolicy;
+  const policy = resolveConfiguredDeviceSyncProviderCredentialPolicy(input.provider);
 
   switch (input.credential.kind) {
     case "oauth_tokens":

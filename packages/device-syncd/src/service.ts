@@ -3,7 +3,7 @@ import { createImporters } from "@murphai/importers";
 import {
   normalizeConfiguredDeviceSyncJobInput,
   normalizeConfiguredDeviceSyncJobRecord,
-} from "./config/provider-manifests.ts";
+} from "./provider-job-definitions.ts";
 import { buildDeviceSyncTokenCipherOptions, createSecretCodec } from "./local-secret-codec.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import {

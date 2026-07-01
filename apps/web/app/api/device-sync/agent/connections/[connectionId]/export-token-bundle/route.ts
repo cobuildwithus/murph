@@ -1,4 +1,4 @@
-import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
+import { createHostedDeviceSyncAgentSessionService } from "@/src/lib/device-sync/agent-session-service";
 import {
   jsonOk,
   postOnlyJson,
@@ -14,10 +14,10 @@ export const POST = withJsonError(async (
   request: Request,
   context: { params: Promise<{ connectionId: string }> },
 ) => {
-  const controlPlane = createHostedDeviceSyncControlPlane(request);
-  const session = await controlPlane.requireAgentSession();
+  const agentSessions = createHostedDeviceSyncAgentSessionService(request);
+  const session = await agentSessions.requireAgentSession();
   const connectionId = await resolveDecodedRouteParam(context.params, "connectionId");
-  const { connection, tokenBundle } = await controlPlane.exportTokenBundle(session, connectionId);
+  const { connection, tokenBundle } = await agentSessions.exportTokenBundle(session, connectionId);
   return jsonOk({
     connection,
     tokenBundle,

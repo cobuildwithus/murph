@@ -229,17 +229,38 @@
       "@murphai/device-syncd/http": [
         "packages/device-syncd/src/http.ts"
       ],
+      "@murphai/device-syncd/junction-resources": [
+        "packages/device-syncd/src/junction-resources.ts"
+      ],
       "@murphai/device-syncd/provider-label": [
         "packages/device-syncd/src/provider-label.ts"
       ],
+      "@murphai/device-syncd/provider-credential-policy": [
+        "packages/device-syncd/src/provider-credential-policy.ts"
+      ],
+      "@murphai/device-syncd/provider-configs": [
+        "packages/device-syncd/src/provider-configs.ts"
+      ],
+      "@murphai/device-syncd/provider-match": [
+        "packages/device-syncd/src/provider-match.ts"
+      ],
+      "@murphai/device-syncd/public-account": [
+        "packages/device-syncd/src/public-account.ts"
+      ],
       "@murphai/device-syncd/providers/junction-client": [
         "packages/device-syncd/src/providers/junction-client.ts"
+      ],
+      "@murphai/device-syncd/providers/junction-config": [
+        "packages/device-syncd/src/providers/junction-config.ts"
       ],
       "@murphai/device-syncd/providers/oura": [
         "packages/device-syncd/src/providers/oura.ts"
       ],
       "@murphai/device-syncd/public-ingress": [
         "packages/device-syncd/src/public-ingress.ts"
+      ],
+      "@murphai/device-syncd/public-provider-descriptors": [
+        "packages/device-syncd/src/public-provider-descriptors.ts"
       ],
       "@murphai/device-syncd/types": [
         "packages/device-syncd/src/types.ts"

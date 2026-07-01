@@ -27,6 +27,10 @@ import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-p
 import { deviceSyncError, isDeviceSyncError, type DeviceSyncError } from "../errors.ts";
 import { sanitizeHostedRuntimeDiagnosticText } from "../hosted-runtime.ts";
 import {
+  assertValidJunctionClientUserIdSecret,
+  normalizeJunctionDeviceSyncRuntimeConfig,
+} from "../configured-provider-runtime-descriptors.ts";
+import {
   addMilliseconds,
   normalizeString,
   sha256Text,
@@ -36,15 +40,17 @@ import {
   JunctionClient,
   type JunctionClientConfig,
   type JunctionDateQueryFormat,
-  type JunctionEnvironment,
   type JunctionProviderConnection,
-  type JunctionRegion,
 } from "./junction-client.ts";
 import {
   buildJunctionProviderSourceInstanceKey,
   JUNCTION_DEFAULT_PROVIDER_FILTER,
   normalizeJunctionProviderFilter,
-} from "./junction-connect-sources.ts";
+} from "../config/junction-connect-sources.ts";
+import type {
+  JunctionDeviceSyncProviderConfig,
+  JunctionEnvironment,
+} from "../config/provider-types.ts";
 
 import type {
   DeviceConnectionSourceStatus,
@@ -69,6 +75,7 @@ import type {
 } from "../types.ts";
 import { classifyDeviceSyncWebhookAcceptanceMode } from "../types.ts";
 
+export type { JunctionDeviceSyncProviderConfig } from "../config/provider-types.ts";
 export { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR };
 export {
   JUNCTION_CONNECT_SOURCE_TARGETS,
@@ -77,27 +84,8 @@ export {
   normalizeJunctionProviderFilter,
   resolveJunctionConnectSourceLabel,
   resolveJunctionConnectTargetForSourceId,
-} from "./junction-connect-sources.ts";
-export type { JunctionConnectSourceTarget } from "./junction-connect-sources.ts";
-
-export interface JunctionDeviceSyncProviderConfig {
-  apiKey: string;
-  clientUserIdSecret: string;
-  environment: JunctionEnvironment;
-  region: JunctionRegion;
-  allowedLinkHosts?: readonly string[];
-  providerFilter?: string[];
-  summaryResources?: string[];
-  timeseriesResources?: string[];
-  summaryBackfillDays?: number;
-  timeseriesBackfillDays?: number;
-  reconcileDays?: number;
-  reconcileIntervalMs?: number;
-  requestTimeoutMs?: number;
-  webhookSecret?: string;
-  webhookTimestampToleranceMs?: number;
-  fetchImpl?: typeof fetch;
-}
+} from "../config/junction-connect-sources.ts";
+export type { JunctionConnectSourceTarget } from "../config/junction-connect-sources.ts";
 
 export const JUNCTION_PROVIDER_CONFIG_KEY = "junction";
 export {
@@ -459,25 +447,9 @@ type JunctionHistoricalBackfillStatus = "complete" | "exhausted" | "retrying";
 export function createJunctionDeviceSyncProvider(
   config: JunctionDeviceSyncProviderConfig,
 ): DeviceSyncProvider {
-  assertValidJunctionClientUserIdSecret(config.clientUserIdSecret);
+  const runtimeConfig = normalizeJunctionDeviceSyncRuntimeConfig(config);
   const client = new JunctionClient(toClientConfig(config));
-  const summaryResources = normalizeRequiredResourceList(
-    config.summaryResources,
-    JUNCTION_DEFAULT_SUMMARY_RESOURCES,
-    JUNCTION_ALLOWED_SUMMARY_RESOURCES,
-    "summary",
-  );
-  const timeseriesResources = normalizeOptionalResourceList(
-    config.timeseriesResources,
-    JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
-    JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
-    JUNCTION_KNOWN_TIMESERIES_RESOURCES,
-    "timeseries",
-  );
-  const providerFilter = normalizeJunctionProviderFilter(config.providerFilter);
-  if (providerFilter.length === 0) {
-    throw new TypeError("Junction provider filter must include at least one hosted Link provider.");
-  }
+  const { providerFilter, summaryResources, timeseriesResources } = runtimeConfig;
   const summaryBackfillDays = config.summaryBackfillDays ?? DEFAULT_SUMMARY_BACKFILL_DAYS;
   const timeseriesBackfillDays = config.timeseriesBackfillDays ?? DEFAULT_TIMESERIES_BACKFILL_DAYS;
   const reconcileDays = config.reconcileDays ?? DEFAULT_RECONCILE_DAYS;
@@ -3290,54 +3262,6 @@ function toClientConfig(config: JunctionDeviceSyncProviderConfig): JunctionClien
   };
 }
 
-function normalizeRequiredResourceList(
-  value: string[] | undefined,
-  defaults: readonly string[],
-  allowedResources: readonly string[],
-  label: string,
-): string[] {
-  const normalized = (value && value.length > 0 ? value : defaults)
-    .map(normalizeJunctionResourceName)
-    .filter((entry): entry is string => entry !== null);
-  const allowedResourceSet = new Set<string>(allowedResources);
-  const unsupportedResources = normalized.filter((entry) => !allowedResourceSet.has(entry));
-
-  if (unsupportedResources.length > 0) {
-    throw new TypeError(
-      `Junction ${label} resources include unsupported resource(s): ${[...new Set(unsupportedResources)].join(", ")}.`,
-    );
-  }
-
-  if (normalized.length === 0) {
-    throw new TypeError(`Junction ${label} resources must include at least one supported resource.`);
-  }
-
-  return [...new Set(normalized)];
-}
-
-function normalizeOptionalResourceList(
-  value: string[] | undefined,
-  defaults: readonly string[],
-  allowedResources: readonly string[],
-  knownResources: readonly string[],
-  label: string,
-): string[] {
-  const normalized = (value === undefined ? defaults : value)
-    .map(normalizeJunctionResourceName)
-    .filter((entry): entry is string => entry !== null);
-  const allowedResourceSet = new Set<string>(allowedResources);
-  const knownResourceSet = new Set<string>([...allowedResources, ...knownResources]);
-  const unsupportedResources = normalized.filter((entry) => !knownResourceSet.has(entry));
-
-  if (unsupportedResources.length > 0) {
-    throw new TypeError(
-      `Junction ${label} resources include unsupported resource(s): ${[...new Set(unsupportedResources)].join(", ")}.`,
-    );
-  }
-
-  return [...new Set(normalized.filter((entry) => allowedResourceSet.has(entry)))];
-}
-
 function normalizeProviderSlug(value: unknown): string | null {
   const normalized = normalizeString(value)?.toLowerCase().replace(/[^a-z0-9_]+/gu, "_").replace(/^_+|_+$/gu, "");
   return normalized || null;
@@ -4801,16 +4725,7 @@ function inferJunctionWebhookResource(
   };
 }
 
-export { normalizeJunctionResourceName } from "@murphai/importers/device-providers/junction-resources";
-
-/**
- * Resolves the normalized Junction resource name carried by a webhook event
- * type such as `daily.data.sleep.created`. Lifecycle events (for example
- * `provider.connection.created`) carry no data resource and resolve to null.
- */
-export function readJunctionWebhookResourceName(eventType: string): string | null {
-  return normalizeJunctionResourceName(readJunctionWebhookResourceFromEventType(eventType));
-}
+export { normalizeJunctionResourceName, readJunctionWebhookResourceName } from "../junction-resources.ts";
 
 function readJunctionWebhookResourceFromEventType(eventType: string): string | null {
   const parts = eventType.split(".").map((part) => part.trim()).filter(Boolean);
@@ -5701,16 +5616,6 @@ function readPlainObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
-}
-
-function assertValidJunctionClientUserIdSecret(secret: string): string {
-  const normalizedSecret = normalizeString(secret);
-
-  if (!normalizedSecret || normalizedSecret.length < 16) {
-    throw new TypeError("JUNCTION_CLIENT_USER_ID_SECRET must be at least 16 characters.");
-  }
-
-  return normalizedSecret;
 }
 
 function base32UrlEncode(input: Buffer): string {

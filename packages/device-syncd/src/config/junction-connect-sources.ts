@@ -5,14 +5,14 @@ import {
   normalizeJunctionProviderSlug,
   resolveDeviceConnectSourceById,
   resolveJunctionDeviceConnectRouteByProviderSlug,
-} from "../config/connect-routes.ts";
+} from "./connect-routes.ts";
 import { normalizeString, sha256Text } from "../shared.ts";
 
 import type {
   DeviceConnectJunctionLinkRoute,
   DeviceConnectJunctionSdkRoute,
   DeviceConnectRoute,
-} from "../config/connect-routes.ts";
+} from "./connect-routes.ts";
 
 export type JunctionConnectMode = "junction_link" | "junction_sdk" | "direct" | "unavailable";
 

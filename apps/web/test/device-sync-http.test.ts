@@ -46,7 +46,7 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@murphai/device-syncd/public-ingress", () => mocks);
+vi.mock("@murphai/device-syncd/errors", () => mocks);
 vi.mock("next/server", () => {
   class MockNextResponse extends Response {
     static redirect(url: string, init?: number | ResponseInit) {

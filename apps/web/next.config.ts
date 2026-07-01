@@ -8,13 +8,13 @@ import {
   HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES,
 } from "../../config/workspace-source-resolution";
 import {
+  KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES,
+  KERNEL_COMPUTER_LIVE_VIEW_FRAME_SOURCES,
+} from "./kernel-live-view-origin";
+import {
   isHostedWebDevFileSystemCacheEnabled,
   resolveHostedWebDistDir,
 } from "./next-artifacts";
-import {
-  KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES,
-  KERNEL_COMPUTER_LIVE_VIEW_FRAME_SOURCES,
-} from "./src/lib/computer-use/live-view-origin";
 
 interface StaticHeader {
   key: string;
@@ -62,6 +62,8 @@ const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 export const WORKSPACE_SOURCE_PACKAGE_NAMES = HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES;
+export const HOSTED_WEB_NEXT_TSCONFIG_PATH = "./tsconfig.next.json";
+export const HOSTED_WEB_PRODUCTION_BUILD_CPUS = 2;
 export const HOSTED_WEB_WORKFLOW_OPTIONS = {
   workflows: {
     lazyDiscovery: true,
@@ -277,6 +279,7 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
     distDir: resolveHostedWebDistDir(phase, process.env),
     env: buildHostedWebClientEnv(process.env),
     experimental: {
+      cpus: HOSTED_WEB_PRODUCTION_BUILD_CPUS,
       turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(process.env),
     },
     outputFileTracingIncludes: {
@@ -293,6 +296,19 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
         "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
         "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
       ],
+      "/biomarkers": [
+        "../../packages/health-commons/generated/web/browse/biomarkers.json",
+      ],
+      "/biomarkers/[biomarkerId]": [
+        "../../packages/health-commons/generated/web/routes/index.json",
+        "../../packages/health-commons/generated/web/shell/biomarkers/**/*.json",
+        "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
+      ],
+      "/biomarkers/[biomarkerId]/research": [
+        "../../packages/health-commons/generated/web/routes/index.json",
+        "../../packages/health-commons/generated/web/shell/biomarkers/**/*.json",
+        "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
+      ],
       "/measurement-methods/[measurementMethodId]": [
         "../../packages/health-commons/generated/web/routes/index.json",
         "../../packages/health-commons/generated/web/bundles/measurement_method/**/*.json",
@@ -301,6 +317,9 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
     outputFileTracingRoot: path.resolve(appDir, "../.."),
     transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
     turbopack: buildHostedWebTurbopackConfig(),
+    typescript: {
+      tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
+    },
     headers: async () => [
       {
         source: HOSTED_WEB_HEADER_SOURCE,

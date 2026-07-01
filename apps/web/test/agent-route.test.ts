@@ -1,28 +1,44 @@
 import {
   deviceSyncError,
-} from "@murphai/device-syncd/public-ingress";
-import { createOuraDeviceSyncProvider } from "@murphai/device-syncd/providers/oura";
+} from "@murphai/device-syncd/errors";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createBearerRequest, createJsonPostRequest, createRouteContext } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
+  createHostedDeviceSyncAgentSessionContext: vi.fn(),
+  createHostedDeviceSyncAgentSessionService: vi.fn(),
   assertBrowserMutationOrigin: vi.fn(),
+  createHostedDeviceSyncProviderAgentSessionService: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
+  createHostedDeviceSyncPublicIngressService: vi.fn(),
   exportTokenBundle: vi.fn(),
   handleWebhook: vi.fn(),
   pairAgent: vi.fn(),
   readWebhookRawBody: vi.fn(),
   refreshTokenBundle: vi.fn(),
+  resolveWebhookPreflight: vi.fn(),
   requireAgentSession: vi.fn(),
   requireAuthenticatedUser: vi.fn(),
-  webhookRegistry: {
-    get: vi.fn(),
-  },
+  requireRegistry: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
+}));
+vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
+  createHostedDeviceSyncPublicIngressService: mocks.createHostedDeviceSyncPublicIngressService,
+}));
+vi.mock("@/src/lib/device-sync/agent-session-service", () => ({
+  createHostedDeviceSyncAgentSessionContext: mocks.createHostedDeviceSyncAgentSessionContext,
+  createHostedDeviceSyncAgentSessionService: mocks.createHostedDeviceSyncAgentSessionService,
+}));
+vi.mock("@/src/lib/device-sync/agent-session-provider-service", () => ({
+  createHostedDeviceSyncProviderAgentSessionService: mocks.createHostedDeviceSyncProviderAgentSessionService,
+}));
+vi.mock("@/src/lib/device-sync/auth", () => ({
+  assertBrowserMutationOrigin: mocks.assertBrowserMutationOrigin,
+  requireAuthenticatedHostedUser: mocks.requireAuthenticatedUser,
 }));
 
 type ExportRouteModule = typeof import("../app/api/device-sync/agent/connections/[connectionId]/export-token-bundle/route");
@@ -47,14 +63,31 @@ describe("hosted device-sync agent and webhook routes", () => {
     vi.clearAllMocks();
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       assertBrowserMutationOrigin: mocks.assertBrowserMutationOrigin,
-      exportTokenBundle: mocks.exportTokenBundle,
-      handleWebhook: mocks.handleWebhook,
       pairAgent: mocks.pairAgent,
+      requireAuthenticatedUser: mocks.requireAuthenticatedUser,
+      requireRegistry: mocks.requireRegistry,
+    });
+    mocks.createHostedDeviceSyncPublicIngressService.mockReturnValue({
+      handleWebhook: mocks.handleWebhook,
       readWebhookRawBody: mocks.readWebhookRawBody,
-      registry: mocks.webhookRegistry,
+      resolveWebhookPreflight: mocks.resolveWebhookPreflight,
+    });
+    mocks.createHostedDeviceSyncAgentSessionService.mockReturnValue({
+      exportTokenBundle: mocks.exportTokenBundle,
       refreshTokenBundle: mocks.refreshTokenBundle,
       requireAgentSession: mocks.requireAgentSession,
-      requireAuthenticatedUser: mocks.requireAuthenticatedUser,
+    });
+    mocks.createHostedDeviceSyncProviderAgentSessionService.mockReturnValue({
+      exportTokenBundle: mocks.exportTokenBundle,
+      refreshTokenBundle: mocks.refreshTokenBundle,
+      requireAgentSession: mocks.requireAgentSession,
+    });
+    mocks.createHostedDeviceSyncAgentSessionContext.mockReturnValue({
+      agentSessions: {
+        createAgentSession: mocks.pairAgent,
+      },
+      env: {},
+      store: {},
     });
     mocks.requireAuthenticatedUser.mockResolvedValue({
       email: "person@example.test",
@@ -67,6 +100,7 @@ describe("hosted device-sync agent and webhook routes", () => {
       userId: "user-123",
     });
     mocks.readWebhookRawBody.mockResolvedValue(Buffer.from('{"event":"sleep.updated"}', "utf8"));
+    mocks.resolveWebhookPreflight.mockResolvedValue(null);
     mocks.pairAgent.mockResolvedValue({
       agent: {
         createdAt: "2026-03-26T12:00:00.000Z",
@@ -76,15 +110,6 @@ describe("hosted device-sync agent and webhook routes", () => {
       },
       token: "device-sync-agent-token",
     });
-    mocks.webhookRegistry.get.mockImplementation((provider: string) =>
-      provider === "oura" || provider === "oura/legacy"
-        ? createOuraDeviceSyncProvider({
-            clientId: "oura-client-id",
-            clientSecret: "oura-client-secret",
-            webhookVerificationToken: "verify-token",
-          })
-        : undefined
-    );
   });
 
   it("authenticates browser pair requests before parsing the body", async () => {
@@ -199,6 +224,48 @@ describe("hosted device-sync agent and webhook routes", () => {
     expect(mocks.exportTokenBundle).not.toHaveBeenCalled();
   });
 
+  it("exports token bundles without constructing provider runtime", async () => {
+    mocks.exportTokenBundle.mockResolvedValueOnce({
+      connection: {
+        id: "dsc_123",
+        provider: "oura",
+      },
+      tokenBundle: {
+        accessToken: "bundle-token-test",
+        refreshToken: null,
+        tokenVersion: 7,
+      },
+    });
+
+    const response = await exportRoute.POST(
+      createBearerRequest(
+        "https://example.test/api/device-sync/agent/connections/dsc_123/export-token-bundle",
+        "valid-session-token",
+        { method: "POST" },
+      ),
+      createRouteContext({ connectionId: "dsc_123" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.createHostedDeviceSyncAgentSessionService).toHaveBeenCalledTimes(1);
+    expect(mocks.createHostedDeviceSyncProviderAgentSessionService).not.toHaveBeenCalled();
+    expect(mocks.exportTokenBundle).toHaveBeenCalledWith({
+      id: "dsa_current",
+      userId: "user-123",
+    }, "dsc_123");
+    await expect(response.json()).resolves.toEqual({
+      connection: {
+        id: "dsc_123",
+        provider: "oura",
+      },
+      tokenBundle: {
+        accessToken: "bundle-token-test",
+        refreshToken: null,
+        tokenVersion: 7,
+      },
+    });
+  });
+
   it("rejects refresh-token-bundle when the bearer token has expired", async () => {
     mocks.requireAgentSession.mockRejectedValue(
       deviceSyncError({
@@ -236,6 +303,13 @@ describe("hosted device-sync agent and webhook routes", () => {
   });
 
   it("returns Oura webhook verification challenges as JSON", async () => {
+    mocks.resolveWebhookPreflight.mockResolvedValueOnce({
+      status: 200,
+      body: {
+        challenge: "oura-challenge-token",
+      },
+    });
+
     const response = await webhookRoute.GET(
       new Request(
         "https://example.test/api/device-sync/webhooks/oura?verification_token=verify-token&challenge=oura-challenge-token",
@@ -243,7 +317,7 @@ describe("hosted device-sync agent and webhook routes", () => {
       createRouteContext({ provider: "oura" }),
     );
 
-    expect(mocks.webhookRegistry.get).toHaveBeenCalledWith("oura");
+    expect(mocks.resolveWebhookPreflight).toHaveBeenCalledWith("oura", Buffer.alloc(0));
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/json");
     await expect(response.json()).resolves.toEqual({
@@ -275,15 +349,6 @@ describe("hosted device-sync agent and webhook routes", () => {
   });
 
   it("returns 202 for hosted Junction orphan webhook deliveries instead of 503", async () => {
-    mocks.webhookRegistry.get.mockImplementation((provider: string) =>
-      provider === "junction"
-        ? createOuraDeviceSyncProvider({
-            clientId: "oura-client-id",
-            clientSecret: "oura-client-secret",
-            webhookVerificationToken: "verify-token",
-          })
-        : undefined
-    );
     mocks.handleWebhook.mockResolvedValue({
       accepted: true,
       duplicate: false,
@@ -314,38 +379,12 @@ describe("hosted device-sync agent and webhook routes", () => {
   });
 
   it("short-circuits hosted webhook POSTs when provider preflight returns a response", async () => {
-    const preflightProvider = createOuraDeviceSyncProvider({
-      clientId: "oura-client-id",
-      clientSecret: "oura-client-secret",
-      webhookVerificationToken: "verify-token",
+    mocks.resolveWebhookPreflight.mockResolvedValueOnce({
+      status: 200,
+      body: {
+        challenge: "demo-preflight-challenge",
+      },
     });
-    let observedUrl: string | null = null;
-    preflightProvider.webhookAdmin!.handleWebhookPreflight = async ({ method, url }) => {
-      if (method !== "POST") {
-        return null;
-      }
-
-      observedUrl = url.toString();
-
-      return {
-        status: 200,
-        body: {
-          challenge: "demo-preflight-challenge",
-        },
-      };
-    };
-
-    mocks.webhookRegistry.get.mockImplementation((provider: string) =>
-      provider === "oura"
-        ? preflightProvider
-        : provider === "oura" || provider === "oura/legacy"
-          ? createOuraDeviceSyncProvider({
-              clientId: "oura-client-id",
-              clientSecret: "oura-client-secret",
-              webhookVerificationToken: "verify-token",
-            })
-          : undefined
-    );
 
     const response = await webhookRoute.POST(
       new Request("https://example.test/api/device-sync/webhooks/oura?via=preflight", {
@@ -355,15 +394,25 @@ describe("hosted device-sync agent and webhook routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(observedUrl).toBe("https://example.test/api/device-sync/webhooks/oura?via=preflight");
     expect(mocks.readWebhookRawBody).toHaveBeenCalledTimes(1);
+    expect(mocks.resolveWebhookPreflight).toHaveBeenCalledWith(
+      "oura",
+      Buffer.from('{"event":"sleep.updated"}', "utf8"),
+    );
     expect(mocks.handleWebhook).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       challenge: "demo-preflight-challenge",
     });
   });
 
-  it("keeps hosted webhook verification token mismatch behavior aligned with the shared Oura helper", async () => {
+  it("surfaces hosted webhook verification token mismatch errors", async () => {
+    mocks.resolveWebhookPreflight.mockRejectedValueOnce(deviceSyncError({
+      code: "OURA_WEBHOOK_VERIFICATION_FAILED",
+      message: "Oura webhook verification token did not match the configured verification token.",
+      retryable: false,
+      httpStatus: 403,
+    }));
+
     const response = await webhookRoute.GET(
       new Request(
         "https://example.test/api/device-sync/webhooks/oura?verification_token=wrong-token&challenge=oura-challenge-token",
@@ -381,15 +430,13 @@ describe("hosted device-sync agent and webhook routes", () => {
     });
   });
 
-  it("keeps hosted webhook verification missing-token behavior aligned with the shared Oura helper", async () => {
-    mocks.webhookRegistry.get.mockImplementation((provider: string) =>
-      provider === "oura"
-        ? createOuraDeviceSyncProvider({
-            clientId: "oura-client-id",
-            clientSecret: "oura-client-secret",
-          })
-        : undefined
-    );
+  it("surfaces hosted webhook verification missing-token errors", async () => {
+    mocks.resolveWebhookPreflight.mockRejectedValueOnce(deviceSyncError({
+      code: "OURA_WEBHOOK_VERIFICATION_TOKEN_MISSING",
+      message: "Oura webhook verification requires OURA_WEBHOOK_VERIFICATION_TOKEN.",
+      retryable: false,
+      httpStatus: 500,
+    }));
 
     const response = await webhookRoute.GET(
       new Request(

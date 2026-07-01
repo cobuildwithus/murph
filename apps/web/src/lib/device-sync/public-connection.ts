@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 
 import { formatDeviceSyncAccountLabel } from "@murphai/device-syncd/provider-label";
-import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
+import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
 
 import { formatHostedDeviceSyncProviderLabel } from "./provider-label";
 

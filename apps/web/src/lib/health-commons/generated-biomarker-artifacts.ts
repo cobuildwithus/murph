@@ -9,6 +9,7 @@ import type {
 } from "@murphai/health-commons/runtime";
 
 const ROUTE_INDEX_SCHEMA_VERSION = "murph.commons.web.route-index.v1";
+const BIOMARKER_INDEX_SCHEMA_VERSION = "murph.commons.web.biomarker-index.v1";
 const BIOMARKER_SHELL_SCHEMA_VERSION = "murph.commons.web.biomarker-shell.v1";
 const BIOMARKER_OVERVIEW_SCHEMA_VERSION = "murph.commons.web.biomarker-overview.v1";
 const BIOMARKER_RESEARCH_SCHEMA_VERSION = "murph.commons.web.biomarker-research.v1";
@@ -29,6 +30,25 @@ interface GeneratedRouteIndexEntry {
   slug: string;
 }
 
+export interface GeneratedBiomarkerIndex {
+  biomarkers: GeneratedBiomarkerIndexEntry[];
+  catalogHash: string;
+  schemaVersion: typeof BIOMARKER_INDEX_SCHEMA_VERSION;
+}
+
+export interface GeneratedBiomarkerIndexEntry {
+  aliases: string[];
+  categories: string[];
+  hidden: boolean;
+  key: string;
+  published: boolean;
+  routeId: string;
+  shortName: string;
+  summary: string | null;
+  title: string;
+  unit: string | null;
+}
+
 export type GeneratedBiomarkerProjectionKey = Extract<
   HealthCommonsWebProjectionKey,
   "biomarker.shell" | "biomarker.overview" | "biomarker.research"
@@ -44,6 +64,7 @@ type GeneratedBiomarkerProjection =
   GeneratedBiomarkerProjectionMap[GeneratedBiomarkerProjectionKey];
 
 let cachedRouteIndex: GeneratedRouteIndex | null = null;
+let cachedBiomarkerIndex: GeneratedBiomarkerIndex | null = null;
 const cachedBiomarkerProjections = new Map<string, GeneratedBiomarkerProjection | null>();
 
 const GENERATED_BIOMARKER_ROUTE_ALIASES: Readonly<Record<string, string>> = Object.freeze({
@@ -69,6 +90,15 @@ export function loadGeneratedBiomarkerResearch(
   biomarkerId: string,
 ): HealthCommonsWebBiomarkerResearch | null {
   return loadGeneratedBiomarkerProjection(biomarkerId, "biomarker.research");
+}
+
+export function getGeneratedBiomarkerIndex(): GeneratedBiomarkerIndex {
+  if (!shouldUseGeneratedArtifactMemoryCache()) {
+    return readGeneratedBiomarkerIndex();
+  }
+
+  cachedBiomarkerIndex ??= readGeneratedBiomarkerIndex();
+  return cachedBiomarkerIndex;
 }
 
 export function loadGeneratedBiomarkerProjection(
@@ -156,12 +186,20 @@ function shouldUseGeneratedArtifactMemoryCache(): boolean {
 }
 
 function readGeneratedRouteIndex(): GeneratedRouteIndex {
-  const parsed = readJsonObjectFromCandidates([
-    path.join(process.cwd(), "packages/health-commons/generated/web/routes/index.json"),
-    path.join(process.cwd(), "../packages/health-commons/generated/web/routes/index.json"),
-    path.join(process.cwd(), "../../packages/health-commons/generated/web/routes/index.json"),
-  ]);
+  const parsed = readJsonObjectFromCandidates(generatedWebCandidatePaths(
+    "routes",
+    "index.json",
+  ));
   assertGeneratedRouteIndex(parsed);
+  return parsed;
+}
+
+function readGeneratedBiomarkerIndex(): GeneratedBiomarkerIndex {
+  const parsed = readJsonObjectFromCandidates(generatedWebCandidatePaths(
+    "browse",
+    "biomarkers.json",
+  ));
+  assertGeneratedBiomarkerIndex(parsed);
   return parsed;
 }
 
@@ -216,21 +254,38 @@ function biomarkerProjectionCandidatePaths(
 }
 
 function biomarkerShellCandidatePaths(fileName: string): string[] {
-  return [
-    path.join(process.cwd(), "packages/health-commons/generated/web/shell/biomarkers", fileName),
-    path.join(process.cwd(), "../packages/health-commons/generated/web/shell/biomarkers", fileName),
-    path.join(process.cwd(), "../../packages/health-commons/generated/web/shell/biomarkers", fileName),
-  ];
+  return generatedWebCandidatePaths("shell", "biomarkers", fileName);
 }
 
 function biomarkerPageCandidatePaths(input: {
   fileName: string;
   routeId: string;
 }): string[] {
+  return generatedWebCandidatePaths(
+    "pages",
+    "biomarkers",
+    input.routeId,
+    input.fileName,
+  );
+}
+
+function generatedWebCandidatePaths(...segments: string[]): string[] {
   return [
-    path.join(process.cwd(), "packages/health-commons/generated/web/pages/biomarkers", input.routeId, input.fileName),
-    path.join(process.cwd(), "../packages/health-commons/generated/web/pages/biomarkers", input.routeId, input.fileName),
-    path.join(process.cwd(), "../../packages/health-commons/generated/web/pages/biomarkers", input.routeId, input.fileName),
+    path.join(
+      /* turbopackIgnore: true */ process.cwd(),
+      "packages/health-commons/generated/web",
+      ...segments,
+    ),
+    path.join(
+      /* turbopackIgnore: true */ process.cwd(),
+      "../packages/health-commons/generated/web",
+      ...segments,
+    ),
+    path.join(
+      /* turbopackIgnore: true */ process.cwd(),
+      "../../packages/health-commons/generated/web",
+      ...segments,
+    ),
   ];
 }
 
@@ -374,6 +429,34 @@ function assertGeneratedRouteIndex(value: unknown): asserts value is GeneratedRo
   if (!Array.isArray(routes)) {
     throw new Error("Health Commons route index must include a routes array.");
   }
+}
+
+function assertGeneratedBiomarkerIndex(value: unknown): asserts value is GeneratedBiomarkerIndex {
+  assertSchemaVersion(value, BIOMARKER_INDEX_SCHEMA_VERSION, "biomarker index");
+  const biomarkers = "biomarkers" in value ? value.biomarkers : null;
+  if (!Array.isArray(biomarkers) || !biomarkers.every(isGeneratedBiomarkerIndexEntry)) {
+    throw new Error("Health Commons biomarker index must include valid biomarker entries.");
+  }
+}
+
+function isGeneratedBiomarkerIndexEntry(value: unknown): value is GeneratedBiomarkerIndexEntry {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const entry = value as Record<string, unknown>;
+  return Array.isArray(entry["aliases"])
+    && entry["aliases"].every((alias) => typeof alias === "string")
+    && Array.isArray(entry["categories"])
+    && entry["categories"].every((category) => typeof category === "string")
+    && typeof entry["hidden"] === "boolean"
+    && typeof entry["key"] === "string"
+    && typeof entry["published"] === "boolean"
+    && typeof entry["routeId"] === "string"
+    && typeof entry["shortName"] === "string"
+    && (typeof entry["summary"] === "string" || entry["summary"] === null)
+    && typeof entry["title"] === "string"
+    && (typeof entry["unit"] === "string" || entry["unit"] === null);
 }
 
 function assertGeneratedBiomarkerShell(value: unknown): asserts value is HealthCommonsWebBiomarkerShell {

@@ -1,7 +1,68 @@
-import type { JunctionDeviceSyncProviderConfig } from "../providers/junction.ts";
-import type { OuraDeviceSyncProviderConfig } from "../providers/oura.ts";
-import type { StravaDeviceSyncProviderConfig } from "../providers/strava.ts";
-import type { WhoopDeviceSyncProviderConfig } from "../providers/whoop.ts";
+export type JunctionEnvironment = "sandbox" | "production";
+export type JunctionRegion = "us" | "eu";
+
+export interface JunctionDeviceSyncProviderConfig {
+  apiKey: string;
+  clientUserIdSecret: string;
+  environment: JunctionEnvironment;
+  region: JunctionRegion;
+  allowedLinkHosts?: readonly string[];
+  providerFilter?: string[];
+  summaryResources?: string[];
+  timeseriesResources?: string[];
+  summaryBackfillDays?: number;
+  timeseriesBackfillDays?: number;
+  reconcileDays?: number;
+  reconcileIntervalMs?: number;
+  requestTimeoutMs?: number;
+  webhookSecret?: string;
+  webhookTimestampToleranceMs?: number;
+  fetchImpl?: typeof fetch;
+}
+
+export interface OuraDeviceSyncProviderConfig {
+  clientId: string;
+  clientSecret: string;
+  authBaseUrl?: string;
+  apiBaseUrl?: string;
+  scopes?: string[];
+  backfillDays?: number;
+  reconcileDays?: number;
+  reconcileIntervalMs?: number;
+  requestTimeoutMs?: number;
+  webhookTimestampToleranceMs?: number;
+  webhookVerificationToken?: string;
+  fetchImpl?: typeof fetch;
+}
+
+export interface WhoopDeviceSyncProviderConfig {
+  clientId: string;
+  clientSecret: string;
+  baseUrl?: string;
+  scopes?: string[];
+  backfillDays?: number;
+  reconcileDays?: number;
+  reconcileIntervalMs?: number;
+  webhookTimestampToleranceMs?: number;
+  requestTimeoutMs?: number;
+  fetchImpl?: typeof fetch;
+}
+
+export interface StravaDeviceSyncProviderConfig {
+  clientId: string;
+  clientSecret: string;
+  authBaseUrl?: string;
+  apiBaseUrl?: string;
+  scopes?: string[];
+  backfillDays?: number;
+  reconcileDays?: number;
+  reconcileIntervalMs?: number;
+  requestTimeoutMs?: number;
+  webhookSigningSecret?: string;
+  webhookTimestampToleranceMs?: number;
+  webhookVerifyToken?: string;
+  fetchImpl?: typeof fetch;
+}
 
 export interface ConfiguredDeviceSyncProviderConfigByKey {
   junction: JunctionDeviceSyncProviderConfig;

@@ -62,16 +62,16 @@ const deviceSyncd = vi.hoisted(() => ({
 }));
 
 const mocks = vi.hoisted(() => ({
-  createHostedDeviceSyncControlPlane: vi.fn(),
+  createHostedDeviceSyncAgentSessionService: vi.fn(),
   recordLocalHeartbeat: vi.fn(),
   requireAgentSession: vi.fn(),
 }));
 
 vi.mock("next/server", () => nextServer);
-vi.mock("@murphai/device-syncd/public-ingress", () => deviceSyncd);
+vi.mock("@murphai/device-syncd/errors", () => deviceSyncd);
 
-vi.mock("@/src/lib/device-sync/control-plane", () => ({
-  createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
+vi.mock("@/src/lib/device-sync/agent-session-service", () => ({
+  createHostedDeviceSyncAgentSessionService: mocks.createHostedDeviceSyncAgentSessionService,
 }));
 
 type RouteModule = typeof import("../app/api/device-sync/agent/connections/[connectionId]/local-heartbeat/route");
@@ -85,7 +85,7 @@ describe("hosted device-sync local-heartbeat route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+    mocks.createHostedDeviceSyncAgentSessionService.mockReturnValue({
       recordLocalHeartbeat: mocks.recordLocalHeartbeat,
       requireAgentSession: mocks.requireAgentSession,
     });
