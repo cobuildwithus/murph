@@ -156,14 +156,16 @@ test("issues a family invite and returns safe share links", async () => {
 });
 
 test("adds one paid seat and retries when the plan is full", async () => {
+  const seatLimit = () =>
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
+      message: "This Family plan has no open paid seats.",
+    });
+  // Initial attempt and the pre-buy re-check both hit the limit, then it lands.
   mocks.issueHostedFamilyInviteTx
-    .mockRejectedValueOnce(
-      hostedOnboardingError({
-        code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
-        httpStatus: 409,
-        message: "This Family plan has no open paid seats.",
-      }),
-    )
+    .mockRejectedValueOnce(seatLimit())
+    .mockRejectedValueOnce(seatLimit())
     .mockResolvedValueOnce({
       channel: "family",
       expiresAt: new Date("2026-07-01T00:00:00.000Z"),
@@ -185,10 +187,10 @@ test("adds one paid seat and retries when the plan is full", async () => {
     prisma: expect.any(Object),
     targetSeatCount: 3,
   });
-  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
+  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(3);
 });
 
-test("retries against a freed seat without buying one", async () => {
+test("reuses a concurrently-created invite on the pre-buy re-check (no purchase)", async () => {
   mocks.issueHostedFamilyInviteTx
     .mockRejectedValueOnce(
       hostedOnboardingError({
@@ -206,12 +208,6 @@ test("retries against a freed seat without buying one", async () => {
       targetLabel: "Dad",
       targetPhoneHint: "+48 6** *** ***",
     });
-  // A seat opened up between the failed attempt and the snapshot read.
-  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce({
-    billingActive: true,
-    groupId: "hbag_family",
-    seats: { active: 1, billed: 2, invited: 0, max: 6, min: 2, remaining: 1, used: 1 },
-  });
 
   const response = await inviteRoute.POST(
     inviteRequest({ addSeatIfNeeded: true, targetLabel: "Dad", targetPhoneNumber: "+48600000001" }),
@@ -223,13 +219,15 @@ test("retries against a freed seat without buying one", async () => {
 });
 
 test("reports a syncing state (no failed invite) when the seat webhook is slow", async () => {
-  mocks.issueHostedFamilyInviteTx.mockRejectedValueOnce(
+  const seatLimit = () =>
     hostedOnboardingError({
       code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
       httpStatus: 409,
       message: "This Family plan has no open paid seats.",
-    }),
-  );
+    });
+  mocks.issueHostedFamilyInviteTx
+    .mockRejectedValueOnce(seatLimit())
+    .mockRejectedValueOnce(seatLimit());
   mocks.waitForHostedFamilyBilledSeatCount.mockResolvedValueOnce(false);
 
   const response = await inviteRoute.POST(
@@ -240,9 +238,9 @@ test("reports a syncing state (no failed invite) when the seat webhook is slow",
   await expect(response.json()).resolves.toMatchObject({
     error: { code: "HOSTED_FAMILY_SEAT_ADDED_SYNCING" },
   });
-  // Seat added once, and no second invite attempt that would fail confusingly.
+  // Seat added once, and no post-add invite attempt that would fail confusingly.
   expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledTimes(1);
-  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(1);
+  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
 });
 
 test("adds at most one seat and surfaces the limit if a confirmed seat is taken first", async () => {
@@ -262,8 +260,9 @@ test("adds at most one seat and surfaces the limit if a confirmed seat is taken 
   await expect(response.json()).resolves.toMatchObject({
     error: { code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED" },
   });
+  // Initial attempt, pre-buy re-check, and the post-buy attempt: one purchase.
   expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledTimes(1);
-  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
+  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(3);
 });
 
 test("does not buy a seat when a full-plan invite is reused (no seat-limit error)", async () => {

@@ -65,22 +65,14 @@ export const POST = withJsonError(async (request: Request) => {
 
   // Only grow the plan when the invite genuinely needs a seat. Reused invites
   // return before the seat check, so a duplicate/retried invite never buys one.
-  // When it does need a seat, add one, wait for Stripe's webhook to confirm the
-  // new count, then issue once. If the webhook has not landed yet the retry
-  // surfaces the seat-limit error (the owner just retries) rather than buying a
-  // second seat.
   let invite;
   try {
     invite = await issueInvite();
   } catch (error) {
-    if (
-      !canAutoAddSeat ||
-      !isHostedOnboardingError(error) ||
-      error.code !== "HOSTED_FAMILY_SEAT_LIMIT_REACHED"
-    ) {
+    if (!canAutoAddSeat || !isSeatLimitError(error)) {
       throw error;
     }
-    const seatResult = await addHostedFamilySeatForOwner(prisma, auth.member.id);
+    const seatResult = await addSeatThenInvite(prisma, auth.member.id, issueInvite);
     if (seatResult === "unavailable") {
       throw error;
     }
@@ -93,7 +85,7 @@ export const POST = withJsonError(async (request: Request) => {
         message: "Added a paid seat — finishing with Stripe. Send the invite again in a moment.",
       });
     }
-    invite = await issueInvite();
+    invite = seatResult.invite;
   }
 
   const { publicBaseUrl, telegramBotUsername } = readHostedOnboardingEnvironment();
@@ -120,23 +112,31 @@ export const POST = withJsonError(async (request: Request) => {
   });
 });
 
-async function addHostedFamilySeatForOwner(
+function isSeatLimitError(error: unknown): boolean {
+  return isHostedOnboardingError(error) && error.code === "HOSTED_FAMILY_SEAT_LIMIT_REACHED";
+}
+
+async function addSeatThenInvite<T>(
   prisma: ReturnType<typeof getPrisma>,
   ownerMemberId: string,
-): Promise<"confirmed" | "syncing" | "unavailable"> {
+  issueInvite: () => Promise<T>,
+): Promise<{ invite: T } | "syncing" | "unavailable"> {
+  // Re-check before buying: a concurrent invite for the same target may have just
+  // created the reusable invite or freed a seat, in which case this issue reuses
+  // it (or takes the open seat) and no purchase is needed.
+  try {
+    return { invite: await issueInvite() };
+  } catch (error) {
+    if (!isSeatLimitError(error)) {
+      throw error;
+    }
+  }
+
   const snapshot = await readHostedFamilyOwnerSnapshotForMember({
     memberId: ownerMemberId,
     prisma,
   });
-  if (!snapshot?.billingActive) {
-    return "unavailable";
-  }
-  // A seat may have freed up (invite expired/canceled, member removed) between
-  // the failed invite and this read; retry against it instead of buying one.
-  if (snapshot.seats.remaining > 0) {
-    return "confirmed";
-  }
-  if (snapshot.seats.billed >= snapshot.seats.max) {
+  if (!snapshot?.billingActive || snapshot.seats.billed >= snapshot.seats.max) {
     return "unavailable";
   }
   const targetSeatCount = snapshot.seats.billed + 1;
@@ -146,13 +146,16 @@ async function addHostedFamilySeatForOwner(
     prisma,
     targetSeatCount,
   });
-  // Only report the seat ready once the webhook reconciled the new count, so the
-  // follow-up invite sees the open seat. If it is still syncing the caller tells
-  // the owner to retry rather than failing with a bare seat-limit error.
+  // Only issue once the webhook reconciled the new count, so the follow-up invite
+  // sees the open seat. If it is still syncing, the caller tells the owner to
+  // retry rather than failing with a bare seat-limit error.
   const confirmed = await waitForHostedFamilyBilledSeatCount({
     groupId: snapshot.groupId,
     prisma,
     targetSeatCount,
   });
-  return confirmed ? "confirmed" : "syncing";
+  if (!confirmed) {
+    return "syncing";
+  }
+  return { invite: await issueInvite() };
 }
