@@ -75,15 +75,11 @@ import {
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
 import {
-  readHostedLinqAssignableHomeLineByPhone,
-} from "./linq-line-store";
-import {
   type HostedLinqHomeLineRouteBindingAuthority,
   type HostedLinqHomeLineRouteBindingResult,
   resolveHostedMemberLinqHomeLineRouteBindingTx,
   reserveHostedLinqHomeLineForPhoneTx,
 } from "./linq-home-routing";
-import { normalizePhoneNumber } from "./phone";
 import {
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
@@ -318,14 +314,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
-  const recipientLine = recipientPhoneNumber
-    ? await readHostedLinqAssignableHomeLineByPhone({
-        phoneNumber: recipientPhoneNumber,
-        prisma: input.prisma,
-      })
-    : null;
-  const incomingRecipientLineIsUnassignable =
-    recipientPhoneNumber !== null && recipientLine === null;
   const buildUnassignableHomeLinePlan = (routeStage: string) =>
     logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("unassignable-home-line"),
@@ -694,10 +682,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
         routeStage: "ignored-blocked-first-contact-content",
       }),
     );
-  }
-
-  if (incomingRecipientLineIsUnassignable) {
-    return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
   }
 
   if (

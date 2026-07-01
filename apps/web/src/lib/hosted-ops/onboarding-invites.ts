@@ -20,15 +20,11 @@ import {
 import {
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqChatId,
-  readHostedMemberRoutingState,
   upsertHostedMemberPendingLinqBindingTx,
 } from "../hosted-onboarding/hosted-member-routing-store";
 import {
-  readHostedLinqAssignableHomeLineByPhone,
-} from "../hosted-onboarding/linq-line-store";
-import {
-  assignHostedMemberLinqHomeLineForPhoneTx,
-  type HostedLinqHomeLineAssignmentReservation,
+  resolveHostedMemberLinqHomeLineBareClaimTx,
+  resolveHostedMemberLinqHomeLineNewChatDeliveryTx,
 } from "../hosted-onboarding/linq-home-routing";
 import { ensureHostedMemberForPhoneTx } from "../hosted-onboarding/member-identity-service";
 import {
@@ -306,38 +302,53 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
       memberId,
       prisma: tx,
     });
-    const routing = await readHostedMemberRoutingState({
+    const deliveryResult = await resolveHostedMemberLinqHomeLineNewChatDeliveryTx({
       memberId,
       prisma: tx,
-    });
-    const existingDelivery = resolveHostedOpsOnboardingReusableNewChatDelivery({
-      routing,
       senderPhone: input.request.linqFromPhoneNumber,
     });
-    if (existingDelivery) {
-      await assertHostedOpsOnboardingSenderLineAssignableTx({
-        prisma: tx,
-        senderPhone: input.request.linqFromPhoneNumber,
-      });
 
+    if (deliveryResult.kind === "existing_pending") {
       return {
         kind: "existing_delivery" as const,
-        delivery: existingDelivery,
+        delivery: {
+          chatId: deliveryResult.chatId,
+          newChatCreated: false,
+          openerMessageId: null,
+        },
         issued: {
           invite,
           memberId,
         },
       };
     }
-    await assertHostedOpsOnboardingMemberCanReceiveNewChatTx({
-      memberId,
-      prisma: tx,
-    });
-    const assignment = await resolveHostedOpsOnboardingNewChatLineAssignmentTx({
-      memberId,
-      prisma: tx,
-      senderPhone: input.request.linqFromPhoneNumber,
-    });
+
+    if (deliveryResult.kind === "already_bound") {
+      throw hostedOnboardingError({
+        code: "HOSTED_OPS_ONBOARDING_MEMBER_ALREADY_HOME_CHAT_BOUND",
+        httpStatus: 409,
+        message: "Member already has a Linq onboarding route. Send the invite to the existing chat instead.",
+        retryable: false,
+      });
+    }
+
+    if (deliveryResult.kind === "unassignable") {
+      throw hostedOnboardingError({
+        code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_UNAUTHORIZED",
+        httpStatus: 400,
+        message: "Linq sender phone must be a configured hosted Linq line.",
+        retryable: false,
+      });
+    }
+
+    if (deliveryResult.kind === "capacity_exhausted") {
+      throw hostedOnboardingError({
+        code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_CAPACITY_EXHAUSTED",
+        httpStatus: 429,
+        message: "Linq sender phone has reached its hosted onboarding new-chat capacity.",
+        retryable: false,
+      });
+    }
 
     return {
       kind: "create_chat" as const,
@@ -346,8 +357,8 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
         memberId,
       },
       reservation: {
-        assignedAt: assignment.assignedAt,
-        linePhoneNumber: assignment.line.phoneNumber,
+        assignedAt: deliveryResult.reservation.assignedAt,
+        linePhoneNumber: deliveryResult.reservation.line.phoneNumber,
       },
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -384,11 +395,20 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
   }
 
   await input.prisma.$transaction(async (tx) => {
-    await assertHostedOpsOnboardingNewChatReservationTx({
+    const bareClaim = await resolveHostedMemberLinqHomeLineBareClaimTx({
       memberId: prepared.issued.memberId,
       prisma: tx,
       recipientPhone: prepared.reservation.linePhoneNumber,
     });
+    if (bareClaim.kind !== "matched") {
+      throw hostedOnboardingError({
+        code: "HOSTED_OPS_ONBOARDING_MEMBER_ROUTE_CHANGED",
+        httpStatus: 409,
+        message: "Member Linq route changed before the new-chat invite could be bound. Retry against the current route.",
+        retryable: false,
+      });
+    }
+
     await upsertHostedMemberPendingLinqBindingTx({
       linqChatId: chatId,
       memberId: prepared.issued.memberId,
@@ -405,108 +425,6 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
     },
     issued: prepared.issued,
   };
-}
-
-function resolveHostedOpsOnboardingReusableNewChatDelivery(input: {
-  routing: Awaited<ReturnType<typeof readHostedMemberRoutingState>>;
-  senderPhone: string;
-}): HostedOpsOnboardingInviteDelivery | null {
-  const senderPhone = normalizePhoneNumber(input.senderPhone);
-  const homeRecipientPhone = normalizePhoneNumber(input.routing?.linqRecipientPhone);
-  const pendingRecipientPhone =
-    normalizePhoneNumber(input.routing?.pendingLinqRecipientPhone);
-
-  if (
-    input.routing?.pendingLinqChatId
-    && senderPhone
-    && homeRecipientPhone === senderPhone
-    && pendingRecipientPhone === senderPhone
-  ) {
-    return {
-      chatId: input.routing.pendingLinqChatId,
-      newChatCreated: false,
-      openerMessageId: null,
-    };
-  }
-
-  return null;
-}
-
-async function assertHostedOpsOnboardingSenderLineAssignableTx(input: {
-  prisma: Prisma.TransactionClient;
-  senderPhone: string;
-}): Promise<void> {
-  const line = await readHostedLinqAssignableHomeLineByPhone({
-    phoneNumber: input.senderPhone,
-    prisma: input.prisma,
-  });
-
-  if (line) {
-    return;
-  }
-
-  throw hostedOnboardingError({
-    code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_UNAUTHORIZED",
-    httpStatus: 400,
-    message: "Linq sender phone must be a configured hosted Linq line.",
-    retryable: false,
-  });
-}
-
-async function assertHostedOpsOnboardingNewChatReservationTx(input: {
-  memberId: string;
-  prisma: Prisma.TransactionClient;
-  recipientPhone: string;
-}): Promise<void> {
-  const recipientPhone = normalizePhoneNumber(input.recipientPhone);
-  const routing = await readHostedMemberRoutingState({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-  const homeRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
-
-  if (
-    recipientPhone
-    && !routing?.linqChatId
-    && !routing?.pendingLinqChatId
-    && homeRecipientPhone === recipientPhone
-  ) {
-    return;
-  }
-
-  throw hostedOnboardingError({
-    code: "HOSTED_OPS_ONBOARDING_MEMBER_ROUTE_CHANGED",
-    httpStatus: 409,
-    message: "Member Linq route changed before the new-chat invite could be bound. Retry against the current route.",
-    retryable: false,
-  });
-}
-
-async function assertHostedOpsOnboardingMemberCanReceiveNewChatTx(input: {
-  memberId: string;
-  prisma: Prisma.TransactionClient;
-}): Promise<void> {
-  const routing = await input.prisma.hostedMemberRouting.findUnique({
-    where: {
-      memberId: input.memberId,
-    },
-    select: {
-      linqChatLookupKey: true,
-      pendingLinqChatLookupKey: true,
-    },
-  });
-
-  if (
-    routing?.linqChatLookupKey
-    || routing?.pendingLinqChatLookupKey
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_OPS_ONBOARDING_MEMBER_ALREADY_HOME_CHAT_BOUND",
-      httpStatus: 409,
-      message: "Member already has a Linq onboarding route. Send the invite to the existing chat instead.",
-      retryable: false,
-    });
-  }
 }
 
 export function resolveHostedOpsOnboardingVoiceMemoContentType(input: {
@@ -665,38 +583,6 @@ async function resolveHostedOpsOnboardingExistingLinqChatMemberId(input: {
       "Existing Linq chat is not bound to this hosted member. Use New chat to start onboarding, or wait for the inbound chat to bind before sending.",
     retryable: false,
   });
-}
-
-async function resolveHostedOpsOnboardingNewChatLineAssignmentTx(input: {
-  prisma: Prisma.TransactionClient;
-  senderPhone: string;
-  memberId: string;
-}): Promise<HostedLinqHomeLineAssignmentReservation> {
-  const reservationResult = await assignHostedMemberLinqHomeLineForPhoneTx({
-    memberId: input.memberId,
-    phoneNumber: input.senderPhone,
-    prisma: input.prisma,
-  });
-
-  if (reservationResult.kind === "unassignable") {
-    throw hostedOnboardingError({
-      code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_UNAUTHORIZED",
-      httpStatus: 400,
-      message: "Linq sender phone must be a configured hosted Linq line.",
-      retryable: false,
-    });
-  }
-
-  if (reservationResult.kind === "capacity_exhausted") {
-    throw hostedOnboardingError({
-      code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_CAPACITY_EXHAUSTED",
-      httpStatus: 429,
-      message: "Linq sender phone has reached its hosted onboarding new-chat capacity.",
-      retryable: false,
-    });
-  }
-
-  return reservationResult.reservation;
 }
 
 interface NormalizedHostedOpsOnboardingInviteInput {

@@ -112,7 +112,13 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       },
     });
 
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledWith({
+      prisma: {} as never,
+    });
+    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: {} as never,
+    });
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
       clearPending: true,
@@ -230,7 +236,13 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
 
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledWith({
+      prisma: {} as never,
+    });
+    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: {} as never,
+    });
     expect(mocks.readHostedLinqAssignableHomeLineByPhone).toHaveBeenCalledWith({
       phoneNumber: "+15550100001",
       prisma: {} as never,
@@ -295,7 +307,13 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
 
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledWith({
+      prisma: {} as never,
+    });
+    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: {} as never,
+    });
     expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
     expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
@@ -334,7 +352,13 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       },
     });
 
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledWith({
+      prisma: {} as never,
+    });
+    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: {} as never,
+    });
     expect(mocks.readHostedLinqAssignableHomeLineByPhone).toHaveBeenCalledWith({
       phoneNumber: "+15550100001",
       prisma: {} as never,

@@ -93,9 +93,6 @@ type RouteModule = typeof import("../app/api/ops/onboarding-invites/route");
 let service: ServiceModule;
 let route: RouteModule;
 type MockedTx = {
-  hostedMemberRouting: {
-    findUnique: ReturnType<typeof vi.fn>;
-  };
   transaction: true;
 };
 type MockedPrisma = {
@@ -127,13 +124,6 @@ describe("hosted ops onboarding invites", () => {
     vi.clearAllMocks();
     routingState = null;
     tx = {
-      hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue({
-          linqChatLookupKey: null,
-          linqRecipientPhoneLookupKey: null,
-          pendingLinqChatLookupKey: null,
-        }),
-      },
       transaction: true,
     };
     prisma = {
@@ -375,7 +365,7 @@ describe("hosted ops onboarding invites", () => {
       recipientPhones: ["+15557654321"],
       since: expect.any(Date),
     });
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(2);
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledTimes(1);
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalledTimes(1);
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
@@ -616,9 +606,15 @@ describe("hosted ops onboarding invites", () => {
   });
 
   it("rejects new-chat sends for members that already have a home Linq chat", async () => {
-    tx.hostedMemberRouting.findUnique.mockResolvedValue({
-      linqChatLookupKey: "lookup:existing-home-chat",
-    });
+    routingState = {
+      linqChatId: "chat_existing",
+      linqHomeLineAssignedAt: new Date("2026-03-26T12:00:00.000Z"),
+      linqRecipientPhone: "+15557654321",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+    };
 
     await expect(service.sendHostedOpsOnboardingInvite({
       deliveryMode: "new_chat",
@@ -630,14 +626,9 @@ describe("hosted ops onboarding invites", () => {
       httpStatus: 409,
     });
 
-    expect(tx.hostedMemberRouting.findUnique).toHaveBeenCalledWith({
-      where: {
-        memberId: "member_123",
-      },
-      select: {
-        linqChatLookupKey: true,
-        pendingLinqChatLookupKey: true,
-      },
+    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: tx,
     });
     expect(mocks.issueHostedInviteTx).toHaveBeenCalledWith({
       channel: "linq",
@@ -649,12 +640,16 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
   });
 
-  it("rejects new-chat sends for members that already have a pending Linq chat", async () => {
-    tx.hostedMemberRouting.findUnique.mockResolvedValue({
-      linqChatLookupKey: null,
-      linqRecipientPhoneLookupKey: "+lookup:reserved",
-      pendingLinqChatLookupKey: "lookup:pending-chat",
-    });
+  it("rejects new-chat sends for members that already have a different pending Linq chat", async () => {
+    routingState = {
+      linqChatId: null,
+      linqHomeLineAssignedAt: new Date("2026-03-26T12:00:00.000Z"),
+      linqRecipientPhone: "+15550000000",
+      pendingLinqChatId: "chat_pending",
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: "+15550000000",
+      telegramThreadId: null,
+    };
 
     await expect(service.sendHostedOpsOnboardingInvite({
       deliveryMode: "new_chat",
@@ -674,6 +669,32 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
+  });
+
+  it("does not bind a provider-created chat after its sender line is disabled", async () => {
+    mocks.readHostedLinqAssignableHomeLineByPhone
+      .mockResolvedValueOnce(buildHomeLine("+15557654321"))
+      .mockResolvedValueOnce(null);
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-disabled-before-bind",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_MEMBER_ROUTE_CHANGED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma: tx,
+      recipientPhone: "+15557654321",
+    });
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("does not write pending route state when Linq chat creation fails", async () => {
@@ -872,11 +893,6 @@ describe("hosted ops onboarding invites", () => {
       pendingLinqRecipientPhone: null,
       telegramThreadId: null,
     };
-    tx.hostedMemberRouting.findUnique.mockResolvedValue({
-      linqChatLookupKey: null,
-      linqRecipientPhoneLookupKey: "+lookup:old-reservation",
-      pendingLinqChatLookupKey: null,
-    });
 
     await expect(service.sendHostedOpsOnboardingInvite({
       deliveryMode: "new_chat",
