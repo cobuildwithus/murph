@@ -224,6 +224,48 @@ describe("hosted device-sync agent and webhook routes", () => {
     expect(mocks.exportTokenBundle).not.toHaveBeenCalled();
   });
 
+  it("exports token bundles without constructing provider runtime", async () => {
+    mocks.exportTokenBundle.mockResolvedValueOnce({
+      connection: {
+        id: "dsc_123",
+        provider: "oura",
+      },
+      tokenBundle: {
+        accessToken: "bundle-token-test",
+        refreshToken: null,
+        tokenVersion: 7,
+      },
+    });
+
+    const response = await exportRoute.POST(
+      createBearerRequest(
+        "https://example.test/api/device-sync/agent/connections/dsc_123/export-token-bundle",
+        "valid-session-token",
+        { method: "POST" },
+      ),
+      createRouteContext({ connectionId: "dsc_123" }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.createHostedDeviceSyncAgentSessionService).toHaveBeenCalledTimes(1);
+    expect(mocks.createHostedDeviceSyncProviderAgentSessionService).not.toHaveBeenCalled();
+    expect(mocks.exportTokenBundle).toHaveBeenCalledWith({
+      id: "dsa_current",
+      userId: "user-123",
+    }, "dsc_123");
+    await expect(response.json()).resolves.toEqual({
+      connection: {
+        id: "dsc_123",
+        provider: "oura",
+      },
+      tokenBundle: {
+        accessToken: "bundle-token-test",
+        refreshToken: null,
+        tokenVersion: 7,
+      },
+    });
+  });
+
   it("rejects refresh-token-bundle when the bearer token has expired", async () => {
     mocks.requireAgentSession.mockRejectedValue(
       deviceSyncError({

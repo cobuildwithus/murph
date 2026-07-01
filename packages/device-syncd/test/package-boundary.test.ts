@@ -122,6 +122,7 @@ const webRoot = resolve(repoRoot, "apps/web");
 
 const WEB_SAFE_DEVICE_SYNC_GRAPH_ROOTS = [
   "apps/web/app/api/device-sync/route.ts",
+  "apps/web/app/api/device-sync/agent/connections/[connectionId]/export-token-bundle/route.ts",
   "apps/web/app/api/device-sync/agent/connections/[connectionId]/local-heartbeat/route.ts",
   "apps/web/app/api/device-sync/agent/session/revoke/route.ts",
   "apps/web/app/api/device-sync/agents/pair/route.ts",
