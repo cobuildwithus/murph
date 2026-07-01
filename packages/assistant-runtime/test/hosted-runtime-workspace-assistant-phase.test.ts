@@ -8581,6 +8581,60 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
+  it("re-arms due provider cleanup when a member-channel barrier blocks auto-reply delivery", async () => {
+    const deliveryEffect = createDeliveryEffect();
+    const preparedDispatches = createPreparedDispatchesForDeliveryEffect(deliveryEffect);
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValueOnce(
+      "2026-04-27T00:14:00.000Z",
+    );
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      errorCode: "HOSTED_MEMBER_CHANNELS_TRANSIENT",
+      errorMessage: "Hosted member-channel update failed.",
+      itemId: "system_mailbox_item_member_channels",
+      nextWakeAt: "2026-04-27T00:30:00.000Z",
+      status: "retryable_failed",
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches,
+    });
+    mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
+      intentId: deliveryEffect.effectId,
+      turnId: deliveryEffect.payload.turnId,
+    });
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValueOnce(
+      new Set([deliveryEffect.effectId]),
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:09:00.000Z",
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      redactedStatus: expect.objectContaining({
+        hostedMemberChannelPreDispatchBlocked: 1,
+      }),
+    }));
+    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith({
+      deferDueOrInvalid: true,
+      nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
+    expect(mocks.resetHostedPreparedAssistantDeliveryEffects).toHaveBeenCalledWith({
+      effects: [deliveryEffect],
+      preparedDispatches,
+      vaultRoot: "/tmp/murph-vault",
+    });
+  });
+
   it("resets prepared delivery claims when remote system catch-up returns a barrier", async () => {
     const deliveryEffect = createDeliveryEffect();
     const preparedDispatches = createPreparedDispatchesForDeliveryEffect(deliveryEffect);

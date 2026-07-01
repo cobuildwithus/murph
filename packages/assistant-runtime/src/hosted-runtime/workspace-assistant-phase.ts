@@ -3318,7 +3318,7 @@ async function drainHostedPostCheckpointDelivery(input: {
       error,
       "Hosted member-channel pre-dispatch barrier failed.",
     );
-    return buildHostedMemberChannelDeliveryBarrierResult({
+    return await buildHostedMemberChannelDeliveryBarrierResult({
       input,
       nextWakeAt: new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString(),
       nextWakeReason: "assistant",
@@ -3552,7 +3552,7 @@ async function flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(
 
   const remoteBarrier = await input.input.prepareAutoReplyDelivery?.();
   if (remoteBarrier) {
-    return buildHostedMemberChannelDeliveryBarrierResult({
+    return await buildHostedMemberChannelDeliveryBarrierResult({
       input,
       nextWakeAt: remoteBarrier.nextWakeAt ?? null,
       nextWakeReason: remoteBarrier.nextWakeReason ?? null,
@@ -3576,7 +3576,7 @@ async function flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(
       break;
     }
     if (preparation.status === "retryable_failed") {
-      return buildHostedMemberChannelDeliveryBarrierResult({
+      return await buildHostedMemberChannelDeliveryBarrierResult({
         input,
         nextWakeAt: preparation.nextWakeAt,
         nextWakeReason: "assistant",
@@ -3594,7 +3594,7 @@ async function flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(
         vaultRoot: input.input.restored.vaultRoot,
       });
       if (record.failed > 0) {
-        return buildHostedMemberChannelDeliveryBarrierResult({
+        return await buildHostedMemberChannelDeliveryBarrierResult({
           input,
           nextWakeAt: record.nextWakeAt,
           nextWakeReason: record.nextWakeReason ?? "assistant",
@@ -3615,7 +3615,7 @@ async function flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(
     return null;
   }
 
-  return buildHostedMemberChannelDeliveryBarrierResult({
+  return await buildHostedMemberChannelDeliveryBarrierResult({
     input,
     nextWakeAt: pendingWakeAt,
     nextWakeReason: "assistant",
@@ -3648,15 +3648,21 @@ async function hostedDeliveryEffectsContainAutoReply(input: {
   return autoReplyIntentIds.size > 0;
 }
 
-function buildHostedMemberChannelDeliveryBarrierResult(input: {
+async function buildHostedMemberChannelDeliveryBarrierResult(input: {
   input: Parameters<typeof drainHostedPostCheckpointDelivery>[0];
   nextWakeAt: string | null;
   nextWakeReason?: string | null;
   redactedStatus: HostedRuntimeRedactedJson;
-}): HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
+}): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
+  const providerCleanupSchedulingWake =
+    await resolveHostedProviderCleanupSchedulingWakeCandidate({
+      deferDueOrInvalid: true,
+      phaseInput: input.input.input,
+    });
   const nextWake = selectHostedRuntimeWakeCandidate([
     input.input.baseNextWake,
     createHostedRuntimeWakeCandidate(input.nextWakeAt, input.nextWakeReason ?? "assistant"),
+    providerCleanupSchedulingWake,
   ]);
   return {
     ...(input.input.afterDurableCheckpoint
