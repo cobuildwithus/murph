@@ -6020,8 +6020,8 @@ function addOvernightMemoryConsolidationAutomation(vaultRoot: string): void {
       threadId: null,
     },
     schedule: {
-      kind: 'dailyLocal',
-      localTime: '03:00',
+      kind: 'cron',
+      expression: '0 3 */2 * *',
     },
     slug: 'overnight-memory-consolidation',
     status: 'active',

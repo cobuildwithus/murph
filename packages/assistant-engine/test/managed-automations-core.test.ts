@@ -274,11 +274,14 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toMatchObject({
       automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      assistantTargetOverride: {
+        reasoningEffort: 'medium',
+      },
       continuityPolicy: 'fresh',
       route: defaultRoute,
       schedule: {
-        kind: 'dailyLocal',
-        localTime: '03:00',
+        kind: 'cron',
+        expression: '0 3 */2 * *',
       },
       slug: 'overnight-memory-consolidation',
       status: 'active',
@@ -288,6 +291,21 @@ describe('applyMurphManagedAutomations core integration', () => {
       ]),
       title: 'Overnight memory consolidation',
     })
+    const automation = await showAutomation({
+      automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      vaultRoot,
+    })
+    if (automation === null) {
+      throw new Error('Expected overnight memory consolidation automation')
+    }
+    expect(automation.instructions).toContain('Goal: consolidate durable user context')
+    expect(automation.instructions).toContain(
+      'all available committed user messages from the last 7 days',
+    )
+    expect(automation.instructions).toContain('committed assistant messages from the same window')
+    expect(automation.instructions).toContain('last-7-days evidence window')
+    expect(automation.instructions).toContain('unbounded transcript history')
+    expect(automation.instructions).toContain('Do not save assistant speculation')
   })
 
   it('creates managed health automations for hosted email targets without a local sender identity', async () => {

@@ -367,27 +367,35 @@ describe('applyMurphManagedAutomations', () => {
     )).toBe('2026-06-25T15:30:00.000Z')
   })
 
-  it('keeps overnight memory consolidation as a hosted-only daily local maintenance seed', () => {
+  it('keeps overnight memory consolidation as a hosted-only every-other-night maintenance seed', () => {
     const seed = MURPH_MANAGED_AUTOMATIONS.find(
       (entry) =>
         entry.automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
     )
-    if (!seed || seed.schedule.kind !== 'dailyLocal') {
-      throw new Error('Expected overnight memory consolidation to use a daily local schedule.')
+    if (!seed || seed.schedule.kind !== 'cron') {
+      throw new Error('Expected overnight memory consolidation to use a cron schedule.')
     }
 
     expect(seed.hostedRuntimeOnly).toBe(true)
     expect(seed.continuityPolicy).toBe('fresh')
-    expect(seed.schedule.localTime).toBe('03:00')
+    expect(seed.assistantTargetOverride).toEqual({
+      reasoningEffort: 'medium',
+    })
+    expect(seed.schedule.expression).toBe('0 3 */2 * *')
     expect(seed.slug).toBe('overnight-memory-consolidation')
     expect(seed.tags).toContain('murph-managed:overnight-memory-consolidation')
     expect(seed.tags).toContain('runtime-maintenance')
     expect(seed.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(seed.instructions).toContain('normal scheduled assistant App Server path')
+    expect(seed.instructions).toContain('Goal: consolidate durable user context')
+    expect(seed.instructions).toContain('all available committed user messages from the last 7 days')
+    expect(seed.instructions).toContain('committed assistant messages from the same window')
+    expect(seed.instructions).toContain('last-7-days evidence window')
     expect(seed.instructions).toContain('vault-cli memory show --format json')
     expect(seed.instructions).toContain('vault-cli memory upsert')
     expect(seed.instructions).toContain('vault-cli memory update')
     expect(seed.instructions).toContain('Do not inspect hidden Codex memory state')
+    expect(seed.instructions).toContain('unbounded transcript history')
+    expect(seed.instructions).toContain('Do not save assistant speculation')
     expect(seed.instructions).not.toContain('generated memory extraction')
     expect(seed.instructions).toContain(
       '{"kind":"skip","privateSummary":"Overnight memory consolidation maintenance wake completed."}',
@@ -627,19 +635,27 @@ describe('applyMurphManagedAutomations', () => {
       continuityPolicy: 'fresh',
       route: defaultRoute,
       schedule: {
-        kind: 'dailyLocal',
-        localTime: '03:00',
+        kind: 'cron',
+        expression: '0 3 */2 * *',
       },
       slug: 'overnight-memory-consolidation',
       status: 'active',
       title: 'Overnight memory consolidation',
     })
+    expect(memoryRecord?.assistantTargetOverride).toEqual({
+      reasoningEffort: 'medium',
+    })
     expect(memoryRecord?.tags).toContain('murph-managed:overnight-memory-consolidation')
     expect(memoryRecord?.tags).toContain('runtime-maintenance')
     expect(memoryRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
-    expect(memoryRecord?.instructions).toContain('normal scheduled assistant App Server path')
+    expect(memoryRecord?.instructions).toContain('Goal: consolidate durable user context')
+    expect(memoryRecord?.instructions).toContain('all available committed user messages from the last 7 days')
+    expect(memoryRecord?.instructions).toContain('committed assistant messages from the same window')
+    expect(memoryRecord?.instructions).toContain('last-7-days evidence window')
     expect(memoryRecord?.instructions).toContain('vault-cli memory show --format json')
     expect(memoryRecord?.instructions).toContain('vault-cli memory upsert')
+    expect(memoryRecord?.instructions).toContain('unbounded transcript history')
+    expect(memoryRecord?.instructions).toContain('Do not save assistant speculation')
     expect(memoryRecord?.instructions).not.toContain('generated memory extraction')
     expect(memoryRecord?.instructions).toContain(
       '{"kind":"skip","privateSummary":"Overnight memory consolidation maintenance wake completed."}',

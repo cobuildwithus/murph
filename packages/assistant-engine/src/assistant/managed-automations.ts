@@ -385,21 +385,27 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     summary:
       'A hosted-only app-server maintenance wake for canonical vault memory.',
     schedule: {
-      kind: 'dailyLocal',
-      localTime: '03:00',
+      kind: 'cron',
+      expression: '0 3 */2 * *',
     },
     continuityPolicy: 'fresh',
     hostedRuntimeOnly: true,
+    assistantTargetOverride: {
+      reasoningEffort: 'medium',
+    },
     tags: [
       'murph-managed:overnight-memory-consolidation',
       'runtime-maintenance',
     ],
     instructions: [
-      'This hosted maintenance automation runs through the normal scheduled assistant App Server path to consolidate durable user context only into the canonical vault memory surface.',
+      'Goal: consolidate durable user context from recent assistant/user conversation history into the canonical vault memory surface.',
       '',
-      'Read existing saved context with `vault-cli memory show --format json` before considering any write.',
-      'Write durable memory only with `vault-cli memory upsert` or `vault-cli memory update` when a concise, user-useful fact is clearly supported by canonical inputs available to this scheduled turn and is not already represented.',
-      'Do not inspect hidden Codex memory state, assistant runtime logs, raw transcripts, unbounded filesystem trees, or vault health data. Do not call external services or send the user a message.',
+      'Read existing saved context with `vault-cli memory show --format json` first so any writes are deduplicated against existing memory.',
+      'Retrieval budget: review all available committed user messages from the last 7 days, plus committed assistant messages from the same window only when they record a completed user-approved action or directly clarify user context.',
+      'Write durable memory only with `vault-cli memory upsert` or `vault-cli memory update` when a concise, user-useful fact is clearly supported by canonical inputs or the last-7-days conversation evidence available to this scheduled turn and is not already represented.',
+      'Before returning, validate each proposed write against existing memory and the last-7-days evidence window. Skip anything uncertain, duplicated, sensitive, or merely transient task detail.',
+      'Do not inspect hidden Codex memory state, assistant runtime logs, unbounded transcript history, unbounded filesystem trees, or vault health data. Do not call external services or send the user a message.',
+      'Do not save assistant speculation, generic advice, transient task details, credentials, payment details, contact details, sensitive identifiers, or medical details from conversation text.',
       `Return exactly \`{"kind":"skip","privateSummary":"${MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY}"}\`.`,
     ].join('\n'),
   },
