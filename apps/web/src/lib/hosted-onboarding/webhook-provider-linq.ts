@@ -346,6 +346,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
 
   const familyInviteTokenPresent = parseHostedFamilyInviteStartToken(summary.text) !== null;
+  if (familyInviteTokenPresent && !recipientPhoneNumber) {
+    return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
+  }
+
   if (familyInviteTokenPresent && incomingRecipientLineIsUnassignable) {
     return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
   }

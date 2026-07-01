@@ -1071,7 +1071,7 @@ describe("hosted-member-store", () => {
       recipientPhone: "+15550100001",
     });
 
-    expect(updateMany).toHaveBeenCalledTimes(2);
+    expect(updateMany).toHaveBeenCalledTimes(3);
     expect(updateMany).toHaveBeenNthCalledWith(1, {
       where: {
         linqChatLookupKey: {
@@ -1084,6 +1084,7 @@ describe("hosted-member-store", () => {
       data: {
         linqChatIdEncrypted: null,
         linqChatLookupKey: null,
+        linqHomeLineAssignedAt: null,
         linqLastInboundAt: null,
         linqRecipientPhoneEncrypted: null,
         linqRecipientPhoneLookupKey: null,
@@ -1091,6 +1092,34 @@ describe("hosted-member-store", () => {
     });
     expect(updateMany).toHaveBeenNthCalledWith(2, {
       where: {
+        linqChatLookupKey: null,
+        pendingLinqChatLookupKey: {
+          in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
+        },
+        NOT: {
+          memberId: "member_123",
+        },
+      },
+      data: {
+        linqHomeLineAssignedAt: null,
+        linqRecipientPhoneEncrypted: null,
+        linqRecipientPhoneLookupKey: null,
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqParticipantContactEncrypted: null,
+        pendingLinqParticipantContactKind: null,
+        pendingLinqParticipantContactLookupKey: null,
+        pendingLinqParticipantContactObservedAt: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        pendingLinqRecipientPhoneLookupKey: null,
+        pendingLinqLastInboundAt: null,
+      },
+    });
+    expect(updateMany).toHaveBeenNthCalledWith(3, {
+      where: {
+        linqChatLookupKey: {
+          not: null,
+        },
         pendingLinqChatLookupKey: {
           in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
         },
@@ -1305,6 +1334,20 @@ describe("hosted-member-store", () => {
     }));
     expect(updateMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
       where: expect.objectContaining({
+        linqChatLookupKey: null,
+        pendingLinqChatLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:linq-chat:v2:/u),
+            expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+          ]),
+        },
+      }),
+    }));
+    expect(updateMany).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      where: expect.objectContaining({
+        linqChatLookupKey: {
+          not: null,
+        },
         pendingLinqChatLookupKey: {
           in: expect.arrayContaining([
             expect.stringMatching(/^hbidx:linq-chat:v2:/u),
@@ -1445,7 +1488,7 @@ describe("hosted-member-store", () => {
       code: "P2002",
     });
 
-    expect(updateMany).toHaveBeenCalledTimes(2);
+    expect(updateMany).toHaveBeenCalledTimes(3);
     expect(upsert).toHaveBeenCalledTimes(1);
   });
 

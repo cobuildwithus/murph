@@ -706,6 +706,7 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
       data: {
         linqChatIdEncrypted: null,
         linqChatLookupKey: null,
+        linqHomeLineAssignedAt: null,
         linqLastInboundAt: null,
         linqRecipientPhoneEncrypted: null,
         linqRecipientPhoneLookupKey: null,
@@ -721,6 +722,9 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
     });
     expect(updateMany).toHaveBeenNthCalledWith(2, {
       data: {
+        linqHomeLineAssignedAt: null,
+        linqRecipientPhoneEncrypted: null,
+        linqRecipientPhoneLookupKey: null,
         pendingLinqChatIdEncrypted: null,
         pendingLinqChatLookupKey: null,
         pendingLinqParticipantContactEncrypted: null,
@@ -734,6 +738,31 @@ describe("upsertHostedMemberHomeLinqBinding", () => {
       where: {
         NOT: {
           memberId: "member_123",
+        },
+        linqChatLookupKey: null,
+        pendingLinqChatLookupKey: {
+          in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
+        },
+      },
+    });
+    expect(updateMany).toHaveBeenNthCalledWith(3, {
+      data: {
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqParticipantContactEncrypted: null,
+        pendingLinqParticipantContactKind: null,
+        pendingLinqParticipantContactLookupKey: null,
+        pendingLinqParticipantContactObservedAt: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        pendingLinqRecipientPhoneLookupKey: null,
+        pendingLinqLastInboundAt: null,
+      },
+      where: {
+        NOT: {
+          memberId: "member_123",
+        },
+        linqChatLookupKey: {
+          not: null,
         },
         pendingLinqChatLookupKey: {
           in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],

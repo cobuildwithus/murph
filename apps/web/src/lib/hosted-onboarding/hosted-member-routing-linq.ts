@@ -782,6 +782,7 @@ async function clearHostedMemberLinqChatConflicts(input: {
     data: {
       linqChatIdEncrypted: null,
       linqChatLookupKey: null,
+      linqHomeLineAssignedAt: null,
       linqRecipientPhoneEncrypted: null,
       linqRecipientPhoneLookupKey: null,
       linqLastInboundAt: null,
@@ -790,6 +791,35 @@ async function clearHostedMemberLinqChatConflicts(input: {
 
   await input.tx.hostedMemberRouting.updateMany({
     where: {
+      linqChatLookupKey: null,
+      pendingLinqChatLookupKey: {
+        in: [...input.linqChatLookupKeys],
+      },
+      NOT: {
+        memberId: input.memberId,
+      },
+    },
+    data: {
+      linqHomeLineAssignedAt: null,
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+      pendingLinqLastInboundAt: null,
+    },
+  });
+
+  await input.tx.hostedMemberRouting.updateMany({
+    where: {
+      linqChatLookupKey: {
+        not: null,
+      },
       pendingLinqChatLookupKey: {
         in: [...input.linqChatLookupKeys],
       },
