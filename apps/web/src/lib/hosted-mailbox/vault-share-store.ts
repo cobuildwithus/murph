@@ -15,7 +15,10 @@ import {
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
-import { hasHostedRuntimeActiveAccessForUpdateTx } from "./runtime-access";
+import {
+  isHostedRuntimeInactiveAccessError,
+  requireHostedRuntimeActiveAccessForUpdateTx,
+} from "./runtime-access";
 import { appendHostedMailboxEnvelopeTx } from "./store";
 
 export interface ActiveHostedVaultShare {
@@ -92,16 +95,16 @@ export async function deliverHostedVaultShareRecords(input: {
 
   return prisma.$transaction(async (tx) => {
     let lastAppendedMailboxItemId: string | null = null;
-    if (!await hasHostedRuntimeActiveAccessForUpdateTx(
+    if (!await hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
       input.share.grantorMemberId,
-      { prisma: tx },
+      tx,
     )) {
       return { lastAppendedMailboxItemId };
     }
 
-    if (!await hasHostedRuntimeActiveAccessForUpdateTx(
+    if (!await hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
       input.share.destinationMemberId,
-      { prisma: tx },
+      tx,
     )) {
       return { lastAppendedMailboxItemId };
     }
@@ -146,6 +149,23 @@ export async function deliverHostedVaultShareRecords(input: {
 
     return { lastAppendedMailboxItemId };
   });
+}
+
+async function hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
+  memberId: string,
+  tx: Prisma.TransactionClient,
+): Promise<boolean> {
+  try {
+    await requireHostedRuntimeActiveAccessForUpdateTx(memberId, {
+      prisma: tx,
+    });
+    return true;
+  } catch (error) {
+    if (isHostedRuntimeInactiveAccessError(error)) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 async function readGrantedHostedVaultShareForUpdateTx(input: {

@@ -11,6 +11,7 @@ import {
 } from "../hosted-onboarding/entitlement";
 import {
   hostedOnboardingError,
+  isHostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 
@@ -159,6 +160,12 @@ export async function hasHostedRuntimeActiveAccessForUpdateTx(
   } catch {
     return false;
   }
+}
+
+export function isHostedRuntimeInactiveAccessError(error: unknown): boolean {
+  return isHostedOnboardingError(error)
+    && error.code === "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE"
+    && !error.retryable;
 }
 
 export async function requireHostedRuntimeMailboxActiveAccess(

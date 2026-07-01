@@ -3,7 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
-  hasHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
+  isHostedRuntimeInactiveAccessError: vi.fn((error: unknown) => (
+    typeof error === "object"
+    && error !== null
+    && "code" in error
+    && error.code === "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE"
+  )),
+  requireHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
@@ -11,10 +17,12 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
-  hasHostedRuntimeActiveAccessForUpdateTx:
-    mocks.hasHostedRuntimeActiveAccessForUpdateTx,
+  isHostedRuntimeInactiveAccessError: mocks.isHostedRuntimeInactiveAccessError,
+  requireHostedRuntimeActiveAccessForUpdateTx:
+    mocks.requireHostedRuntimeActiveAccessForUpdateTx,
 }));
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { deliverHostedVaultShareRecords } from "@/src/lib/hosted-mailbox/vault-share-store";
 
 const SHARE = {
@@ -85,7 +93,7 @@ function fakePrisma(
 describe("deliverHostedVaultShareRecords", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.hasHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(true);
+    mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(undefined);
   });
 
   it("appends every record in one transaction and reports the last inserted item id", async () => {
@@ -104,11 +112,11 @@ describe("deliverHostedVaultShareRecords", () => {
 
     expect(result).toEqual({ lastAppendedMailboxItemId: "mailbox_item_3" });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(mocks.hasHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
+    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
       "member_grantor",
       { prisma: TX },
     );
-    expect(mocks.hasHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
+    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
       "member_referee",
       { prisma: TX },
     );
@@ -227,8 +235,16 @@ describe("deliverHostedVaultShareRecords", () => {
 
   it("rechecks destination runtime authority inside the append transaction", async () => {
     const prisma = fakePrisma();
-    mocks.hasHostedRuntimeActiveAccessForUpdateTx.mockImplementation(
-      async (memberId: string) => memberId !== "member_referee",
+    mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockImplementation(
+      async (memberId: string) => {
+        if (memberId === "member_referee") {
+          throw hostedOnboardingError({
+            code: "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE",
+            httpStatus: 403,
+            message: "Hosted runtime mailbox access is not active.",
+          });
+        }
+      },
     );
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       inserted: true,
@@ -242,11 +258,11 @@ describe("deliverHostedVaultShareRecords", () => {
     });
 
     expect(result).toEqual({ lastAppendedMailboxItemId: null });
-    expect(mocks.hasHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
+    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
       "member_grantor",
       { prisma: TX },
     );
-    expect(mocks.hasHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
+    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
       "member_referee",
       { prisma: TX },
     );
@@ -256,8 +272,16 @@ describe("deliverHostedVaultShareRecords", () => {
 
   it("rechecks grantor runtime authority inside the append transaction", async () => {
     const prisma = fakePrisma();
-    mocks.hasHostedRuntimeActiveAccessForUpdateTx.mockImplementation(
-      async (memberId: string) => memberId !== "member_grantor",
+    mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockImplementation(
+      async (memberId: string) => {
+        if (memberId === "member_grantor") {
+          throw hostedOnboardingError({
+            code: "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE",
+            httpStatus: 403,
+            message: "Hosted runtime mailbox access is not active.",
+          });
+        }
+      },
     );
     mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       inserted: true,
@@ -271,10 +295,30 @@ describe("deliverHostedVaultShareRecords", () => {
     });
 
     expect(result).toEqual({ lastAppendedMailboxItemId: null });
-    expect(mocks.hasHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
+    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledWith(
       "member_grantor",
       { prisma: TX },
     );
+    expect(TX.$queryRaw).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("propagates retryable grantor runtime authority failures instead of treating them as inactive", async () => {
+    const prisma = fakePrisma();
+    const authorityChanged = hostedOnboardingError({
+      code: "HOSTED_RUNTIME_ACCESS_AUTHORITY_CHANGED",
+      httpStatus: 409,
+      message: "Hosted runtime access changed while validating authority. Retry the request.",
+      retryable: true,
+    });
+    mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockRejectedValue(authorityChanged);
+
+    await expect(deliverHostedVaultShareRecords({
+      prisma,
+      records: RECORDS,
+      share: SHARE,
+    })).rejects.toBe(authorityChanged);
+
     expect(TX.$queryRaw).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
