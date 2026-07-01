@@ -46,6 +46,18 @@ interface SharedVaultShareProjectionsFile {
   updatedAt: string;
 }
 
+type SharedVaultShareProjectionStoreReadResult =
+  | {
+      status: "loaded";
+      store: SharedVaultShareProjectionsFile;
+    }
+  | {
+      status: "corrupt";
+    }
+  | {
+      status: "read_failed";
+    };
+
 /**
  * Destination-side landing for consented vault-share deliveries: a deterministic,
  * idempotent upsert of the shared record into one compact derived destination
@@ -76,16 +88,23 @@ export async function importHostedVaultShareDeliveryWake(input: {
   }
 
   try {
-    const store = await readSharedVaultShareProjectionStore(input.vaultRoot);
-    if (!store) {
+    const read = await readRepairableSharedVaultShareProjectionStore(input.vaultRoot);
+    if (read.status === "read_failed") {
       return {
         reasonCode: "vault_share.read_failed",
         retryable: true,
         status: "blocked",
       };
     }
+    if (read.status === "repair_failed") {
+      return {
+        reasonCode: "vault_share.write_failed",
+        retryable: true,
+        status: "blocked",
+      };
+    }
 
-    upsertSharedVaultShareRecord(store, {
+    upsertSharedVaultShareRecord(read.store, {
       grantorMemberId: delivery.grantorMemberId,
       projectionKind: delivery.projectionKind,
       receivedEventId: input.wake.eventId,
@@ -93,7 +112,7 @@ export async function importHostedVaultShareDeliveryWake(input: {
       shareId: delivery.shareId,
       updatedAt: input.wake.occurredAt,
     });
-    await writeSharedVaultShareProjectionStore(input.vaultRoot, store);
+    await writeSharedVaultShareProjectionStore(input.vaultRoot, read.store);
   } catch {
     // Retry instead of consuming the mailbox item: the web mailbox dedupe key already
     // owns exact replay idempotency, so the destination must not checkpoint past the
@@ -127,15 +146,23 @@ export async function applyHostedVaultShareRevokeWake(input: {
   }
 
   try {
-    const store = await readSharedVaultShareProjectionStore(input.vaultRoot);
-    if (!store) {
+    const read = await readRepairableSharedVaultShareProjectionStore(input.vaultRoot);
+    if (read.status === "read_failed") {
       return {
         reasonCode: "vault_share.read_failed",
         retryable: true,
         status: "blocked",
       };
     }
+    if (read.status === "repair_failed") {
+      return {
+        reasonCode: "vault_share.write_failed",
+        retryable: true,
+        status: "blocked",
+      };
+    }
 
+    const store = read.store;
     const projection = store.projections[revoke.projectionKind];
     const grantor = projection?.grantors[revoke.grantorMemberId];
     if (!projection || !grantor) {
@@ -230,7 +257,7 @@ function compareSharedVaultShareRecords(
 
 async function readSharedVaultShareProjectionStore(
   vaultRoot: string,
-): Promise<SharedVaultShareProjectionsFile | null> {
+): Promise<SharedVaultShareProjectionStoreReadResult> {
   const path = resolveSharedVaultShareProjectionStorePath(vaultRoot);
   let raw: string;
   try {
@@ -238,19 +265,53 @@ async function readSharedVaultShareProjectionStore(
   } catch (error) {
     if (hasNodeErrorCode(error, "ENOENT")) {
       return {
-        projections: {},
-        schema: SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA,
-        updatedAt: "1970-01-01T00:00:00.000Z",
+        status: "loaded",
+        store: createEmptySharedVaultShareProjectionStore(),
       };
     }
-    return null;
+    return { status: "read_failed" };
   }
 
   try {
-    return parseSharedVaultShareProjectionStore(JSON.parse(raw));
+    const store = parseSharedVaultShareProjectionStore(JSON.parse(raw));
+    return store ? { status: "loaded", store } : { status: "corrupt" };
   } catch {
-    return null;
+    return { status: "corrupt" };
   }
+}
+
+async function readRepairableSharedVaultShareProjectionStore(
+  vaultRoot: string,
+): Promise<
+  | { status: "loaded"; store: SharedVaultShareProjectionsFile }
+  | { status: "read_failed" }
+  | { status: "repair_failed" }
+> {
+  const read = await readSharedVaultShareProjectionStore(vaultRoot);
+  if (read.status !== "corrupt") {
+    return read;
+  }
+
+  try {
+    await rm(resolveSharedVaultShareProjectionStorePath(vaultRoot), {
+      force: true,
+    });
+  } catch {
+    return { status: "repair_failed" };
+  }
+
+  return {
+    status: "loaded",
+    store: createEmptySharedVaultShareProjectionStore(),
+  };
+}
+
+function createEmptySharedVaultShareProjectionStore(): SharedVaultShareProjectionsFile {
+  return {
+    projections: {},
+    schema: SHARED_VAULT_SHARE_PROJECTIONS_SCHEMA,
+    updatedAt: "1970-01-01T00:00:00.000Z",
+  };
 }
 
 async function writeSharedVaultShareProjectionStore(

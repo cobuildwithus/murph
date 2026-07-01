@@ -480,6 +480,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedVaultShareActiveIndexesMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260701153000_hosted_vault_share_active_indexes/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -555,6 +562,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260629160000_computer_handoff_viewport_session_hint",
       "20260701040000_hosted_groups",
       "20260701050000_hosted_vault_share_drop_source",
+      "20260701153000_hosted_vault_share_active_indexes",
       "migration_lock.toml",
     ]);
     expect(hostedThreadRoutesMigrationSql).toContain('CREATE TABLE "hosted_thread_container"');
@@ -1119,6 +1127,20 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(schema).not.toContain("model HostedRevnetIssuance");
     expect(schema).not.toContain("enum HostedRevnetIssuanceStatus");
+    expect(hostedVaultShareActiveIndexesMigrationSql).toContain(
+      'CREATE INDEX "hosted_vault_share_active_grantor_projection_idx"',
+    );
+    expect(hostedVaultShareActiveIndexesMigrationSql).toContain(
+      'ON "hosted_vault_share"("grantor_member_id", "projection_kind")',
+    );
+    expect(hostedVaultShareActiveIndexesMigrationSql).toContain(
+      'CREATE INDEX "hosted_vault_share_active_destination_projection_idx"',
+    );
+    expect(hostedVaultShareActiveIndexesMigrationSql).toContain(
+      'ON "hosted_vault_share"("destination_member_id", "projection_kind")',
+    );
+    expect(hostedVaultShareActiveIndexesMigrationSql.match(/WHERE "status" = 'granted'/gu))
+      .toHaveLength(2);
   });
 
   it("makes eligible stuck device connections due even when their reconcile is scheduled in the future", () => {

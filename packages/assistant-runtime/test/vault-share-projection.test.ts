@@ -398,6 +398,49 @@ describe("importHostedVaultShareDeliveryWake", () => {
     )).toEqual(["2026-06-10"]);
   });
 
+  it("repairs a corrupt derived projection file before importing a delivery", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
+    await mkdir(join(vaultRoot, "derived", "vault-share"), { recursive: true });
+    await writeFile(storePath(vaultRoot), "{not-json");
+
+    await expect(importHostedVaultShareDeliveryWake({ vaultRoot, wake }))
+      .resolves.toEqual({ status: "imported" });
+
+    const stored = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
+    const grantor = stored.projections["sleep-times.v0"].grantors.member_grantor;
+    expect(grantor.records).toHaveLength(1);
+    expect(grantor.records[0].record).toEqual(RECORD);
+  });
+
+  it("repairs a corrupt derived projection file before consuming a revoke", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
+    await mkdir(join(vaultRoot, "derived", "vault-share"), { recursive: true });
+    await writeFile(
+      storePath(vaultRoot),
+      JSON.stringify({ schema: "murph.shared-vault-projections.v0" }),
+    );
+
+    await expect(applyHostedVaultShareRevokeWake({
+      vaultRoot,
+      wake: {
+        eventId: "vault-share-revoke:share_1:2026-07-01T00:00:00.000Z",
+        kind: "vault-share.revoke",
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        revoke: {
+          grantorMemberId: "member_grantor",
+          projectionKind: "sleep-times.v0",
+          revokedAt: "2026-07-01T00:00:00.000Z",
+          schema: "murph.vault-share.revoke.v1",
+          shareId: "share_1",
+        },
+        userId: "member_referee",
+      },
+    })).resolves.toEqual({ status: "imported" });
+
+    await expect(readFile(storePath(vaultRoot), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("keeps delivery import read failures retryable so shared data is not consumed", async () => {
     const result = await importHostedVaultShareDeliveryWake({
       vaultRoot: "/dev/null/not-a-dir",
