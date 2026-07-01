@@ -55,6 +55,9 @@ overrides:
   repomix@1.14.0>fast-xml-builder: 1.2.0
 
 patchedDependencies:
+  '@cobuild/review-gpt@0.5.94':
+    hash: 1c804f5806adc5c95e4af4bf43c13626aea2d47f388edc9a3dfd8cb621087455
+    path: patches/@cobuild__review-gpt@0.5.94.patch
   incur@0.4.5:
     hash: a4a70545bebf677aebb5ab89bf04d130ba1469d166e0e08e00096f4158f73a2e
     path: patches/incur@0.4.5.patch
@@ -68,7 +71,7 @@ importers:
         version: 0.1.15
       '@cobuild/review-gpt':
         specifier: ^0.5.94
-        version: 0.5.94(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
+        version: 0.5.94(patch_hash=1c804f5806adc5c95e4af4bf43c13626aea2d47f388edc9a3dfd8cb621087455)(@cfworker/json-schema@4.1.1)(typescript@5.9.3)
       '@murphai/health-metrics':
         specifier: workspace:*
         version: link:packages/health-metrics
@@ -10451,7 +10454,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.94(@cfworker/json-schema@4.1.1)(typescript@5.9.3)':
+  '@cobuild/review-gpt@0.5.94(patch_hash=1c804f5806adc5c95e4af4bf43c13626aea2d47f388edc9a3dfd8cb621087455)(@cfworker/json-schema@4.1.1)(typescript@5.9.3)':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
       incur: 0.4.10

@@ -282,7 +282,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.94')
     expect(pnpmWorkspace).toContain('@cobuild/review-gpt@0.5.94')
     expect(pnpmWorkspace.match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]?.trim()).toBe(
-      'incur@0.4.5: patches/incur@0.4.5.patch',
+      "'@cobuild/review-gpt@0.5.94': patches/@cobuild__review-gpt@0.5.94.patch\n" +
+        '  incur@0.4.5: patches/incur@0.4.5.patch',
     )
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-browser-profile.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.config.sh'))).toBe(true)
