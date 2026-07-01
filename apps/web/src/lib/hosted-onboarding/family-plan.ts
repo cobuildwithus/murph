@@ -1948,11 +1948,14 @@ export async function updateHostedFamilySeatCount(input: {
     }
 
     // Stripe confirmed the quantity synchronously, so persist it now instead of
-    // waiting for the subscription webhook. lastStripeEventCreatedAt stays
-    // untouched, so the webhook reconciler fence still orders later events.
+    // waiting for the subscription webhook. Advance the reconciler fence to now
+    // so a delayed, older Stripe event cannot later revert this seat count (and
+    // revoke the invite it enabled); the webhook for this change is newer and
+    // still reconciles.
     await prisma.hostedAccountGroupBillingRef.update({
       data: {
         billedSeatCount: targetSeatCount,
+        lastStripeEventCreatedAt: now,
       },
       where: {
         groupId: input.groupId,

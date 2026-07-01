@@ -143,8 +143,9 @@ export function HostedFamilyManager(props: {
   const [seatError, setSeatError] = useState<string | null>(null);
 
   const seatsFull = props.seats.remaining <= 0;
-  const inviteWillAddSeat = seatsFull && props.seats.billed < props.seats.max;
-  const inviteDisabled = props.seats.used >= props.seats.max;
+  const inviteWillAddSeat =
+    props.billingActive && seatsFull && props.seats.billed < props.seats.max;
+  const inviteDisabled = !props.billingActive || props.seats.used >= props.seats.max;
   const canRemoveSeat =
     props.billingActive &&
     props.seats.billed > props.seats.used &&

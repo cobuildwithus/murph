@@ -2243,7 +2243,7 @@ describe("hosted Family plan", () => {
     });
   });
 
-  it("updates Family seat count through Stripe without writing the reconciled seat quantity", async () => {
+  it("updates Family seat count through Stripe and persists the confirmed quantity behind an advanced fence", async () => {
     const tx = createTxMock({
       activeMembershipCount: 2,
       billedSeatCount: 2,
@@ -2282,7 +2282,15 @@ describe("hosted Family plan", () => {
       },
     );
     expect(stripeSubscriptionItemUpdate.mock.calls[0]).toHaveLength(2);
-    expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.update).toHaveBeenCalledWith({
+      data: {
+        billedSeatCount: 3,
+        lastStripeEventCreatedAt: new Date("2026-06-18T12:00:00.000Z"),
+      },
+      where: {
+        groupId: "hbag_family",
+      },
+    });
   });
 
   it("does not reduce Family seats below active members and pending invites", async () => {
