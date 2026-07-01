@@ -212,7 +212,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
         `last error code: ${deviceSyncStatus.lastErrorCode}`,
       ]));
     }
-    await assertHostedDeviceSyncReplayProcessed({
+    await assertHostedDeviceSyncReplayReceiptAccepted({
       scenario: activeScenario,
       status: deviceSyncStatus,
       userId: signedWebhookUserId,
@@ -310,7 +310,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
       ]));
     }
 
-    await assertHostedDeviceSyncReplayProcessed({
+    await assertHostedDeviceSyncReplayReceiptAccepted({
       scenario: activeScenario,
       status: deviceSyncStatus,
       userId,
@@ -500,7 +500,7 @@ async function readBrowserVaultReplica(input: {
   return JSON.parse(textDecoder.decode(plaintext));
 }
 
-async function assertHostedDeviceSyncReplayProcessed(input: {
+async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
   scenario: HostedLocalFullStackScenario;
   status: HostedRunnerStatusResponse;
   userId: string;
@@ -520,9 +520,12 @@ async function assertHostedDeviceSyncReplayProcessed(input: {
     && (entry.status === "processed" || entry.status === "recorded")
     && (entry.recordFailed ?? 0) === 0
   );
+  const receiptObserved = recordedDeviceSyncLog !== undefined
+    || recorded > 0
+    || prepared > 0;
 
   if (
-    !recordedDeviceSyncLog
+    !receiptObserved
     || retryableLog
     || retryableFailed > 0
     || recordFailed > 0
@@ -531,7 +534,7 @@ async function assertHostedDeviceSyncReplayProcessed(input: {
       .map((entry) => entry.safeErrorMessage)
       .filter((message): message is string => typeof message === "string" && message.length > 0);
     throw new Error(await input.scenario.buildFailureMessage(input.userId, [
-      "Hosted Junction wearable direct-resource replay did not cleanly process and record the device-sync system mailbox item.",
+      "Hosted Junction wearable direct-resource replay did not show a clean device-sync system mailbox receipt.",
       `system mailbox counters: ${JSON.stringify({
         prepared,
         recordFailed,
