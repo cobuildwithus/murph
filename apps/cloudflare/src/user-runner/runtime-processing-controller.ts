@@ -33,6 +33,10 @@ import {
   type RuntimeProcessingCommandBudget,
 } from "./runtime-command-budget.js";
 import {
+  readRuntimeFenceLivenessBestEffort,
+  type RuntimeFenceLivenessReadResult,
+} from "./runtime-fence-liveness.js";
+import {
   ensureActiveRuntimeProcessing,
 } from "./runtime-container-wake.js";
 import {
@@ -223,12 +227,12 @@ export class RuntimeProcessingController {
       }
 
       const activeRuntimeState =
-        await this.readActiveRuntimeFenceWithoutWake({
+        await this.readActiveRuntimeFenceLiveness({
           activeFence,
           commandBudget: input.commandBudget,
           record,
         });
-      if (activeRuntimeState === "inactive") {
+      if (activeRuntimeState.outcome === "inactive") {
         return await this.replaceStartRequiredRuntimeFence({
           activeFence,
           commandBudget: input.commandBudget,
@@ -247,12 +251,12 @@ export class RuntimeProcessingController {
 
     if (activeFence.processingMode === "inbox_media_retention") {
       const activeRuntimeState =
-        await this.readActiveRuntimeFenceWithoutWake({
+        await this.readActiveRuntimeFenceLiveness({
           activeFence,
           commandBudget: input.commandBudget,
           record,
         });
-      if (activeRuntimeState === "inactive") {
+      if (activeRuntimeState.outcome === "inactive") {
         return await this.replaceStartRequiredRuntimeFence({
           activeFence,
           commandBudget: input.commandBudget,
@@ -261,7 +265,7 @@ export class RuntimeProcessingController {
           runtimeWakeStartedAt: input.runtimeWakeStartedAt,
         });
       }
-      if (activeRuntimeState === "indeterminate") {
+      if (activeRuntimeState.outcome !== "exact-active") {
         await this.syncRunnerAlarm(record);
         return createRuntimeProcessingRetryLater({
           reason: "container_rpc_error",
@@ -329,12 +333,12 @@ export class RuntimeProcessingController {
     }
 
     const activeRuntimeState =
-      await this.readActiveRuntimeFenceWithoutWake({
+      await this.readActiveRuntimeFenceLiveness({
         activeFence,
         commandBudget: input.commandBudget,
         record,
       });
-    if (activeRuntimeState === "inactive") {
+    if (activeRuntimeState.outcome === "inactive") {
       return await this.replaceStartRequiredRuntimeFence({
         activeFence,
         commandBudget: input.commandBudget,
@@ -411,12 +415,12 @@ export class RuntimeProcessingController {
   }): Promise<HostedRuntimeEnsureProcessingResponse> {
     const { activeFence, record } = input;
     const activeRuntimeState =
-      await this.readActiveRuntimeFenceWithoutWake({
+      await this.readActiveRuntimeFenceLiveness({
         activeFence,
         commandBudget: input.commandBudget,
         record,
       });
-    if (activeRuntimeState === "inactive") {
+    if (activeRuntimeState.outcome === "inactive") {
       return await this.replaceStartRequiredRuntimeFence({
         activeFence,
         commandBudget: input.commandBudget,
@@ -426,7 +430,7 @@ export class RuntimeProcessingController {
         runtimeWakeStartedAt: input.runtimeWakeStartedAt,
       });
     }
-    if (activeRuntimeState === "indeterminate") {
+    if (activeRuntimeState.outcome !== "exact-active") {
       await this.syncRunnerAlarm(record);
       return createRuntimeProcessingRetryLater({
         reason: "container_rpc_error",
@@ -529,52 +533,33 @@ export class RuntimeProcessingController {
     return Date.now() < commandBudget.deadlineAtMs;
   }
 
-  private async readActiveRuntimeFenceWithoutWake(input: {
+  private async readActiveRuntimeFenceLiveness(input: {
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
     commandBudget: RuntimeProcessingCommandBudget;
     record: RunnerStateRecord;
-  }): Promise<"inactive" | "indeterminate" | "matching"> {
-    if (!this.input.runnerContainerNamespace) {
-      return "indeterminate";
-    }
-
-    const runnerContainerName = input.activeFence.runnerContainerName;
-    if (!runnerContainerName) {
-      return "indeterminate";
-    }
-
-    const container = this.input.runnerContainerNamespace.getByName(
-      runnerContainerName,
-    );
-    if (!container.readActiveRuntimeUserFence) {
-      return "indeterminate";
-    }
-
-    try {
-      const activeRuntime = await runRuntimeProcessingCommandStep({
-        budget: input.commandBudget,
-        operation: async () => await container.readActiveRuntimeUserFence!(),
-        stepTimeoutMs: this.input.env.webControlTimeoutMs,
-      });
-      if (!activeRuntime.active) {
-        return "inactive";
-      }
-      return activeRuntime.attemptId === input.activeFence.attemptId
-        && activeRuntime.leaseGeneration === String(input.activeFence.generation)
-        && activeRuntime.userId === input.record.userId
-        ? "matching"
-        : "indeterminate";
-    } catch (error) {
+  }): Promise<RuntimeFenceLivenessReadResult> {
+    const result = await readRuntimeFenceLivenessBestEffort({
+      commandBudget: input.commandBudget,
+      identity: {
+        attemptId: input.activeFence.attemptId,
+        leaseGeneration: String(input.activeFence.generation),
+        userId: input.record.userId,
+      },
+      runnerContainerName: input.activeFence.runnerContainerName,
+      runnerContainerNamespace: this.input.runnerContainerNamespace,
+      stepTimeoutMs: this.input.env.webControlTimeoutMs,
+    });
+    if (result.outcome === "indeterminate" && result.error !== undefined) {
       emitHostedExecutionStructuredLog({
         component: "hosted.runner",
-        details: buildHostedRunnerMetadataOnlyErrorDetails(error),
+        details: buildHostedRunnerMetadataOnlyErrorDetails(result.error),
         level: "warn",
         message: "Hosted runner active retention liveness check failed.",
         phase: "scheduled",
         userId: input.record.userId,
       });
-      return "indeterminate";
     }
+    return result;
   }
 
   private async startRuntimeProcessing(input: {

@@ -62,6 +62,9 @@ import {
   readRuntimeProcessingCommandStepTimeoutMs,
   runRuntimeProcessingCommandStep,
 } from "./runtime-command-budget.js";
+import {
+  readRuntimeFenceLivenessBestEffort,
+} from "./runtime-fence-liveness.js";
 import type { RunnerWriteFenceToken } from "./runner-state-store.js";
 import { RunnerStateStore } from "./runner-state-store.js";
 import type { RunnerStateRecord } from "./types.js";
@@ -802,54 +805,43 @@ export class RuntimeInvocationService {
   private async readPreparedAttemptLivenessBestEffort(
     prepared: PreparedRuntimeInvocation,
   ): Promise<RuntimeAttemptLivenessProbeOutcome> {
-    const namespace = this.input.runnerContainerNamespace;
-    if (!namespace) {
-      return "unsupported";
-    }
-    let probeTimer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const container = namespace.getByName(prepared.runnerContainerName);
-      if (!container.readActiveRuntimeUserFence) {
-        return "unsupported";
-      }
-      const active = await Promise.race([
-        container.readActiveRuntimeUserFence(),
-        new Promise<null>((resolve) => {
-          probeTimer = setTimeout(
-            () => resolve(null),
-            RUNTIME_ATTEMPT_LIVENESS_PROBE_TIMEOUT_MS,
-          );
-        }),
-      ]);
-      if (active === null) {
-        this.emitAttemptLivenessProbeUnconfirmedLog({
-          prepared,
-          probeOutcome: "timeout",
-        });
-        return "timeout";
-      }
-      if (!active.active) {
-        return "inactive";
-      }
-      return active.userId === prepared.input.userId
-        && active.attemptId === prepared.token.attemptId
+    const liveness = await readRuntimeFenceLivenessBestEffort({
+      commandBudget: null,
+      identity: {
+        attemptId: prepared.token.attemptId,
         // The container records the generation from the job request; compare
         // against that single source of truth.
-        && active.leaseGeneration === prepared.job.request.leaseGeneration
-        ? "active"
-        : "mismatch";
-    } catch (error) {
+        leaseGeneration: prepared.job.request.leaseGeneration,
+        userId: prepared.input.userId,
+      },
+      runnerContainerName: prepared.runnerContainerName,
+      runnerContainerNamespace: this.input.runnerContainerNamespace,
+      stepTimeoutMs: RUNTIME_ATTEMPT_LIVENESS_PROBE_TIMEOUT_MS,
+    });
+    if (liveness.outcome === "exact-active") {
+      return "active";
+    }
+    if (liveness.outcome === "inactive" || liveness.outcome === "mismatch") {
+      return liveness.outcome;
+    }
+
+    if (liveness.reason === "timeout") {
       this.emitAttemptLivenessProbeUnconfirmedLog({
-        error,
+        ...(liveness.error !== undefined ? { error: liveness.error } : {}),
+        prepared,
+        probeOutcome: "timeout",
+      });
+      return "timeout";
+    }
+    if (liveness.reason === "error") {
+      this.emitAttemptLivenessProbeUnconfirmedLog({
+        ...(liveness.error !== undefined ? { error: liveness.error } : {}),
         prepared,
         probeOutcome: "error",
       });
       return "error";
-    } finally {
-      if (probeTimer !== undefined) {
-        clearTimeout(probeTimer);
-      }
     }
+    return "unsupported";
   }
 
   private emitAttemptLivenessProbeUnconfirmedLog(input: {

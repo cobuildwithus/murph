@@ -170,6 +170,13 @@ foreground/default work arrives, the runner preempts that exact child through
 the existing container abort seam, clears the old fence by identity, and starts
 foreground work. Retention remains recoverable through the workspace's projected
 retention wake instead of becoming a second scheduler concern.
+Runtime-fence liveness uses one container probe vocabulary: exact-active,
+inactive, mismatched, or indeterminate. The probe only answers whether the
+container still has the requested fence identity in flight. It does not own
+completion or replacement policy: UserRunner maps inactive fences to the
+existing clear-and-start path, preserves or retries ambiguous/mismatched
+foreground ownership, and keeps transport-failure committed-progress recovery
+limited to the exact accepted attempt.
 
 The foreground-priority rule does not weaken correctness checks. Wrong-user
 authority, invalid auth, undecryptable mailbox payloads, stale leases, and
