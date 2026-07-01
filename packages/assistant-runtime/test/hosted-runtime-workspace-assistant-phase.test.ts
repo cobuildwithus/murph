@@ -56,7 +56,9 @@ const mocks = vi.hoisted(() => ({
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
+  resolveHostedProviderCleanupCheckpointWakeAt: vi.fn(),
   resolveHostedProviderCleanupDeferredWakeAt: vi.fn(),
+  resolveHostedProviderCleanupScheduledWakeAt: vi.fn(),
   resolveHostedPendingAssistantInputWakeAt: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
   resolveHostedDeviceSyncNextWakeAt: vi.fn(),
@@ -135,8 +137,12 @@ vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
   drainHostedProviderCleanupAfterCommit: mocks.drainHostedProviderCleanupAfterCommit,
   recordHostedProviderCleanupBeforeCommit: mocks.recordHostedProviderCleanupBeforeCommit,
   readHostedProviderCleanupCheckpoint: mocks.readHostedProviderCleanupCheckpoint,
+  resolveHostedProviderCleanupCheckpointWakeAt:
+    mocks.resolveHostedProviderCleanupCheckpointWakeAt,
   resolveHostedProviderCleanupDeferredWakeAt:
     mocks.resolveHostedProviderCleanupDeferredWakeAt,
+  resolveHostedProviderCleanupScheduledWakeAt:
+    mocks.resolveHostedProviderCleanupScheduledWakeAt,
 }));
 
 vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
@@ -356,6 +362,21 @@ beforeEach(() => {
       : Date.parse("2026-04-27T00:00:00.000Z");
     return new Date(nowMs + 5 * 60_000).toISOString();
   });
+  mocks.resolveHostedProviderCleanupCheckpointWakeAt.mockImplementation((input) => {
+    const checkpoint = input.checkpoint as { nextWakeAt?: string | null } | null;
+    if (!checkpoint) {
+      return null;
+    }
+    const nextWakeAt = checkpoint.nextWakeAt ?? null;
+    const nextWakeMs = Date.parse(nextWakeAt ?? "");
+    if (!Number.isFinite(nextWakeMs) || nextWakeMs <= input.nowMs) {
+      return input.deferDueOrInvalid
+        ? mocks.resolveHostedProviderCleanupDeferredWakeAt({ nowMs: input.nowMs })
+        : null;
+    }
+    return nextWakeAt;
+  });
+  mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(null);
   mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValue({
     failed: 0,
     nextWakeAt: null,
@@ -7246,6 +7267,51 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "canonical_runtime_commit",
       nextWakeAt: "2026-04-27T00:12:00.000Z",
+      progressed: true,
+    }));
+  });
+
+  it("re-arms due provider cleanup when fresh foreground input has no delivery effects", async () => {
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValueOnce(
+      "2026-04-27T00:14:00.000Z",
+    );
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: true,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:09:00.000Z",
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-27T00:08:00.000Z",
+        nextWakeReason: "assistant",
+      }),
+    }));
+
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: [],
+      vaultRoot: expect.any(String),
+    });
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith({
+      deferDueOrInvalid: true,
+      nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
       progressed: true,
     }));
   });

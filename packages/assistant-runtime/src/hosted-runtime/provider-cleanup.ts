@@ -70,6 +70,18 @@ export async function readHostedProviderCleanupCheckpoint(
   return (await readHostedProviderCleanupState(vaultRoot))?.checkpoint ?? null;
 }
 
+export async function resolveHostedProviderCleanupScheduledWakeAt(input: {
+  deferDueOrInvalid: boolean;
+  nowMs: number;
+  vaultRoot: string;
+}): Promise<string | null> {
+  return resolveHostedProviderCleanupCheckpointWakeAt({
+    checkpoint: await readHostedProviderCleanupCheckpoint(input.vaultRoot),
+    deferDueOrInvalid: input.deferDueOrInvalid,
+    nowMs: input.nowMs,
+  });
+}
+
 export async function drainHostedProviderCleanupAfterCommit(input: {
   assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
   assertLiveness?: () => Promise<void>;
@@ -163,6 +175,28 @@ export function resolveHostedProviderCleanupDeferredWakeAt(input: {
     ? Number(input.nowMs)
     : Date.now();
   return new Date(nowMs + HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS).toISOString();
+}
+
+export function resolveHostedProviderCleanupCheckpointWakeAt(input: {
+  checkpoint: HostedProviderCleanupCheckpoint | null;
+  deferDueOrInvalid: boolean;
+  nowMs: number;
+}): string | null {
+  if (!input.checkpoint) {
+    return null;
+  }
+
+  const checkpointWakeAt = input.checkpoint.nextWakeAt ?? null;
+  const checkpointWakeMs = Date.parse(checkpointWakeAt ?? "");
+  if (!Number.isFinite(checkpointWakeMs) || checkpointWakeMs <= input.nowMs) {
+    return input.deferDueOrInvalid
+      ? resolveHostedProviderCleanupDeferredWakeAt({
+          nowMs: input.nowMs,
+        })
+      : null;
+  }
+
+  return checkpointWakeAt;
 }
 
 function resolveHostedProviderCleanupRecordedCheckpoint(input: {

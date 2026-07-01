@@ -84,7 +84,9 @@ import {
   drainHostedProviderCleanupAfterCommit,
   readHostedProviderCleanupCheckpoint,
   recordHostedProviderCleanupBeforeCommit,
+  resolveHostedProviderCleanupCheckpointWakeAt,
   resolveHostedProviderCleanupDeferredWakeAt,
+  resolveHostedProviderCleanupScheduledWakeAt,
   type HostedProviderCleanupCheckpoint,
 } from "./provider-cleanup.ts";
 import { normalizeHostedFutureWakeAt } from "./wake-time.ts";
@@ -1750,6 +1752,18 @@ function createFutureExistingHostedAssistantWorkspaceWakeCandidate(
   );
 }
 
+async function resolveHostedProviderCleanupSchedulingWakeCandidate(input: {
+  deferDueOrInvalid: boolean;
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<HostedRuntimeWakeCandidate | null> {
+  const nextWakeAt = await resolveHostedProviderCleanupScheduledWakeAt({
+    deferDueOrInvalid: input.deferDueOrInvalid,
+    nowMs: resolveHostedAssistantPhaseNowMs(input.phaseInput),
+    vaultRoot: input.phaseInput.restored.vaultRoot,
+  });
+  return createHostedRuntimeWakeCandidate(nextWakeAt, HOSTED_ASSISTANT_WAKE_REASON);
+}
+
 function withHostedAssistantCronWakeCandidate(input: {
   assistantCronWake: HostedRuntimeWakeCandidate | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
@@ -3160,6 +3174,12 @@ async function runForegroundAssistantReplyPhase(input: {
   const assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
     assistantNextWakeAt,
   });
+  const providerCleanupSchedulingWake = deliveryEffects.length === 0
+    ? await resolveHostedProviderCleanupSchedulingWakeCandidate({
+        deferDueOrInvalid: true,
+        phaseInput: input.input,
+      })
+    : null;
   const nextWake = selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
     input.foregroundWorkspaceWake,
@@ -3167,6 +3187,7 @@ async function runForegroundAssistantReplyPhase(input: {
     createHostedRuntimeWakeCandidate(outboxWakeAt, "assistant"),
     input.systemMailboxWake,
     createHostedRuntimeWakeCandidate(input.deferredProviderCleanupWakeAt, "assistant"),
+    providerCleanupSchedulingWake,
   ]);
   const nextWakeAt = nextWake.at;
   const wakeStateProgressed = hostedAssistantWakeStateProgressed({
@@ -3366,6 +3387,12 @@ async function drainHostedPostCheckpointDelivery(input: {
     });
     providerCleanupNextWakeAt = providerCleanup.nextWakeAt;
   }
+  const providerCleanupSchedulingWake = providerCleanupNextWakeAt === null
+    ? await resolveHostedProviderCleanupSchedulingWakeCandidate({
+        deferDueOrInvalid: input.providerCleanup.mode === "defer",
+        phaseInput: input.input,
+      })
+    : null;
   const postOutboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
@@ -3409,6 +3436,7 @@ async function drainHostedPostCheckpointDelivery(input: {
     createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(providerCleanupNextWakeAt, "assistant"),
+    providerCleanupSchedulingWake,
   ]);
   const postNextWakeAt = postNextWake.at;
   if (input.assistantDeliveryEffects.length > 0) {
@@ -5219,28 +5247,6 @@ function resolveHostedProviderCleanupPhaseWakeAt(input: {
     createHostedRuntimeWakeCandidate(terminalCleanupWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(checkpointWakeAt, "assistant"),
   ]).at;
-}
-
-function resolveHostedProviderCleanupCheckpointWakeAt(input: {
-  checkpoint: HostedProviderCleanupCheckpoint | null;
-  deferDueOrInvalid: boolean;
-  nowMs: number;
-}): string | null {
-  if (!input.checkpoint) {
-    return null;
-  }
-
-  const checkpointWakeAt = input.checkpoint.nextWakeAt ?? null;
-  const checkpointWakeMs = Date.parse(checkpointWakeAt ?? "");
-  if (!Number.isFinite(checkpointWakeMs) || checkpointWakeMs <= input.nowMs) {
-    return input.deferDueOrInvalid
-      ? resolveHostedProviderCleanupDeferredWakeAt({
-          nowMs: input.nowMs,
-        })
-      : null;
-  }
-
-  return checkpointWakeAt;
 }
 
 function shouldDropHostedFastDispatchSkippedDeviceSyncRetry(input: {
