@@ -146,16 +146,21 @@ async function addSeatThenInvite<T>(
     prisma,
     targetSeatCount,
   });
-  // Only issue once the webhook reconciled the new count, so the follow-up invite
-  // sees the open seat. If it is still syncing, the caller tells the owner to
-  // retry rather than failing with a bare seat-limit error.
-  const confirmed = await waitForHostedFamilyBilledSeatCount({
+  // Give the webhook a moment to reconcile the new count, then let the invite
+  // itself be the test: if any seat is now open (even if a concurrent change
+  // pushed the count past our target) it lands; only a still-full plan reports
+  // syncing so the owner retries instead of seeing a bare seat-limit error.
+  await waitForHostedFamilyBilledSeatCount({
     groupId: snapshot.groupId,
     prisma,
     targetSeatCount,
   });
-  if (!confirmed) {
-    return "syncing";
+  try {
+    return { invite: await issueInvite() };
+  } catch (error) {
+    if (isSeatLimitError(error)) {
+      return "syncing";
+    }
+    throw error;
   }
-  return { invite: await issueInvite() };
 }

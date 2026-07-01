@@ -218,32 +218,10 @@ test("reuses a concurrently-created invite on the pre-buy re-check (no purchase)
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
 });
 
-test("reports a syncing state (no failed invite) when the seat webhook is slow", async () => {
-  const seatLimit = () =>
-    hostedOnboardingError({
-      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
-      httpStatus: 409,
-      message: "This Family plan has no open paid seats.",
-    });
-  mocks.issueHostedFamilyInviteTx
-    .mockRejectedValueOnce(seatLimit())
-    .mockRejectedValueOnce(seatLimit());
-  mocks.waitForHostedFamilyBilledSeatCount.mockResolvedValueOnce(false);
-
-  const response = await inviteRoute.POST(
-    inviteRequest({ addSeatIfNeeded: true, targetLabel: "Dad", targetPhoneNumber: "+48600000001" }),
-  );
-
-  expect(response.status).toBe(409);
-  await expect(response.json()).resolves.toMatchObject({
-    error: { code: "HOSTED_FAMILY_SEAT_ADDED_SYNCING" },
-  });
-  // Seat added once, and no post-add invite attempt that would fail confusingly.
-  expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledTimes(1);
-  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
-});
-
-test("adds at most one seat and surfaces the limit if a confirmed seat is taken first", async () => {
+test("adds one seat then reports syncing if the invite still cannot land", async () => {
+  // Every attempt (initial, pre-buy re-check, post-buy) hits the limit, e.g. a
+  // slow webhook or a concurrent grab. Exactly one seat is purchased and the
+  // owner is told it is syncing rather than seeing a bare seat-limit error.
   mocks.issueHostedFamilyInviteTx.mockRejectedValue(
     hostedOnboardingError({
       code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
@@ -258,9 +236,8 @@ test("adds at most one seat and surfaces the limit if a confirmed seat is taken 
 
   expect(response.status).toBe(409);
   await expect(response.json()).resolves.toMatchObject({
-    error: { code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED" },
+    error: { code: "HOSTED_FAMILY_SEAT_ADDED_SYNCING" },
   });
-  // Initial attempt, pre-buy re-check, and the post-buy attempt: one purchase.
   expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledTimes(1);
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(3);
 });
