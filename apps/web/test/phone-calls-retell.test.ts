@@ -148,6 +148,9 @@ describe("Retell phone-call runtime", () => {
         webhook_url: "https://local-tunnel.example.test/api/retell/webhook",
       },
     });
+    expect(body.retell_llm_dynamic_variables).toMatchObject({
+      murph_public_base_url: "https://local-tunnel.example.test",
+    });
   });
 
   it("rejects malformed Retell webhook public bases before creating a call", async () => {
@@ -447,15 +450,23 @@ describe("Retell phone-call result handling", () => {
       data_storage_setting: "basic_attributes_only",
     };
 
-    await handleRetellCallAnalyzed({
+    const firstResult = await handleRetellCallAnalyzed({
       call,
       prisma: store.prisma,
     });
-    await handleRetellCallAnalyzed({
+    const secondResult = await handleRetellCallAnalyzed({
       call,
       prisma: store.prisma,
     });
 
+    expect(firstResult).toEqual({
+      notificationMailboxItemId: "mailbox_hpc_123",
+      notificationUserId: "member_123",
+    });
+    expect(secondResult).toEqual({
+      notificationMailboxItemId: "mailbox_hpc_123",
+      notificationUserId: "member_123",
+    });
     expect(store.updateManyCalls).toHaveLength(1);
     expect(store.updateManyCalls[0]).toMatchObject({
       data: {
@@ -983,6 +994,10 @@ function createWebhookStore(input: {
     appendResultNotification: async (call) => {
       appendResultNotificationCalls.push(call);
       await input.appendResultNotification?.(call);
+      return {
+        notificationMailboxItemId: `mailbox_${call.id}`,
+        notificationUserId: call.memberId,
+      };
     },
     hostedPhoneCall: {
       findUnique: async (args) => {
