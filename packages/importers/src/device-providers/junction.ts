@@ -1802,6 +1802,9 @@ function collectJunctionSleepStageAggregates(
   const parentTimestamp = resolveRecordTimestamp(entry, context, resourceContext.sourceProviderSlug);
   const intervals = collectJunctionSleepStageIntervals(entry, resourceContext, context, parentTimestamp);
   const parentResourceId = resolveSleepCycleParentResourceId(resourceContext, entry, parentTimestamp);
+  if (!parentResourceId) {
+    return;
+  }
 
   for (const interval of intervals) {
     for (const segment of splitJunctionSleepStageInterval(interval, entry, parentTimestamp, context.defaultTimeZone)) {
@@ -1912,20 +1915,13 @@ function resolveSleepCycleParentResourceId(
   resourceContext: ResourceContext,
   entry: PlainObject,
   parentTimestamp: ReturnType<typeof resolveRecordTimestamp>,
-): string {
-  if (
-    parentTimestamp.observedAtRaw ||
-    firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS)
-  ) {
+): string | undefined {
+  const explicitParentId = firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
+  if ((parentTimestamp.observedAtRaw || explicitParentId) && !isDirectSleepStageIntervalEntry(entry)) {
     return buildStableResourceId(resourceContext, entry, parentTimestamp);
   }
 
-  return `${resourceContext.resourceSlug}-stage-stream-${shortHash([
-    resourceContext.resourceSlug,
-    resourceContext.sourceProviderSlug,
-    resourceContext.origin.sourceType,
-    resourceContext.origin.sourceInstanceId,
-  ])}`;
+  return undefined;
 }
 
 function splitJunctionSleepStageInterval(
@@ -2028,20 +2024,21 @@ function resolveSleepStageDayKey(
 function resolveSleepStageBucketTimeZone(
   intervalEntry: PlainObject,
   parentEntry: PlainObject,
-  defaultTimeZone: string | undefined,
+  _defaultTimeZone: string | undefined,
 ): string | undefined {
   const explicitTimeZone = firstStringFromPaths(intervalEntry, ["timeZone", "timezone", "time_zone"])
     ?? firstStringFromPaths(parentEntry, ["timeZone", "timezone", "time_zone"]);
   const intervalOffsetSeconds = readJunctionTimeZoneOffsetSeconds(intervalEntry);
   const parentOffsetSeconds = readJunctionTimeZoneOffsetSeconds(parentEntry);
-  // Offset-only sleep-stage rows keep their historic UTC-day identity for
-  // stable replay; explicit IANA/UTC zones and vault defaults can be split.
+  // Only provider-supplied zones can define durable stage buckets. The vault
+  // default timezone is mutable profile state, so missing/null provider zones
+  // keep stable UTC-day identity.
   const hasOffsetOnlyEvidence = !explicitTimeZone && (
     intervalOffsetSeconds !== null && intervalOffsetSeconds !== undefined ||
     parentOffsetSeconds !== null && parentOffsetSeconds !== undefined
   );
 
-  return explicitTimeZone ?? (hasOffsetOnlyEvidence ? undefined : defaultTimeZone);
+  return hasOffsetOnlyEvidence ? undefined : explicitTimeZone;
 }
 
 function splitIsoIntervalByLocalDay(
@@ -3815,21 +3812,27 @@ function groupedTimeseriesResourceEntries(payload: unknown): JunctionResourceEnt
 }
 
 function sleepStageIntervalEntries(entry: PlainObject): PlainObject[] {
+  const seen = new Set<PlainObject>();
+
   return [
-    ...collectSleepStageIntervalEntries(entry),
+    ...collectSleepStageIntervalEntries(entry, seen),
     ...parallelSleepStageIntervalEntries(entry),
   ];
 }
 
-function collectSleepStageIntervalEntries(value: unknown): PlainObject[] {
+function collectSleepStageIntervalEntries(value: unknown, seen: Set<PlainObject>): PlainObject[] {
   if (Array.isArray(value)) {
-    return value.flatMap((entry) => collectSleepStageIntervalEntries(entry));
+    return value.flatMap((entry) => collectSleepStageIntervalEntries(entry, seen));
   }
 
   const entry = asPlainObject(value);
   if (!entry) {
     return [];
   }
+  if (seen.has(entry)) {
+    return [];
+  }
+  seen.add(entry);
 
   if (firstSleepStageFromPaths(entry, JUNCTION_SLEEP_STAGE_VALUE_PATHS)) {
     return [entry];
@@ -3841,7 +3844,7 @@ function collectSleepStageIntervalEntries(value: unknown): PlainObject[] {
       return [];
     }
 
-    return collectSleepStageIntervalEntries(nested);
+    return collectSleepStageIntervalEntries(nested, seen);
   });
 }
 
