@@ -451,6 +451,8 @@ export async function runHostedWorkspaceAssistantPhase(
             operatorHomeRoot: input.restored.operatorHomeRoot,
             runtimeAttemptId: input.request.attemptId,
             runtimeEnv: input.runtimeEnv,
+            shouldYieldBackgroundMaintenance:
+              input.shouldYieldBackgroundMaintenance ?? null,
             signal: input.signal ?? undefined,
             vaultRoot: input.restored.vaultRoot,
             wake,

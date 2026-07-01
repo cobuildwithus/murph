@@ -3201,6 +3201,41 @@ describe("runHostedAssistantAutomationLane", () => {
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });
 
+  it("passes the background-yield signal into hosted cron deferral", async () => {
+    const shouldYieldBackgroundMaintenance = vi.fn().mockReturnValue(true);
+    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-08T01:00:00.000Z",
+      progressed: false,
+    });
+
+    await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_assistant_lane_yield",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_yield",
+      runtime: createHostedAutomationRuntime(),
+      shouldYieldBackgroundMaintenance,
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "req_yield",
+        shouldDeferCron: shouldYieldBackgroundMaintenance,
+      }),
+    );
+  });
+
   it("records provider trace diagnostics from the maintenance automation lane", async () => {
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       input.onTraceEvent?.({

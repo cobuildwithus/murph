@@ -3417,6 +3417,132 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("runtime wake interrupts background maintenance before late assistant input import completes", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_yield_during_import_initial",
+        laneSeq: "1",
+      }),
+    ];
+    const importStartedSeqs: string[] = [];
+    const importedSeqs: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const yieldStates: boolean[] = [];
+    let releaseLateImport = (): void => {};
+    let lateImportStarted = (): void => {};
+    const lateImportStartedPromise = new Promise<void>((resolve) => {
+      lateImportStarted = resolve;
+    });
+    const lateImportReleasePromise = new Promise<void>((resolve) => {
+      releaseLateImport = resolve;
+    });
+
+    try {
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: TEST_NOW,
+        }],
+        updatedAt: TEST_NOW,
+        version: 1,
+      });
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_active_turn_yield_during_import",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "4",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          importStartedSeqs.push(item.item.laneSeq);
+          if (item.item.laneSeq === "1") {
+            importedSeqs.push(item.item.laneSeq);
+            return { status: "imported" };
+          }
+
+          lateImportStarted();
+          await lateImportReleasePromise;
+          const staged = await upsertAssistantInputEvent({
+            event: createStoredAssistantInputEventForMailboxItem(
+              item.item,
+              `late same-conversation input ${item.item.laneSeq}`,
+            ),
+            vault: vaultRoot,
+          });
+          await enqueueHostedPendingAssistantInputId({
+            inputId: staged.inputId,
+            vaultRoot,
+          });
+          importedSeqs.push(item.item.laneSeq);
+          return {
+            assistantInputId: staged.inputId,
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_active_turn_yield_during_import",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          items.push(createMailboxItem({
+            id: "mailbox_item_runner_yield_during_import_late",
+            laneSeq: "2",
+            occurredAt: "2026-04-26T00:00:02.000Z",
+          }));
+          runtimeWakeSignal.notify();
+          await lateImportStartedPromise;
+          await waitForCondition(() =>
+            input.shouldYieldBackgroundMaintenance?.() === true
+          );
+          yieldStates.push(input.shouldYieldBackgroundMaintenance?.() ?? false);
+          assert.deepEqual(importedSeqs, ["1"]);
+          releaseLateImport();
+          await waitForCondition(() => importedSeqs.includes("2"));
+          return {
+            checkpointReason: "canonical_runtime_commit",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(importStartedSeqs, ["1", "2"]);
+      assert.deepEqual(importedSeqs, ["1", "2"]);
+      assert.deepEqual(yieldStates, [false, true]);
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
+      assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
+          { importedSeq: "1", lane: "conversation" },
+        ],
+      ]);
+    } finally {
+      releaseLateImport();
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("late foreground input without an active turn schedules pending-index assistant wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items = [
