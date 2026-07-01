@@ -434,6 +434,72 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       memberId: "member_123",
       prisma: {} as never,
     });
+    expect(mocks.readHostedLinqAssignableHomeLineByPhone).toHaveBeenCalledWith({
+      phoneNumber: "+15550100001",
+      prisma: {} as never,
+    });
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale home-chat member match before treating it as a first bind", async () => {
+    mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+
+    await expect(
+      resolveHostedMemberLinqHomeLineRouteBindingTx({
+        incomingChatId: "chat_stale_lookup",
+        incomingDirectAttested: false,
+        incomingRecipientPhone: "+15550100001",
+        memberAuthority: {
+          kind: "home-linq-chat",
+        },
+        memberId: "member_123",
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      kind: "ignore_unknown_home",
+    });
+
+    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale pending-contact member match before treating it as a first bind", async () => {
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: null,
+      linqHomeLineAssignedAt: null,
+      linqRecipientPhone: null,
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+
+    await expect(
+      resolveHostedMemberLinqHomeLineRouteBindingTx({
+        incomingChatId: "chat_new",
+        incomingDirectAttested: false,
+        incomingRecipientPhone: "+15550100001",
+        memberAuthority: {
+          contact: {
+            kind: "phone",
+            lookupKey: "lookup:+15551234567",
+            value: "+15551234567",
+          },
+          kind: "pending-contact",
+        },
+        memberId: "member_123",
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      kind: "ignore_unknown_home",
+    });
+
     expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
@@ -541,6 +607,50 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     });
 
     expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
+  });
+
+  it("uses the pending route recipient instead of a stale home recipient", async () => {
+    const pendingLine = buildLine("+15550100002");
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: null,
+      linqHomeLineAssignedAt: new Date("2026-06-30T14:15:00.000Z"),
+      linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqChatId: "chat_pending",
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: pendingLine.phoneNumber,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockImplementation(async ({ phoneNumber }) => {
+      if (phoneNumber !== pendingLine.phoneNumber) {
+        throw new Error("pending route binding must not use the stale home recipient");
+      }
+      return pendingLine;
+    });
+
+    await expect(
+      resolveHostedMemberLinqHomeLineRouteBindingTx({
+        incomingChatId: "chat_pending",
+        incomingDirectAttested: false,
+        incomingRecipientPhone: pendingLine.phoneNumber,
+        memberId: "member_123",
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      homeLineAssignedAt: new Date("2026-06-30T14:15:00.000Z"),
+      kind: "bind",
+      recipientPhone: pendingLine.phoneNumber,
+    });
+
+    expect(mocks.readHostedLinqAssignableHomeLineByPhone).toHaveBeenCalledWith({
+      phoneNumber: pendingLine.phoneNumber,
+      prisma: {} as never,
+    });
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
   });

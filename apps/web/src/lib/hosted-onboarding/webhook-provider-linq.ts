@@ -78,6 +78,7 @@ import {
   readHostedLinqAssignableHomeLineByPhone,
 } from "./linq-line-store";
 import {
+  type HostedLinqHomeLineRouteBindingAuthority,
   type HostedLinqHomeLineRouteBindingResult,
   resolveHostedMemberLinqHomeLineRouteBindingTx,
   reserveHostedLinqHomeLineForPhoneTx,
@@ -271,6 +272,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
     existingPendingLinqContactLookupPresent: Boolean(existingPendingLinqContactLookup),
     participantContactKind: participantContact.kind,
   });
+  const memberRouteBindingAuthority = resolveHostedLinqHomeLineRouteBindingAuthority({
+    existingMemberMatch,
+    participantContact,
+  });
   const existingMemberSuspended = existingMember
     ? isHostedMemberSuspended(existingMember.suspendedAt)
     : false;
@@ -427,6 +432,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
           incomingChatId: summary.chatId,
           incomingDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
           incomingRecipientPhone: recipientPhoneNumber,
+          memberAuthority: memberRouteBindingAuthority?.kind === "pending-contact"
+            ? { kind: "member-identity" }
+            : memberRouteBindingAuthority,
           memberId: existingMember?.id ?? null,
           prisma: input.prisma,
         });
@@ -516,6 +524,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       incomingChatId: summary.chatId,
       incomingDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
       incomingRecipientPhone: recipientPhoneNumber,
+      memberAuthority: memberRouteBindingAuthority,
       memberId: existingMember.id,
       prisma: input.prisma,
     });
@@ -742,6 +751,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     incomingChatId: summary.chatId,
     incomingDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
     incomingRecipientPhone: recipientPhoneNumber,
+    memberAuthority: memberRouteBindingAuthority,
     memberId: existingMember?.id ?? null,
     prisma: input.prisma,
   });
@@ -844,6 +854,7 @@ async function resolveIncomingHostedLinqHomeLineRouteBindingTx(input: {
   incomingChatId: string;
   incomingDirectAttested: boolean;
   incomingRecipientPhone: string | null;
+  memberAuthority?: HostedLinqHomeLineRouteBindingAuthority | null;
   memberId?: string | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLineRouteBindingResult> {
@@ -852,6 +863,7 @@ async function resolveIncomingHostedLinqHomeLineRouteBindingTx(input: {
       incomingChatId: input.incomingChatId,
       incomingDirectAttested: input.incomingDirectAttested,
       incomingRecipientPhone: input.incomingRecipientPhone,
+      memberAuthority: input.memberAuthority ?? null,
       memberId: input.memberId,
       prisma: input.prisma,
     });
@@ -1321,6 +1333,35 @@ function resolveHostedLinqExistingMemberMatch(input: {
   }
 
   return "none";
+}
+
+function resolveHostedLinqHomeLineRouteBindingAuthority(input: {
+  existingMemberMatch: HostedLinqExistingMemberMatch;
+  participantContact: HostedLinqParticipantContact;
+}): HostedLinqHomeLineRouteBindingAuthority | null {
+  if (
+    input.existingMemberMatch === "phone-identity"
+    || input.existingMemberMatch === "verified-email"
+  ) {
+    return {
+      kind: "member-identity",
+    };
+  }
+
+  if (input.existingMemberMatch === "home-linq-chat") {
+    return {
+      kind: "home-linq-chat",
+    };
+  }
+
+  if (input.existingMemberMatch === "pending-contact") {
+    return {
+      contact: input.participantContact,
+      kind: "pending-contact",
+    };
+  }
+
+  return null;
 }
 
 function buildHostedLinqWebhookPlannerDetails(

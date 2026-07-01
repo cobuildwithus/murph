@@ -26,6 +26,7 @@ import {
 } from "./linq-line-store";
 import { normalizePhoneNumber } from "./phone";
 import { hostedOnboardingError } from "./errors";
+import type { HostedLinqParticipantContact } from "./linq-participant-contact";
 import type { Prisma } from "@prisma/client";
 
 export interface HostedMemberActivationLinqRouteResolution {
@@ -63,6 +64,18 @@ export type HostedLinqHomeLineRouteBindingResult =
       kind: "capacity_exhausted";
     };
 
+export type HostedLinqHomeLineRouteBindingAuthority =
+  | {
+      kind: "home-linq-chat";
+    }
+  | {
+      contact: HostedLinqParticipantContact;
+      kind: "pending-contact";
+    }
+  | {
+      kind: "member-identity";
+    };
+
 export async function reserveHostedLinqHomeLineForPhoneTx(input: {
   phoneNumber: string;
   prisma: Prisma.TransactionClient;
@@ -81,6 +94,7 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
   incomingChatId: string;
   incomingDirectAttested: boolean;
   incomingRecipientPhone: string | null;
+  memberAuthority?: HostedLinqHomeLineRouteBindingAuthority | null;
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLineRouteBindingResult> {
@@ -93,13 +107,21 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  const routedChatId = routing?.linqChatId ?? routing?.pendingLinqChatId ?? null;
-  const routedRecipientPhone =
-    normalizePhoneNumber(routing?.linqRecipientPhone)
-    ?? normalizePhoneNumber(routing?.pendingLinqRecipientPhone);
+  const currentRoute = resolveHostedMemberCurrentLinqRoute(routing);
+
+  if (!hostedLinqRouteBindingAuthorityMatchesCurrentRoute({
+    authority: input.memberAuthority ?? { kind: "member-identity" },
+    incomingChatId: input.incomingChatId,
+    routing,
+  })) {
+    return {
+      kind: "ignore_unknown_home",
+    };
+  }
+
   const routeDecision = resolveHostedLinqActiveRouteDecision({
-    homeChatId: routedChatId,
-    homeRecipientPhone: routedRecipientPhone,
+    homeChatId: currentRoute?.chatId ?? null,
+    homeRecipientPhone: currentRoute?.recipientPhone ?? null,
     incomingChatId: input.incomingChatId,
     incomingDirectAttested: input.incomingDirectAttested,
     incomingRecipientPhone: input.incomingRecipientPhone,
@@ -110,13 +132,32 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
   }
 
   const recipientPhone = resolveHostedLinqHomeBindingRecipientPhone({
-    homeChatId: routedChatId,
-    homeRecipientPhone: routedRecipientPhone,
+    homeChatId: currentRoute?.chatId ?? null,
+    homeRecipientPhone: currentRoute?.recipientPhone ?? null,
     incomingChatId: input.incomingChatId,
     incomingRecipientPhone: input.incomingRecipientPhone,
   });
 
-  if (routedChatId === input.incomingChatId) {
+  if (currentRoute?.chatId === input.incomingChatId) {
+    if (currentRoute.kind === "pending" && recipientPhone) {
+      const line = await readHostedLinqAssignableHomeLineByPhone({
+        phoneNumber: recipientPhone,
+        prisma: input.prisma,
+      });
+
+      if (!line) {
+        return {
+          kind: "unassignable",
+        };
+      }
+
+      return {
+        homeLineAssignedAt: routing?.linqHomeLineAssignedAt ?? null,
+        kind: "bind",
+        recipientPhone: line.phoneNumber,
+      };
+    }
+
     return {
       homeLineAssignedAt: routing?.linqHomeLineAssignedAt ?? null,
       kind: "bind",
@@ -141,7 +182,7 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
     };
   }
 
-  if (routing && routedChatId && routedRecipientPhone === line.phoneNumber) {
+  if (routing && currentRoute && currentRoute.recipientPhone === line.phoneNumber) {
     return {
       homeLineAssignedAt: routing.linqHomeLineAssignedAt ?? null,
       kind: "bind",
@@ -509,6 +550,44 @@ async function reserveOrReuseHostedMemberLinqHomeLineForPhoneTx(input: {
     kind: "reserved",
     reservation,
   };
+}
+
+function resolveHostedMemberCurrentLinqRoute(
+  routing: HostedMemberRoutingStateSnapshot | null,
+): { chatId: string; kind: "home" | "pending"; recipientPhone: string | null } | null {
+  if (routing?.linqChatId) {
+    return {
+      chatId: routing.linqChatId,
+      kind: "home",
+      recipientPhone: normalizePhoneNumber(routing.linqRecipientPhone),
+    };
+  }
+
+  if (routing?.pendingLinqChatId) {
+    return {
+      chatId: routing.pendingLinqChatId,
+      kind: "pending",
+      recipientPhone: normalizePhoneNumber(routing.pendingLinqRecipientPhone),
+    };
+  }
+
+  return null;
+}
+
+function hostedLinqRouteBindingAuthorityMatchesCurrentRoute(input: {
+  authority: HostedLinqHomeLineRouteBindingAuthority;
+  incomingChatId: string;
+  routing: HostedMemberRoutingStateSnapshot | null;
+}): boolean {
+  if (input.authority.kind === "member-identity") {
+    return true;
+  }
+
+  if (input.authority.kind === "home-linq-chat") {
+    return input.routing?.linqChatId === input.incomingChatId;
+  }
+
+  return input.routing?.pendingLinqParticipantContact?.lookupKey === input.authority.contact.lookupKey;
 }
 
 function resolveReusableBareSameDayHomeLineAssignedAt(input: {
