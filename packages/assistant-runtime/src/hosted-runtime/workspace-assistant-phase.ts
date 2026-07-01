@@ -1750,32 +1750,9 @@ function createFutureExistingHostedAssistantWorkspaceWakeCandidate(
   );
 }
 
-function shouldResolveHostedForegroundProviderCleanupCheckpointWake(input: {
-  foregroundWorkspaceWake: HostedRuntimeWakeCandidate | null;
-  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
-}): boolean {
-  if (input.foregroundWorkspaceWake?.at) {
-    return false;
-  }
-
-  const workspaceWake = createExistingHostedAssistantWorkspaceWakeCandidate(input.phaseInput);
-  if (!workspaceWake?.at) {
-    return false;
-  }
-
-  const wakeMs = Date.parse(workspaceWake.at);
-  return Number.isFinite(wakeMs)
-    && wakeMs <= resolveHostedAssistantPhaseNowMs(input.phaseInput);
-}
-
 async function resolveHostedForegroundProviderCleanupCheckpointWakeCandidate(input: {
-  foregroundWorkspaceWake: HostedRuntimeWakeCandidate | null;
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
 }): Promise<HostedRuntimeWakeCandidate | null> {
-  if (!shouldResolveHostedForegroundProviderCleanupCheckpointWake(input)) {
-    return null;
-  }
-
   const checkpoint =
     await readHostedProviderCleanupCheckpoint(input.phaseInput.restored.vaultRoot);
   const nextWakeAt = resolveHostedProviderCleanupCheckpointWakeAt({
@@ -1787,13 +1764,11 @@ async function resolveHostedForegroundProviderCleanupCheckpointWakeCandidate(inp
 }
 
 async function withHostedForegroundProviderCleanupCheckpointWake(input: {
-  foregroundWorkspaceWake: HostedRuntimeWakeCandidate | null;
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
   result: HostedWorkspaceRunnerAssistantPhasePostCheckpoint;
 }): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
   const providerCleanupWake =
     await resolveHostedForegroundProviderCleanupCheckpointWakeCandidate({
-      foregroundWorkspaceWake: input.foregroundWorkspaceWake,
       phaseInput: input.phaseInput,
     });
   if (!providerCleanupWake?.at) {
@@ -3171,7 +3146,6 @@ async function runForegroundAssistantReplyPhase(input: {
     });
     const postDeliveryWithCleanupWake =
       await withHostedForegroundProviderCleanupCheckpointWake({
-        foregroundWorkspaceWake: input.foregroundWorkspaceWake,
         phaseInput: input.input,
         result: postDelivery,
       });
@@ -3245,7 +3219,6 @@ async function runForegroundAssistantReplyPhase(input: {
   });
   const foregroundProviderCleanupWake = deliveryEffects.length === 0
     ? await resolveHostedForegroundProviderCleanupCheckpointWakeCandidate({
-        foregroundWorkspaceWake: input.foregroundWorkspaceWake,
         phaseInput: input.input,
       })
     : null;
@@ -3332,7 +3305,6 @@ async function runForegroundAssistantReplyPhase(input: {
               wake: input.wake,
             });
             return await withHostedForegroundProviderCleanupCheckpointWake({
-              foregroundWorkspaceWake: input.foregroundWorkspaceWake,
               phaseInput: input.input,
               result: postDelivery,
             });
