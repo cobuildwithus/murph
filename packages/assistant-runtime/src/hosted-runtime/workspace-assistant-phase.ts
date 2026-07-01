@@ -335,21 +335,30 @@ export async function runHostedWorkspaceAssistantPhase(
       });
     const shouldContinueAssistantLane = systemMailboxMaintenance.continueAssistantLane
       || managedAutomationsResult !== null;
+    const initialProviderCleanupCheckpoint =
+      systemMailboxMaintenance.initialProviderCleanupCheckpoint;
+    const systemMailboxProviderCleanupDue = isHostedProviderCleanupCheckpointDue(
+      initialProviderCleanupCheckpoint,
+      input,
+    );
+    const shouldBypassMaintenanceEarlyReturnForProviderCleanup =
+      systemMailboxProviderCleanupDue
+      && systemMailboxMaintenance.result?.checkpointReason === "assistant_runtime_commit";
     if (
       systemMailboxMaintenance.result
       && !shouldContinueAssistantLane
+      && !shouldBypassMaintenanceEarlyReturnForProviderCleanup
     ) {
       return withHostedDeviceSyncMaintenanceRan(
         systemMailboxMaintenance.result,
         systemMailboxMaintenance.deviceSyncMaintenanceRan,
       );
     }
-    let continuingSystemMailboxResult = shouldContinueAssistantLane
-      ? mergeHostedAssistantPhaseResults(systemMailboxMaintenance.result, managedAutomationsResult)
-      : managedAutomationsResult;
+    let continuingSystemMailboxResult =
+      shouldContinueAssistantLane || shouldBypassMaintenanceEarlyReturnForProviderCleanup
+        ? mergeHostedAssistantPhaseResults(systemMailboxMaintenance.result, managedAutomationsResult)
+        : managedAutomationsResult;
     let deviceSyncMaintenanceRan = systemMailboxMaintenance.deviceSyncMaintenanceRan;
-    const initialProviderCleanupCheckpoint =
-      systemMailboxMaintenance.initialProviderCleanupCheckpoint;
     const mergeContinuingSystemMailboxResult = (
       assistantResult: HostedWorkspaceRunnerAssistantPhaseResult,
     ): HostedWorkspaceRunnerAssistantPhaseResult =>
@@ -819,6 +828,10 @@ export async function runHostedWorkspaceAssistantPhase(
                 assistantCronWakeAfterPassCandidate,
                 deviceSyncFollowUpWake,
                 systemMailboxWake,
+                createHostedRuntimeWakeCandidate(
+                  continuingSystemMailboxResult?.nextWakeAt ?? null,
+                  continuingSystemMailboxResult?.nextWakeReason ?? "assistant",
+                ),
                 createHostedRuntimeWakeCandidate(deferredProviderCleanupWakeAt, "assistant"),
               ]);
               const baseNextWakeAt = baseNextWake.at;
