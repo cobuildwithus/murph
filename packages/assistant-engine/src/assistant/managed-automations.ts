@@ -386,7 +386,10 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'A hosted-only app-server maintenance wake for canonical vault memory.',
     schedule: {
       kind: 'cron',
-      expression: '0 3 */2 * *',
+      // Alternating nights via day-of-month steps ('*/2') is wrong at month
+      // boundaries (a 31st fires again on the 1st). Fixed days-of-week keep
+      // the 03:00 local anchor with no consecutive-night occurrences.
+      expression: '0 3 * * 1,3,5',
     },
     continuityPolicy: 'fresh',
     hostedRuntimeOnly: true,
@@ -401,10 +404,10 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'Goal: consolidate durable user context from recent assistant/user conversation history into the canonical vault memory surface.',
       '',
       'Read existing saved context with `vault-cli memory show --format json` first so any writes are deduplicated against existing memory.',
-      'Retrieval budget: review all available committed user messages from the last 7 days, plus committed assistant messages from the same window only when they record a completed user-approved action or directly clarify user context.',
-      'Write durable memory only with `vault-cli memory upsert` or `vault-cli memory update` when a concise, user-useful fact is clearly supported by canonical inputs or the last-7-days conversation evidence available to this scheduled turn and is not already represented.',
-      'Before returning, validate each proposed write against existing memory and the last-7-days evidence window. Skip anything uncertain, duplicated, sensitive, or merely transient task detail.',
-      'Do not inspect hidden Codex memory state, assistant runtime logs, unbounded transcript history, unbounded filesystem trees, or vault health data. Do not call external services or send the user a message.',
+      'Retrieval budget: use only the engine-supplied "Conversation evidence" section appended to this prompt. It already contains the bounded committed user and assistant conversation messages from the last 7 days; count assistant messages as support only when they record a completed user-approved action or directly clarify user context. If that section reports no messages, do not write any new memory.',
+      'Write durable memory only with `vault-cli memory upsert` or `vault-cli memory update` when a concise, user-useful fact is clearly supported by existing memory or the supplied conversation evidence and is not already represented.',
+      'Before returning, validate each proposed write against existing memory and the supplied conversation evidence. Skip anything uncertain, duplicated, sensitive, or merely transient task detail.',
+      'Do not read transcript files or session storage, hidden Codex memory state, assistant runtime logs, unbounded filesystem trees, or vault health data. Do not call external services or send the user a message.',
       'Do not save assistant speculation, generic advice, transient task details, credentials, payment details, contact details, sensitive identifiers, or medical details from conversation text.',
       `Return exactly \`{"kind":"skip","privateSummary":"${MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY}"}\`.`,
     ].join('\n'),

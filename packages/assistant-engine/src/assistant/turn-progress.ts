@@ -73,7 +73,7 @@ export function shouldCreateAssistantProgressDelivery(
   >,
   profile?: {
     promptProfile?: 'conversation' | 'notification-decision' | null
-    toolProfile?: 'provider-turn' | 'notification-turn' | null
+    toolProfile?: 'provider-turn' | 'notification-turn' | 'maintenance-turn' | null
   } | null,
 ): boolean {
   return input.deliverResponse === true &&

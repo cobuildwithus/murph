@@ -381,20 +381,20 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.assistantTargetOverride).toEqual({
       reasoningEffort: 'medium',
     })
-    expect(seed.schedule.expression).toBe('0 3 */2 * *')
+    expect(seed.schedule.expression).toBe('0 3 * * 1,3,5')
     expect(seed.slug).toBe('overnight-memory-consolidation')
     expect(seed.tags).toContain('murph-managed:overnight-memory-consolidation')
     expect(seed.tags).toContain('runtime-maintenance')
     expect(seed.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(seed.instructions).toContain('Goal: consolidate durable user context')
-    expect(seed.instructions).toContain('all available committed user messages from the last 7 days')
-    expect(seed.instructions).toContain('committed assistant messages from the same window')
-    expect(seed.instructions).toContain('last-7-days evidence window')
+    expect(seed.instructions).toContain('engine-supplied "Conversation evidence" section')
+    expect(seed.instructions).toContain('bounded committed user and assistant conversation messages from the last 7 days')
+    expect(seed.instructions).toContain('supplied conversation evidence')
     expect(seed.instructions).toContain('vault-cli memory show --format json')
     expect(seed.instructions).toContain('vault-cli memory upsert')
     expect(seed.instructions).toContain('vault-cli memory update')
-    expect(seed.instructions).toContain('Do not inspect hidden Codex memory state')
-    expect(seed.instructions).toContain('unbounded transcript history')
+    expect(seed.instructions).toContain('hidden Codex memory state')
+    expect(seed.instructions).toContain('Do not read transcript files or session storage')
     expect(seed.instructions).toContain('Do not save assistant speculation')
     expect(seed.instructions).not.toContain('generated memory extraction')
     expect(seed.instructions).toContain(
@@ -636,7 +636,7 @@ describe('applyMurphManagedAutomations', () => {
       route: defaultRoute,
       schedule: {
         kind: 'cron',
-        expression: '0 3 */2 * *',
+        expression: '0 3 * * 1,3,5',
       },
       slug: 'overnight-memory-consolidation',
       status: 'active',
@@ -649,12 +649,12 @@ describe('applyMurphManagedAutomations', () => {
     expect(memoryRecord?.tags).toContain('runtime-maintenance')
     expect(memoryRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(memoryRecord?.instructions).toContain('Goal: consolidate durable user context')
-    expect(memoryRecord?.instructions).toContain('all available committed user messages from the last 7 days')
-    expect(memoryRecord?.instructions).toContain('committed assistant messages from the same window')
-    expect(memoryRecord?.instructions).toContain('last-7-days evidence window')
+    expect(memoryRecord?.instructions).toContain('engine-supplied "Conversation evidence" section')
+    expect(memoryRecord?.instructions).toContain('bounded committed user and assistant conversation messages from the last 7 days')
+    expect(memoryRecord?.instructions).toContain('supplied conversation evidence')
     expect(memoryRecord?.instructions).toContain('vault-cli memory show --format json')
     expect(memoryRecord?.instructions).toContain('vault-cli memory upsert')
-    expect(memoryRecord?.instructions).toContain('unbounded transcript history')
+    expect(memoryRecord?.instructions).toContain('Do not read transcript files or session storage')
     expect(memoryRecord?.instructions).toContain('Do not save assistant speculation')
     expect(memoryRecord?.instructions).not.toContain('generated memory extraction')
     expect(memoryRecord?.instructions).toContain(

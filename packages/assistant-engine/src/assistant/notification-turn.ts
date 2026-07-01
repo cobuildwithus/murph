@@ -40,6 +40,7 @@ import {
   selectedAssistantEmailDeliveryIsThreadReply,
 } from './channel-adapters.js'
 import { withAssistantTurnLock } from './turn-lock.js'
+import { buildAssistantMaintenanceConversationEvidence } from './maintenance-evidence.js'
 import type {
   AssistantDeliveryOutcome,
   AssistantMessageInput,
@@ -109,13 +110,13 @@ const ASSISTANT_NOTIFICATION_TURN_PROFILE: Required<
   toolProfile: 'notification-turn',
 }
 
-const ASSISTANT_NOTIFICATION_ISOLATED_TURN_PROFILE: Required<
+const ASSISTANT_NOTIFICATION_MAINTENANCE_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
   nativeResumePolicy: 'disabled',
   promptProfile: 'notification-decision',
   threadScope: 'isolated-thread',
-  toolProfile: 'notification-turn',
+  toolProfile: 'maintenance-turn',
 }
 const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
   'memories.use_memories=false',
@@ -207,7 +208,16 @@ export async function sendAssistantNotificationLocal(
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
-      const messageInput = buildAssistantNotificationMessageInput(input)
+      const maintenanceEvidence = isAssistantNotificationMaintenanceExactSkip(input)
+        ? await buildAssistantMaintenanceConversationEvidence({
+            now: new Date(),
+            vault: input.vault,
+          })
+        : null
+      const messageInput = buildAssistantNotificationMessageInput(
+        input,
+        maintenanceEvidence,
+      )
       const resolved =
         isAssistantNotificationMaintenanceExactSkip(input)
           ? createAssistantMaintenanceNotificationResolvedSession({
@@ -1001,7 +1011,9 @@ function readAssistantNotificationStringListProperty(
 
 function buildAssistantNotificationMessageInput(
   input: AssistantNotificationInput,
+  maintenanceEvidence: string | null,
 ): AssistantMessageInput {
+  const instructions = normalizeRequiredText(input.instructions, 'instructions')
   return {
     abortSignal: input.abortSignal,
     actorId: input.actorId,
@@ -1041,7 +1053,9 @@ function buildAssistantNotificationMessageInput(
     participantId: input.participantId,
     persistUserPromptOnFailure: false,
     profile: input.profile,
-    prompt: normalizeRequiredText(input.instructions, 'instructions'),
+    prompt: maintenanceEvidence
+      ? `${instructions}\n\n${maintenanceEvidence}`
+      : instructions,
     provider: input.provider,
     receiptMetadata: null,
     reasoningEffort: input.reasoningEffort,
@@ -1159,7 +1173,7 @@ function resolveAssistantNotificationTurnProfile(
   input: AssistantNotificationInput,
 ): AssistantCodexTurnThreadScopeProfile {
   return isAssistantNotificationMaintenanceExactSkip(input)
-    ? ASSISTANT_NOTIFICATION_ISOLATED_TURN_PROFILE
+    ? ASSISTANT_NOTIFICATION_MAINTENANCE_TURN_PROFILE
     : ASSISTANT_NOTIFICATION_TURN_PROFILE
 }
 

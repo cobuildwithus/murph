@@ -281,7 +281,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       route: defaultRoute,
       schedule: {
         kind: 'cron',
-        expression: '0 3 */2 * *',
+        expression: '0 3 * * 1,3,5',
       },
       slug: 'overnight-memory-consolidation',
       status: 'active',
@@ -300,11 +300,13 @@ describe('applyMurphManagedAutomations core integration', () => {
     }
     expect(automation.instructions).toContain('Goal: consolidate durable user context')
     expect(automation.instructions).toContain(
-      'all available committed user messages from the last 7 days',
+      'engine-supplied "Conversation evidence" section',
     )
-    expect(automation.instructions).toContain('committed assistant messages from the same window')
-    expect(automation.instructions).toContain('last-7-days evidence window')
-    expect(automation.instructions).toContain('unbounded transcript history')
+    expect(automation.instructions).toContain(
+      'bounded committed user and assistant conversation messages from the last 7 days',
+    )
+    expect(automation.instructions).toContain('supplied conversation evidence')
+    expect(automation.instructions).toContain('Do not read transcript files or session storage')
     expect(automation.instructions).toContain('Do not save assistant speculation')
   })
 

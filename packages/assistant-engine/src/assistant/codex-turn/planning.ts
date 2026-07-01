@@ -219,6 +219,7 @@ export type AssistantCodexTurnPromptProfile =
 export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
   | 'notification-turn'
+  | 'maintenance-turn'
 
 export type AssistantCodexThreadScope =
   | 'session-thread'
@@ -566,7 +567,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const allowFinishWithoutReply =
     input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
-  const dynamicTools = resolveMurphDynamicTools({
+  // Maintenance turns run without a delivery target and must not expose any
+  // external-capable or delivery-facing tool surface, so the gate is the
+  // resolved tool set itself rather than prompt text.
+  const dynamicTools = input.profile.toolProfile === 'maintenance-turn'
+    ? []
+    : resolveMurphDynamicTools({
     allowFinishWithoutReply,
     allowMessageReactions: messageReactionsAvailable,
     computerToolsAvailable:
@@ -842,7 +848,7 @@ function limitAssistantConversationHistoryMessages(
   return retained.reverse()
 }
 
-function limitAssistantConversationHistoryTextBytes(
+export function limitAssistantConversationHistoryTextBytes(
   value: string | null,
   maxBytes: number,
 ): string | null {

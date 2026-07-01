@@ -140,6 +140,52 @@ describe('assistant protocol index planning', () => {
     })
   })
 
+  it('resolves no dynamic tools for maintenance turns', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const promptTimeContext = {
+      currentLocalDate: '2026-05-04',
+      currentTimeZone: 'Asia/Kuala_Lumpur',
+    }
+
+    const maintenancePlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'notification-decision',
+        threadScope: 'isolated-thread',
+        toolProfile: 'maintenance-turn',
+      },
+      promptTimeContext,
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    expect(maintenancePlan.dynamicTools).toEqual([])
+
+    const notificationPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'notification-decision',
+        threadScope: 'session-thread',
+        toolProfile: 'notification-turn',
+      },
+      promptTimeContext,
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    const notificationToolNames = notificationPlan.dynamicTools.map(
+      (tool) => tool.name,
+    )
+    expect(notificationToolNames).toContain('generate_image')
+    expect(notificationToolNames).toContain('attach_response_media')
+  })
+
   it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)

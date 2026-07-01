@@ -1652,11 +1652,15 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
           'memories.use_memories=false',
           'memories.generate_memories=false',
         ],
+        prompt: expect.stringContaining(
+          '## Conversation evidence (engine-supplied, bounded, last 7 days)',
+        ),
         suppressProviderFailureTranscriptAudit: true,
       }),
       profile: expect.objectContaining({
         nativeResumePolicy: 'disabled',
         threadScope: 'isolated-thread',
+        toolProfile: 'maintenance-turn',
       }),
     }),
   )

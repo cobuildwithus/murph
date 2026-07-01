@@ -6021,7 +6021,9 @@ function addOvernightMemoryConsolidationAutomation(vaultRoot: string): void {
     },
     schedule: {
       kind: 'cron',
-      expression: '0 3 */2 * *',
+      // Daily on purpose: these orchestration tests pin fake clock times and
+      // only exercise claim/yield/retry behavior, not the seeded cadence.
+      expression: '0 3 * * *',
     },
     slug: 'overnight-memory-consolidation',
     status: 'active',
