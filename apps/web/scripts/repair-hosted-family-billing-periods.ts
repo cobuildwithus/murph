@@ -3,8 +3,15 @@ import {
   repairHostedFamilyBillingPeriodForGroup,
   type HostedFamilyBillingPeriodRepairReason,
 } from "../src/lib/hosted-onboarding/family-plan";
+import {
+  sanitizeHostedOnboardingLogString,
+  sanitizeHostedOnboardingPersistedErrorCode,
+  sanitizeHostedOnboardingPersistedErrorName,
+} from "../src/lib/hosted-onboarding/http";
 import { requireHostedStripeApi } from "../src/lib/hosted-onboarding/runtime";
 import { getPrisma } from "../src/lib/prisma";
+
+const REPAIR_OPERATION = "hosted-family-billing-period-repair";
 
 const USAGE = `Usage:
   pnpm --dir apps/web hosted:repair-family-billing-periods -- [--dry-run] [--limit 100]
@@ -80,9 +87,14 @@ async function main(): Promise<void> {
     } catch (error) {
       summary.failed += 1;
       summary.reasons.exception += 1;
-      console.error("Failed to repair a hosted Family billing period.", {
-        errorName: error instanceof Error ? error.name : typeof error,
-      });
+      console.error(
+        "Failed to repair a hosted Family billing period.",
+        describeHostedFamilyBillingPeriodRepairError({
+          error,
+          groupId: candidate.groupId,
+          operation: REPAIR_OPERATION,
+        }),
+      );
     }
   }
 
@@ -158,9 +170,123 @@ function createHostedFamilyBillingPeriodRepairReasonCounts(): Record<
   };
 }
 
+function describeHostedFamilyBillingPeriodRepairError(input: {
+  error: unknown;
+  groupId?: string;
+  operation: string;
+}): Record<string, unknown> {
+  const errorMessage = readHostedFamilyBillingPeriodRepairErrorMessage(input.error);
+  const description: Record<string, unknown> = {
+    errorCategory: readHostedFamilyBillingPeriodRepairErrorCategory(input.error),
+    errorName: readHostedFamilyBillingPeriodRepairErrorName(input.error),
+    message: errorMessage ?? "No error message was provided.",
+    operation: input.operation,
+  };
+  const groupId = sanitizeHostedOnboardingLogString(input.groupId, 128);
+  if (groupId) {
+    description.groupId = groupId;
+  }
+
+  const code = readHostedFamilyBillingPeriodRepairErrorCode(input.error);
+  if (code) {
+    description.code = code;
+  }
+
+  const httpStatus = readNumberProperty(input.error, "httpStatus");
+  if (httpStatus !== null) {
+    description.httpStatus = httpStatus;
+  }
+
+  const providerStatus = readNumberProperty(input.error, "statusCode");
+  if (providerStatus !== null) {
+    description.providerStatus = providerStatus;
+  }
+
+  const providerType = readSanitizedTokenProperty(input.error, "type");
+  if (providerType) {
+    description.providerType = providerType;
+  }
+
+  const providerRequestId = readStringProperty(input.error, "requestId");
+  if (providerRequestId !== null) {
+    description.providerRequestIdPresent = true;
+  }
+
+  const retryable = readBooleanProperty(input.error, "retryable");
+  if (retryable !== null) {
+    description.retryable = retryable;
+  }
+
+  return description;
+}
+
+function readHostedFamilyBillingPeriodRepairErrorCategory(error: unknown): string {
+  const errorName = error instanceof Error ? error.name : null;
+  if (errorName === "HostedOnboardingError") {
+    return "domain";
+  }
+  if (readStringProperty(error, "requestId") || readStringProperty(error, "type")) {
+    return "stripe";
+  }
+  if (error instanceof Error) {
+    return "exception";
+  }
+  return error === null ? "null" : typeof error;
+}
+
+function readHostedFamilyBillingPeriodRepairErrorName(error: unknown): string {
+  const errorName = error instanceof Error ? error.name : typeof error;
+  return sanitizeHostedOnboardingPersistedErrorName(errorName) ?? "unknown";
+}
+
+function readHostedFamilyBillingPeriodRepairErrorMessage(error: unknown): string | null {
+  if (error instanceof Error) {
+    return sanitizeHostedOnboardingLogString(error.message);
+  }
+  return typeof error === "string"
+    ? sanitizeHostedOnboardingLogString(error)
+    : null;
+}
+
+function readHostedFamilyBillingPeriodRepairErrorCode(error: unknown): string | null {
+  return readSanitizedTokenProperty(error, "code") ??
+    readSanitizedTokenProperty(error, "errorCode");
+}
+
+function readSanitizedTokenProperty(error: unknown, property: string): string | null {
+  return sanitizeHostedOnboardingPersistedErrorCode(readStringProperty(error, property));
+}
+
+function readStringProperty(error: unknown, property: string): string | null {
+  const value = readObjectProperty(error, property);
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readNumberProperty(error: unknown, property: string): number | null {
+  const value = readObjectProperty(error, property);
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readBooleanProperty(error: unknown, property: string): boolean | null {
+  const value = readObjectProperty(error, property);
+  return typeof value === "boolean" ? value : null;
+}
+
+function readObjectProperty(value: unknown, property: string): unknown {
+  return typeof value === "object" && value !== null
+    ? Reflect.get(value, property)
+    : undefined;
+}
+
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   main().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : String(error));
+    console.error(
+      "Hosted Family billing period repair command failed.",
+      describeHostedFamilyBillingPeriodRepairError({
+        error,
+        operation: `${REPAIR_OPERATION}-cli`,
+      }),
+    );
     process.exitCode = 1;
   });
 }
