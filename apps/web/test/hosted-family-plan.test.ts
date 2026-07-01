@@ -68,7 +68,6 @@ import {
   issueHostedFamilyInviteTx,
   readHostedFamilyCheckoutSessionIdFromUrl,
   resolveHostedFamilyCheckoutRedirectUrl,
-  repairHostedFamilyBillingPeriodForGroup,
   writeHostedAccountGroupStripeBillingTx,
   parseHostedFamilyInviteStartToken,
   readHostedFamilyAccessForMember,
@@ -1260,95 +1259,6 @@ describe("hosted Family plan", () => {
         currentPeriodStart: FAMILY_STRIPE_PERIOD_START,
       }),
     }));
-  });
-
-  it("repairs existing paid Family billing refs that were stored without periods", async () => {
-    const tx = createTxMock({
-      activeMembershipCount: 2,
-    });
-    const prisma = tx as FamilyPlanTxMock & {
-      $transaction: ReturnType<typeof vi.fn>;
-    };
-    const repairNow = new Date(FAMILY_STRIPE_PERIOD_START.getTime() + 60_000);
-    const previousEventCreatedAt = new Date(FAMILY_STRIPE_PERIOD_START.getTime() - 120_000);
-    const retriedEventCreatedAt = new Date(FAMILY_STRIPE_PERIOD_START.getTime() - 60_000);
-    let billingRefState = createBillingRefMock({
-      currentPeriodEnd: null,
-      currentPeriodStart: null,
-      lastStripeEventCreatedAt: previousEventCreatedAt,
-    });
-    prisma.$transaction = vi.fn((callback) => callback(tx));
-    tx.hostedAccountGroupBillingRef.findUnique.mockImplementation(async () => billingRefState);
-    tx.hostedAccountGroupBillingRef.findMany.mockImplementation(async () => [billingRefState]);
-    tx.hostedAccountGroupBillingRef.upsert.mockImplementation(async ({ create, update }) => {
-      billingRefState = {
-        ...billingRefState,
-        billedSeatCount: update.billedSeatCount ?? create.billedSeatCount,
-        currentBillingPhase: update.currentBillingPhase ?? create.currentBillingPhase,
-        currentBillingPlanCode: update.currentBillingPlanCode ?? create.currentBillingPlanCode,
-        currentPeriodEnd: update.currentPeriodEnd ?? create.currentPeriodEnd,
-        currentPeriodStart: update.currentPeriodStart ?? create.currentPeriodStart,
-        lastStripeEventCreatedAt:
-          update.lastStripeEventCreatedAt ?? create.lastStripeEventCreatedAt,
-        stripeCustomerIdEncrypted:
-          update.stripeCustomerIdEncrypted ?? create.stripeCustomerIdEncrypted,
-        stripeSubscriptionItemIdEncrypted:
-          update.stripeSubscriptionItemIdEncrypted ?? create.stripeSubscriptionItemIdEncrypted,
-        stripeSubscriptionIdEncrypted:
-          update.stripeSubscriptionIdEncrypted ?? create.stripeSubscriptionIdEncrypted,
-      };
-      return billingRefState;
-    });
-    const retrieve = vi.fn().mockResolvedValue(makeFamilyStripeSubscription({
-      periodLocation: "subscription_item",
-    }));
-    runtimeMocks.requireHostedStripeApi.mockReturnValueOnce({
-      subscriptions: {
-        retrieve,
-      },
-    });
-
-    await expect(repairHostedFamilyBillingPeriodForGroup({
-      groupId: "hbag_family",
-      now: repairNow,
-      prisma: prisma as never,
-    })).resolves.toMatchObject({
-      billingRef: {
-        currentBillingPhase: "paid",
-        currentPeriodEnd: FAMILY_STRIPE_PERIOD_END,
-        currentPeriodStart: FAMILY_STRIPE_PERIOD_START,
-      },
-      groupId: "hbag_family",
-      reason: "reconciled_current_period",
-      repaired: true,
-    });
-
-    expect(retrieve).toHaveBeenCalledWith("sub_family", {
-      expand: ["items.data.price"],
-    });
-    expect(tx.hostedAccountGroupBillingRef.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      update: expect.objectContaining({
-        currentBillingPhase: "paid",
-        currentPeriodEnd: FAMILY_STRIPE_PERIOD_END,
-        currentPeriodStart: FAMILY_STRIPE_PERIOD_START,
-        lastStripeEventCreatedAt: repairNow,
-      }),
-    }));
-
-    tx.hostedAccountGroupBillingRef.upsert.mockClear();
-    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
-      dispatchContext: {
-        eventCreatedAt: retriedEventCreatedAt,
-      },
-      subscription: makeFamilyStripeSubscription({
-        periodLocation: "subscription_item",
-      }),
-      tx,
-    })).resolves.toEqual({
-      activations: [],
-      groupId: "hbag_family",
-    });
-    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
   });
 
   it("reconciles active Family billing while skipping direct-paid members during activation", async () => {

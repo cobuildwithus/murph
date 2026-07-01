@@ -18,7 +18,6 @@
     "dev:smoke": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-smoke.ts",
     "product-labels:env-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-product-label-runtime-env.ts",
     "device:reconnect-link": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/create-device-reconnect-link.ts",
-    "hosted:repair-family-billing-periods": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/repair-hosted-family-billing-periods.ts",
     "pitch:pdf": "pnpm --dir ../.. exec tsx apps/web/scripts/export-pitch-pdf.ts",
     "legal:pdf": "pnpm --dir ../.. exec tsx apps/web/scripts/generate-legal-pdfs.ts",
     "typecheck": "pnpm health-commons:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && pnpm prisma:generate && tsc -p tsconfig.json --pretty false",
