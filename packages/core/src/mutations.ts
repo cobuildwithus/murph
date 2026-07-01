@@ -1729,63 +1729,14 @@ function isSameObservationValue(existing: EventRecord, incoming: EventRecord): b
     existing.value === incoming.value;
 }
 
-const DEVICE_EXTERNAL_REF_PRIORITY_VERSION_PATTERN = /^priority:(\d{1,3})$/u;
 const JUNCTION_SLEEP_STAGE_METRIC_FACETS = new Set([
   "sleep-awake-minutes",
   "sleep-light-minutes",
   "sleep-deep-minutes",
   "sleep-rem-minutes",
 ]);
-
-function deviceExternalRefPriority(externalRef: ExternalRef | undefined): number | null {
-  const version = externalRef?.version;
-  if (!version) {
-    return null;
-  }
-
-  const match = DEVICE_EXTERNAL_REF_PRIORITY_VERSION_PATTERN.exec(version);
-  if (!match) {
-    return null;
-  }
-
-  const priority = Number.parseInt(match[1] as string, 10);
-  return Number.isFinite(priority) ? priority : null;
-}
-
-function shouldKeepExistingHigherPriorityDeviceObservation(
-  existing: EventRecord,
-  incoming: EventRecord,
-): boolean {
-  if (!isSameObservationFacet(existing, incoming)) {
-    return false;
-  }
-
-  const existingPriority = deviceExternalRefPriority(existing.externalRef);
-  const incomingPriority = deviceExternalRefPriority(incoming.externalRef);
-  return existingPriority !== null &&
-    incomingPriority !== null &&
-    existingPriority > incomingPriority;
-}
-
-function canCollapseHigherPriorityDeviceObservationAlias(input: {
-  incoming: EventRecord;
-  legacyMatches: readonly { indexedMatch: IndexedEventExternalRefMatch; refKey: string }[];
-  primaryMatch: IndexedEventExternalRefMatch | undefined;
-}): boolean {
-  if (!input.primaryMatch || input.legacyMatches.length !== 1) {
-    return false;
-  }
-
-  const incomingPriority = deviceExternalRefPriority(input.incoming.externalRef);
-  const primaryPriority = deviceExternalRefPriority(input.primaryMatch.record.externalRef);
-  const [legacyMatch] = input.legacyMatches;
-  return incomingPriority !== null &&
-    primaryPriority !== null &&
-    incomingPriority > primaryPriority &&
-    isSameObservationFacet(input.primaryMatch.record, input.incoming) &&
-    legacyMatch !== undefined &&
-    isSameObservationFacet(legacyMatch.indexedMatch.record, input.incoming);
-}
+const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
+const JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION = "junction-sleep-stage-cycle-fallback.v1";
 
 function deviceDataOriginSourceMatches(
   existing: DeviceDataOrigin | undefined,
@@ -1834,20 +1785,6 @@ function isWhoopBodyMeasurementDateOnlyLegacyRef(
     isScopedDateLikeWhoopBodyMeasurementResourceId(incoming.externalRef.resourceId);
 }
 
-function isJunctionSleepStageSummaryLegacyMigrationRef(
-  legacyExternalRef: ExternalRef,
-  incoming: EventRecord,
-): boolean {
-  return legacyExternalRef.system === "junction" &&
-    incoming.externalRef?.system === "junction" &&
-    legacyExternalRef.resourceType === incoming.externalRef.resourceType &&
-    /^junction-[a-z0-9-]+-sleep$/u.test(legacyExternalRef.resourceType) &&
-    legacyExternalRef.facet !== undefined &&
-    legacyExternalRef.facet === incoming.externalRef.facet &&
-    JUNCTION_SLEEP_STAGE_METRIC_FACETS.has(legacyExternalRef.facet) &&
-    deviceExternalRefPriority(incoming.externalRef) === 20;
-}
-
 function isJunctionSleepStageExternalRefInput(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
@@ -1861,17 +1798,31 @@ function isJunctionSleepStageExternalRefInput(value: unknown): boolean {
     JUNCTION_SLEEP_STAGE_METRIC_FACETS.has(externalRef.facet);
 }
 
-function hasStableJunctionSleepStageLegacyOccurrenceProof(
-  existing: IndexedEventExternalRefMatch,
+function isJunctionSleepStageObservation(record: EventRecord): boolean {
+  return record.kind === "observation" &&
+    isJunctionSleepStageExternalRefInput(record.externalRef);
+}
+
+function isJunctionSleepStageSummaryObservation(record: EventRecord): boolean {
+  return isJunctionSleepStageObservation(record) &&
+    record.dataOrigin?.normalizerVersion === JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION;
+}
+
+function isJunctionSleepStageCycleFallbackObservation(record: EventRecord): boolean {
+  return isJunctionSleepStageObservation(record) &&
+    record.dataOrigin?.normalizerVersion === JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION;
+}
+
+function shouldKeepExistingJunctionSleepStageSummaryObservation(
+  existing: EventRecord,
   incoming: EventRecord,
 ): boolean {
-  if (!isSameObservationFacet(existing.record, incoming)) {
+  if (!isSameObservationFacet(existing, incoming)) {
     return false;
   }
 
-  const existingDataOrigin = existing.indexedRecord.dataOrigin ?? existing.record.dataOrigin;
-  return existing.record.occurredAt === incoming.occurredAt &&
-    deviceDataOriginSourceMatches(existingDataOrigin, incoming.dataOrigin);
+  return isJunctionSleepStageSummaryObservation(existing) &&
+    isJunctionSleepStageCycleFallbackObservation(incoming);
 }
 
 function hasStableLegacyOccurrenceProof(
@@ -1918,10 +1869,6 @@ function isCompatibleLegacyExternalRefMatch(
   if (isWhoopBodyMeasurementDateOnlyLegacyRef(legacyExternalRef, incoming)) {
     return isSameObservationFacet(existing.record, incoming) &&
       hasStableLegacyOccurrenceProof(existing, incoming, legacyExternalRef);
-  }
-
-  if (isJunctionSleepStageSummaryLegacyMigrationRef(legacyExternalRef, incoming)) {
-    return hasStableJunctionSleepStageLegacyOccurrenceProof(existing, incoming);
   }
 
   return existing.record.dayKey === incoming.dayKey ||
@@ -2087,7 +2034,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
       ...legacyMatchedEntries,
     ];
     const selectedPrimaryMatch = matchedEntries.find((match) => match.refKey === refKey);
-    let aliasCollapseTombstoneMatches: Array<{ indexedMatch: IndexedEventExternalRefMatch; refKey: string }> = [];
     let latest = selectedPrimaryMatch?.indexedMatch.record ?? matchedEntries[0]?.indexedMatch.record;
 
     if (!latest) {
@@ -2113,22 +2059,12 @@ async function reconcileDeviceEventEntriesByExternalRef(
 
     const matchedIds = new Set(matchedEntries.map((match) => match.indexedMatch.record.id));
     if (matchedIds.size > 1) {
-      if (canCollapseHigherPriorityDeviceObservationAlias({
-        incoming: entry.record,
-        legacyMatches: legacyMatchedEntries,
-        primaryMatch,
-      })) {
-        const [legacyMatch] = legacyMatchedEntries;
-        latest = legacyMatch?.indexedMatch.record;
-        aliasCollapseTombstoneMatches = primaryMatch ? [{ indexedMatch: primaryMatch, refKey }] : [];
-      } else {
-        throw new VaultError(
-          "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-          `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
-            `${externalRef.facet ? `#${externalRef.facet}` : ""}" matched multiple live event IDs; ` +
-            "ambiguous legacy cleanup must be repaired explicitly.",
-        );
-      }
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
+          `${externalRef.facet ? `#${externalRef.facet}` : ""}" matched multiple live event IDs; ` +
+          "ambiguous legacy cleanup must be repaired explicitly.",
+      );
     }
 
     if (!latest) {
@@ -2165,7 +2101,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       continue;
     }
 
-    if (shouldKeepExistingHigherPriorityDeviceObservation(latest, entry.record)) {
+    if (shouldKeepExistingJunctionSleepStageSummaryObservation(latest, entry.record)) {
       records.push(latest);
       continue;
     }
@@ -2193,25 +2129,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
     };
 
     forceAppendIds.add(latest.id);
-    for (const match of aliasCollapseTombstoneMatches) {
-      const tombstoneRevision = Math.max(
-        eventSpineRevision(match.indexedMatch.record),
-        index.maxRevisionById.get(match.indexedMatch.record.id) ?? 0,
-      ) + 1;
-      const tombstone: EventRecord = {
-        ...match.indexedMatch.record,
-        recordedAt: entry.record.recordedAt,
-        lifecycle: buildEventSpineLifecycle(tombstoneRevision, "deleted"),
-      };
-
-      forceAppendIds.add(tombstone.id);
-      appendEntries.push({ relativePath: match.indexedMatch.relativePath, record: tombstone });
-      index.latestByRefKey.set(
-        match.refKey,
-        toIndexedExternalRefMatch(tombstone, match.indexedMatch.indexedExternalRef, match.indexedMatch.relativePath),
-      );
-      index.maxRevisionById.set(tombstone.id, tombstoneRevision);
-    }
     index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(superseding, externalRef));
     for (const { refKey: matchedRefKey, indexedMatch } of matchedEntries) {
       const currentMatch = index.latestByRefKey.get(matchedRefKey);

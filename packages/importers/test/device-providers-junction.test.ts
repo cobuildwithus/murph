@@ -4578,6 +4578,10 @@ test("Junction sleep_cycle normalizer emits compact sleep-stage observations", (
   assert.ok(observations.every((event) => event.fields?.unit === "minutes"));
   assert.ok(observations.every((event) => event.fields?.observationGrain === "summary"));
   assert.ok(observations.every((event) => event.externalRef?.system === "junction"));
+  assert.ok(observations.every((event) => event.externalRef?.version === undefined));
+  assert.ok(observations.every((event) =>
+    event.dataOrigin?.normalizerVersion === "junction-sleep-stage-cycle-fallback.v1"
+  ));
   assert.equal(observations.some((event) => event.externalRef?.resourceType.includes("hypnogram")), false);
   assert.deepEqual([...new Set(observations.map((event) => event.externalRef?.resourceType))].sort(), [
     "junction-garmin-sleep",
@@ -4677,16 +4681,21 @@ test("Junction sleep_cycle fills missing sleep summary stages without duplicatin
     "sleep-light-minutes",
     "sleep-rem-minutes",
   ]);
+  assert.ok(positiveStageObservations.every((event) => event.externalRef?.version === undefined));
 
   const positiveDeepObservations = stageObservationsFor("sleep-deep-minutes")
     .filter((event) => Number(event.fields?.value ?? 0) > 0);
   assert.equal(positiveDeepObservations.length, 1);
   assert.equal(positiveDeepObservations[0]?.externalRef?.resourceType, "junction-garmin-sleep");
+  assert.equal(positiveDeepObservations[0]?.dataOrigin?.normalizerVersion, "junction-sleep-stage-summary.v1");
   assert.equal(positiveDeepObservations[0]?.fields?.value, 60);
 
   const awakeObservations = stageObservationsFor("sleep-awake-minutes");
   assert.equal(awakeObservations.length, 1);
   assert.ok(awakeObservations.every((event) => event.externalRef?.resourceType === "junction-garmin-sleep"));
+  assert.ok(awakeObservations.every((event) =>
+    event.dataOrigin?.normalizerVersion === "junction-sleep-stage-cycle-fallback.v1"
+  ));
   assert.deepEqual(
     awakeObservations.map((event) => [event.dayKey, event.fields?.value]).sort(),
     [

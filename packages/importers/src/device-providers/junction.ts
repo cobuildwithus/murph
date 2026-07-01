@@ -698,8 +698,8 @@ const JUNCTION_SLEEP_COVERAGE_END_TIMESTAMP_PATHS = [
 ] as const;
 const SLEEP_STAGE_COVERAGE_TOLERANCE_MS = 1000;
 const JUNCTION_SLEEP_STAGES: readonly JunctionSleepStage[] = ["awake", "light", "deep", "rem"];
-const JUNCTION_SLEEP_STAGE_SUMMARY_REF_VERSION = "priority:20";
-const JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_REF_VERSION = "priority:10";
+const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
+const JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION = "junction-sleep-stage-cycle-fallback.v1";
 
 type JunctionSleepStage = JunctionSleepStageValue;
 
@@ -1945,7 +1945,6 @@ function pushSleepSummaryStageMetrics(
           dayKey,
           metric: metric.metric,
           timeZone,
-          version: JUNCTION_SLEEP_STAGE_SUMMARY_REF_VERSION,
         })
       : makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric);
     const legacyExternalRef = startAt && endAt
@@ -1963,7 +1962,9 @@ function pushSleepSummaryStageMetrics(
       evidenceRoles: resourceContext.evidenceRoles,
       externalRef,
       legacyExternalRefs: legacyExternalRef ? [legacyExternalRef] : undefined,
-      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+      dataOrigin: buildDataOrigin(entry, resourceContext, timestamp, {
+        normalizerVersion: JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION,
+      }),
       fields: {
         metric: metric.metric,
         observationGrain: "summary",
@@ -2031,9 +2032,10 @@ function pushSleepCycleEntries(
         aggregate.resourceContext,
         aggregate,
         metric.metric,
-        JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_REF_VERSION,
       ),
-      dataOrigin: buildDataOrigin(aggregate.dataOriginEntry, aggregate.resourceContext, aggregate.timestamp),
+      dataOrigin: buildDataOrigin(aggregate.dataOriginEntry, aggregate.resourceContext, aggregate.timestamp, {
+        normalizerVersion: JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION,
+      }),
       fields: {
         metric: metric.metric,
         observationGrain: "summary",
@@ -2637,7 +2639,6 @@ function makeJunctionSleepStageAggregateExternalRef(
   resourceContext: ResourceContext,
   aggregate: JunctionSleepStageAggregate,
   metric: string,
-  version?: string,
 ): DeviceExternalRefPayload {
   return makeJunctionCanonicalSleepStageExternalRef(resourceContext, {
     coverageEndAt: aggregate.coverageEndAt,
@@ -2645,7 +2646,6 @@ function makeJunctionSleepStageAggregateExternalRef(
     dayKey: aggregate.timestamp.dayKey,
     metric,
     timeZone: aggregate.timeZone,
-    version,
   });
 }
 
@@ -2657,7 +2657,6 @@ function makeJunctionCanonicalSleepStageExternalRef(
     dayKey?: string;
     metric: string;
     timeZone?: string;
-    version?: string;
   },
 ): DeviceExternalRefPayload {
   return makeProviderExternalRef(
@@ -2670,7 +2669,7 @@ function makeJunctionCanonicalSleepStageExternalRef(
       input.coverageStartAt,
       input.coverageEndAt,
     ])}`,
-    input.version,
+    undefined,
     slugify(input.metric, "value"),
   );
 }
@@ -4046,13 +4045,14 @@ function buildDataOrigin(
   entry: PlainObject,
   resourceContext: ResourceContext,
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
+  options: { normalizerVersion?: string } = {},
 ): DeviceDataOrigin {
   return stripUndefined({
     ...resourceContext.origin,
     observedAtRaw: timestamp.observedAtRaw,
     timeZoneOffsetMinutes: readJunctionTimeZoneOffsetMinutes(entry),
     timestampSemantics: timestamp.timestampSemantics,
-    normalizerVersion: "junction-normalizer.v1",
+    normalizerVersion: options.normalizerVersion ?? "junction-normalizer.v1",
   });
 }
 
