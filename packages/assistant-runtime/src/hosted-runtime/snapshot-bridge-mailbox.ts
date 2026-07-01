@@ -1,4 +1,5 @@
 import {
+  applyHostedVaultShareRevokeWake,
   importHostedVaultShareDeliveryWake,
 } from "./vault-share-import.ts";
 import {
@@ -203,6 +204,27 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   if (
     input.item.route.action === "import-vault-share-delivery"
     || wake.kind === "vault-share.delivery"
+  ) {
+    return {
+      reasonCode: "payload.decode_mismatch",
+      retryable: false,
+      status: "blocked",
+    };
+  }
+
+  if (
+    input.item.route.action === "import-vault-share-revoke"
+    && wake.kind === "vault-share.revoke"
+  ) {
+    return await applyHostedVaultShareRevokeWake({
+      vaultRoot: input.vaultRoot,
+      wake,
+    });
+  }
+
+  if (
+    input.item.route.action === "import-vault-share-revoke"
+    || wake.kind === "vault-share.revoke"
   ) {
     return {
       reasonCode: "payload.decode_mismatch",

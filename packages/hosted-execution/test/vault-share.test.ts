@@ -4,8 +4,10 @@ import { parseHostedExecutionWake } from "../src/parsers.ts";
 import { HOSTED_MAILBOX_KINDS } from "../src/runtime-control.ts";
 import {
   buildHostedVaultShareDeliveryDedupeKey,
+  buildHostedVaultShareRevokeDedupeKey,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
+  HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
   parseHostedVaultShareDeliverRequest,
   parseHostedVaultShareDeliverResponse,
 } from "../src/vault-share.ts";
@@ -28,15 +30,37 @@ const VALID_DELIVERY = {
   shareId: "share_1",
 };
 
+const VALID_REVOKE = {
+  grantorMemberId: "member_grantor",
+  projectionKind: "sleep-times.v0",
+  revokedAt: "2026-07-01T00:00:00.000Z",
+  schema: HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
+  shareId: "share_1",
+};
+
 describe("vault-share contracts", () => {
-  it("registers the delivery kind in the mailbox kind registry", () => {
+  it("registers vault-share kinds in the mailbox kind registry", () => {
     expect(HOSTED_MAILBOX_KINDS).toContain("vault-share.delivery");
+    expect(HOSTED_MAILBOX_KINDS).toContain("vault-share.revoke");
   });
 
-  it("derives the dedupe key from share id and record key", () => {
+  it("derives the delivery dedupe key from share id, record key, and revision", () => {
     expect(
-      buildHostedVaultShareDeliveryDedupeKey({ recordKey: "2026-06-09", shareId: "share_1" }),
-    ).toBe("vault-share:share_1:2026-06-09");
+      buildHostedVaultShareDeliveryDedupeKey({
+        recordKey: "2026-06-09",
+        recordRevision: "revision_1",
+        shareId: "share_1",
+      }),
+    ).toBe("vault-share:share_1:2026-06-09:revision_1");
+  });
+
+  it("derives the revoke dedupe key from share id and revocation timestamp", () => {
+    expect(
+      buildHostedVaultShareRevokeDedupeKey({
+        revokedAt: "2026-07-01T00:00:00.000Z",
+        shareId: "share_1",
+      }),
+    ).toBe("vault-share-revoke:share_1:2026-07-01T00:00:00.000Z");
   });
 
   it("parses a valid deliver request", () => {
@@ -244,7 +268,7 @@ describe("vault-share contracts", () => {
     // from the record normalizes back to the record's night-date midnight.
     const parsed = parseHostedExecutionWake({
       delivery: VALID_DELIVERY,
-      eventId: "vault-share:share_1:2026-06-09",
+      eventId: "vault-share:share_1:2026-06-09:revision_1",
       kind: "vault-share.delivery",
       occurredAt: "2026-06-10T07:00:00.000Z",
       userId: "member_referee",
@@ -252,7 +276,7 @@ describe("vault-share contracts", () => {
 
     expect(parsed).toEqual({
       delivery: VALID_DELIVERY,
-      eventId: "vault-share:share_1:2026-06-09",
+      eventId: "vault-share:share_1:2026-06-09:revision_1",
       kind: "vault-share.delivery",
       occurredAt: VALID_RECORD.occurredAt,
       userId: "member_referee",
@@ -263,11 +287,41 @@ describe("vault-share contracts", () => {
     expect(() =>
       parseHostedExecutionWake({
         delivery: { ...VALID_DELIVERY, schema: "murph.vault-share.delivery.v999" },
-        eventId: "vault-share:share_1:2026-06-09",
+        eventId: "vault-share:share_1:2026-06-09:revision_1",
         kind: "vault-share.delivery",
         occurredAt: "2026-06-10T07:00:00.000Z",
         userId: "member_referee",
       }),
     ).toThrow(/delivery payload schema/u);
+  });
+
+  it("round-trips a vault-share revoke wake and pins occurredAt to revokedAt", () => {
+    const parsed = parseHostedExecutionWake({
+      eventId: "vault-share-revoke:share_1:2026-07-01T00:00:00.000Z",
+      kind: "vault-share.revoke",
+      occurredAt: "2026-07-02T00:00:00.000Z",
+      revoke: VALID_REVOKE,
+      userId: "member_referee",
+    });
+
+    expect(parsed).toEqual({
+      eventId: "vault-share-revoke:share_1:2026-07-01T00:00:00.000Z",
+      kind: "vault-share.revoke",
+      occurredAt: "2026-07-01T00:00:00.000Z",
+      revoke: VALID_REVOKE,
+      userId: "member_referee",
+    });
+  });
+
+  it("rejects a revoke wake whose payload schema is wrong", () => {
+    expect(() =>
+      parseHostedExecutionWake({
+        eventId: "vault-share-revoke:share_1:2026-07-01T00:00:00.000Z",
+        kind: "vault-share.revoke",
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        revoke: { ...VALID_REVOKE, schema: "murph.vault-share.revoke.v999" },
+        userId: "member_referee",
+      }),
+    ).toThrow(/revoke payload schema/u);
   });
 });

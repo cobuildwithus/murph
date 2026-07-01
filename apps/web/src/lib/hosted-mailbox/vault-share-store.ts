@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import {
   buildHostedExecutionVaultShareDeliveryWake,
 } from "@murphai/hosted-execution";
@@ -10,9 +12,13 @@ import {
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import {
+  isHostedRuntimeInactiveAccessError,
+  requireHostedRuntimeActiveAccessForUpdateTx,
+} from "./runtime-access";
 import { appendHostedMailboxEnvelopeTx } from "./store";
 
 export interface ActiveHostedVaultShare {
@@ -63,15 +69,22 @@ export interface DeliverHostedVaultShareRecordsResult {
   lastAppendedMailboxItemId: string | null;
 }
 
+type HostedVaultShareAuthorityRow = {
+  destinationMemberId: string;
+  grantorMemberId: string;
+  id: string;
+  projectionKind: string;
+  status: string;
+};
+
 /**
  * Appends one typed `vault-share.delivery` wake envelope per shared record into the
  * destination mailbox, all in a single transaction per share. The envelope eventId doubles
- * as the mailbox dedupe key — derived from (shareId, recordKey) — and occurredAt comes from
- * the record itself (parser-pinned to the night date for sleep-times), so the envelope is
- * fully deterministic for a given (share, record) and re-offering an already-delivered
- * record is a byte-identical no-op rather than a dedupe conflict. Payload data rides the
- * standard encrypted mailbox path; only the dedupe key and night-date occurredAt are
- * plaintext mailbox metadata.
+ * as the mailbox dedupe key — derived from (shareId, recordKey, payload revision) — while
+ * destination replacement remains keyed by recordKey. Exact replays dedupe, but corrected
+ * payloads for the same logical record append a new mailbox item and replace the destination
+ * record during import. Payload data rides the standard encrypted mailbox path; only the
+ * dedupe key and night-date occurredAt are plaintext mailbox metadata.
  */
 export async function deliverHostedVaultShareRecords(input: {
   prisma?: PrismaClient;
@@ -82,21 +95,47 @@ export async function deliverHostedVaultShareRecords(input: {
 
   return prisma.$transaction(async (tx) => {
     let lastAppendedMailboxItemId: string | null = null;
+    if (!await hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
+      input.share.grantorMemberId,
+      tx,
+    )) {
+      return { lastAppendedMailboxItemId };
+    }
+
+    if (!await hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
+      input.share.destinationMemberId,
+      tx,
+    )) {
+      return { lastAppendedMailboxItemId };
+    }
+
+    const share = await readGrantedHostedVaultShareForUpdateTx({
+      share: input.share,
+      tx,
+    });
+
+    if (!share) {
+      return { lastAppendedMailboxItemId };
+    }
 
     for (const record of input.records) {
       const envelope = buildHostedExecutionVaultShareDeliveryWake({
         delivery: {
-          grantorMemberId: input.share.grantorMemberId,
-          projectionKind: input.share.projectionKind,
+          grantorMemberId: share.grantorMemberId,
+          projectionKind: share.projectionKind,
           record,
           schema: HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
-          shareId: input.share.id,
+          shareId: share.id,
         },
         eventId: buildHostedVaultShareDeliveryDedupeKey({
           recordKey: record.recordKey,
-          shareId: input.share.id,
+          recordRevision: deriveHostedVaultShareRecordRevision({
+            projectionKind: share.projectionKind,
+            record,
+          }),
+          shareId: share.id,
         }),
-        memberId: input.share.destinationMemberId,
+        memberId: share.destinationMemberId,
       });
       const result = await appendHostedMailboxEnvelopeTx({
         envelope,
@@ -110,4 +149,68 @@ export async function deliverHostedVaultShareRecords(input: {
 
     return { lastAppendedMailboxItemId };
   });
+}
+
+async function hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
+  memberId: string,
+  tx: Prisma.TransactionClient,
+): Promise<boolean> {
+  try {
+    await requireHostedRuntimeActiveAccessForUpdateTx(memberId, {
+      prisma: tx,
+    });
+    return true;
+  } catch (error) {
+    if (isHostedRuntimeInactiveAccessError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function readGrantedHostedVaultShareForUpdateTx(input: {
+  share: ActiveHostedVaultShare;
+  tx: Prisma.TransactionClient;
+}): Promise<ActiveHostedVaultShare | null> {
+  const rows = await input.tx.$queryRaw<HostedVaultShareAuthorityRow[]>`
+    SELECT
+      id,
+      grantor_member_id AS "grantorMemberId",
+      projection_kind AS "projectionKind",
+      destination_member_id AS "destinationMemberId",
+      status
+    FROM hosted_vault_share
+    WHERE id = ${input.share.id}
+    FOR UPDATE
+  `;
+  const row = rows[0];
+
+  if (
+    !row
+    || row.status !== "granted"
+    || row.grantorMemberId !== input.share.grantorMemberId
+    || row.destinationMemberId !== input.share.destinationMemberId
+    || row.projectionKind !== input.share.projectionKind
+  ) {
+    return null;
+  }
+
+  return input.share;
+}
+
+function deriveHostedVaultShareRecordRevision(input: {
+  projectionKind: HostedVaultShareProjectionKind;
+  record: HostedVaultShareDeliveryRecord;
+}): string {
+  const canonicalRecord = JSON.stringify({
+    data: input.record.data,
+    occurredAt: input.record.occurredAt,
+    projectionKind: input.projectionKind,
+    recordKey: input.record.recordKey,
+    schema: HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
+  });
+  return createHash("sha256")
+    .update(canonicalRecord)
+    .digest("base64url")
+    .slice(0, 32);
 }

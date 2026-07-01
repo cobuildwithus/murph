@@ -23,6 +23,7 @@ import type {
   HostedCodexAuthAction,
   HostedExecutionTelegramMessage,
   HostedExecutionVaultShareDeliveryWake,
+  HostedExecutionVaultShareRevokeWake,
   HostedExecutionTelegramConversationMessagePayload,
   HostedExecutionWhatsAppMessage,
   HostedExecutionWhatsAppConversationMessagePayload,
@@ -30,7 +31,9 @@ import type {
 } from "./contracts.ts";
 import {
   parseHostedVaultShareDeliveryPayload,
+  parseHostedVaultShareRevokePayload,
   type HostedVaultShareDeliveryPayload,
+  type HostedVaultShareRevokePayload,
 } from "./vault-share.ts";
 
 function cloneLinqMessagePart(
@@ -121,7 +124,8 @@ type HostedExecutionMemberOwnedWake =
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
-  | HostedExecutionVaultShareDeliveryWake;
+  | HostedExecutionVaultShareDeliveryWake
+  | HostedExecutionVaultShareRevokeWake;
 
 function buildHostedExecutionMemberOwnedWakeBase<
   TKind extends HostedExecutionMemberOwnedWake["kind"],
@@ -397,6 +401,24 @@ export function buildHostedExecutionVaultShareDeliveryWake(input: {
       occurredAt: delivery.record.occurredAt,
     }),
     delivery,
+  };
+}
+
+export function buildHostedExecutionVaultShareRevokeWake(input: {
+  eventId: string;
+  memberId: string;
+  revoke: HostedVaultShareRevokePayload;
+}): HostedExecutionVaultShareRevokeWake {
+  const revoke = parseHostedVaultShareRevokePayload(input.revoke);
+
+  return {
+    ...buildHostedExecutionMemberOwnedWakeBase({
+      eventId: input.eventId,
+      kind: "vault-share.revoke",
+      memberId: input.memberId,
+      occurredAt: revoke.revokedAt,
+    }),
+    revoke,
   };
 }
 
