@@ -2194,6 +2194,7 @@ async function runCodexAppServerTurnOnProcess(
   let codexThreadId = normalizeNullableString(input.resumeSessionId) ?? null
   let turnId: string | null = null
   let turnStartResponseReceived = false
+  const isReusedWarmProcess = codexProcess.initializedForRpc
   let lastAgentMessage: string | null = null
   // Completed final-phase agent messages that were followed by a steered
   // user-message item and then superseded by a newer final message in the
@@ -3508,11 +3509,12 @@ async function runCodexAppServerTurnOnProcess(
     const requestId = readCodexRpcServerRequestId(message)
     if (requestId !== null) {
       if (
+        isReusedWarmProcess &&
         isScopedParentTurnRequestRequired(method) &&
-        messageThreadId !== null &&
         (turnId === null || messageTurnId !== turnId)
       ) {
         rejectUnscopedParentTurnRequest(requestId)
+        rejectOnce(buildUnscopedParentTurnMessageError())
         return
       }
       handleAcceptedServerRequest(message, requestId)
@@ -3520,9 +3522,8 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     if (
+      isReusedWarmProcess &&
       messageTurnId === null &&
-      messageThreadId !== null &&
-      turnId !== null &&
       isScopedParentTurnEventRequired(message, method)
     ) {
       rejectOnce(buildUnscopedParentTurnMessageError())

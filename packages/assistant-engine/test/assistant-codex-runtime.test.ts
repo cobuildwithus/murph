@@ -4688,7 +4688,7 @@ describe('assistant codex runtime', () => {
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
   })
 
-  it('rejects untagged parent-thread server requests on reused warm processes', async () => {
+  it('poisons reused warm processes on untagged parent-thread server requests', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-untagged-request-work-')
     const codexHome = await createTempDir('assistant-codex-local-untagged-request-home-')
     const progressDelivery = createProgressDeliveryMock()
@@ -4722,12 +4722,16 @@ describe('assistant codex runtime', () => {
             },
           }))
 
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 2,
-            threadId: 'thread-local-untagged-request',
-            turnId: 'turn-local-untagged-request-2',
-          })
+          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondThread.id,
+            result: {
+              thread: {
+                id: 'thread-local-untagged-request',
+              },
+            },
+          }))
+          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
           child.stdout.write(jsonLine({
             id: 99,
             method: 'item/tool/call',
@@ -4736,7 +4740,6 @@ describe('assistant codex runtime', () => {
                 text: 'This unscoped progress must not send',
               },
               namespace: 'murph',
-              threadId: 'thread-local-untagged-request',
               tool: 'send_progress_update',
             },
           }))
@@ -4747,6 +4750,14 @@ describe('assistant codex runtime', () => {
               message: 'Codex parent-thread request did not include the active turn id.',
             },
           })
+          child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: {
+                id: 'turn-local-untagged-request-2',
+              },
+            },
+          }))
 
           child.stdout.write(jsonLine({
             method: 'assistant.message.delta',
@@ -4802,10 +4813,8 @@ describe('assistant codex runtime', () => {
         ...stableInput,
         prompt: 'second local turn should reject untagged server request',
       }),
-    ).resolves.toMatchObject({
-      finalMessage: 'Current turn rejected untagged request',
-      sessionId: 'thread-local-untagged-request',
-      turnId: 'turn-local-untagged-request-2',
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CODEX_APP_SERVER_UNSCOPED_PARENT_TURN_MESSAGE',
     })
     expect(progressDelivery.send).not.toHaveBeenCalled()
     expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
@@ -4844,12 +4853,16 @@ describe('assistant codex runtime', () => {
             },
           }))
 
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 2,
-            threadId: 'thread-local-untagged-output',
-            turnId: 'turn-local-untagged-output-2',
-          })
+          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondThread.id,
+            result: {
+              thread: {
+                id: 'thread-local-untagged-output',
+              },
+            },
+          }))
+          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
           child.stdout.write(jsonLine({
             method: 'assistant.message.delta',
             params: {
@@ -4858,7 +4871,24 @@ describe('assistant codex runtime', () => {
                 id: 'assistant-local-untagged-output-2',
                 type: 'assistant_message',
               },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: {
+                id: 'turn-local-untagged-output-2',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
               threadId: 'thread-local-untagged-output',
+              turn: {
+                id: 'turn-local-untagged-output-2',
+                status: 'completed',
+              },
             },
           }))
         })()
