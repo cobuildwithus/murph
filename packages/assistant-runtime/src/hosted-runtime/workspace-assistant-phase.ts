@@ -642,8 +642,10 @@ export async function runHostedWorkspaceAssistantPhase(
           result: timedForegroundAssistantResult,
         }),
       );
-      return withHostedRuntimeWakeCandidate({
-        preserveAfterCheckpoint: !foregroundAssistantResult.afterCheckpoint,
+      const withProviderCleanupWake = foregroundAssistantResult.afterCheckpoint
+        ? withHostedRuntimeWakeCandidate
+        : withHostedRuntimeWakeCandidatePreservedAfterCheckpoint;
+      return withProviderCleanupWake({
         result,
         wake: createHostedRuntimeWakeCandidate(
           providerCleanupPhase.deferredProviderCleanupWakeAt,
@@ -832,8 +834,10 @@ export async function runHostedWorkspaceAssistantPhase(
       systemMailboxRetryableFailed: 0,
     });
     if (!phaseProgressed) {
-      return withHostedRuntimeWakeCandidate({
-        preserveAfterCheckpoint: deferredProviderCleanupWakeAt !== null,
+      const withProviderCleanupWake = deferredProviderCleanupWakeAt !== null
+        ? withHostedRuntimeWakeCandidatePreservedAfterCheckpoint
+        : withHostedRuntimeWakeCandidate;
+      return withProviderCleanupWake({
         result: mergeContinuingSystemMailboxResult({
           ...(nextWakeAt ? { nextWakeAt } : {}),
           ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
@@ -917,9 +921,11 @@ export async function runHostedWorkspaceAssistantPhase(
       progressed: true,
       redactedStatus,
     });
-    return withHostedRuntimeWakeCandidate({
-      preserveAfterCheckpoint:
-        !hasPostCommitProviderCleanup && deferredProviderCleanupWakeAt !== null,
+    const withProviderCleanupWake = hasPostCommitProviderCleanup
+      || deferredProviderCleanupWakeAt === null
+        ? withHostedRuntimeWakeCandidate
+        : withHostedRuntimeWakeCandidatePreservedAfterCheckpoint;
+    return withProviderCleanupWake({
       result,
       wake: createHostedRuntimeWakeCandidate(
         deferredProviderCleanupWakeAt,
@@ -1419,17 +1425,20 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
     terminalLinqCleanup,
   });
   const resultDrainsProviderCleanup = input.result.checkpointReason === "outbox_sending";
-  const result = withHostedRuntimeWakeCandidate({
-    preserveAfterCheckpoint:
-      !resultDrainsProviderCleanup
-      && providerCleanupPhase.deferredProviderCleanupWakeAt !== null,
+  const deferredCleanupWake = createHostedRuntimeWakeCandidate(
+    resultDrainsProviderCleanup
+      ? null
+      : providerCleanupPhase.deferredProviderCleanupWakeAt,
+    HOSTED_ASSISTANT_WAKE_REASON,
+  );
+  const withProviderCleanupWake =
+    !resultDrainsProviderCleanup
+    && providerCleanupPhase.deferredProviderCleanupWakeAt !== null
+      ? withHostedRuntimeWakeCandidatePreservedAfterCheckpoint
+      : withHostedRuntimeWakeCandidate;
+  const result = withProviderCleanupWake({
     result: input.result,
-    wake: createHostedRuntimeWakeCandidate(
-      resultDrainsProviderCleanup
-        ? null
-        : providerCleanupPhase.deferredProviderCleanupWakeAt,
-      HOSTED_ASSISTANT_WAKE_REASON,
-    ),
+    wake: deferredCleanupWake,
   });
   if (
     resultDrainsProviderCleanup
@@ -1474,51 +1483,6 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
       ? result.checkpointReason ?? "assistant_runtime_commit"
       : "provider_cleanup",
     progressed: true,
-  };
-}
-
-function mergeHostedWakeCandidateIntoPostCheckpoint(input: {
-  postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void;
-  wake: HostedRuntimeWakeCandidate;
-}): HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null {
-  if (!input.wake.at) {
-    return input.postCheckpoint ?? null;
-  }
-
-  const wakeResult: HostedWorkspaceRunnerAssistantPhasePostCheckpoint = {
-    checkpointReason: input.postCheckpoint?.checkpointReason ?? "assistant_runtime_commit",
-    nextWakeAt: input.wake.at,
-    ...(input.wake.reason
-      ? { nextWakeReason: input.wake.reason }
-      : {}),
-    redactedStatus: {
-      nextWakeAt: input.wake.at,
-    },
-  };
-  return input.postCheckpoint
-    ? preserveHostedWakeCandidatePostCheckpointReason({
-        merged: mergeHostedAssistantPhasePostCheckpoint(input.postCheckpoint, wakeResult),
-        wake: input.wake,
-      })
-    : wakeResult;
-}
-
-function preserveHostedWakeCandidatePostCheckpointReason(input: {
-  merged: HostedWorkspaceRunnerAssistantPhasePostCheckpoint;
-  wake: HostedRuntimeWakeCandidate;
-}): HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
-  if (
-    !input.wake.at
-    || !input.wake.reason
-    || input.merged.nextWakeAt !== input.wake.at
-    || Object.hasOwn(input.merged, "nextWakeReason")
-  ) {
-    return input.merged;
-  }
-
-  return {
-    ...input.merged,
-    nextWakeReason: input.wake.reason,
   };
 }
 
@@ -1951,7 +1915,6 @@ function withHostedAssistantCronWakeCandidate(input: {
 }
 
 function withHostedRuntimeWakeCandidate(input: {
-  preserveAfterCheckpoint?: boolean | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
   wake: HostedRuntimeWakeCandidate | null;
 }): HostedWorkspaceRunnerAssistantPhaseResult {
@@ -1989,18 +1952,67 @@ function withHostedRuntimeWakeCandidate(input: {
       ? { nextWakeReason }
       : {}),
   };
-  if (input.preserveAfterCheckpoint !== true || !nextWake.at || !nextResult.afterCheckpoint) {
-    return nextResult;
+  return nextResult;
+}
+
+function withHostedRuntimeWakeCandidatePreservedAfterCheckpoint(input: {
+  result: HostedWorkspaceRunnerAssistantPhaseResult;
+  wake: HostedRuntimeWakeCandidate | null;
+}): HostedWorkspaceRunnerAssistantPhaseResult {
+  const result = withHostedRuntimeWakeCandidate(input);
+  const wake = createHostedRuntimeWakeCandidate(
+    result.nextWakeAt ?? null,
+    result.nextWakeReason ?? HOSTED_ASSISTANT_WAKE_REASON,
+  );
+  if (!wake?.at || !result.afterCheckpoint) {
+    return result;
   }
 
-  const afterCheckpoint = nextResult.afterCheckpoint;
+  const afterCheckpoint = result.afterCheckpoint;
   return {
-    ...nextResult,
+    ...result,
     afterCheckpoint: async () =>
       mergeHostedWakeCandidateIntoPostCheckpoint({
         postCheckpoint: await afterCheckpoint(),
-        wake: nextWake,
+        wake,
       }),
+  };
+}
+
+function mergeHostedWakeCandidateIntoPostCheckpoint(input: {
+  postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void;
+  wake: HostedRuntimeWakeCandidate;
+}): HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null {
+  if (!input.wake.at) {
+    return input.postCheckpoint ?? null;
+  }
+
+  const wakeResult: HostedWorkspaceRunnerAssistantPhasePostCheckpoint = {
+    checkpointReason: input.postCheckpoint?.checkpointReason ?? "assistant_runtime_commit",
+    nextWakeAt: input.wake.at,
+    ...(input.wake.reason
+      ? { nextWakeReason: input.wake.reason }
+      : {}),
+    redactedStatus: {
+      nextWakeAt: input.wake.at,
+    },
+  };
+  if (!input.postCheckpoint) {
+    return wakeResult;
+  }
+
+  const merged = mergeHostedAssistantPhasePostCheckpoint(input.postCheckpoint, wakeResult);
+  if (
+    !input.wake.reason
+    || merged.nextWakeAt !== input.wake.at
+    || Object.hasOwn(merged, "nextWakeReason")
+  ) {
+    return merged;
+  }
+
+  return {
+    ...merged,
+    nextWakeReason: input.wake.reason,
   };
 }
 
