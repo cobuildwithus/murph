@@ -44,20 +44,24 @@ export interface HostedProviderCleanupDrainResult {
 export async function recordHostedProviderCleanupBeforeCommit(input: {
   linqMessageIds?: readonly string[] | null;
   checkpoint: HostedProviderCleanupCheckpoint;
+  nowMs?: number | null;
   vaultRoot: string;
-}): Promise<void> {
+}): Promise<HostedProviderCleanupCheckpoint> {
   const existing = await readHostedProviderCleanupState(input.vaultRoot);
+  const checkpoint = resolveHostedProviderCleanupRecordedCheckpoint({
+    existing: existing?.checkpoint ?? null,
+    next: input.checkpoint,
+    nowMs: input.nowMs,
+  });
   await writeHostedProviderCleanupState(input.vaultRoot, {
     schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
-    checkpoint: resolveHostedProviderCleanupRecordedCheckpoint({
-      existing: existing?.checkpoint ?? null,
-      next: input.checkpoint,
-    }),
+    checkpoint,
     linqMessageIds: normalizeHostedProviderMessageIds([
       ...(existing?.linqMessageIds ?? []),
       ...(input.linqMessageIds ?? []),
     ]),
   });
+  return checkpoint;
 }
 
 export async function readHostedProviderCleanupCheckpoint(
@@ -164,6 +168,7 @@ export function resolveHostedProviderCleanupDeferredWakeAt(input: {
 function resolveHostedProviderCleanupRecordedCheckpoint(input: {
   existing: HostedProviderCleanupCheckpoint | null;
   next: HostedProviderCleanupCheckpoint;
+  nowMs?: number | null;
 }): HostedProviderCleanupCheckpoint {
   const normalizedNext = normalizeHostedProviderCleanupCheckpoint(input.next)
     ?? { nextWakeAt: null };
@@ -175,7 +180,14 @@ function resolveHostedProviderCleanupRecordedCheckpoint(input: {
 
   const existingWakeAt = input.existing?.nextWakeAt ?? null;
   const existingWakeMs = Date.parse(existingWakeAt ?? "");
-  if (Number.isFinite(existingWakeMs) && existingWakeMs < nextWakeMs) {
+  const nowMs = Number.isFinite(input.nowMs)
+    ? Number(input.nowMs)
+    : Date.now();
+  if (
+    Number.isFinite(existingWakeMs)
+    && existingWakeMs > nowMs
+    && existingWakeMs < nextWakeMs
+  ) {
     return {
       nextWakeAt: existingWakeAt,
     };

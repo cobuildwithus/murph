@@ -146,7 +146,9 @@ beforeEach(() => {
     recorded: 1,
     stillDirty: false,
   });
-  mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValue(undefined);
+  mocks.recordHostedProviderCleanupBeforeCommit.mockImplementation(async (input) =>
+    input.checkpoint
+  );
   mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValue({
     failed: 0,
     nextWakeAt: null,

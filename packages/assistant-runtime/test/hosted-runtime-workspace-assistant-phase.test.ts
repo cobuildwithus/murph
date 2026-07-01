@@ -346,7 +346,9 @@ beforeEach(() => {
     recorded: 1,
     stillDirty: false,
   });
-  mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValue(undefined);
+  mocks.recordHostedProviderCleanupBeforeCommit.mockImplementation(async (input) =>
+    input.checkpoint
+  );
   mocks.resolveHostedProviderCleanupDeferredWakeAt.mockImplementation((input = {}) => {
     const record = input as { nowMs?: number | null };
     const nowMs = Number.isFinite(record.nowMs)
@@ -6692,7 +6694,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
-    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
@@ -6704,12 +6706,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         includeBackgroundDueIntents: true,
       }),
-    );
-    expect(
-      mocks.collectHostedAssistantDeliverySideEffects.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.readHostedProviderCleanupCheckpoint.mock.invocationCallOrder[0] ??
-        Number.MAX_SAFE_INTEGER,
     );
     expectAssistantLaneCallWithoutDeviceSyncOptions({
       freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
@@ -7244,7 +7240,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       preferredIntentIds: [],
       vaultRoot: expect.any(String),
     });
-    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
@@ -7254,21 +7250,33 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("recovers hidden provider cleanup after a stale foreground mailbox wake is consumed", async () => {
-    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+  it("uses the persisted provider cleanup wake after foreground Linq delivery behind a stale mailbox wake", async () => {
+    mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValueOnce({
       nextWakeAt: "2026-04-27T00:14:00.000Z",
     });
-    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
-      assistantAutomationCurrentTurnDeliveryIntentIds: [],
-      assistantAutomationProgressed: true,
-      deviceSyncProcessed: 0,
-      deviceSyncSkipped: true,
-      nextWakeAt: null,
-      parserProcessed: 0,
-      postCheckpointRecord: null,
-      progressed: true,
-      redactedLogEntries: [],
-    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "linq",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: "fingerprint_synthetic",
+        effectId: "effect_synthetic",
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: "provider_message_from_reply",
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
@@ -7279,24 +7287,29 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     }));
 
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
-    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledTimes(1);
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: "2026-04-27T00:14:00.000Z",
+      },
+      linqMessageIds: ["provider_message_from_reply"],
+      nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
+      vaultRoot: "/tmp/murph-vault",
+    });
     expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "canonical_runtime_commit",
+      checkpointReason: "outbox_receipt",
       nextWakeAt: "2026-04-27T00:14:00.000Z",
       progressed: true,
     }));
   });
 
-  it("recovers hidden provider cleanup after a stale active-turn device-sync wake is consumed", async () => {
-    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue({
+  it("uses the persisted provider cleanup wake after active-turn Linq delivery behind a stale device-sync wake", async () => {
+    mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValueOnce({
       nextWakeAt: "2026-04-27T00:14:00.000Z",
     });
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       activeTurnInputIngested: true,
-      assistantAutomationCurrentTurnDeliveryIntentIds: [],
       assistantAutomationProgressed: true,
       deviceSyncProcessed: 0,
       deviceSyncSkipped: true,
@@ -7306,6 +7319,29 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       progressed: true,
       redactedLogEntries: [],
     });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "linq",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: "fingerprint_synthetic",
+        effectId: "effect_synthetic",
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: "provider_message_from_active_turn",
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
@@ -7317,11 +7353,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
-    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledTimes(2);
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: "2026-04-27T00:14:00.000Z",
+      },
+      linqMessageIds: ["provider_message_from_active_turn"],
+      nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
+      vaultRoot: "/tmp/murph-vault",
+    });
     expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "canonical_runtime_commit",
+      checkpointReason: "outbox_receipt",
       nextWakeAt: "2026-04-27T00:14:00.000Z",
       progressed: true,
     }));
@@ -7331,9 +7373,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
       captureIds: ["cap_terminal_cleanup"],
       linqMessageIds: ["linq_msg_terminal_cleanup"],
-    });
-    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
-      nextWakeAt: null,
     });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
@@ -7365,6 +7404,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
     expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
@@ -7372,6 +7412,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         nextWakeAt: "2026-04-27T00:14:00.000Z",
       },
       linqMessageIds: ["provider_message_from_reply"],
+      nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
       vaultRoot: "/tmp/murph-vault",
     });
     expect(result).toEqual(expect.objectContaining({
@@ -7381,8 +7422,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("reads hidden provider cleanup only after foreground delivery drains", async () => {
-    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+  it("records provider cleanup only after foreground delivery drains", async () => {
+    mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValueOnce({
       nextWakeAt: "2026-04-27T00:14:00.000Z",
     });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
@@ -7392,7 +7433,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       {
         cleanupMessages: [],
         cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
+        deliveryChannel: "linq",
         deliveryErrorCode: null,
         deliveryErrorMessage: null,
         deliveryStatus: "sent",
@@ -7423,12 +7464,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeAt: "2026-04-27T00:14:00.000Z",
       progressed: true,
     }));
-    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(
       mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.readHostedProviderCleanupCheckpoint.mock.invocationCallOrder[0] ??
+      mocks.recordHostedProviderCleanupBeforeCommit.mock.invocationCallOrder[0] ??
         Number.MAX_SAFE_INTEGER,
     );
   });
@@ -7448,9 +7489,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
       captureIds: ["cap_terminal_cleanup"],
       linqMessageIds: ["linq_msg_terminal_cleanup"],
-    });
-    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
-      nextWakeAt: null,
     });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
@@ -7492,7 +7530,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         includeBackgroundDueIntents: true,
       }),
     );
-    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledTimes(2);
+    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledTimes(1);
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
     expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
@@ -7500,6 +7538,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         nextWakeAt: "2026-04-27T00:14:00.000Z",
       },
       linqMessageIds: ["provider_message_from_active_turn"],
+      nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
       vaultRoot: "/tmp/murph-vault",
     });
     expect(result).toEqual(expect.objectContaining({

@@ -1750,58 +1750,6 @@ function createFutureExistingHostedAssistantWorkspaceWakeCandidate(
   );
 }
 
-async function resolveHostedForegroundProviderCleanupCheckpointWakeCandidate(input: {
-  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
-}): Promise<HostedRuntimeWakeCandidate | null> {
-  const checkpoint =
-    await readHostedProviderCleanupCheckpoint(input.phaseInput.restored.vaultRoot);
-  const nextWakeAt = resolveHostedProviderCleanupCheckpointWakeAt({
-    checkpoint,
-    deferDueOrInvalid: true,
-    nowMs: resolveHostedAssistantPhaseNowMs(input.phaseInput),
-  });
-  return createHostedRuntimeWakeCandidate(nextWakeAt, HOSTED_ASSISTANT_WAKE_REASON);
-}
-
-async function withHostedForegroundProviderCleanupCheckpointWake(input: {
-  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
-  result: HostedWorkspaceRunnerAssistantPhasePostCheckpoint;
-}): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
-  const providerCleanupWake =
-    await resolveHostedForegroundProviderCleanupCheckpointWakeCandidate({
-      phaseInput: input.phaseInput,
-    });
-  if (!providerCleanupWake?.at) {
-    return input.result;
-  }
-
-  const currentWake = createHostedRuntimeWakeCandidate(
-    input.result.nextWakeAt ?? null,
-    input.result.nextWakeReason ?? HOSTED_ASSISTANT_WAKE_REASON,
-  );
-  const nextWake = selectHostedRuntimeWakeCandidate([
-    currentWake,
-    providerCleanupWake,
-  ]);
-  if (
-    nextWake.at === currentWake.at
-    && nextWake.reason === currentWake.reason
-  ) {
-    return input.result;
-  }
-
-  return {
-    ...input.result,
-    nextWakeAt: nextWake.at,
-    nextWakeReason: nextWake.reason,
-    redactedStatus: {
-      ...(input.result.redactedStatus ?? {}),
-      hostedAssistantNextWakeAt: nextWake.at,
-      nextWakeAt: nextWake.at,
-    },
-  };
-}
-
 function withHostedAssistantCronWakeCandidate(input: {
   assistantCronWake: HostedRuntimeWakeCandidate | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
@@ -3144,12 +3092,7 @@ async function runForegroundAssistantReplyPhase(input: {
       redactedStatus: null,
       wake: input.wake,
     });
-    const postDeliveryWithCleanupWake =
-      await withHostedForegroundProviderCleanupCheckpointWake({
-        phaseInput: input.input,
-        result: postDelivery,
-      });
-    const nextWakeAt = postDeliveryWithCleanupWake.nextWakeAt ?? null;
+    const nextWakeAt = postDelivery.nextWakeAt ?? null;
     const wakeStateProgressed = hostedAssistantWakeStateProgressed({
       assistantMetrics: input.assistantMetrics,
       input: input.input,
@@ -3182,25 +3125,25 @@ async function runForegroundAssistantReplyPhase(input: {
         systemMailboxPrepared: 0,
         systemMailboxRetryableFailed: 0,
       }),
-      ...(postDeliveryWithCleanupWake.redactedStatus ?? {}),
+      ...(postDelivery.redactedStatus ?? {}),
     };
     if (!progressed) {
       return {
         foregroundReplyFailed,
         ...(nextWakeAt ? { nextWakeAt } : {}),
-        ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDeliveryWithCleanupWake.nextWakeReason)
-          ? { nextWakeReason: postDeliveryWithCleanupWake.nextWakeReason }
+        ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
+          ? { nextWakeReason: postDelivery.nextWakeReason }
           : {}),
         progressed: false,
         redactedStatus,
       };
     }
     return {
-      checkpointReason: postDeliveryWithCleanupWake.checkpointReason,
+      checkpointReason: postDelivery.checkpointReason,
       foregroundReplyFailed,
       nextWakeAt,
-      ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDeliveryWithCleanupWake.nextWakeReason)
-        ? { nextWakeReason: postDeliveryWithCleanupWake.nextWakeReason }
+      ...(shouldExposeHostedAssistantPhaseNextWakeReason(postDelivery.nextWakeReason)
+        ? { nextWakeReason: postDelivery.nextWakeReason }
         : {}),
       progressed: true,
       redactedStatus,
@@ -3217,11 +3160,6 @@ async function runForegroundAssistantReplyPhase(input: {
   const assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
     assistantNextWakeAt,
   });
-  const foregroundProviderCleanupWake = deliveryEffects.length === 0
-    ? await resolveHostedForegroundProviderCleanupCheckpointWakeCandidate({
-        phaseInput: input.input,
-      })
-    : null;
   const nextWake = selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
     input.foregroundWorkspaceWake,
@@ -3229,7 +3167,6 @@ async function runForegroundAssistantReplyPhase(input: {
     createHostedRuntimeWakeCandidate(outboxWakeAt, "assistant"),
     input.systemMailboxWake,
     createHostedRuntimeWakeCandidate(input.deferredProviderCleanupWakeAt, "assistant"),
-    foregroundProviderCleanupWake,
   ]);
   const nextWakeAt = nextWake.at;
   const wakeStateProgressed = hostedAssistantWakeStateProgressed({
@@ -3304,10 +3241,7 @@ async function runForegroundAssistantReplyPhase(input: {
               redactedStatus: null,
               wake: input.wake,
             });
-            return await withHostedForegroundProviderCleanupCheckpointWake({
-              phaseInput: input.input,
-              result: postDelivery,
-            });
+            return postDelivery;
           },
         }
       : {}),
@@ -3735,18 +3669,17 @@ async function deferHostedProviderCleanupAfterDelivery(input: {
     };
   }
 
-  const nextWakeAt = resolveHostedProviderCleanupDeferredWakeAt({
-    nowMs: resolveHostedAssistantPhaseNowMs(input.input),
-  });
-  await recordHostedProviderCleanupBeforeCommit({
+  const nowMs = resolveHostedAssistantPhaseNowMs(input.input);
+  const checkpoint = await recordHostedProviderCleanupBeforeCommit({
     checkpoint: {
-      nextWakeAt,
+      nextWakeAt: resolveHostedProviderCleanupDeferredWakeAt({ nowMs }),
     },
     linqMessageIds: providerCleanupMessageIds,
+    nowMs,
     vaultRoot: input.input.restored.vaultRoot,
   });
   return {
-    nextWakeAt,
+    nextWakeAt: checkpoint.nextWakeAt ?? null,
   };
 }
 
