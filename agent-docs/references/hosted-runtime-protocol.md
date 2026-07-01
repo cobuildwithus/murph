@@ -177,17 +177,17 @@ completion or replacement policy: UserRunner maps inactive fences to one
 controller-owned path that first recovers completion from a successful
 web-owned status read when the workspace advanced and mailbox lag is drained,
 otherwise replaces the stale fence by identity. Ambiguous or mismatched
-foreground ownership is preserved/retried.
+foreground ownership is preserved/retried. Existing active fences that predate
+persisted container names resolve through the legacy unversioned per-user
+container name for liveness probes; fresh starts still use the current
+versioned container resolver.
 For foreground/default work behind an `inbox_media_retention` fence, the
 existing workspace-invocation abort seam is the preemption authority when
-liveness is ambiguous. This foreground-over-retention path uses the same
-legacy unversioned per-user runner container-name fallback as active wake for
-fences that predate persisted container names; fresh starts still use the
-current versioned container resolver. A local exact-pointer abort or inactive
-proof enters the same inactive-fence recovery/replacement path; missing-pointer
-abort delivery is only an abort request and preserves the fence until a later
-liveness pass proves the old child inactive. Stale or failed status preserves
-the fence and retries.
+liveness is ambiguous. A local exact-pointer abort or inactive proof enters the
+same inactive-fence recovery/replacement path; missing-pointer abort delivery
+is only an abort request and preserves the fence until a later liveness pass
+proves the old child inactive. Stale or failed status preserves the fence and
+retries.
 
 The foreground-priority rule does not weaken correctness checks. Wrong-user
 authority, invalid auth, undecryptable mailbox payloads, stale leases, and

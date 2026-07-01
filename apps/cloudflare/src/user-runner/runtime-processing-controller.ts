@@ -612,8 +612,9 @@ export class RuntimeProcessingController {
         leaseGeneration: String(input.activeFence.generation),
         userId: input.record.userId,
       },
-      runnerContainerName:
-        input.runnerContainerName ?? input.activeFence.runnerContainerName,
+      runnerContainerName: input.runnerContainerName === undefined
+        ? this.readActiveRuntimeFenceContainerName(input)
+        : input.runnerContainerName,
       runnerContainerNamespace: this.input.runnerContainerNamespace,
       stepTimeoutMs: this.input.env.webControlTimeoutMs,
     });
