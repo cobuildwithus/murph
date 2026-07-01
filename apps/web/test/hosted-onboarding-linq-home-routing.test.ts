@@ -733,6 +733,57 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalled();
   });
+
+  it("excludes the member's stale bare same-line claim from active capacity", async () => {
+    const line = buildLine("+15550100001", {
+      activeMemberLimit: 1,
+      maxNewConversationsPerDay: 1,
+    });
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: null,
+      linqHomeLineAssignedAt: new Date("2026-06-29T14:15:00.000Z"),
+      linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(line);
+    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockImplementation(
+      async (input: { excludedMemberId?: string | null }) =>
+        new Map([[line.phoneNumber, input.excludedMemberId === "member_123" ? 0 : 1]]),
+    );
+
+    await expect(
+      resolveHostedMemberLinqHomeLineRouteBindingTx({
+        incomingChatId: "chat_new",
+        incomingDirectAttested: true,
+        incomingRecipientPhone: "+15550100001",
+        memberId: "member_123",
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      homeLineAssignedAt: expect.any(Date),
+      kind: "bind",
+      recipientPhone: line.phoneNumber,
+    });
+
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledWith({
+      excludedMemberId: "member_123",
+      now: expect.any(Date),
+      prisma: {} as never,
+      recipientPhones: [line.phoneNumber],
+    });
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalledWith({
+      prisma: {} as never,
+      recipientPhones: [line.phoneNumber],
+      since: expect.any(Date),
+    });
+  });
 });
 
 function buildLine(

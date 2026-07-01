@@ -204,6 +204,11 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
   }
 
   const reservation = await reserveHostedLinqHomeLineFromCandidatesTx({
+    excludedActiveMemberId: resolveBareSameLineClaimOwnerMemberId({
+      memberId: input.memberId,
+      phoneNumber: line.phoneNumber,
+      routing,
+    }),
     lines: [line],
     now,
     preferredRecipientPhone: line.phoneNumber,
@@ -385,6 +390,7 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
 }
 
 async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
+  excludedActiveMemberId?: string | null;
   lines: readonly HostedLinqAssignableHomeLine[];
   now?: Date;
   preferredRecipientPhone?: string | null;
@@ -398,6 +404,9 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
 
   const now = input.now ?? new Date();
   const activeMembersByRecipientPhone = await countHostedMemberHomeLinqBindingsByRecipientPhone({
+    ...(input.excludedActiveMemberId
+      ? { excludedMemberId: input.excludedActiveMemberId }
+      : {}),
     now,
     prisma: input.prisma,
     recipientPhones,
@@ -534,6 +543,11 @@ async function reserveOrReuseHostedMemberLinqHomeLineForPhoneTx(input: {
   }
 
   const reservation = await reserveHostedLinqHomeLineFromCandidatesTx({
+    excludedActiveMemberId: resolveBareSameLineClaimOwnerMemberId({
+      memberId: input.memberId,
+      phoneNumber: line.phoneNumber,
+      routing,
+    }),
     lines: [line],
     now,
     preferredRecipientPhone: line.phoneNumber,
@@ -572,6 +586,20 @@ function resolveHostedMemberCurrentLinqRoute(
   }
 
   return null;
+}
+
+function resolveBareSameLineClaimOwnerMemberId(input: {
+  memberId: string;
+  phoneNumber: string;
+  routing: HostedMemberRoutingStateSnapshot | null;
+}): string | null {
+  const recipientPhone = normalizePhoneNumber(input.routing?.linqRecipientPhone);
+  return input.routing
+    && !input.routing.linqChatId
+    && !input.routing.pendingLinqChatId
+    && recipientPhone === input.phoneNumber
+    ? input.memberId
+    : null;
 }
 
 function hostedLinqRouteBindingAuthorityMatchesCurrentRoute(input: {

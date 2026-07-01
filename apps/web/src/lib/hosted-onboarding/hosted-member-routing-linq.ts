@@ -287,6 +287,7 @@ export async function acquireHostedMemberHomeLinqRecipientAssignmentLockTx(input
 }
 
 export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
+  excludedMemberId?: string | null;
   now: Date;
   prisma: HostedOnboardingReadClient;
   recipientPhones: readonly string[];
@@ -315,6 +316,13 @@ export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
       linqRecipientPhoneLookupKey: {
         in: recipientPhoneEntries.map(({ lookupKey }) => lookupKey),
       },
+      ...(input.excludedMemberId
+        ? {
+            memberId: {
+              not: input.excludedMemberId,
+            },
+          }
+        : {}),
       OR: [
         {
           member: {

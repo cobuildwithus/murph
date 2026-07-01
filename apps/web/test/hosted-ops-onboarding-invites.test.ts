@@ -810,6 +810,58 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
   });
 
+  it("excludes the member's stale bare same-line claim from new-chat active capacity", async () => {
+    routingState = {
+      linqChatId: null,
+      linqHomeLineAssignedAt: new Date("2026-03-25T12:00:00.000Z"),
+      linqRecipientPhone: "+15557654321",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+    };
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(
+      buildHomeLine("+15557654321", {
+        activeMemberLimit: 1,
+        maxNewConversationsPerDay: 1,
+      }),
+    );
+    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockImplementation(
+      async (input: { excludedMemberId?: string | null }) =>
+        new Map([["+15557654321", input.excludedMemberId === "member_123" ? 0 : 1]]),
+    );
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-previous-day-bare-active-self-count",
+    })).resolves.toMatchObject({
+      chatId: "chat_created",
+      deliveryMode: "new_chat",
+      newChatCreated: true,
+    });
+
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledWith({
+      excludedMemberId: "member_123",
+      now: expect.any(Date),
+      prisma: tx,
+      recipientPhones: ["+15557654321"],
+    });
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma: tx,
+      recipientPhone: "+15557654321",
+    });
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledWith({
+      linqChatId: "chat_created",
+      memberId: "member_123",
+      prisma: tx,
+      recipientPhone: "+15557654321",
+    });
+  });
+
   it("can replace a failed bare new-chat reservation with a different sender line", async () => {
     routingState = {
       linqChatId: null,
