@@ -185,6 +185,40 @@ test("adds one paid seat and retries when the plan is full", async () => {
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
 });
 
+test("retries against a freed seat without buying one", async () => {
+  mocks.issueHostedFamilyInviteTx
+    .mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+        httpStatus: 409,
+        message: "This Family plan has no open paid seats.",
+      }),
+    )
+    .mockResolvedValueOnce({
+      channel: "family",
+      expiresAt: new Date("2026-07-01T00:00:00.000Z"),
+      id: "inv_new",
+      inviteCode: "NEWCODE",
+      status: "pending",
+      targetLabel: "Dad",
+      targetPhoneHint: "+48 6** *** ***",
+    });
+  // A seat opened up between the failed attempt and the snapshot read.
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce({
+    billingActive: true,
+    groupId: "hbag_family",
+    seats: { active: 1, billed: 2, invited: 0, max: 6, min: 2, remaining: 1, used: 1 },
+  });
+
+  const response = await inviteRoute.POST(
+    inviteRequest({ addSeatIfNeeded: true, targetLabel: "Dad", targetPhoneNumber: "+48600000001" }),
+  );
+
+  expect(response.status).toBe(200);
+  expect(mocks.updateHostedFamilySeatCount).not.toHaveBeenCalled();
+  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
+});
+
 test("reports a syncing state (no failed invite) when the seat webhook is slow", async () => {
   mocks.issueHostedFamilyInviteTx.mockRejectedValueOnce(
     hostedOnboardingError({

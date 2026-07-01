@@ -120,7 +120,15 @@ async function addHostedFamilySeatForOwner(
     memberId: ownerMemberId,
     prisma,
   });
-  if (!snapshot?.billingActive || snapshot.seats.billed >= snapshot.seats.max) {
+  if (!snapshot?.billingActive) {
+    return "unavailable";
+  }
+  // A seat may have freed up (invite expired/canceled, member removed) between
+  // the failed invite and this read; retry against it instead of buying one.
+  if (snapshot.seats.remaining > 0) {
+    return "confirmed";
+  }
+  if (snapshot.seats.billed >= snapshot.seats.max) {
     return "unavailable";
   }
   const targetSeatCount = snapshot.seats.billed + 1;
