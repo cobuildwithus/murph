@@ -72,6 +72,12 @@ const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 100_000;
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
 const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 5;
+const HOSTED_CODEX_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION = 128;
+const HOSTED_CODEX_MEMORIES_MAX_ROLLOUT_AGE_DAYS = 10;
+const HOSTED_CODEX_MEMORIES_MAX_ROLLOUTS_PER_STARTUP = 1;
+const HOSTED_CODEX_MEMORIES_MAX_UNUSED_DAYS = 30;
+const HOSTED_CODEX_MEMORIES_MIN_RATE_LIMIT_REMAINING_PERCENT = 25;
+const HOSTED_CODEX_MEMORIES_MIN_ROLLOUT_IDLE_HOURS = 1;
 const HOSTED_CODEX_REJECTED_SEED_ENV_KEYS = [
   HOSTED_ASSISTANT_API_KEY_ENV,
   HOSTED_ASSISTANT_BASE_URL_ENV,
@@ -516,6 +522,21 @@ export function buildHostedCodexConfigToml(input: {
     "[features]",
     "plugins = false",
     "multi_agent_v2 = true",
+    "memories = true",
+    "",
+    "# Codex-native memories are operator memory only. Murph product memory",
+    "# remains canonical in the vault; snapshots keep the Codex home allowlist",
+    "# narrow instead of recursively preserving every generated memory artifact.",
+    "[memories]",
+    "use_memories = true",
+    "generate_memories = true",
+    "disable_on_external_context = false",
+    `min_rollout_idle_hours = ${HOSTED_CODEX_MEMORIES_MIN_ROLLOUT_IDLE_HOURS}`,
+    `max_rollouts_per_startup = ${HOSTED_CODEX_MEMORIES_MAX_ROLLOUTS_PER_STARTUP}`,
+    `max_rollout_age_days = ${HOSTED_CODEX_MEMORIES_MAX_ROLLOUT_AGE_DAYS}`,
+    `min_rate_limit_remaining_percent = ${HOSTED_CODEX_MEMORIES_MIN_RATE_LIMIT_REMAINING_PERCENT}`,
+    `max_raw_memories_for_consolidation = ${HOSTED_CODEX_MEMORIES_MAX_RAW_MEMORIES_FOR_CONSOLIDATION}`,
+    `max_unused_days = ${HOSTED_CODEX_MEMORIES_MAX_UNUSED_DAYS}`,
     "",
     "# Keep Codex skill file instructions out of hosted prompts. Their temporary",
     "# runner paths change on each wake and break provider prefix caching.",
