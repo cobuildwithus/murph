@@ -508,28 +508,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   if (existingMember && existingMemberEffectiveActive) {
-    const bindingResult = await resolveIncomingHostedLinqHomeLineRouteBindingTx({
-      incomingChatId: summary.chatId,
-      incomingDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
-      incomingRecipientPhone: recipientPhoneNumber,
-      memberAuthority: memberRouteBindingAuthority,
-      memberId: existingMember.id,
-      prisma: input.prisma,
-    });
-    const blockedPlan = buildRouteBindingBlockedPlan(bindingResult, {
-      capacityExhausted: "active-member-ignored-home-line-capacity-exhausted",
-      redirect: "active-member-redirect",
-      unassignable: "active-member-ignored-unassignable-home-line",
-      unattestedDirect: "active-member-ignored-unattested-direct",
-      unknownHome: "active-member-ignored-home-line",
-    });
-    if (blockedPlan) {
-      return blockedPlan;
-    }
-    if (bindingResult.kind !== "bind") {
-      return buildUnassignableHomeLinePlan("active-member-ignored-unassignable-home-line");
-    }
-
     const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
       dedupeKey: input.event.event_id,
       prisma: input.prisma,
@@ -554,10 +532,31 @@ export async function planHostedOnboardingLinqWebhook(input: {
           existingMemberActive: existingMemberEffectiveActive,
           existingMemberMatch,
           reason: "duplicate-webhook-event",
-          routeDecision: bindingResult.kind,
           routeStage: "active-member-duplicate",
         }),
       );
+    }
+
+    const bindingResult = await resolveIncomingHostedLinqHomeLineRouteBindingTx({
+      incomingChatId: summary.chatId,
+      incomingDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
+      incomingRecipientPhone: recipientPhoneNumber,
+      memberAuthority: memberRouteBindingAuthority,
+      memberId: existingMember.id,
+      prisma: input.prisma,
+    });
+    const blockedPlan = buildRouteBindingBlockedPlan(bindingResult, {
+      capacityExhausted: "active-member-ignored-home-line-capacity-exhausted",
+      redirect: "active-member-redirect",
+      unassignable: "active-member-ignored-unassignable-home-line",
+      unattestedDirect: "active-member-ignored-unattested-direct",
+      unknownHome: "active-member-ignored-home-line",
+    });
+    if (blockedPlan) {
+      return blockedPlan;
+    }
+    if (bindingResult.kind !== "bind") {
+      return buildUnassignableHomeLinePlan("active-member-ignored-unassignable-home-line");
     }
 
     const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({

@@ -826,6 +826,54 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     });
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
+
+  it("dedupes active-member Linq replays before route redirect planning", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
+      id: "mailbox_evt_123",
+    });
+    mocks.readHostedMemberRoutingState.mockImplementationOnce(async () => {
+      throw new Error("duplicate active-member replays must not resolve route binding");
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqMessageWebhookBody({
+        eventId: "evt_123",
+        messageId: "msg_replay",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      duplicate: true,
+      ignored: true,
+      ok: true,
+      reason: "duplicate-webhook-event",
+    });
+    expect(mocks.readHostedMailboxItemByDedupeKey).toHaveBeenCalledWith({
+      dedupeKey: "evt_123",
+      prisma,
+      userId: "member_123",
+    });
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_evt_123",
+    });
+  });
 });
 
 function buildLinqMessageWebhookBody(input: {
