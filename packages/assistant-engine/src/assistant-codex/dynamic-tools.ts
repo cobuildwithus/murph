@@ -1435,7 +1435,7 @@ export async function executeMurphDynamicToolRequest(input: {
       if (!requestKeyScope) {
         return toolTextResult(
           false,
-          'phone calling requires user-approved manual input for this turn',
+          'phone calling requires user-sourced input for this turn',
         )
       }
 

@@ -111,7 +111,7 @@ function isAssistantPhoneCallAcceptedInputEligible(input: {
   source: AssistantAcceptedTurnInputSource
   turnTrigger: string | null
 }): boolean {
-  if (!isManualPhoneCallTurnTrigger(input.turnTrigger)) {
+  if (!isPhoneCallTurnTriggerEligibleForUserInput(input.turnTrigger)) {
     return false
   }
   if (input.id === SYNTHETIC_INITIAL_ACCEPTED_INPUT_ID) {
@@ -129,10 +129,11 @@ function isAssistantPhoneCallAcceptedInputEligible(input: {
   }
 }
 
-function isManualPhoneCallTurnTrigger(turnTrigger: string | null): boolean {
+function isPhoneCallTurnTriggerEligibleForUserInput(turnTrigger: string | null): boolean {
   return turnTrigger === null ||
     turnTrigger === 'manual-ask' ||
-    turnTrigger === 'manual-deliver'
+    turnTrigger === 'manual-deliver' ||
+    turnTrigger === 'automation-auto-reply'
 }
 
 function stableJson(value: unknown): string {
