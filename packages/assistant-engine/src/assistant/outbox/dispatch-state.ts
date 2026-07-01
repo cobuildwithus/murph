@@ -1136,6 +1136,7 @@ export async function markAssistantOutboxIntentMirrorTerminal(input: {
   failedAt: Date
   intent: AssistantOutboxIntent
   intentPath: string
+  onlyCurrentStatuses?: readonly AssistantOutboxIntent['status'][]
   status: 'abandoned' | 'failed'
   vault: string
 }): Promise<AssistantOutboxIntent> {
@@ -1150,6 +1151,7 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
   failedAt: Date
   intent: AssistantOutboxIntent
   intentPath: string
+  onlyCurrentStatuses?: readonly AssistantOutboxIntent['status'][]
   retryable: boolean
   status: 'abandoned' | 'failed' | 'retryable'
   vault: string
@@ -1163,6 +1165,18 @@ async function persistAssistantOutboxIntentMirrorFailure(input: {
     const current = await readAssistantOutboxIntentAtPath(input.intentPath, {
       vault: input.vault,
     })
+    if (
+      current &&
+      input.onlyCurrentStatuses &&
+      !input.onlyCurrentStatuses.includes(current.status)
+    ) {
+      await repairAssistantOutboxReceiptForIntent({
+        at: current.updatedAt,
+        intent: current,
+        vault: input.vault,
+      })
+      return current
+    }
     if (
       current &&
       !assistantOutboxIntentMatchesDispatchOwner(

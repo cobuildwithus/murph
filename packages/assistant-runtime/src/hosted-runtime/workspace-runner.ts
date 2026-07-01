@@ -200,6 +200,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier {
 
 interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   afterCheckpoint?: (() => Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void>) | null;
+  afterCheckpointKeepsForegroundImportLoop?: true;
   browserVaultReplicaRefreshRequested?: true;
   deviceSyncMaintenanceRan?: true;
   // Failed foreground reply count for this pass. Present only when the pass
@@ -607,6 +608,46 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         foregroundConversationWorkObserved = true;
       },
     });
+  let foregroundMailboxImportLoopStopped = false;
+  const stopForegroundMailboxImportLoop = async (): Promise<void> => {
+    if (foregroundMailboxImportLoopStopped) {
+      return;
+    }
+    await foregroundMailboxImportLoop.stop();
+    foregroundMailboxImportLoopStopped = true;
+  };
+  let foregroundRuntimeWakeObservedAfterStop = false;
+  const shouldYieldBackgroundMaintenance = (): boolean => {
+    if (foregroundConversationWorkObserved || foregroundRuntimeWakeObservedAfterStop) {
+      return true;
+    }
+
+    if (!foregroundMailboxImportLoopStopped) {
+      return false;
+    }
+
+    if (!input.runtimeWakeSignal?.consumePending()) {
+      return false;
+    }
+
+    foregroundRuntimeWakeObservedAfterStop = true;
+    return true;
+  };
+  const stopForegroundMailboxImportLoopAndNotify = async (): Promise<void> => {
+    await stopForegroundMailboxImportLoop();
+    if (!foregroundConversationWorkObserved) {
+      return;
+    }
+    // stop() drains any foreground import already in flight. Preserve the
+    // selected durable wake, but nudge the outer dirty loop to run the new
+    // foreground pass before idle checkpointing when there is assistant work
+    // queued from that import.
+    await notifyPendingForegroundAssistantInputWake({
+      now: input.now,
+      runtimeWakeSignal: input.runtimeWakeSignal ?? null,
+      vaultRoot: input.vaultRoot,
+    });
+  };
   const assistantPhaseInput = {
     initialMailboxImport,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
@@ -615,8 +656,8 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     prepareAutoReplyDelivery: async () =>
       await prepareHostedAutoReplyDeliveryForWorkspaceRunner({
         checkpointRequestBuilder: checkpointRequestSession,
-        foregroundMailboxImportLoop,
         input,
+        stopForegroundMailboxImportLoop,
       }),
     recordDeferredUsage(record: AssistantUsageRecord): void {
       if (deferredUsageCaptureStarted) {
@@ -626,7 +667,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
 
       deferredUsageRecords.push(record);
     },
-    shouldYieldBackgroundMaintenance: () => foregroundConversationWorkObserved,
+    shouldYieldBackgroundMaintenance,
     workspace: input.workspace,
   };
   let assistantContextSnapshotDirty = false;
@@ -668,17 +709,11 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     if (assistantPhaseResult.afterCheckpoint && assistantPhaseResult.progressed !== true) {
       throw new TypeError("Hosted workspace assistant phase afterCheckpoint requires a progressed phase.");
     }
-    await foregroundMailboxImportLoop.stop();
-    if (foregroundConversationWorkObserved) {
-      // stop() drains any foreground import already in flight. Preserve the
-      // selected durable wake, but nudge the outer dirty loop to run the new
-      // foreground pass before idle checkpointing when there is assistant work
-      // queued from that import.
-      await notifyPendingForegroundAssistantInputWake({
-        now: input.now,
-        runtimeWakeSignal: input.runtimeWakeSignal ?? null,
-        vaultRoot: input.vaultRoot,
-      });
+    const keepForegroundImportLoopDuringAfterCheckpoint =
+      assistantPhaseResult.afterCheckpointKeepsForegroundImportLoop === true
+      && !foregroundConversationWorkObserved;
+    if (!keepForegroundImportLoopDuringAfterCheckpoint) {
+      await stopForegroundMailboxImportLoopAndNotify();
     }
     let postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void;
     try {
@@ -693,6 +728,9 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         input,
       });
       postCheckpoint = null;
+    }
+    if (keepForegroundImportLoopDuringAfterCheckpoint) {
+      await stopForegroundMailboxImportLoopAndNotify();
     }
     if (postCheckpoint) {
       try {
@@ -757,7 +795,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     });
   } catch (error) {
     runnerError = error;
-    await foregroundMailboxImportLoop.stop();
+    await stopForegroundMailboxImportLoop();
     scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
@@ -766,7 +804,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     throw error;
   } finally {
     try {
-      await foregroundMailboxImportLoop.stop();
+      await stopForegroundMailboxImportLoop();
     } catch (error) {
       runnerError ??= error;
       throw error;
@@ -917,10 +955,10 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
 
 async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
-  foregroundMailboxImportLoop: { stop(): Promise<void> };
   input: HostedWorkspaceRunnerInput;
+  stopForegroundMailboxImportLoop: () => Promise<void>;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null> {
-  await input.foregroundMailboxImportLoop.stop();
+  await input.stopForegroundMailboxImportLoop();
 
   let previousSystemSeq: string | null = null;
   let importPage = 0;

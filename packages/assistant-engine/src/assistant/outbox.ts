@@ -190,6 +190,11 @@ export interface AssistantOutboxDispatchHooks {
     intent: AssistantOutboxIntent
     vault: string
   }) => Promise<AssistantChannelDelivery | null>
+  shouldRethrowDispatchError?: (input: {
+    error: unknown
+    intent: AssistantOutboxIntent
+    vault: string
+  }) => boolean
 }
 
 export type DeliverAssistantOutboxMessageResult =
@@ -886,6 +891,14 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       session: delivered.session ?? null,
     }
   } catch (error) {
+    if (input.dispatchHooks?.shouldRethrowDispatchError?.({
+      error,
+      intent: dispatchIntent,
+      vault: input.vault,
+    }) === true) {
+      throw error
+    }
+
     let failure = error
     let effectiveDeliveryMayHaveSucceeded =
       deliveryMayHaveSucceeded || errorImpliesAssistantDeliveryMayHaveSucceeded(error)
@@ -1002,6 +1015,7 @@ export async function deliverAssistantOutboxMessage(input: {
   turnTrigger?: AssistantTurnTrigger | null
   vault: string
 }): Promise<DeliverAssistantOutboxMessageResult> {
+  throwIfAssistantOutboxSignalAborted(input.signal)
   const intent = await createAssistantOutboxIntent({
     actorId: input.actorId,
     bindingDelivery: input.bindingDelivery,
@@ -1086,6 +1100,22 @@ export async function deliverAssistantOutboxMessage(input: {
       normalizeAssistantDeliveryError(new Error('Assistant outbound delivery failed.')),
     session: dispatched.session ?? null,
   }
+}
+
+function throwIfAssistantOutboxSignalAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) {
+    return
+  }
+
+  const reason: unknown = signal.reason
+  if (reason instanceof Error) {
+    throw reason
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_OUTBOX_ABORTED',
+    'Assistant outbound delivery was aborted before dispatch.',
+  )
 }
 
 export async function deliverAssistantOutboxReaction(input: {
@@ -1632,6 +1662,7 @@ export async function markAssistantOutboxIntentMirrorTerminalById(input: {
   error: unknown
   failedAt?: Date
   intentId: string
+  onlyCurrentStatuses?: readonly AssistantOutboxIntent['status'][]
   status: 'abandoned' | 'failed'
   vault: string
 }): Promise<AssistantOutboxIntent | null> {
@@ -1650,6 +1681,9 @@ export async function markAssistantOutboxIntentMirrorTerminalById(input: {
     failedAt: input.failedAt ?? new Date(),
     intent,
     intentPath,
+    ...(input.onlyCurrentStatuses
+      ? { onlyCurrentStatuses: input.onlyCurrentStatuses }
+      : {}),
     status: input.status,
     vault: input.vault,
   })

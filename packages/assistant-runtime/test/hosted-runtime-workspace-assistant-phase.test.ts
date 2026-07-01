@@ -4334,6 +4334,205 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("yields prepared background outbox delivery when foreground work appears before post-checkpoint drain", async () => {
+    const deliveryEffect = createDeliveryEffect();
+    const preparedDispatches = createPreparedDispatchesForDeliveryEffect(deliveryEffect);
+    let shouldYield = false;
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      shouldYield = true;
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: true,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches,
+    });
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(
+      "2026-04-27T00:00:30.000Z",
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+      shouldYieldBackgroundMaintenance: () => shouldYield,
+      workspace: createDueAssistantWorkspace(),
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      progressed: true,
+    }));
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
+      expect.objectContaining({
+        includeBackgroundDueIntents: false,
+      }),
+    );
+    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
+    expect(mocks.resetHostedPreparedAssistantDeliveryEffects).toHaveBeenCalledWith({
+      effects: [deliveryEffect],
+      preparedDispatches,
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: "2026-04-27T00:00:00.000Z",
+      nextWakeReason: "assistant",
+      redactedStatus: expect.objectContaining({
+        hostedAssistantNextWakeAt: "2026-04-27T00:00:00.000Z",
+        hostedOutboxDeliveryYielded: 1,
+        nextWakeAt: "2026-04-27T00:00:00.000Z",
+      }),
+    }));
+  });
+
+  it("yields prepared background outbox delivery when foreground work appears after the member-channel barrier", async () => {
+    const deliveryEffect = createDeliveryEffect();
+    const preparedDispatches = createPreparedDispatchesForDeliveryEffect(deliveryEffect);
+    let shouldYield = false;
+    const prepareAutoReplyDelivery = vi.fn(async () => {
+      shouldYield = true;
+      return null;
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches,
+    });
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(
+      "2026-04-27T00:00:30.000Z",
+    );
+    mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
+      intentId: deliveryEffect.effectId,
+      turnId: deliveryEffect.payload.turnId,
+    });
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValueOnce(
+      new Set([deliveryEffect.effectId]),
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+      prepareAutoReplyDelivery,
+      shouldYieldBackgroundMaintenance: () => shouldYield,
+      workspace: createDueAssistantWorkspace(),
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(result).toEqual(expect.objectContaining({
+      afterCheckpointKeepsForegroundImportLoop: true,
+      checkpointReason: "outbox_sending",
+      progressed: true,
+    }));
+    expect(prepareAutoReplyDelivery).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
+    expect(mocks.resetHostedPreparedAssistantDeliveryEffects).toHaveBeenCalledWith({
+      effects: [deliveryEffect],
+      preparedDispatches,
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: "2026-04-27T00:00:00.000Z",
+      redactedStatus: expect.objectContaining({
+        hostedOutboxDeliveryYielded: 1,
+      }),
+    }));
+  });
+
+  it("yields prepared background outbox delivery when foreground work appears inside the prepared drain", async () => {
+    const firstDeliveryEffect = {
+      ...createDeliveryEffect(),
+      deliveryPhase: "background_retry" as const,
+      effectId: "effect_late_yield_first",
+      fingerprint: "fingerprint_late_yield_first",
+      payload: {
+        ...createDeliveryEffect().payload,
+        idempotencyKey: "assistant-outbox:intent_late_yield_first",
+      },
+    };
+    const secondDeliveryEffect = {
+      ...createDeliveryEffect(),
+      deliveryPhase: "background_retry" as const,
+      effectId: "effect_late_yield_second",
+      fingerprint: "fingerprint_late_yield_second",
+      payload: {
+        ...createDeliveryEffect().payload,
+        idempotencyKey: "assistant-outbox:intent_late_yield_second",
+      },
+    };
+    const preparedDispatches = [
+      ...createPreparedDispatchesForDeliveryEffect(firstDeliveryEffect),
+      ...createPreparedDispatchesForDeliveryEffect(secondDeliveryEffect),
+    ];
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      firstDeliveryEffect,
+      secondDeliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches,
+    });
+    mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValueOnce(
+      "2026-04-27T00:00:30.000Z",
+    );
+    mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async (input) => {
+      expect(input.shouldYieldBackgroundDelivery?.()).toBe(false);
+      input.onBackgroundDeliveryYield?.({ yieldedEffectCount: 1 });
+      return [{
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "telegram",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: firstDeliveryEffect.fingerprint,
+        effectId: firstDeliveryEffect.effectId,
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: "provider_late_yield_first",
+        providerMessageIds: [],
+        providerThreadId: "thread_late_yield_first",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      }];
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:00:00.000Z",
+      shouldYieldBackgroundMaintenance: () => false,
+      workspace: createDueAssistantWorkspace(),
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantDeliveryEffects: [firstDeliveryEffect, secondDeliveryEffect],
+        onBackgroundDeliveryYield: expect.any(Function),
+        preparedDispatches,
+        shouldYieldBackgroundDelivery: expect.any(Function),
+        vaultRoot: "/tmp/murph-vault",
+      }),
+    );
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.resetHostedPreparedAssistantDeliveryEffects).not.toHaveBeenCalled();
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: "2026-04-27T00:00:00.000Z",
+      nextWakeReason: "assistant",
+      redactedStatus: expect.objectContaining({
+        hostedAssistantNextWakeAt: "2026-04-27T00:00:00.000Z",
+        hostedOutboxDeliveryYielded: 1,
+        nextWakeAt: "2026-04-27T00:00:00.000Z",
+      }),
+    }));
+  });
+
   it("does not carry device-sync next-wake reasons from the assistant automation lane", async () => {
     const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
