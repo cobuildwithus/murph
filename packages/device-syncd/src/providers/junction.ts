@@ -836,8 +836,8 @@ export function createJunctionDeviceSyncProvider(
   }
 
   function shouldLoadJunctionDirectResourceSourceProviders(input: JunctionDirectResourceJobInput): boolean {
-    return input.resource === "sleep_cycle" ||
-      (input.resource === "sleep" && hasJunctionSourceReferenceIdentity(input.record));
+    return (input.resource === "sleep_cycle" || input.resource === "sleep") &&
+      hasJunctionSourceReferenceIdentity(input.record);
   }
 
   async function diagnoseBackfill(
