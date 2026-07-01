@@ -1010,7 +1010,7 @@ export async function repairHostedFamilyBillingPeriodForGroup(input: {
 
     await applyHostedFamilyStripeSubscriptionUpdatedTx({
       dispatchContext: {
-        eventCreatedAt: lockedBillingRef?.lastStripeEventCreatedAt ?? null,
+        eventCreatedAt: now,
       },
       subscription,
       tx,

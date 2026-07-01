@@ -1,14 +1,12 @@
+import { createHash } from "node:crypto";
+
 import {
   listHostedFamilyBillingPeriodRepairCandidates,
   repairHostedFamilyBillingPeriodForGroup,
   type HostedFamilyBillingPeriodRepairReason,
 } from "../src/lib/hosted-onboarding/family-plan";
-import {
-  sanitizeHostedOnboardingLogString,
-  sanitizeHostedOnboardingPersistedErrorCode,
-  sanitizeHostedOnboardingPersistedErrorName,
-} from "../src/lib/hosted-onboarding/http";
 import { requireHostedStripeApi } from "../src/lib/hosted-onboarding/runtime";
+import { describeErrorForLog } from "../src/lib/http";
 import { getPrisma } from "../src/lib/prisma";
 
 const REPAIR_OPERATION = "hosted-family-billing-period-repair";
@@ -175,107 +173,31 @@ function describeHostedFamilyBillingPeriodRepairError(input: {
   groupId?: string;
   operation: string;
 }): Record<string, unknown> {
-  const errorMessage = readHostedFamilyBillingPeriodRepairErrorMessage(input.error);
-  const description: Record<string, unknown> = {
-    errorCategory: readHostedFamilyBillingPeriodRepairErrorCategory(input.error),
-    errorName: readHostedFamilyBillingPeriodRepairErrorName(input.error),
-    message: errorMessage ?? "No error message was provided.",
+  const retryable = readHostedFamilyBillingPeriodRepairRetryable(input.error);
+
+  return {
+    ...(describeErrorForLog(input.error) ?? {
+      errorType: input.error === null ? "null" : typeof input.error,
+    }),
+    ...(input.groupId
+      ? { groupIdHash: hashHostedFamilyBillingPeriodRepairGroupId(input.groupId) }
+      : {}),
     operation: input.operation,
+    ...(retryable === null ? {} : { retryable }),
   };
-  const groupId = sanitizeHostedOnboardingLogString(input.groupId, 128);
-  if (groupId) {
-    description.groupId = groupId;
-  }
-
-  const code = readHostedFamilyBillingPeriodRepairErrorCode(input.error);
-  if (code) {
-    description.code = code;
-  }
-
-  const httpStatus = readNumberProperty(input.error, "httpStatus");
-  if (httpStatus !== null) {
-    description.httpStatus = httpStatus;
-  }
-
-  const providerStatus = readNumberProperty(input.error, "statusCode");
-  if (providerStatus !== null) {
-    description.providerStatus = providerStatus;
-  }
-
-  const providerType = readSanitizedTokenProperty(input.error, "type");
-  if (providerType) {
-    description.providerType = providerType;
-  }
-
-  const providerRequestId = readStringProperty(input.error, "requestId");
-  if (providerRequestId !== null) {
-    description.providerRequestIdPresent = true;
-  }
-
-  const retryable = readBooleanProperty(input.error, "retryable");
-  if (retryable !== null) {
-    description.retryable = retryable;
-  }
-
-  return description;
 }
 
-function readHostedFamilyBillingPeriodRepairErrorCategory(error: unknown): string {
-  const errorName = error instanceof Error ? error.name : null;
-  if (errorName === "HostedOnboardingError") {
-    return "domain";
+function readHostedFamilyBillingPeriodRepairRetryable(error: unknown): boolean | null {
+  if (typeof error !== "object" || error === null) {
+    return null;
   }
-  if (readStringProperty(error, "requestId") || readStringProperty(error, "type")) {
-    return "stripe";
-  }
-  if (error instanceof Error) {
-    return "exception";
-  }
-  return error === null ? "null" : typeof error;
+
+  const retryable = Reflect.get(error, "retryable");
+  return typeof retryable === "boolean" ? retryable : null;
 }
 
-function readHostedFamilyBillingPeriodRepairErrorName(error: unknown): string {
-  const errorName = error instanceof Error ? error.name : typeof error;
-  return sanitizeHostedOnboardingPersistedErrorName(errorName) ?? "unknown";
-}
-
-function readHostedFamilyBillingPeriodRepairErrorMessage(error: unknown): string | null {
-  if (error instanceof Error) {
-    return sanitizeHostedOnboardingLogString(error.message);
-  }
-  return typeof error === "string"
-    ? sanitizeHostedOnboardingLogString(error)
-    : null;
-}
-
-function readHostedFamilyBillingPeriodRepairErrorCode(error: unknown): string | null {
-  return readSanitizedTokenProperty(error, "code") ??
-    readSanitizedTokenProperty(error, "errorCode");
-}
-
-function readSanitizedTokenProperty(error: unknown, property: string): string | null {
-  return sanitizeHostedOnboardingPersistedErrorCode(readStringProperty(error, property));
-}
-
-function readStringProperty(error: unknown, property: string): string | null {
-  const value = readObjectProperty(error, property);
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function readNumberProperty(error: unknown, property: string): number | null {
-  const value = readObjectProperty(error, property);
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function readBooleanProperty(error: unknown, property: string): boolean | null {
-  const value = readObjectProperty(error, property);
-  return typeof value === "boolean" ? value : null;
-}
-
-function readObjectProperty(value: unknown, property: string): unknown {
-  return typeof value === "object" && value !== null
-    ? Reflect.get(value, property)
-    : undefined;
+function hashHostedFamilyBillingPeriodRepairGroupId(groupId: string): string {
+  return createHash("sha256").update(groupId).digest("hex").slice(0, 16);
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {

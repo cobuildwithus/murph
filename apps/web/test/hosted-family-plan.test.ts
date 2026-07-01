@@ -1270,10 +1270,12 @@ describe("hosted Family plan", () => {
       $transaction: ReturnType<typeof vi.fn>;
     };
     const repairNow = new Date(FAMILY_STRIPE_PERIOD_START.getTime() + 60_000);
+    const previousEventCreatedAt = new Date(FAMILY_STRIPE_PERIOD_START.getTime() - 120_000);
+    const retriedEventCreatedAt = new Date(FAMILY_STRIPE_PERIOD_START.getTime() - 60_000);
     let billingRefState = createBillingRefMock({
       currentPeriodEnd: null,
       currentPeriodStart: null,
-      lastStripeEventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+      lastStripeEventCreatedAt: previousEventCreatedAt,
     });
     prisma.$transaction = vi.fn((callback) => callback(tx));
     tx.hostedAccountGroupBillingRef.findUnique.mockImplementation(async () => billingRefState);
@@ -1329,9 +1331,24 @@ describe("hosted Family plan", () => {
         currentBillingPhase: "paid",
         currentPeriodEnd: FAMILY_STRIPE_PERIOD_END,
         currentPeriodStart: FAMILY_STRIPE_PERIOD_START,
-        lastStripeEventCreatedAt: new Date("2026-06-18T12:30:00.000Z"),
+        lastStripeEventCreatedAt: repairNow,
       }),
     }));
+
+    tx.hostedAccountGroupBillingRef.upsert.mockClear();
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt: retriedEventCreatedAt,
+      },
+      subscription: makeFamilyStripeSubscription({
+        periodLocation: "subscription_item",
+      }),
+      tx,
+    })).resolves.toEqual({
+      activations: [],
+      groupId: "hbag_family",
+    });
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
   });
 
   it("reconciles active Family billing while skipping direct-paid members during activation", async () => {
