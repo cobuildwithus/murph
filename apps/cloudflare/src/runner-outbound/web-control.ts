@@ -151,6 +151,9 @@ export async function handleRunnerWebControlRequest(input: {
     && input.request.method === "POST";
   const isPhoneCallStartRequest = policy.operation === "phone_call_start"
     && input.request.method === "POST";
+  const isLinqContactCardShareAfterOutboundRequest =
+    policy.operation === "linq_contact_card_share_after_outbound"
+    && input.request.method === "POST";
   let writeAuthority: RunnerRuntimeWriteFenceWriteAuthority | null =
     null;
   if (
@@ -166,6 +169,7 @@ export async function handleRunnerWebControlRequest(input: {
     || isComputerUseRequest
     || isConnectedAppsRequest
     || isCodexAuthUpdateRequest
+    || isLinqContactCardShareAfterOutboundRequest
     || isPhoneCallStartRequest
   ) {
     try {

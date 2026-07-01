@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { HostedBillingStatus } from "@prisma/client";
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   readHostedMemberHomeLinqRoute: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberCoreState: vi.fn(async () => null),
   readHostedMemberSnapshot: vi.fn(),
 }));
 
@@ -19,6 +21,13 @@ vi.mock("@/src/lib/hosted-onboarding/linq", () => ({
   sendHostedLinqChatMessage: vi.fn().mockResolvedValue({
     chatId: "chat-1",
     messageId: "provider-message-1",
+  }),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
+  maybeShareHostedLinqContactCardAfterOutboundForRuntime: vi.fn().mockResolvedValue({
+    action: "skip",
+    reason: "recent_attempt",
   }),
 }));
 
@@ -65,6 +74,7 @@ import {
   releaseHostedAiUsageLimitNotice,
 } from "@/src/lib/hosted-execution/usage-allowance";
 import {
+  createHostedExternalThreadLookupKey,
   createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -79,6 +89,9 @@ import {
   releaseHostedLinqOnboardingLinkNoticeClaim,
   releaseHostedLinqQuotaReplyNoticeClaim,
 } from "@/src/lib/hosted-onboarding/linq-daily-state";
+import {
+  maybeShareHostedLinqContactCardAfterOutboundForRuntime,
+} from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
@@ -130,6 +143,231 @@ describe("hosted Linq webhook transport", () => {
         replyToMessageId: "message-1",
       }),
     );
+  });
+
+  it("shares the contact card after an eligible side-effect without route authority", async () => {
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      homeRecipientPhone: "+15555550100",
+      memberId: "member-1",
+      replyToMessageId: "message-1",
+      service: "iMessage",
+      sourceEventId: "event-contact-card",
+      threadIsDirect: true,
+      template: "conversation_home_redirect",
+    });
+    const prisma = {};
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(maybeShareHostedLinqContactCardAfterOutboundForRuntime).toHaveBeenCalledWith({
+      authority: null,
+      boundUserId: "member-1",
+      chatId: "chat-1",
+      eligibility: {
+        service: "iMessage",
+        threadIsDirect: true,
+      },
+      prisma,
+      signal: undefined,
+    });
+  });
+
+  it("shares the contact card after an eligible send with validated route authority", async () => {
+    const route = buildAuthorizedLinqRouteFixture({
+      memberId: "member-1",
+      threadId: "chat-1",
+    });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      routeAuthority: route.authority,
+      service: "iMessage",
+      sourceEventId: "event-contact-card-authorized",
+      threadIsDirect: true,
+      template: "daily_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
+        prisma: route.prisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(maybeShareHostedLinqContactCardAfterOutboundForRuntime).toHaveBeenCalledWith({
+      authority: route.authority,
+      boundUserId: "member-1",
+      chatId: "chat-1",
+      eligibility: {
+        service: "iMessage",
+        threadIsDirect: true,
+      },
+      prisma: route.prisma,
+      signal: undefined,
+    });
+  });
+
+  it("does not wait for contact-card sharing before completing side-effect delivery", async () => {
+    vi.mocked(maybeShareHostedLinqContactCardAfterOutboundForRuntime)
+      .mockImplementationOnce(() => new Promise<never>(() => undefined));
+    const route = buildAuthorizedLinqRouteFixture({
+      memberId: "member-1",
+      threadId: "chat-1",
+    });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      routeAuthority: route.authority,
+      service: "iMessage",
+      sourceEventId: "event-contact-card-detached",
+      threadIsDirect: true,
+      template: "daily_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
+        prisma: route.prisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(maybeShareHostedLinqContactCardAfterOutboundForRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects routed side effects when authority targets a different chat", async () => {
+    const route = buildAuthorizedLinqRouteFixture({
+      memberId: "member-1",
+      threadId: "chat-other",
+    });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      routeAuthority: route.authority,
+      service: "iMessage",
+      sourceEventId: "event-contact-card-wrong-chat",
+      threadIsDirect: true,
+      template: "daily_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: route.prisma as never,
+        sideEffects: [effect],
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+    });
+
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(maybeShareHostedLinqContactCardAfterOutboundForRuntime).not.toHaveBeenCalled();
+    expect(route.prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+    expect(releaseHostedLinqQuotaReplyNoticeClaim).toHaveBeenCalledWith({
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma: route.prisma,
+    });
+  });
+
+  it("rejects routed side effects when authority targets a different member", async () => {
+    const route = buildAuthorizedLinqRouteFixture({
+      memberId: "member-other",
+      threadId: "chat-1",
+    });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      routeAuthority: route.authority,
+      service: "iMessage",
+      sourceEventId: "event-contact-card-wrong-member",
+      threadIsDirect: true,
+      template: "daily_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: route.prisma as never,
+        sideEffects: [effect],
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+    });
+
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(maybeShareHostedLinqContactCardAfterOutboundForRuntime).not.toHaveBeenCalled();
+    expect(route.prisma.hostedThreadRoute.findMany).not.toHaveBeenCalled();
+    expect(releaseHostedLinqQuotaReplyNoticeClaim).toHaveBeenCalledWith({
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma: route.prisma,
+    });
+  });
+
+  it("does not let contact-card share failures release successful notice claims", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.mocked(maybeShareHostedLinqContactCardAfterOutboundForRuntime)
+      .mockRejectedValueOnce(new Error("share failed"));
+    const route = buildAuthorizedLinqRouteFixture({
+      memberId: "member-1",
+      threadId: "chat-1",
+    });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      routeAuthority: route.authority,
+      service: "iMessage",
+      sourceEventId: "event-contact-card-fail",
+      threadIsDirect: true,
+      template: "daily_quota",
+    });
+
+    try {
+      await expect(
+        drainHostedLinqSideEffectsDirect({
+          currentInboundReply,
+          prisma: route.prisma as never,
+          sideEffects: [effect],
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+      expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(warnSpy).toHaveBeenCalledWith(
+          "Hosted Linq contact-card side-effect share failed.",
+          expect.objectContaining({
+            chatIdSuffix: "chat-1",
+            errorMessage: "share failed",
+            operation: "share_contact_card",
+            provider: "linq",
+            template: "daily_quota",
+          }),
+        );
+      });
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("yields a stable effect id for repeat wrong-chat inbounds and a fresh id when the home line changes", () => {
@@ -677,6 +915,12 @@ describe("hosted Linq webhook transport", () => {
       throw new Error("Expected test account lookup key.");
     }
     const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
       hostedThreadRoute: {
         findMany: vi.fn().mockResolvedValue([]),
       },
@@ -1052,6 +1296,56 @@ describe("hosted Linq webhook transport", () => {
     }
   });
 });
+
+function buildAuthorizedLinqRouteFixture(input: {
+  memberId: string;
+  threadId: string;
+}) {
+  const accountLookupKey = createHostedPhoneLookupKey("+15550000000");
+  if (!accountLookupKey) {
+    throw new Error("Expected test account lookup key.");
+  }
+  const threadLookupKey = createHostedExternalThreadLookupKey({
+    accountLookupKey,
+    channel: "linq",
+    threadId: input.threadId,
+  });
+  if (!threadLookupKey) {
+    throw new Error("Expected test thread lookup key.");
+  }
+  const memberState = {
+    billingStatus: HostedBillingStatus.active,
+    createdAt: new Date("2026-03-26T00:00:00.000Z"),
+    id: input.memberId,
+    suspendedAt: null,
+    updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+  };
+
+  return {
+    authority: {
+      accountLookupKey,
+      channel: "linq" as const,
+      containerMemberId: input.memberId,
+      threadId: input.threadId,
+    },
+    prisma: {
+      hostedThreadRoute: {
+        findMany: vi.fn().mockResolvedValueOnce([
+          {
+            channel: "linq",
+            container: {
+              member: memberState,
+              owner: memberState,
+            },
+            containerMemberId: input.memberId,
+            lastInboundAt: new Date("2026-03-26T11:59:00.000Z"),
+            threadLookupKey,
+          },
+        ]),
+      },
+    },
+  };
+}
 
 const HOME_REDIRECT_TEST_KEYRING_ENTRIES = {
   v1: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",

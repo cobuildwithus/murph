@@ -766,6 +766,62 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     },
   );
 
+  it("does not add synthetic route authority to active-member direct iMessage wakes", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+        }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        chatIsGroup: false,
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          message: expect.objectContaining({
+            linqMessage: expect.objectContaining({
+              service: "iMessage",
+              threadIsDirect: true,
+            }),
+          }),
+          userId: "member_123",
+        }),
+      }),
+    );
+    const outboxCall = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0];
+    expect(outboxCall?.envelope.message).not.toHaveProperty("accountLookupKey");
+    expect(outboxCall?.envelope.message).not.toHaveProperty("routeAuthority");
+  });
+
   it("marks Linq reaction eligibility from raw parts before mailbox text compaction", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
@@ -1552,6 +1608,74 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
   });
 
+  it("sends scheduled active-member Linq read receipts with current inbound proof", async () => {
+    const scheduledTasks: Array<() => Promise<void>> = [];
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+      },
+      hostedMemberRouting,
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_scheduled_read_receipt_route_drift",
+      }),
+      scheduleAfterResponse: (task) => {
+        scheduledTasks.push(task);
+      },
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
+    expect(scheduledTasks).toHaveLength(3);
+
+    for (const task of scheduledTasks) {
+      await task();
+    }
+
+    expect(mocks.sendHostedLinqReadReceipt).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      signal: undefined,
+    });
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        step: "hosted-onboarding.webhook.linq.ingress-read-receipt",
+      }),
+      "sent",
+      expect.objectContaining({
+        httpStatus: 204,
+        responseReason: "wake-appended-active-member",
+        wakeHandoffStarted: true,
+        wakeHandoffSignalAccepted: true,
+      }),
+    );
+  });
+
   it("revalidates routed Linq read receipts before provider delivery", async () => {
     const routeAccountLookupKey = createHostedPhoneLookupKey("+15550000000");
     if (!routeAccountLookupKey) {
@@ -1591,7 +1715,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
               threadLookupKey: routeLookupKey,
             },
           ])
-          .mockResolvedValueOnce([]),
+          .mockResolvedValue([]),
       },
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
@@ -1772,6 +1896,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("opens a Prisma transaction when dispatching an active-member Linq message from a root client", async () => {
     const transactionReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
     const transactionHostedMemberFindUnique = vi.fn().mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
       id: "member_123",
@@ -1786,6 +1911,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedMember: {
         findUnique: transactionHostedMemberFindUnique,
       },
+      hostedMemberRouting,
     };
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
@@ -1808,6 +1934,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           phoneLookupKey: "+15551234567",
         }),
       },
+      hostedMemberRouting,
     }, transactionClient);
 
     const response = await handleHostedOnboardingLinqWebhook({
@@ -3845,7 +3972,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     await expect(handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
+        chatIsGroup: false,
         eventId: "evt_active_member_no_first_contact_classifier",
+        service: "iMessage",
       }),
       signature: null,
       timestamp: null,
@@ -4794,14 +4923,24 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           suspendedAt: null,
         }),
       },
-      hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue(staleHomeRoute),
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-        upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({
-          ...create,
-          ...update,
-        })),
-      },
+      hostedMemberRouting: (() => {
+        let route = staleHomeRoute;
+        return {
+          findUnique: vi.fn().mockImplementation(async () =>
+            withHostedMemberRoutingMember(route)
+          ),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+          upsert: vi.fn(async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
+            route = {
+              ...route,
+              ...create,
+              ...update,
+              memberId: "member_123",
+            };
+            return withHostedMemberRoutingMember(route);
+          }),
+        };
+      })(),
     });
 
     const response = await handleHostedOnboardingLinqWebhook({
@@ -6084,14 +6223,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   if (!hostedMemberRouting?.upsert) {
     Object.defineProperty(prisma, "hostedMemberRouting", {
       configurable: true,
-      value: {
-        findFirst: vi.fn().mockResolvedValue(null),
-        findMany: vi.fn().mockResolvedValue([]),
-        findUnique: vi.fn().mockResolvedValue(null),
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-        upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
-        createMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
+      value: createStatefulHostedMemberRoutingMock(),
     });
   } else if (!hostedMemberRouting.findFirst && hostedMemberRouting.findUnique) {
     hostedMemberRouting.findFirst = hostedMemberRouting.findUnique;
@@ -6190,6 +6322,60 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   }
 
   return prisma as T & HostedOnboardingLinqWebhookPrismaFixture;
+}
+
+function createStatefulHostedMemberRoutingMock(initialRecord: Record<string, unknown> | null = null) {
+  let hostedMemberRoutingRecord = initialRecord;
+  return {
+    findFirst: vi.fn(async () => withHostedMemberRoutingMember(hostedMemberRoutingRecord)),
+    findMany: vi.fn(async () => {
+      const record = withHostedMemberRoutingMember(hostedMemberRoutingRecord);
+      return record ? [record] : [];
+    }),
+    findUnique: vi.fn(async ({ where }: { where?: Record<string, unknown> } = {}) => {
+      if (!hostedMemberRoutingRecord) {
+        return null;
+      }
+      if (
+        typeof where?.memberId === "string"
+        && hostedMemberRoutingRecord.memberId !== where.memberId
+      ) {
+        return null;
+      }
+      return withHostedMemberRoutingMember(hostedMemberRoutingRecord);
+    }),
+    updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    upsert: vi.fn(async ({ create, update }: {
+      create: Record<string, unknown>;
+      update?: Record<string, unknown>;
+    }) => {
+      hostedMemberRoutingRecord = {
+        ...create,
+        ...(update ?? {}),
+      };
+      return hostedMemberRoutingRecord;
+    }),
+    createMany: vi.fn().mockResolvedValue({ count: 1 }),
+  };
+}
+
+function withHostedMemberRoutingMember(
+  record: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!record || record.member) {
+    return record;
+  }
+  const memberId = typeof record.memberId === "string" ? record.memberId : "member_123";
+  return {
+    ...record,
+    member: {
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-03-26T00:00:00.000Z"),
+      id: memberId,
+      suspendedAt: null,
+      updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+    },
+  };
 }
 
 function withPrismaTransaction<
@@ -6315,6 +6501,7 @@ function readHostedMemberIdentityFromMockMember(
 }
 
 function buildHostedLinqWebhookBody(input: {
+  chatIsGroup?: boolean;
   createdAt?: string;
   data?: Record<string, unknown>;
   eventId?: string;
@@ -6329,6 +6516,7 @@ function buildHostedLinqWebhookBody(input: {
     data: {
       chat: {
         id: "chat_123",
+        ...(input.chatIsGroup === undefined ? {} : { is_group: input.chatIsGroup }),
         owner_handle: {
           handle: "+15550000000",
           id: "handle_owner_123",

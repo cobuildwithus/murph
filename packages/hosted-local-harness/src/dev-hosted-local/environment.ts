@@ -685,9 +685,14 @@ function normalizeHostedLocalBaseEnvironment(
 export function buildHostedLocalDevOverrides(
   config: HostedLocalDevConfig,
   cloudflareDevVars: Record<string, string>,
+  input: {
+    retellWebhookPublicBaseUrl?: string | null;
+  } = {},
 ): NodeJS.ProcessEnv {
   const webOrigin = `http://${config.webHost}:${config.webPort}`;
   const deviceSyncPublicBaseUrl = `${webOrigin}/api/device-sync`;
+  const retellWebhookPublicBaseUrl =
+    normalizeOptionalString(input.retellWebhookPublicBaseUrl);
   const workerBaseUrl =
     `${config.workerProtocol}://${resolveHostedLocalClientWorkerHost(config.workerHost)}:${config.workerPort}`;
   const callbackPrivateJwkJson = cloudflareDevVars.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK;
@@ -720,6 +725,9 @@ export function buildHostedLocalDevOverrides(
     HOSTED_EXECUTION_CONTROL_URL: workerBaseUrl,
     HOSTED_EXECUTION_DISPATCH_URL: workerBaseUrl,
     HOSTED_ONBOARDING_PUBLIC_BASE_URL: webOrigin,
+    ...(retellWebhookPublicBaseUrl
+      ? { RETELL_WEBHOOK_PUBLIC_BASE_URL: retellWebhookPublicBaseUrl }
+      : {}),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON"),
     ...copyNonEmptyEnv(cloudflareDevVars, "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK"),

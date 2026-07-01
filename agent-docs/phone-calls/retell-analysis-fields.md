@@ -6,6 +6,8 @@ not the raw transcript.
 Subscribe the Retell webhook to `call_ended` and `call_analyzed` only, pointing at
 `/api/retell/webhook`. Murph verifies the raw `X-Retell-Signature`, updates the existing
 `HostedPhoneCall` row idempotently, and runs result handling only once when analysis first lands.
+For local development, `RETELL_WEBHOOK_PUBLIC_BASE_URL` may point individual created calls at
+the local public tunnel without changing the published agent or workspace webhook configuration.
 
 ```text
 outcome

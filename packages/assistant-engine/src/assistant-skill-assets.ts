@@ -26,6 +26,12 @@ export const ASSISTANT_SKILLS = [
       'Use for starting, configuring, modifying, supporting, or reviewing bounded health experiments, including Health Commons protocol resolution, vault-first setup, safety screens, typed run creation, first-session prep reminders, planned-session support reminders, and experiment outcomes.',
   },
   {
+    slug: 'red-light-therapy',
+    name: 'red-light-therapy',
+    triggerHint:
+      'Use for red light therapy or photobiomodulation questions, including dosing, session duration, treatment distance, wavelengths, device irradiance, Bestqool lamps, safety boundaries, and whether to set up a bounded Health Commons PBM experiment.',
+  },
+  {
     slug: 'behavior-followthrough',
     name: 'behavior-followthrough',
     triggerHint:

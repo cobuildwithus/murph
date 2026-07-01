@@ -107,30 +107,35 @@ export function createHostedAssistantChannelTypingDependencies(input: {
 }): AssistantChannelTypingDependencies {
   return {
     startLinqTyping: async (request) => {
+      const linqDeliveryContexts = input.linqDeliveryContexts ?? [];
       const deliveryContext = resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
-        contexts: input.linqDeliveryContexts ?? [],
+        contexts: linqDeliveryContexts,
         replyToMessageId: null,
         target: request.target,
         targetKind: "thread",
       });
-      if (!deliveryContext || !input.providerFetch) {
+      if (!deliveryContext && linqDeliveryContexts.length > 0) {
+        return undefined;
+      }
+      if (!input.providerFetch) {
         return undefined;
       }
       const assertRecentInbound = input.effectsPort?.assertLinqRecentInboundEngagement;
       if (!assertRecentInbound) {
         return undefined;
       }
-      const currentInbound = deliveryContext.currentInbound ?? null;
+      const target = deliveryContext?.target ?? request.target;
+      const currentInbound = deliveryContext?.currentInbound ?? null;
       try {
         await assertRecentInbound({
           ...(currentInbound ? { currentInbound } : {}),
-          directRecipientPhoneNumber: deliveryContext.directRecipientPhoneNumber,
+          directRecipientPhoneNumber: deliveryContext?.directRecipientPhoneNumber ?? null,
           engagementKind: "requires_recent_inbound",
-          fromPhoneNumber: deliveryContext.fromPhoneNumber,
+          fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
           idempotencyKey: null,
           intentId: null,
-          routeAuthority: deliveryContext.routeAuthority,
-          target: deliveryContext.target ?? request.target,
+          routeAuthority: deliveryContext?.routeAuthority ?? null,
+          target,
           targetKind: "thread",
         }, {
           signal: input.signal ?? null,
@@ -148,7 +153,7 @@ export function createHostedAssistantChannelTypingDependencies(input: {
         signal: input.signal,
       }, "Hosted Linq typing indicator");
       return startLinqTypingIndicator({
-        target: deliveryContext.target ?? request.target,
+        target,
       }, dependencies);
     },
     startTelegramTyping: async (request) => {

@@ -81,6 +81,7 @@ import {
   type HostedRuntimeSideInputUnavailableCode,
   type HostedRuntimeUsageRecordRequest,
   type HostedRuntimeUsageRecordResponse,
+  type HostedRuntimeLinqContactCardShareAfterOutboundRequest,
   type HostedRuntimeFamilyPlanToolRequest,
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
@@ -102,6 +103,9 @@ import {
   type HostedWorkspaceInvocationStatus,
   type HostedWorkspaceState,
 } from "../runtime-control.ts";
+import type {
+  HostedExecutionLinqExternalThreadRouteAuthority,
+} from "../contracts.ts";
 import {
   rejectLegacyAliases,
   requireArray,
@@ -613,6 +617,40 @@ export function parseHostedRuntimeUsageRecordResponse(
   };
 }
 
+export function parseHostedRuntimeLinqContactCardShareAfterOutboundRequest(
+  value: unknown,
+): HostedRuntimeLinqContactCardShareAfterOutboundRequest {
+  const record = requireObject(value, "Hosted runtime Linq contact-card share after-outbound request");
+  assertAllowedObjectKeys(
+    record,
+    new Set(["authority", "chatId", "service", "threadIsDirect"]),
+    "Hosted runtime Linq contact-card share after-outbound request",
+  );
+
+  return {
+    authority: record.authority === undefined || record.authority === null
+      ? null
+      : parseHostedRuntimeLinqExternalThreadRouteAuthority(
+        record.authority,
+        "Hosted runtime Linq contact-card share after-outbound request authority",
+      ),
+    chatId: requireString(
+      record.chatId,
+      "Hosted runtime Linq contact-card share after-outbound request chatId",
+    ),
+    service: readNullableString(
+      record.service,
+      "Hosted runtime Linq contact-card share after-outbound request service",
+    ),
+    threadIsDirect: record.threadIsDirect === null
+      ? null
+      : requireBoolean(
+          record.threadIsDirect,
+          "Hosted runtime Linq contact-card share after-outbound request threadIsDirect",
+        ),
+  };
+}
+
 export function parseHostedRuntimeProductFeedbackRecordRequest(
   value: unknown,
 ): HostedRuntimeProductFeedbackRecordRequest {
@@ -945,6 +983,24 @@ function assertHostedCodexAuthVerificationUrl(value: string): void {
   if (url.hostname !== "auth.openai.com") {
     throw new TypeError("Hosted Codex auth verificationUrl must use the OpenAI auth host.");
   }
+}
+
+function parseHostedRuntimeLinqExternalThreadRouteAuthority(
+  value: unknown,
+  label: string,
+): HostedExecutionLinqExternalThreadRouteAuthority {
+  const record = requireObject(value, label);
+  const channel = requireString(record.channel, `${label} channel`);
+  if (channel !== "linq") {
+    throw new TypeError(`${label} channel must be linq.`);
+  }
+
+  return {
+    accountLookupKey: requireString(record.accountLookupKey, `${label} accountLookupKey`),
+    channel,
+    containerMemberId: requireString(record.containerMemberId, `${label} containerMemberId`),
+    threadId: requireString(record.threadId, `${label} threadId`),
+  };
 }
 
 function parseHostedProductFeedbackKind(value: unknown): HostedProductFeedbackKind {

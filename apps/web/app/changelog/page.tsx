@@ -43,6 +43,79 @@ import {
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
+  "hosted-family-plan-mvp": (
+    <ChecklistMock
+      label="Family covers"
+      items={[
+        { label: "2–6 sponsored seats at $7/mo each", done: true },
+        { label: "Private accounts — no shared chats or vault", done: true },
+        { label: "Each member gets their own Pulse allowance", done: true },
+        { label: "Invite by Telegram, phone, or email", done: true },
+      ]}
+    />
+  ),
+  "linq-contact-card-share": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        {
+          from: "murph",
+          body: "Got it — I'll text you when the pharmacy opens.",
+        },
+        {
+          from: "murph",
+          body: "(shared my contact so you can save the number)",
+        },
+      ]}
+    />
+  ),
+  "pulse-trial-10-days": (
+    <StatBlock
+      label="Pulse Trial length"
+      before="7 days"
+      after="10 days"
+      caption="every new trial, no card required"
+    />
+  ),
+  "device-sync-reconnect-context": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "Why was my sleep so short last night?" },
+        {
+          from: "murph",
+          body: "Your Garmin hasn't synced since Wednesday — let's reconnect before I read the gap as a bad night.",
+        },
+      ]}
+    />
+  ),
+  "onboarding-delegate-slow-saves": (
+    <StatBlock
+      label="Onboarding mid-write"
+      before="Stalls on save"
+      after="Keeps talking"
+      caption="supplements and labs save in background"
+    />
+  ),
+  "homepage-editorial-refresh": (
+    <ChecklistMock
+      label="New on the homepage"
+      items={[
+        { label: "Clock-in hero with live voice-memo demo", done: true },
+        { label: "Editorial asymmetric layout for the asks", done: true },
+        { label: "Trust band rewritten to match the FAQ", done: true },
+        { label: "Integrations grid with the Murph mark as hub", done: true },
+      ]}
+    />
+  ),
+  "linq-reminder-wake-no-replay": (
+    <StatBlock
+      label="Scheduled reminder fires"
+      before="Could replay"
+      after="Once"
+      caption="on cron rewind"
+    />
+  ),
   "garmin-junction-sleep-records": (
     <DeviceList
       devices={[

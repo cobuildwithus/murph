@@ -409,6 +409,17 @@ async function maybeSendHostedLinqIngressReadReceipt(input: {
   const currentInboundChatMatches =
     normalizeHostedLinqReadReceiptChatId(chatId)
       === normalizeHostedLinqReadReceiptChatId(input.currentInboundReply?.chatId);
+  if (routeAuthority && (routeAuthority.channel !== "linq" || routeAuthority.threadId !== chatId)) {
+    finishHostedOnboardingTiming(readReceiptTiming, "skipped-route-authority-mismatch", {
+      responseReason,
+      signalAbortedAfterReadReceipt: input.signal?.aborted ?? false,
+      wakeHandoffReason,
+      wakeHandoffStarted,
+      wakeHandoffSignalAccepted,
+    });
+    return;
+  }
+
   try {
     if (routeAuthority) {
       await assertHostedThreadRouteEgressAuthority({

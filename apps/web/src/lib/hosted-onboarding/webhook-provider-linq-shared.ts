@@ -131,7 +131,9 @@ export function buildSignupLinkResponse(input: {
   memberId: string;
   messageId: string;
   occurredAt: string;
+  service?: string | null;
   sourceEventId: string;
+  threadIsDirect?: boolean | null;
 }): HostedOnboardingLinqDirectPlan {
   const joinUrl = buildHostedInviteUrl(input.inviteCode);
 
@@ -143,7 +145,9 @@ export function buildSignupLinkResponse(input: {
         memberId: input.memberId,
         occurredAt: input.occurredAt,
         replyToMessageId: input.messageId,
+        service: input.service ?? null,
         sourceEventId: input.sourceEventId,
+        threadIsDirect: input.threadIsDirect ?? null,
         template: "invite_signup",
       }),
     ],
@@ -198,7 +202,9 @@ export function buildAiUsageQuotaReplyResponse(input: {
   noticeCode: HostedAiUsageGateNoticeCode;
   occurredAt: string;
   routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
+  service?: string | null;
   sourceEventId: string;
+  threadIsDirect?: boolean | null;
 }): HostedOnboardingLinqDirectPlan {
   const baseInput = {
     chatId: input.chatId,
@@ -207,7 +213,9 @@ export function buildAiUsageQuotaReplyResponse(input: {
     occurredAt: input.occurredAt,
     replyToMessageId: input.messageId,
     ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
+    service: input.service ?? null,
     sourceEventId: input.sourceEventId,
+    threadIsDirect: input.threadIsDirect ?? null,
     template: "ai_usage_quota" as const,
   };
 
@@ -237,7 +245,9 @@ export function buildConversationHomeRedirectResponse(input: {
   homeRecipientPhone: string;
   memberId: string;
   messageId: string;
+  service?: string | null;
   sourceEventId: string;
+  threadIsDirect?: boolean | null;
 }): HostedOnboardingLinqDirectPlan {
   return buildActiveMemberDirectPlan({
     desiredSideEffects: [
@@ -248,7 +258,9 @@ export function buildConversationHomeRedirectResponse(input: {
         homeRecipientPhone: input.homeRecipientPhone,
         memberId: input.memberId,
         replyToMessageId: input.messageId,
+        service: input.service ?? null,
         sourceEventId: input.sourceEventId,
+        threadIsDirect: input.threadIsDirect ?? null,
         template: "conversation_home_redirect",
       }),
     ],
@@ -265,7 +277,9 @@ export function buildQuotaReplyResponse(input: {
   messageId: string;
   occurredAt: string;
   routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
+  service?: string | null;
   sourceEventId: string;
+  threadIsDirect?: boolean | null;
 }): HostedOnboardingLinqDirectPlan {
   return buildActiveMemberDirectPlan({
     desiredSideEffects: [
@@ -275,7 +289,9 @@ export function buildQuotaReplyResponse(input: {
         occurredAt: input.occurredAt,
         replyToMessageId: input.messageId,
         ...(input.routeAuthority ? { routeAuthority: input.routeAuthority } : {}),
+        service: input.service ?? null,
         sourceEventId: input.sourceEventId,
+        threadIsDirect: input.threadIsDirect ?? null,
         template: "daily_quota",
       }),
     ],

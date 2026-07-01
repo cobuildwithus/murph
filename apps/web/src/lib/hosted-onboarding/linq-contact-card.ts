@@ -20,6 +20,7 @@ const MURPH_CONTACT_CARD_FIRST_NAME = "Murph";
 const MURPH_CONTACT_CARD_DEFAULT_IMAGE_URL =
   "https://www.withmurph.ai/murph_headshot.png";
 const MURPH_CONTACT_CARD_IMAGE_PATH = "/murph_headshot.png";
+const LINQ_CONTACT_CARD_IMAGE_CDN_HOST = "cdn.linqapp.com";
 
 export type HostedLinqContactCard = {
   firstName: string;
@@ -285,7 +286,30 @@ function isCurrentMurphContactCard(
     return false;
   }
 
-  return imageUrl ? card.imageUrl === imageUrl : true;
+  if (!imageUrl) {
+    return true;
+  }
+
+  // Linq rewrites accepted contact-card images to its own CDN URL.
+  return card.imageUrl === imageUrl || isHostedLinqContactCardImageUrl(card.imageUrl);
+}
+
+function isHostedLinqContactCardImageUrl(value: string | null): boolean {
+  const imageUrl = normalizeNullableString(value);
+  if (!imageUrl) {
+    return false;
+  }
+
+  try {
+    const url = new URL(imageUrl);
+    return url.protocol === "https:"
+      && url.hostname === LINQ_CONTACT_CARD_IMAGE_CDN_HOST
+      && url.search === ""
+      && url.pathname.includes("/contact-card/")
+      && /\/image-[^/]+\.png$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
 }
 
 function getMurphContactCardImageUrl(): string | null {

@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  assertHostedLinqRouteEgressAuthority,
   readHostedThreadRouteByExternalThread,
   readHostedThreadRouteByThreadIdentity,
 } from "../src/lib/hosted-routing/thread-route-store";
@@ -17,13 +18,23 @@ if (!LINQ_ACCOUNT_LOOKUP_KEY) {
 }
 
 function createPrismaMock() {
+  const hostedMember = {
+    findUnique: vi.fn(),
+  };
+  const hostedMemberRouting = {
+    findUnique: vi.fn(),
+  };
   const hostedThreadRoute = {
     findMany: vi.fn(),
   };
 
   return {
+    hostedMember,
+    hostedMemberRouting,
     hostedThreadRoute,
   } as unknown as Prisma.TransactionClient & {
+    hostedMember: typeof hostedMember;
+    hostedMemberRouting: typeof hostedMemberRouting;
     hostedThreadRoute: typeof hostedThreadRoute;
   };
 }
@@ -273,6 +284,35 @@ describe("hosted thread route store", () => {
       containerMemberId: "member_container_123",
       owner,
     });
+  });
+
+  it("does not authorize home Linq routing state without an explicit thread route", async () => {
+    const prisma = createPrismaMock();
+    prisma.hostedThreadRoute.findMany.mockResolvedValueOnce([]);
+
+    await expect(assertHostedLinqRouteEgressAuthority({
+      authority: {
+        accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+        channel: "linq",
+        containerMemberId: "member_home_123",
+        threadId: "chat_home_123",
+      },
+      prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+    });
+
+    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          channel: "linq",
+          threadLookupKey: expect.any(Object),
+        }),
+      }),
+    );
+    expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
   });
 
   it("fails closed when lookup candidates match multiple containers", async () => {
