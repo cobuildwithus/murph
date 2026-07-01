@@ -15,7 +15,6 @@ import { readRunnerNextAlarmAt } from "./alarm-coordinator.js";
 
 export type RuntimeProcessingRetryReason =
   | "active_child_rejected"
-  | "completed_fence_recovered"
   | "container_busy"
   | "container_rpc_error"
   | "container_rpc_timeout"

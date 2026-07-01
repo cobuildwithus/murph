@@ -17,7 +17,6 @@ export function computeRuntimeProcessingRetryAt(
   reason: RuntimeProcessingRetryReason,
 ): string {
   const delayMs =
-    reason === "completed_fence_recovered" ? 5_000 :
     reason === "stale_fence_replacement_race" ? 5_000 :
     reason === "container_busy" ? 5_000 :
     reason === "container_rpc_timeout" ? 10_000 :

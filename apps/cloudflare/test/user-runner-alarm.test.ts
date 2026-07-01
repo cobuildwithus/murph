@@ -1876,6 +1876,44 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
+  it("does not preempt retention through a rejected runner container name", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const getByName = vi.fn((): HostedExecutionContainerStubLike => {
+      throw new Error("rejected container name must not be used");
+    });
+    const { invoke, runner, sql } = createRunnerHarness({
+      runnerContainerNamespace: { getByName },
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      processingMode: "inbox_media_retention",
+      runnerContainerName: "member_other--v-current",
+      workspaceVersion: "7",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-default-behind-rejected-retention-name",
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:30.000Z",
+    });
+
+    expect(getByName).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql)).toMatchObject({
+      active_attempt_id: token.attemptId,
+      active_expires_at: null,
+      wake_at: null,
+    });
+  });
+
   it("waits for inactive proof after requesting abort for indeterminate retention liveness", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -2050,7 +2088,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
-    expect(onStatusRead).toHaveBeenCalledOnce();
+    expect(onStatusRead).not.toHaveBeenCalled();
     expect(ensureProcessing).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(readRunnerMeta(sql)).toMatchObject({
@@ -2116,7 +2154,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
-    expect(onStatusRead).toHaveBeenCalledOnce();
+    expect(onStatusRead).not.toHaveBeenCalled();
     expect(ensureProcessing).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(readRunnerMeta(sql)).toMatchObject({
@@ -2181,7 +2219,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
-    expect(onStatusRead).toHaveBeenCalledOnce();
+    expect(onStatusRead).not.toHaveBeenCalled();
     expect(ensureProcessing).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(readRunnerMeta(sql)).toMatchObject({
@@ -2247,7 +2285,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
-    expect(onStatusRead).toHaveBeenCalledOnce();
+    expect(onStatusRead).not.toHaveBeenCalled();
     expect(ensureProcessing).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(readRunnerMeta(sql)).toMatchObject({
@@ -2465,9 +2503,10 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
-  it("recovers a non-wakeable accepted fence when durable progress is already visible", async () => {
+  it("replaces a non-wakeable inactive fence without reading web status", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
       async () => ({
         kind: "start-required" as const,
@@ -2477,6 +2516,7 @@ describe("HostedUserRunner execution coordination", () => {
     const onStatusRead = vi.fn();
     const { invoke, runner, sql } = createRunnerHarness({
       ensureProcessing,
+      invocationResults: [invocationResult.promise],
       mailboxLag: [],
       onStatusRead,
       workspace: createWorkspaceState({ version: "8" }),
@@ -2489,31 +2529,43 @@ describe("HostedUserRunner execution coordination", () => {
     vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
 
     await expect(runner.ensureRuntimeProcessingForUser({
-      orchestrationAttemptId: "test-orchestration-attempt-recover-completed-inactive-fence",
+      orchestrationAttemptId: "test-orchestration-attempt-replace-inactive-fence-without-status",
       userId: TEST_USER_ID,
-    })).resolves.toEqual({
-      kind: "retry_later",
-      retryAt: "2026-04-27T00:00:36.000Z",
+    })).resolves.toMatchObject({
+      action: "replaced",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-04-27T00:01:31.000Z",
+      runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
-    expect(onStatusRead).toHaveBeenCalledOnce();
-    expect(invoke).not.toHaveBeenCalled();
+    expect(onStatusRead).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: null,
+      active_attempt_id: expect.not.stringMatching(token.attemptId),
       active_expires_at: null,
       backoff_until: null,
-      last_invocation_at: expect.any(String),
       wake_at: null,
     });
+
+    invocationResult.resolve({
+      nextWakeAt: null,
+      status: "idle",
+    });
+    await vi.waitFor(() =>
+      expect(readRunnerMeta(sql)).toMatchObject({
+        active_attempt_id: null,
+        last_invocation_at: expect.any(String),
+      })
+    );
   });
 
-  it("preserves a non-wakeable accepted fence when recovery has no remaining command budget", async () => {
+  it("clears a non-wakeable inactive fence when replacement has no remaining command budget", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
       async () => {
-        vi.setSystemTime(new Date("2026-04-27T00:00:40.500Z"));
+        vi.setSystemTime(new Date("2026-04-27T00:00:41.500Z"));
         return {
           kind: "start-required" as const,
           reason: "no-active-child" as const,
@@ -2525,7 +2577,7 @@ describe("HostedUserRunner execution coordination", () => {
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
-    const token = writeRuntimeFenceForTest(sql, {
+    writeRuntimeFenceForTest(sql, {
       workspaceVersion: "7",
     });
     vi.setSystemTime(new Date("2026-04-27T00:00:31.000Z"));
@@ -2536,13 +2588,13 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     })).resolves.toEqual({
       kind: "retry_later",
-      retryAt: "2026-04-27T00:00:50.500Z",
+      retryAt: "2026-04-27T00:00:51.500Z",
     });
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
-      active_attempt_id: token.attemptId,
+      active_attempt_id: null,
       wake_at: null,
     });
   });
@@ -2768,7 +2820,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
     expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
-    expect(onStatusRead).toHaveBeenCalledOnce();
+    expect(onStatusRead).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token.attemptId),
@@ -2833,7 +2885,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
     expect(readActiveRuntimeUserFence).toHaveBeenCalledOnce();
-    expect(onStatusRead).toHaveBeenCalledOnce();
+    expect(onStatusRead).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token.attemptId),
