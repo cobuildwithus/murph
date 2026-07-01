@@ -1984,40 +1984,41 @@ async function withHostedProviderCleanupSchedulingWake(input: {
   const afterCheckpoint = result.afterCheckpoint;
   return {
     ...result,
-    afterCheckpoint: async () =>
-      mergeHostedProviderCleanupSchedulingWakeIntoPostCheckpoint({
+    afterCheckpoint: async () => {
+      const postCheckpoint = await afterCheckpoint();
+      if (!postCheckpoint) {
+        return null;
+      }
+      return await mergeHostedProviderCleanupSchedulingWakeIntoPostCheckpoint({
         deferDueOrInvalid: input.deferDueOrInvalid,
         phaseInput: input.phaseInput,
-        postCheckpoint: await afterCheckpoint(),
-      }),
+        postCheckpoint,
+      });
+    },
   };
 }
 
 async function mergeHostedProviderCleanupSchedulingWakeIntoPostCheckpoint(input: {
   deferDueOrInvalid: boolean;
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
-  postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null | void;
-}): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null> {
+  postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint;
+}): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
   const wake = await resolveHostedProviderCleanupSchedulingWakeCandidate({
     deferDueOrInvalid: input.deferDueOrInvalid,
     phaseInput: input.phaseInput,
   });
   if (!wake?.at) {
-    return input.postCheckpoint ?? null;
+    return input.postCheckpoint;
   }
 
   const wakeResult: HostedWorkspaceRunnerAssistantPhasePostCheckpoint = {
-    checkpointReason: input.postCheckpoint?.checkpointReason ?? "assistant_runtime_commit",
+    checkpointReason: input.postCheckpoint.checkpointReason,
     nextWakeAt: wake.at,
     ...(wake.reason ? { nextWakeReason: wake.reason } : {}),
     redactedStatus: {
       nextWakeAt: wake.at,
     },
   };
-  if (!input.postCheckpoint) {
-    return wakeResult;
-  }
-
   const merged = mergeHostedAssistantPhasePostCheckpoint(input.postCheckpoint, wakeResult);
   if (
     !wake.reason
