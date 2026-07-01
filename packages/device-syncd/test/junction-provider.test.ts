@@ -5801,7 +5801,7 @@ test("Junction imports multiple direct daily payloads via per-job execution with
   assert.deepEqual(records.map((record) => record.sourceProviderSlug), ["garmin", "garmin"]);
 });
 
-test("Junction resource jobs import direct Garmin sleep webhook payloads without Junction HTTP requests", async () => {
+test("Junction resource jobs import direct Garmin sleep webhook payloads without source references", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -5882,7 +5882,7 @@ test("Junction resource jobs import direct Garmin sleep webhook payloads without
   assert.deepEqual(snapshot.timeseries, {});
 });
 
-test("Junction resource jobs import direct Garmin sleep webhook object data without Junction HTTP requests", async () => {
+test("Junction resource jobs import direct Garmin sleep webhook object data without source references", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -5958,6 +5958,90 @@ test("Junction resource jobs import direct Garmin sleep webhook object data with
   assert.equal(sleepRecord?.sourceProviderSlug, "garmin");
   assert.equal(sleepData?.duration, 28800);
   assert.equal(sleepData?.total, 25200);
+  assert.deepEqual(snapshot.timeseries, {});
+});
+
+test("Junction resource jobs resolve direct Garmin sleep provider references before import", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            source: {
+              device_id: "garmin-watch-1",
+            },
+            status: "connected",
+            resource_availability: {
+              sleep: true,
+            },
+          },
+        ],
+      });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep"],
+    timeseriesResources: [],
+  });
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      upsertConnectionSource: () => {
+        throw new Error("Direct sleep imports should not project Junction source state.");
+      },
+    }),
+    createJob("resource", {
+      eventType: "daily.data.sleep.created",
+      objectId: "sleep-provider-reference-1",
+      occurredAt: "2026-04-02T11:00:00.000Z",
+      resource: "sleep",
+      resourceCategory: "summary",
+      sourceProviderSlug: "garmin",
+      webhookDataJson: JSON.stringify({
+        average_hrv: 42,
+        bedtime_start: "2026-04-02T03:00:00.000Z",
+        bedtime_stop: "2026-04-02T11:00:00.000Z",
+        deep: 5400,
+        duration: 28800,
+        id: "sleep-provider-reference-1",
+        light: 12600,
+        provider_connection_id: "provider-garmin-1",
+        rem: 7200,
+        sourceProviderSlug: "garmin",
+        total: 25200,
+      }),
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-05T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as {
+    connections?: Array<Record<string, unknown>>;
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+    timeseries?: Record<string, unknown[]>;
+  };
+  const sleepRecord = snapshot.summaries?.sleep?.[0];
+  const sourceInstanceId = snapshot.connections?.[0]?.sourceInstanceId;
+  assert.ok(requests.some((url) => url.includes("/v2/user/providers/")));
+  assert.equal(requests.some((url) => url.includes("/v2/summary/sleep/")), false);
+  assert.equal(typeof sourceInstanceId, "string");
+  assert.equal(sleepRecord?.sourceInstanceId, sourceInstanceId);
+  assert.equal("provider_connection_id" in (sleepRecord ?? {}), false);
   assert.deepEqual(snapshot.timeseries, {});
 });
 

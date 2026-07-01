@@ -835,6 +835,11 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
+  function shouldLoadJunctionDirectResourceSourceProviders(input: JunctionDirectResourceJobInput): boolean {
+    return input.resource === "sleep_cycle" ||
+      (input.resource === "sleep" && hasJunctionSourceReferenceIdentity(input.record));
+  }
+
   async function diagnoseBackfill(
     context: DeviceSyncBackfillDiagnosticContext,
   ): Promise<DeviceSyncBackfillDiagnosticResult> {
@@ -1201,7 +1206,7 @@ export function createJunctionDeviceSyncProvider(
 
       const directInput = readJunctionDirectResourceJobInput(job, window);
       if (directInput) {
-        const sourceProviders = directInput.resource === "sleep_cycle"
+        const sourceProviders = shouldLoadJunctionDirectResourceSourceProviders(directInput)
           ? await loadSourceProviders()
           : [];
         await importJunctionDirectResourceSnapshot(
@@ -3467,6 +3472,26 @@ function isJunctionSourceReferenceIdentityKey(key: string): boolean {
   return normalized === "connectionid"
     || normalized === "providerconnectionid"
     || normalized === "sourceid";
+}
+
+function hasJunctionSourceReferenceIdentity(
+  value: unknown,
+  seen: Set<Record<string, unknown>> = new Set(),
+): boolean {
+  if (Array.isArray(value)) {
+    return value.some((entry) => hasJunctionSourceReferenceIdentity(entry, seen));
+  }
+
+  const record = readPlainObject(value);
+  if (!record || seen.has(record)) {
+    return false;
+  }
+  seen.add(record);
+
+  return Object.entries(record).some(([key, nested]) =>
+    (isJunctionSourceReferenceIdentityKey(key) && normalizeString(nested) !== undefined) ||
+    hasJunctionSourceReferenceIdentity(nested, seen)
+  );
 }
 
 function isBlockedJunctionImportSourceIdentityContainerKey(key: string): boolean {
