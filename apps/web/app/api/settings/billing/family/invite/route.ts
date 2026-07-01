@@ -136,7 +136,21 @@ async function addSeatThenInvite<T>(
     memberId: ownerMemberId,
     prisma,
   });
-  if (!snapshot?.billingActive || snapshot.seats.billed >= snapshot.seats.max) {
+  if (!snapshot?.billingActive) {
+    return "unavailable";
+  }
+  // A seat may have freed (invite expired/canceled, member removed) since the
+  // re-check; take it instead of buying another.
+  if (snapshot.seats.remaining > 0) {
+    try {
+      return { invite: await issueInvite() };
+    } catch (error) {
+      if (!isSeatLimitError(error)) {
+        throw error;
+      }
+    }
+  }
+  if (snapshot.seats.billed >= snapshot.seats.max) {
     return "unavailable";
   }
   const targetSeatCount = snapshot.seats.billed + 1;

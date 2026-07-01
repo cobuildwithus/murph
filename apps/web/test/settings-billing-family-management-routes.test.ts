@@ -218,6 +218,42 @@ test("reuses a concurrently-created invite on the pre-buy re-check (no purchase)
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
 });
 
+test("uses a seat freed before the purchase instead of buying another", async () => {
+  const seatLimit = () =>
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
+      message: "This Family plan has no open paid seats.",
+    });
+  // Initial attempt and pre-buy re-check fail, but the snapshot then shows a seat
+  // freed up (cancel/remove), so the invite lands without a purchase.
+  mocks.issueHostedFamilyInviteTx
+    .mockRejectedValueOnce(seatLimit())
+    .mockRejectedValueOnce(seatLimit())
+    .mockResolvedValueOnce({
+      channel: "family",
+      expiresAt: new Date("2026-07-01T00:00:00.000Z"),
+      id: "inv_new",
+      inviteCode: "NEWCODE",
+      status: "pending",
+      targetLabel: "Dad",
+      targetPhoneHint: "+48 6** *** ***",
+    });
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce({
+    billingActive: true,
+    groupId: "hbag_family",
+    seats: { active: 1, billed: 2, invited: 0, max: 6, min: 2, remaining: 1, used: 1 },
+  });
+
+  const response = await inviteRoute.POST(
+    inviteRequest({ addSeatIfNeeded: true, targetLabel: "Dad", targetPhoneNumber: "+48600000001" }),
+  );
+
+  expect(response.status).toBe(200);
+  expect(mocks.updateHostedFamilySeatCount).not.toHaveBeenCalled();
+  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(3);
+});
+
 test("adds one seat then reports syncing if the invite still cannot land", async () => {
   // Every attempt (initial, pre-buy re-check, post-buy) hits the limit, e.g. a
   // slow webhook or a concurrent grab. Exactly one seat is purchased and the
