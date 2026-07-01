@@ -1,4 +1,4 @@
-import { access, readdir, readFile } from 'node:fs/promises'
+import { access, open, readdir, readFile, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import {
@@ -180,6 +180,54 @@ export async function readAssistantTranscriptEntries(
     }
 
     throw error
+  }
+}
+
+// Bounded tail read for recurring maintenance work: reads at most maxBytes
+// from the end of the committed transcript JSONL instead of parsing the whole
+// file. A partial first line from the byte cut is dropped before parsing.
+export async function readAssistantTranscriptTailEntries(
+  paths: AssistantStatePaths,
+  sessionId: string,
+  maxBytes: number,
+): Promise<AssistantTranscriptEntry[]> {
+  const transcriptPath = resolveAssistantTranscriptPath(paths, sessionId)
+
+  let handle: FileHandle
+  try {
+    handle = await open(transcriptPath, 'r')
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return []
+    }
+    throw error
+  }
+
+  try {
+    const size = (await handle.stat()).size
+    const readBytes = Math.min(size, Math.max(0, maxBytes))
+    if (readBytes === 0) {
+      return []
+    }
+    const buffer = Buffer.alloc(readBytes)
+    await handle.read(buffer, 0, readBytes, size - readBytes)
+    let raw = buffer.toString('utf8')
+    if (readBytes < size) {
+      const firstNewlineIndex = raw.indexOf('\n')
+      raw = firstNewlineIndex === -1 ? '' : raw.slice(firstNewlineIndex + 1)
+    }
+    const parsed = parseAssistantJsonLinesWithTailSalvage(raw, (value) =>
+      assistantTranscriptEntrySchema.parse(value),
+    )
+    if (parsed.malformedLineCount > 0) {
+      throw new VaultCliError(
+        'ASSISTANT_TRANSCRIPT_CORRUPTED',
+        'Assistant transcript contains malformed committed entries.',
+      )
+    }
+    return parsed.values
+  } finally {
+    await handle.close()
   }
 }
 

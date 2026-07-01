@@ -2168,6 +2168,32 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
+  it('schedules a catch-up wake for a due unclaimed overnight job while foreground yield is active', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-overnight-memory-preclaim-yield-',
+    )
+    addOvernightMemoryConsolidationAutomation(vaultRoot)
+
+    // Yield is active before any claim: no retryAfterAt has been persisted,
+    // and the yield-filtered projection hides the due job from dueJobs. The
+    // status wake must still include a short catch-up retry so the occurrence
+    // is not disarmed until an unrelated wake.
+    await expect(getAssistantCronStatus(vaultRoot, {
+      executionContext: {
+        hosted: {
+          memberId: 'member-hosted',
+          userEnvKeys: [],
+        },
+      },
+      shouldYieldBackgroundMaintenance: () => true,
+    })).resolves.toMatchObject({
+      dueJobs: 0,
+      nextRunAt: '2026-04-09T03:10:30.000Z',
+    })
+  })
+
   it('aborts and releases overnight memory consolidation when hosted maintenance yields during provider work before side effects', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))

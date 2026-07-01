@@ -1,4 +1,5 @@
-import { readdir } from 'node:fs/promises'
+import { readdir, stat } from 'node:fs/promises'
+import path from 'node:path'
 import {
   assistantAutomationStateSchema,
   parseAssistantSessionRecord,
@@ -35,6 +36,7 @@ import {
   readAssistantIndexStore,
   readAssistantSession,
   readAssistantTranscriptEntries,
+  readAssistantTranscriptTailEntries,
   readAutomationState,
   writeAutomationState,
   replaceTranscriptEntries,
@@ -374,6 +376,56 @@ export async function listAssistantSessionsLocal(
   })
 }
 
+// Bounded variant for recurring maintenance work: stats session files and
+// fully parses only the newest `limit` by file modification time, instead of
+// reading every session record in a growing directory. Callers still filter
+// on record timestamps; mtime ordering is only the read bound.
+export async function listRecentAssistantSessions(
+  vault: string,
+  options: { limit: number },
+): Promise<AssistantSession[]> {
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
+
+    const entries = await readdir(paths.sessionsDirectory, {
+      withFileTypes: true,
+    })
+    const candidates: Array<{ mtimeMs: number; sessionId: string }> = []
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) {
+        continue
+      }
+      try {
+        const stats = await stat(path.join(paths.sessionsDirectory, entry.name))
+        candidates.push({
+          mtimeMs: stats.mtimeMs,
+          sessionId: entry.name.replace(/\.json$/u, ''),
+        })
+      } catch {
+        continue
+      }
+    }
+
+    const sessions: AssistantSession[] = []
+    for (const candidate of candidates
+      .sort((left, right) => right.mtimeMs - left.mtimeMs)
+      .slice(0, Math.max(0, options.limit))) {
+      const session = await readAssistantSession({
+        paths,
+        sessionId: candidate.sessionId,
+        treatCorruptedAsMissing: true,
+      })
+      if (session) {
+        sessions.push(session)
+      }
+    }
+
+    return sessions.sort((left, right) =>
+      compareAssistantTimestampsAscending(right.updatedAt, left.updatedAt),
+    )
+  })
+}
+
 export async function getAssistantSession(
   vault: string,
   sessionId: string,
@@ -442,6 +494,16 @@ export async function listAssistantTranscriptEntries(
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
   return readAssistantTranscriptEntries(paths, sessionId)
+}
+
+export async function listAssistantTranscriptTailEntries(
+  vault: string,
+  sessionId: string,
+  options: { maxBytes: number },
+): Promise<AssistantTranscriptEntry[]> {
+  const paths = resolveAssistantStatePaths(vault)
+  await ensureAssistantState(paths)
+  return readAssistantTranscriptTailEntries(paths, sessionId, options.maxBytes)
 }
 
 export async function appendAssistantTranscriptEntries(

@@ -1,4 +1,4 @@
-import { rm } from 'node:fs/promises'
+import { rm, utimes } from 'node:fs/promises'
 import { afterEach, expect, test } from 'vitest'
 
 import {
@@ -12,8 +12,12 @@ import {
 } from '../src/assistant/maintenance-evidence.ts'
 import {
   appendAssistantTranscriptEntries,
+  listAssistantTranscriptTailEntries,
+  listRecentAssistantSessions,
   saveAssistantSession,
 } from '../src/assistant/store.ts'
+import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
+import { resolveAssistantSessionPath } from '../src/assistant/store/persistence.ts'
 import { createTempVaultContext } from './test-helpers.js'
 
 const cleanupPaths: string[] = []
@@ -129,6 +133,92 @@ test('builds bounded committed conversation evidence across recent sessions', as
   expect(evidence).not.toContain('Too old to be included.')
   expect(evidence).not.toContain('Stale session message.')
   expect(evidence).not.toContain('internal status entry')
+})
+
+test('bounds transcript evidence reads to the tail byte cap', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-maintenance-evidence-tail-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  await appendAssistantTranscriptEntries(vaultRoot, 'session-tail', [
+    {
+      createdAt: '2026-06-28T09:00:00.000Z',
+      kind: 'user',
+      text: 'oldest message that the tail cap should drop',
+    },
+    {
+      createdAt: '2026-06-28T09:00:01.000Z',
+      kind: 'user',
+      text: 'middle message',
+    },
+    {
+      createdAt: '2026-06-28T09:00:02.000Z',
+      kind: 'user',
+      text: 'newest message',
+    },
+  ])
+
+  const all = await listAssistantTranscriptTailEntries(vaultRoot, 'session-tail', {
+    maxBytes: 1_000_000,
+  })
+  expect(all.map((entry) => entry.text)).toEqual([
+    'oldest message that the tail cap should drop',
+    'middle message',
+    'newest message',
+  ])
+
+  // Small enough to cut into the oldest line: the partial first line is
+  // dropped and only fully contained newest entries are returned.
+  const tail = await listAssistantTranscriptTailEntries(vaultRoot, 'session-tail', {
+    maxBytes: 240,
+  })
+  expect(tail.length).toBeGreaterThan(0)
+  expect(tail.length).toBeLessThan(3)
+  expect(tail[tail.length - 1]?.text).toBe('newest message')
+  expect(tail.map((entry) => entry.text)).not.toContain(
+    'oldest message that the tail cap should drop',
+  )
+})
+
+test('bounds session reads to the newest session files', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-maintenance-evidence-session-cap-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  await saveAssistantSession(
+    vaultRoot,
+    createEvidenceTestSession({
+      lastTurnAt: '2026-06-29T21:00:00.000Z',
+      sessionId: 'session-old-file',
+    }),
+  )
+  await saveAssistantSession(
+    vaultRoot,
+    createEvidenceTestSession({
+      lastTurnAt: '2026-06-29T22:00:00.000Z',
+      sessionId: 'session-new-file',
+    }),
+  )
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  const past = new Date('2026-06-01T00:00:00.000Z')
+  await utimes(
+    resolveAssistantSessionPath(paths, 'session-old-file'),
+    past,
+    past,
+  )
+
+  const limited = await listRecentAssistantSessions(vaultRoot, { limit: 1 })
+  expect(limited.map((session) => session.sessionId)).toEqual([
+    'session-new-file',
+  ])
+
+  const unlimited = await listRecentAssistantSessions(vaultRoot, { limit: 10 })
+  expect(unlimited.map((session) => session.sessionId).sort()).toEqual([
+    'session-new-file',
+    'session-old-file',
+  ])
 })
 
 test('returns an explicit empty evidence section when the window has no messages', async () => {

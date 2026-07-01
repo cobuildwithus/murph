@@ -1,5 +1,8 @@
 import { limitAssistantConversationHistoryTextBytes } from './codex-turn/planning.js'
-import { listAssistantSessions, listAssistantTranscriptEntries } from './store.js'
+import {
+  listAssistantTranscriptTailEntries,
+  listRecentAssistantSessions,
+} from './store.js'
 
 export const ASSISTANT_MAINTENANCE_EVIDENCE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 export const ASSISTANT_MAINTENANCE_EVIDENCE_HEADING =
@@ -8,6 +11,11 @@ export const ASSISTANT_MAINTENANCE_EVIDENCE_HEADING =
 const ASSISTANT_MAINTENANCE_EVIDENCE_MAX_MESSAGES = 400
 const ASSISTANT_MAINTENANCE_EVIDENCE_MESSAGE_BYTES = 2_000
 const ASSISTANT_MAINTENANCE_EVIDENCE_TOTAL_BYTES = 96_000
+// Read bounds, distinct from the prompt-size caps above: at most this many
+// session records are parsed (newest by mtime) and at most this many bytes
+// are read from the end of each committed transcript.
+const ASSISTANT_MAINTENANCE_EVIDENCE_MAX_SESSIONS = 16
+const ASSISTANT_MAINTENANCE_EVIDENCE_TRANSCRIPT_TAIL_BYTES = 262_144
 
 const ASSISTANT_MAINTENANCE_EVIDENCE_EMPTY_BODY =
   'No committed user or assistant conversation messages were found in this window. Do not write any new memory this run.'
@@ -61,7 +69,9 @@ async function collectAssistantMaintenanceEvidenceMessages(input: {
   until: number
   vault: string
 }): Promise<AssistantMaintenanceEvidenceMessage[]> {
-  const sessions = await listAssistantSessions(input.vault)
+  const sessions = await listRecentAssistantSessions(input.vault, {
+    limit: ASSISTANT_MAINTENANCE_EVIDENCE_MAX_SESSIONS,
+  })
   const messages: AssistantMaintenanceEvidenceMessage[] = []
 
   for (const session of sessions) {
@@ -72,9 +82,13 @@ async function collectAssistantMaintenanceEvidenceMessages(input: {
       continue
     }
 
-    let entries: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>
+    let entries: Awaited<ReturnType<typeof listAssistantTranscriptTailEntries>>
     try {
-      entries = await listAssistantTranscriptEntries(input.vault, session.sessionId)
+      entries = await listAssistantTranscriptTailEntries(
+        input.vault,
+        session.sessionId,
+        { maxBytes: ASSISTANT_MAINTENANCE_EVIDENCE_TRANSCRIPT_TAIL_BYTES },
+      )
     } catch {
       continue
     }

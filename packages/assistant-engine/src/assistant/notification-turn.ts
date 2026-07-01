@@ -203,17 +203,19 @@ export async function sendAssistantNotificationLocal(
     defaults: await resolveAssistantOperatorDefaults(),
     executionContext,
   })
+  // Built before the turn lock so evidence reads never extend the window in
+  // which fresh foreground input waits on lock admission.
+  const maintenanceEvidence = isAssistantNotificationMaintenanceExactSkip(input)
+    ? await buildAssistantMaintenanceConversationEvidence({
+        now: new Date(),
+        vault: input.vault,
+      })
+    : null
 
   return withAssistantTurnLock({
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
-      const maintenanceEvidence = isAssistantNotificationMaintenanceExactSkip(input)
-        ? await buildAssistantMaintenanceConversationEvidence({
-            now: new Date(),
-            vault: input.vault,
-          })
-        : null
       const messageInput = buildAssistantNotificationMessageInput(
         input,
         maintenanceEvidence,

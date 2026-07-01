@@ -39,6 +39,7 @@ import {
   canonicalAssistantCronSourceIsBackgroundMaintenance,
   claimNextDueAssistantCronJob,
   claimResolvedAssistantCronJob,
+  computeAssistantCronBackgroundMaintenanceYieldRetryAt,
   executeClaimedAssistantCronJob,
   isAssistantCronBackgroundMaintenanceYieldError,
   type AssistantCronRunnableProjectionInput,
@@ -486,13 +487,24 @@ async function resolveAssistantCronBackgroundMaintenanceRetryWakeAt(
     runtimeStore,
   })
 
+  const now = new Date().toISOString()
   return earliestAssistantCronWakeAt(
     ...projection.canonicalEntries
       .filter((entry) =>
-        canonicalAssistantCronSourceIsBackgroundMaintenance(entry.source) &&
-        entry.runtimeState.state.retryAfterAt !== null
+        canonicalAssistantCronSourceIsBackgroundMaintenance(entry.source),
       )
-      .map((entry) => entry.job.state.nextRunAt),
+      .map((entry) => {
+        if (entry.runtimeState.state.retryAfterAt !== null) {
+          return entry.job.state.nextRunAt
+        }
+        // A due job that was never claimed has no persisted retry marker, but
+        // active foreground yield hides it from the runnable projection. It
+        // still needs a catch-up wake or the occurrence sits until an
+        // unrelated wake happens with yield inactive.
+        return isAssistantCronJobDue(entry.job, now)
+          ? computeAssistantCronBackgroundMaintenanceYieldRetryAt(now)
+          : null
+      }),
   )
 }
 

@@ -158,6 +158,14 @@ const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELDED_CODE =
   'ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELDED'
 const ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELD_RETRY_MS = 30_000
 
+export function computeAssistantCronBackgroundMaintenanceYieldRetryAt(
+  nowIso: string,
+): string {
+  return new Date(
+    Date.parse(nowIso) + ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELD_RETRY_MS,
+  ).toISOString()
+}
+
 export async function claimResolvedAssistantCronJob(input: {
   job: ResolvedAssistantCronJob
   occurrenceFallbackAt?: string | null
@@ -1692,9 +1700,7 @@ async function releaseClaimedAssistantCronJobAfterBackgroundMaintenanceYield(inp
         runningAt: null,
         runningClaimId: null,
         runningPid: null,
-        retryAfterAt: new Date(
-          Date.parse(now) + ASSISTANT_CRON_BACKGROUND_MAINTENANCE_YIELD_RETRY_MS,
-        ).toISOString(),
+        retryAfterAt: computeAssistantCronBackgroundMaintenanceYieldRetryAt(now),
       },
     })
     await writeAssistantCronCanonicalRuntimeStore(input.paths, runtimeStore)
