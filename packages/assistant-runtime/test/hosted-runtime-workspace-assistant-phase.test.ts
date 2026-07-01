@@ -471,6 +471,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(body).not.toContain("includeBackgroundDueIntents: true");
   });
 
+  it("uses post-delivery wake normalization for member-channel barriers", async () => {
+    const source = await readFile(
+      new URL("../src/hosted-runtime/workspace-assistant-phase.ts", import.meta.url),
+      "utf8",
+    );
+    const body = extractTopLevelFunctionBody(
+      source,
+      "buildHostedMemberChannelDeliveryBarrierResult",
+    );
+
+    expect(body).toContain("dropConsumedPostDeliveryWorkspaceAssistantWake");
+    expect(body).toContain("resolveHostedPostDeliveryBaseNextWake(input.input)");
+    expect(body).not.toContain("input.input.baseNextWake,");
+  });
+
   it("hydrates the hosted default assistant target before running automation", async () => {
     const hostedDefaultTarget = {
       adapter: "codex-cli" as const,
@@ -7467,6 +7482,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => "2026-04-27T00:09:00.000Z",
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-27T00:08:00.000Z",
+        nextWakeReason: "assistant",
+      }),
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();

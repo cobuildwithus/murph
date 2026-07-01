@@ -3659,8 +3659,13 @@ async function buildHostedMemberChannelDeliveryBarrierResult(input: {
       deferDueOrInvalid: true,
       phaseInput: input.input.input,
     });
+  const baseNextWake = dropConsumedPostDeliveryWorkspaceAssistantWake({
+    candidate: resolveHostedPostDeliveryBaseNextWake(input.input),
+    canConsumeWorkspaceAssistantWake: input.input.canConsumeWorkspaceAssistantWake,
+    phaseInput: input.input.input,
+  });
   const nextWake = selectHostedRuntimeWakeCandidate([
-    input.input.baseNextWake,
+    baseNextWake,
     createHostedRuntimeWakeCandidate(input.nextWakeAt, input.nextWakeReason ?? "assistant"),
     providerCleanupSchedulingWake,
   ]);
