@@ -7909,15 +7909,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
-  it("defers cleanup for assistant input ids even when imported count is zero", async () => {
-    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
-      captureIds: ["cap_terminal_cleanup"],
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
-    });
-    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
-      "2026-04-27T00:14:00.000Z",
-    );
-
+  it("does not discover terminal Linq cleanup for foreground assistant input ids", async () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       assistantInputIds: ["ain_00000000000000000000000000000007"],
       importedCount: 0,
@@ -7925,19 +7917,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
-      checkpoint: {
-        nextWakeAt: "2026-04-27T00:14:00.000Z",
-      },
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
-      vaultRoot: "/tmp/murph-vault",
-    });
-    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).toHaveBeenCalledWith({
-      captureIds: ["cap_terminal_cleanup"],
-      vault: "/tmp/murph-vault",
-    });
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
-    expect(result.nextWakeAt).toBe("2026-04-27T00:14:00.000Z");
+    expect(result.checkpointReason).not.toBe("provider_cleanup");
   });
 
   it("collects only current-turn delivery effects on foreground conversation input", async () => {
@@ -7965,38 +7949,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
-  it("schedules terminal Linq cleanup after fresh conversation input without draining it first", async () => {
-    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
-      captureIds: ["cap_terminal_cleanup"],
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
-    });
-    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
-      "2026-04-27T00:14:00.000Z",
-    );
-
+  it("does not scan terminal Linq cleanup during fresh conversation input", async () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => "2026-04-27T00:09:00.000Z",
     }));
 
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
-      checkpoint: {
-        nextWakeAt: "2026-04-27T00:14:00.000Z",
-      },
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
-      vaultRoot: "/tmp/murph-vault",
-    });
-    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).toHaveBeenCalledWith({
-      captureIds: ["cap_terminal_cleanup"],
-      vault: "/tmp/murph-vault",
-    });
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
-    expect(result.nextWakeAt).toBe("2026-04-27T00:14:00.000Z");
-    expect(result.progressed).toBe(true);
-    expect(result.checkpointReason).toBe("provider_cleanup");
+    expect(result.checkpointReason).not.toBe("provider_cleanup");
   });
 
-  it("preserves terminal Linq cleanup after foreground non-fast delivery without provider ids", async () => {
+  it("preserves scheduled cleanup wake after foreground non-fast delivery without provider ids", async () => {
     const providerCleanupWakeAt = "2026-04-27T00:14:00.000Z";
     const baseDeliveryEffect = createDeliveryEffect();
     const deliveryEffect = {
@@ -8006,10 +7972,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         transportIdempotent: false,
       },
     };
-    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
-      captureIds: ["cap_terminal_cleanup"],
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
-    });
     mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
       providerCleanupWakeAt,
     );
@@ -8061,13 +8023,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeAt: providerCleanupWakeAt,
       progressed: true,
     }));
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
-      checkpoint: {
-        nextWakeAt: providerCleanupWakeAt,
-      },
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
-      vaultRoot: "/tmp/murph-vault",
-    });
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
 
     const postCheckpoint = await result.afterCheckpoint?.();
@@ -8079,7 +8037,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         nextWakeAt: providerCleanupWakeAt,
       }),
     }));
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
   });
 
@@ -8285,10 +8243,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   });
 
   it("does not drain queued provider cleanup when fresh input also produces delivery effects", async () => {
-    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
-      captureIds: ["cap_terminal_cleanup"],
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
-    });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
     ]);
@@ -8325,18 +8279,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
     expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
-    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).toHaveBeenCalledWith({
-      captureIds: ["cap_terminal_cleanup"],
-      vault: "/tmp/murph-vault",
-    });
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenNthCalledWith(1, {
-      checkpoint: {
-        nextWakeAt: "2026-04-27T00:14:00.000Z",
-      },
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
-      vaultRoot: "/tmp/murph-vault",
-    });
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenNthCalledWith(2, {
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
       checkpoint: {
         nextWakeAt: "2026-04-27T00:14:00.000Z",
       },
@@ -8414,10 +8360,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       progressed: true,
       redactedLogEntries: [],
     });
-    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
-      captureIds: ["cap_terminal_cleanup"],
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
-    });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
     ]);
@@ -8460,18 +8402,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
     expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
-    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).toHaveBeenCalledWith({
-      captureIds: ["cap_terminal_cleanup"],
-      vault: "/tmp/murph-vault",
-    });
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenNthCalledWith(1, {
-      checkpoint: {
-        nextWakeAt: "2026-04-27T00:14:00.000Z",
-      },
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
-      vaultRoot: "/tmp/murph-vault",
-    });
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenNthCalledWith(2, {
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
       checkpoint: {
         nextWakeAt: "2026-04-27T00:14:00.000Z",
       },
@@ -9510,7 +9444,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
-  it("preserves terminal Linq cleanup when a foreground member-channel barrier blocks delivery", async () => {
+  it("preserves scheduled cleanup wake when a foreground member-channel barrier blocks delivery", async () => {
     const providerCleanupWakeAt = "2026-04-27T00:14:00.000Z";
     const baseDeliveryEffect = createDeliveryEffect();
     const deliveryEffect = {
@@ -9528,10 +9462,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         hostedMemberChannelPreDispatchImportBlocked: 1,
       },
     }));
-    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
-      captureIds: ["cap_terminal_cleanup"],
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
-    });
     mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
       providerCleanupWakeAt,
     );
@@ -9589,17 +9519,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       preparedDispatches,
       vaultRoot: "/tmp/murph-vault",
     });
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
-      checkpoint: {
-        nextWakeAt: providerCleanupWakeAt,
-      },
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
-      vaultRoot: "/tmp/murph-vault",
-    });
-    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).toHaveBeenCalledWith({
-      captureIds: ["cap_terminal_cleanup"],
-      vault: "/tmp/murph-vault",
-    });
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
   });
 

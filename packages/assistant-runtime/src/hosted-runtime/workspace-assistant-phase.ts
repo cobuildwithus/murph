@@ -583,14 +583,20 @@ export async function runHostedWorkspaceAssistantPhase(
       vaultRoot: input.restored.vaultRoot,
     });
     const systemMailboxWakeAt = systemMailboxWake.at;
-    const terminalLinqCleanup = await listPendingAssistantAutoReplyLinqCleanupEvidence({
-      vault: input.restored.vaultRoot,
-    });
     const initialProviderCleanupCheckpoint =
       deferredPendingSystemMailboxMaintenance?.initialProviderCleanupCheckpoint
       ?? systemMailboxMaintenance.initialProviderCleanupCheckpoint;
+    const deferProviderCleanup = backgroundMaintenanceYielded || foregroundAssistantPass;
+    const terminalLinqCleanup: HostedTerminalLinqCleanupEvidence = deferProviderCleanup
+      ? {
+          captureIds: [],
+          linqMessageIds: [],
+        }
+      : await listPendingAssistantAutoReplyLinqCleanupEvidence({
+          vault: input.restored.vaultRoot,
+        });
     const providerCleanupPhase = await runProviderCleanupPhase({
-      deferProviderCleanup: backgroundMaintenanceYielded,
+      deferProviderCleanup,
       foregroundAssistantPass,
       initialProviderCleanupCheckpoint,
       input,
