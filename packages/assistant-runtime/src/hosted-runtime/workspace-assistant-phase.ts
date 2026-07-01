@@ -644,7 +644,8 @@ export async function runHostedWorkspaceAssistantPhase(
     const deferredProviderCleanupWakeAt = providerCleanupPhase.deferredProviderCleanupWakeAt;
     const deliveryEffects = await collectHostedAssistantDeliverySideEffects({
       actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
-      includeBackgroundDueIntents: true,
+      includeBackgroundDueIntents:
+        input.shouldYieldBackgroundMaintenance?.() !== true,
       preferredIntentIds: currentTurnDeliveryIntentIds,
       vaultRoot: input.restored.vaultRoot,
     });
@@ -687,6 +688,7 @@ export async function runHostedWorkspaceAssistantPhase(
           mode: "drain",
         },
         redactedStatus: null,
+        shouldYieldBackgroundDrain: input.shouldYieldBackgroundMaintenance ?? null,
         wake,
       });
       const nextWakeAt = postDelivery.nextWakeAt ?? null;
@@ -847,6 +849,7 @@ export async function runHostedWorkspaceAssistantPhase(
                   mode: "drain",
                 },
                 redactedStatus: null,
+                shouldYieldBackgroundDrain: input.shouldYieldBackgroundMaintenance ?? null,
                 wake,
               });
             },
@@ -2802,6 +2805,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
           hostedSystemMailboxRecordFailed: statusCallback.failed,
           hostedSystemMailboxRecorded: statusCallback.recorded,
         },
+        shouldYieldBackgroundDrain: input.input.shouldYieldBackgroundMaintenance ?? null,
         wake: input.systemMailboxPreparation.item.wake,
       });
     }
@@ -2858,6 +2862,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
         mode: "drain",
       },
       redactedStatus: dirtyPostCheckpoint?.redactedStatus ?? null,
+      shouldYieldBackgroundDrain: input.input.shouldYieldBackgroundMaintenance ?? null,
       wake: input.wake,
     });
   }
@@ -3258,8 +3263,13 @@ async function drainHostedPostCheckpointDelivery(input: {
     | { checkpoint: HostedProviderCleanupCheckpoint | null; mode: "drain" }
     | { mode: "defer" };
   redactedStatus: HostedRuntimeRedactedJson | null;
+  shouldYieldBackgroundDrain?: (() => boolean) | null;
   wake: Parameters<typeof drainHostedPreparedAssistantDeliveries>[0]["wake"];
 }): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
+  if (input.shouldYieldBackgroundDrain?.() === true) {
+    return await yieldHostedBackgroundPostCheckpointDrain(input);
+  }
+
   let memberChannelBarrier: HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null = null;
   try {
     memberChannelBarrier = input.assistantDeliveryEffects.length > 0
@@ -3424,6 +3434,42 @@ async function drainHostedPostCheckpointDelivery(input: {
       ...deliveryRedactedStatus,
       hostedAssistantNextWakeAt: postNextWakeAt,
       nextWakeAt: postNextWakeAt,
+    },
+  };
+}
+
+async function yieldHostedBackgroundPostCheckpointDrain(
+  input: Parameters<typeof drainHostedPostCheckpointDelivery>[0],
+): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
+  if (input.assistantDeliveryEffects.length > 0) {
+    await resetHostedPreparedDeliveryForBarrier({
+      assistantDeliveryEffects: input.assistantDeliveryEffects,
+      assistantDeliveryPreparation: input.assistantDeliveryPreparation ?? null,
+      input: input.input,
+    });
+  }
+  const postOutboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
+    vaultRoot: input.input.restored.vaultRoot,
+  });
+  const nextWake = selectHostedRuntimeWakeCandidate([
+    createHostedRuntimeWakeCandidate(
+      new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString(),
+      HOSTED_ASSISTANT_WAKE_REASON,
+    ),
+    createHostedRuntimeWakeCandidate(postOutboxWakeAt, HOSTED_ASSISTANT_WAKE_REASON),
+    input.baseNextWake,
+  ]);
+
+  return {
+    ...(input.afterDurableCheckpoint ? { afterDurableCheckpoint: input.afterDurableCheckpoint } : {}),
+    checkpointReason: "assistant_runtime_commit",
+    nextWakeAt: nextWake.at,
+    nextWakeReason: nextWake.reason,
+    redactedStatus: {
+      ...(input.redactedStatus ?? {}),
+      hostedOutboxDeliveryYielded: input.assistantDeliveryEffects.length,
+      hostedAssistantNextWakeAt: nextWake.at,
+      nextWakeAt: nextWake.at,
     },
   };
 }

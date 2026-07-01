@@ -22,7 +22,10 @@ import {
   type AssistantOutboxDispatchMode,
 } from '../outbox.js'
 import type { AssistantProviderServiceTier } from '../providers/types.js'
-import type { AssistantTurnEnvironment } from '../service-contracts.js'
+import type {
+  AssistantDeliveryOutcome,
+  AssistantTurnEnvironment,
+} from '../service-contracts.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
 import type { AssistantStatePaths } from '../store/paths.js'
@@ -422,6 +425,15 @@ export async function executeClaimedAssistantCronJob(input: {
           const result = await sendAssistantNotificationLocal({
             vault: input.vault,
             ...automationTurn,
+            beforeCommit: async (context) => {
+              await preemptAssistantCronNotificationCommitForForeground({
+                deliveryOutcome: context.deliveryOutcome ?? null,
+                foregroundPreemption,
+                jobName: claimedJob.name,
+                shouldYield: input.shouldYield ?? null,
+                vault: input.vault,
+              })
+            },
             instructions: buildAssistantCronExecutionInstructions(claimedJob),
             deliveryDedupeToken: buildAssistantCronNotificationDedupeToken({
               job: claimedJob,
@@ -445,6 +457,8 @@ export async function executeClaimedAssistantCronJob(input: {
             responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
             threadId: claimedJob.target.threadId,
             bindingDeliveryTarget: bindingDelivery?.target ?? undefined,
+            deferCommitUntilDeliveryAccepted:
+              input.deliveryDispatchMode === 'queue-only',
             deliveryKind: bindingDelivery?.kind ?? undefined,
             deliverySource: claimedJob.target.deliverySource,
             deliveryTarget: claimedJob.target.deliveryTarget,
@@ -1128,6 +1142,41 @@ function assertAssistantCronForegroundNotYielded(input: {
   if (input.shouldYield?.() === true) {
     throw buildAssistantCronForegroundYieldedError(input.jobName)
   }
+}
+
+async function preemptAssistantCronNotificationCommitForForeground(input: {
+  deliveryOutcome: AssistantDeliveryOutcome | null
+  foregroundPreemption: ReturnType<typeof createAssistantCronForegroundPreemption>
+  jobName: string
+  shouldYield: (() => boolean) | null
+  vault: string
+}): Promise<void> {
+  const foregroundYielded =
+    input.foregroundPreemption.wasForegroundYielded()
+    || input.shouldYield?.() === true
+  if (!foregroundYielded) {
+    return
+  }
+
+  const deliveryOutcome = input.deliveryOutcome
+  if (deliveryOutcome?.kind === 'sent') {
+    return
+  }
+
+  if (deliveryOutcome?.kind === 'queued') {
+    const abandonedIntent = await markAssistantOutboxIntentMirrorTerminalById({
+      error: buildAssistantCronForegroundYieldedError(input.jobName),
+      intentId: deliveryOutcome.intentId,
+      onlyCurrentStatuses: ['pending', 'retryable', 'awaiting_approval'],
+      status: 'abandoned',
+      vault: input.vault,
+    })
+    if (abandonedIntent !== null && abandonedIntent.status !== 'abandoned') {
+      return
+    }
+  }
+
+  throw buildAssistantCronForegroundYieldedError(input.jobName)
 }
 
 function createAssistantCronForegroundPreemption(input: {

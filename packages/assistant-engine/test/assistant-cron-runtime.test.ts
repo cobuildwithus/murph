@@ -2128,7 +2128,25 @@ describe('assistant cron runtime orchestration', () => {
       const canonicalJob = await createCanonicalJob(vaultRoot, 'yield-queued-outbox')
       const queuedIntentId = 'outbox_yield_queued_delivery'
       let shouldYield = false
-      cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async () => {
+      cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
+        beforeCommit?: (context: {
+          decision: {
+            kind: 'send_message'
+            privateSummary: string
+            text: string
+          }
+          deliveryOutcome: {
+            error: null
+            intentId: string
+            kind: 'queued'
+            session: {
+              sessionId: string
+            }
+          }
+          response: string
+        }) => Promise<void> | void
+        deferCommitUntilDeliveryAccepted?: boolean | null
+      }) => {
         await saveAssistantOutboxIntent(
           vaultRoot,
           buildTestLinqOutboxIntent({
@@ -2136,21 +2154,29 @@ describe('assistant cron runtime orchestration', () => {
             intentId: queuedIntentId,
           }),
         )
+        const decision = {
+          kind: 'send_message' as const,
+          privateSummary: 'Queued scheduled reminder.',
+          text: 'Remember to sleep.',
+        }
+        const deliveryOutcome = {
+          kind: 'queued' as const,
+          error: null,
+          intentId: queuedIntentId,
+          session: {
+            sessionId: 'session-default',
+          },
+        }
         shouldYield = true
+        expect(input.deferCommitUntilDeliveryAccepted).toBe(true)
+        await input.beforeCommit?.({
+          decision,
+          deliveryOutcome,
+          response: 'Remember to sleep.',
+        })
         return {
-          decision: {
-            kind: 'send_message',
-            privateSummary: 'Queued scheduled reminder.',
-            text: 'Remember to sleep.',
-          },
-          deliveryOutcome: {
-            kind: 'queued',
-            error: null,
-            intentId: queuedIntentId,
-            session: {
-              sessionId: 'session-default',
-            },
-          },
+          decision,
+          deliveryOutcome,
           response: 'Remember to sleep.',
           session: {
             sessionId: 'session-default',
