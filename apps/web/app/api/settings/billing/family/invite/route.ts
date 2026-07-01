@@ -9,7 +9,7 @@ import {
   readHostedFamilyOwnerSnapshotForMember,
   updateHostedFamilySeatCount,
 } from "@/src/lib/hosted-onboarding/family-plan";
-import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
@@ -37,40 +37,40 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  if (body.addSeatIfNeeded === true) {
-    const snapshot = await readHostedFamilyOwnerSnapshotForMember({
-      memberId: auth.member.id,
-      prisma,
-    });
-    if (
-      snapshot?.billingActive &&
-      snapshot.seats.remaining <= 0 &&
-      snapshot.seats.billed < snapshot.seats.max
-    ) {
-      await updateHostedFamilySeatCount({
-        groupId: snapshot.groupId,
+  const issueInvite = () =>
+    prisma.$transaction(async (tx) => {
+      const group = await ensureHostedAccountGroupForOwnerTx({
         ownerMemberId: auth.member.id,
-        prisma,
-        targetSeatCount: snapshot.seats.billed + 1,
+        tx,
       });
+      return issueHostedFamilyInviteTx({
+        groupId: group.id,
+        invitedByMemberId: auth.member.id,
+        targetEmail,
+        targetLabel,
+        targetPhoneNumber,
+        targetTelegramUsername,
+        tx,
+      });
+    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  let invite;
+  try {
+    invite = await issueInvite();
+  } catch (error) {
+    // Only grow the plan when the invite genuinely needs a seat. Reused invites
+    // return before the seat check, so a duplicate/retried invite never buys one.
+    if (
+      body.addSeatIfNeeded === true &&
+      isHostedOnboardingError(error) &&
+      error.code === "HOSTED_FAMILY_SEAT_LIMIT_REACHED" &&
+      (await addHostedFamilySeatForOwner(prisma, auth.member.id))
+    ) {
+      invite = await issueInvite();
+    } else {
+      throw error;
     }
   }
-
-  const invite = await prisma.$transaction(async (tx) => {
-    const group = await ensureHostedAccountGroupForOwnerTx({
-      ownerMemberId: auth.member.id,
-      tx,
-    });
-    return issueHostedFamilyInviteTx({
-      groupId: group.id,
-      invitedByMemberId: auth.member.id,
-      targetEmail,
-      targetLabel,
-      targetPhoneNumber,
-      targetTelegramUsername,
-      tx,
-    });
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   const { publicBaseUrl, telegramBotUsername } = readHostedOnboardingEnvironment();
 
@@ -95,3 +95,23 @@ export const POST = withJsonError(async (request: Request) => {
     },
   });
 });
+
+async function addHostedFamilySeatForOwner(
+  prisma: ReturnType<typeof getPrisma>,
+  ownerMemberId: string,
+): Promise<boolean> {
+  const snapshot = await readHostedFamilyOwnerSnapshotForMember({
+    memberId: ownerMemberId,
+    prisma,
+  });
+  if (!snapshot?.billingActive || snapshot.seats.billed >= snapshot.seats.max) {
+    return false;
+  }
+  await updateHostedFamilySeatCount({
+    groupId: snapshot.groupId,
+    ownerMemberId,
+    prisma,
+    targetSeatCount: snapshot.seats.billed + 1,
+  });
+  return true;
+}
