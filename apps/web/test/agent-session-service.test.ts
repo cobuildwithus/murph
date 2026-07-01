@@ -907,6 +907,54 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
     }
   });
 
+  it("does not leave a refresh lease when the provider is not configured", async () => {
+    vi.useFakeTimers();
+    try {
+      const bearerToken = "hbds_agent_original";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const registry = createDeviceSyncRegistry([]);
+
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest("https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle", bearerToken),
+        store: harness.store,
+        registry,
+      });
+
+      const session = await service.requireAgentSession();
+      await expect(service.refreshTokenBundle(session, "conn-1", {
+        expectedTokenVersion: 2,
+        force: true,
+      })).rejects.toMatchObject({
+        code: "PROVIDER_NOT_CONFIGURED",
+        retryable: false,
+      });
+
+      expect(harness.getRefreshLease()).toBeNull();
+      await expect(harness.store.getStoredConnectionAccountForUser("user-1", "conn-1")).resolves.toMatchObject({
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        tokenVersion: 2,
+      });
+      expect(harness.signals).toHaveLength(0);
+      expect(harness.getPublicConnection()).toMatchObject({
+        lastErrorCode: null,
+        status: "active",
+      });
+
+      const exported = await service.exportTokenBundle(session, "conn-1");
+      expect(exported).toMatchObject({
+        tokenBundle: {
+          accessToken: "access-token",
+          refreshToken: "refresh-token",
+          tokenVersion: 2,
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("fails closed when an expired refresh lease makes provider state unknowable", async () => {
     vi.useFakeTimers();
     try {
@@ -1217,6 +1265,7 @@ type MutableSessionState = HostedAgentSessionRecord & {
 function createRetrySafeStoreHarness(bearerToken: string): {
   audits: Array<Record<string, unknown>>;
   getPublicConnection: () => Record<string, unknown>;
+  getRefreshLease: () => { leaseExpiresAt: string; leaseOwner: string; tokenVersion: number } | null;
   sessionState: MutableSessionState;
   setConnectionStatus: (status: DeviceSyncAccount["status"]) => void;
   setRefreshLease: (lease: { leaseExpiresAt: string; leaseOwner: string; tokenVersion: number } | null) => void;
@@ -1463,6 +1512,7 @@ function createRetrySafeStoreHarness(bearerToken: string): {
   return {
     audits,
     getPublicConnection: () => ({ ...publicConnection }),
+    getRefreshLease: () => refreshLease ? { ...refreshLease } : null,
     sessionState,
     setConnectionStatus: (status: typeof publicConnection.status) => {
       publicConnection = {

@@ -4,6 +4,7 @@ import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import type {
   DeviceSyncRegistry,
+  DeviceSyncProvider,
   PublicDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 import {
@@ -78,13 +79,15 @@ type HostedTokenRefreshSuccess = {
   tokenVersionChanged: boolean;
 };
 
+type HostedTokenRefreshRequiredResult = {
+  status: "refresh_required";
+  account: HostedStoredDeviceSyncAccount;
+  currentTokenBundle: HostedStoredTokenBundle;
+};
+
 type HostedTokenRefreshCurrentResult =
   | HostedTokenRefreshSuccess
-  | {
-      status: "refresh_required";
-      account: HostedStoredDeviceSyncAccount;
-      currentTokenBundle: HostedStoredTokenBundle;
-    };
+  | HostedTokenRefreshRequiredResult;
 
 type HostedTokenRefreshLockResult =
   | HostedTokenRefreshCurrentResult
@@ -548,33 +551,30 @@ export class HostedDeviceSyncAgentSessionService {
     session: HostedAgentSessionRecord;
   }): Promise<HostedTokenRefreshSuccess> {
     const leaseOwner = `agent-refresh:${randomUUID()}`;
-    const currentRefreshState = await this.claimRefreshLeaseOrResolveCurrent({
-      ...input,
-      leaseOwner,
-    });
+    const currentRefreshState = await this.resolveCurrentRefreshState(input);
 
     if (currentRefreshState.status === "success") {
       return currentRefreshState;
     }
 
-    const provider = (await this.requireRegistry()).get(currentRefreshState.account.provider);
-    if (!provider) {
-      throw deviceSyncError({
-        code: "PROVIDER_NOT_CONFIGURED",
-        message:
-          `Hosted device-sync provider ${currentRefreshState.account.provider} is not configured in the shared device-sync provider registry.`,
-        retryable: false,
-        httpStatus: 404,
-      });
+    const provider = await this.requireConfiguredRefreshProvider(currentRefreshState.account.provider);
+    const leasedRefreshState = await this.claimRefreshLeaseOrResolveCurrent({
+      ...input,
+      currentRefreshState,
+      leaseOwner,
+    });
+
+    if (leasedRefreshState.status === "success") {
+      return leasedRefreshState;
     }
     const refreshResult = await refreshProviderTokens({
-      account: currentRefreshState.account,
+      account: leasedRefreshState.account,
       provider,
     });
 
     const persistedResult = await this.persistProviderRefreshResultWithLease({
       ...input,
-      leaseOwner: currentRefreshState.leaseOwner,
+      leaseOwner: leasedRefreshState.leaseOwner,
       refreshResult,
     });
 
@@ -655,23 +655,12 @@ export class HostedDeviceSyncAgentSessionService {
   private async claimRefreshLeaseOrResolveCurrent(input: {
     baseTokenBundle: HostedStoredTokenBundle;
     connectionId: string;
+    currentRefreshState: HostedTokenRefreshRequiredResult;
     forceRefresh: boolean;
     leaseOwner: string;
     now: string;
     session: HostedAgentSessionRecord;
   }): Promise<HostedTokenRefreshLeaseResult> {
-    const currentRefreshState = await this.resolveCurrentRefreshState({
-      baseTokenBundle: input.baseTokenBundle,
-      connectionId: input.connectionId,
-      forceRefresh: input.forceRefresh,
-      now: input.now,
-      session: input.session,
-    });
-
-    if (currentRefreshState.status === "success") {
-      return currentRefreshState;
-    }
-
     const nowMs = Date.parse(input.now);
     const leaseExpiresAt = new Date(nowMs + HOSTED_DEVICE_TOKEN_REFRESH_LEASE_TTL_MS).toISOString();
     const claim = await this.store.withConnectionMutationLock(input.connectionId, async (tx) =>
@@ -690,8 +679,8 @@ export class HostedDeviceSyncAgentSessionService {
       case "claimed":
         return {
           status: "lease_claimed",
-          account: currentRefreshState.account,
-          currentTokenBundle: currentRefreshState.currentTokenBundle,
+          account: input.currentRefreshState.account,
+          currentTokenBundle: input.currentRefreshState.currentTokenBundle,
           leaseOwner: input.leaseOwner,
         };
       case "version_changed": {
@@ -1148,6 +1137,21 @@ export class HostedDeviceSyncAgentSessionService {
     }
 
     return this.registry;
+  }
+
+  private async requireConfiguredRefreshProvider(providerId: string): Promise<DeviceSyncProvider> {
+    const provider = (await this.requireRegistry()).get(providerId);
+    if (!provider) {
+      throw deviceSyncError({
+        code: "PROVIDER_NOT_CONFIGURED",
+        message:
+          `Hosted device-sync provider ${providerId} is not configured in the shared device-sync provider registry.`,
+        retryable: false,
+        httpStatus: 404,
+      });
+    }
+
+    return provider;
   }
 }
 
