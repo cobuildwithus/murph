@@ -171,6 +171,7 @@ import {
   dispatchAssistantOutboxIntent,
   markAssistantOutboxIntentMirrorTerminalById,
   markAssistantOutboxIntentSentById,
+  readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -2332,6 +2333,60 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
+  it('retries overnight memory consolidation when read-only provider work fails', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-overnight-memory-read-only-failure-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    addOvernightMemoryConsolidationAutomation(vaultRoot)
+    const error = new VaultCliError(
+      'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
+      'Assistant maintenance notification must return the exact configured skip decision.',
+    )
+    Reflect.set(error, 'details', {
+      assistantNotificationProviderNonReplayableWork: false,
+    })
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(error)
+
+    const summary = await processDueAssistantCronJobsLocal({
+      executionContext: {
+        hosted: {
+          memberId: 'member-hosted',
+          userEnvKeys: [],
+        },
+      },
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 1,
+      processed: 1,
+      succeeded: 0,
+    })
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeRecord = runtimeStore.jobs.find(
+      (record) =>
+        record.jobId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+    )
+    expect(runtimeRecord?.state.pendingOccurrenceAt).not.toBeNull()
+    expect(runtimeRecord?.state.retryAfterAt).not.toBeNull()
+    expect(runtimeRecord?.state.lastSucceededAt).toBeNull()
+    expect(runtimeRecord?.state.lastFailedAt).toBe('2026-04-09T03:10:00.000Z')
+    await expect(listAssistantCronRuns({
+      job: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      runs: [
+        expect.objectContaining({
+          status: 'failed',
+        }),
+      ],
+    })
+  })
+
   it('consumes overnight memory consolidation when foreground yield appears after maintenance success', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))
@@ -2476,6 +2531,312 @@ describe('assistant cron runtime orchestration', () => {
         turnTrigger: 'automation-cron',
       }),
     )
+  })
+
+  it('does not claim due cron jobs when foreground work is already observed', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
+    try {
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-yield-before-claim-',
+      )
+      const canonicalJob = await createCanonicalJob(vaultRoot, 'yield-before-claim')
+
+      const summary = await processDueAssistantCronJobsLocal({
+        limit: 1,
+        shouldYield: () => true,
+        vault: vaultRoot,
+      })
+
+      expect(summary).toEqual({
+        failed: 0,
+        processed: 0,
+        succeeded: 0,
+      })
+      expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+      await expect(
+        listAssistantCronRuns({
+          job: canonicalJob.jobId,
+          vault: vaultRoot,
+        }),
+      ).resolves.toEqual({
+        jobId: canonicalJob.jobId,
+        runs: [],
+      })
+      const current = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
+      expect(current.state.runningAt).toBeNull()
+      expect(current.state.lastSucceededAt).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('aborts an in-flight canonical cron assistant turn when foreground work appears', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    try {
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-yield-in-flight-',
+      )
+      const canonicalJob = await createCanonicalJob(vaultRoot, 'yield-in-flight')
+      let shouldYield = false
+      cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
+        async (input: { abortSignal?: AbortSignal }) => {
+          expect(input.abortSignal?.aborted).toBe(false)
+          shouldYield = true
+          await vi.advanceTimersByTimeAsync(50)
+          expect(input.abortSignal?.aborted).toBe(true)
+          throw input.abortSignal?.reason ?? new Error('Expected foreground yield abort.')
+        },
+      )
+
+      const summary = await processDueAssistantCronJobsLocal({
+        limit: 1,
+        shouldYield: () => shouldYield,
+        vault: vaultRoot,
+      })
+
+      expect(summary).toEqual({
+        failed: 1,
+        processed: 1,
+        succeeded: 0,
+      })
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+      await expect(
+        listAssistantCronRuns({
+          job: canonicalJob.jobId,
+          vault: vaultRoot,
+        }),
+      ).resolves.toMatchObject({
+        jobId: canonicalJob.jobId,
+        runs: [{
+          error: 'Assistant cron yielded to fresh foreground input.',
+          status: 'failed',
+        }],
+      })
+
+      const current = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
+      expect(current.state.runningAt).toBeNull()
+      expect(current.state.lastFailedAt).toBeNull()
+      expect(current.state.consecutiveFailures).toBe(0)
+      expect(current.state.nextRunAt).toBe('2026-04-08T10:20:10.050Z')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('abandons a queued cron outbox intent when foreground work appears before durable commit', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    try {
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-yield-queued-outbox-',
+      )
+      const canonicalJob = await createCanonicalJob(vaultRoot, 'yield-queued-outbox')
+      const queuedIntentId = 'outbox_yield_queued_delivery'
+      let shouldYield = false
+      cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
+        beforeCommit?: (context: {
+          decision: {
+            kind: 'send_message'
+            privateSummary: string
+            text: string
+          }
+          deliveryOutcome: {
+            error: null
+            intentId: string
+            kind: 'queued'
+            session: {
+              sessionId: string
+            }
+          }
+          response: string
+        }) => Promise<void> | void
+        deferCommitUntilDeliveryAccepted?: boolean | null
+      }) => {
+        await saveAssistantOutboxIntent(
+          vaultRoot,
+          buildTestLinqOutboxIntent({
+            createdAt: '2026-04-08T10:20:00.000Z',
+            intentId: queuedIntentId,
+          }),
+        )
+        const decision = {
+          kind: 'send_message' as const,
+          privateSummary: 'Queued scheduled reminder.',
+          text: 'Remember to sleep.',
+        }
+        const deliveryOutcome = {
+          kind: 'queued' as const,
+          error: null,
+          intentId: queuedIntentId,
+          session: {
+            sessionId: 'session-default',
+          },
+        }
+        shouldYield = true
+        expect(input.deferCommitUntilDeliveryAccepted).toBe(true)
+        await input.beforeCommit?.({
+          decision,
+          deliveryOutcome,
+          response: 'Remember to sleep.',
+        })
+        return {
+          decision,
+          deliveryOutcome,
+          response: 'Remember to sleep.',
+          session: {
+            sessionId: 'session-default',
+          },
+        }
+      })
+
+      const summary = await processDueAssistantCronJobsLocal({
+        deliveryDispatchMode: 'queue-only',
+        limit: 1,
+        shouldYield: () => shouldYield,
+        vault: vaultRoot,
+      })
+
+      expect(summary).toEqual({
+        failed: 1,
+        processed: 1,
+        succeeded: 0,
+      })
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+      const intent = await readAssistantOutboxIntent(vaultRoot, queuedIntentId)
+      expect(intent?.status).toBe('abandoned')
+      expect(intent?.lastError).toMatchObject({
+        code: 'ASSISTANT_CRON_FOREGROUND_YIELDED',
+      })
+      await expect(
+        listAssistantCronRuns({
+          job: canonicalJob.jobId,
+          vault: vaultRoot,
+        }),
+      ).resolves.toMatchObject({
+        jobId: canonicalJob.jobId,
+        runs: [{
+          error: 'Assistant cron yielded to fresh foreground input.',
+          status: 'failed',
+        }],
+      })
+
+      const current = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
+      expect(current.state.pendingDeliveryIntentId).toBeUndefined()
+      expect(current.state.runningAt).toBeNull()
+      expect(current.state.lastFailedAt).toBeNull()
+      expect(current.state.consecutiveFailures).toBe(0)
+      expect(current.state.nextRunAt).toBe('2026-04-08T10:20:10.000Z')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps an accepted queue-only cron delivery when foreground work appears after durable commit', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
+    try {
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-yield-after-queued-commit-',
+      )
+      const canonicalJob = await createCanonicalJob(vaultRoot, 'yield-after-queued-commit')
+      const queuedIntentId = 'outbox_yield_after_queued_commit'
+      let shouldYield = false
+      cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input: {
+        beforeCommit?: (context: {
+          decision: {
+            kind: 'send_message'
+            privateSummary: string
+            text: string
+          }
+          deliveryOutcome: {
+            error: null
+            intentId: string
+            kind: 'queued'
+            session: {
+              sessionId: string
+            }
+          }
+          response: string
+        }) => Promise<void> | void
+        deferCommitUntilDeliveryAccepted?: boolean | null
+      }) => {
+        await saveAssistantOutboxIntent(
+          vaultRoot,
+          buildTestLinqOutboxIntent({
+            createdAt: '2026-04-08T10:20:00.000Z',
+            intentId: queuedIntentId,
+          }),
+        )
+        const decision = {
+          kind: 'send_message' as const,
+          privateSummary: 'Queued scheduled reminder.',
+          text: 'Remember to sleep.',
+        }
+        const deliveryOutcome = {
+          kind: 'queued' as const,
+          error: null,
+          intentId: queuedIntentId,
+          session: {
+            sessionId: 'session-default',
+          },
+        }
+        expect(input.deferCommitUntilDeliveryAccepted).toBe(true)
+        await input.beforeCommit?.({
+          decision,
+          deliveryOutcome,
+          response: 'Remember to sleep.',
+        })
+        shouldYield = true
+        return {
+          decision,
+          deliveryOutcome,
+          response: 'Remember to sleep.',
+          session: {
+            sessionId: 'session-default',
+          },
+        }
+      })
+
+      const summary = await processDueAssistantCronJobsLocal({
+        deliveryDispatchMode: 'queue-only',
+        limit: 1,
+        shouldYield: () => shouldYield,
+        vault: vaultRoot,
+      })
+
+      expect(summary).toEqual({
+        failed: 0,
+        processed: 1,
+        succeeded: 0,
+      })
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+      const intent = await readAssistantOutboxIntent(vaultRoot, queuedIntentId)
+      expect(intent?.status).toBe('pending')
+      expect(intent?.lastError).toBeNull()
+      await expect(
+        listAssistantCronRuns({
+          job: canonicalJob.jobId,
+          vault: vaultRoot,
+        }),
+      ).resolves.toMatchObject({
+        jobId: canonicalJob.jobId,
+        runs: [{
+          error: null,
+          status: 'skipped',
+        }],
+      })
+
+      const current = await getAssistantCronJob(vaultRoot, canonicalJob.jobId)
+      expect(current.state.pendingDeliveryIntentId).toBe(queuedIntentId)
+      expect(current.state.runningAt).toBeNull()
+      expect(current.state.lastFailedAt).toBeNull()
+      expect(current.state.consecutiveFailures).toBe(0)
+      expect(current.state.nextRunAt).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('uses flex service tier with a deadline for clean hosted scheduled notification sends', async () => {
@@ -3222,11 +3583,12 @@ describe('assistant cron runtime orchestration', () => {
       succeeded: 1,
     })
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
-    expect(cronMocks.executeScheduledLogOccurrence).toHaveBeenCalledWith({
+    expect(cronMocks.executeScheduledLogOccurrence).toHaveBeenCalledWith(expect.objectContaining({
+      beforeWrite: expect.any(Function),
       occurrenceAt: '2026-04-08T09:00:00.000Z',
       scheduledLogId: 'slog_01JX8VCQY2M5ZBV64ZP4N1DRBC',
       vaultRoot,
-    })
+    }))
     expect(cronMocks.setScheduledLogStatus).toHaveBeenCalledWith({
       scheduledLogId: 'slog_01JX8VCQY2M5ZBV64ZP4N1DRBC',
       status: 'archived',
@@ -3247,6 +3609,107 @@ describe('assistant cron runtime orchestration', () => {
         }),
       ],
     })
+  })
+
+  it('yields canonical scheduled-log cron before writing when foreground work appears after claim', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
+    try {
+      const { vaultRoot } = await createRuntimeContext(
+        'assistant-cron-runtime-yield-scheduled-log-',
+      )
+      const scheduledLogId = 'slog_01JX8VCQY2M5ZBV64ZP4N1DRBD'
+      getVaultScheduledLogStore(vaultRoot).push({
+        action: {
+          kind: 'measurement.add',
+          measurements: [
+            {
+              metric: 'body-weight',
+              unit: 'lb',
+              value: 180.8,
+            },
+          ],
+        },
+        body: 'Write the morning measurement event.',
+        createdAt: '2026-04-08T08:00:00.000Z',
+        docType: 'scheduled_log',
+        markdown: 'scheduled log markdown',
+        relativePath: 'bank/scheduled-logs/morning-measurement-yield.md',
+        schedule: {
+          at: '2026-04-08T09:00:00.000Z',
+          kind: 'at',
+        },
+        schemaVersion: 'murph.frontmatter.scheduled-log.v1',
+        scheduledLogId,
+        slug: 'morning-measurement-yield',
+        status: 'active',
+        summary: 'Record the morning measurement.',
+        tags: ['measurement'],
+        title: 'Morning measurement',
+        updatedAt: '2026-04-08T08:00:00.000Z',
+      })
+      let shouldYield = false
+      let scheduledEventWriteAttempted = false
+      cronMocks.executeScheduledLogOccurrence.mockImplementationOnce(async (input: {
+        beforeWrite?: () => Promise<void> | void
+      }) => {
+        shouldYield = true
+        await input.beforeWrite?.()
+        scheduledEventWriteAttempted = true
+        return {
+          message: 'Unexpected scheduled event write.',
+        }
+      })
+
+      const summary = await processDueAssistantCronJobsLocal({
+        limit: 1,
+        shouldYield: () => shouldYield,
+        vault: vaultRoot,
+      })
+
+      expect(summary).toEqual({
+        failed: 1,
+        processed: 1,
+        succeeded: 0,
+      })
+      expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+      expect(cronMocks.executeScheduledLogOccurrence).toHaveBeenCalledWith(expect.objectContaining({
+        beforeWrite: expect.any(Function),
+        occurrenceAt: '2026-04-08T09:00:00.000Z',
+        scheduledLogId,
+        vaultRoot,
+      }))
+      expect(scheduledEventWriteAttempted).toBe(false)
+      expect(cronMocks.setScheduledLogStatus).not.toHaveBeenCalled()
+      await expect(
+        listAssistantCronRuns({
+          job: scheduledLogId,
+          vault: vaultRoot,
+        }),
+      ).resolves.toMatchObject({
+        jobId: scheduledLogId,
+        runs: [{
+          error: 'Assistant cron yielded to fresh foreground input.',
+          status: 'failed',
+        }],
+      })
+
+      const current = await getAssistantCronJob(vaultRoot, scheduledLogId)
+      expect(current.state.runningAt).toBeNull()
+      expect(current.state.lastFailedAt).toBeNull()
+      expect(current.state.consecutiveFailures).toBe(0)
+      expect(current.state.nextRunAt).toBe('2026-04-08T13:00:10.000Z')
+      const runtimeStore = await readAssistantCronCanonicalRuntimeStore(
+        resolveAssistantStatePaths(vaultRoot),
+      )
+      const runtimeRecord = runtimeStore.jobs.find((record) =>
+        record.jobId === scheduledLogId
+      )
+      expect(runtimeRecord?.state.pendingOccurrenceAt).toBe('2026-04-08T09:00:00.000Z')
+      expect(runtimeRecord?.state.retryAfterAt).toBe('2026-04-08T13:00:10.000Z')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('processes due jobs across local and canonical stores and reports mixed outcomes', async () => {

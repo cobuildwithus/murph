@@ -190,8 +190,8 @@ export async function runHostedAssistantAutomationLane(input: {
   assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
   buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
   runtimeEnv?: Readonly<Record<string, string>>;
-  signal?: AbortSignal;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
+  signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
   vaultRoot: string;
 }): Promise<HostedAssistantAutomationLaneMetrics> {
@@ -230,8 +230,12 @@ export async function runHostedAssistantAutomationLane(input: {
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
-          shouldYieldBackgroundMaintenance:
-            input.shouldYieldBackgroundMaintenance ?? null,
+          ...(input.shouldYieldBackgroundMaintenance
+            ? {
+                shouldYieldBackgroundMaintenance:
+                  input.shouldYieldBackgroundMaintenance,
+              }
+            : {}),
         },
       )
     : {
@@ -433,7 +437,6 @@ export async function runHostedAssistantAutomation(
       ...(buildBackgroundDynamicContextPrompt
         ? { buildDynamicContextPrompt: buildBackgroundDynamicContextPrompt }
         : {}),
-      deferCronForForegroundInput: selectedInputIds.mode === "foreground",
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
       executionContext,
@@ -499,6 +502,9 @@ export async function runHostedAssistantAutomation(
       vaultServices,
       maxPerScan,
       requestId,
+      ...(options?.shouldYieldBackgroundMaintenance
+        ? { shouldDeferCron: options.shouldYieldBackgroundMaintenance }
+        : {}),
       signal,
       shouldYieldBackgroundMaintenance:
         options?.shouldYieldBackgroundMaintenance ?? null,

@@ -97,7 +97,7 @@ export interface RunAssistantAutomationInput {
   once?: boolean
   requestId?: string | null
   shouldYieldBackgroundMaintenance?: (() => boolean) | null
-  deferCronForForegroundInput?: boolean
+  shouldDeferCron?: (() => boolean) | null
   signal?: AbortSignal
   startDaemon?: boolean
   sessionMaxAgeMs?: number | null
@@ -971,19 +971,23 @@ export async function runAssistantAutomationPass(
         queued: 0,
         sent: 0,
       }
-  const shouldDeferCronForHostedForegroundWork =
+  const shouldDeferCronAfterHostedReply =
     executionContext?.hosted != null &&
     input.deliveryDispatchMode === 'queue-only' &&
-    (
-      input.deferCronForForegroundInput === true ||
-      scanResult.replies.replied > 0
-    )
-  const cronResult = applyCanonicalWrites && !shouldDeferCronForHostedForegroundWork
+    scanResult.replies.replied > 0
+  const shouldDeferCronByCaller =
+    executionContext?.hosted != null &&
+    input.deliveryDispatchMode === 'queue-only' &&
+    input.shouldDeferCron?.() === true
+  const shouldDeferCron =
+    shouldDeferCronAfterHostedReply || shouldDeferCronByCaller
+  const cronResult = applyCanonicalWrites && !shouldDeferCron
     ? await processDueAssistantCronJobs({
         deliveryDispatchMode: input.deliveryDispatchMode,
         executionContext,
         onEvent: input.onEvent,
         onTraceEvent: input.onTraceEvent,
+        shouldYield: input.shouldDeferCron ?? null,
         vault: input.vault,
         signal: input.signal,
         shouldYieldBackgroundMaintenance:
@@ -1022,7 +1026,7 @@ export async function runAssistantAutomationPass(
   const cronNextRunAt = resolveAssistantCronNextWakeAt({
     applyCanonicalWrites,
     cronStatus,
-    shouldDeferCronForHostedForegroundWork,
+    shouldDeferCron,
   })
   const outboxNextAttemptAt = input.drainOutbox ?? true
     ? (await buildAssistantOutboxSummary(input.vault)).nextAttemptAt
@@ -1073,14 +1077,14 @@ function appendHostedDynamicContextPrompt(input: {
 function resolveAssistantCronNextWakeAt(input: {
   applyCanonicalWrites: boolean
   cronStatus: Awaited<ReturnType<typeof getAssistantCronStatus>>
-  shouldDeferCronForHostedForegroundWork: boolean
+  shouldDeferCron: boolean
 }): string | null {
   if (!input.applyCanonicalWrites) {
     return null
   }
 
   if (
-    input.shouldDeferCronForHostedForegroundWork &&
+    input.shouldDeferCron &&
     (input.cronStatus.dueJobs ?? 0) > 0
   ) {
     return computeAssistantAutomationRetryAt(

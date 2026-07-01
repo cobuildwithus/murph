@@ -148,6 +148,7 @@ export interface ProcessDueAssistantCronJobsInput {
   limit?: number
   onEvent?: (event: AssistantRunEvent) => void
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
+  shouldYield?: (() => boolean) | null
   signal?: AbortSignal
   shouldYieldBackgroundMaintenance?: (() => boolean) | null
   turnEnvironment?: AssistantTurnEnvironment | null
@@ -558,10 +559,18 @@ export async function processDueAssistantCronJobsLocal(
     succeeded: 0,
     failed: 0,
   }
+  if (input.shouldYield?.() === true) {
+    return summary
+  }
+
   await repairPendingAssistantCronDeliveries({
     paths,
     vault: input.vault,
   })
+  if (input.shouldYield?.() === true) {
+    return summary
+  }
+
   await emitAssistantCronScanEvents({
     onEvent: input.onEvent,
     paths,
@@ -579,6 +588,10 @@ export async function processDueAssistantCronJobsLocal(
   })
 
   while (!input.signal?.aborted && summary.processed < limit) {
+    if (input.shouldYield?.() === true) {
+      break
+    }
+
     const claimed = await claimNextDueAssistantCronJob(paths, input.vault, {
       executionContext: input.executionContext,
       shouldYieldBackgroundMaintenance:
@@ -594,6 +607,7 @@ export async function processDueAssistantCronJobsLocal(
       executionContext: input.executionContext,
       onTraceEvent: input.onTraceEvent,
       paths,
+      shouldYield: input.shouldYield ?? null,
       signal: input.signal,
       shouldYieldBackgroundMaintenance:
         input.shouldYieldBackgroundMaintenance ?? null,
