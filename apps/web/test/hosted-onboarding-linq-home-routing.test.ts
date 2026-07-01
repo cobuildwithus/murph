@@ -516,7 +516,7 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
   });
 
-  it("timestamps a migrated same-phone route claim without consuming capacity", async () => {
+  it("preserves a migrated same-phone route claim without consuming capacity", async () => {
     const line = buildLine("+15550100001", {
       activeMemberLimit: 1,
       maxNewConversationsPerDay: 1,
@@ -551,7 +551,7 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
         prisma: {} as never,
       }),
     ).resolves.toEqual({
-      homeLineAssignedAt: expect.any(Date),
+      homeLineAssignedAt: null,
       kind: "bind",
       recipientPhone: line.phoneNumber,
     });

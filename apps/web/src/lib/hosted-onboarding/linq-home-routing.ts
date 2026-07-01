@@ -137,16 +137,10 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
     };
   }
 
-  const reusableAssignedAt = resolveReusableHostedMemberLinqHomeLineAssignedAt({
-    now,
-    phoneNumber: line.phoneNumber,
-    routing,
-    scope: "authorized-route",
-  });
-
-  if (reusableAssignedAt) {
+  const homeRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
+  if (routing && homeRecipientPhone === line.phoneNumber) {
     return {
-      homeLineAssignedAt: reusableAssignedAt,
+      homeLineAssignedAt: routing.linqHomeLineAssignedAt ?? null,
       kind: "bind",
       recipientPhone: line.phoneNumber,
     };
@@ -181,7 +175,6 @@ export async function assignHostedMemberLinqHomeLineForPhoneTx(input: {
     memberId: input.memberId,
     phoneNumber: input.phoneNumber,
     prisma: input.prisma,
-    reuseScope: "bare-same-day",
   });
 
   if (reservationResult.kind !== "reserved") {
@@ -440,7 +433,6 @@ async function reserveOrReuseHostedMemberLinqHomeLineForPhoneTx(input: {
   memberId: string;
   phoneNumber: string;
   prisma: Prisma.TransactionClient;
-  reuseScope: "authorized-route" | "bare-same-day";
 }): Promise<HostedLinqHomeLinePhoneReservationResult> {
   const phoneNumber = normalizePhoneNumber(input.phoneNumber);
   if (!phoneNumber) {
@@ -458,11 +450,10 @@ async function reserveOrReuseHostedMemberLinqHomeLineForPhoneTx(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  const reusableAssignedAt = resolveReusableHostedMemberLinqHomeLineAssignedAt({
+  const reusableAssignedAt = resolveReusableBareSameDayHomeLineAssignedAt({
     now,
     phoneNumber,
     routing,
-    scope: input.reuseScope,
   });
   const line = await readHostedLinqAssignableHomeLineByPhone({
     phoneNumber,
@@ -504,11 +495,10 @@ async function reserveOrReuseHostedMemberLinqHomeLineForPhoneTx(input: {
   };
 }
 
-function resolveReusableHostedMemberLinqHomeLineAssignedAt(input: {
+function resolveReusableBareSameDayHomeLineAssignedAt(input: {
   now: Date;
   phoneNumber: string;
   routing: HostedMemberRoutingStateSnapshot | null;
-  scope: "authorized-route" | "bare-same-day";
 }): Date | null {
   const homeRecipientPhone = normalizePhoneNumber(input.routing?.linqRecipientPhone);
 
@@ -517,10 +507,6 @@ function resolveReusableHostedMemberLinqHomeLineAssignedAt(input: {
   }
 
   const assignedAt = input.routing.linqHomeLineAssignedAt ?? null;
-
-  if (input.scope === "authorized-route") {
-    return assignedAt ?? input.now;
-  }
 
   return assignedAt
     && !input.routing.linqChatId

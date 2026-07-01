@@ -30,7 +30,6 @@ import {
 import {
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
-  readHostedMemberHomeLinqRoute,
   upsertHostedMemberHomeLinqBindingTx,
 } from "./hosted-member-routing-store";
 import {
@@ -53,9 +52,6 @@ import {
   type HostedLinqWebhookEvent,
   shouldIgnoreHostedLinqForLocalInboundGuard,
 } from "./linq";
-import {
-  resolveHostedLinqActiveRouteDecision,
-} from "./linq-routing-policy";
 import {
   appendHostedMailboxEnvelopeTx,
   readHostedMailboxItemByDedupeKey,
@@ -516,66 +512,25 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   if (existingMember && existingMemberEffectiveActive) {
-    const homeRoute = await readHostedMemberHomeLinqRoute({
-      memberId: existingMember.id,
-      prisma: input.prisma,
-    });
-
-    const routeDecision = resolveHostedLinqActiveRouteDecision({
-      homeChatId: homeRoute?.linqChatId ?? null,
-      homeRecipientPhone: homeRoute?.linqRecipientPhone ?? null,
+    const bindingResult = await resolveIncomingHostedLinqHomeLineRouteBindingTx({
       incomingChatId: summary.chatId,
       incomingDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
       incomingRecipientPhone: recipientPhoneNumber,
+      memberId: existingMember.id,
+      prisma: input.prisma,
     });
-
-    if (routeDecision.kind === "redirect_to_home") {
-      return logHostedLinqWebhookPlannerDecisionAndReturn(
-        buildConversationHomeRedirectResponse({
-          chatId: summary.chatId,
-          homeRecipientPhone: routeDecision.homeRecipientPhone,
-          memberId: existingMember.id,
-          messageId: summary.messageId,
-          service: messageEvent.data.service ?? null,
-          sourceEventId: input.event.event_id,
-          threadIsDirect: isHostedLinqDirectChatAttested(messageEvent),
-        }),
-        buildHostedLinqWebhookPlannerDetails(input.event, context, {
-          existingMemberActive: existingMemberEffectiveActive,
-          existingMemberMatch,
-          homeRoutePresent: Boolean(homeRoute?.linqChatId),
-          reason: "redirect-to-home",
-          routeDecision: routeDecision.kind,
-          routeStage: "active-member-redirect",
-        }),
-      );
+    const blockedPlan = buildRouteBindingBlockedPlan(bindingResult, {
+      capacityExhausted: "active-member-ignored-home-line-capacity-exhausted",
+      redirect: "active-member-redirect",
+      unassignable: "active-member-ignored-unassignable-home-line",
+      unattestedDirect: "active-member-ignored-unattested-direct",
+      unknownHome: "active-member-ignored-home-line",
+    });
+    if (blockedPlan) {
+      return blockedPlan;
     }
-
-    if (routeDecision.kind === "ignore_unattested_direct") {
-      return logHostedLinqWebhookPlannerDecisionAndReturn(
-        buildIgnoredLinqWebhookPlan("unattested-direct-chat"),
-        buildHostedLinqWebhookPlannerDetails(input.event, context, {
-          existingMemberActive: existingMemberEffectiveActive,
-          existingMemberMatch,
-          homeRoutePresent: Boolean(homeRoute?.linqChatId),
-          reason: "unattested-direct-chat",
-          routeStage: "active-member-ignored-unattested-direct",
-        }),
-      );
-    }
-
-    if (routeDecision.kind === "ignore_unknown_home") {
-      return logHostedLinqWebhookPlannerDecisionAndReturn(
-        buildIgnoredLinqWebhookPlan("unknown-home-line"),
-        buildHostedLinqWebhookPlannerDetails(input.event, context, {
-          existingMemberActive: existingMemberEffectiveActive,
-          existingMemberMatch,
-          homeRoutePresent: Boolean(homeRoute?.linqChatId),
-          reason: "unknown-home-line",
-          routeDecision: routeDecision.kind,
-          routeStage: "active-member-ignored-home-line",
-        }),
-      );
+    if (bindingResult.kind !== "bind") {
+      return buildUnassignableHomeLinePlan("active-member-ignored-unassignable-home-line");
     }
 
     const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
@@ -601,33 +556,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
           duplicate: true,
           existingMemberActive: existingMemberEffectiveActive,
           existingMemberMatch,
-          homeRoutePresent: Boolean(homeRoute?.linqChatId),
           reason: "duplicate-webhook-event",
-          routeDecision: routeDecision.kind,
+          routeDecision: bindingResult.kind,
           routeStage: "active-member-duplicate",
         }),
       );
-    }
-
-    const bindingResult = await resolveIncomingHostedLinqHomeLineRouteBindingTx({
-      incomingChatId: summary.chatId,
-      incomingDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
-      incomingRecipientPhone: recipientPhoneNumber,
-      memberId: existingMember.id,
-      prisma: input.prisma,
-    });
-    const blockedPlan = buildRouteBindingBlockedPlan(bindingResult, {
-      capacityExhausted: "active-member-ignored-home-line-capacity-exhausted",
-      redirect: "active-member-redirect",
-      unassignable: "active-member-ignored-unassignable-home-line",
-      unattestedDirect: "active-member-ignored-unattested-direct",
-      unknownHome: "active-member-ignored-home-line",
-    });
-    if (blockedPlan) {
-      return blockedPlan;
-    }
-    if (bindingResult.kind !== "bind") {
-      return buildUnassignableHomeLinePlan("active-member-ignored-unassignable-home-line");
     }
 
     const dailyState = await bindHostedMemberHomeLinqChatAndTrackInbound({
@@ -653,8 +586,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       logDetails: {
         existingMemberActive: true,
         existingMemberMatch,
-        homeRoutePresent: Boolean(homeRoute?.linqChatId),
-        routeDecision: routeDecision.kind,
+        routeDecision: bindingResult.kind,
       },
       memberId: existingMember.id,
       prisma: input.prisma,
@@ -717,10 +649,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
         dailyInboundCount: dailyState.inboundCount,
         existingMemberActive: existingMemberEffectiveActive,
         existingMemberMatch,
-        homeRoutePresent: Boolean(homeRoute?.linqChatId),
         mailboxAppendPresent: true,
         reason: "wake-appended-active-member",
-        routeDecision: routeDecision.kind,
+        routeDecision: bindingResult.kind,
         routeStage: "active-member-appended",
       }),
     );

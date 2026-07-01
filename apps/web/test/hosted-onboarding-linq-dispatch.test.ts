@@ -6440,9 +6440,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       telegramUserLookupKey: null,
     };
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock(currentRoute);
-    hostedMemberRouting.findUnique
-      .mockResolvedValueOnce(null)
-      .mockResolvedValue(withHostedMemberRoutingMember(currentRoute));
     const prisma = asPrismaTransactionClient({
       hostedLinqLine: buildHostedLinqLineFixture({
         phoneNumber: homeLinePhone,
