@@ -190,6 +190,7 @@ export async function runHostedAssistantAutomationLane(input: {
   assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
   buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
   runtimeEnv?: Readonly<Record<string, string>>;
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
   vaultRoot: string;
@@ -229,6 +230,12 @@ export async function runHostedAssistantAutomationLane(input: {
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
+          ...(input.shouldYieldBackgroundMaintenance
+            ? {
+                shouldYieldBackgroundMaintenance:
+                  input.shouldYieldBackgroundMaintenance,
+              }
+            : {}),
         },
       )
     : {
@@ -281,6 +288,7 @@ export async function runHostedAssistantAutomation(
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     runtimeAttemptId?: string | null;
+    shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   },
 ): Promise<{
   currentTurnDeliveryIntentIds: string[];
@@ -494,6 +502,9 @@ export async function runHostedAssistantAutomation(
       vaultServices,
       maxPerScan,
       requestId,
+      ...(options?.shouldYieldBackgroundMaintenance
+        ? { shouldDeferCron: options.shouldYieldBackgroundMaintenance }
+        : {}),
       signal,
       inputSource,
       turnEnvironment: turnEnvironment ?? null,
