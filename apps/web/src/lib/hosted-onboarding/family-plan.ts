@@ -1982,8 +1982,10 @@ export async function waitForHostedFamilyBilledSeatCount(input: {
   timeoutMs?: number;
 }): Promise<boolean> {
   const prisma = input.prisma ?? getPrisma();
-  const intervalMs = input.intervalMs ?? 500;
-  const deadline = Date.now() + (input.timeoutMs ?? 20_000);
+  const intervalMs = input.intervalMs ?? 400;
+  // Keep the wait short so it stays well inside the request budget and reads as a
+  // brief spinner; a slow webhook falls back to the syncing response and refresh.
+  const deadline = Date.now() + (input.timeoutMs ?? 6_000);
   for (;;) {
     const billedSeatCount = await readHostedFamilyBilledSeatCountTx({
       groupId: input.groupId,
