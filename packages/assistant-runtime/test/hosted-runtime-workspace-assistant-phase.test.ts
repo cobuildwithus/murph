@@ -57,7 +57,7 @@ const mocks = vi.hoisted(() => ({
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
   resolveHostedProviderCleanupCheckpointWakeAt: vi.fn(),
-  resolveHostedProviderCleanupDeferredWakeAt: vi.fn(),
+  resolveHostedProviderCleanupFirstDeferredWakeAt: vi.fn(),
   resolveHostedProviderCleanupScheduledWakeAt: vi.fn(),
   resolveHostedPendingAssistantInputWakeAt: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
@@ -139,8 +139,8 @@ vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
   readHostedProviderCleanupCheckpoint: mocks.readHostedProviderCleanupCheckpoint,
   resolveHostedProviderCleanupCheckpointWakeAt:
     mocks.resolveHostedProviderCleanupCheckpointWakeAt,
-  resolveHostedProviderCleanupDeferredWakeAt:
-    mocks.resolveHostedProviderCleanupDeferredWakeAt,
+  resolveHostedProviderCleanupFirstDeferredWakeAt:
+    mocks.resolveHostedProviderCleanupFirstDeferredWakeAt,
   resolveHostedProviderCleanupScheduledWakeAt:
     mocks.resolveHostedProviderCleanupScheduledWakeAt,
 }));
@@ -355,7 +355,7 @@ beforeEach(() => {
   mocks.recordHostedProviderCleanupBeforeCommit.mockImplementation(async (input) =>
     input.checkpoint
   );
-  mocks.resolveHostedProviderCleanupDeferredWakeAt.mockImplementation((input = {}) => {
+  mocks.resolveHostedProviderCleanupFirstDeferredWakeAt.mockImplementation((input = {}) => {
     const record = input as { nowMs?: number | null };
     const nowMs = Number.isFinite(record.nowMs)
       ? Number(record.nowMs)
@@ -371,7 +371,10 @@ beforeEach(() => {
     const nextWakeMs = Date.parse(nextWakeAt ?? "");
     if (!Number.isFinite(nextWakeMs) || nextWakeMs <= input.nowMs) {
       return input.deferDueOrInvalid
-        ? mocks.resolveHostedProviderCleanupDeferredWakeAt({ nowMs: input.nowMs })
+        ? mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
+            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            nowMs: input.nowMs,
+          })
         : null;
     }
     return nextWakeAt;
@@ -2449,6 +2452,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.resolveHostedProviderCleanupCheckpointWakeAt).toHaveBeenCalledWith({
       checkpoint: null,
       deferDueOrInvalid: true,
+      idleCheckpointDelayMs: undefined,
       nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
     });
     expect(result).toEqual(expect.objectContaining({
@@ -2517,6 +2521,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith({
       deferDueOrInvalid: true,
+      idleCheckpointDelayMs: undefined,
       nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
       vaultRoot: "/tmp/murph-vault",
     });
@@ -2542,6 +2547,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
     expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith({
       deferDueOrInvalid: true,
+      idleCheckpointDelayMs: undefined,
       nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
       vaultRoot: "/tmp/murph-vault",
     });
@@ -7548,6 +7554,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith({
       deferDueOrInvalid: true,
+      idleCheckpointDelayMs: undefined,
       nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
       vaultRoot: "/tmp/murph-vault",
     });
@@ -8868,6 +8875,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
     expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith({
       deferDueOrInvalid: true,
+      idleCheckpointDelayMs: undefined,
       nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
       vaultRoot: "/tmp/murph-vault",
     });

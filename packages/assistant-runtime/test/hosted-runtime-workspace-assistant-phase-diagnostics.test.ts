@@ -35,7 +35,7 @@ const mocks = vi.hoisted(() => ({
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
   resolveHostedProviderCleanupCheckpointWakeAt: vi.fn(),
-  resolveHostedProviderCleanupDeferredWakeAt: vi.fn(),
+  resolveHostedProviderCleanupFirstDeferredWakeAt: vi.fn(),
   resolveHostedProviderCleanupScheduledWakeAt: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
   resolveHostedSystemMailboxNextWakeCandidate: vi.fn(),
@@ -92,8 +92,8 @@ vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
   readHostedProviderCleanupCheckpoint: mocks.readHostedProviderCleanupCheckpoint,
   resolveHostedProviderCleanupCheckpointWakeAt:
     mocks.resolveHostedProviderCleanupCheckpointWakeAt,
-  resolveHostedProviderCleanupDeferredWakeAt:
-    mocks.resolveHostedProviderCleanupDeferredWakeAt,
+  resolveHostedProviderCleanupFirstDeferredWakeAt:
+    mocks.resolveHostedProviderCleanupFirstDeferredWakeAt,
   resolveHostedProviderCleanupScheduledWakeAt:
     mocks.resolveHostedProviderCleanupScheduledWakeAt,
 }));
@@ -161,7 +161,7 @@ beforeEach(() => {
     recorded: 1,
   });
   mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue(null);
-  mocks.resolveHostedProviderCleanupDeferredWakeAt.mockImplementation((input = {}) => {
+  mocks.resolveHostedProviderCleanupFirstDeferredWakeAt.mockImplementation((input = {}) => {
     const record = input as { nowMs?: number | null };
     const nowMs = Number.isFinite(record.nowMs)
       ? Number(record.nowMs)
@@ -177,7 +177,10 @@ beforeEach(() => {
     const nextWakeMs = Date.parse(nextWakeAt ?? "");
     if (!Number.isFinite(nextWakeMs) || nextWakeMs <= input.nowMs) {
       return input.deferDueOrInvalid
-        ? mocks.resolveHostedProviderCleanupDeferredWakeAt({ nowMs: input.nowMs })
+        ? mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
+            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            nowMs: input.nowMs,
+          })
         : null;
     }
     return nextWakeAt;

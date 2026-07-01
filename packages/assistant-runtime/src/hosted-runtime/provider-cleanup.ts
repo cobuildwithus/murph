@@ -22,6 +22,8 @@ import {
 
 const HOSTED_PROVIDER_CLEANUP_SCHEMA = "murph.hosted-provider-cleanup.v1";
 const HOSTED_PROVIDER_CLEANUP_FILE_NAME = "hosted-provider-cleanup.json";
+const HOSTED_PROVIDER_CLEANUP_DEFAULT_IDLE_CHECKPOINT_DELAY_MS = 180_000;
+const HOSTED_PROVIDER_CLEANUP_AFTER_IDLE_BUFFER_MS = 1_000;
 const HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS = 5 * 60_000;
 
 interface HostedProviderCleanupState {
@@ -72,12 +74,14 @@ export async function readHostedProviderCleanupCheckpoint(
 
 export async function resolveHostedProviderCleanupScheduledWakeAt(input: {
   deferDueOrInvalid: boolean;
+  idleCheckpointDelayMs?: number | null;
   nowMs: number;
   vaultRoot: string;
 }): Promise<string | null> {
   return resolveHostedProviderCleanupCheckpointWakeAt({
     checkpoint: await readHostedProviderCleanupCheckpoint(input.vaultRoot),
     deferDueOrInvalid: input.deferDueOrInvalid,
+    idleCheckpointDelayMs: input.idleCheckpointDelayMs,
     nowMs: input.nowMs,
   });
 }
@@ -124,7 +128,7 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
     });
     await assertHostedProviderCleanupLiveNow(input);
   } catch (error) {
-    const nextWakeAt = resolveHostedProviderCleanupDeferredWakeAt();
+    const nextWakeAt = resolveHostedProviderCleanupRetryWakeAt();
     await writeHostedProviderCleanupState(input.vaultRoot, {
       schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
       checkpoint: {
@@ -168,7 +172,21 @@ export function collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes(
   return normalizeHostedProviderMessageIds(collectHostedLinqProviderMessageIds(outcomes));
 }
 
-export function resolveHostedProviderCleanupDeferredWakeAt(input: {
+export function resolveHostedProviderCleanupFirstDeferredWakeAt(input: {
+  idleCheckpointDelayMs?: number | null;
+  nowMs?: number | null;
+} = {}): string {
+  const nowMs = Number.isFinite(input.nowMs)
+    ? Number(input.nowMs)
+    : Date.now();
+  return new Date(
+    nowMs
+      + resolveHostedProviderCleanupIdleCheckpointDelayMs(input.idleCheckpointDelayMs)
+      + HOSTED_PROVIDER_CLEANUP_AFTER_IDLE_BUFFER_MS,
+  ).toISOString();
+}
+
+export function resolveHostedProviderCleanupRetryWakeAt(input: {
   nowMs?: number | null;
 } = {}): string {
   const nowMs = Number.isFinite(input.nowMs)
@@ -180,6 +198,7 @@ export function resolveHostedProviderCleanupDeferredWakeAt(input: {
 export function resolveHostedProviderCleanupCheckpointWakeAt(input: {
   checkpoint: HostedProviderCleanupCheckpoint | null;
   deferDueOrInvalid: boolean;
+  idleCheckpointDelayMs?: number | null;
   nowMs: number;
 }): string | null {
   if (!input.checkpoint) {
@@ -190,7 +209,8 @@ export function resolveHostedProviderCleanupCheckpointWakeAt(input: {
   const checkpointWakeMs = Date.parse(checkpointWakeAt ?? "");
   if (!Number.isFinite(checkpointWakeMs) || checkpointWakeMs <= input.nowMs) {
     return input.deferDueOrInvalid
-      ? resolveHostedProviderCleanupDeferredWakeAt({
+      ? resolveHostedProviderCleanupFirstDeferredWakeAt({
+          idleCheckpointDelayMs: input.idleCheckpointDelayMs,
           nowMs: input.nowMs,
         })
       : null;
@@ -228,6 +248,16 @@ function resolveHostedProviderCleanupRecordedCheckpoint(input: {
   }
 
   return normalizedNext;
+}
+
+function resolveHostedProviderCleanupIdleCheckpointDelayMs(
+  value: number | null | undefined,
+): number {
+  if (value !== null && value !== undefined && Number.isFinite(value) && value > 0) {
+    return Math.trunc(value);
+  }
+
+  return HOSTED_PROVIDER_CLEANUP_DEFAULT_IDLE_CHECKPOINT_DELAY_MS;
 }
 
 async function assertHostedProviderCleanupLiveNow(input: {

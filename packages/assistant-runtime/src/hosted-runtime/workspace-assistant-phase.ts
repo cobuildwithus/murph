@@ -85,7 +85,7 @@ import {
   readHostedProviderCleanupCheckpoint,
   recordHostedProviderCleanupBeforeCommit,
   resolveHostedProviderCleanupCheckpointWakeAt,
-  resolveHostedProviderCleanupDeferredWakeAt,
+  resolveHostedProviderCleanupFirstDeferredWakeAt,
   resolveHostedProviderCleanupScheduledWakeAt,
   type HostedProviderCleanupCheckpoint,
 } from "./provider-cleanup.ts";
@@ -1955,6 +1955,7 @@ async function resolveHostedProviderCleanupSchedulingWakeCandidate(input: {
 }): Promise<HostedRuntimeWakeCandidate | null> {
   const nextWakeAt = await resolveHostedProviderCleanupScheduledWakeAt({
     deferDueOrInvalid: input.deferDueOrInvalid,
+    idleCheckpointDelayMs: input.phaseInput.request.idleCheckpointDelayMs,
     nowMs: resolveHostedAssistantPhaseNowMs(input.phaseInput),
     vaultRoot: input.phaseInput.restored.vaultRoot,
   });
@@ -3129,11 +3130,15 @@ async function runProviderCleanupPhase(input: {
     const nowMs = resolveHostedAssistantPhaseNowMs(input.input);
     const scheduledCleanupWake = await resolveHostedProviderCleanupScheduledWakeAt({
       deferDueOrInvalid: true,
+      idleCheckpointDelayMs: input.input.request.idleCheckpointDelayMs,
       nowMs,
       vaultRoot: input.input.restored.vaultRoot,
     });
     const terminalCleanupWake = input.terminalLinqCleanup.linqMessageIds.length > 0
-      ? resolveHostedProviderCleanupDeferredWakeAt({ nowMs })
+      ? resolveHostedProviderCleanupFirstDeferredWakeAt({
+          idleCheckpointDelayMs: input.input.request.idleCheckpointDelayMs,
+          nowMs,
+        })
       : null;
     const deferredProviderCleanupWakeAt = selectHostedRuntimeWakeCandidate([
       createHostedRuntimeWakeCandidate(scheduledCleanupWake, HOSTED_ASSISTANT_WAKE_REASON),
@@ -3900,7 +3905,10 @@ async function deferHostedProviderCleanupAfterDelivery(input: {
   const nowMs = resolveHostedAssistantPhaseNowMs(input.input);
   const checkpoint = await recordHostedProviderCleanupBeforeCommit({
     checkpoint: {
-      nextWakeAt: resolveHostedProviderCleanupDeferredWakeAt({ nowMs }),
+      nextWakeAt: resolveHostedProviderCleanupFirstDeferredWakeAt({
+        idleCheckpointDelayMs: input.input.request.idleCheckpointDelayMs,
+        nowMs,
+      }),
     },
     linqMessageIds: providerCleanupMessageIds,
     nowMs,
@@ -5436,11 +5444,15 @@ function resolveHostedProviderCleanupPhaseWakeAt(input: {
 
   const nowMs = resolveHostedAssistantPhaseNowMs(input.input);
   const terminalCleanupWakeAt = input.foregroundAssistantPass && input.terminalLinqCleanupPending
-    ? resolveHostedProviderCleanupDeferredWakeAt({ nowMs })
+    ? resolveHostedProviderCleanupFirstDeferredWakeAt({
+        idleCheckpointDelayMs: input.input.request.idleCheckpointDelayMs,
+        nowMs,
+      })
     : null;
   const checkpointWakeAt = resolveHostedProviderCleanupCheckpointWakeAt({
     checkpoint: input.checkpoint,
     deferDueOrInvalid: input.foregroundAssistantPass,
+    idleCheckpointDelayMs: input.input.request.idleCheckpointDelayMs,
     nowMs,
   });
   return selectHostedRuntimeWakeCandidate([

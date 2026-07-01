@@ -20,6 +20,7 @@ import {
   drainHostedProviderCleanupAfterCommit,
   readHostedProviderCleanupCheckpoint,
   recordHostedProviderCleanupBeforeCommit,
+  resolveHostedProviderCleanupFirstDeferredWakeAt,
   resolveHostedProviderCleanupScheduledWakeAt,
 } from "../src/hosted-runtime/provider-cleanup.ts";
 
@@ -130,7 +131,7 @@ test("hosted provider cleanup replaces a stale due checkpoint when appending def
   }
 });
 
-test("hosted provider cleanup resolves a future scheduling wake for due persisted cleanup", async () => {
+test("hosted provider cleanup defers due persisted cleanup until after the idle window", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
 
   try {
@@ -146,10 +147,11 @@ test("hosted provider cleanup resolves a future scheduling wake for due persiste
     assert.equal(
       await resolveHostedProviderCleanupScheduledWakeAt({
         deferDueOrInvalid: true,
+        idleCheckpointDelayMs: 1_000,
         nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
         vaultRoot,
       }),
-      "2026-07-01T00:14:00.000Z",
+      "2026-07-01T00:09:02.000Z",
     );
     assert.deepEqual(await readHostedProviderCleanupCheckpoint(vaultRoot), {
       nextWakeAt: "2026-07-01T00:08:00.000Z",
@@ -157,6 +159,16 @@ test("hosted provider cleanup resolves a future scheduling wake for due persiste
   } finally {
     await cleanup();
   }
+});
+
+test("hosted provider cleanup first defer wake follows the idle checkpoint delay", () => {
+  assert.equal(
+    resolveHostedProviderCleanupFirstDeferredWakeAt({
+      idleCheckpointDelayMs: 54_000,
+      nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
+    }),
+    "2026-07-01T00:09:55.000Z",
+  );
 });
 
 test("hosted provider cleanup deletes persisted and delivered Linq ids after commit", async () => {
