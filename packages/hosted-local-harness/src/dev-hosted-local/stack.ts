@@ -465,7 +465,9 @@ export async function startHostedLocalDevStack(input: {
       },
     });
     throwIfAbortSignalAborted(input.abortSignal);
-    const localOverrides = buildHostedLocalDevOverrides(config, cloudflareDevVars);
+    const localOverrides = buildHostedLocalDevOverrides(config, cloudflareDevVars, {
+      retellWebhookPublicBaseUrl: linqWebhookSetup?.publicBaseUrl ?? null,
+    });
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...vercelEnv,
       ...localOverrides,
