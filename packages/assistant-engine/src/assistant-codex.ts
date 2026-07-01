@@ -3384,6 +3384,37 @@ async function runCodexAppServerTurnOnProcess(
     })
   }
 
+  const rejectPreStartParentTurnRequest = (requestId: CodexRpcId): void => {
+    void tryWriteRpcMessage({
+      id: requestId,
+      error: {
+        code: -32000,
+        message: 'Codex parent-thread request arrived before the active turn id was known.',
+      },
+    })
+  }
+
+  const acceptTurnStartResultTurnId = (resultTurnId: string | null): void => {
+    if (resultTurnId === null) {
+      return
+    }
+    if (turnId === null) {
+      turnId = resultTurnId
+      return
+    }
+    if (turnId !== resultTurnId) {
+      rejectOnce(
+        new VaultCliError(
+          'ASSISTANT_CODEX_APP_SERVER_TURN_ID_MISMATCH',
+          'Codex app-server turn/start returned a different turn id than the active turn.',
+          {
+            retryable: true,
+          },
+        ),
+      )
+    }
+  }
+
   function handleParsedMessage(message: CodexRpcMessage): void {
     const responseId = readCodexRpcResponseId(message)
     if (responseId !== null) {
@@ -3407,7 +3438,7 @@ async function runCodexAppServerTurnOnProcess(
       }
       if (pending?.method === 'turn/start') {
         const resultTurnId = extractCodexTurnIdFromResult(message.result)
-        turnId = turnId ?? resultTurnId
+        acceptTurnStartResultTurnId(resultTurnId)
       }
       return
     }
@@ -3430,8 +3461,16 @@ async function runCodexAppServerTurnOnProcess(
 
     const messageTurnId = extractCodexTurnIdFromMessage(message)
     const method = readCodexEventMethod(message)
+    const requestId = readCodexRpcServerRequestId(message)
     if (messageTurnId !== null) {
-      if (turnId === null) {
+      if (turnId === null && isCodexTurnStartedMethod(method)) {
+        turnId = messageTurnId
+      } else if (turnId === null && isReusedWarmProcess) {
+        if (requestId !== null) {
+          rejectPreStartParentTurnRequest(requestId)
+        }
+        return
+      } else if (turnId === null) {
         turnId = messageTurnId
       } else if (messageTurnId !== turnId) {
         handleStaleParentTurnMessage(message)
@@ -3439,7 +3478,6 @@ async function runCodexAppServerTurnOnProcess(
       }
     }
 
-    const requestId = readCodexRpcServerRequestId(message)
     if (requestId !== null) {
       if (isReusedWarmProcess && messageTurnId === null) {
         rejectUnscopedParentTurnRequest(requestId)
@@ -3682,7 +3720,7 @@ async function runCodexAppServerTurnOnProcess(
       CODEX_RPC_DEFAULT_TIMEOUT_MS,
       'turn/start',
     )
-    turnId = extractCodexTurnIdFromResult(turnResult) ?? turnId
+    acceptTurnStartResultTurnId(extractCodexTurnIdFromResult(turnResult))
     lifecycleStage = 'turn_started'
     emitAppServerTimingTrace('turn-started')
     notifyProviderRequestStarted()

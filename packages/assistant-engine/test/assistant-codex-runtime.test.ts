@@ -4401,7 +4401,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('trusts tagged pre-start warm server requests as current-turn requests', async () => {
+  it('accepts tagged warm server requests after turn/started establishes the current turn', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-prestart-request-work-')
     const codexHome = await createTempDir('assistant-codex-local-prestart-request-home-')
     const progressUpdates: string[] = []
@@ -4444,6 +4444,14 @@ describe('assistant codex runtime', () => {
             },
           }))
           const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: 'turn-local-prestart-request-2',
+              },
+            },
+          }))
           child.stdout.write(jsonLine({
             id: 99,
             method: 'item/tool/call',
@@ -4528,7 +4536,7 @@ describe('assistant codex runtime', () => {
     await expect(
       executeCodexAppServerTurn({
         ...stableInput,
-        prompt: 'second local turn with prestart server request',
+        prompt: 'second local turn with started server request',
       }),
     ).resolves.toMatchObject({
       finalMessage: 'Pre-start request completed',
@@ -4582,6 +4590,27 @@ describe('assistant codex runtime', () => {
             },
           }))
           const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            id: 98,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                text: 'This pre-start stale progress must not send',
+              },
+              namespace: 'murph',
+              threadId: 'thread-local-stale-turn-id',
+              tool: 'send_progress_update',
+              turnId: 'turn-local-stale-turn-id-1',
+            },
+          }))
+
+          await expect(waitForRpcResponse(child, 98)).resolves.toMatchObject({
+            error: {
+              code: -32000,
+              message: 'Codex parent-thread request arrived before the active turn id was known.',
+            },
+          })
+
           child.stdout.write(jsonLine({
             id: secondTurn.id,
             result: {

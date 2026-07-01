@@ -2620,6 +2620,7 @@ function listExpectedHostedCodexProcessIds(
   for (const [pid, state] of processStates) {
     if (
       state.state !== "Z"
+      && state.ppid === expectedCodexRoot.pid
       && state.processGroupId === expectedCodexRoot.processGroupId
       && (expectedCodexRoot.uid === null || state.uid === expectedCodexRoot.uid)
     ) {
