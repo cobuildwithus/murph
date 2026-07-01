@@ -17,10 +17,19 @@ import {
   sendHostedLinqVoiceMemo,
   uploadHostedLinqAttachment,
 } from "../hosted-onboarding/linq-client";
-import { isHostedLinqConfiguredLinePhone } from "../hosted-onboarding/linq-line-store";
 import {
+  type HostedLinqAssignableHomeLine,
+  listHostedLinqAssignableHomeLines,
+  syncHostedLinqConfiguredLinesTx,
+} from "../hosted-onboarding/linq-line-store";
+import { chooseHostedLinqHomeLine } from "../hosted-onboarding/linq-routing-policy";
+import {
+  acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
+  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
+  countHostedMemberHomeLinqBindingsByRecipientPhone,
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqChatId,
+  upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberPendingLinqBindingTx,
 } from "../hosted-onboarding/hosted-member-routing-store";
 import { ensureHostedMemberForPhoneTx } from "../hosted-onboarding/member-identity-service";
@@ -30,6 +39,7 @@ import {
 } from "../hosted-onboarding/shared";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
+import { getHostedOnboardingEnvironment } from "../hosted-onboarding/runtime";
 
 export const HOSTED_OPS_ONBOARDING_VOICE_MEMO_MAX_BYTES = 10 * 1024 * 1024;
 
@@ -157,13 +167,6 @@ export async function sendHostedOpsOnboardingInvite(
   const prisma = input.prisma ?? getPrisma();
   const request = normalizeHostedOpsOnboardingInviteInput(input);
 
-  if (request.deliveryMode === "new_chat") {
-    await assertHostedOpsOnboardingAuthorizedLinqSenderPhone({
-      prisma,
-      senderPhone: request.linqFromPhoneNumber,
-    });
-  }
-
   const issued = await issueHostedOpsOnboardingInviteForRequest({
     prisma,
     request,
@@ -229,6 +232,12 @@ async function issueHostedOpsOnboardingInviteForRequest(input: {
   memberId: string;
 }> {
   return input.prisma.$transaction(async (tx) => {
+    const newChatAssignment = input.request.deliveryMode === "new_chat"
+      ? await resolveHostedOpsOnboardingNewChatLineAssignmentTx({
+          prisma: tx,
+          senderPhone: input.request.linqFromPhoneNumber,
+        })
+      : null;
     const memberId = input.request.deliveryMode === "existing_chat"
       ? await resolveHostedOpsOnboardingExistingChatMemberId({
           linqChatId: input.request.linqChatId,
@@ -239,6 +248,16 @@ async function issueHostedOpsOnboardingInviteForRequest(input: {
           phoneNumber: input.request.recipientPhoneNumber,
           prisma: tx,
         })).id;
+
+    if (newChatAssignment) {
+      await upsertHostedMemberHomeLinqRecipientPhoneTx({
+        homeLineAssignedAt: newChatAssignment.assignedAt,
+        memberId,
+        prisma: tx,
+        recipientPhone: newChatAssignment.line.phoneNumber,
+      });
+    }
+
     const invite = await issueHostedInviteTx({
       channel: "linq",
       memberId,
@@ -479,16 +498,20 @@ async function resolveHostedOpsOnboardingExistingLinqChatMemberId(input: {
   });
 }
 
-async function assertHostedOpsOnboardingAuthorizedLinqSenderPhone(input: {
-  prisma: PrismaClient;
+async function resolveHostedOpsOnboardingNewChatLineAssignmentTx(input: {
+  prisma: Prisma.TransactionClient;
   senderPhone: string;
-}): Promise<void> {
-  const configured = await isHostedLinqConfiguredLinePhone({
-    phoneNumber: input.senderPhone,
+}): Promise<{
+  assignedAt: Date;
+  line: HostedLinqAssignableHomeLine;
+}> {
+  const now = new Date();
+  await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
     prisma: input.prisma,
   });
+  const line = await resolveHostedOpsOnboardingAssignableLinqLineTx(input);
 
-  if (!configured) {
+  if (!line) {
     throw hostedOnboardingError({
       code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_UNAUTHORIZED",
       httpStatus: 400,
@@ -496,6 +519,87 @@ async function assertHostedOpsOnboardingAuthorizedLinqSenderPhone(input: {
       retryable: false,
     });
   }
+
+  const recipientPhones = [line.phoneNumber];
+  const activeMembersByRecipientPhone =
+    await countHostedMemberHomeLinqBindingsByRecipientPhone({
+      prisma: input.prisma,
+      recipientPhones,
+    });
+  const newAssignmentsByRecipientPhone =
+    await countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince({
+      prisma: input.prisma,
+      recipientPhones,
+      since: startOfUtcDay(now),
+    });
+  const chosen = chooseHostedLinqHomeLine({
+    activeMembersByRecipientPhone,
+    lines: [line],
+    newAssignmentsByRecipientPhone,
+    preferredRecipientPhone: line.phoneNumber,
+  });
+
+  if (!chosen) {
+    throw hostedOnboardingError({
+      code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_CAPACITY_EXHAUSTED",
+      httpStatus: 429,
+      message: "Linq sender phone has reached its hosted onboarding new-chat capacity.",
+      retryable: false,
+    });
+  }
+
+  return {
+    assignedAt: now,
+    line: chosen,
+  };
+}
+
+async function resolveHostedOpsOnboardingAssignableLinqLineTx(input: {
+  prisma: Prisma.TransactionClient;
+  senderPhone: string;
+}): Promise<HostedLinqAssignableHomeLine | null> {
+  let lines = await listHostedLinqAssignableHomeLines({
+    prisma: input.prisma,
+  });
+  let line = findHostedOpsOnboardingLineByPhone(lines, input.senderPhone);
+
+  if (line) {
+    return line;
+  }
+
+  const environment = getHostedOnboardingEnvironment();
+  if (
+    environment.linqConversationPhoneNumbers.some((phoneNumber) =>
+      normalizePhoneNumber(phoneNumber) === input.senderPhone
+    )
+  ) {
+    await syncHostedLinqConfiguredLinesTx({
+      activeMemberLimit: environment.linqMaxActiveMembersPerConversationPhone,
+      phoneNumbers: environment.linqConversationPhoneNumbers,
+      prisma: input.prisma,
+    });
+    lines = await listHostedLinqAssignableHomeLines({
+      prisma: input.prisma,
+    });
+    line = findHostedOpsOnboardingLineByPhone(lines, input.senderPhone);
+  }
+
+  return line ?? null;
+}
+
+function findHostedOpsOnboardingLineByPhone(
+  lines: readonly HostedLinqAssignableHomeLine[],
+  phoneNumber: string,
+): HostedLinqAssignableHomeLine | null {
+  return lines.find((line) => line.phoneNumber === phoneNumber) ?? null;
+}
+
+function startOfUtcDay(value: Date): Date {
+  return new Date(Date.UTC(
+    value.getUTCFullYear(),
+    value.getUTCMonth(),
+    value.getUTCDate(),
+  ));
 }
 
 interface NormalizedHostedOpsOnboardingInviteInput {

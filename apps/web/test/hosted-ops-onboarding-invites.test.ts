@@ -5,16 +5,22 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   createHostedLinqChat: vi.fn(),
   createHostedLinqChatLookupKey: vi.fn(),
+  acquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
+  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: vi.fn(),
+  countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   ensureHostedMemberForPhoneTx: vi.fn(),
+  getHostedOnboardingEnvironment: vi.fn(),
   getPrisma: vi.fn(),
   issueHostedInviteTx: vi.fn(),
-  isHostedLinqConfiguredLinePhone: vi.fn(),
+  listHostedLinqAssignableHomeLines: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqChatId: vi.fn(),
   requireHostedOpsRequestAccess: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
   sendHostedLinqVoiceMemo: vi.fn(),
+  syncHostedLinqConfiguredLinesTx: vi.fn(),
+  upsertHostedMemberHomeLinqRecipientPhoneTx: vi.fn(),
   upsertHostedMemberPendingLinqBindingTx: vi.fn(),
   uploadHostedLinqAttachment: vi.fn(),
 }));
@@ -50,12 +56,20 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
-  isHostedLinqConfiguredLinePhone: mocks.isHostedLinqConfiguredLinePhone,
+  listHostedLinqAssignableHomeLines: mocks.listHostedLinqAssignableHomeLines,
+  syncHostedLinqConfiguredLinesTx: mocks.syncHostedLinqConfiguredLinesTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  acquireHostedMemberHomeLinqRecipientAssignmentLockTx:
+    mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
+  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince:
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
+  countHostedMemberHomeLinqBindingsByRecipientPhone:
+    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
   lookupHostedMemberRoutingByHomeLinqChatId: mocks.lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqChatId: mocks.lookupHostedMemberRoutingByPendingLinqChatId,
+  upsertHostedMemberHomeLinqRecipientPhoneTx: mocks.upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberPendingLinqBindingTx: mocks.upsertHostedMemberPendingLinqBindingTx,
 }));
 
@@ -65,6 +79,10 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
   lookupHostedMemberIdentityByPhoneNumber: mocks.lookupHostedMemberIdentityByPhoneNumber,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  getHostedOnboardingEnvironment: mocks.getHostedOnboardingEnvironment,
 }));
 
 type ServiceModule = typeof import("../src/lib/hosted-ops/onboarding-invites");
@@ -108,7 +126,16 @@ describe("hosted ops onboarding invites", () => {
     mocks.createHostedLinqChatLookupKey.mockImplementation((chatId: string | null | undefined) =>
       chatId ? `lookup:${chatId}` : null
     );
-    mocks.isHostedLinqConfiguredLinePhone.mockResolvedValue(true);
+    mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
+    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
+    mocks.getHostedOnboardingEnvironment.mockReturnValue({
+      linqConversationPhoneNumbers: [],
+      linqMaxActiveMembersPerConversationPhone: null,
+    });
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+      buildHomeLine("+15557654321"),
+    ]);
     mocks.requireHostedOpsRequestAccess.mockResolvedValue({ member: { id: "member_ops" } });
     mocks.ensureHostedMemberForPhoneTx.mockResolvedValue({ id: "member_123" });
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
@@ -132,6 +159,8 @@ describe("hosted ops onboarding invites", () => {
       chatId: "chat_created",
       messageId: "message_open",
     });
+    mocks.syncHostedLinqConfiguredLinesTx.mockResolvedValue(undefined);
+    mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberPendingLinqBindingTx.mockResolvedValue(undefined);
     mocks.uploadHostedLinqAttachment.mockResolvedValue({ attachmentId: "attachment_123" });
     mocks.sendHostedLinqVoiceMemo.mockResolvedValue(undefined);
@@ -279,9 +308,26 @@ describe("hosted ops onboarding invites", () => {
       requestId: "request-456",
     });
 
-    expect(mocks.isHostedLinqConfiguredLinePhone).toHaveBeenCalledWith({
-      phoneNumber: "+15557654321",
-      prisma,
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledWith({
+      prisma: tx,
+    });
+    expect(mocks.listHostedLinqAssignableHomeLines).toHaveBeenCalledWith({
+      prisma: tx,
+    });
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledWith({
+      prisma: tx,
+      recipientPhones: ["+15557654321"],
+    });
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalledWith({
+      prisma: tx,
+      recipientPhones: ["+15557654321"],
+      since: expect.any(Date),
+    });
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma: tx,
+      recipientPhone: "+15557654321",
     });
     expect(mocks.createHostedLinqChat).toHaveBeenCalledWith({
       from: "+15557654321",
@@ -310,6 +356,11 @@ describe("hosted ops onboarding invites", () => {
       recipientPhone: "+15557654321",
     });
     expect(
+      mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.createHostedLinqChat.mock.invocationCallOrder[0],
+    );
+    expect(
       mocks.upsertHostedMemberPendingLinqBindingTx.mock.invocationCallOrder[0],
     ).toBeLessThan(
       mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0],
@@ -326,7 +377,7 @@ describe("hosted ops onboarding invites", () => {
   });
 
   it("rejects a new chat sender that is not a configured hosted Linq conversation phone", async () => {
-    mocks.isHostedLinqConfiguredLinePhone.mockResolvedValue(false);
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
 
     await expect(service.sendHostedOpsOnboardingInvite({
       deliveryMode: "new_chat",
@@ -337,15 +388,79 @@ describe("hosted ops onboarding invites", () => {
       code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_UNAUTHORIZED",
     });
 
-    expect(mocks.isHostedLinqConfiguredLinePhone).toHaveBeenCalledWith({
-      phoneNumber: "+15557654321",
-      prisma,
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledWith({
+      prisma: tx,
+    });
+    expect(mocks.listHostedLinqAssignableHomeLines).toHaveBeenCalledWith({
+      prisma: tx,
     });
     expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
     expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
     expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("rejects a new chat sender that has exhausted its daily new-conversation cap", async () => {
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+      buildHomeLine("+15557654321", {
+        maxNewConversationsPerDay: 1,
+      }),
+    ]);
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
+      new Map([["+15557654321", 1]]),
+    );
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-cap-exhausted",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_CAPACITY_EXHAUSTED",
+      httpStatus: 429,
+    });
+
+    expect(mocks.ensureHostedMemberForPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+    expect(mocks.createHostedLinqChat).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+  });
+
+  it("lazy-syncs env-configured Linq lines during new-chat DB cutover", async () => {
+    mocks.listHostedLinqAssignableHomeLines
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        buildHomeLine("+15557654321", {
+          activeMemberLimit: 250,
+        }),
+      ]);
+    mocks.getHostedOnboardingEnvironment.mockReturnValue({
+      linqConversationPhoneNumbers: ["+15557654321"],
+      linqMaxActiveMembersPerConversationPhone: 250,
+    });
+
+    await service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-cutover-sync",
+    });
+
+    expect(mocks.syncHostedLinqConfiguredLinesTx).toHaveBeenCalledWith({
+      activeMemberLimit: 250,
+      phoneNumbers: ["+15557654321"],
+      prisma: tx,
+    });
+    expect(mocks.listHostedLinqAssignableHomeLines).toHaveBeenCalledTimes(2);
+    expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma: tx,
+      recipientPhone: "+15557654321",
+    });
   });
 
   it("rejects a new chat opener that includes a URL before issuing an invite", async () => {
@@ -561,6 +676,24 @@ function inviteRow(input: {
     inviteCode: "invite_code",
     memberId: "member_123",
     sentAt: input.sentAt,
+  };
+}
+
+function buildHomeLine(
+  phoneNumber: string,
+  overrides: Partial<{
+    activeMemberLimit: number | null;
+    assignmentWeight: number;
+    maxNewConversationsPerDay: number | null;
+  }> = {},
+) {
+  return {
+    activeMemberLimit: overrides.activeMemberLimit ?? null,
+    assignmentWeight: overrides.assignmentWeight ?? 100,
+    maxNewConversationsPerDay: overrides.maxNewConversationsPerDay ?? null,
+    phoneNumber,
+    phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
+    phoneNumberLookupKey: `lookup:${phoneNumber}`,
   };
 }
 
