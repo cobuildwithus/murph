@@ -48,6 +48,7 @@ const mocks = vi.hoisted(() => ({
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
   prepareHostedAssistantAutomationForWake: vi.fn(),
   prepareHostedAssistantDeliveryEffectsForDispatch: vi.fn(),
+  prepareHostedProviderCleanupPlan: vi.fn(),
   prepareHostedSystemMailboxItemForCheckpoint: vi.fn(),
   readAssistantAutomationState: vi.fn(),
   readAssistantInputEvent: vi.fn(),
@@ -136,6 +137,7 @@ vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
   collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes:
     mocks.collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes,
   drainHostedProviderCleanupAfterCommit: mocks.drainHostedProviderCleanupAfterCommit,
+  prepareHostedProviderCleanupPlan: mocks.prepareHostedProviderCleanupPlan,
   recordHostedProviderCleanupAfterDelivery: mocks.recordHostedProviderCleanupAfterDelivery,
   recordHostedProviderCleanupBeforeCommit: mocks.recordHostedProviderCleanupBeforeCommit,
   readHostedProviderCleanupCheckpoint: mocks.readHostedProviderCleanupCheckpoint,
@@ -333,6 +335,58 @@ beforeEach(() => {
     linqMessageIds: [],
   });
   mocks.markAssistantAutoReplyLinqCleanupQueued.mockResolvedValue(undefined);
+  mocks.prepareHostedProviderCleanupPlan.mockImplementation(async (input: {
+    deferred: boolean;
+    idleCheckpointDelayMs?: number | null;
+    initialCheckpoint?: { nextWakeAt?: string | null } | null;
+    nowMs: number;
+    vaultRoot: string;
+  }) => {
+    let checkpoint = input.initialCheckpoint ?? null;
+    let stateQueued = false;
+    if (!input.deferred) {
+      checkpoint ??= await mocks.readHostedProviderCleanupCheckpoint(input.vaultRoot);
+      const terminalCleanup =
+        await mocks.listPendingAssistantAutoReplyLinqCleanupEvidence({
+          vault: input.vaultRoot,
+        });
+      const linqMessageIds = Array.isArray(terminalCleanup?.linqMessageIds)
+        ? terminalCleanup.linqMessageIds
+        : [];
+      stateQueued = linqMessageIds.length > 0;
+      if (stateQueued) {
+        checkpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
+          checkpoint: {
+            nextWakeAt: null,
+          },
+          linqMessageIds,
+          vaultRoot: input.vaultRoot,
+        });
+        await mocks.markAssistantAutoReplyLinqCleanupQueued({
+          captureIds: terminalCleanup.captureIds,
+          vault: input.vaultRoot,
+        });
+      }
+    }
+    const wakeAt = await mocks.resolveHostedProviderCleanupScheduledWakeAt({
+      deferDueOrInvalid: input.deferred,
+      idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+      nowMs: input.nowMs,
+      vaultRoot: input.vaultRoot,
+    });
+    const wakeMs = Date.parse(checkpoint?.nextWakeAt ?? "");
+    const due = !input.deferred
+      && checkpoint !== null
+      && (!Number.isFinite(wakeMs) || wakeMs <= input.nowMs);
+    return {
+      checkpoint,
+      deferred: input.deferred,
+      due,
+      requiresCheckpoint: due || stateQueued,
+      stateQueued,
+      wakeAt,
+    };
+  });
   mocks.applyMurphManagedAutomations.mockResolvedValue({
     created: 0,
     skipped: 1,

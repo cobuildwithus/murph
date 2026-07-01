@@ -31,8 +31,6 @@ import type {
 } from "@murphai/contracts";
 import {
   findAssistantAutoReplyDeliveryIntentIds,
-  listPendingAssistantAutoReplyLinqCleanupEvidence,
-  markAssistantAutoReplyLinqCleanupQueued,
 } from "@murphai/assistant-engine/assistant-automation";
 import {
   listConfiguredDeviceSyncConnectTargets,
@@ -81,12 +79,10 @@ import {
 } from "./pending-assistant-input.ts";
 import {
   drainHostedProviderCleanupAfterCommit,
-  readHostedProviderCleanupCheckpoint,
   recordHostedProviderCleanupAfterDelivery,
-  recordHostedProviderCleanupBeforeCommit,
-  resolveHostedProviderCleanupFirstDeferredWakeAt,
-  resolveHostedProviderCleanupScheduledWakeAt,
   type HostedProviderCleanupCheckpoint,
+  type HostedProviderCleanupPlan,
+  prepareHostedProviderCleanupPlan,
 } from "./provider-cleanup.ts";
 import { normalizeHostedFutureWakeAt } from "./wake-time.ts";
 import {
@@ -347,8 +343,6 @@ export async function runHostedWorkspaceAssistantPhase(
           systemMailboxMaintenance.result,
           systemMailboxMaintenance.deviceSyncMaintenanceRan,
         ),
-        resultDrainsProviderCleanup:
-          systemMailboxMaintenance.result.afterCheckpointKeepsForegroundImportLoop === true,
         wake,
       });
     }
@@ -586,22 +580,15 @@ export async function runHostedWorkspaceAssistantPhase(
     const initialProviderCleanupCheckpoint =
       deferredPendingSystemMailboxMaintenance?.initialProviderCleanupCheckpoint
       ?? systemMailboxMaintenance.initialProviderCleanupCheckpoint;
-    const deferProviderCleanup = backgroundMaintenanceYielded || foregroundAssistantPass;
-    const terminalLinqCleanup: HostedTerminalLinqCleanupEvidence = deferProviderCleanup
-      ? {
-          captureIds: [],
-          linqMessageIds: [],
-        }
-      : await listPendingAssistantAutoReplyLinqCleanupEvidence({
-          vault: input.restored.vaultRoot,
-        });
-    const providerCleanupPhase = await runProviderCleanupPhase({
-      deferProviderCleanup,
-      foregroundAssistantPass,
-      initialProviderCleanupCheckpoint,
-      input,
-      terminalLinqCleanup,
+    const providerCleanupPlan = await prepareHostedProviderCleanupPlan({
+      deferred: backgroundMaintenanceYielded || foregroundAssistantPass,
+      idleCheckpointDelayMs: input.request.idleCheckpointDelayMs,
+      initialCheckpoint: initialProviderCleanupCheckpoint,
+      nowMs: resolveHostedAssistantPhaseNowMs(input),
+      vaultRoot: input.restored.vaultRoot,
     });
+    const providerCleanupOwnedByPostCheckpointDelivery =
+      postCheckpointDeliveryResultOwnsProviderCleanup(continuingSystemMailboxResult);
     if (foregroundAssistantPass) {
       writeHostedAssistantTurnTimingRuntimeLog({
         currentTurnDeliveryIntentCount: currentTurnDeliveryIntentIds.length,
@@ -627,6 +614,7 @@ export async function runHostedWorkspaceAssistantPhase(
         foregroundWorkspaceWake: createFutureExistingHostedAssistantWorkspaceWakeCandidate(input),
         input,
         linqDeliveryContexts: initialLinqDeliveryContexts,
+        providerCleanupPlan,
         skippedDeviceSyncWake: deviceSyncFollowUpWake,
         systemMailboxWake,
         systemMailboxWakeAt,
@@ -656,16 +644,15 @@ export async function runHostedWorkspaceAssistantPhase(
         }),
       );
       let checkpointableResult: HostedWorkspaceRunnerAssistantPhaseResult = result;
-      if (providerCleanupPhase.providerCleanupStateQueued && !result.progressed) {
+      if (providerCleanupPlan.stateQueued && !result.progressed) {
         checkpointableResult = {
           ...result,
           checkpointReason: "provider_cleanup",
           progressed: true,
         };
       }
-      return await withHostedProviderCleanupOwnerWake({
-        deferDueOrInvalid: providerCleanupPhase.deferProviderCleanup,
-        phaseInput: input,
+      return withHostedProviderCleanupPlanWake({
+        providerCleanupPlan,
         result: checkpointableResult,
       });
     }
@@ -682,18 +669,12 @@ export async function runHostedWorkspaceAssistantPhase(
           state: assistantCronWakeAfterPass,
         })
       : null;
-    const providerCleanupCheckpoint = providerCleanupPhase.providerCleanupCheckpoint;
-    const providerCleanupHandledByContinuingSystemMailbox =
-      !foregroundAssistantPass && continuingSystemMailboxDrainsProviderCleanup;
-    const providerCleanupDue = providerCleanupHandledByContinuingSystemMailbox
+    const providerCleanupDue = providerCleanupOwnedByPostCheckpointDelivery
       ? false
-      : providerCleanupPhase.providerCleanupDue;
-    const terminalLinqCleanupDue = providerCleanupHandledByContinuingSystemMailbox
+      : providerCleanupPlan.due;
+    const providerCleanupStateQueued = providerCleanupOwnedByPostCheckpointDelivery
       ? false
-      : providerCleanupPhase.terminalLinqCleanupDue;
-    const providerCleanupStateQueued = providerCleanupHandledByContinuingSystemMailbox
-      ? false
-      : providerCleanupPhase.providerCleanupStateQueued;
+      : providerCleanupPlan.stateQueued;
     const deliveryEffects = await collectHostedAssistantDeliverySideEffects({
       actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
       includeBackgroundDueIntents:
@@ -734,14 +715,7 @@ export async function runHostedWorkspaceAssistantPhase(
         checkpointReason: "outbox_receipt",
         canConsumeWorkspaceAssistantWake: true,
         input,
-        providerCleanup: providerCleanupPhase.deferProviderCleanup
-          ? {
-              mode: "defer",
-            }
-          : {
-              checkpoint: providerCleanupCheckpoint,
-              mode: "drain",
-            },
+        providerCleanupPlan,
         redactedStatus: null,
         shouldYieldBackgroundDrain: input.shouldYieldBackgroundMaintenance ?? null,
         wake,
@@ -758,7 +732,6 @@ export async function runHostedWorkspaceAssistantPhase(
         nextWakeAt,
       }, deliveryEffects.length)
         || wakeStateProgressed
-        || terminalLinqCleanupDue
         || providerCleanupStateQueued;
       await writeHostedAssistantAutomationDetailRuntimeLogs({
         assistantMetrics,
@@ -814,12 +787,7 @@ export async function runHostedWorkspaceAssistantPhase(
       deviceSyncFollowUpWake,
       createHostedRuntimeWakeCandidate(outboxWakeAt, "assistant"),
       systemMailboxWake,
-      providerCleanupHandledByContinuingSystemMailbox
-        ? null
-        : await resolveHostedProviderCleanupSchedulingWakeCandidate({
-            deferDueOrInvalid: providerCleanupPhase.deferProviderCleanup,
-            phaseInput: input,
-          }),
+      createHostedRuntimeWakeCandidate(providerCleanupPlan.wakeAt, HOSTED_ASSISTANT_WAKE_REASON),
     ]);
     const nextWakeAt = nextWake.at;
     const wakeStateProgressed = hostedAssistantWakeStateProgressed({
@@ -833,7 +801,6 @@ export async function runHostedWorkspaceAssistantPhase(
       nextWakeAt,
     }, deliveryEffects.length)
       || wakeStateProgressed
-      || terminalLinqCleanupDue
       || providerCleanupStateQueued;
     await writeHostedAssistantAutomationDetailRuntimeLogs({
       assistantMetrics,
@@ -849,7 +816,7 @@ export async function runHostedWorkspaceAssistantPhase(
     });
     const hasPostCommitProviderCleanup = providerCleanupDue
       || deliveryEffects.length > 0
-      || terminalLinqCleanupDue;
+      || providerCleanupStateQueued;
 
     const phaseProgressed = progressed || providerCleanupDue;
     const redactedStatus = buildHostedWorkspaceAssistantPhaseRedactedStatus({
@@ -861,7 +828,7 @@ export async function runHostedWorkspaceAssistantPhase(
       systemMailboxRetryableFailed: 0,
     });
     if (!phaseProgressed) {
-      const result = mergeContinuingSystemMailboxResult({
+      return mergeContinuingSystemMailboxResult({
         ...(nextWakeAt ? { nextWakeAt } : {}),
         ...(shouldExposeHostedAssistantPhaseNextWakeReason(nextWake.reason)
           ? { nextWakeReason: nextWake.reason }
@@ -869,13 +836,6 @@ export async function runHostedWorkspaceAssistantPhase(
         progressed: false,
         redactedStatus,
       });
-      return providerCleanupHandledByContinuingSystemMailbox
-        ? result
-        : await withHostedProviderCleanupOwnerWake({
-            deferDueOrInvalid: providerCleanupPhase.deferProviderCleanup,
-            phaseInput: input,
-            result,
-          });
     }
 
     const result = mergeContinuingSystemMailboxResult({
@@ -898,7 +858,7 @@ export async function runHostedWorkspaceAssistantPhase(
               if (
                 deliveryEffects.length === 0
                 && !providerCleanupDue
-                && !terminalLinqCleanupDue
+                && !providerCleanupStateQueued
               ) {
                 return {
                   checkpointReason: "assistant_runtime_commit",
@@ -917,14 +877,7 @@ export async function runHostedWorkspaceAssistantPhase(
                 checkpointReason: deliveryEffects.length > 0 ? "outbox_receipt" : "provider_cleanup",
                 canConsumeWorkspaceAssistantWake: true,
                 input,
-                providerCleanup: providerCleanupPhase.deferProviderCleanup
-                  ? {
-                      mode: "defer",
-                    }
-                  : {
-                      checkpoint: providerCleanupCheckpoint,
-                      mode: "drain",
-                    },
+                providerCleanupPlan,
                 redactedStatus: null,
                 shouldYieldBackgroundDrain: input.shouldYieldBackgroundMaintenance ?? null,
                 wake,
@@ -942,7 +895,7 @@ export async function runHostedWorkspaceAssistantPhase(
                 nextWakeAt,
               },
               providerCleanupDue,
-              terminalLinqCleanupDue,
+              terminalLinqCleanupDue: providerCleanupStateQueued,
               wakeStateProgressed,
             }),
       nextWakeAt,
@@ -952,13 +905,10 @@ export async function runHostedWorkspaceAssistantPhase(
       progressed: true,
       redactedStatus,
     });
-    return providerCleanupHandledByContinuingSystemMailbox
-      ? result
-      : await withHostedProviderCleanupOwnerWake({
-          deferDueOrInvalid: providerCleanupPhase.deferProviderCleanup,
-          phaseInput: input,
-          result,
-        });
+    return withHostedProviderCleanupPlanWake({
+      providerCleanupPlan,
+      result,
+    });
   } finally {
     releaseChannelAbortRelay();
     channelAbortController.abort();
@@ -1301,6 +1251,12 @@ function mergeHostedAssistantPhaseResults(
   });
 }
 
+function postCheckpointDeliveryResultOwnsProviderCleanup(
+  result: HostedWorkspaceRunnerAssistantPhaseResult | null,
+): boolean {
+  return result?.afterCheckpointKeepsForegroundImportLoop === true;
+}
+
 function mergePendingAssistantInputMaintenanceResult(input: {
   pendingAttemptResult: HostedWorkspaceRunnerAssistantPhaseResult;
   systemMailboxResult: HostedWorkspaceRunnerAssistantPhaseResult | null;
@@ -1446,43 +1402,24 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
   initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
-  resultDrainsProviderCleanup?: boolean;
   wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
-  const deferProviderCleanup =
-    input.backgroundMaintenanceYielded
-    || input.input.shouldYieldBackgroundMaintenance?.() === true;
-  const terminalLinqCleanup: HostedTerminalLinqCleanupEvidence = deferProviderCleanup
-    ? {
-        captureIds: [],
-        linqMessageIds: [],
-      }
-    : await listPendingAssistantAutoReplyLinqCleanupEvidence({
-        vault: input.input.restored.vaultRoot,
-      });
-  const providerCleanupPhase = await runProviderCleanupPhase({
-    deferProviderCleanup,
-    foregroundAssistantPass: false,
-    initialProviderCleanupCheckpoint: input.initialProviderCleanupCheckpoint,
-    input: input.input,
-    terminalLinqCleanup,
+  const providerCleanupPlan = await prepareHostedProviderCleanupPlan({
+    deferred:
+      input.backgroundMaintenanceYielded
+      || input.input.shouldYieldBackgroundMaintenance?.() === true,
+    idleCheckpointDelayMs: input.input.request.idleCheckpointDelayMs,
+    initialCheckpoint: input.initialProviderCleanupCheckpoint,
+    nowMs: resolveHostedAssistantPhaseNowMs(input.input),
+    vaultRoot: input.input.restored.vaultRoot,
   });
-  const resultDrainsProviderCleanup = input.result.checkpointReason === "outbox_sending";
-  const resultAlreadyDrainsProviderCleanup =
-    input.resultDrainsProviderCleanup === true || resultDrainsProviderCleanup;
-  const result = resultAlreadyDrainsProviderCleanup
-    ? input.result
-    : await withHostedProviderCleanupOwnerWake({
-        deferDueOrInvalid: providerCleanupPhase.deferProviderCleanup,
-        phaseInput: input.input,
-        result: input.result,
-      });
+  const result = withHostedProviderCleanupPlanWake({
+    providerCleanupPlan,
+    result: input.result,
+  });
   if (
-    resultAlreadyDrainsProviderCleanup
-    || (
-      !providerCleanupPhase.providerCleanupDue
-      && !providerCleanupPhase.terminalLinqCleanupDue
-    )
+    !providerCleanupPlan.requiresCheckpoint
+    || postCheckpointDeliveryResultOwnsProviderCleanup(result)
   ) {
     return result;
   }
@@ -1498,10 +1435,7 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
       checkpointReason: "provider_cleanup",
       canConsumeWorkspaceAssistantWake: false,
       input: input.input,
-      providerCleanup: {
-        checkpoint: providerCleanupPhase.providerCleanupCheckpoint,
-        mode: "drain",
-      },
+      providerCleanupPlan,
       redactedStatus: null,
       shouldYieldBackgroundDrain: input.input.shouldYieldBackgroundMaintenance ?? null,
       wake: input.wake,
@@ -1804,9 +1738,6 @@ type HostedDeviceActivityAutomationScheduleResult =
 type HostedSystemMailboxPreparation = NonNullable<
   Awaited<ReturnType<typeof prepareHostedSystemMailboxItemForCheckpoint>>
 >;
-type HostedTerminalLinqCleanupEvidence = Awaited<
-  ReturnType<typeof listPendingAssistantAutoReplyLinqCleanupEvidence>
->;
 type HostedAssistantCronStatus = Awaited<ReturnType<typeof getAssistantCronStatus>>;
 
 interface HostedAssistantCronWakeState {
@@ -1939,19 +1870,6 @@ function createFutureExistingHostedAssistantWorkspaceWakeCandidate(
   );
 }
 
-async function resolveHostedProviderCleanupSchedulingWakeCandidate(input: {
-  deferDueOrInvalid: boolean;
-  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
-}): Promise<HostedRuntimeWakeCandidate | null> {
-  const nextWakeAt = await resolveHostedProviderCleanupScheduledWakeAt({
-    deferDueOrInvalid: input.deferDueOrInvalid,
-    idleCheckpointDelayMs: input.phaseInput.request.idleCheckpointDelayMs,
-    nowMs: resolveHostedAssistantPhaseNowMs(input.phaseInput),
-    vaultRoot: input.phaseInput.restored.vaultRoot,
-  });
-  return createHostedRuntimeWakeCandidate(nextWakeAt, HOSTED_ASSISTANT_WAKE_REASON);
-}
-
 function withHostedAssistantCronWakeCandidate(input: {
   assistantCronWake: HostedRuntimeWakeCandidate | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
@@ -2003,17 +1921,16 @@ function withHostedRuntimeWakeCandidate(input: {
   return nextResult;
 }
 
-async function withHostedProviderCleanupOwnerWake(input: {
-  deferDueOrInvalid: boolean;
-  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
+function withHostedProviderCleanupPlanWake(input: {
+  providerCleanupPlan: HostedProviderCleanupPlan;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
-}): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
+}): HostedWorkspaceRunnerAssistantPhaseResult {
   return withHostedRuntimeWakeCandidate({
     result: input.result,
-    wake: await resolveHostedProviderCleanupSchedulingWakeCandidate({
-      deferDueOrInvalid: input.deferDueOrInvalid,
-      phaseInput: input.phaseInput,
-    }),
+    wake: createHostedRuntimeWakeCandidate(
+      input.providerCleanupPlan.wakeAt,
+      HOSTED_ASSISTANT_WAKE_REASON,
+    ),
   });
 }
 
@@ -2023,7 +1940,7 @@ async function resolveHostedBackgroundMaintenanceWakeCandidate(input: {
   deviceSyncFollowUpWake?: HostedRuntimeWakeCandidate | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   pendingAssistantInputWakeAt?: string | null;
-  providerCleanupDeferDueOrInvalid?: boolean;
+  providerCleanupWakeAt?: string | null;
   systemMailboxWake?: HostedRuntimeWakeCandidate | null;
   systemMailboxWakeAt?: string | null;
 }): Promise<HostedRuntimeWakeCandidate> {
@@ -2045,10 +1962,7 @@ async function resolveHostedBackgroundMaintenanceWakeCandidate(input: {
     createHostedRuntimeWakeCandidate(input.pendingAssistantInputWakeAt ?? null, "assistant"),
     createHostedDeviceActivityAutomationWakeCandidate(input.deviceActivityAutomation ?? null),
     input.assistantCronWake,
-    await resolveHostedProviderCleanupSchedulingWakeCandidate({
-      deferDueOrInvalid: input.providerCleanupDeferDueOrInvalid === true,
-      phaseInput: input.input,
-    }),
+    createHostedRuntimeWakeCandidate(input.providerCleanupWakeAt ?? null, "assistant"),
   ]);
 }
 
@@ -2508,8 +2422,7 @@ async function runSystemMailboxMaintenancePhase(input: {
 
   const phaseInput = input.input;
   let initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null = null;
-  let initialProviderCleanupCheckpointRead = false;
-  let initialProviderCleanupDue = false;
+  let providerCleanupPlan: HostedProviderCleanupPlan | null = null;
   let assistantCronWakeState: HostedAssistantCronWakeState | null = null;
   const readAssistantCronWakeState = async (): Promise<HostedAssistantCronWakeState> => {
     if (assistantCronWakeState) {
@@ -2571,15 +2484,21 @@ async function runSystemMailboxMaintenancePhase(input: {
   if (!hasPendingAssistantInputWakeOverride && !pendingAssistantInputWakeAt) {
     pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(phaseInput);
   }
-  const readInitialProviderCleanupState = async (): Promise<void> => {
-    if (initialProviderCleanupCheckpointRead || shouldYieldAfterSystemMailboxPreparation) {
-      return;
+  const resolveProviderCleanupPlan = async (): Promise<HostedProviderCleanupPlan> => {
+    if (providerCleanupPlan) {
+      return providerCleanupPlan;
     }
-    initialProviderCleanupCheckpointRead = true;
-    initialProviderCleanupCheckpoint =
-      await readHostedProviderCleanupCheckpoint(phaseInput.restored.vaultRoot);
-    initialProviderCleanupDue =
-      isHostedProviderCleanupCheckpointDue(initialProviderCleanupCheckpoint, phaseInput);
+    providerCleanupPlan = await prepareHostedProviderCleanupPlan({
+      deferred:
+        shouldYieldAfterSystemMailboxPreparation
+        || phaseInput.shouldYieldBackgroundMaintenance?.() === true,
+      idleCheckpointDelayMs: phaseInput.request.idleCheckpointDelayMs,
+      initialCheckpoint: initialProviderCleanupCheckpoint,
+      nowMs: resolveHostedAssistantPhaseNowMs(phaseInput),
+      vaultRoot: phaseInput.restored.vaultRoot,
+    });
+    initialProviderCleanupCheckpoint = providerCleanupPlan.checkpoint;
+    return providerCleanupPlan;
   };
   const shouldRunDirtyDeviceSyncWorkSource = shouldRunIdleDeviceSyncMaintenance({
     phaseInput,
@@ -2617,7 +2536,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       };
     }
     if (dirtyDeviceSyncMetrics) {
-      await readInitialProviderCleanupState();
+      const cleanupPlan = await resolveProviderCleanupPlan();
       const dirtyAssistantCronWakeState = await readAssistantCronWakeState();
       const assistantCronWake = resolveHostedAssistantCronWakeCandidate({
         phaseInput,
@@ -2628,7 +2547,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         deviceActivityAutomation: dirtyDeviceActivityAutomation,
         input: phaseInput,
         pendingAssistantInputWakeAt,
-        providerCleanupDeferDueOrInvalid: shouldYieldAfterSystemMailboxPreparation,
+        providerCleanupWakeAt: cleanupPlan.wakeAt,
       });
       return {
         backgroundMaintenanceYielded: shouldYieldAfterSystemMailboxPreparation,
@@ -2651,7 +2570,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         phaseInput,
       });
     if (contextSnapshotRefresh) {
-      await readInitialProviderCleanupState();
+      const cleanupPlan = await resolveProviderCleanupPlan();
       const contextAssistantCronWakeState = await readAssistantCronWakeState();
       const assistantCronWake = resolveHostedAssistantCronWakeCandidate({
         phaseInput,
@@ -2661,7 +2580,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         assistantCronWake,
         input: phaseInput,
         pendingAssistantInputWakeAt,
-        providerCleanupDeferDueOrInvalid: shouldYieldAfterSystemMailboxPreparation,
+        providerCleanupWakeAt: cleanupPlan.wakeAt,
       });
       return {
         backgroundMaintenanceYielded: shouldYieldAfterSystemMailboxPreparation,
@@ -2730,7 +2649,7 @@ async function runSystemMailboxMaintenancePhase(input: {
   const deviceSyncMaintenanceRan =
     systemMailboxDeviceSyncRan
     || (dirtyDeviceSyncMetrics !== null && !dirtyDeviceSyncMetrics.deviceSyncSkipped);
-  await readInitialProviderCleanupState();
+  const cleanupPlan = await resolveProviderCleanupPlan();
   const deviceSyncFollowUpWake = resolveHostedDeviceSyncFollowUpWake({
     deviceSyncMaintenanceRan,
     input: phaseInput,
@@ -2761,7 +2680,7 @@ async function runSystemMailboxMaintenancePhase(input: {
     deviceSyncFollowUpWake,
     input: phaseInput,
     pendingAssistantInputWakeAt,
-    providerCleanupDeferDueOrInvalid: shouldYieldAfterSystemMailboxPreparation,
+    providerCleanupWakeAt: cleanupPlan.wakeAt,
     systemMailboxWake,
   });
   const nextWake = selectHostedRuntimeWakeCandidate([
@@ -2775,7 +2694,7 @@ async function runSystemMailboxMaintenancePhase(input: {
   const browserVaultReplicaRefreshRequested =
     isBrowserVaultReplicaRefreshSystemMailboxPreparation(systemMailboxPreparation);
   const shouldRunPostSystemCheckpoint = shouldRecordSystemMailbox
-    || initialProviderCleanupDue
+    || cleanupPlan.requiresCheckpoint
     || (dirtyDeviceSyncMetrics?.postCheckpointRecord ?? null) !== null;
   if ("metrics" in systemMailboxPreparation) {
     await writeHostedAssistantAutomationDetailRuntimeLogs({
@@ -2818,7 +2737,7 @@ async function runSystemMailboxMaintenancePhase(input: {
         : {}),
       ...(shouldRunPostSystemCheckpoint
         ? {
-            ...(systemMailboxDeliveryEffects.length > 0 || initialProviderCleanupDue
+            ...(systemMailboxDeliveryEffects.length > 0
               ? { afterCheckpointKeepsForegroundImportLoop: true }
               : {}),
             afterCheckpoint: async () => {
@@ -2828,10 +2747,9 @@ async function runSystemMailboxMaintenancePhase(input: {
                 dirtyDeviceSyncWake,
                 dirtyDeviceActivityAutomation,
                 assistantCronWakeState: systemAssistantCronWakeState,
-                initialProviderCleanupCheckpoint,
-                initialProviderCleanupDue,
                 input: phaseInput,
                 pendingAssistantInputWakeAt,
+                providerCleanupPlan: cleanupPlan,
                 deviceSyncFollowUpWake,
                 readAssistantCronWakeState,
                 systemMailboxMetricsWakeAt,
@@ -2927,10 +2845,9 @@ async function runSystemMailboxPostCheckpointPhase(input: {
   dirtyDeviceActivityAutomation: HostedDeviceActivityAutomationScheduleResult | null;
   dirtyDeviceSyncMetrics: HostedDeviceSyncWakeMetrics | null;
   dirtyDeviceSyncWake: HostedRuntimeWakeCandidate | null;
-  initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
-  initialProviderCleanupDue: boolean;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   pendingAssistantInputWakeAt: string | null;
+  providerCleanupPlan: HostedProviderCleanupPlan;
   readAssistantCronWakeState: () => Promise<HostedAssistantCronWakeState>;
   systemMailboxMetricsWakeAt: string | null;
   systemMailboxMetricsWakeReason: string | null;
@@ -2987,8 +2904,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       deviceSyncFollowUpWake: input.deviceSyncFollowUpWake,
       input: input.input,
       pendingAssistantInputWakeAt: input.pendingAssistantInputWakeAt,
-      providerCleanupDeferDueOrInvalid:
-        input.input.shouldYieldBackgroundMaintenance?.() === true,
+      providerCleanupWakeAt: input.providerCleanupPlan.wakeAt,
       systemMailboxWake: createHostedRuntimeWakeCandidate(
         statusCallback.nextWakeAt,
         statusCallback.nextWakeReason ?? "assistant",
@@ -3027,7 +2943,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       status: deferredSystemMailboxRecord ? "recording" : "recorded",
       wakeKind: input.systemMailboxPreparation.item.wake.kind,
     });
-    if (input.systemMailboxDeliveryEffects.length > 0 || input.initialProviderCleanupDue) {
+    if (input.systemMailboxDeliveryEffects.length > 0) {
       return await drainHostedPostCheckpointDelivery({
         afterDurableCheckpoint,
         assistantDeliveryEffects: input.systemMailboxDeliveryEffects,
@@ -3036,15 +2952,10 @@ async function runSystemMailboxPostCheckpointPhase(input: {
           at: statusNextWakeAt,
           reason: statusNextWakeReason,
         },
-        checkpointReason: input.systemMailboxDeliveryEffects.length > 0
-          ? "outbox_receipt"
-          : "provider_cleanup",
+        checkpointReason: "outbox_receipt",
         canConsumeWorkspaceAssistantWake: false,
         input: input.input,
-        providerCleanup: {
-          checkpoint: input.initialProviderCleanupCheckpoint,
-          mode: "drain",
-        },
+        providerCleanupPlan: input.providerCleanupPlan,
         redactedStatus: {
           ...dirtyRedactedStatus,
           ...systemMailboxRecordRedactedStatus,
@@ -3077,42 +2988,6 @@ async function runSystemMailboxPostCheckpointPhase(input: {
     : null;
   const dirtyPostCheckpointWakeAt = dirtyPostCheckpoint?.nextWakeAt ?? null;
 
-  if (input.initialProviderCleanupDue) {
-    const backgroundWake = await resolveHostedBackgroundMaintenanceWakeCandidate({
-      assistantCronWake,
-      deviceActivityAutomation: input.dirtyDeviceActivityAutomation,
-      deviceSyncFollowUpWake: input.deviceSyncFollowUpWake,
-      input: input.input,
-      pendingAssistantInputWakeAt: input.pendingAssistantInputWakeAt,
-      providerCleanupDeferDueOrInvalid:
-        input.input.shouldYieldBackgroundMaintenance?.() === true,
-      systemMailboxWake: input.systemMailboxWake,
-    });
-    const baseNextWake = selectHostedRuntimeWakeCandidate([
-      backgroundWake,
-      input.dirtyDeviceSyncWake,
-      createHostedRuntimeWakeCandidate(
-        dirtyPostCheckpointWakeAt,
-        HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
-      ),
-    ]);
-    return await drainHostedPostCheckpointDelivery({
-      afterDurableCheckpoint: dirtyPostCheckpoint?.afterDurableCheckpoint ?? null,
-      assistantDeliveryEffects: [],
-      baseNextWake,
-      checkpointReason: "provider_cleanup",
-      canConsumeWorkspaceAssistantWake: false,
-      input: input.input,
-      providerCleanup: {
-        checkpoint: input.initialProviderCleanupCheckpoint,
-        mode: "drain",
-      },
-      redactedStatus: dirtyPostCheckpoint?.redactedStatus ?? null,
-      shouldYieldBackgroundDrain: input.input.shouldYieldBackgroundMaintenance ?? null,
-      wake: input.wake,
-    });
-  }
-
   if (!dirtyPostCheckpoint) {
     return null;
   }
@@ -3123,8 +2998,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
     deviceSyncFollowUpWake: input.deviceSyncFollowUpWake,
     input: input.input,
     pendingAssistantInputWakeAt: input.pendingAssistantInputWakeAt,
-    providerCleanupDeferDueOrInvalid:
-      input.input.shouldYieldBackgroundMaintenance?.() === true,
+    providerCleanupWakeAt: input.providerCleanupPlan.wakeAt,
     systemMailboxWake: input.systemMailboxWake,
   });
   const dirtyNextWake = selectHostedRuntimeWakeCandidate([
@@ -3200,89 +3074,6 @@ function resolveHostedSystemMailboxMetricsWakeAt(input: {
   return wakeMs <= nowMs ? new Date(nowMs).toISOString() : null;
 }
 
-async function runProviderCleanupPhase(input: {
-  deferProviderCleanup: boolean;
-  foregroundAssistantPass: boolean;
-  initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
-  input: HostedWorkspaceRuntimeAssistantPhaseInput;
-  terminalLinqCleanup: HostedTerminalLinqCleanupEvidence;
-}): Promise<{
-  deferProviderCleanup: boolean;
-  providerCleanupCheckpoint: HostedProviderCleanupCheckpoint | null;
-  providerCleanupDue: boolean;
-  providerCleanupStateQueued: boolean;
-  terminalLinqCleanupDue: boolean;
-}> {
-  if (input.deferProviderCleanup || input.foregroundAssistantPass) {
-    const terminalCleanupCheckpoint = input.terminalLinqCleanup.linqMessageIds.length > 0
-      ? await recordHostedDeferredTerminalLinqCleanup({
-          input: input.input,
-          terminalLinqCleanup: input.terminalLinqCleanup,
-        })
-      : null;
-    return {
-      deferProviderCleanup: true,
-      providerCleanupCheckpoint: terminalCleanupCheckpoint,
-      providerCleanupDue: false,
-      providerCleanupStateQueued: terminalCleanupCheckpoint !== null,
-      terminalLinqCleanupDue: false,
-    };
-  }
-
-  const terminalLinqCleanupDue =
-    !input.foregroundAssistantPass && input.terminalLinqCleanup.linqMessageIds.length > 0;
-  if (terminalLinqCleanupDue) {
-    await recordHostedProviderCleanupBeforeCommit({
-      checkpoint: {
-        nextWakeAt: null,
-      },
-      linqMessageIds: input.terminalLinqCleanup.linqMessageIds,
-      vaultRoot: input.input.restored.vaultRoot,
-    });
-    await markAssistantAutoReplyLinqCleanupQueued({
-      captureIds: input.terminalLinqCleanup.captureIds,
-      vault: input.input.restored.vaultRoot,
-    });
-  }
-
-  const providerCleanupCheckpoint = input.foregroundAssistantPass
-    ? null
-    : input.initialProviderCleanupCheckpoint
-      ?? (terminalLinqCleanupDue
-        ? { nextWakeAt: null }
-        : await readHostedProviderCleanupCheckpoint(input.input.restored.vaultRoot));
-  const providerCleanupDue = !input.foregroundAssistantPass
-    && isHostedProviderCleanupCheckpointDue(providerCleanupCheckpoint, input.input);
-  return {
-    deferProviderCleanup: false,
-    providerCleanupCheckpoint,
-    providerCleanupDue,
-    providerCleanupStateQueued: terminalLinqCleanupDue,
-    terminalLinqCleanupDue,
-  };
-}
-
-async function recordHostedDeferredTerminalLinqCleanup(input: {
-  input: HostedWorkspaceRuntimeAssistantPhaseInput;
-  terminalLinqCleanup: HostedTerminalLinqCleanupEvidence;
-}): Promise<HostedProviderCleanupCheckpoint> {
-  const checkpoint = await recordHostedProviderCleanupBeforeCommit({
-    checkpoint: {
-      nextWakeAt: resolveHostedProviderCleanupFirstDeferredWakeAt({
-        idleCheckpointDelayMs: input.input.request.idleCheckpointDelayMs,
-        nowMs: resolveHostedAssistantPhaseNowMs(input.input),
-      }),
-    },
-    linqMessageIds: input.terminalLinqCleanup.linqMessageIds,
-    vaultRoot: input.input.restored.vaultRoot,
-  });
-  await markAssistantAutoReplyLinqCleanupQueued({
-    captureIds: input.terminalLinqCleanup.captureIds,
-    vault: input.input.restored.vaultRoot,
-  });
-  return checkpoint;
-}
-
 async function collectForegroundDeliveryEffects(input: {
   actionApprovalPort: HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["actionApprovalPort"];
   linqDeliveryContext?: Parameters<
@@ -3315,6 +3106,7 @@ async function runForegroundAssistantReplyPhase(input: {
   currentTurnDeliveryIntentIds: readonly string[];
   foregroundWorkspaceWake: HostedRuntimeWakeCandidate | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  providerCleanupPlan: HostedProviderCleanupPlan;
   skippedDeviceSyncWake: HostedRuntimeWakeCandidate | null;
   systemMailboxWake: HostedRuntimeWakeCandidate | null;
   systemMailboxWakeAt: string | null;
@@ -3355,9 +3147,7 @@ async function runForegroundAssistantReplyPhase(input: {
       canConsumeWorkspaceAssistantWake: true,
       input: input.input,
       linqDeliveryContexts: input.linqDeliveryContexts,
-      providerCleanup: {
-        mode: "defer",
-      },
+      providerCleanupPlan: input.providerCleanupPlan,
       redactedStatus: null,
       wake: input.wake,
     });
@@ -3429,19 +3219,16 @@ async function runForegroundAssistantReplyPhase(input: {
   const assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
     assistantNextWakeAt,
   });
-  const providerCleanupSchedulingWake = deliveryEffects.length === 0
-    ? await resolveHostedProviderCleanupSchedulingWakeCandidate({
-        deferDueOrInvalid: true,
-        phaseInput: input.input,
-      })
-    : null;
   const nextWake = selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
     input.foregroundWorkspaceWake,
     input.skippedDeviceSyncWake,
     createHostedRuntimeWakeCandidate(outboxWakeAt, "assistant"),
     input.systemMailboxWake,
-    providerCleanupSchedulingWake,
+    createHostedRuntimeWakeCandidate(
+      deliveryEffects.length === 0 ? input.providerCleanupPlan.wakeAt : null,
+      HOSTED_ASSISTANT_WAKE_REASON,
+    ),
   ]);
   const nextWakeAt = nextWake.at;
   const wakeStateProgressed = hostedAssistantWakeStateProgressed({
@@ -3510,9 +3297,7 @@ async function runForegroundAssistantReplyPhase(input: {
               canConsumeWorkspaceAssistantWake: true,
               input: input.input,
               linqDeliveryContexts: input.linqDeliveryContexts,
-              providerCleanup: {
-                mode: "defer",
-              },
+              providerCleanupPlan: input.providerCleanupPlan,
               redactedStatus: null,
               wake: input.wake,
             });
@@ -3541,17 +3326,13 @@ async function runForegroundAssistantReplyPhase(input: {
   };
 }
 
-type HostedProviderCleanupPostCheckpointMode =
-  | { checkpoint: HostedProviderCleanupCheckpoint | null; mode: "drain" }
-  | { mode: "defer" };
-
 type HostedProviderCleanupPostCheckpointWake =
   Parameters<typeof drainHostedPreparedAssistantDeliveries>[0]["wake"];
 
 async function runHostedProviderCleanupPostCheckpointStep(input: {
   assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
-  providerCleanup: HostedProviderCleanupPostCheckpointMode;
+  providerCleanupPlan: HostedProviderCleanupPlan;
   shouldYieldBackgroundDrain?: (() => boolean) | null;
   wake: HostedProviderCleanupPostCheckpointWake;
 }): Promise<{
@@ -3559,18 +3340,18 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
   wake: HostedRuntimeWakeCandidate | null;
 }> {
   const providerCleanupDrainDeferred =
-    input.providerCleanup.mode === "drain"
+    !input.providerCleanupPlan.deferred
     && input.shouldYieldBackgroundDrain?.() === true;
   let providerCleanupNextWakeAt: string | null;
   let providerCleanupRedactedStatus: HostedRuntimeRedactedJson = {};
 
-  if (input.providerCleanup.mode === "drain" && !providerCleanupDrainDeferred) {
+  if (!input.providerCleanupPlan.deferred && !providerCleanupDrainDeferred) {
     const providerCleanup = await drainHostedProviderCleanupAfterCommit({
       assistantDeliveryOutcomes: input.assistantDeliveryOutcomes,
       assertLiveness: async () => {
         assertHostedAssistantPhaseLiveness(input.phaseInput.signal);
       },
-      checkpoint: input.providerCleanup.checkpoint ?? {
+      checkpoint: input.providerCleanupPlan.checkpoint ?? {
         nextWakeAt: null,
       },
       env: buildHostedLinqChannelEnv({
@@ -3591,7 +3372,18 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
       outcomes: input.assistantDeliveryOutcomes,
       vaultRoot: input.phaseInput.restored.vaultRoot,
     });
-    providerCleanupNextWakeAt = providerCleanup.nextWakeAt;
+    const deferredPlan = providerCleanupDrainDeferred
+      ? await prepareHostedProviderCleanupPlan({
+          deferred: true,
+          idleCheckpointDelayMs: input.phaseInput.request.idleCheckpointDelayMs,
+          nowMs: resolveHostedAssistantPhaseNowMs(input.phaseInput),
+          vaultRoot: input.phaseInput.restored.vaultRoot,
+        })
+      : null;
+    providerCleanupNextWakeAt =
+      providerCleanup.nextWakeAt
+      ?? deferredPlan?.wakeAt
+      ?? input.providerCleanupPlan.wakeAt;
     if (providerCleanupDrainDeferred) {
       providerCleanupRedactedStatus = {
         hostedProviderCleanupYielded: 1,
@@ -3599,16 +3391,10 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
     }
   }
 
-  const providerCleanupWake = providerCleanupNextWakeAt === null
-    ? await resolveHostedProviderCleanupSchedulingWakeCandidate({
-        deferDueOrInvalid: input.providerCleanup.mode === "defer"
-          || providerCleanupDrainDeferred,
-        phaseInput: input.phaseInput,
-      })
-    : createHostedRuntimeWakeCandidate(
-      providerCleanupNextWakeAt,
-      HOSTED_ASSISTANT_WAKE_REASON,
-    );
+  const providerCleanupWake = createHostedRuntimeWakeCandidate(
+    providerCleanupNextWakeAt,
+    HOSTED_ASSISTANT_WAKE_REASON,
+  );
   return {
     redactedStatus: providerCleanupRedactedStatus,
     wake: providerCleanupWake,
@@ -3625,7 +3411,7 @@ async function drainHostedPostCheckpointDelivery(input: {
   canConsumeWorkspaceAssistantWake: boolean;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
-  providerCleanup: HostedProviderCleanupPostCheckpointMode;
+  providerCleanupPlan: HostedProviderCleanupPlan;
   redactedStatus: HostedRuntimeRedactedJson | null;
   shouldYieldBackgroundDrain?: (() => boolean) | null;
   wake: Parameters<typeof drainHostedPreparedAssistantDeliveries>[0]["wake"];
@@ -3721,7 +3507,7 @@ async function drainHostedPostCheckpointDelivery(input: {
   const providerCleanup = await runHostedProviderCleanupPostCheckpointStep({
     assistantDeliveryOutcomes: outcomes,
     phaseInput: input.input,
-    providerCleanup: input.providerCleanup,
+    providerCleanupPlan: input.providerCleanupPlan,
     shouldYieldBackgroundDrain: input.shouldYieldBackgroundDrain ?? null,
     wake: input.wake,
   });
@@ -4030,7 +3816,7 @@ async function buildHostedMemberChannelDeliveryBarrierResult(input: {
   const providerCleanup = await runHostedProviderCleanupPostCheckpointStep({
     assistantDeliveryOutcomes: [],
     phaseInput: input.input.input,
-    providerCleanup: input.input.providerCleanup,
+    providerCleanupPlan: input.input.providerCleanupPlan,
     shouldYieldBackgroundDrain: input.input.input.shouldYieldBackgroundMaintenance ?? null,
     wake: input.input.wake,
   });
@@ -4106,23 +3892,6 @@ function assertHostedAssistantPhaseLiveness(signal: AbortSignal | null | undefin
     throw reason;
   }
   throw new Error("Hosted workspace assistant phase was aborted.");
-}
-
-function isHostedProviderCleanupCheckpointDue(
-  checkpoint: HostedProviderCleanupCheckpoint | null,
-  input?: HostedWorkspaceRuntimeAssistantPhaseInput,
-): boolean {
-  if (!checkpoint) {
-    return false;
-  }
-
-  if (!checkpoint.nextWakeAt) {
-    return true;
-  }
-
-  const timestamp = Date.parse(checkpoint.nextWakeAt);
-  const nowMs = input ? resolveHostedAssistantPhaseNowMs(input) : Date.now();
-  return Number.isFinite(timestamp) && timestamp <= nowMs;
 }
 
 function resolveHostedAssistantPhaseNowMs(input: {

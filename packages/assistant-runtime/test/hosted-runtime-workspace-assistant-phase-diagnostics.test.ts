@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
   prepareHostedAssistantAutomationForWake: vi.fn(),
   prepareHostedAssistantDeliveryEffectsForDispatch: vi.fn(),
+  prepareHostedProviderCleanupPlan: vi.fn(),
   prepareHostedSystemMailboxItemForCheckpoint: vi.fn(),
   recordHostedDeviceSyncDirtyPostCheckpointRecord: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
@@ -88,6 +89,7 @@ vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
 
 vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
   drainHostedProviderCleanupAfterCommit: mocks.drainHostedProviderCleanupAfterCommit,
+  prepareHostedProviderCleanupPlan: mocks.prepareHostedProviderCleanupPlan,
   recordHostedProviderCleanupBeforeCommit: mocks.recordHostedProviderCleanupBeforeCommit,
   readHostedProviderCleanupCheckpoint: mocks.readHostedProviderCleanupCheckpoint,
   resolveHostedProviderCleanupCheckpointWakeAt:
@@ -144,6 +146,16 @@ beforeEach(() => {
   });
   mocks.hasPendingAssistantAutoReplyInput.mockResolvedValue(false);
   mocks.markAssistantAutoReplyLinqCleanupQueued.mockResolvedValue(undefined);
+  mocks.prepareHostedProviderCleanupPlan.mockImplementation(async (input: {
+    deferred: boolean;
+  }) => ({
+    checkpoint: null,
+    deferred: input.deferred,
+    due: false,
+    requiresCheckpoint: false,
+    stateQueued: false,
+    wakeAt: null,
+  }));
   mocks.prepareHostedAssistantAutomationForWake.mockResolvedValue(undefined);
   mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue(undefined);
   mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);

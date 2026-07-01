@@ -8,6 +8,10 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
+  listPendingAssistantAutoReplyLinqCleanupEvidence,
+  markAssistantAutoReplyLinqCleanupQueued,
+} from "@murphai/assistant-engine/assistant-automation";
+import {
   resolveAssistantStatePaths,
   writeAssistantStateJson,
 } from "@murphai/runtime-state/node/assistant-state-fs";
@@ -34,6 +38,15 @@ interface HostedProviderCleanupState {
 
 export interface HostedProviderCleanupCheckpoint {
   nextWakeAt?: string | null;
+}
+
+export interface HostedProviderCleanupPlan {
+  checkpoint: HostedProviderCleanupCheckpoint | null;
+  deferred: boolean;
+  due: boolean;
+  requiresCheckpoint: boolean;
+  stateQueued: boolean;
+  wakeAt: string | null;
 }
 
 export interface HostedProviderCleanupDrainResult {
@@ -79,6 +92,62 @@ export async function resolveHostedProviderCleanupScheduledWakeAt(input: {
     deferDueOrInvalid: input.deferDueOrInvalid,
     idleCheckpointDelayMs: input.idleCheckpointDelayMs,
     nowMs: input.nowMs,
+  });
+}
+
+export async function prepareHostedProviderCleanupPlan(input: {
+  deferred: boolean;
+  idleCheckpointDelayMs?: number | null;
+  initialCheckpoint?: HostedProviderCleanupCheckpoint | null;
+  nowMs: number;
+  vaultRoot: string;
+}): Promise<HostedProviderCleanupPlan> {
+  if (input.deferred) {
+    return {
+      checkpoint: input.initialCheckpoint ?? null,
+      deferred: true,
+      due: false,
+      requiresCheckpoint: false,
+      stateQueued: false,
+      wakeAt: await resolveHostedProviderCleanupScheduledWakeAt({
+        deferDueOrInvalid: true,
+        idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+        nowMs: input.nowMs,
+        vaultRoot: input.vaultRoot,
+      }),
+    };
+  }
+
+  const terminalCleanup = await listPendingAssistantAutoReplyLinqCleanupEvidence({
+    vault: input.vaultRoot,
+  });
+  const terminalCleanupMessageIds = terminalCleanup.linqMessageIds;
+  const terminalCleanupQueued = terminalCleanupMessageIds.length > 0;
+  if (terminalCleanupQueued) {
+    await recordHostedProviderCleanupBeforeCommit({
+      checkpoint: {
+        nextWakeAt: null,
+      },
+      linqMessageIds: terminalCleanupMessageIds,
+      vaultRoot: input.vaultRoot,
+    });
+    await markAssistantAutoReplyLinqCleanupQueued({
+      captureIds: terminalCleanup.captureIds,
+      vault: input.vaultRoot,
+    });
+  }
+
+  const checkpoint =
+    input.initialCheckpoint
+    ?? (terminalCleanupQueued
+      ? { nextWakeAt: null }
+      : await readHostedProviderCleanupCheckpoint(input.vaultRoot));
+  return buildHostedProviderCleanupPlan({
+    checkpoint,
+    deferred: false,
+    idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+    nowMs: input.nowMs,
+    stateQueued: terminalCleanupQueued,
   });
 }
 
@@ -242,6 +311,44 @@ export function resolveHostedProviderCleanupCheckpointWakeAt(input: {
   }
 
   return checkpointWakeAt;
+}
+
+function buildHostedProviderCleanupPlan(input: {
+  checkpoint: HostedProviderCleanupCheckpoint | null;
+  deferred: boolean;
+  idleCheckpointDelayMs?: number | null;
+  nowMs: number;
+  stateQueued: boolean;
+}): HostedProviderCleanupPlan {
+  const due =
+    !input.deferred
+    && isHostedProviderCleanupCheckpointDue(input.checkpoint, input.nowMs);
+  return {
+    checkpoint: input.checkpoint,
+    deferred: input.deferred,
+    due,
+    requiresCheckpoint: due || input.stateQueued,
+    stateQueued: input.stateQueued,
+    wakeAt: resolveHostedProviderCleanupCheckpointWakeAt({
+      checkpoint: input.checkpoint,
+      deferDueOrInvalid: input.deferred,
+      idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+      nowMs: input.nowMs,
+    }),
+  };
+}
+
+function isHostedProviderCleanupCheckpointDue(
+  checkpoint: HostedProviderCleanupCheckpoint | null,
+  nowMs: number,
+): boolean {
+  if (!checkpoint) {
+    return false;
+  }
+
+  const wakeAt = checkpoint.nextWakeAt ?? null;
+  const wakeMs = Date.parse(wakeAt ?? "");
+  return !Number.isFinite(wakeMs) || wakeMs <= nowMs;
 }
 
 function resolveHostedProviderCleanupIdleCheckpointDelayMs(
