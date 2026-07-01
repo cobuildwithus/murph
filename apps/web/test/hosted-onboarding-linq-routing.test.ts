@@ -222,7 +222,7 @@ describe("resolveHostedLinqHomeBindingRecipientPhone", () => {
     ).toBe("+15550100001");
   });
 
-  it("fills the saved home recipient phone from inbound metadata when the matching home chat is missing one", () => {
+  it("preserves a missing saved home recipient phone when the incoming chat already matches", () => {
     expect(
       resolveHostedLinqHomeBindingRecipientPhone({
         homeChatId: "chat_home",
@@ -230,7 +230,7 @@ describe("resolveHostedLinqHomeBindingRecipientPhone", () => {
         incomingChatId: "chat_home",
         incomingRecipientPhone: "+15550100002",
       }),
-    ).toBe("+15550100002");
+    ).toBeNull();
   });
 
   it("prefers the inbound recipient phone when rebinding onto a different chat", () => {

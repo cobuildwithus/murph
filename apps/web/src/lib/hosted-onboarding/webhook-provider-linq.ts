@@ -83,6 +83,8 @@ import {
   readHostedLinqAssignableHomeLineByPhone,
 } from "./linq-line-store";
 import {
+  type HostedLinqHomeLinePhoneReservationResult,
+  reserveOrReuseHostedMemberLinqHomeLineForRouteTx,
   reserveHostedLinqHomeLineForPhoneTx,
 } from "./linq-home-routing";
 import { normalizePhoneNumber } from "./phone";
@@ -385,7 +387,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
             return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
           }
 
-          const reservationResult = await reserveHostedLinqHomeLineForPhoneTx({
+          const reservationResult = await reserveIncomingHostedLinqHomeLineForRouteTx({
+            chatId: summary.chatId,
+            memberId: existingMember?.id ?? null,
             phoneNumber: recipientPhoneNumber,
             prisma: input.prisma,
           });
@@ -585,7 +589,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
         return buildUnassignableHomeLinePlan("active-member-ignored-unassignable-home-line");
       }
 
-      const reservationResult = await reserveHostedLinqHomeLineForPhoneTx({
+      const reservationResult = await reserveIncomingHostedLinqHomeLineForRouteTx({
+        chatId: summary.chatId,
+        memberId: existingMember.id,
         phoneNumber: recipientPhoneNumber,
         prisma: input.prisma,
       });
@@ -780,7 +786,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
   }
 
-  const reservationResult = await reserveHostedLinqHomeLineForPhoneTx({
+  const reservationResult = await reserveIncomingHostedLinqHomeLineForRouteTx({
+    chatId: summary.chatId,
+    memberId: existingMember?.id ?? null,
     phoneNumber: recipientPhoneNumber,
     prisma: input.prisma,
   });
@@ -889,6 +897,25 @@ function shouldReserveIncomingHomeLineBinding(input: {
     && bindingRecipientPhone === incomingRecipientPhone
     && input.homeChatId !== input.incomingChatId
     && homeRecipientPhone !== incomingRecipientPhone;
+}
+
+async function reserveIncomingHostedLinqHomeLineForRouteTx(input: {
+  chatId: string;
+  memberId?: string | null;
+  phoneNumber: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedLinqHomeLinePhoneReservationResult> {
+  return input.memberId
+    ? reserveOrReuseHostedMemberLinqHomeLineForRouteTx({
+        chatId: input.chatId,
+        memberId: input.memberId,
+        phoneNumber: input.phoneNumber,
+        prisma: input.prisma,
+      })
+    : reserveHostedLinqHomeLineForPhoneTx({
+        phoneNumber: input.phoneNumber,
+        prisma: input.prisma,
+      });
 }
 
 async function planHostedLinqExplicitThreadRouteWebhook(input: {

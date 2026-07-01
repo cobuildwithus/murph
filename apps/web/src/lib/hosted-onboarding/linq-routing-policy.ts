@@ -69,7 +69,7 @@ export function resolveHostedLinqHomeBindingRecipientPhone(input: {
   const homeRecipientPhone = normalizePhoneNumber(input.homeRecipientPhone);
 
   if (input.homeChatId && input.homeChatId === input.incomingChatId) {
-    return homeRecipientPhone ?? incomingRecipientPhone;
+    return homeRecipientPhone;
   }
 
   return incomingRecipientPhone ?? homeRecipientPhone;

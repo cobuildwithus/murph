@@ -2261,6 +2261,72 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it("keeps a matching active home chat without filling a missing recipient from inbound metadata", async () => {
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id",
+        memberId: "member_123",
+        value: "chat_123",
+      }),
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId: "member_123",
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_active_same_chat_missing_recipient",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    expect(hostedMemberRouting.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        linqRecipientPhoneEncrypted: null,
+        linqRecipientPhoneLookupKey: null,
+      }),
+    }));
+    expect(hostedMemberRouting.groupBy).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("does not bind an active member home route from a capacity-exhausted inbound Linq line", async () => {
     const homeLinePhone = "+15550000000";
     const homeLineLookupKey = createHostedPhoneLookupKey(homeLinePhone);
@@ -6182,6 +6248,118 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("reuses an existing pending home-line reservation when retrying an unsent signup link", async () => {
+    const homeLinePhone = "+15550000000";
+    const assignedAt = new Date("2026-03-26T12:00:00.000Z");
+    mocks.readHostedLinqDailyState.mockResolvedValueOnce(null);
+    mocks.incrementHostedLinqInboundDailyState.mockResolvedValueOnce(makeHostedLinqDailyState());
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
+      linqChatIdEncrypted: null,
+      linqHomeLineAssignedAt: assignedAt,
+      linqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-recipient-phone",
+        memberId: "member_123",
+        value: homeLinePhone,
+      }),
+      linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homeLinePhone),
+      memberId: "member_123",
+      pendingLinqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.pending-linq-chat-id",
+        memberId: "member_123",
+        value: "chat_123",
+      }),
+      pendingLinqChatLookupKey: "lookup:chat_123",
+      pendingLinqRecipientPhoneEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.pending-linq-recipient-phone",
+        memberId: "member_123",
+        value: homeLinePhone,
+      }),
+      pendingLinqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homeLinePhone),
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    });
+    hostedMemberRouting.groupBy.mockImplementation(async () => {
+      throw new Error("retry should reuse the existing route reservation before recounting capacity");
+    });
+    const hostedInviteCreate = vi.fn().mockResolvedValue({
+      channel: "linq",
+      id: "invite_retry",
+      inviteCode: "code_retry",
+      memberId: "member_123",
+      sentAt: null,
+      status: "pending",
+    });
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        create: hostedInviteCreate,
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue({
+            inviteCode: "code_retry",
+          }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      hostedLinqLine: buildHostedLinqLineFixture({
+        maxNewConversationsPerDay: 1,
+        phoneNumber: homeLinePhone,
+      }),
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_signup_retry_reuses_reservation",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      inviteCode: "code_retry",
+      ok: true,
+      reason: "sent-signup-link",
+    });
+    expect(hostedInviteCreate).toHaveBeenCalled();
+    expect(hostedMemberRouting.groupBy).not.toHaveBeenCalled();
+    expect(readHostedMemberRoutingUpsertMock(prisma)).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        linqHomeLineAssignedAt: assignedAt,
+        linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homeLinePhone),
+        pendingLinqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homeLinePhone),
+      }),
+    }));
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: expect.stringContaining("https://join.example.test/join/code_retry"),
+        replyToMessageId: "msg_123",
+      }),
+    );
   });
 
   it("sends one daily quota reply after 100 active-member inbound messages", async () => {

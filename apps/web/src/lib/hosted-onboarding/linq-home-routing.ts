@@ -3,6 +3,7 @@ import {
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
+  readHostedMemberRoutingState,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
 } from "./hosted-member-routing-store";
@@ -58,6 +59,73 @@ export async function reserveHostedLinqHomeLineForPhoneTx(input: {
   if (!line) {
     return {
       kind: "unassignable",
+    };
+  }
+
+  const reservation = await reserveHostedLinqHomeLineFromCandidatesTx({
+    lines: [line],
+    preferredRecipientPhone: line.phoneNumber,
+    prisma: input.prisma,
+  });
+
+  if (!reservation) {
+    return {
+      kind: "capacity_exhausted",
+    };
+  }
+
+  return {
+    kind: "reserved",
+    reservation,
+  };
+}
+
+export async function reserveOrReuseHostedMemberLinqHomeLineForRouteTx(input: {
+  chatId: string;
+  memberId: string;
+  phoneNumber: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedLinqHomeLinePhoneReservationResult> {
+  const phoneNumber = normalizePhoneNumber(input.phoneNumber);
+  if (!phoneNumber) {
+    return {
+      kind: "unassignable",
+    };
+  }
+
+  await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
+    prisma: input.prisma,
+  });
+
+  const routing = await readHostedMemberRoutingState({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const existingAssignedAt = routing?.linqHomeLineAssignedAt ?? null;
+  const existingRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
+  const routeMatches =
+    existingAssignedAt !== null
+    && existingRecipientPhone === phoneNumber
+    && (routing?.linqChatId === input.chatId || routing?.pendingLinqChatId === input.chatId);
+
+  const line = await readHostedLinqAssignableHomeLineByPhone({
+    phoneNumber,
+    prisma: input.prisma,
+  });
+
+  if (!line) {
+    return {
+      kind: "unassignable",
+    };
+  }
+
+  if (routeMatches) {
+    return {
+      kind: "reserved",
+      reservation: {
+        assignedAt: existingAssignedAt,
+        line,
+      },
     };
   }
 
