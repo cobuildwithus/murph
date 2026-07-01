@@ -7532,6 +7532,11 @@ describe("hosted workspace runtime entrypoint", () => {
       ));
       assert.ok(events.includes("vault-share.deliver:done"));
       assert.ok(
+        requireEventIndex(events, "workspace.checkpoint")
+          < requireEventIndex(events, "vault-share.deliver:start"),
+        "dirty source workspace must checkpoint before vault-share delivery starts",
+      );
+      assert.ok(
         requireEventIndex(events, "assistant.phase:2")
           < requireEventIndex(events, "vault-share.deliver:done"),
         "fresh foreground input should run before the slow vault-share delivery completes",
@@ -7541,9 +7546,120 @@ describe("hosted workspace runtime entrypoint", () => {
           request.lanes.some((lane) => lane.lane === "conversation")
         ),
       );
-      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests.length, 2);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[1]?.reason, "idle_shutdown");
       assert.equal(result.status, "idle");
+    } finally {
+      runtimeAbortController.abort();
+      mocks.summarizeWearableSleepRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("failed dirty checkpoint prevents vault-share delivery from egressing uncheckpointed source state", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-vault-share-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const checkpointFailure = new Error("synthetic checkpoint failed");
+    const importedInputIds: string[] = [];
+    let vaultShareDeliverCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.summarizeWearableSleepRuntime.mockResolvedValueOnce([{
+        date: "2026-04-26",
+        sleepEndAt: "2026-04-27T06:31:00.000Z",
+        sleepStartAt: "2026-04-26T22:04:00.000Z",
+      }]);
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await expect(runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_vault_share_checkpoint_failure",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-vault-share-checkpoint.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            importedInputIds.push(inputId);
+            return {
+              assistantInputId: inputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_vault_share_checkpoint_failure",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            vaultSharePort: {
+              async deliver() {
+                vaultShareDeliverCalls += 1;
+                events.push("vault-share.deliver:start");
+                return { status: "delivered" };
+              },
+            },
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              checkpointWorkspace() {
+                throw checkpointFailure;
+              },
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            const inputId = importedInputIds.shift();
+            assert.ok(inputId);
+            await writeSyntheticAssistantAutoReplyTerminalEvidence({
+              inputId,
+              vaultRoot,
+            });
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              nextWakeAt: null,
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      )).rejects.toBe(checkpointFailure);
+
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(vaultShareDeliverCalls, 0);
+      assert.ok(!events.includes("vault-share.deliver:start"));
     } finally {
       runtimeAbortController.abort();
       mocks.summarizeWearableSleepRuntime.mockClear();

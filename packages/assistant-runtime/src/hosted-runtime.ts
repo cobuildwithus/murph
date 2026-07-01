@@ -1841,14 +1841,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runtimeStateDirty ||= result.runtimeStateDirty;
         return result;
       };
-      const vaultShareOfferWakeLatencySeed =
-        await offerHostedVaultShareProjectionDuringIdle();
-      if (vaultShareOfferWakeLatencySeed) {
-        await runIdleWakeForegroundPass({
-          latencySeed: vaultShareOfferWakeLatencySeed,
-          projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
-          requestIdKind: "idle-wake",
-        });
+      if (!runtimeStateDirty) {
+        const vaultShareOfferWakeLatencySeed =
+          await offerHostedVaultShareProjectionDuringIdle();
+        if (vaultShareOfferWakeLatencySeed) {
+          await runIdleWakeForegroundPass({
+            latencySeed: vaultShareOfferWakeLatencySeed,
+            projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
+            requestIdKind: "idle-wake",
+          });
+        }
       }
       while (runtimeStateDirty) {
         let checkpointBlockedProjectedWakeKey: string | null = null;
@@ -2189,6 +2191,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             latencySeed: null,
             projectedWakeKeyBeingServiced: checkpointBlockedProjectedWakeKey,
             requestIdKind: "checkpoint-wake",
+          });
+          continue;
+        }
+        const vaultShareOfferWakeLatencySeed =
+          await offerHostedVaultShareProjectionDuringIdle();
+        if (vaultShareOfferWakeLatencySeed) {
+          await runIdleWakeForegroundPass({
+            latencySeed: vaultShareOfferWakeLatencySeed,
+            projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
+            requestIdKind: "idle-wake",
           });
           continue;
         }
