@@ -192,7 +192,9 @@ export async function sendHostedOpsOnboardingInvite(
   await sendHostedLinqChatMessage({
     chatId: delivery.chatId,
     idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
-      requestId: request.requestId,
+      idempotencyParts: [
+        request.requestId,
+      ],
       step: "invite",
       targetParts: [
         issued.memberId,
@@ -326,18 +328,19 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
         },
       };
     }
-    const reservedLinePhoneNumber = resolveHostedOpsOnboardingReusableNewChatReservation({
+    const reservedReservation = resolveHostedOpsOnboardingReusableNewChatReservation({
       routing,
       senderPhone: input.request.linqFromPhoneNumber,
     });
-    if (reservedLinePhoneNumber) {
+    if (reservedReservation) {
       return {
         kind: "create_chat" as const,
         issued: {
           invite,
           memberId,
         },
-        linePhoneNumber: reservedLinePhoneNumber,
+        lineAssignedAt: reservedReservation.assignedAt,
+        linePhoneNumber: reservedReservation.linePhoneNumber,
       };
     }
 
@@ -362,6 +365,7 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
         invite,
         memberId,
       },
+      lineAssignedAt: assignment.assignedAt,
       linePhoneNumber: assignment.line.phoneNumber,
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
@@ -376,11 +380,14 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
   const createdChat = await createHostedLinqChat({
     from: prepared.linePhoneNumber,
     idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
-      requestId: input.request.requestId,
+      idempotencyParts: [
+        prepared.issued.memberId,
+      ],
       step: "open",
       targetParts: [
         prepared.linePhoneNumber,
         input.request.recipientPhoneNumber,
+        prepared.lineAssignedAt.toISOString(),
       ],
     }),
     message: input.request.newChatOpeningMessage,
@@ -447,7 +454,7 @@ function resolveHostedOpsOnboardingReusableNewChatDelivery(input: {
 function resolveHostedOpsOnboardingReusableNewChatReservation(input: {
   routing: Awaited<ReturnType<typeof readHostedMemberRoutingState>>;
   senderPhone: string;
-}): string | null {
+}): { assignedAt: Date; linePhoneNumber: string } | null {
   const senderPhone = normalizePhoneNumber(input.senderPhone);
   const homeRecipientPhone = normalizePhoneNumber(input.routing?.linqRecipientPhone);
 
@@ -457,7 +464,10 @@ function resolveHostedOpsOnboardingReusableNewChatReservation(input: {
     && !input.routing.pendingLinqChatId
     && senderPhone
     && homeRecipientPhone === senderPhone
-    ? homeRecipientPhone
+    ? {
+        assignedAt: input.routing.linqHomeLineAssignedAt,
+        linePhoneNumber: homeRecipientPhone,
+      }
     : null;
 }
 
@@ -970,13 +980,13 @@ function buildHostedOpsOnboardingInviteMessage(input: {
 }
 
 function buildHostedOpsOnboardingIdempotencyKey(input: {
-  requestId: string;
+  idempotencyParts: readonly string[];
   step: "invite" | "open";
   targetParts: readonly string[];
 }): string {
   const digest = createHash("sha256");
 
-  for (const part of [input.requestId, ...input.targetParts]) {
+  for (const part of [...input.idempotencyParts, ...input.targetParts]) {
     digest.update(`${part.length}:`, "utf8");
     digest.update(part, "utf8");
     digest.update("\n", "utf8");

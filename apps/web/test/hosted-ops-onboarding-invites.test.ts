@@ -707,6 +707,45 @@ describe("hosted ops onboarding invites", () => {
     expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
   });
 
+  it("keeps the open-chat idempotency key stable across overlapping requests for the same reservation", async () => {
+    mocks.createHostedLinqChat
+      .mockResolvedValueOnce({
+        chatId: null,
+        messageId: null,
+      })
+      .mockResolvedValueOnce({
+        chatId: "chat_created_retry",
+        messageId: "message_open_retry",
+      });
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-create-missing-chat-a",
+    })).rejects.toMatchObject({
+      code: "HOSTED_OPS_ONBOARDING_CHAT_CREATE_FAILED",
+    });
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-create-missing-chat-b",
+    })).resolves.toMatchObject({
+      chatId: "chat_created_retry",
+      deliveryMode: "new_chat",
+      newChatCreated: true,
+    });
+
+    expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(2);
+    expect(readIdempotencyKey(mocks.createHostedLinqChat, 1)).toBe(
+      readIdempotencyKey(mocks.createHostedLinqChat, 0),
+    );
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(1);
+  });
+
   it("does not runtime-sync env-configured Linq lines during new-chat assignment", async () => {
     mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(null);
     mocks.getHostedOnboardingEnvironment.mockReturnValue({
