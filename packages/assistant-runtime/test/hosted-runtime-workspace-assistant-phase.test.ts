@@ -2188,6 +2188,76 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
   });
 
+  it("does not add a cleanup wake to fresh managed automation post-checkpoint status", async () => {
+    const assistantWakeAt = "2026-04-27T00:05:00.000Z";
+    const providerCleanupWakeAt = "2026-04-27T00:14:00.000Z";
+    const defaultRoute = {
+      channel: "linq",
+      deliverySource: null,
+      deliveryTarget: "chat_synthetic_seed_route",
+      identityId: "identity_synthetic_seed_route",
+      participantId: "participant_synthetic_seed_route",
+      threadId: "thread_synthetic_seed_route",
+    };
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      providerCleanupWakeAt,
+    );
+    mocks.readAssistantInputEvent.mockResolvedValueOnce({
+      conversation: {
+        accountId: defaultRoute.identityId,
+        actorId: defaultRoute.participantId,
+        actorIsSelf: false,
+        source: defaultRoute.channel,
+        threadId: defaultRoute.threadId,
+        threadIsDirect: true,
+      },
+      replyTarget: {
+        channel: defaultRoute.channel,
+        messageId: "message_synthetic_seed_route",
+        threadId: defaultRoute.deliveryTarget,
+      },
+    });
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 1,
+      skipped: 0,
+      updated: 0,
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: assistantWakeAt,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      afterCheckpoint: expect.any(Function),
+      nextWakeAt: assistantWakeAt,
+      progressed: true,
+    }));
+
+    const providerCleanupWakeReadsBeforePostCheckpoint =
+      mocks.resolveHostedProviderCleanupScheduledWakeAt.mock.calls.length;
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 1,
+        murphManagedAutomationSkipped: 0,
+        murphManagedAutomationUpdated: 0,
+      }),
+    }));
+    expect(postCheckpoint).not.toHaveProperty("nextWakeAt");
+    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledTimes(
+      providerCleanupWakeReadsBeforePostCheckpoint,
+    );
+  });
+
   it("keeps a managed automation retry wake after a fresh-input checkpoint failure", async () => {
     const defaultRoute = {
       channel: "linq",

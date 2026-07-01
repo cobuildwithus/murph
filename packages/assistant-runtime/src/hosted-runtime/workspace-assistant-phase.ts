@@ -2003,6 +2003,10 @@ async function mergeHostedProviderCleanupSchedulingWakeIntoPostCheckpoint(input:
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
   postCheckpoint: HostedWorkspaceRunnerAssistantPhasePostCheckpoint;
 }): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
+  if (!Object.hasOwn(input.postCheckpoint, "nextWakeAt")) {
+    return input.postCheckpoint;
+  }
+
   const wake = await resolveHostedProviderCleanupSchedulingWakeCandidate({
     deferDueOrInvalid: input.deferDueOrInvalid,
     phaseInput: input.phaseInput,
