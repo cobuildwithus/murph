@@ -8,8 +8,8 @@ import {
   issueHostedFamilyInviteTx,
   readHostedFamilyOwnerSnapshotForMember,
   updateHostedFamilySeatCount,
+  waitForHostedFamilyBilledSeatCount,
 } from "@/src/lib/hosted-onboarding/family-plan";
-import { HOSTED_FAMILY_MAX_SEATS } from "@/src/lib/hosted-onboarding/billing-plans";
 import { hostedOnboardingError, isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
@@ -57,23 +57,22 @@ export const POST = withJsonError(async (request: Request) => {
 
   // Only grow the plan when the invite genuinely needs a seat. Reused invites
   // return before the seat check, so a duplicate/retried invite never buys one.
-  // Loop (bounded by max seats) so concurrent full-plan invites each add their
-  // own seat instead of racing on the same billed count.
+  // When it does need a seat, add one, wait for Stripe's webhook to confirm the
+  // new count, then issue once. If the webhook has not landed yet the retry
+  // surfaces the seat-limit error (the owner just retries) rather than buying a
+  // second seat.
   let invite;
-  for (let attempt = 0; ; attempt += 1) {
-    try {
+  try {
+    invite = await issueInvite();
+  } catch (error) {
+    if (
+      body.addSeatIfNeeded === true &&
+      isHostedOnboardingError(error) &&
+      error.code === "HOSTED_FAMILY_SEAT_LIMIT_REACHED" &&
+      (await addHostedFamilySeatForOwner(prisma, auth.member.id))
+    ) {
       invite = await issueInvite();
-      break;
-    } catch (error) {
-      if (
-        body.addSeatIfNeeded === true &&
-        isHostedOnboardingError(error) &&
-        error.code === "HOSTED_FAMILY_SEAT_LIMIT_REACHED" &&
-        attempt < HOSTED_FAMILY_MAX_SEATS &&
-        (await addHostedFamilySeatForOwner(prisma, auth.member.id))
-      ) {
-        continue;
-      }
+    } else {
       throw error;
     }
   }
@@ -113,11 +112,20 @@ async function addHostedFamilySeatForOwner(
   if (!snapshot?.billingActive || snapshot.seats.billed >= snapshot.seats.max) {
     return false;
   }
+  const targetSeatCount = snapshot.seats.billed + 1;
   await updateHostedFamilySeatCount({
     groupId: snapshot.groupId,
     ownerMemberId,
     prisma,
-    targetSeatCount: snapshot.seats.billed + 1,
+    targetSeatCount,
+  });
+  // Wait for the webhook to reconcile the new count so the follow-up invite sees
+  // the open seat. Best-effort: on timeout the retry seat-limits and the owner
+  // can try again, which never double-buys because the seat already exists.
+  await waitForHostedFamilyBilledSeatCount({
+    groupId: snapshot.groupId,
+    prisma,
+    targetSeatCount,
   });
   return true;
 }

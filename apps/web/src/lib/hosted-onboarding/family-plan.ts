@@ -1947,36 +1947,10 @@ export async function updateHostedFamilySeatCount(input: {
       });
     }
 
-    // Stripe confirmed the quantity synchronously, so persist it now instead of
-    // waiting for the subscription webhook. Take the same owner-row lock the
-    // webhook reconciler uses so a delayed webhook cannot interleave and revert
-    // this count. Advance the fence to the start of the current second: flooring
-    // matches Stripe's second-granular event.created so the webhook for this same
-    // change still reconciles, while older events are rejected as stale. Skip the
-    // write only if a newer event already advanced the fence past our confirmation.
-    const fenceAt = new Date(Math.floor(now.getTime() / 1_000) * 1_000);
-    await prisma.$transaction(async (tx) => {
-      await lockHostedMemberRow(tx, seatChange.group.ownerMemberId);
-      const current = await tx.hostedAccountGroupBillingRef.findUnique({
-        select: { lastStripeEventCreatedAt: true },
-        where: { groupId: input.groupId },
-      });
-      if (
-        current?.lastStripeEventCreatedAt &&
-        current.lastStripeEventCreatedAt.getTime() > fenceAt.getTime()
-      ) {
-        return;
-      }
-      await tx.hostedAccountGroupBillingRef.update({
-        data: {
-          billedSeatCount: targetSeatCount,
-          lastStripeEventCreatedAt: fenceAt,
-        },
-        where: {
-          groupId: input.groupId,
-        },
-      });
-    }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    // Stripe owns the durable seat quantity. The subscription webhook reconciler
+    // is the only local writer of billedSeatCount so event freshness has one fence.
+    // Callers that need the new count reflected (invite-and-add, UI) wait for the
+    // webhook via waitForHostedFamilyBilledSeatCount instead of writing it here.
   }
 
   const snapshot = await readHostedFamilyOwnerSnapshotForMember({
@@ -1993,6 +1967,36 @@ export async function updateHostedFamilySeatCount(input: {
   }
 
   return snapshot;
+}
+
+/**
+ * Poll until the subscription webhook reconciles billedSeatCount to the target,
+ * so callers can chain on a confirmed seat (invite-and-add) or show the real
+ * count after an add or remove. Returns false if the deadline passes first.
+ */
+export async function waitForHostedFamilyBilledSeatCount(input: {
+  groupId: string;
+  intervalMs?: number;
+  prisma?: HostedOnboardingReadClient;
+  targetSeatCount: number;
+  timeoutMs?: number;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const intervalMs = input.intervalMs ?? 500;
+  const deadline = Date.now() + (input.timeoutMs ?? 20_000);
+  for (;;) {
+    const billedSeatCount = await readHostedFamilyBilledSeatCountTx({
+      groupId: input.groupId,
+      tx: prisma,
+    });
+    if (billedSeatCount === input.targetSeatCount) {
+      return true;
+    }
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
 }
 
 async function writeHostedFamilyCheckoutAttemptTx(input: {

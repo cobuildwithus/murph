@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   requireHostedAppSessionFromRequest: vi.fn(),
   revokeHostedFamilyInviteTx: vi.fn(),
   updateHostedFamilySeatCount: vi.fn(),
+  waitForHostedFamilyBilledSeatCount: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
@@ -39,6 +40,7 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   removeHostedFamilyMemberTx: mocks.removeHostedFamilyMemberTx,
   revokeHostedFamilyInviteTx: mocks.revokeHostedFamilyInviteTx,
   updateHostedFamilySeatCount: mocks.updateHostedFamilySeatCount,
+  waitForHostedFamilyBilledSeatCount: mocks.waitForHostedFamilyBilledSeatCount,
 }));
 
 let inviteRoute: typeof import("../app/api/settings/billing/family/invite/route");
@@ -106,6 +108,7 @@ beforeEach(async () => {
     groupId: "hbag_family",
     seats: { active: 2, billed: 2, invited: 0, max: 6, min: 2, remaining: 0, used: 2 },
   });
+  mocks.waitForHostedFamilyBilledSeatCount.mockResolvedValue(true);
 
   inviteRoute = await import("../app/api/settings/billing/family/invite/route");
   inviteCancelRoute = await import("../app/api/settings/billing/family/invite/[inviteId]/route");
@@ -182,33 +185,26 @@ test("adds one paid seat and retries when the plan is full", async () => {
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
 });
 
-test("keeps adding seats across retries until the invite lands", async () => {
+test("surfaces the seat limit (no second seat) when confirmation has not landed on retry", async () => {
   const seatLimit = () =>
     hostedOnboardingError({
       code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
       httpStatus: 409,
       message: "This Family plan has no open paid seats.",
     });
-  mocks.issueHostedFamilyInviteTx
-    .mockRejectedValueOnce(seatLimit())
-    .mockRejectedValueOnce(seatLimit())
-    .mockResolvedValueOnce({
-      channel: "family",
-      expiresAt: new Date("2026-07-01T00:00:00.000Z"),
-      id: "inv_new",
-      inviteCode: "NEWCODE",
-      status: "pending",
-      targetLabel: "Dad",
-      targetPhoneHint: "+48 6** *** ***",
-    });
+  mocks.issueHostedFamilyInviteTx.mockRejectedValue(seatLimit());
 
   const response = await inviteRoute.POST(
     inviteRequest({ addSeatIfNeeded: true, targetLabel: "Dad", targetPhoneNumber: "+48600000001" }),
   );
 
-  expect(response.status).toBe(200);
-  expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledTimes(2);
-  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(3);
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED" },
+  });
+  // One add attempt only, then a single retry — never a runaway of purchases.
+  expect(mocks.updateHostedFamilySeatCount).toHaveBeenCalledTimes(1);
+  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(2);
 });
 
 test("does not buy a seat when a full-plan invite is reused (no seat-limit error)", async () => {
@@ -242,6 +238,12 @@ test("does not add a seat when the seat limit is hit but addSeatIfNeeded is off"
 });
 
 test("updates paid Family seat count explicitly", async () => {
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValueOnce({
+    billingActive: true,
+    groupId: "hbag_family",
+    seats: { active: 1, billed: 3, invited: 1, max: 6, min: 2, remaining: 1, used: 2 },
+  });
+
   const response = await seatsRoute.PATCH(
     new Request("https://join.example.test/api/settings/billing/family/seats", {
       body: JSON.stringify({ seatCount: 3 }),
