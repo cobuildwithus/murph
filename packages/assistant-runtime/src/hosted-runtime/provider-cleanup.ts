@@ -85,20 +85,6 @@ export async function readHostedProviderCleanupCheckpoint(
   return (await readHostedProviderCleanupState(vaultRoot))?.checkpoint ?? null;
 }
 
-export async function resolveHostedProviderCleanupScheduledWakeAt(input: {
-  deferDueOrInvalid: boolean;
-  idleCheckpointDelayMs?: number | null;
-  nowMs: number;
-  vaultRoot: string;
-}): Promise<string | null> {
-  return resolveHostedProviderCleanupCheckpointWakeAt({
-    checkpoint: await readHostedProviderCleanupCheckpoint(input.vaultRoot),
-    deferDueOrInvalid: input.deferDueOrInvalid,
-    idleCheckpointDelayMs: input.idleCheckpointDelayMs,
-    nowMs: input.nowMs,
-  });
-}
-
 export async function prepareHostedProviderCleanupPlan(input: {
   deferred: boolean;
   idleCheckpointDelayMs?: number | null;
@@ -138,11 +124,11 @@ export async function prepareHostedProviderCleanupPlan(input: {
       due: false,
       requiresCheckpoint: false,
       stateQueued: false,
-      wakeAt: await resolveHostedProviderCleanupScheduledWakeAt({
+      wakeAt: resolveHostedProviderCleanupCheckpointWakeAt({
+        checkpoint: await readHostedProviderCleanupCheckpoint(input.vaultRoot),
         deferDueOrInvalid: true,
         idleCheckpointDelayMs: input.idleCheckpointDelayMs,
         nowMs: input.nowMs,
-        vaultRoot: input.vaultRoot,
       }),
     };
   }
@@ -306,7 +292,7 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
   };
 }
 
-export function collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes(
+function collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes(
   outcomes: readonly HostedAssistantDeliveryOutcome[],
 ): string[] {
   return normalizeHostedProviderMessageIds(collectHostedLinqProviderMessageIds(outcomes));
@@ -326,7 +312,7 @@ export function resolveHostedProviderCleanupFirstDeferredWakeAt(input: {
   ).toISOString();
 }
 
-export function resolveHostedProviderCleanupRetryWakeAt(input: {
+function resolveHostedProviderCleanupRetryWakeAt(input: {
   nowMs?: number | null;
 } = {}): string {
   const nowMs = Number.isFinite(input.nowMs)
@@ -335,7 +321,7 @@ export function resolveHostedProviderCleanupRetryWakeAt(input: {
   return new Date(nowMs + HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS).toISOString();
 }
 
-export function resolveHostedProviderCleanupCheckpointWakeAt(input: {
+function resolveHostedProviderCleanupCheckpointWakeAt(input: {
   checkpoint: HostedProviderCleanupCheckpoint | null;
   deferDueOrInvalid: boolean;
   idleCheckpointDelayMs?: number | null;
