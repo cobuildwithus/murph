@@ -5467,11 +5467,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         pendingLinqChatLookupKey: null,
       }),
     }));
-    expect(mocks.claimHostedLinqOnboardingLinkNotice).toHaveBeenCalledWith({
-      memberId: "member_123",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      prisma,
-    });
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
     expect(mocks.createHostedLinqChat).toHaveBeenCalledWith({
       from: fallbackLinePhone,
       idempotencyKey: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
@@ -5479,6 +5475,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       signal: undefined,
       to: ["+15551234567"],
     });
+    expect(mocks.markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledWith({
+      memberId: "member_123",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(mocks.createHostedLinqChat.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.markHostedLinqOnboardingLinkNoticeSent.mock.invocationCallOrder[0],
+    );
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
@@ -5579,6 +5583,134 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       to: ["+15551234567"],
     });
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("retries fallback signup delivery after provider failure instead of redirecting to the fallback line", async () => {
+    const incomingLinePhone = "+15550000000";
+    const fallbackLinePhone = "+15550100001";
+    const invite = {
+      channel: "linq",
+      id: "invite_fallback_retry",
+      inviteCode: "code_fallback_retry",
+      memberId: "member_123",
+      sentAt: null,
+      status: "pending",
+    };
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          id: "invite_fallback_retry",
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqLine: buildHostedLinqLinePoolFixture({
+        lines: [
+          {
+            phoneNumber: fallbackLinePhone,
+          },
+        ],
+      }),
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+          suspendedAt: null,
+        }),
+        update: vi.fn(),
+      },
+      hostedMemberRouting,
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+    const deliveryError = new Error("fallback provider unavailable");
+    mocks.createHostedLinqChat
+      .mockRejectedValueOnce(deliveryError)
+      .mockResolvedValueOnce({
+        chatId: "chat_fallback_retry",
+        messageId: "provider_msg_fallback_retry",
+      });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_degraded",
+            owner_handle: {
+              handle: incomingLinePhone,
+              id: "handle_owner_degraded",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+        },
+        eventId: "evt_fallback_retry_first_contact",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toThrow("fallback provider unavailable");
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_degraded",
+            owner_handle: {
+              handle: incomingLinePhone,
+              id: "handle_owner_degraded",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+        },
+        eventId: "evt_fallback_retry_second_contact",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      inviteCode: "code_fallback_retry",
+      ok: true,
+      reason: "sent-signup-link",
+    });
+    expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(2);
+    expect(mocks.createHostedLinqChat).toHaveBeenNthCalledWith(2, {
+      from: fallbackLinePhone,
+      idempotencyKey: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
+      message: expect.stringContaining("https://join.example.test/join/code_fallback_retry"),
+      signal: undefined,
+      to: ["+15551234567"],
+    });
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledTimes(1);
+    expect(mocks.releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalledWith({
+      memberId: "member_123",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
   });
 
   it("keeps all-unassignable first-contact line routing ignored", async () => {

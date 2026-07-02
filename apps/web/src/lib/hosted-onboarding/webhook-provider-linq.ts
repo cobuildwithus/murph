@@ -30,6 +30,7 @@ import {
 import {
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
+  readHostedMemberRoutingState,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
 } from "./hosted-member-routing-store";
@@ -41,7 +42,6 @@ import {
 } from "./logging";
 import {
   HOSTED_LINQ_DAILY_TEXT_LIMIT,
-  claimHostedLinqOnboardingLinkNotice,
   incrementHostedLinqInboundDailyState,
   incrementHostedLinqOutboundDailyState,
   readHostedLinqDailyState,
@@ -762,6 +762,52 @@ export async function planHostedOnboardingLinqWebhook(input: {
     memberId: existingMember?.id ?? null,
     prisma: input.prisma,
   });
+  const retryableFallbackRecipientPhone =
+    await readRetryableUnsentFallbackRecipientPhone({
+      bindingResult,
+      existingMemberActive: Boolean(existingMemberEffectiveActive),
+      memberId: existingMember?.id ?? null,
+      onboardingLinkSentAt: existingDailyState?.onboardingLinkSentAt ?? null,
+      prisma: input.prisma,
+    });
+  if (retryableFallbackRecipientPhone) {
+    const memberPhone = normalizePhoneNumber(participantPhoneNumber);
+    if (!memberPhone || !existingMember) {
+      return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
+    }
+
+    const dailyState = await incrementHostedLinqInboundDailyState({
+      memberId: existingMember.id,
+      occurredAt,
+      prisma: input.prisma,
+    });
+    const invite = await issueHostedInviteTx({
+      channel: "linq",
+      memberId: existingMember.id,
+      prisma: input.prisma,
+    });
+
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildFallbackSignupLinkResponse({
+        assignedPhone: retryableFallbackRecipientPhone,
+        inviteCode: invite.inviteCode,
+        inviteId: invite.id,
+        memberId: existingMember.id,
+        memberPhone,
+        occurredAt,
+        sourceEventId: input.event.event_id,
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        chatDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
+        dailyInboundCount: dailyState.inboundCount,
+        existingMemberActive: existingMemberEffectiveActive,
+        existingMemberMatch,
+        fallbackLine: true,
+        reason: "sent-signup-link",
+        routeStage: "first-contact-fallback-retry",
+      }),
+    );
+  }
   const blockedPlan = buildRouteBindingBlockedPlan(bindingResult, {
     capacityExhausted: "ignored-home-line-capacity-exhausted",
     redirect: "first-contact-redirect",
@@ -811,25 +857,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
       occurredAt,
       prisma: input.prisma,
     });
-    const claimedOnboardingLink = await claimHostedLinqOnboardingLinkNotice({
-      memberId: member.id,
-      occurredAt,
-      prisma: input.prisma,
-    });
-
-    if (!claimedOnboardingLink) {
-      return logHostedLinqWebhookPlannerDecisionAndReturn(
-        buildIgnoredLinqWebhookPlan("signup-link-already-sent"),
-        buildHostedLinqWebhookPlannerDetails(input.event, context, {
-          dailyInboundCount: dailyState.inboundCount,
-          existingMemberActive: existingMemberEffectiveActive,
-          existingMemberMatch,
-          reason: "signup-link-already-sent",
-          routeStage: "first-contact-signup-already-sent",
-        }),
-      );
-    }
-
     const invite = await issueHostedInviteTx({
       channel: "linq",
       memberId: member.id,
@@ -1813,6 +1840,40 @@ function isHostedLinqDirectChatAttested(
   messageEvent: HostedLinqMessageReceivedEvent,
 ): boolean {
   return messageEvent.data.chat?.is_group === false;
+}
+
+async function readRetryableUnsentFallbackRecipientPhone(input: {
+  bindingResult: HostedLinqHomeLineRouteBindingResult;
+  existingMemberActive: boolean;
+  memberId: string | null;
+  onboardingLinkSentAt: Date | null;
+  prisma: Prisma.TransactionClient;
+}): Promise<string | null> {
+  if (
+    input.bindingResult.kind !== "redirect_to_home"
+    || input.existingMemberActive
+    || input.onboardingLinkSentAt
+    || !input.memberId
+  ) {
+    return null;
+  }
+
+  const routing = await readHostedMemberRoutingState({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const fallbackRecipientPhone = normalizePhoneNumber(input.bindingResult.homeRecipientPhone);
+  if (
+    !fallbackRecipientPhone
+    || !routing
+    || routing.linqChatId
+    || routing.pendingLinqChatId
+    || normalizePhoneNumber(routing.linqRecipientPhone) !== fallbackRecipientPhone
+  ) {
+    return null;
+  }
+
+  return fallbackRecipientPhone;
 }
 
 function normalizeHostedLinqPartText(value: unknown): string | null {
