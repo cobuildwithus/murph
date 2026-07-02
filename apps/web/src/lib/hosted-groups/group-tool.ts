@@ -1,13 +1,40 @@
 import "server-only";
 
-import type {
-  HostedRuntimeGroupCreateJoinLinkRequest,
-  HostedRuntimeGroupToolRequest,
-  HostedRuntimeGroupToolResponse,
+import {
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  type HostedRuntimeGroupChatParticipant,
+  type HostedRuntimeGroupCreateJoinLinkRequest,
+  type HostedRuntimeGroupToolLinqThreadContext,
+  type HostedRuntimeGroupToolRequest,
+  type HostedRuntimeGroupToolResponse,
 } from "@murphai/hosted-execution/runtime-control";
 
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
+import {
+  hasHostedMemberActiveAccess,
+  isHostedMemberSuspended,
+} from "../hosted-onboarding/entitlement";
+import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
+import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
+import {
+  getHostedLinqChatHandles,
+  isHostedLinqAttachmentSendPrepareFailure,
+  sendHostedLinqAttachmentMessage,
+} from "../hosted-onboarding/linq-client";
+import {
+  buildMurphHostedLinqContactCardVcf,
+  fetchMurphHostedLinqContactCardVcfPhoto,
+  MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
+  MURPH_CONTACT_CARD_VCF_FILE_NAME,
+  resolveMurphHostedLinqContactCardBackupPhoneNumber,
+} from "../hosted-onboarding/linq-contact-card";
+import {
+  releaseHostedLinqContactCardShareAttempt,
+  reserveHostedLinqContactCardShareAttempt,
+} from "../hosted-onboarding/linq-contact-card-share";
+import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
+import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
@@ -23,6 +50,20 @@ export async function handleHostedRuntimeGroupTool(input: {
   if (input.request.action === "create_join_link") {
     return handleHostedRuntimeGroupCreateJoinLink({
       joinLink: input.request.joinLink ?? null,
+      memberId: input.memberId,
+    });
+  }
+
+  if (input.request.action === "read_chat_participants") {
+    return handleHostedRuntimeGroupReadChatParticipants({
+      linqThread: input.request.linqThread ?? null,
+      memberId: input.memberId,
+    });
+  }
+
+  if (input.request.action === "share_contact_card") {
+    return handleHostedRuntimeGroupShareContactCard({
+      linqThread: input.request.linqThread ?? null,
       memberId: input.memberId,
     });
   }
@@ -111,5 +152,219 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
   return {
     action: "create_join_link",
     result: { group: created.group, joinUrl, status: "ok" },
+  };
+}
+
+type HostedRuntimeGroupLinqThreadAuthorization =
+  | { chatId: string }
+  | { unavailableReason: string };
+
+async function authorizeHostedRuntimeGroupLinqThread(input: {
+  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+  memberId: string;
+}): Promise<HostedRuntimeGroupLinqThreadAuthorization> {
+  if (!input.linqThread) {
+    return { unavailableReason: "linq_thread_unavailable" };
+  }
+  const { authority, chatId } = input.linqThread;
+  if (
+    authority.containerMemberId !== input.memberId
+    || authority.threadId !== chatId
+  ) {
+    return { unavailableReason: "linq_thread_unauthorized" };
+  }
+  try {
+    await assertHostedLinqRouteEgressAuthority({
+      authority,
+      prisma: getPrisma(),
+    });
+  } catch {
+    return { unavailableReason: "linq_thread_unauthorized" };
+  }
+  return { chatId };
+}
+
+async function handleHostedRuntimeGroupReadChatParticipants(input: {
+  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+  memberId: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "read_chat_participants",
+    result: { participants: null, status: "unavailable", unavailableReason },
+  });
+
+  const authorized = await authorizeHostedRuntimeGroupLinqThread(input);
+  if ("unavailableReason" in authorized) {
+    return unavailable(authorized.unavailableReason);
+  }
+
+  let handles: Awaited<ReturnType<typeof getHostedLinqChatHandles>>;
+  try {
+    handles = await getHostedLinqChatHandles({ chatId: authorized.chatId });
+  } catch {
+    return unavailable("provider_unavailable");
+  }
+  // An empty roster means the provider payload had no recognizable handles;
+  // treat that as provider trouble instead of a truthful "nobody here".
+  if (handles.length === 0) {
+    return unavailable("provider_unavailable");
+  }
+
+  const prisma = getPrisma();
+  const participants: HostedRuntimeGroupChatParticipant[] = [];
+  try {
+    for (const handle of handles) {
+      if (handle.isMe) {
+        continue;
+      }
+      if (handle.status && handle.status.trim().toLowerCase() !== "active") {
+        continue;
+      }
+      if (participants.length >= HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX) {
+        break;
+      }
+      participants.push({
+        handle: handle.handle,
+        hasOwnMurph: await hasParticipantOwnMurphMembership({
+          handle: handle.handle,
+          prisma,
+        }),
+      });
+    }
+  } catch {
+    // A failed identity lookup must not degrade into a guessed hasOwnMurph
+    // value or an unstructured route error.
+    return unavailable("membership_lookup_unavailable");
+  }
+
+  return {
+    action: "read_chat_participants",
+    result: { participants, status: "ok" },
+  };
+}
+
+async function hasParticipantOwnMurphMembership(input: {
+  handle: string;
+  prisma: ReturnType<typeof getPrisma>;
+}): Promise<boolean> {
+  const lookup = await lookupParticipantMemberByHandle(input);
+  const member = lookup?.core ?? null;
+  return member !== null
+    && !isHostedMemberSuspended(member.suspendedAt)
+    && hasHostedMemberActiveAccess(member);
+}
+
+async function lookupParticipantMemberByHandle(input: {
+  handle: string;
+  prisma: ReturnType<typeof getPrisma>;
+}) {
+  if (input.handle.includes("@")) {
+    return await lookupHostedMemberByVerifiedEmailAddress({
+      address: input.handle,
+      prisma: input.prisma,
+    });
+  }
+  const phoneNumber = normalizePhoneNumber(input.handle);
+  if (!phoneNumber) {
+    return null;
+  }
+  return await lookupHostedMemberIdentityByPhoneNumber({
+    phoneNumber,
+    prisma: input.prisma,
+  });
+}
+
+async function handleHostedRuntimeGroupShareContactCard(input: {
+  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+  memberId: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "share_contact_card",
+    result: { status: "unavailable", unavailableReason },
+  });
+
+  const authorized = await authorizeHostedRuntimeGroupLinqThread(input);
+  if ("unavailableReason" in authorized) {
+    return unavailable(authorized.unavailableReason);
+  }
+
+  let linePhoneNumber: string | null = null;
+  let rosterPresent = false;
+  try {
+    const handles = await getHostedLinqChatHandles({ chatId: authorized.chatId });
+    rosterPresent = handles.length > 0;
+    linePhoneNumber = normalizePhoneNumber(
+      handles.find((handle) => handle.isMe)?.handle ?? null,
+    );
+  } catch {
+    return unavailable("provider_unavailable");
+  }
+  if (!rosterPresent) {
+    return unavailable("provider_unavailable");
+  }
+  if (!linePhoneNumber) {
+    return unavailable("line_unresolved");
+  }
+
+  const prisma = getPrisma();
+  const reservation = await reserveHostedLinqContactCardShareAttempt({
+    chatId: authorized.chatId,
+    memberId: input.memberId,
+    prisma,
+  });
+  if (reservation.action !== "share") {
+    if (reservation.reason === "recent_attempt") {
+      return {
+        action: "share_contact_card",
+        result: { status: "already_shared" },
+      };
+    }
+    return unavailable(reservation.reason);
+  }
+
+  const [photo, backupPhoneNumber] = await Promise.all([
+    fetchMurphHostedLinqContactCardVcfPhoto(),
+    resolveMurphHostedLinqContactCardBackupPhoneNumber({
+      excludePhoneNumber: linePhoneNumber,
+      prisma: getPrisma(),
+    }),
+  ]);
+  const vcf = buildMurphHostedLinqContactCardVcf({
+    backupPhoneNumber,
+    phoneNumber: linePhoneNumber,
+    photo,
+  });
+  try {
+    await sendHostedLinqAttachmentMessage({
+      bytes: new Uint8Array(Buffer.from(vcf, "utf8")),
+      chatId: authorized.chatId,
+      contentType: MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
+      fileName: MURPH_CONTACT_CARD_VCF_FILE_NAME,
+      // Chat id + day: dedupes duplicate provider submissions of this share
+      // without suppressing an intentional re-share after the 48h throttle.
+      // The chat id is Linq's own identifier, so no new exposure.
+      idempotencyKey: `group-contact-card:${authorized.chatId}:${new Date().toISOString().slice(0, 10)}`,
+    });
+  } catch (error) {
+    if (isHostedLinqAttachmentSendPrepareFailure(error)) {
+      // Nothing reached the chat; free the 48h reservation so a later retry
+      // is not locked out. Ambiguous message-send failures keep it.
+      try {
+        await releaseHostedLinqContactCardShareAttempt({
+          attemptedAt: reservation.attemptedAt,
+          chatId: authorized.chatId,
+          memberId: input.memberId,
+          prisma,
+        });
+      } catch {
+        // Best effort: a stuck reservation only delays the next attempt.
+      }
+    }
+    return unavailable("send_failed");
+  }
+
+  return {
+    action: "share_contact_card",
+    result: { status: "sent" },
   };
 }

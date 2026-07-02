@@ -88,8 +88,11 @@ import {
   type HostedRuntimeFamilyPlanToolStatusResponse,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
+  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
   type HostedRuntimeGroupKind,
+  type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeProductFeedbackRecordRequest,
@@ -765,7 +768,39 @@ export function parseHostedRuntimeGroupToolRequest(
       joinLink: parseHostedRuntimeGroupCreateJoinLinkRequest(record.joinLink),
     };
   }
+  if (action === "read_chat_participants" || action === "share_contact_card") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action", "linqThread"]),
+      `Hosted runtime group tool ${action} request`,
+    );
+    if (record.linqThread === undefined || record.linqThread === null) {
+      return { action };
+    }
+    return {
+      action,
+      linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+        record.linqThread,
+        `Hosted runtime group tool ${action} request linqThread`,
+      ),
+    };
+  }
   throw new TypeError("Hosted runtime group tool action is not supported.");
+}
+
+function parseHostedRuntimeGroupToolLinqThreadContext(
+  value: unknown,
+  label: string,
+): HostedRuntimeGroupToolLinqThreadContext {
+  const record = requireObject(value, label);
+  assertAllowedObjectKeys(record, new Set(["authority", "chatId"]), label);
+  return {
+    authority: parseHostedRuntimeLinqExternalThreadRouteAuthority(
+      record.authority,
+      `${label} authority`,
+    ),
+    chatId: requireString(record.chatId, `${label} chatId`),
+  };
 }
 
 function parseHostedRuntimeGroupCreateJoinLinkRequest(
@@ -863,7 +898,70 @@ export function parseHostedRuntimeGroupToolResponse(
     }
   }
 
+  if (action === "read_chat_participants") {
+    const result = requireObject(record.result, "Hosted runtime group tool read_chat_participants response result");
+    const status = requireString(result.status, "Hosted runtime group tool read_chat_participants response status");
+    if (status === "ok") {
+      assertAllowedObjectKeys(result, new Set(["status", "participants"]), "Hosted runtime group tool read_chat_participants ok response result");
+      return {
+        action,
+        result: {
+          status,
+          participants: parseHostedRuntimeGroupChatParticipants(result.participants),
+        },
+      };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "participants"]), "Hosted runtime group tool read_chat_participants unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+          participants: null,
+        },
+      };
+    }
+  }
+
+  if (action === "share_contact_card") {
+    const result = requireObject(record.result, "Hosted runtime group tool share_contact_card response result");
+    const status = requireString(result.status, "Hosted runtime group tool share_contact_card response status");
+    if (status === "sent" || status === "already_shared") {
+      assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool share_contact_card response result");
+      return { action, result: { status } };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool share_contact_card unavailable response result");
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(result.unavailableReason, "Hosted runtime group unavailableReason"),
+        },
+      };
+    }
+  }
+
   throw new TypeError("Hosted runtime group tool response action/status is not supported.");
+}
+
+function parseHostedRuntimeGroupChatParticipants(
+  value: unknown,
+): HostedRuntimeGroupChatParticipant[] {
+  const label = "Hosted runtime group tool read_chat_participants participants";
+  const entries = requireArray(value, label);
+  if (entries.length > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX) {
+    throw new TypeError(`${label} must contain at most ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries.`);
+  }
+  return entries.map((entry) => {
+    const record = requireObject(entry, `${label} entry`);
+    assertAllowedObjectKeys(record, new Set(["handle", "hasOwnMurph"]), `${label} entry`);
+    return {
+      handle: requireString(record.handle, `${label} entry handle`),
+      hasOwnMurph: requireBoolean(record.hasOwnMurph, `${label} entry hasOwnMurph`),
+    };
+  });
 }
 
 function parseHostedRuntimeGroupProjectionKindArray(
@@ -1168,6 +1266,11 @@ function parseHostedRuntimeLinqExternalThreadRouteAuthority(
   label: string,
 ): HostedExecutionLinqExternalThreadRouteAuthority {
   const record = requireObject(value, label);
+  assertAllowedObjectKeys(
+    record,
+    new Set(["accountLookupKey", "channel", "containerMemberId", "threadId"]),
+    label,
+  );
   const channel = requireString(record.channel, `${label} channel`);
   if (channel !== "linq") {
     throw new TypeError(`${label} channel must be linq.`);

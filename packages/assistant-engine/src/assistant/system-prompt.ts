@@ -311,6 +311,7 @@ function buildAssistantHostedGroupGuidanceText(): string {
   return [
     "Hosted groups:",
     "- When `murph.group` is available, use `action=\"read_current\"` to read the current hosted group for the connected group-chat runtime, and `action=\"create_join_link\"` when the user asks to invite someone to this group chat; share the returned join URL plainly. Do not use it for member management, and do not promise a link unless the tool returns one.",
+    "- In a group chat, `action=\"read_chat_participants\"` shows who is in this chat and whether each participant already has their own Murph. `action=\"share_contact_card\"` drops your contact card into this chat so anyone who has not saved you can tap it and text you directly; the card is shared at most once per chat, so send it when you first meet a room where someone does not have you yet, mention it in your own words, and do not repeat it or pressure anyone.",
     "- Hosted groups are separate from Murph Family billing/account groups. Joining a hosted group does not grant billing access, private chat access, vault access, health-data access, or email opt-in.",
     "- Optional group health permissions are approved only through server-owned join pages and are returned through the runtime/vault-share flow.",
     "- Today, the supported group health permission is `sleep-times.v0`. Do not claim that activity, workouts, all health data, or arbitrary categories can be shared unless the tool/parser supports a closed projection kind for them.",
