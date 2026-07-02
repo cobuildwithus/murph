@@ -294,10 +294,21 @@ export async function sendAssistantNotificationLocal(
             })
 
       try {
+        const notificationProviderRequestStarted =
+          messageInput.onProviderRequestStarted ?? null
         const providerOutcome = await executeCodexTurnWithRecovery({
           allowFinishWithoutReply: false,
           input: messageInput,
-          onProviderRequestStarted: messageInput.onProviderRequestStarted ?? null,
+          // Adapt the runner's lean start event to the message-input hook
+          // shape; notification turns accept no input items.
+          onProviderRequestStarted: notificationProviderRequestStarted
+            ? (event) =>
+                notificationProviderRequestStarted({
+                  acceptedInputIds: [],
+                  providerRequestOrdinal: event.providerRequestOrdinal ?? 0,
+                  startedAt: event.startedAt,
+                })
+            : undefined,
           plan: sharedPlan,
           progressDelivery,
           profile: resolveAssistantNotificationTurnProfile(input),

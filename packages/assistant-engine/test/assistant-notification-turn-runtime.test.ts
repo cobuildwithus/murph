@@ -1661,12 +1661,28 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
       }),
       // The replay barrier depends on the runner receiving this hook
       // top-level; the message-input copy alone never fires in production.
-      onProviderRequestStarted: maintenanceProviderStartHook,
+      onProviderRequestStarted: expect.any(Function),
       profile: expect.objectContaining({
         nativeResumePolicy: 'disabled',
         threadScope: 'isolated-thread',
         toolProfile: 'maintenance-turn',
       }),
+    }),
+  )
+  const maintenanceRunnerCall =
+    mocks.executeCodexTurnWithRecovery.mock.calls.at(-1)?.[0] as {
+      onProviderRequestStarted?: (event: {
+        providerRequestOrdinal: number | null
+        startedAt: string
+      }) => void
+    }
+  maintenanceRunnerCall.onProviderRequestStarted?.({
+    providerRequestOrdinal: 1,
+    startedAt: '2026-04-09T03:10:00.000Z',
+  })
+  expect(maintenanceProviderStartHook).toHaveBeenCalledWith(
+    expect.objectContaining({
+      startedAt: '2026-04-09T03:10:00.000Z',
     }),
   )
 
