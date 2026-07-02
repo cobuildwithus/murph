@@ -485,6 +485,7 @@ describe('assistant store persistence seams', () => {
         external: 'session-external',
       },
       conversationKeys: {},
+      recentSessions: {},
     }))
 
     await synchronizeAssistantIndexes(paths, createSession({
@@ -520,6 +521,7 @@ describe('assistant store persistence seams', () => {
       conversationKeys: {
         'telegram:user-1:thread-external': 'session-external',
       },
+      recentSessions: {},
     }))
 
     await expect(readAssistantIndexStore(paths)).resolves.toEqual({

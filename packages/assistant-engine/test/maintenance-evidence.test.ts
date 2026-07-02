@@ -224,6 +224,28 @@ test('bounds session reads to the newest sessions by durable activity', async ()
   expect(rebuilt.map((session) => session.sessionId)).toEqual([
     'session-newer-activity',
   ])
+
+  // A session save arriving before the first maintenance read must not turn
+  // the missing projection into a partial one: the merge rebuilds first, so
+  // pre-existing durable sessions stay visible.
+  await writeFile(
+    paths.indexesPath,
+    JSON.stringify({ version: 1, aliases: {}, conversationKeys: {} }),
+    'utf8',
+  )
+  await saveAssistantSession(
+    vaultRoot,
+    createEvidenceTestSession({
+      lastTurnAt: '2026-06-29T23:00:00.000Z',
+      sessionId: 'session-post-deploy',
+    }),
+  )
+  const merged = await listRecentAssistantSessions(vaultRoot, { limit: 10 })
+  expect(merged.map((session) => session.sessionId).sort()).toEqual([
+    'session-newer-activity',
+    'session-older-activity',
+    'session-post-deploy',
+  ])
 })
 
 test('returns an explicit empty evidence section when the window has no messages', async () => {

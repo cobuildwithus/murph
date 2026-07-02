@@ -364,17 +364,14 @@ export async function listRecentAssistantSessions(
     await ensureAssistantState(paths)
 
     let indexes = await readAssistantIndexStore(paths)
-    if (
-      Object.keys(indexes.recentSessions).length === 0 &&
-      (await listAssistantSessionFileIds(paths)).length > 0
-    ) {
+    if (!indexes.recentSessions) {
       // Index written before the recent-sessions projection existed (or
       // restored without it): rebuild once from durable session records.
       indexes = await rebuildAssistantIndexStore(paths)
     }
     return readAssistantSessionsSorted(
       paths,
-      Object.entries(indexes.recentSessions)
+      Object.entries(indexes.recentSessions ?? {})
         .sort(([, left], [, right]) =>
           compareAssistantTimestampsAscending(right, left),
         )

@@ -604,7 +604,13 @@ export async function synchronizeAssistantIndexes(
   session: AssistantSession,
   previous: AssistantSession | null,
 ): Promise<void> {
-  const store = await readAssistantIndexStore(paths, { fresh: true })
+  let store = await readAssistantIndexStore(paths, { fresh: true })
+  if (!store.recentSessions) {
+    // Index predates the recent-sessions projection: rebuild once from
+    // durable session records before merging, so the projection starts
+    // complete instead of containing only post-deploy sessions.
+    store = await rebuildAssistantIndexStore(paths)
+  }
   const aliases = {
     ...store.aliases,
   }
@@ -634,7 +640,7 @@ export async function synchronizeAssistantIndexes(
     aliases,
     conversationKeys,
     recentSessions: pruneAssistantRecentSessions({
-      ...store.recentSessions,
+      ...(store.recentSessions ?? {}),
       [session.sessionId]: session.lastTurnAt ?? session.updatedAt,
     }),
   })
