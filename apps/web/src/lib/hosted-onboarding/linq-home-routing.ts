@@ -368,10 +368,45 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberActivationLinqRouteResolution> {
+  // Most activations promote an existing home, pending, or assigned-line
+  // route. Resolve those without the shared pool lock so activation never
+  // waits behind unrelated line assignment; the ops new-chat path holds
+  // that lock across a provider call.
+  const promoted = await resolveHostedMemberActivationLinqRouteAttempt({
+    claimNewHomeLine: false,
+    member: input.member,
+    prisma: input.prisma,
+  });
+  if (promoted) {
+    return promoted;
+  }
+
   await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
     prisma: input.prisma,
   });
+  // Routing and capacity may have changed while another transaction held
+  // the pool lock, so re-resolve before claiming a new home line.
+  const resolved = await resolveHostedMemberActivationLinqRouteAttempt({
+    claimNewHomeLine: true,
+    member: input.member,
+    prisma: input.prisma,
+  });
+  if (!resolved) {
+    throw hostedOnboardingError({
+      code: "LINQ_CONVERSATION_PHONE_REQUIRED",
+      message: "Configure an enabled hosted_linq_line row before activating members without an existing Linq conversation thread.",
+      httpStatus: 500,
+    });
+  }
 
+  return resolved;
+}
+
+async function resolveHostedMemberActivationLinqRouteAttempt(input: {
+  claimNewHomeLine: boolean;
+  member: HostedMemberSnapshot;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedMemberActivationLinqRouteResolution | null> {
   const routing = await readHostedMemberRoutingState({
     memberId: input.member.core.id,
     prisma: input.prisma,
@@ -450,10 +485,14 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
   }
 
   const target = await resolveHostedMemberActivationTargetRecipientPhone({
+    claimNewHomeLine: input.claimNewHomeLine,
     member: input.member,
     prisma: input.prisma,
     routing,
   });
+  if (target === "needs_claim") {
+    return null;
+  }
   const targetRecipientPhone = normalizePhoneNumber(target.recipientPhone);
 
   if (!targetRecipientPhone) {
@@ -569,10 +608,11 @@ async function reserveHostedLinqHomeLineForPhoneAfterLockTx(input: {
 }
 
 async function resolveHostedMemberActivationTargetRecipientPhone(input: {
+  claimNewHomeLine: boolean;
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
   routing: HostedMemberRoutingStateSnapshot | null;
-}): Promise<{ homeLineAssignedAt?: Date; recipientPhone: string | null }> {
+}): Promise<{ homeLineAssignedAt?: Date; recipientPhone: string | null } | "needs_claim"> {
   const routing = input.routing;
   const existingRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
   if (existingRecipientPhone) {
@@ -589,6 +629,12 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
         recipientPhone: existingRecipientLine.phoneNumber,
       };
     }
+  }
+
+  // Claiming a new line consumes pool capacity; the caller must hold the
+  // pool lock before allowing this branch.
+  if (!input.claimNewHomeLine) {
+    return "needs_claim";
   }
 
   const reservation = await reserveHostedLinqHomeLineFromCandidatesTx({
