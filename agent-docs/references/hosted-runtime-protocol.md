@@ -340,11 +340,13 @@ stops on the first signal failure. It is not a scheduler, queue, or generic
 admin job framework.
 
 The same ops page may also expose narrow hosted-runtime setup actions that reuse
-existing source-of-truth services, such as manually ensuring a Linq
-external-thread route through `/api/ops/thread-routes`. Those actions must use
-the same hosted app-session, allowlist, and same-origin mutation gate, and must
-delegate to the owning service primitive rather than hand-writing persisted
-runtime rows.
+existing source-of-truth services. Those actions must use the same hosted
+app-session, allowlist, and same-origin mutation gate, and must delegate to the
+owning service primitive rather than hand-writing persisted runtime rows. Linq
+group-thread containers are no longer operator-provisioned: the Linq webhook
+planner auto-provisions the thread-container route through
+`ensureHostedThreadContainerRouteTx` when an attested group message arrives from
+an active member texting their own home line.
 
 For hard-cut rollouts, deploy consumers before producers: Cloudflare and the
 runtime parser must understand the new mailbox kind before web emits it. After
