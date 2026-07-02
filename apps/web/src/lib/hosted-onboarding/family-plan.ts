@@ -1949,6 +1949,8 @@ export async function updateHostedFamilySeatCount(input: {
 
     // Stripe owns the durable seat quantity. The subscription webhook reconciler
     // is the only local writer of billedSeatCount so event freshness has one fence.
+    // Callers that need the new count reflected (invite-and-add, UI) wait for the
+    // webhook via waitForHostedFamilyBilledSeatCount instead of writing it here.
   }
 
   const snapshot = await readHostedFamilyOwnerSnapshotForMember({
@@ -1965,6 +1967,38 @@ export async function updateHostedFamilySeatCount(input: {
   }
 
   return snapshot;
+}
+
+/**
+ * Poll until the subscription webhook reconciles billedSeatCount to the target,
+ * so callers can chain on a confirmed seat (invite-and-add) or show the real
+ * count after an add or remove. Returns false if the deadline passes first.
+ */
+export async function waitForHostedFamilyBilledSeatCount(input: {
+  groupId: string;
+  intervalMs?: number;
+  prisma?: HostedOnboardingReadClient;
+  targetSeatCount: number;
+  timeoutMs?: number;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const intervalMs = input.intervalMs ?? 400;
+  // Keep the wait short so it stays well inside the request budget and reads as a
+  // brief spinner; a slow webhook falls back to the syncing response and refresh.
+  const deadline = Date.now() + (input.timeoutMs ?? 6_000);
+  for (;;) {
+    const billedSeatCount = await readHostedFamilyBilledSeatCountTx({
+      groupId: input.groupId,
+      tx: prisma,
+    });
+    if (billedSeatCount === input.targetSeatCount) {
+      return true;
+    }
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
 }
 
 async function writeHostedFamilyCheckoutAttemptTx(input: {
@@ -2259,6 +2293,29 @@ export async function issueHostedFamilyInvite(input: {
     ...input,
     tx,
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+/**
+ * Whether an invite target has a contact the issuer can dedup on (phone, email,
+ * or Telegram) after normalization. Mirrors the reuse-key logic in
+ * issueHostedFamilyInviteTx so callers can gate retry-unsafe side effects (paid
+ * seat auto-add) on the same validity, not on raw non-empty strings.
+ */
+export function hostedFamilyInviteHasReusableTarget(input: {
+  targetEmail?: string | null;
+  targetPhoneNumber?: string | null;
+  targetTelegramUsername?: string | null;
+}): boolean {
+  const phone = createHostedPhoneLookupKeyReadCandidates(
+    normalizePhoneNumber(input.targetPhoneNumber),
+  );
+  const telegram = createHostedTelegramUsernameLookupKeyReadCandidates(
+    normalizeHostedTelegramUsernameForLookup(input.targetTelegramUsername),
+  );
+  const email = createHostedEmailLookupKeyReadCandidates(
+    normalizeHostedEmailAddress(input.targetEmail),
+  );
+  return phone.length > 0 || telegram.length > 0 || email.length > 0;
 }
 
 export async function issueHostedFamilyInviteTx(input: {

@@ -99,6 +99,7 @@ vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
 
 vi.mock("../app/auth-controls", () => ({
   LandingAuthActions: mocks.LandingAuthActions,
+  LandingAuthDialog: () => null,
 }));
 
 test("HomePage renders the canonical landing page at the root route", async () => {
@@ -173,6 +174,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
     },
     undefined
   );
+  assert.match(markup, /aria-label="Open menu"/);
   assert.match(markup, /data-root-landing-auth-actions-context="nav"/);
   assert.match(markup, /data-root-landing-auth-actions-context="hero"/);
   assert.match(markup, /data-root-landing-auth-actions-context="footer"/);

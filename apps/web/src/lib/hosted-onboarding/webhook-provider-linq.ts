@@ -80,12 +80,18 @@ import {
 import {
   type HostedLinqHomeLineRouteBindingAuthority,
   type HostedLinqHomeLineRouteBindingResult,
+  readHostedLinqHomeLineAuthority,
   resolveHostedMemberLinqHomeLineRouteBindingTx,
   reserveHostedLinqHomeLineFromPoolTx,
 } from "./linq-home-routing";
 import {
+  createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
+import { normalizePhoneNumber } from "./phone";
+import {
+  ensureHostedThreadContainerRouteTx,
+} from "../hosted-routing/thread-container-service";
 import type {
   HostedLinqFirstContactAdmissionRequest,
 } from "./linq-first-contact-admission";
@@ -103,7 +109,6 @@ import type {
   HostedOnboardingLinqDirectPlan,
 } from "./webhook-provider-linq-types";
 import { type HostedLinqParticipantContact } from "./linq-participant-contact";
-import { normalizePhoneNumber } from "./phone";
 
 const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
 const HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES = 128 * 1024;
@@ -194,14 +199,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   if (isHostedLinqGroupChat(messageEvent)) {
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildIgnoredLinqWebhookPlan("group-chat"),
-      buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        existingMemberMatch: "none",
-        reason: "group-chat",
-        routeStage: "ignored-group-chat",
-      }),
-    );
+    return planHostedLinqGroupChatWebhook({
+      context,
+      event: input.event,
+      prisma: input.prisma,
+      threadRouteAccountLookupKeys,
+    });
   }
 
   if (messageEvent.data.message.parts.length === 0) {
@@ -548,6 +551,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
             ok: true,
             reason: "duplicate-webhook-event",
           },
+          // No checkpoint on the duplicate read: this transaction did not run
+          // the append-path workspace upsert, so the retry keeps the legacy
+          // signal path that repairs a missing workspace row.
           wakeMailboxItemId: existingMailboxItem.id,
           wakeUserId: existingMember.id,
         }),
@@ -662,6 +668,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
           reason: "wake-appended-active-member",
         },
         wakeLinqChatId: summary.chatId,
+        wakeMailboxCheckpoint: {
+          lane: mailboxAppend.item.lane,
+          laneSeq: mailboxAppend.item.laneSeq,
+        },
         wakeMailboxItemId: mailboxAppend.item.id,
         wakeUserId: existingMember.id,
       }),
@@ -1108,6 +1118,9 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
           reason: "duplicate-webhook-event",
         },
         wakeLinqChatId: summary.chatId,
+        // No checkpoint on the duplicate read: this transaction did not run
+        // the append-path workspace upsert, so the retry keeps the legacy
+        // signal path that repairs a missing workspace row.
         wakeMailboxItemId: existingMailboxItem.id,
         wakeUserId: input.route.containerMemberId,
         linqReadReceiptRouteAuthority: routeAuthority,
@@ -1205,6 +1218,10 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
         reason: "wake-appended-thread-route",
       },
       wakeLinqChatId: summary.chatId,
+      wakeMailboxCheckpoint: {
+        lane: mailboxAppend.item.lane,
+        laneSeq: mailboxAppend.item.laneSeq,
+      },
       wakeMailboxItemId: mailboxAppend.item.id,
       wakeUserId: input.route.containerMemberId,
       linqReadReceiptRouteAuthority: routeAuthority,
@@ -1218,6 +1235,136 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       routeStage: "thread-route-appended",
     }),
   );
+}
+
+const HOSTED_LINQ_GROUP_PROVISION_UNAVAILABLE_ERROR_CODES = new Set([
+  "HOSTED_THREAD_CONTAINER_OWNER_ACTIVE_ACCESS_REQUIRED",
+  "HOSTED_THREAD_CONTAINER_OWNER_MUST_NOT_BE_CONTAINER",
+  "HOSTED_THREAD_ROUTE_ALREADY_BOUND",
+]);
+
+/**
+ * Group chats with no explicit thread route stay ignored unless the sender is
+ * an active member texting their own home Murph line; only then is the
+ * dedicated thread-container runtime provisioned and the triggering message
+ * routed into it. This keeps provisioning member-initiated (Murph never sends
+ * the first message) and keeps strangers who know a line's number from minting
+ * containers billed against its home member.
+ */
+async function planHostedLinqGroupChatWebhook(input: {
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  event: HostedLinqWebhookEvent;
+  prisma: Prisma.TransactionClient;
+  threadRouteAccountLookupKeys: readonly string[];
+}): Promise<HostedOnboardingLinqDirectPlan> {
+  const {
+    messageEvent,
+    occurredAt,
+    participantContact,
+    recipientPhoneNumber,
+    summary,
+  } = input.context;
+
+  const ignored = (routeStage: string) =>
+    logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("group-chat"),
+      buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+        existingMemberMatch: "none",
+        reason: "group-chat",
+        routeStage,
+      }),
+    );
+
+  if (
+    summary.isFromMe
+    || messageEvent.data.message.parts.length === 0
+    || !participantContact
+    || shouldIgnoreHostedLinqForLocalInboundGuard({
+      isFromMe: summary.isFromMe,
+      participantContact,
+    })
+  ) {
+    return ignored("ignored-group-chat");
+  }
+
+  const accountLookupKey = createHostedPhoneLookupKey(recipientPhoneNumber);
+  if (!accountLookupKey) {
+    return ignored("ignored-group-chat");
+  }
+
+  const senderLookup = participantContact.kind === "phone"
+    ? await lookupHostedMemberIdentityByPhoneNumberForLinqWebhook({
+        phoneNumber: participantContact.value,
+        prisma: input.prisma,
+      })
+    : await lookupHostedMemberByVerifiedEmailAddress({
+        address: participantContact.value,
+        prisma: input.prisma,
+      });
+  const sender = senderLookup?.core ?? null;
+  if (!sender) {
+    return ignored("ignored-group-chat");
+  }
+  if (isHostedMemberSuspended(sender.suspendedAt) || !hasHostedMemberActiveAccess(sender)) {
+    return ignored("group-chat-sender-inactive");
+  }
+
+  const homeLineAuthority = readHostedLinqHomeLineAuthority(
+    await readHostedMemberRoutingState({
+      memberId: sender.id,
+      prisma: input.prisma,
+    }),
+  );
+  const homeRecipientPhone =
+    homeLineAuthority.kind === "none" ? null : homeLineAuthority.recipientPhone;
+  const incomingRecipientPhone = normalizePhoneNumber(recipientPhoneNumber);
+  if (
+    !homeRecipientPhone
+    || !incomingRecipientPhone
+    || homeRecipientPhone !== incomingRecipientPhone
+  ) {
+    return ignored("group-chat-not-home-line");
+  }
+
+  try {
+    await ensureHostedThreadContainerRouteTx({
+      accountLookupKey,
+      accountLookupKeys: input.threadRouteAccountLookupKeys,
+      channel: "linq",
+      occurredAt: new Date(occurredAt),
+      ownerMemberId: sender.id,
+      prisma: input.prisma,
+      threadId: summary.chatId,
+    });
+  } catch (error) {
+    if (
+      !isHostedOnboardingError(error)
+      || !HOSTED_LINQ_GROUP_PROVISION_UNAVAILABLE_ERROR_CODES.has(error.code)
+    ) {
+      throw error;
+    }
+    // A concurrent first message may have bound this thread while this webhook
+    // was in flight (pooled lines allow two members of the same group to race).
+    // Fall through to the re-read and converge on the committed route instead
+    // of dropping an authorized inbound; a missing route still fails closed.
+  }
+
+  const route = await readHostedThreadRouteByExternalThread({
+    accountLookupKeys: input.threadRouteAccountLookupKeys,
+    channel: "linq",
+    prisma: input.prisma,
+    threadId: summary.chatId,
+  });
+  if (!route) {
+    return ignored("group-chat-provision-unavailable");
+  }
+
+  return planHostedLinqExplicitThreadRouteWebhook({
+    context: input.context,
+    event: input.event,
+    prisma: input.prisma,
+    route,
+  });
 }
 
 async function planHostedLinqInboundAdmissionDenied(input: {

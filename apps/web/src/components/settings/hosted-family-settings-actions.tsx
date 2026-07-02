@@ -1,10 +1,13 @@
 "use client";
 
-import { Check, Copy, Loader2, Plus } from "lucide-react";
+import { Check, Copy, Loader2, Minus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "@/src/components/hosted-onboarding/client-api";
 import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
 import {
@@ -116,6 +119,7 @@ export function HostedFamilyManager(props: {
   billingActive: boolean;
   invites: FamilyManagerInvite[];
   members: FamilyManagerMember[];
+  seatPrice: string;
   seats: {
     active: number;
     billed: number;
@@ -138,11 +142,20 @@ export function HostedFamilyManager(props: {
   const [actionError, setActionError] = useState<string | null>(null);
   const [isActing, setIsActing] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [isAddingSeat, setIsAddingSeat] = useState(false);
+  const [isRemovingSeat, setIsRemovingSeat] = useState(false);
   const [seatError, setSeatError] = useState<string | null>(null);
 
   const seatsFull = props.seats.remaining <= 0;
-  const canAddSeat = props.billingActive && props.seats.billed < props.seats.max;
+  const planCanGrow = props.billingActive && seatsFull && props.seats.billed < props.seats.max;
+  // A seat is only auto-added for invites the server can dedup on retry, so the
+  // paid CTA (and the addSeatIfNeeded flag) require a phone, email, or Telegram.
+  const hasStableTarget = Boolean(phone.trim() || email.trim() || telegram.trim());
+  const inviteWillAddSeat = planCanGrow && hasStableTarget;
+  const inviteDisabled = !props.billingActive || props.seats.used >= props.seats.max;
+  const canRemoveSeat =
+    props.billingActive &&
+    props.seats.billed > props.seats.used &&
+    props.seats.billed > props.seats.min;
 
   function resetInviteForm() {
     setLabel("");
@@ -163,6 +176,9 @@ export function HostedFamilyManager(props: {
       await requestHostedOnboardingJson({
         method: "POST",
         payload: {
+          // Only authorize buying a seat when the dialog actually showed the
+          // paid-seat cost, so a stale open-seat form never charges silently.
+          addSeatIfNeeded: inviteWillAddSeat,
           targetEmail: email.trim() || undefined,
           targetLabel: label.trim() || undefined,
           targetPhoneNumber: phone.trim() || undefined,
@@ -174,6 +190,14 @@ export function HostedFamilyManager(props: {
       resetInviteForm();
       router.refresh();
     } catch (error) {
+      // The seat was added but Stripe is still confirming: refresh so the new
+      // seat shows, and keep the dialog open so the owner can resend in a moment.
+      if (
+        error instanceof HostedOnboardingApiError &&
+        error.code === "HOSTED_FAMILY_SEAT_ADDED_SYNCING"
+      ) {
+        router.refresh();
+      }
       setInviteError(toErrorMessage(error, "Could not create the invite right now."));
     } finally {
       setIsInviting(false);
@@ -208,25 +232,25 @@ export function HostedFamilyManager(props: {
     }
   }
 
-  async function addPaidSeat() {
-    if (!canAddSeat) {
+  async function removeEmptySeat() {
+    if (!canRemoveSeat) {
       return;
     }
     setSeatError(null);
-    setIsAddingSeat(true);
+    setIsRemovingSeat(true);
     try {
       await requestHostedOnboardingJson({
         method: "PATCH",
         payload: {
-          seatCount: props.seats.billed + 1,
+          seatCount: props.seats.billed - 1,
         },
         url: "/api/settings/billing/family/seats",
       });
       router.refresh();
     } catch (error) {
-      setSeatError(toErrorMessage(error, "Could not add a Family seat right now."));
+      setSeatError(toErrorMessage(error, "Could not remove a Family seat right now."));
     } finally {
-      setIsAddingSeat(false);
+      setIsRemovingSeat(false);
     }
   }
 
@@ -256,9 +280,9 @@ export function HostedFamilyManager(props: {
           </div>
           <p className="text-xs text-muted-foreground">
             {seatsFull
-              ? canAddSeat
-                ? "No open paid seats. Add a paid seat before inviting another person."
-                : "No open seats. Cancel an invite or remove a member to free one."
+              ? planCanGrow
+                ? `No open seats. Inviting adds a paid seat at ${props.seatPrice}.`
+                : "All seats are full. Remove a member or cancel an invite to free one."
               : `${props.seats.remaining} paid ${props.seats.remaining === 1 ? "seat" : "seats"} open`}
           </p>
           <p className="text-xs text-muted-foreground">
@@ -271,19 +295,19 @@ export function HostedFamilyManager(props: {
           ) : null}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {canAddSeat ? (
+          {canRemoveSeat ? (
             <Button
               type="button"
               variant="secondary"
-              onClick={() => void addPaidSeat()}
-              disabled={isAddingSeat}
+              onClick={() => void removeEmptySeat()}
+              disabled={isRemovingSeat}
             >
-              {isAddingSeat ? (
+              {isRemovingSeat ? (
                 <Loader2 className="size-4 animate-spin" aria-hidden="true" />
               ) : (
-                <Plus className="size-4" aria-hidden="true" />
+                <Minus className="size-4" aria-hidden="true" />
               )}
-              Add paid seat
+              Remove empty seat
             </Button>
           ) : null}
           <Button
@@ -292,7 +316,7 @@ export function HostedFamilyManager(props: {
               resetInviteForm();
               setInviteOpen(true);
             }}
-            disabled={seatsFull}
+            disabled={inviteDisabled}
           >
             Invite member
           </Button>
@@ -471,6 +495,14 @@ export function HostedFamilyManager(props: {
             <p className="text-xs leading-5 text-[#736a58]">
               Add a phone, email, or Telegram username so they can join.
             </p>
+            {inviteWillAddSeat ? (
+              <p
+                role="status"
+                className="rounded-lg border border-[#c4a882]/25 bg-[#fffcf6] p-3 text-xs leading-5 text-[#736a58]"
+              >
+                No open seats — inviting adds a paid seat at {props.seatPrice}.
+              </p>
+            ) : null}
           </div>
 
           {inviteError ? (
@@ -490,7 +522,13 @@ export function HostedFamilyManager(props: {
               disabled={isInviting}
               className="w-full"
             >
-              {isInviting ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : "Create invite"}
+              {isInviting ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+              ) : inviteWillAddSeat ? (
+                `Invite & add seat · ${props.seatPrice}`
+              ) : (
+                "Create invite"
+              )}
             </Button>
             <Button
               type="button"

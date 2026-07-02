@@ -948,11 +948,9 @@ class DeviceSyncServiceController {
         retryable: failure.retryable,
         summary: failure.message,
       });
-      const failureMetadataPatch = readDeviceSyncFailureMetadataPatch(error);
       const failureOptions = {
         disconnectGeneration,
         localConnectionRevision,
-        ...(failureMetadataPatch ? { metadataPatch: failureMetadataPatch } : {}),
       };
       const markedFailed = this.store.markSyncFailed(
         storedAccount.id,
@@ -1618,15 +1616,6 @@ function buildDeviceSyncErrorFailureDiagnostics(
     providerOAuthResponseErrorFieldPresent: readSafeDiagnosticBoolean(error.details?.oauthResponseErrorFieldPresent),
     providerOAuthResponseShapeKind: readSafeDiagnosticToken(error.details?.oauthResponseShapeKind),
   });
-}
-
-function readDeviceSyncFailureMetadataPatch(error: unknown): Record<string, unknown> | undefined {
-  if (!isDeviceSyncError(error)) {
-    return undefined;
-  }
-
-  const patch = toPlainRecord(error.details?.failureMetadataPatch);
-  return patch && Object.keys(patch).length > 0 ? patch : undefined;
 }
 
 function buildUnexpectedErrorFailureDiagnostics(

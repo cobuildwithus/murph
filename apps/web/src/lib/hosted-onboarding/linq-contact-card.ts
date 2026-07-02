@@ -1,3 +1,5 @@
+import "server-only";
+
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
@@ -430,4 +432,141 @@ function normalizeLineLimit(value: number | null | undefined): number {
   }
 
   return Math.min(value, HOSTED_LINQ_CONTACT_CARD_CRON_LINE_LIMIT);
+}
+
+const MURPH_CONTACT_CARD_VCF_PHOTO_MAX_BYTES = 2 * 1024 * 1024;
+const MURPH_CONTACT_CARD_VCF_PHOTO_FETCH_TIMEOUT_MS = 5_000;
+const MURPH_CONTACT_CARD_VCF_LINE_MAX_CHARS = 75;
+
+export const MURPH_CONTACT_CARD_VCF_FILE_NAME = "Murph.vcf";
+export const MURPH_CONTACT_CARD_VCF_CONTENT_TYPE = "text/vcard";
+
+export type MurphHostedLinqContactCardVcfPhoto = {
+  base64: string;
+  type: "JPEG" | "PNG";
+};
+
+/**
+ * vCard 3.0 with CRLF line endings and 75-char folding so iMessage renders it
+ * as a native tappable contact bubble rather than a generic file. The chat's
+ * own line is the `mobile` number; a second healthy pool line, when
+ * available, rides along under a `backup` label so members keep a way to
+ * reach Murph if the primary line degrades.
+ */
+export function buildMurphHostedLinqContactCardVcf(input: {
+  backupPhoneNumber?: string | null;
+  phoneNumber: string;
+  photo?: MurphHostedLinqContactCardVcfPhoto | null;
+}): string {
+  const phoneNumber = normalizePhoneNumber(input.phoneNumber);
+  if (!phoneNumber) {
+    throw new TypeError("Murph contact-card vCard requires a line phone number.");
+  }
+  const backupPhoneNumber = normalizePhoneNumber(input.backupPhoneNumber ?? null);
+
+  const lines = [
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    `N:;${MURPH_CONTACT_CARD_FIRST_NAME};;;`,
+    `FN:${MURPH_CONTACT_CARD_FIRST_NAME}`,
+    `TEL;TYPE=CELL:${phoneNumber}`,
+    ...(backupPhoneNumber && backupPhoneNumber !== phoneNumber
+      ? [
+          `item1.TEL:${backupPhoneNumber}`,
+          "item1.X-ABLabel:backup",
+        ]
+      : []),
+    ...(input.photo
+      ? [`PHOTO;ENCODING=b;TYPE=${input.photo.type}:${input.photo.base64}`]
+      : []),
+    "END:VCARD",
+  ];
+
+  return lines.map(foldMurphContactCardVcfLine).join("\r\n") + "\r\n";
+}
+
+/**
+ * Second healthy configured conversation line (excluding the chat's own) for
+ * the vCard's `backup` slot. Reuses the contact-card cron's line listing so
+ * health comes from the synced `hostedLinqLine` provider status; lines the
+ * provider marks AT_RISK/CRITICAL are skipped. Fails soft to null.
+ */
+export async function resolveMurphHostedLinqContactCardBackupPhoneNumber(input: {
+  excludePhoneNumber: string;
+  prisma: HostedLinqContactCardClient;
+}): Promise<string | null> {
+  const excludePhoneNumber = normalizePhoneNumber(input.excludePhoneNumber);
+  try {
+    const lines = await listHostedLinqConfiguredContactCardLines({
+      observedAt: new Date(),
+      prisma: input.prisma,
+    });
+    return lines.find((line) =>
+      line.phoneNumber !== excludePhoneNumber
+      && line.providerStatus !== "AT_RISK"
+      && line.providerStatus !== "CRITICAL"
+    )?.phoneNumber ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function foldMurphContactCardVcfLine(line: string): string {
+  if (line.length <= MURPH_CONTACT_CARD_VCF_LINE_MAX_CHARS) {
+    return line;
+  }
+  const folded: string[] = [line.slice(0, MURPH_CONTACT_CARD_VCF_LINE_MAX_CHARS)];
+  for (
+    let index = MURPH_CONTACT_CARD_VCF_LINE_MAX_CHARS;
+    index < line.length;
+    index += MURPH_CONTACT_CARD_VCF_LINE_MAX_CHARS - 1
+  ) {
+    folded.push(` ${line.slice(index, index + MURPH_CONTACT_CARD_VCF_LINE_MAX_CHARS - 1)}`);
+  }
+  return folded.join("\r\n");
+}
+
+/**
+ * Best-effort fetch of the Murph headshot for embedding; any failure returns
+ * null so the card ships without a photo instead of failing the share.
+ */
+export async function fetchMurphHostedLinqContactCardVcfPhoto(input: {
+  fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
+} = {}): Promise<MurphHostedLinqContactCardVcfPhoto | null> {
+  const imageUrl = getMurphContactCardImageUrl();
+  if (!imageUrl) {
+    return null;
+  }
+
+  try {
+    const fetchImpl = input.fetchImpl ?? fetch;
+    const response = await fetchImpl(imageUrl, {
+      signal: input.signal ?? AbortSignal.timeout(MURPH_CONTACT_CARD_VCF_PHOTO_FETCH_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    const type = contentType.includes("png")
+      ? "PNG" as const
+      : contentType.includes("jpeg") || contentType.includes("jpg")
+        ? "JPEG" as const
+        : imageUrl.toLowerCase().endsWith(".png")
+          ? "PNG" as const
+          : null;
+    if (!type) {
+      return null;
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength === 0 || bytes.byteLength > MURPH_CONTACT_CARD_VCF_PHOTO_MAX_BYTES) {
+      return null;
+    }
+    return {
+      base64: Buffer.from(bytes).toString("base64"),
+      type,
+    };
+  } catch {
+    return null;
+  }
 }

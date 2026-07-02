@@ -120,6 +120,7 @@ export function buildAssistantAutoReplyPrompt(
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,
         replyContext: entry.telegramMetadata?.replyContext ?? null,
+        senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata),
         totalInputs: inputs.length,
       })
     })
@@ -184,6 +185,7 @@ export async function prepareAssistantAutoReplyInput(
         projectionReasonCode: entry.projection?.reasonCode ?? null,
         projectionStatus: entry.projection?.status ?? null,
         replyContext: entry.telegramMetadata?.replyContext ?? null,
+        senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata),
         totalInputs: preparedInputs.length,
       })
     })
@@ -292,6 +294,14 @@ export function renderAssistantInputAttachmentDescriptorPromptSection(input: {
     .join('\n')
 }
 
+function readAssistantInputGroupSenderHandle(
+  metadata: AssistantInputSourceMetadata | null,
+): string | null {
+  return metadata?.kind === 'linq'
+    ? normalizeNullableString(metadata.senderHandle)
+    : null
+}
+
 function renderAssistantAutoReplyInputSection(input: {
   attachmentSections: readonly string[]
   evidenceReasonCode: string | null
@@ -303,9 +313,13 @@ function renderAssistantAutoReplyInputSection(input: {
   projectionReasonCode?: string | null
   projectionStatus?: AssistantInputProjectionStatus | null
   replyContext: string | null
+  senderHandle?: string | null
   totalInputs: number
 }): string | null {
   const sections: string[] = []
+  if (input.senderHandle) {
+    sections.push(`Sender: ${input.senderHandle}`)
+  }
   if (input.replyContext) {
     sections.push(`Reply context:\n${input.replyContext}`)
   }

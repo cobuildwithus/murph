@@ -17,11 +17,39 @@ function groupToolCall(argumentsValue: unknown): Record<string, unknown> {
 }
 
 describe("murph.group dynamic tool", () => {
-  it("advertises read_current and create_join_link actions", () => {
+  it("advertises the supported actions", () => {
     expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toEqual([
       "read_current",
       "create_join_link",
+      "read_chat_participants",
+      "share_contact_card",
     ]);
+  });
+
+  it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "read_chat_participants",
+    }))).toEqual({
+      kind: "group",
+      request: { action: "read_chat_participants" },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "share_contact_card",
+    }))).toEqual({
+      kind: "group",
+      request: { action: "share_contact_card" },
+    });
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "share_contact_card",
+      linqThread: { chatId: "chat_hijack" },
+    }))?.kind).toBe("invalid-group-arguments");
+
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "read_chat_participants",
+      chatId: "chat_hijack",
+    }))?.kind).toBe("invalid-group-arguments");
   });
 
   it("parses read_current arguments", () => {

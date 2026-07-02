@@ -169,6 +169,10 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       ok: true,
       reason: "wake-appended-active-member",
     },
+    wakeMailboxCheckpoint: {
+      lane: mailboxAppend.item.lane,
+      laneSeq: mailboxAppend.item.laneSeq,
+    },
     wakeMailboxItemId: mailboxAppend.item.id,
     wakeUserId: existingMember.id,
   };

@@ -381,21 +381,33 @@ export function HeroClocksIn({
     return () => node.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Auto-scroll on new content only when the user hasn't scrolled up.
+  // Auto-scroll on new content only when the user hasn't scrolled up. The
+  // first scroll jumps instantly so a seeded thread doesn't animate on load;
+  // later appends scroll smoothly.
+  const hasAutoScrolledRef = useRef(false);
   useLayoutEffect(() => {
     const node = scrollerRef.current;
     if (!node) return;
     if (isAtBottomRef.current) {
-      node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
+      node.scrollTo({
+        top: node.scrollHeight,
+        behavior: hasAutoScrolledRef.current ? "smooth" : "auto",
+      });
+      hasAutoScrolledRef.current = true;
     }
   }, [items, typing]);
 
   useEffect(() => {
     const nextId = () => ++idRef.current;
 
+    // Below lg (Tailwind's 64rem breakpoint) the floaters that feed the
+    // animated demo are hidden and the thread cannot scroll, so seed a static
+    // conversation instead of running the timed demo into an empty
+    // bottom-anchored thread.
     if (
       typeof window !== "undefined" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      (window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+        !window.matchMedia("(min-width: 64rem)").matches)
     ) {
       const seed: StreamItem[] = [];
       [EXCHANGES[0], EXCHANGES[2]].forEach((ex) => {
@@ -716,7 +728,7 @@ export function HeroClocksIn({
         })}
       </div>
 
-      <div className="relative z-10 mx-auto grid min-h-svh max-w-[1280px] grid-cols-1 items-center gap-6 px-5 pt-24 pb-10 sm:gap-10 sm:px-10 sm:pb-16 lg:grid-cols-12 lg:gap-20 lg:px-16">
+      <div className="relative z-10 mx-auto grid min-h-svh max-w-[1280px] grid-cols-1 items-center gap-6 px-5 pt-20 pb-10 sm:gap-10 sm:px-10 sm:pb-16 lg:grid-cols-12 lg:gap-20 lg:px-16 lg:pt-24">
         <div className="relative z-10 lg:col-span-7">
           <h1 className="font-serif text-[clamp(2.25rem,4.8vw,4.25rem)] font-semibold leading-[1.05] tracking-[-0.04em] text-black">
             <span className="block">Health is</span>
@@ -726,7 +738,7 @@ export function HeroClocksIn({
             Murph makes it easy.
           </p>
 
-          <p className="mt-10 max-w-[52ch] text-[1.0625rem] leading-[1.7] text-pretty text-[#3a322a]">
+          <p className="mt-6 max-w-[52ch] text-[1.0625rem] leading-[1.7] text-pretty text-[#3a322a] lg:mt-10">
             Murph is your personal health assistant. Wearables, bloodwork,
             doctor visits, supplements, blood pressure, sleep. Murph runs it
             all and helps you figure out what actually makes you healthier,
@@ -745,15 +757,15 @@ export function HeroClocksIn({
         </div>
 
         <div className="relative lg:col-span-5">
-          <div className="relative mx-auto h-[560px] w-full max-w-[360px] sm:h-[640px] sm:max-w-[420px] lg:h-auto lg:aspect-[3/4] lg:max-w-[520px]">
-            <div className="absolute left-1/2 top-1/2 w-[340px] -translate-x-1/2 -translate-y-1/2 scale-[0.82] sm:scale-95 lg:scale-100">
+          <div className="relative mx-auto w-full max-w-[320px] lg:aspect-[3/4] lg:max-w-[520px]">
+            <div className="lg:absolute lg:left-1/2 lg:top-1/2 lg:w-[340px] lg:-translate-x-1/2 lg:-translate-y-1/2">
               <PhoneShell>
                 <StatusBar />
                 <div className="relative">
                   <div className="absolute inset-x-0 top-0 z-20">
                     <ChatHeader murphHeadshotSrc={murphHeadshotSrc} />
                   </div>
-                  <div className="relative" style={{ height: 580 }}>
+                  <div className="relative h-[460px] lg:h-[580px]">
                     <div
                       aria-hidden="true"
                       className="pointer-events-none absolute inset-x-0 top-0 z-10 h-20 bg-gradient-to-b from-[#f5f0e8] via-[#f5f0e8]/85 to-transparent"
@@ -833,7 +845,7 @@ export function HeroClocksIn({
           </div>
         </div>
 
-        <div className="mx-auto w-full max-w-[360px] sm:max-w-[420px] lg:hidden [&_a]:w-full [&_button]:w-full">
+        <div className="relative mx-auto mt-2 w-full max-w-[320px] lg:hidden [&_a]:w-full [&_button]:w-full">
           <LandingAuthActions
             authLabel="Meet Murph"
             authenticated={authenticated}
@@ -1039,7 +1051,7 @@ function BloodworkCard({ result }: { result: BloodworkResult }) {
 
 function PhoneShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative rounded-[2.75rem] bg-[#0a0a0a] p-[4px] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.55)]">
+    <div className="relative rounded-[2.75rem] bg-[#0a0a0a] p-[4px] shadow-[0_16px_36px_-18px_rgba(0,0,0,0.4)] lg:shadow-[0_30px_80px_-20px_rgba(0,0,0,0.55)]">
       <div className="overflow-hidden rounded-[2.5rem] bg-[#f5f0e8]">
         {children}
       </div>

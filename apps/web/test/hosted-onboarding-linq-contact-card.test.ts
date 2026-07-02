@@ -33,6 +33,13 @@ vi.mock("@/src/lib/hosted-onboarding/linq-phone-number-inventory", () => ({
 }));
 
 import {
+  isHostedLinqAttachmentSendPrepareFailure,
+  sendHostedLinqAttachmentMessage,
+} from "@/src/lib/hosted-onboarding/linq-client";
+import {
+  buildMurphHostedLinqContactCardVcf,
+  fetchMurphHostedLinqContactCardVcfPhoto,
+  resolveMurphHostedLinqContactCardBackupPhoneNumber,
   getHostedLinqContactCard,
   listHostedLinqContactCards,
   reconcileHostedLinqContactCards,
@@ -369,4 +376,206 @@ describe("hosted Linq contact card client", () => {
     });
   });
 
+});
+
+describe("buildMurphHostedLinqContactCardVcf", () => {
+  it("builds a CRLF vCard 3.0 for the line without a photo", () => {
+    const vcf = buildMurphHostedLinqContactCardVcf({
+      phoneNumber: "+15557770000",
+      photo: null,
+    });
+
+    expect(vcf).toBe([
+      "BEGIN:VCARD",
+      "VERSION:3.0",
+      "N:;Murph;;;",
+      "FN:Murph",
+      "TEL;TYPE=CELL:+15557770000",
+      "END:VCARD",
+    ].join("\r\n") + "\r\n");
+  });
+
+  it("adds a labeled backup number when a second line is available", () => {
+    const vcf = buildMurphHostedLinqContactCardVcf({
+      backupPhoneNumber: "+15558880000",
+      phoneNumber: "+15557770000",
+      photo: null,
+    });
+
+    expect(vcf).toBe([
+      "BEGIN:VCARD",
+      "VERSION:3.0",
+      "N:;Murph;;;",
+      "FN:Murph",
+      "TEL;TYPE=CELL:+15557770000",
+      "item1.TEL:+15558880000",
+      "item1.X-ABLabel:backup",
+      "END:VCARD",
+    ].join("\r\n") + "\r\n");
+
+    expect(buildMurphHostedLinqContactCardVcf({
+      backupPhoneNumber: "+15557770000",
+      phoneNumber: "+15557770000",
+      photo: null,
+    })).not.toContain("item1.TEL");
+  });
+
+  it("embeds the photo as folded base64 that unfolds losslessly", () => {
+    const base64 = Buffer.from(new Uint8Array(512).fill(7)).toString("base64");
+    const vcf = buildMurphHostedLinqContactCardVcf({
+      phoneNumber: "+15557770000",
+      photo: { base64, type: "PNG" },
+    });
+
+    const lines = vcf.split("\r\n");
+    for (const line of lines) {
+      expect(line.length).toBeLessThanOrEqual(75);
+    }
+    const unfolded = vcf.replace(/\r\n[ ]/gu, "");
+    expect(unfolded).toContain(`PHOTO;ENCODING=b;TYPE=PNG:${base64}`);
+  });
+
+  it("rejects an unusable line phone number", () => {
+    expect(() => buildMurphHostedLinqContactCardVcf({
+      phoneNumber: "not-a-phone",
+      photo: null,
+    })).toThrow(/phone number/u);
+  });
+});
+
+describe("fetchMurphHostedLinqContactCardVcfPhoto", () => {
+  it("returns embedded base64 for a healthy png response", async () => {
+    runtimeMocks.getHostedOnboardingEnvironment.mockReturnValue({
+      publicBaseUrl: "https://www.withmurph.ai",
+    });
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(bytes, {
+      headers: { "content-type": "image/png" },
+      status: 200,
+    }));
+
+    await expect(fetchMurphHostedLinqContactCardVcfPhoto({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    })).resolves.toEqual({
+      base64: Buffer.from(bytes).toString("base64"),
+      type: "PNG",
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://www.withmurph.ai/murph_headshot.png",
+      expect.anything(),
+    );
+  });
+
+  it("fails soft to null on provider errors and oversized bodies", async () => {
+    runtimeMocks.getHostedOnboardingEnvironment.mockReturnValue({
+      publicBaseUrl: "https://www.withmurph.ai",
+    });
+
+    await expect(fetchMurphHostedLinqContactCardVcfPhoto({
+      fetchImpl: vi.fn().mockResolvedValue(new Response("nope", { status: 500 })) as unknown as typeof fetch,
+    })).resolves.toBeNull();
+
+    await expect(fetchMurphHostedLinqContactCardVcfPhoto({
+      fetchImpl: vi.fn().mockRejectedValue(new Error("offline")) as unknown as typeof fetch,
+    })).resolves.toBeNull();
+
+    const oversized = new Uint8Array(2 * 1024 * 1024 + 1);
+    await expect(fetchMurphHostedLinqContactCardVcfPhoto({
+      fetchImpl: vi.fn().mockResolvedValue(new Response(oversized, {
+        headers: { "content-type": "image/png" },
+        status: 200,
+      })) as unknown as typeof fetch,
+    })).resolves.toBeNull();
+  });
+});
+
+describe("resolveMurphHostedLinqContactCardBackupPhoneNumber", () => {
+  it("returns the first healthy configured line that is not the chat's own", async () => {
+    linqLineStoreMocks.listHostedLinqContactCardLines.mockResolvedValue([
+      {
+        phoneNumber: "+15550000001",
+        phoneNumberHint: "*** 0001",
+        phoneNumberLookupKey: "lookup:1",
+        providerStatus: "HEALTHY",
+      },
+      {
+        phoneNumber: "+15550000002",
+        phoneNumberHint: "*** 0002",
+        phoneNumberLookupKey: "lookup:2",
+        providerStatus: "AT_RISK",
+      },
+      {
+        phoneNumber: "+15550000003",
+        phoneNumberHint: "*** 0003",
+        phoneNumberLookupKey: "lookup:3",
+        providerStatus: "HEALTHY",
+      },
+    ]);
+
+    await expect(resolveMurphHostedLinqContactCardBackupPhoneNumber({
+      excludePhoneNumber: "+15550000001",
+      prisma: {} as never,
+    })).resolves.toBe("+15550000003");
+  });
+
+  it("fails soft to null when listing lines is unavailable", async () => {
+    runtimeMocks.getHostedOnboardingEnvironment.mockImplementation(() => {
+      throw new Error("env unavailable");
+    });
+
+    await expect(resolveMurphHostedLinqContactCardBackupPhoneNumber({
+      excludePhoneNumber: "+15550000001",
+      prisma: {} as never,
+    })).resolves.toBeNull();
+  });
+});
+
+describe("sendHostedLinqAttachmentMessage failure phases", () => {
+  it("tags pre-send failures as prepare and leaves message-send failures ambiguous", async () => {
+    const attachmentCreated = createJsonResponse({
+      attachment_id: "att_1",
+      required_headers: { "content-type": "text/vcard" },
+      upload_url: "https://uploads.example.test/att_1",
+    });
+
+    // Attachment create fails: provably nothing was sent.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("nope", { status: 500 })));
+    let prepareError: unknown;
+    await sendHostedLinqAttachmentMessage({
+      bytes: new Uint8Array([1]),
+      chatId: "chat_group_1",
+      contentType: "text/vcard",
+      fileName: "Murph.vcf",
+    }).catch((error: unknown) => {
+      prepareError = error;
+    });
+    expect(isHostedLinqAttachmentSendPrepareFailure(prepareError)).toBe(true);
+
+    // Create + upload succeed, the final message POST fails: ambiguous.
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof URL ? input : new URL(String(input));
+      if (url.pathname.endsWith("/attachments")) {
+        return attachmentCreated.clone();
+      }
+      if (url.hostname === "uploads.example.test") {
+        return new Response(null, { status: 200 });
+      }
+      if (url.pathname.endsWith("/messages")) {
+        return new Response("nope", { status: 500 });
+      }
+      throw new Error(`Unexpected Linq URL ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    let sendError: unknown;
+    await sendHostedLinqAttachmentMessage({
+      bytes: new Uint8Array([1]),
+      chatId: "chat_group_1",
+      contentType: "text/vcard",
+      fileName: "Murph.vcf",
+    }).catch((error: unknown) => {
+      sendError = error;
+    });
+    expect(sendError).toBeTruthy();
+    expect(isHostedLinqAttachmentSendPrepareFailure(sendError)).toBe(false);
+  });
 });

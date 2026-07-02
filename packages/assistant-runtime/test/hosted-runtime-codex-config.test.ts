@@ -44,6 +44,7 @@ import {
 import {
   buildHostedCodexConfigToml,
   HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
+  HOSTED_CODEX_ROOT_AGENT_USAGE_HINT,
   prepareHostedCodexRuntimeEnvironment,
 } from "../src/hosted-runtime/codex-config.ts";
 import {
@@ -153,6 +154,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /approval_policy = "never"/u);
   assert.match(config, /sandbox_mode = "danger-full-access"/u);
   assert.match(config, /^check_for_update_on_startup = false$/mu);
+  assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
   assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
   assert.doesNotMatch(config, /\[model_providers\."openai"\]/u);
   assert.match(config, /\[model_providers\."hosted-openai"\]/u);
@@ -162,7 +164,13 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /^supports_websockets = true$/mu);
   assert.match(config, /^requires_openai_auth = false$/mu);
   assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
-  assert.match(config, /\[features\]\nplugins = false\nmulti_agent_v2 = true\nmemories = true/u);
+  assert.match(config, /\[features\]\nplugins = false\nmemories = true/u);
+  assert.ok(
+    config.includes(
+      `[features.multi_agent_v2]\nenabled = true\nroot_agent_usage_hint_text = ${JSON.stringify(HOSTED_CODEX_ROOT_AGENT_USAGE_HINT)}`,
+    ),
+  );
+  assertHostedCodexRootAgentUsageHintRetainsCodexDefaults();
   assert.match(
     config,
     /\[memories\]\nuse_memories = true\ngenerate_memories = true\ndisable_on_external_context = false\nmin_rollout_idle_hours = 1\nmax_rollouts_per_startup = 1\nmax_rollout_age_days = 10\nmin_rate_limit_remaining_percent = 25\nmax_raw_memories_for_consolidation = 128\nmax_unused_days = 30/u,
@@ -445,6 +453,7 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
   assert.match(config, /model_reasoning_effort = "low"/u);
   assert.match(config, /\[history\]\npersistence = "none"/u);
   assert.match(config, /\[shell_environment_policy\]/u);
+  assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
   assertHostedCodexAutoCompactTokenLimit(config);
 });
 
@@ -613,6 +622,7 @@ test("hosted Codex runtime config preserves managed ChatGPT auth", async () => {
   assert.match(config, /^model_provider = "openai"$/mu);
   assert.doesNotMatch(config, /\[model_providers\./u);
   assert.doesNotMatch(config, /chatgpt-refresh-token/u);
+  assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
   assertHostedCodexAutoCompactTokenLimit(config);
 });
 
@@ -1263,6 +1273,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       'approval_policy = "never"',
       'sandbox_mode = "danger-full-access"',
       "check_for_update_on_startup = false",
+      "allow_login_shell = false",
       "",
       '[model_providers."openai"]',
       'name = "OpenAI"',
@@ -1275,8 +1286,16 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
       "[features]",
       "plugins = false",
-      "multi_agent_v2 = true",
       "memories = true",
+      "",
+      "# Murph prompts and skills direct sub-agent delegation for slow ingestion",
+      "# (lab PDFs, supplement labels), but Codex 0.142.x's multi-agent mode",
+      "# message only recognizes explicit user requests. The root-agent hint",
+      "# REPLACES Codex's default, so it restates the 0.142.5 default verbatim",
+      "# and appends the Murph skill-delegation authorization sentence.",
+      "[features.multi_agent_v2]",
+      "enabled = true",
+      `root_agent_usage_hint_text = ${JSON.stringify(HOSTED_CODEX_ROOT_AGENT_USAGE_HINT)}`,
       "",
       "# Codex-native memories are operator memory only. Murph product memory",
       "# remains canonical in the vault; snapshots keep the Codex home allowlist",
@@ -1305,6 +1324,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "",
       "[shell_environment_policy]",
       'inherit = "all"',
+      "ignore_default_excludes = true",
       'include_only = ["CI", "CODEX_HOME", "CODEX_CA_CERTIFICATE", "COLORTERM", "CURL_CA_BUNDLE", "FORCE_COLOR", "HOME", "MURPH_HOSTED_CLI_BRIDGE_TOKEN", "MURPH_HOSTED_CLI_BRIDGE_URL", "MURPH_HOSTED_RUNTIME_PROCESS", "MURPH_ASSISTANT_SKILLS_ROOT", "LANG", "LC_ALL", "LC_CTYPE", "EXA_API_KEY", "MAPBOX_ACCESS_TOKEN", "MURPH_DATA_API_KEY", "NODE_EXTRA_CA_CERTS", "NO_COLOR", "PATH", "REQUESTS_CA_BUNDLE", "SSL_CERT_DIR", "SSL_CERT_FILE", "TEMP", "TERM", "TMP", "TMPDIR", "VAULT"]',
       "",
       "[shell_environment_policy.set]",
@@ -1312,6 +1332,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "",
     ].join("\n"),
   );
+  assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
 });
 
 test("hosted Codex shell policy excludes ElevenLabs runtime capability env", () => {
@@ -1339,7 +1360,9 @@ test("hosted Codex config keeps skill instructions disabled while enabling opera
   assert.match(config, /\[skills\]\ninclude_instructions = false/u);
   assert.match(config, /\[skills\.bundled\]\nenabled = false/u);
   assert.match(config, /\[features\]\nplugins = false/u);
-  assert.match(config, /^multi_agent_v2 = true$/mu);
+  assert.match(config, /^\[features\.multi_agent_v2\]$/mu);
+  assert.match(config, /^enabled = true$/mu);
+  assert.match(config, /^root_agent_usage_hint_text = "You are `\/root`/mu);
   assert.match(config, /^memories = true$/mu);
   assert.match(config, /\[memories\]\nuse_memories = true/u);
   assert.match(config, /^generate_memories = true$/mu);
@@ -1404,6 +1427,42 @@ async function createTemporaryDirectory(): Promise<string> {
   const target = await mkdtemp(path.join(tmpdir(), "hosted-codex-config-"));
   temporaryPaths.push(target);
   return target;
+}
+
+// The configured root-agent usage hint REPLACES Codex's default hint, so it
+// must retain the default's operational guidance from the pinned
+// @openai/codex 0.142.5 alongside the appended Murph authorization sentence.
+// If a Codex version bump changes the default, re-copy it and update here.
+function assertHostedCodexRootAgentUsageHintRetainsCodexDefaults(): void {
+  assert.match(HOSTED_CODEX_ROOT_AGENT_USAGE_HINT, /^You are `\/root`, the primary agent/u);
+  assert.ok(HOSTED_CODEX_ROOT_AGENT_USAGE_HINT.includes(
+    "collaboration tools cannot be called from inside `functions.exec`",
+  ));
+  assert.ok(HOSTED_CODEX_ROOT_AGENT_USAGE_HINT.includes(
+    "Message Type: MESSAGE | FINAL_ANSWER",
+  ));
+  assert.ok(HOSTED_CODEX_ROOT_AGENT_USAGE_HINT.includes(
+    "You can decide how much context you want to propagate to your sub-agents with the `fork_turns` parameter.",
+  ));
+  assert.ok(HOSTED_CODEX_ROOT_AGENT_USAGE_HINT.includes(
+    "There are 4 available concurrency slots",
+  ));
+  assert.ok(HOSTED_CODEX_ROOT_AGENT_USAGE_HINT.endsWith(
+    "Murph system-prompt and skill instructions that direct delegating work to a sub-agent, such as onboarding supplement-label or lab-result ingestion, count as explicit user requests for sub-agent work under any multi-agent mode instruction.",
+  ));
+}
+
+function assertHostedCodexConfigDisablesLoginShellAtTopLevel(config: string): void {
+  const loginShellAssignments = config.match(/^allow_login_shell\s*=/gmu) ?? [];
+  assert.deepEqual(loginShellAssignments, ["allow_login_shell ="]);
+  assert.match(config, /^allow_login_shell = false$/mu);
+
+  const loginShellIndex = config.indexOf("allow_login_shell = false");
+  const firstSectionIndex = config.search(/^\[/mu);
+  assert.ok(
+    firstSectionIndex === -1 || loginShellIndex < firstSectionIndex,
+    "allow_login_shell must be a top-level Codex config key before the first TOML section",
+  );
 }
 
 function chatGptCodexAuthTokens(): Record<string, string> {

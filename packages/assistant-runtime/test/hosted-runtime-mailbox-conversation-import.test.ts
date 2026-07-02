@@ -1226,6 +1226,12 @@ describe("hosted mailbox conversation import adapter", () => {
         : false,
       true,
     );
+    assert.equal(
+      event.sourceMetadata?.kind === "linq"
+        ? event.sourceMetadata.senderHandle
+        : null,
+      "+15551110000",
+    );
     assert.equal(event.replyTarget?.threadId, "chat_group_identity");
   });
 

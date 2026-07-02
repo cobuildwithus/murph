@@ -60,6 +60,7 @@ describe("hosted onboarding Telegram webhook route", () => {
       rawBody: JSON.stringify({
         ok: true,
       }),
+      scheduleAfterResponse: expect.any(Function),
       secretToken: "telegram-secret",
       signal: request.signal,
     });

@@ -265,7 +265,13 @@ orchestration; Temporal then re-reads web-owned reconciliation facts and, if
 processing is needed, calls Cloudflare's short-lived `ensure-processing`
 adapter. There is no
 webhook-to-Cloudflare runner nudge path, no direct web-to-Cloudflare message
-path, and no second wake authority. If the
+path, and no second wake authority. A direct web ensure fast path was
+attempted and withdrawn 2026-07-02 (PR #362): because runtime import/consume
+watermarks publish at checkpoint, the workflow's reconcile-ensure loop treats
+a direct-woken pointer as still-lagging and lands extra ensures in
+inter-invocation gaps, producing invocation churn and a reachable duplicate
+turn on already-replied input. Any future direct wake must carry pointer
+awareness into the workflow so it skips its immediate ensure. If the
 Temporal signal cannot be accepted after the mailbox row exists, the failure is
 logged as a post-commit best-effort handoff failure and does not make provider
 ingress fail. Web does not run a mailbox-lag cron backstop: missed post-commit
@@ -340,11 +346,13 @@ stops on the first signal failure. It is not a scheduler, queue, or generic
 admin job framework.
 
 The same ops page may also expose narrow hosted-runtime setup actions that reuse
-existing source-of-truth services, such as manually ensuring a Linq
-external-thread route through `/api/ops/thread-routes`. Those actions must use
-the same hosted app-session, allowlist, and same-origin mutation gate, and must
-delegate to the owning service primitive rather than hand-writing persisted
-runtime rows.
+existing source-of-truth services. Those actions must use the same hosted
+app-session, allowlist, and same-origin mutation gate, and must delegate to the
+owning service primitive rather than hand-writing persisted runtime rows. Linq
+group-thread containers are no longer operator-provisioned: the Linq webhook
+planner auto-provisions the thread-container route through
+`ensureHostedThreadContainerRouteTx` when an attested group message arrives from
+an active member texting their own home line.
 
 For hard-cut rollouts, deploy consumers before producers: Cloudflare and the
 runtime parser must understand the new mailbox kind before web emits it. After
@@ -440,6 +448,8 @@ recheck instead of being cleared from the pointer alone; only the wake path may
 then replace the fence after it explicitly reports no active child. Inactive
 liveness is explicit no-active-child proof, so the controller clears and
 replaces that fence directly instead of asking web status to complete it first.
+For the active-wake probe, a verifiably stopped container shell
+(`ctx.container.running === false`) is the same explicit no-active-child proof.
 Committed-progress recovery stays in the transport-failure adapter, where the
 transport outcome is the thing being reconciled. Mismatched liveness probes
 clear the fence because they prove the active child is not the fenced attempt;

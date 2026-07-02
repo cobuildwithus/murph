@@ -69,6 +69,49 @@ const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 // staying well above the typical conversational floor so unrelated turns
 // don't compact every message.
 const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 100_000;
+// Codex 0.142.x injects a per-turn multi-agent mode developer message that
+// only treats user messages as authorization to spawn sub-agents, which
+// overrides Murph's skill-directed delegation (onboarding supplement-label
+// and lab ingestion). The skill/AGENTS.md authorization clause only lands in
+// Codex 0.143; until then the root-agent usage hint (also a per-turn
+// developer message) is the supported config lever. Configuring it REPLACES
+// Codex's default root hint rather than appending, so everything above the
+// final Murph sentence is the default hint from the pinned @openai/codex
+// 0.142.5 (codex-rs/core/src/config/mod.rs, default
+// max_concurrent_threads_per_session = 4) copied verbatim; re-copy it on any
+// Codex version bump.
+export const HOSTED_CODEX_ROOT_AGENT_USAGE_HINT = [
+  "You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.",
+  "",
+  "At the start of your turn, you are the active agent.",
+  "You can spawn sub-agents to handle subtasks, and those sub-agents can spawn their own sub-agents.",
+  "All agents in the team, including the agents that you can assign tasks to, are equally intelligent and capable, and have access to the same set of tools.",
+  "",
+  "You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task and trigger a turn, and `send_message` to pass a message to a running agent without triggering a turn.",
+  "Child agents can also spawn their own sub-agents.",
+  "You can decide how much context you want to propagate to your sub-agents with the `fork_turns` parameter.",
+  "",
+  "You will receive messages in the analysis channel in the form:",
+  "```",
+  "Message Type: MESSAGE | FINAL_ANSWER",
+  "Task name: <recipient>",
+  "Sender: <author>",
+  "Payload:",
+  "<payload text>",
+  "```",
+  "They may be addressed as to=/root",
+  "",
+  'Note that collaboration tools cannot be called from inside `functions.exec`. Call `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and `list_agents` only as direct tool calls using the recipient shown in their tool definitions, such as `to=functions.spawn_agent` without a configured namespace or `to=functions.agents.spawn_agent` with `tool_namespace = "agents"`, since they are intentionally absent from the `functions.exec` `tools.*` namespace. Available tools in `functions.exec` are explicitly described with a `tools` namespace in the developer message.',
+  "",
+  "All agents share the same directory. In detail:",
+  "- All agents have access to the same container and filesystem as you.",
+  "- All agents use the same current working directory.",
+  "- As a result, edits made by one agent are immediately visible to all other agents.",
+  "",
+  "There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.",
+  "",
+  "Murph system-prompt and skill instructions that direct delegating work to a sub-agent, such as onboarding supplement-label or lab-result ingestion, count as explicit user requests for sub-agent work under any multi-agent mode instruction.",
+].join("\n");
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
 const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 5;
@@ -544,14 +587,27 @@ export function buildHostedCodexConfigToml(input: {
     `approval_policy = ${tomlString(DEFAULT_HOSTED_CODEX_APPROVAL_POLICY)}`,
     `sandbox_mode = ${tomlString(DEFAULT_HOSTED_CODEX_SANDBOX)}`,
     "check_for_update_on_startup = false",
+    // Login shells re-source /etc/profile, which resets PATH to the stock
+    // system dirs and drops /app/node_modules/.bin (vault-cli). The runner
+    // image has no profile.d content worth sourcing, so force non-login
+    // shells and let shell_environment_policy own the exec environment.
+    "allow_login_shell = false",
     "",
     ...providerConfigLines,
     "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
     "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
     "[features]",
     "plugins = false",
-    "multi_agent_v2 = true",
     `memories = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.featureEnabled}`,
+    "",
+    "# Murph prompts and skills direct sub-agent delegation for slow ingestion",
+    "# (lab PDFs, supplement labels), but Codex 0.142.x's multi-agent mode",
+    "# message only recognizes explicit user requests. The root-agent hint",
+    "# REPLACES Codex's default, so it restates the 0.142.5 default verbatim",
+    "# and appends the Murph skill-delegation authorization sentence.",
+    "[features.multi_agent_v2]",
+    "enabled = true",
+    `root_agent_usage_hint_text = ${tomlString(HOSTED_CODEX_ROOT_AGENT_USAGE_HINT)}`,
     "",
     "# Codex-native memories are operator memory only. Murph product memory",
     "# remains canonical in the vault; snapshots keep the Codex home allowlist",
@@ -580,6 +636,11 @@ export function buildHostedCodexConfigToml(input: {
     "",
     "[shell_environment_policy]",
     `inherit = ${tomlString(HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,
+    // include_only is the single gate for shell env. Codex's default
+    // *KEY*/*TOKEN*/*SECRET* excludes run before include_only and can only
+    // subtract deliberately allowlisted vars (bridge token, provider keys),
+    // so they add no protection here and must stay off.
+    "ignore_default_excludes = true",
     `include_only = ${tomlStringArray(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)}`,
     "",
     "[shell_environment_policy.set]",
