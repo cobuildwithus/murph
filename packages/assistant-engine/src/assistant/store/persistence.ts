@@ -651,18 +651,37 @@ export async function synchronizeAssistantIndexes(
 
 const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 32
 
-// One-time, O(1) migration for index files written before the projection
-// existed: persist an empty projection so subsequent bounded foreground
-// saves populate it. Never rebuilds from session files on this path; a
-// legacy vault's first maintenance wakes simply see fewer sessions until
-// normal saves warm the projection up.
+// Recurring-maintenance projection reader. Deliberately does NOT go through
+// readAssistantIndexStore: that reader's missing/corrupt fallbacks rebuild
+// the index by scanning every session file, which is only acceptable on
+// explicit repair/routing paths. Here a parseable legacy index gets an
+// empty projection persisted once (O(1)) so bounded foreground saves warm
+// it up, and a missing or corrupt index just yields no evidence this wake.
 export async function ensureAssistantRecentSessionsProjection(
   paths: AssistantStatePaths,
-): Promise<AssistantAliasStore> {
-  const store = await readAssistantIndexStore(paths, { fresh: true })
-  if (store.recentSessions !== undefined) {
-    return store
+): Promise<Record<string, string>> {
+  let raw: string
+  try {
+    raw = await readFile(paths.indexesPath, 'utf8')
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return {}
+    }
+    throw error
   }
+
+  let store: AssistantAliasStore
+  try {
+    store = assistantAliasStoreSchema.parse(JSON.parse(raw))
+  } catch {
+    // Corrupt index: quarantine/rebuild belongs to the routing read path.
+    return {}
+  }
+
+  if (store.recentSessions !== undefined) {
+    return store.recentSessions
+  }
+
   const updated = assistantAliasStoreSchema.parse({
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases: store.aliases,
@@ -670,7 +689,7 @@ export async function ensureAssistantRecentSessionsProjection(
     recentSessions: {},
   })
   await writeJsonFileAtomic(paths.indexesPath, updated)
-  return updated
+  return {}
 }
 
 function pruneAssistantRecentSessions(

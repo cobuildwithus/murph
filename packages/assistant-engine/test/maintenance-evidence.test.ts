@@ -236,6 +236,18 @@ test('bounds session reads to the newest sessions by durable activity', async ()
   expect(warmed.map((session) => session.sessionId)).toEqual([
     'session-post-deploy',
   ])
+
+  // Missing or corrupt index files must not trigger the repair-path rebuild
+  // (an all-session scan) from this recurring read: the wake just sees no
+  // evidence and the routing path owns repair.
+  await rm(paths.indexesPath, { force: true })
+  await expect(
+    listRecentAssistantSessions(vaultRoot, { limit: 10 }),
+  ).resolves.toEqual([])
+  await writeFile(paths.indexesPath, '{corrupt-index', 'utf8')
+  await expect(
+    listRecentAssistantSessions(vaultRoot, { limit: 10 }),
+  ).resolves.toEqual([])
 })
 
 test('returns an explicit empty evidence section when the window has no messages', async () => {

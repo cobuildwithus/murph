@@ -363,10 +363,10 @@ export async function listRecentAssistantSessions(
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
 
-    const indexes = await ensureAssistantRecentSessionsProjection(paths)
+    const recentSessions = await ensureAssistantRecentSessionsProjection(paths)
     return readAssistantSessionsSorted(
       paths,
-      Object.entries(indexes.recentSessions ?? {})
+      Object.entries(recentSessions)
         .sort(([, left], [, right]) =>
           compareAssistantTimestampsAscending(right, left),
         )
