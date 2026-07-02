@@ -6103,10 +6103,12 @@ function addOvernightMemoryConsolidationAutomation(vaultRoot: string): void {
     continuityPolicy: 'fresh',
     createdAt: '2026-04-08T08:00:00.000Z',
     instructions: 'Consolidate canonical vault memory.',
+    // Deliberately target-less: maintenance never delivers, and execution
+    // must not gate the memory work on a deliverable route.
     route: {
       channel: 'telegram',
       deliverySource: null,
-      deliveryTarget: 'room-1',
+      deliveryTarget: null,
       identityId: null,
       participantId: null,
       threadId: null,

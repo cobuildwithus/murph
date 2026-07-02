@@ -532,10 +532,14 @@ export async function executeClaimedAssistantCronJob(input: {
         })
         status = 'succeeded'
       } else {
-        validateAssistantCronDeliveryTarget(
-          claimedJob.target,
-          assistantCronExecutionDeliveryTargetProfile(input),
-        )
+        // Background maintenance never delivers (exact-skip policy), so a
+        // stale or unresolvable route must not block the memory work.
+        if (!assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)) {
+          validateAssistantCronDeliveryTarget(
+            claimedJob.target,
+            assistantCronExecutionDeliveryTargetProfile(input),
+          )
+        }
         const serviceTier = resolveAssistantCronTurnServiceTier({
           executionContext: input.executionContext ?? null,
           job: claimedJob,
