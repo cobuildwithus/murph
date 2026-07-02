@@ -92,6 +92,7 @@ interface AssistantRuntimeResiduePrunePlan {
 export async function pruneAssistantRuntimeResidue(input: {
   now?: Date
   pendingInputIds: readonly string[]
+  protectPendingProviderCleanupEvidence?: boolean
   vault: string
 }): Promise<AssistantRuntimeResiduePruneResult> {
   return await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
@@ -100,6 +101,8 @@ export async function pruneAssistantRuntimeResidue(input: {
       now: input.now ?? new Date(),
       paths,
       pendingInputIds: input.pendingInputIds,
+      protectPendingProviderCleanupEvidence:
+        input.protectPendingProviderCleanupEvidence ?? false,
       vault: input.vault,
     })
   })
@@ -109,6 +112,7 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
   now: Date
   paths: AssistantStatePaths
   pendingInputIds: readonly string[]
+  protectPendingProviderCleanupEvidence: boolean
   vault: string
 }): Promise<AssistantRuntimeResiduePruneResult> {
   const directories = resolveAssistantRuntimeResidueDirectories(input.paths)
@@ -121,6 +125,8 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
     inventory,
     now: input.now,
     pendingInputIds: input.pendingInputIds,
+    protectPendingProviderCleanupEvidence:
+      input.protectPendingProviderCleanupEvidence,
   })
 
   for (const filePath of plan.journalPaths) {
@@ -165,6 +171,7 @@ function planAssistantRuntimeResiduePrune(input: {
   inventory: AssistantRuntimeResidueInventory
   now: Date
   pendingInputIds: readonly string[]
+  protectPendingProviderCleanupEvidence?: boolean
 }): AssistantRuntimeResiduePrunePlan {
   const cutoffMs = input.now.getTime() - ASSISTANT_RUNTIME_RESIDUE_RETENTION_MS
   const pendingInputIds = new Set(
@@ -231,6 +238,8 @@ function planAssistantRuntimeResiduePrune(input: {
       !setIntersects(group.inputIds, pendingInputIds) &&
       !setIntersects(group.inputIds, retainedJournalInputIds) &&
       !setIntersects(group.inputIds, activeAutoReplyInputIds) &&
+      (!input.protectPendingProviderCleanupEvidence ||
+        !group.records.some(hasPendingAssistantProviderCleanup)) &&
       group.records.every((evidence) => {
         const intentId = readEvidenceDeliveryIntentId(evidence)
         return intentId === null || !activeIntentIds.has(intentId)
@@ -414,6 +423,20 @@ function isActiveAssistantOutboxIntent(intent: AssistantOutboxIntent): boolean {
     intent.status === 'pending' ||
     intent.status === 'sending' ||
     intent.status === 'retryable'
+  )
+}
+
+// Migration-window guard only: hosted callers set
+// protectPendingProviderCleanupEvidence until the provider-cleanup recovery
+// marker is durable, so pre-upgrade evidence carrying undeleted Linq message
+// ids survives until the one-shot migration queues it into
+// hosted-provider-cleanup.json. Delete together with that migration.
+function hasPendingAssistantProviderCleanup(
+  evidence: AssistantAutoReplyTerminalEvidence,
+): boolean {
+  return (
+    evidence.providerCleanup.linqMessageIds.length > 0 &&
+    evidence.providerCleanup.queuedAt === null
   )
 }
 

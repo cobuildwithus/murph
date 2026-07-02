@@ -392,7 +392,7 @@ async function recoverLegacyPendingTerminalLinqCleanupOnce(
   return recoveredCleanupQueued;
 }
 
-async function hasHostedProviderCleanupRecoveryCompleted(
+export async function hasHostedProviderCleanupRecoveryCompleted(
   vaultRoot: string,
 ): Promise<boolean> {
   try {

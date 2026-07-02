@@ -26,6 +26,7 @@ vi.mock("../src/hosted-runtime/message-cleanup.ts", () => ({
 
 import {
   drainHostedProviderCleanupAfterCommit,
+  hasHostedProviderCleanupRecoveryCompleted,
   prepareHostedProviderCleanupPlan,
   readHostedProviderCleanupCheckpoint,
   recordHostedProviderCleanupBeforeCommit,
@@ -304,6 +305,7 @@ test("hosted provider cleanup upgrade recovery queues legacy unqueued evidence o
     });
 
   try {
+    assert.equal(await hasHostedProviderCleanupRecoveryCompleted(vaultRoot), false);
     const plan = await prepareHostedProviderCleanupPlan({
       deferred: false,
       nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
@@ -312,6 +314,7 @@ test("hosted provider cleanup upgrade recovery queues legacy unqueued evidence o
 
     assert.equal(plan.stateQueued, true);
     assert.equal(plan.due, true);
+    assert.equal(await hasHostedProviderCleanupRecoveryCompleted(vaultRoot), true);
     expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).toHaveBeenCalledTimes(3);
     expect(mocks.markAssistantAutoReplyLinqCleanupQueued).toHaveBeenCalledWith({
       captureIds: ["capture_batch_1"],

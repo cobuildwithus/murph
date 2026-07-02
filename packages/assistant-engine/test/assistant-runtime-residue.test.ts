@@ -158,6 +158,40 @@ describe('assistant runtime residue pruning', () => {
     await expectPathExists(resolveEvidencePath(paths, first.inputId))
   })
 
+  it('retains pending-cleanup evidence during the migration window', async () => {
+    const { paths, vaultRoot } = await createAssistantVault(
+      'assistant-runtime-residue-migration-window-',
+    )
+    const event = await createHostedInputEvent({
+      now: OLD_RECORD_AT,
+      seq: 5,
+      vaultRoot,
+    })
+    await writeAssistantAutoReplySuppressionEvidence({
+      captureIds: [event.inputId],
+      inputIds: [event.inputId],
+      linqMessageIds: ['linq-cleanup-message'],
+      reason: 'already-handled',
+      recordedAt: OLD_RECORD_AT,
+      vault: vaultRoot,
+    })
+
+    const result = await pruneAssistantRuntimeResidue({
+      now: PRUNE_NOW,
+      pendingInputIds: [],
+      protectPendingProviderCleanupEvidence: true,
+      vault: vaultRoot,
+    })
+
+    expect(result.inputEventsPruned).toBe(0)
+    expect(result.autoReplyEvidenceFilesPruned).toBe(0)
+    await expectPathExists(resolveAssistantInputEventPath({
+      inputId: event.inputId,
+      paths,
+    }))
+    await expectPathExists(resolveEvidencePath(paths, event.inputId))
+  })
+
   it('prunes evidence with Linq cleanup ids on normal retention; cleanup state owns deletion', async () => {
     const { paths, vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-provider-cleanup-',
