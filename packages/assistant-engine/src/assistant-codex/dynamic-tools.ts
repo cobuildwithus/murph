@@ -313,14 +313,14 @@ export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read the current hosted group for the connected group-chat runtime with action="read_current", or mint the shareable group join link with action="create_join_link" and include the returned join URL plainly in your reply. Joining through that link grants group membership only. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, share health data, or opt anyone into email.',
+    'Read the current hosted group for the connected group-chat runtime with action="read_current", or mint the shareable group join link with action="create_join_link" and include the returned join URL plainly in your reply. Joining through that link grants group membership only. Use action="read_chat_participants" to see who is in this group chat and whether each participant already has their own Murph; use action="share_contact_card" to drop your contact card into this chat once so people who do not have you saved can tap it, save you, and text you directly. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, share health data, or opt anyone into email.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
       action: {
         type: 'string',
-        enum: ['read_current', 'create_join_link'],
+        enum: ['read_current', 'create_join_link', 'read_chat_participants', 'share_contact_card'],
       },
       displayName: {
         type: 'string',
@@ -675,6 +675,16 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('read_current'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('read_chat_participants'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('share_contact_card'),
     })
     .strict(),
   z
@@ -2505,6 +2515,12 @@ function parseGroupArguments(
           ? { action: 'create_join_link', joinLink }
           : { action: 'create_join_link' },
     }
+  }
+  if (
+    parsed.data.action === 'read_chat_participants'
+    || parsed.data.action === 'share_contact_card'
+  ) {
+    return { ok: true, request: { action: parsed.data.action } }
   }
   return { ok: true, request: { action: 'read_current' } }
 }

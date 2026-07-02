@@ -125,6 +125,28 @@ describe.runIf(Boolean(databaseUrl))("supplements live search corpus", () => {
     expect(onceDaily[0]?.name).toBe("Women's Once Daily");
   }, 120_000);
 
+  it("matches singular and plural product-name forms both ways", async () => {
+    // Regression for the Blueprint "Advanced Antioxidants" miss: the catalog
+    // row is plural, the query was singular, and simple-config FTS has no
+    // stemming while the trigram fallback stays suppressed whenever FTS
+    // returns anything. Both directions must reach the other form now.
+    const singular = await search("Advanced Antioxidant");
+    expect(
+      singular.some(
+        (row) => row.brand === "Blueprint" && row.name === "Advanced Antioxidants",
+      ),
+    ).toBe(true);
+
+    const plural = await search("Advanced Antioxidants");
+    expect(
+      plural.some((row) => /advanced antioxidant\b/iu.test(row.name)),
+    ).toBe(true);
+
+    const branded = await search("Blueprint Advanced Antioxidant");
+    expect(branded[0]?.brand).toBe("Blueprint");
+    expect(branded[0]?.name).toBe("Advanced Antioxidants");
+  }, 120_000);
+
   it("returns results for known ranking quirks without asserting order", async () => {
     // These currently rank an off-brand or adjacent product first; tracked as
     // candidates for future ranking work. Assert coverage only so this test

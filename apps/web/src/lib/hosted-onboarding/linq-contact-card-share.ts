@@ -85,7 +85,7 @@ export type HostedLinqContactCardShareDecision =
     };
 
 type HostedLinqContactCardShareReserveDecision =
-  | Extract<HostedLinqContactCardShareDecision, { action: "share" }>
+  | { action: "share"; attemptedAt: Date }
   | Extract<HostedLinqContactCardShareDecision, { action: "skip" }>;
 
 export async function maybeShareHostedLinqContactCardAfterOutboundForRuntime(input: {
@@ -223,19 +223,32 @@ async function reserveHostedLinqContactCardShareAttemptAfterOutbound(input: {
   now?: Date;
   prisma: HostedLinqContactCardSharePersistenceClient;
 }): Promise<HostedLinqContactCardShareReserveDecision> {
+  if (!isHostedLinqContactCardShareEligible(input.eligibility)) {
+    return {
+      action: "skip",
+      reason: "ineligible_chat",
+    };
+  }
+
+  return await reserveHostedLinqContactCardShareAttempt(input);
+}
+
+/**
+ * Shared per-chat share throttle. Callers own their eligibility/authority
+ * checks; this only guards the attempt cadence (one per chat per 48h).
+ */
+export async function reserveHostedLinqContactCardShareAttempt(input: {
+  chatId: string;
+  memberId: string;
+  now?: Date;
+  prisma: HostedLinqContactCardSharePersistenceClient;
+}): Promise<HostedLinqContactCardShareReserveDecision> {
   const now = input.now ?? new Date();
   const chatLookup = resolveHostedLinqContactCardShareLookup(input.chatId);
   if (!chatLookup) {
     return {
       action: "skip",
       reason: "missing_chat_id",
-    };
-  }
-
-  if (!isHostedLinqContactCardShareEligible(input.eligibility)) {
-    return {
-      action: "skip",
-      reason: "ineligible_chat",
     };
   }
 
@@ -309,6 +322,7 @@ async function reserveHostedLinqContactCardShareAttemptAfterOutbound(input: {
 
   return {
     action: "share",
+    attemptedAt: now,
   };
 }
 
@@ -413,7 +427,36 @@ async function createHostedLinqContactCardShareAttemptReservation(input: {
 
   return {
     action: "share",
+    attemptedAt: input.now,
   };
+}
+
+/**
+ * Undo a reservation whose share provably never reached the provider (for
+ * example the attachment upload failed before the message send started).
+ * Matching on the exact reservation instant keeps a concurrent newer
+ * reservation untouched. Ambiguous send failures must NOT release.
+ */
+export async function releaseHostedLinqContactCardShareAttempt(input: {
+  attemptedAt: Date;
+  chatId: string;
+  memberId: string;
+  prisma: HostedLinqContactCardSharePersistenceClient;
+}): Promise<void> {
+  const chatLookup = resolveHostedLinqContactCardShareLookup(input.chatId);
+  if (!chatLookup) {
+    return;
+  }
+  await input.prisma.hostedLinqContactCardShare.updateMany({
+    where: {
+      lastContactCardShareAttemptedAt: input.attemptedAt,
+      linqChatLookupKey: chatLookup.writeKey,
+      memberId: input.memberId,
+    },
+    data: {
+      lastContactCardShareAttemptedAt: null,
+    },
+  });
 }
 
 function logHostedLinqContactCardShareFailure(input: {

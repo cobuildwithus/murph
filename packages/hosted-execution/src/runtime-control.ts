@@ -772,7 +772,11 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
   recorded: boolean;
 }
 
-export type HostedRuntimeGroupToolAction = "read_current" | "create_join_link";
+export type HostedRuntimeGroupToolAction =
+  | "read_current"
+  | "create_join_link"
+  | "read_chat_participants"
+  | "share_contact_card";
 
 export const HOSTED_RUNTIME_GROUP_KINDS = [
   "couple",
@@ -802,9 +806,28 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
   requestedVaultShareProjectionKinds?: HostedVaultShareProjectionKind[] | null;
 }
 
+/**
+ * Injected by the hosted runtime from the current wake's Linq delivery
+ * context; never supplied by the model. The web handler asserts the authority
+ * row before touching the chat.
+ */
+export interface HostedRuntimeGroupToolLinqThreadContext {
+  authority: HostedExecutionLinqExternalThreadRouteAuthority;
+  chatId: string;
+}
+
+export const HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX = 32;
+
+export interface HostedRuntimeGroupChatParticipant {
+  handle: string;
+  hasOwnMurph: boolean;
+}
+
 export type HostedRuntimeGroupToolRequest =
   | { action: "read_current" }
-  | { action: "create_join_link"; joinLink?: HostedRuntimeGroupCreateJoinLinkRequest | null };
+  | { action: "create_join_link"; joinLink?: HostedRuntimeGroupCreateJoinLinkRequest | null }
+  | { action: "read_chat_participants"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null }
+  | { action: "share_contact_card"; linqThread?: HostedRuntimeGroupToolLinqThreadContext | null };
 
 export type HostedRuntimeGroupToolResponse =
   | {
@@ -819,6 +842,19 @@ export type HostedRuntimeGroupToolResponse =
       result:
         | { status: "ok"; group: HostedRuntimeGroupSummary; joinUrl: string }
         | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "read_chat_participants";
+      result:
+        | { status: "ok"; participants: HostedRuntimeGroupChatParticipant[] }
+        | { status: "unavailable"; unavailableReason: string; participants: null };
+    }
+  | {
+      action: "share_contact_card";
+      result:
+        | { status: "sent" }
+        | { status: "already_shared" }
+        | { status: "unavailable"; unavailableReason: string };
     };
 
 export type HostedRuntimeFamilyPlanToolAction =

@@ -1,3 +1,4 @@
+import { HOSTED_FAMILY_PLAN_DISPLAY } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedFamilyOwnerSnapshot } from "@/src/lib/hosted-onboarding/family-plan";
 
 import {
@@ -8,6 +9,10 @@ import {
 
 const OWNER_PRIVACY_COPY =
   "You pay for your family's access, but you can't see their Murph conversations, health data, vault, exports, or deletion controls.";
+
+const SEAT_PRICE_LABEL = `$${Math.round(
+  HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat / 100,
+)}/mo`;
 
 export function HostedFamilySettings(props: { ownerSnapshot: HostedFamilyOwnerSnapshot }) {
   const snapshot = props.ownerSnapshot;
@@ -37,6 +42,7 @@ export function HostedFamilySettings(props: { ownerSnapshot: HostedFamilyOwnerSn
         billingActive={snapshot.billingActive}
         invites={invites}
         members={members}
+        seatPrice={SEAT_PRICE_LABEL}
         seats={snapshot.seats}
       />
     </div>

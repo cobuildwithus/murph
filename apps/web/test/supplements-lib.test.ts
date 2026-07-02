@@ -98,6 +98,9 @@ describe("supplements query helpers", () => {
     expect(schemaSql).toContain("UNIQUE (data_origin, data_origin_id)");
     expect(schemaSql).toContain("CREATE EXTENSION IF NOT EXISTS pg_trgm");
     expect(schemaSql).toContain(
+      "CREATE INDEX IF NOT EXISTS supplements_search_english_idx",
+    );
+    expect(schemaSql).toContain(
       "CREATE INDEX IF NOT EXISTS supplements_name_trgm_idx",
     );
     expect(schemaSql).toContain(
@@ -162,7 +165,11 @@ describe("supplements query helpers", () => {
     expect(calls[0]?.values).toEqual([]);
 
     const searchCall = calls[1];
-    expect(searchCall?.text).toContain("websearch_to_tsquery");
+    expect(searchCall?.text).toContain("websearch_to_tsquery('simple', $1)");
+    expect(searchCall?.text).toContain("websearch_to_tsquery('english', $1)");
+    expect(searchCall?.text).toContain(
+      "OR to_tsvector('english', search_text) @@ query.stemmed_tsq",
+    );
     expect(searchCall?.text).toContain("$1::text AS raw_q");
     expect(searchCall?.text).toContain(
       "strict_word_similarity(query.raw_q, name)",
@@ -1182,6 +1189,22 @@ describe("supplements query helpers", () => {
         if (isProductTestsQuery(text)) {
           return { rows: [] as T[] };
         }
+        if (text.includes("brand_candidates AS MATERIALIZED")) {
+          return {
+            rows: [
+              {
+                id: "1001",
+                dataOrigin: "dsld",
+                dataOriginId: "1001",
+                name: "Calcium",
+                brand: "Momentous",
+                upc: null,
+                offMarket: false,
+                label: {},
+              },
+            ] as T[],
+          };
+        }
         return { rows: [] as T[] };
       },
     });
@@ -1192,11 +1215,13 @@ describe("supplements query helpers", () => {
       includeOffMarket: false,
     });
 
-    expect(calls).toHaveLength(2);
+    // brand index + brand-scoped search + contaminant attach for the row
+    expect(calls).toHaveLength(3);
     expect(calls[0]?.text).toContain("GROUP BY brand");
     expect(calls[0]?.text).toContain("data_origin NOT IN");
     expect(calls[0]?.text).toContain("'nyc_dohmh_consumer_products'");
     expect(calls[0]?.text).toContain("'king_county_consumer_products'");
+    expect(calls[2]?.text).toContain("JOIN product_tests");
 
     const sql = calls[1]?.text ?? "";
 
@@ -1254,13 +1279,15 @@ describe("supplements query helpers", () => {
       includeOffMarket: false,
     });
 
+    // Three generic searches: the two unscoped queries, plus the empty
+    // brand-scoped "Life Magnesium" result falling back to the generic path.
     expect(
       calls.filter(
         (call) =>
           call.text.includes("fts_candidates AS MATERIALIZED") &&
           !call.text.includes("brand_candidates AS MATERIALIZED"),
       ),
-    ).toHaveLength(2);
+    ).toHaveLength(3);
     expect(calls.filter((call) =>
       call.text.includes("brand_candidates AS MATERIALIZED"),
     )).toEqual([
@@ -1268,6 +1295,46 @@ describe("supplements query helpers", () => {
         text: expect.stringContaining("brand_candidates AS MATERIALIZED"),
         values: ["Life Magnesium", false, 1, ["Life"], "magnesium"],
       },
+    ]);
+  });
+
+  it("falls back to generic search when a brand scope matches nothing", async () => {
+    const calls: Array<{ text: string; values: unknown[] }> = [];
+    const queries = createSupplementsQueries({
+      async query<T>(text: string, values: unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("GROUP BY brand")) {
+          return { rows: [{ brand: "Magnesium" }] as T[] };
+        }
+        if (isProductTestsQuery(text)) {
+          return { rows: [] as T[] };
+        }
+        return { rows: [] as T[] };
+      },
+    });
+
+    await queries.searchSupplements({
+      q: "Magnesium Glycinate",
+      limit: 5,
+      includeOffMarket: false,
+    });
+
+    const brandScopedCalls = calls.filter((call) =>
+      call.text.includes("brand_candidates AS MATERIALIZED"),
+    );
+    const genericCalls = calls.filter(
+      (call) =>
+        call.text.includes("fts_candidates AS MATERIALIZED") &&
+        !call.text.includes("brand_candidates AS MATERIALIZED"),
+    );
+
+    expect(brandScopedCalls).toHaveLength(1);
+    expect(genericCalls).toHaveLength(1);
+    expect(genericCalls[0]?.values).toEqual([
+      "Magnesium Glycinate",
+      false,
+      5,
+      null,
     ]);
   });
 

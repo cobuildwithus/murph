@@ -8,6 +8,7 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  type HostedRuntimeGroupToolLinqThreadContext,
   type HostedWorkspaceCheckpointReason,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeRedactedObject,
@@ -103,6 +104,9 @@ import type {
   HostedAssistantLinqDeliveryContext,
 } from "./linq-delivery-context.ts";
 import type {
+  HostedRuntimePlatform,
+} from "./platform.ts";
+import type {
   HostedAssistantDeliveryOutcome,
   HostedAssistantWorkspaceRuntimeJobInput,
   HostedDeviceSyncDirtyProcessedPostCheckpointRecord,
@@ -187,6 +191,71 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
 export type HostedWorkspaceRuntimeAssistantPhase = (
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ) => Promise<HostedWorkspaceRunnerAssistantPhaseResult>;
+
+/**
+ * The chat-scoped murph.group actions need the raw Linq chat id and the
+ * thread-route egress authority, which live only in wake-derived delivery
+ * contexts (the web DB stores hashed lookup keys). Inject them here so the
+ * model never supplies its own thread target.
+ */
+export function createHostedGroupToolWithLinqThreadContext(input: {
+  groupToolPort: NonNullable<HostedRuntimePlatform["groupToolPort"]>;
+  linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+}): NonNullable<HostedRuntimePlatform["groupToolPort"]> {
+  return {
+    async request(request) {
+      if (
+        request.action !== "read_chat_participants"
+        && request.action !== "share_contact_card"
+      ) {
+        return await input.groupToolPort.request(request);
+      }
+      const linqThread = resolveHostedGroupToolLinqThreadContext(
+        input.linqDeliveryContexts,
+      );
+      return await input.groupToolPort.request(
+        linqThread ? { action: request.action, linqThread } : { action: request.action },
+      );
+    },
+  };
+}
+
+function resolveHostedGroupToolLinqThreadContext(
+  contexts: readonly HostedAssistantLinqDeliveryContext[],
+): HostedRuntimeGroupToolLinqThreadContext | null {
+  const eligible = new Map<string, HostedRuntimeGroupToolLinqThreadContext>();
+  for (const context of contexts) {
+    const authority = context.routeAuthority;
+    if (
+      !authority
+      || authority.threadId.trim().length === 0
+      || context.service?.trim().toLowerCase() !== "imessage"
+      || context.threadIsDirect !== false
+    ) {
+      continue;
+    }
+    eligible.set(
+      JSON.stringify([
+        authority.channel,
+        authority.containerMemberId,
+        authority.accountLookupKey,
+        authority.threadId,
+      ]),
+      {
+        authority,
+        chatId: authority.threadId,
+      },
+    );
+  }
+
+  // Two distinct route-authorized threads in one turn (for example around a
+  // provider chat re-key) make the target ambiguous; fail closed and let the
+  // web handler answer linq_thread_unavailable.
+  if (eligible.size !== 1) {
+    return null;
+  }
+  return [...eligible.values()][0] ?? null;
+}
 
 function resolveHostedInitialMailboxLinqDeliveryContexts(
   importResult: HostedMailboxImportLoopResult,
@@ -283,7 +352,12 @@ export async function runHostedWorkspaceAssistantPhase(
           ? { familyPlanTool: input.runtime.platform.familyPlanToolPort }
           : {}),
         ...(input.runtime.platform.groupToolPort
-          ? { groupTool: input.runtime.platform.groupToolPort }
+          ? {
+              groupTool: createHostedGroupToolWithLinqThreadContext({
+                groupToolPort: input.runtime.platform.groupToolPort,
+                linqDeliveryContexts: initialLinqDeliveryContexts,
+              }),
+            }
           : {}),
         ...(issueDeviceConnectLink ? { issueDeviceConnectLink } : {}),
         ...(input.materializeWorkspaceArtifacts

@@ -605,6 +605,151 @@ describe("parseHostedRuntimeGroupTool", () => {
       })
     ).toThrow(/not allowed/u);
   });
+
+  const LINQ_THREAD = {
+    authority: {
+      accountLookupKey: "hplk_account",
+      channel: "linq",
+      containerMemberId: "member_container",
+      threadId: "chat_group_1",
+    },
+    chatId: "chat_group_1",
+  };
+
+  it("parses chat-scoped requests with and without the runtime-injected linqThread", () => {
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "read_chat_participants",
+    })).toEqual({
+      action: "read_chat_participants",
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "share_contact_card",
+      linqThread: LINQ_THREAD,
+    })).toEqual({
+      action: "share_contact_card",
+      linqThread: LINQ_THREAD,
+    });
+
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "read_chat_participants",
+        linqThread: { chatId: "chat_group_1" },
+      })
+    ).toThrow(/not allowed|authority/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "share_contact_card",
+        linqThread: {
+          ...LINQ_THREAD,
+          authority: { ...LINQ_THREAD.authority, channel: "email" },
+        },
+      })
+    ).toThrow(/channel/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "share_contact_card",
+        chatId: "chat_group_1",
+      })
+    ).toThrow(/not allowed/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "share_contact_card",
+        linqThread: {
+          ...LINQ_THREAD,
+          authority: { ...LINQ_THREAD.authority, extra: "field" },
+        },
+      })
+    ).toThrow(/not allowed/u);
+  });
+
+  it("parses read_chat_participants responses and caps the participant list", () => {
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_chat_participants",
+      result: {
+        participants: [
+          { handle: "+15550000001", hasOwnMurph: true },
+          { handle: "person@example.com", hasOwnMurph: false },
+        ],
+        status: "ok",
+      },
+    })).toEqual({
+      action: "read_chat_participants",
+      result: {
+        participants: [
+          { handle: "+15550000001", hasOwnMurph: true },
+          { handle: "person@example.com", hasOwnMurph: false },
+        ],
+        status: "ok",
+      },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_chat_participants",
+      result: {
+        participants: null,
+        status: "unavailable",
+        unavailableReason: "linq_thread_unavailable",
+      },
+    })).toEqual({
+      action: "read_chat_participants",
+      result: {
+        participants: null,
+        status: "unavailable",
+        unavailableReason: "linq_thread_unavailable",
+      },
+    });
+
+    expect(() =>
+      parseHostedRuntimeGroupToolResponse({
+        action: "read_chat_participants",
+        result: {
+          participants: Array.from({ length: 33 }, (_, index) => ({
+            handle: `+1555000${index}`,
+            hasOwnMurph: false,
+          })),
+          status: "ok",
+        },
+      })
+    ).toThrow(/at most 32/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolResponse({
+        action: "read_chat_participants",
+        result: {
+          participants: [{ handle: "+15550000001", hasOwnMurph: false, memberId: "m_1" }],
+          status: "ok",
+        },
+      })
+    ).toThrow(/not allowed/u);
+  });
+
+  it("parses share_contact_card responses", () => {
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "share_contact_card",
+      result: { status: "sent" },
+    })).toEqual({
+      action: "share_contact_card",
+      result: { status: "sent" },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "share_contact_card",
+      result: { status: "already_shared" },
+    })).toEqual({
+      action: "share_contact_card",
+      result: { status: "already_shared" },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "share_contact_card",
+      result: { status: "unavailable", unavailableReason: "send_failed" },
+    })).toEqual({
+      action: "share_contact_card",
+      result: { status: "unavailable", unavailableReason: "send_failed" },
+    });
+    expect(() =>
+      parseHostedRuntimeGroupToolResponse({
+        action: "share_contact_card",
+        result: { status: "sent", messageId: "msg_1" },
+      })
+    ).toThrow(/not allowed/u);
+  });
 });
 
 describe("parseHostedRuntimeFamilyPlanTool", () => {
