@@ -16,6 +16,7 @@ import {
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
   recordHostedLinqDeliveryAttemptTx,
+  resolveHostedLinqInviteSignupDispatchEffectIdTx,
 } from "./linq-delivery-store";
 import {
   assertHostedLinqRouteAuthorityMatchesTarget,
@@ -322,7 +323,11 @@ export async function drainHostedLinqSideEffectsDirect(input: {
   sideEffects: readonly HostedLinqMessageSideEffect[];
   signal?: AbortSignal;
 }): Promise<void> {
-  for (const effect of input.sideEffects) {
+  for (const plannedEffect of input.sideEffects) {
+    const effect = await resolveHostedLinqDispatchSideEffect(plannedEffect, input.prisma);
+    if (!effect) {
+      continue;
+    }
     const noticeClaimed = await claimHostedLinqNoticeForSideEffect(effect, input.prisma);
     if (!noticeClaimed) {
       continue;
@@ -350,6 +355,44 @@ export async function drainHostedLinqSideEffectsDirect(input: {
       await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
     }
   }
+}
+
+/**
+ * Signup-link sends run as explicit delivery attempts: the planner emits the
+ * member/day base effect id and dispatch resolves it to the first attempt
+ * whose delivery row is absent or still actionable. A terminally failed
+ * attempt advances the ordinal so the provider idempotency key is fresh and
+ * Linq cannot dedupe the retry against the dead message. Returns null (drops
+ * the send) once the day's attempt budget is exhausted.
+ */
+async function resolveHostedLinqDispatchSideEffect(
+  effect: HostedLinqMessageSideEffect,
+  prisma: HostedLinqTransportPersistenceClient,
+): Promise<HostedLinqMessageSideEffect | null> {
+  if (
+    effect.payload.template !== "invite_signup"
+    && effect.payload.template !== "invite_signup_fallback"
+  ) {
+    return effect;
+  }
+
+  const effectId = await resolveHostedLinqInviteSignupDispatchEffectIdTx({
+    effectId: effect.effectId,
+    prisma,
+  });
+  if (!effectId) {
+    console.warn("Hosted Linq signup-link attempt budget exhausted for the day.", {
+      effectIdSuffix: toHostedOnboardingLogIdSuffix(effect.effectId) ?? "unknown",
+      template: effect.payload.template,
+    });
+    return null;
+  }
+  return effectId === effect.effectId
+    ? effect
+    : {
+        ...effect,
+        effectId,
+      };
 }
 
 async function sendHostedLinqSideEffect(
@@ -628,12 +671,29 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
 }): Promise<void> {
   const template = input.effect.payload.template;
   try {
-    await markHostedLinqDeliveryAcceptedTx({
+    const milestone = await markHostedLinqDeliveryAcceptedTx({
       idempotencyKey: input.effect.effectId,
       linqChatId: input.chatId,
       messageId: input.messageId,
       prisma: input.prisma,
     });
+    // A terminal receipt can beat this milestone write (it only just learned
+    // the provider message id); the milestone replays that receipt and this
+    // applies the same daily-state consequence as live receipt ingestion.
+    if (milestone.reopenOnboardingLink) {
+      await releaseHostedLinqOnboardingLinkNoticeClaim({
+        memberId: milestone.reopenOnboardingLink.memberId,
+        occurredAt: milestone.reopenOnboardingLink.occurredAt,
+        prisma: input.prisma,
+      });
+    }
+    if (milestone.restoreOnboardingLink) {
+      await markHostedLinqOnboardingLinkNoticeSent({
+        memberId: milestone.restoreOnboardingLink.memberId,
+        occurredAt: milestone.restoreOnboardingLink.occurredAt,
+        prisma: input.prisma,
+      });
+    }
   } catch (error) {
     console.warn("Hosted Linq delivery accepted recording failed.", {
       errorName: error instanceof Error ? error.name : "UnknownError",

@@ -953,6 +953,7 @@ function createPrismaStub() {
     hostedLinqDelivery: {
       create: vi.fn().mockResolvedValue({ id: "hld_random" }),
       findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockResolvedValue(undefined),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),

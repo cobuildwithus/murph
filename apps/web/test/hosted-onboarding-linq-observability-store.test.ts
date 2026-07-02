@@ -10,7 +10,12 @@ import {
   markHostedLinqDeliverySkippedTx,
   recordHostedLinqDeliveryAttemptTx,
   recordHostedLinqRuntimeDeliveryOutcomeTx,
+  resolveHostedLinqInviteSignupDispatchEffectIdTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
+import {
+  buildHostedLinqInviteSignupEffectId,
+  parseHostedLinqInviteSignupEffectId,
+} from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
@@ -206,7 +211,7 @@ describe("hosted Linq observability stores", () => {
     });
   });
 
-  it("does not reopen onboarding after delivered or non-onboarding terminal receipts", async () => {
+  it("restores onboarding after a delivered invite receipt and ignores non-onboarding terminal receipts", async () => {
     const fixture = createObservabilityPrismaFixture();
     const effectId = "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
     fixture.hostedLinqDeliveryFindFirst
@@ -251,12 +256,29 @@ describe("hosted Linq observability stores", () => {
       event: delivered,
       prisma: fixture.prisma as never,
     });
+
+    // A delivered invite receipt re-marks the member/day as sent, so daily
+    // state tracks the latest terminal delivery truth even after a reopen.
+    expect(fixture.hostedLinqDailyStateUpdateMany).toHaveBeenCalledTimes(1);
+    expect(fixture.hostedLinqDailyStateUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          onboardingLinkSentAt: expect.any(Date),
+        },
+        where: expect.objectContaining({
+          memberId: "member_123",
+          onboardingLinkSentAt: null,
+        }),
+      }),
+    );
+
     await ingestHostedLinqProviderEventTx({
       event: failedQuota,
       prisma: fixture.prisma as never,
     });
 
-    expect(fixture.hostedLinqDailyStateUpdateMany).not.toHaveBeenCalled();
+    // Non-onboarding terminal receipts never touch onboarding daily state.
+    expect(fixture.hostedLinqDailyStateUpdateMany).toHaveBeenCalledTimes(1);
   });
 
   it("does not regress projections but still claims event-scoped alerts for stale delivery receipts", async () => {
@@ -1709,6 +1731,7 @@ describe("hosted Linq observability stores", () => {
       deliveryId: "hld_skipped_retry",
       phoneNumberLookupKey: null,
       reopenOnboardingLink: null,
+      restoreOnboardingLink: null,
     });
 
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenLastCalledWith(
@@ -1980,12 +2003,181 @@ describe("hosted Linq observability stores", () => {
   });
 });
 
+
+describe("hosted Linq signup-link delivery attempts", () => {
+  const BASE_EFFECT_ID = "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
+  const failedCorrelatedRow = (effectId: string) => ({
+    acceptedAt: new Date("2026-03-26T12:00:00.000Z"),
+    deliveredAt: null,
+    idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(effectId),
+    lastReceiptAt: new Date("2026-03-26T12:01:00.000Z"),
+    messageLookupKey: "hbidx:linq-message:failed",
+    status: "failed",
+  });
+
+  it("round-trips attempt ordinals through the invite effect id", () => {
+    expect(buildHostedLinqInviteSignupEffectId({
+      memberId: "member_123",
+      occurredAt: "2026-03-26T12:34:56.000Z",
+    })).toBe(BASE_EFFECT_ID);
+    const second = buildHostedLinqInviteSignupEffectId({
+      attempt: 2,
+      memberId: "member_123",
+      occurredAt: "2026-03-26T12:34:56.000Z",
+    });
+    expect(second).toBe(`${BASE_EFFECT_ID}:a2`);
+    expect(parseHostedLinqInviteSignupEffectId(second)).toEqual({
+      attempt: 2,
+      dayUtc: "2026-03-26T00:00:00.000Z",
+      memberId: "member_123",
+    });
+    expect(parseHostedLinqInviteSignupEffectId(BASE_EFFECT_ID)).toEqual({
+      attempt: 1,
+      dayUtc: "2026-03-26T00:00:00.000Z",
+      memberId: "member_123",
+    });
+  });
+
+  it("keeps the base attempt while no delivery row blocks it", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    await expect(resolveHostedLinqInviteSignupDispatchEffectIdTx({
+      effectId: BASE_EFFECT_ID,
+      prisma: fixture.prisma as never,
+    })).resolves.toBe(BASE_EFFECT_ID);
+  });
+
+  it("advances to the next attempt after a terminal provider failure", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      failedCorrelatedRow(BASE_EFFECT_ID),
+    ]);
+    await expect(resolveHostedLinqInviteSignupDispatchEffectIdTx({
+      effectId: BASE_EFFECT_ID,
+      prisma: fixture.prisma as never,
+    })).resolves.toBe(`${BASE_EFFECT_ID}:a2`);
+  });
+
+  it("keeps the same attempt after a synchronous send failure", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([{
+      acceptedAt: null,
+      deliveredAt: null,
+      idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(BASE_EFFECT_ID),
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      status: "failed",
+    }]);
+    await expect(resolveHostedLinqInviteSignupDispatchEffectIdTx({
+      effectId: BASE_EFFECT_ID,
+      prisma: fixture.prisma as never,
+    })).resolves.toBe(BASE_EFFECT_ID);
+  });
+
+  it("reuses an in-flight attempt instead of opening a new one", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      failedCorrelatedRow(BASE_EFFECT_ID),
+      {
+        acceptedAt: null,
+        deliveredAt: null,
+        idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(`${BASE_EFFECT_ID}:a2`),
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        status: "attempted",
+      },
+    ]);
+    await expect(resolveHostedLinqInviteSignupDispatchEffectIdTx({
+      effectId: BASE_EFFECT_ID,
+      prisma: fixture.prisma as never,
+    })).resolves.toBe(`${BASE_EFFECT_ID}:a2`);
+  });
+
+  it("stops sending once the day's attempt budget is exhausted", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      failedCorrelatedRow(BASE_EFFECT_ID),
+      failedCorrelatedRow(`${BASE_EFFECT_ID}:a2`),
+      failedCorrelatedRow(`${BASE_EFFECT_ID}:a3`),
+      failedCorrelatedRow(`${BASE_EFFECT_ID}:a4`),
+      failedCorrelatedRow(`${BASE_EFFECT_ID}:a5`),
+    ]);
+    await expect(resolveHostedLinqInviteSignupDispatchEffectIdTx({
+      effectId: BASE_EFFECT_ID,
+      prisma: fixture.prisma as never,
+    })).resolves.toBeNull();
+  });
+
+  it("reopens the onboarding link when the accepted milestone replays a buffered failure receipt", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqProviderEventFindMany.mockResolvedValueOnce([{
+      deliveryStatus: "failed",
+      eventId: "evt_failed_buffered",
+      failureCode: "30007",
+      failureReason: "carrier filtered",
+      phoneNumberLookupKey: null,
+      providerCreatedAt: new Date("2026-03-26T12:02:00.000Z"),
+      service: "sms",
+    }]);
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      sourceRef: BASE_EFFECT_ID,
+      template: "invite_signup",
+    });
+
+    await expect(markHostedLinqDeliveryAcceptedTx({
+      idempotencyKey: BASE_EFFECT_ID,
+      linqChatId: "chat_123",
+      messageId: "provider_msg_123",
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual({
+      reopenOnboardingLink: {
+        memberId: "member_123",
+        occurredAt: "2026-03-26T00:00:00.000Z",
+      },
+      restoreOnboardingLink: null,
+    });
+  });
+
+  it("restores the onboarding link when a delivered receipt advances an invite delivery", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
+      id: "hld_delivered_signup",
+      idempotencyKey: null,
+      phoneNumberLookupKey: null,
+      sourceRef: `${BASE_EFFECT_ID}:a2`,
+      template: "invite_signup",
+    });
+
+    await expect(applyHostedLinqDeliveryReceiptTx({
+      event: requireParsedProviderEvent(buildProviderEvent({
+        data: {
+          message_id: "provider_msg_a2",
+          phone_number: "+15550000000",
+          service: "sms",
+        },
+        eventId: "evt_delivered_a2",
+        eventType: "message.delivered",
+      })),
+      prisma: fixture.prisma as never,
+    })).resolves.toEqual({
+      advanced: true,
+      deliveryId: "hld_delivered_signup",
+      phoneNumberLookupKey: null,
+      reopenOnboardingLink: null,
+      restoreOnboardingLink: {
+        memberId: "member_123",
+        occurredAt: "2026-03-26T00:00:00.000Z",
+      },
+    });
+  });
+});
+
 function createObservabilityPrismaFixture() {
   const executeRaw = vi.fn().mockResolvedValue([]);
   const hostedLinqAlertCreateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqDailyStateUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqDeliveryCreate = vi.fn().mockResolvedValue({ id: "hld_random" });
   const hostedLinqDeliveryFindFirst = vi.fn().mockResolvedValue(null);
+  const hostedLinqDeliveryFindMany = vi.fn().mockResolvedValue([]);
   const hostedLinqDeliveryFindUnique = vi.fn().mockResolvedValue(null);
   const hostedLinqDeliveryUpdate = vi.fn().mockResolvedValue(undefined);
   const hostedLinqDeliveryUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
@@ -2015,6 +2207,7 @@ function createObservabilityPrismaFixture() {
     hostedLinqDelivery: {
       create: hostedLinqDeliveryCreate,
       findFirst: hostedLinqDeliveryFindFirst,
+      findMany: hostedLinqDeliveryFindMany,
       findUnique: hostedLinqDeliveryFindUnique,
       update: hostedLinqDeliveryUpdate,
       updateMany: hostedLinqDeliveryUpdateMany,
@@ -2040,6 +2233,7 @@ function createObservabilityPrismaFixture() {
     hostedLinqDailyStateUpdateMany,
     hostedLinqDeliveryCreate,
     hostedLinqDeliveryFindFirst,
+    hostedLinqDeliveryFindMany,
     hostedLinqDeliveryFindUnique,
     hostedLinqDeliveryUpdate,
     hostedLinqDeliveryUpdateMany,

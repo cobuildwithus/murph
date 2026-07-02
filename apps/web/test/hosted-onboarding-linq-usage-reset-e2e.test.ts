@@ -322,6 +322,7 @@ type UsageResetPrismaFixture = {
   hostedLinqDelivery: {
     create: MockedFunction;
     findFirst: MockedFunction;
+    findMany: MockedFunction;
     findUnique: MockedFunction;
     update: MockedFunction;
     updateMany: MockedFunction;
@@ -772,6 +773,7 @@ function createUsageResetPrismaFixture(input: {
     hostedLinqDelivery: {
       create: vi.fn().mockResolvedValue({ id: "hld_random" }),
       findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockResolvedValue(undefined),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),

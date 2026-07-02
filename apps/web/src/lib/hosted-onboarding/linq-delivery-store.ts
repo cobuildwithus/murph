@@ -15,7 +15,10 @@ import {
   createHostedLinqDeliveryIdempotencyLookupKey,
   createHostedLinqDeliverySourceRefLookupKey,
 } from "./linq-observability-identifiers";
-import { parseHostedLinqInviteSignupEffectId } from "./linq-invite-signup-effect-id";
+import {
+  buildHostedLinqInviteSignupEffectId,
+  parseHostedLinqInviteSignupEffectId,
+} from "./linq-invite-signup-effect-id";
 import {
   compareHostedLinqProviderEventProgress,
   createHostedLinqProviderEventProgress,
@@ -146,6 +149,70 @@ export async function recordHostedLinqDeliveryAttemptTx(input: {
   }
 }
 
+const HOSTED_LINQ_INVITE_SIGNUP_MAX_ATTEMPTS_PER_DAY = 5;
+
+/**
+ * Resolves which signup-link delivery attempt an inbound-driven send should
+ * run as. Attempts are first-class delivery rows: a row whose provider
+ * conclusively failed (terminal receipt) can never be re-dispatched under its
+ * own idempotency key (the provider would dedupe against the dead message),
+ * so the retry advances to the next attempt ordinal. A synchronous send
+ * failure keeps its ordinal: the row is not provider-correlated and the
+ * existing stale-attempt re-claim on the same key stays dedupe-safe against
+ * a provider that may have half-processed it. Returns null when the day's
+ * attempt budget is exhausted.
+ */
+export async function resolveHostedLinqInviteSignupDispatchEffectIdTx(input: {
+  effectId: string;
+  prisma: HostedLinqDeliveryClient;
+}): Promise<string | null> {
+  const parsed = parseHostedLinqInviteSignupEffectId(input.effectId);
+  if (!parsed) {
+    return input.effectId;
+  }
+
+  const candidates = Array.from(
+    { length: HOSTED_LINQ_INVITE_SIGNUP_MAX_ATTEMPTS_PER_DAY },
+    (_, index) => buildHostedLinqInviteSignupEffectId({
+      attempt: index + 1,
+      memberId: parsed.memberId,
+      occurredAt: parsed.dayUtc,
+    }),
+  );
+  const lookupKeys = candidates.map(
+    (candidate) => createHostedLinqDeliveryIdempotencyLookupKey(candidate),
+  );
+  const rows = await input.prisma.hostedLinqDelivery.findMany({
+    where: {
+      idempotencyKey: {
+        in: lookupKeys.filter((key): key is string => key !== null),
+      },
+    },
+    select: {
+      acceptedAt: true,
+      deliveredAt: true,
+      idempotencyKey: true,
+      lastReceiptAt: true,
+      messageLookupKey: true,
+      status: true,
+    },
+  });
+  const rowsByKey = new Map(rows.map((row) => [row.idempotencyKey, row]));
+
+  for (const [index, candidate] of candidates.entries()) {
+    const lookupKey = lookupKeys[index];
+    const row = lookupKey ? rowsByKey.get(lookupKey) : undefined;
+    if (!row) {
+      return candidate;
+    }
+    if (row.status !== "failed" || !isHostedLinqDeliveryProviderCorrelated(row)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
   attemptedAt?: Date;
   idempotencyKey?: string | null;
@@ -272,14 +339,21 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
   linqChatId?: string | null;
   messageId?: string | null;
   prisma: HostedLinqDeliveryClient;
-}): Promise<void> {
+}): Promise<{
+  reopenOnboardingLink: HostedLinqReopenOnboardingLink | null;
+  restoreOnboardingLink: HostedLinqReopenOnboardingLink | null;
+}> {
+  const none = {
+    reopenOnboardingLink: null,
+    restoreOnboardingLink: null,
+  };
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(input.idempotencyKey);
   if (!idempotencyKey) {
-    return;
+    return none;
   }
   const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
   const messageLookupKeyCandidates = createHostedLinqMessageLookupKeyReadCandidates(input.messageId);
-  await runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
+  return runHostedLinqDeliveryStoreTransaction(input.prisma, async (prisma) => {
     const updated = await prisma.hostedLinqDelivery.updateMany({
       where: {
         deliveredAt: null,
@@ -313,15 +387,41 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
       },
     });
     if (updated.count !== 1) {
-      return;
+      return none;
     }
 
-    await applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx({
+    const replay = await applyLatestHostedLinqDeliveryReceiptForAcceptedMessageTx({
       idempotencyKey,
       messageLookupKeyCandidates,
       messageLookupKey,
       prisma,
     });
+    if (!replay.advanced || !replay.receipt) {
+      return none;
+    }
+
+    // A receipt buffered before this milestone wrote the message lookup key
+    // just resolved the delivery terminally; surface the same reopen/restore
+    // signal the live receipt-ingestion path emits so the orchestration layer
+    // keeps daily state consistent (a failed link reopens the member/day).
+    const delivery = await prisma.hostedLinqDelivery.findUnique({
+      where: { idempotencyKey },
+      select: {
+        sourceRef: true,
+        template: true,
+      },
+    });
+    const onboardingLink = resolveHostedLinqReopenOnboardingLink({
+      idempotencyKey: input.idempotencyKey,
+      sourceRef: delivery?.sourceRef ?? null,
+      template: delivery?.template ?? null,
+    });
+    if (!onboardingLink) {
+      return none;
+    }
+    return replay.receipt.deliveryStatus === "failed"
+      ? { reopenOnboardingLink: onboardingLink, restoreOnboardingLink: null }
+      : { reopenOnboardingLink: null, restoreOnboardingLink: onboardingLink };
   });
 }
 
@@ -752,6 +852,7 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
   deliveryId: string | null;
   phoneNumberLookupKey: string | null;
   reopenOnboardingLink: HostedLinqReopenOnboardingLink | null;
+  restoreOnboardingLink: HostedLinqReopenOnboardingLink | null;
 }> {
   if (!input.event.messageLookupKey || !input.event.deliveryStatus) {
     return {
@@ -759,6 +860,7 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
       deliveryId: null,
       phoneNumberLookupKey: null,
       reopenOnboardingLink: null,
+      restoreOnboardingLink: null,
     };
   }
   const delivery = await input.prisma.hostedLinqDelivery.findFirst({
@@ -784,6 +886,7 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
       deliveryId: null,
       phoneNumberLookupKey: null,
       reopenOnboardingLink: null,
+      restoreOnboardingLink: null,
     };
   }
 
@@ -800,6 +903,12 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
     deliveryId: delivery.id,
     phoneNumberLookupKey: delivery.phoneNumberLookupKey,
     reopenOnboardingLink: advanced && input.event.deliveryStatus === "failed"
+      ? resolveHostedLinqReopenOnboardingLink(delivery)
+      : null,
+    // The symmetric signal: a delivered receipt that wins ordering after a
+    // reopen re-marks the member/day as sent, so daily state always tracks
+    // the latest terminal delivery truth.
+    restoreOnboardingLink: advanced && input.event.deliveryStatus === "delivered"
       ? resolveHostedLinqReopenOnboardingLink(delivery)
       : null,
   };

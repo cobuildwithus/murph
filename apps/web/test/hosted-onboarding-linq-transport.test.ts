@@ -62,6 +62,9 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
       claimed: true,
       id: "hld_claimed",
     }),
+    resolveHostedLinqInviteSignupDispatchEffectIdTx: vi.fn(
+      async (input: { effectId: string }) => input.effectId,
+    ),
   };
 });
 

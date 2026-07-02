@@ -409,6 +409,7 @@ type HostedLinqAlertFixture = {
 type HostedLinqDeliveryFixture = {
   create?: MockedFunction;
   findFirst?: MockedFunction;
+  findMany?: MockedFunction;
   findUnique?: MockedFunction;
   update?: MockedFunction;
   updateMany?: MockedFunction;
@@ -5963,6 +5964,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         createMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqDelivery: {
+        findMany: vi.fn().mockResolvedValue([]),
         create: vi.fn().mockResolvedValue({ id: "hld_fallback_receipt_retry" }),
         findFirst: vi.fn()
           .mockResolvedValueOnce({
@@ -7628,6 +7630,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         createMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedLinqDelivery: {
+        findMany: vi.fn().mockResolvedValue([]),
         create: vi.fn().mockResolvedValue({ id: "hld_reopened_retry" }),
         findFirst: vi.fn()
           .mockResolvedValueOnce({
@@ -8384,12 +8387,15 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
       value: {
         create: vi.fn().mockResolvedValue({ id: "hld_random" }),
         findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
         findUnique: vi.fn().mockResolvedValue(null),
         update: vi.fn().mockResolvedValue(undefined),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         upsert: vi.fn().mockResolvedValue({ id: "hld_123" }),
       },
     });
+  } else if (!hostedLinqDelivery.findMany) {
+    hostedLinqDelivery.findMany = vi.fn().mockResolvedValue([]);
   }
 
   if (!hostedLinqAlert?.createMany) {
