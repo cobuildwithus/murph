@@ -140,6 +140,7 @@ assert.deepEqual(Object.keys(schemaCatalog).sort(), [
   "frontmatter-journal-day",
   "frontmatter-protocol",
   "frontmatter-memory",
+  "frontmatter-profile",
   "frontmatter-provider",
   "frontmatter-regimen",
   "frontmatter-recipe",

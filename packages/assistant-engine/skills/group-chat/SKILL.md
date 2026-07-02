@@ -12,7 +12,16 @@ is the product; never crowd it out.
 
 In group runtimes each inbound message includes a `Sender:` handle. Track who
 is talking, who was asked, and who already answered. Refer to people the way
-the group does (names once you know them, never raw phone numbers).
+the group does (names, never raw phone numbers).
+
+Read the roster before you need it: `murph.group` with `action="read_current"`
+returns the group's members with their member id, chat handle, and the share
+kinds each member granted. Members' profile display names arrive as
+`profile-name.v0` shared records keyed by the same member id, so the roster is
+your join between who is texting (`Sender:` handle), who they are (display
+name), and whose shared data is whose (grantor member id). If a member's name
+has not arrived yet, use context gracefully and never guess; their name
+usually lands after their runtime's next wake.
 
 ## The decision ladder
 

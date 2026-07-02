@@ -1,10 +1,20 @@
 import "server-only";
 
 import {
-  HOSTED_VAULT_SHARE_PROJECTION_KINDS,
-  isHostedVaultShareProjectionKind,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   type HostedVaultShareProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
+
+type HostedVaultShareSelectableProjectionKind =
+  (typeof HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS)[number];
+
+function isHostedVaultShareSelectableProjectionKind(
+  value: unknown,
+): value is HostedVaultShareSelectableProjectionKind {
+  return HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.includes(
+    value as HostedVaultShareSelectableProjectionKind,
+  );
+}
 
 export const HOSTED_GROUP_JOIN_POLICY_SCHEMA =
   "murph.hosted-group.join-policy.v1" as const;
@@ -20,7 +30,7 @@ export interface HostedVaultShareProjectionDisplay {
   projectionKind: HostedVaultShareProjectionKind;
 }
 
-const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareProjectionKind, {
+const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectableProjectionKind, {
   description: string;
   label: string;
 }> = {
@@ -56,15 +66,20 @@ export function emptyHostedGroupJoinPolicy(): HostedGroupJoinPolicy {
   };
 }
 
+/**
+ * Join policies hold only individually selectable health projections. The
+ * membership-implied profile-name share is granted directly at join/creation and is
+ * silently dropped here so a stale or crafted request cannot turn it into a checkbox.
+ */
 export function normalizeHostedVaultShareProjectionKinds(
   value: unknown,
 ): HostedVaultShareProjectionKind[] {
   if (!Array.isArray(value)) {
     return [];
   }
-  const seen = new Set<HostedVaultShareProjectionKind>();
+  const seen = new Set<HostedVaultShareSelectableProjectionKind>();
   for (const entry of value) {
-    if (!isHostedVaultShareProjectionKind(entry)) {
+    if (!isHostedVaultShareSelectableProjectionKind(entry)) {
       continue;
     }
     seen.add(entry);
@@ -72,7 +87,7 @@ export function normalizeHostedVaultShareProjectionKinds(
       break;
     }
   }
-  return HOSTED_VAULT_SHARE_PROJECTION_KINDS.filter((kind) => seen.has(kind));
+  return HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.filter((kind) => seen.has(kind));
 }
 
 export function mergeHostedGroupJoinPolicy(input: {
@@ -92,8 +107,10 @@ export function mergeHostedGroupJoinPolicy(input: {
 export function projectHostedVaultShareProjectionDisplays(
   projectionKinds: readonly HostedVaultShareProjectionKind[],
 ): HostedVaultShareProjectionDisplay[] {
-  return normalizeHostedVaultShareProjectionKinds(projectionKinds).map((projectionKind) => ({
-    projectionKind,
-    ...HOSTED_VAULT_SHARE_PROJECTION_DISPLAY[projectionKind],
-  }));
+  return normalizeHostedVaultShareProjectionKinds(projectionKinds)
+    .filter(isHostedVaultShareSelectableProjectionKind)
+    .map((projectionKind) => ({
+      projectionKind,
+      ...HOSTED_VAULT_SHARE_PROJECTION_DISPLAY[projectionKind],
+    }));
 }

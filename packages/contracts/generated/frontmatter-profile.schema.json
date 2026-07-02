@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "docType": {
+      "type": "string",
+      "const": "profile"
+    },
+    "schemaVersion": {
+      "type": "string",
+      "const": "murph.frontmatter.profile.v1"
+    },
+    "displayName": {
+      "default": null,
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f](?:[^\\u0000-\\u001f\\u007f]*[^\\s\\u0000-\\u001f\\u007f])?$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "updatedAt": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "docType",
+    "schemaVersion",
+    "displayName",
+    "updatedAt"
+  ],
+  "additionalProperties": false,
+  "$id": "@murphai/contracts/frontmatter-profile.schema.json",
+  "title": "Murph Profile Frontmatter"
+}

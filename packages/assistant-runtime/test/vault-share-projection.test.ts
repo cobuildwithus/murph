@@ -15,8 +15,14 @@ import {
 import {
   HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
   offerHostedVaultShareProjectionBestEffort,
+  readProjectableProfileName,
   selectProjectableSleepNights,
 } from "../src/hosted-runtime/vault-share-projection.ts";
+import {
+  createEmptyProfileDocument,
+  renderProfileDocument,
+  setProfileDisplayName,
+} from "@murphai/contracts";
 
 const NIGHT = {
   date: "2026-06-09",
@@ -493,5 +499,64 @@ describe("importHostedVaultShareDeliveryWake", () => {
       retryable: false,
       status: "blocked",
     });
+  });
+});
+
+describe("readProjectableProfileName", () => {
+  it("delivers the typed profile display name and the parser accepts it unchanged", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "murph-vault-share-profile-"));
+    await mkdir(join(vaultRoot, "bank"), { recursive: true });
+    await writeFile(
+      join(vaultRoot, "bank", "profile.md"),
+      renderProfileDocument(
+        setProfileDisplayName(createEmptyProfileDocument(new Date("2026-07-01T00:00:00.000Z")), {
+          displayName: "Theo",
+          now: new Date("2026-07-01T00:00:00.000Z"),
+        }),
+      ),
+      "utf8",
+    );
+
+    const records = await readProjectableProfileName(vaultRoot);
+    expect(records).toEqual([
+      {
+        data: { displayName: "Theo" },
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        recordKey: "profile-name",
+      },
+    ]);
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "profile-name.v0",
+        records,
+      })
+    ).not.toThrow();
+
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      readRecords: async () => [],
+      vaultRoot,
+      vaultSharePort: { deliver },
+    });
+    expect(result.outcome).toBe("delivered");
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(deliver).toHaveBeenCalledWith({
+      projectionKind: "profile-name.v0",
+      records,
+    });
+  });
+
+  it("projects nothing when the typed profile document is absent", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "murph-vault-share-noprofile-"));
+    await expect(readProjectableProfileName(vaultRoot)).resolves.toEqual([]);
+
+    const deliver = vi.fn();
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      readRecords: async () => [],
+      vaultRoot,
+      vaultSharePort: { deliver },
+    });
+    expect(result.outcome).toBe("no-projectable-records");
+    expect(deliver).not.toHaveBeenCalled();
   });
 });

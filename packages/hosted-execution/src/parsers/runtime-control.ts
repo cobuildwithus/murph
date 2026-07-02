@@ -93,6 +93,7 @@ import {
   type HostedRuntimeGroupCreateJoinLinkRequest,
   type HostedRuntimeGroupKind,
   type HostedRuntimeGroupToolLinqThreadContext,
+  type HostedRuntimeGroupMemberSummary,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
   type HostedRuntimeProductFeedbackRecordRequest,
@@ -117,7 +118,7 @@ import type {
 } from "../contracts.ts";
 import {
   HOSTED_VAULT_SHARE_PROJECTION_KINDS,
-  isHostedVaultShareProjectionKind,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   type HostedVaultShareProjectionKind,
 } from "../vault-share.ts";
 import {
@@ -825,9 +826,12 @@ function parseHostedRuntimeGroupCreateJoinLinkRequest(
   return {
     displayName,
     kind: readHostedRuntimeGroupKind(record.kind),
+    // The membership-implied profile-name.v0 kind is never requestable through a join
+    // link: the request contract is closed over the individually selectable kinds.
     requestedVaultShareProjectionKinds: parseHostedRuntimeGroupProjectionKindArray(
       record.requestedVaultShareProjectionKinds,
       "Hosted runtime group tool create_join_link requestedVaultShareProjectionKinds",
+      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
     ),
   };
 }
@@ -964,30 +968,40 @@ function parseHostedRuntimeGroupChatParticipants(
   });
 }
 
-function parseHostedRuntimeGroupProjectionKindArray(
+function parseHostedRuntimeGroupProjectionKindArray<
+  K extends HostedVaultShareProjectionKind,
+>(
   value: unknown,
   label: string,
-): HostedVaultShareProjectionKind[] | null {
+  allowedKinds: readonly K[],
+): K[] | null {
   if (value === undefined || value === null) return null;
   const requested = requireArray(value, label);
   if (requested.length > 8) {
     throw new TypeError(`${label} must contain at most 8 entries.`);
   }
-  const seen = new Set<HostedVaultShareProjectionKind>();
+  const seen = new Set<K>();
   for (const entry of requested) {
-    if (!isHostedVaultShareProjectionKind(entry)) {
+    if (!isAllowedProjectionKind(allowedKinds, entry)) {
       throw new TypeError(`${label} contains an unsupported projection kind.`);
     }
     seen.add(entry);
   }
-  return HOSTED_VAULT_SHARE_PROJECTION_KINDS.filter((kind) => seen.has(kind));
+  return allowedKinds.filter((kind) => seen.has(kind));
+}
+
+function isAllowedProjectionKind<K extends HostedVaultShareProjectionKind>(
+  allowedKinds: readonly K[],
+  value: unknown,
+): value is K {
+  return (allowedKinds as readonly unknown[]).includes(value);
 }
 
 function parseHostedRuntimeGroupSummary(value: unknown) {
   const record = requireObject(value, "Hosted runtime group summary");
   assertAllowedObjectKeys(
     record,
-    new Set(["displayName", "id", "kind", "memberCount", "requestedVaultShareProjectionKinds", "status"]),
+    new Set(["displayName", "id", "kind", "memberCount", "members", "requestedVaultShareProjectionKinds", "status"]),
     "Hosted runtime group summary",
   );
   return {
@@ -995,12 +1009,49 @@ function parseHostedRuntimeGroupSummary(value: unknown) {
     id: requireString(record.id, "Hosted runtime group summary id"),
     kind: requireString(record.kind, "Hosted runtime group summary kind"),
     memberCount: requireNumber(record.memberCount, "Hosted runtime group summary memberCount"),
+    members: parseHostedRuntimeGroupMemberSummaries(record.members),
     requestedVaultShareProjectionKinds: parseHostedRuntimeGroupProjectionKindArray(
       record.requestedVaultShareProjectionKinds,
       "Hosted runtime group summary requestedVaultShareProjectionKinds",
+      HOSTED_VAULT_SHARE_PROJECTION_KINDS,
     ) ?? [],
     status: requireString(record.status, "Hosted runtime group summary status"),
   };
+}
+
+const HOSTED_RUNTIME_GROUP_MEMBER_SUMMARY_MAX_ENTRIES = 200;
+
+// Optional for deploy skew: a runner updated before web tolerates summaries
+// without a roster; the reverse order is rejected by the allowed-keys check
+// above, so Cloudflare deploys before web when this shape widens.
+function parseHostedRuntimeGroupMemberSummaries(
+  value: unknown,
+): HostedRuntimeGroupMemberSummary[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  const entries = requireArray(value, "Hosted runtime group summary members");
+  if (entries.length > HOSTED_RUNTIME_GROUP_MEMBER_SUMMARY_MAX_ENTRIES) {
+    throw new TypeError("Hosted runtime group summary members has too many entries.");
+  }
+  return entries.map((entry) => {
+    const record = requireObject(entry, "Hosted runtime group summary member");
+    assertAllowedObjectKeys(
+      record,
+      new Set(["grantedVaultShareProjectionKinds", "handle", "memberId", "role"]),
+      "Hosted runtime group summary member",
+    );
+    return {
+      grantedVaultShareProjectionKinds: parseHostedRuntimeGroupProjectionKindArray(
+        record.grantedVaultShareProjectionKinds,
+        "Hosted runtime group summary member grantedVaultShareProjectionKinds",
+        HOSTED_VAULT_SHARE_PROJECTION_KINDS,
+      ) ?? [],
+      handle: readNullableString(record.handle, "Hosted runtime group summary member handle"),
+      memberId: requireString(record.memberId, "Hosted runtime group summary member memberId"),
+      role: requireString(record.role, "Hosted runtime group summary member role"),
+    };
+  });
 }
 
 export function parseHostedRuntimeFamilyPlanToolRequest(

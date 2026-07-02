@@ -61,7 +61,12 @@ const TX = {
 };
 
 function shareAuthorityRow(
-  share: typeof SHARE,
+  share: {
+    destinationMemberId: string;
+    grantorMemberId: string;
+    id: string;
+    projectionKind: string;
+  },
   status: "granted" | "revoked" = "granted",
 ): {
   destinationMemberId: string;
@@ -193,6 +198,41 @@ describe("deliverHostedVaultShareRecords", () => {
     expect(eventIds[0]).toBe(eventIds[1]);
     expect(eventIds[2]).not.toBe(eventIds[0]);
     expect(eventIds[2]).toMatch(/^vault-share:share_1:2026-06-07:[A-Za-z0-9_-]{32}$/u);
+  });
+
+  it("derives profile-name revision identity from content alone, ignoring occurredAt drift", async () => {
+    // Current-state kind: the same unchanged name re-offered with a different
+    // occurredAt must dedupe instead of minting a fresh mailbox dedupe key, while a
+    // changed name still appends a new revision.
+    const prisma = fakePrisma([
+      shareAuthorityRow({ ...SHARE, projectionKind: "profile-name.v0" }, "granted"),
+    ]);
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
+      inserted: true,
+      item: { id: "mailbox_item_1" },
+    });
+    const record = (occurredAt: string, displayName: string) => ({
+      data: { displayName },
+      occurredAt,
+      recordKey: "profile-name",
+    });
+
+    await deliverHostedVaultShareRecords({
+      prisma,
+      records: [
+        record("2026-01-01T00:00:00.000Z", "Theo"),
+        record("2026-03-15T12:34:56.000Z", "Theo"),
+        record("2026-03-15T12:34:56.000Z", "Odin"),
+      ],
+      share: { ...SHARE, projectionKind: "profile-name.v0" },
+    });
+
+    const eventIds = mocks.appendHostedMailboxEnvelopeTx.mock.calls.map(
+      (call) => call[0].envelope.eventId,
+    );
+    expect(eventIds[0]).toBe(eventIds[1]);
+    expect(eventIds[2]).not.toBe(eventIds[0]);
+    expect(eventIds[0]).toMatch(/^vault-share:share_1:profile-name:[A-Za-z0-9_-]{32}$/u);
   });
 
   it("reports a null item id when every record is a dedupe duplicate", async () => {

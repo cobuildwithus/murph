@@ -102,6 +102,7 @@ import {
 import { registerIntakeCommands } from './commands/intake.js'
 import { registerJournalCommands } from './commands/journal.js'
 import { registerMemoryCommands } from './commands/memory.js'
+import { registerProfileCommands } from './commands/profile.js'
 import {
   medicationHistoryResultSchema,
   registerMedicationCommands,
@@ -839,6 +840,14 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['memory'],
     register({ cli }) {
       registerMemoryCommands(cli)
+    },
+  },
+  {
+    id: 'profile',
+    bindingMode: 'none',
+    rootCommandNames: ['profile'],
+    register({ cli }) {
+      registerProfileCommands(cli)
     },
   },
   {

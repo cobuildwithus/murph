@@ -22,8 +22,43 @@ import {
  * schema and a projector, never widening the envelope.
  */
 export const HOSTED_VAULT_SHARE_PROJECTION_KINDS = [
+  "profile-name.v0",
   "sleep-times.v0",
 ] as const;
+
+/**
+ * Kinds members may individually select on a group join page. profile-name.v0 is
+ * excluded: it is granted implicitly with group membership (introducing yourself by
+ * name is what joining means), never requested as an optional health permission.
+ */
+export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS = [
+  "sleep-times.v0",
+] as const satisfies readonly HostedVaultShareProjectionKind[];
+
+export type HostedVaultShareSelectableProjectionKind =
+  (typeof HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS)[number];
+
+/**
+ * Kinds whose records are current-state facts rather than time-series entries: one
+ * parser-enforced fixed recordKey per grantor, so a delivery replaces the previous fact
+ * instead of extending a history. Two delivery-policy consequences, both keyed here so
+ * they cannot drift apart: the server-side recency age bound does not apply (a fact set
+ * long ago is still the current fact at a member's first group join), and the delivery
+ * revision identity must hash the content alone — occurredAt is grantor-runtime-controlled
+ * metadata, and hashing it would let drifted timestamps mint unbounded mailbox dedupe keys
+ * for the same unchanged fact.
+ */
+export const HOSTED_VAULT_SHARE_CURRENT_STATE_PROJECTION_KINDS = [
+  "profile-name.v0",
+] as const satisfies readonly HostedVaultShareProjectionKind[];
+
+export function isHostedVaultShareCurrentStateProjectionKind(
+  kind: HostedVaultShareProjectionKind,
+): boolean {
+  const kinds: readonly HostedVaultShareProjectionKind[] =
+    HOSTED_VAULT_SHARE_CURRENT_STATE_PROJECTION_KINDS;
+  return kinds.includes(kind);
+}
 
 export type HostedVaultShareProjectionKind =
   (typeof HOSTED_VAULT_SHARE_PROJECTION_KINDS)[number];
@@ -45,7 +80,13 @@ export interface HostedVaultShareSleepTimesData {
   sleepStartAt: string;
 }
 
-export type HostedVaultShareDeliveryRecordData = HostedVaultShareSleepTimesData;
+export interface HostedVaultShareProfileNameData {
+  displayName: string;
+}
+
+export type HostedVaultShareDeliveryRecordData =
+  | HostedVaultShareProfileNameData
+  | HostedVaultShareSleepTimesData;
 
 export interface HostedVaultShareDeliveryRecord {
   data: HostedVaultShareDeliveryRecordData;
@@ -157,9 +198,46 @@ function parseHostedVaultShareDeliveryRecordData(
   },
 ): HostedVaultShareDeliveryRecordData {
   switch (context.projectionKind) {
+    case "profile-name.v0":
+      return parseHostedVaultShareProfileNameData(value, context);
     case "sleep-times.v0":
       return parseHostedVaultShareSleepTimesData(value, context);
   }
+}
+
+export const HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY = "profile-name";
+export const HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH = 120;
+
+function parseHostedVaultShareProfileNameData(
+  value: unknown,
+  context: { recordKey: string },
+): HostedVaultShareProfileNameData {
+  const data = requireObject(value, "Vault share profile-name data");
+
+  // One logical record per grantor: the fixed recordKey makes every delivery a
+  // replacement of the previous name instead of an accumulating history.
+  if (context.recordKey !== HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY) {
+    throw new TypeError(
+      'Vault share profile-name recordKey must be "profile-name".',
+    );
+  }
+
+  const displayName = requireString(
+    data.displayName,
+    "Vault share profile-name data displayName",
+  ).trim();
+
+  if (
+    displayName.length === 0
+    || displayName.length > HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH
+    || /[\u0000-\u001f\u007f]/u.test(displayName)
+  ) {
+    throw new TypeError(
+      "Vault share profile-name displayName must be 1-120 characters with no control characters.",
+    );
+  }
+
+  return { displayName };
 }
 
 const HOSTED_VAULT_SHARE_SLEEP_MAX_WINDOW_MS = 24 * 60 * 60 * 1000;

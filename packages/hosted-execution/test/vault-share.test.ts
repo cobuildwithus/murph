@@ -325,3 +325,60 @@ describe("vault-share contracts", () => {
     ).toThrow(/revoke payload schema/u);
   });
 });
+
+
+describe("profile-name.v0 delivery records", () => {
+  it("parses a valid profile-name record", () => {
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "profile-name.v0",
+      records: [
+        {
+          data: { displayName: "Theo" },
+          occurredAt: "2026-07-01T00:00:00.000Z",
+          recordKey: "profile-name",
+        },
+      ],
+    })).toEqual({
+      projectionKind: "profile-name.v0",
+      records: [
+        {
+          data: { displayName: "Theo" },
+          occurredAt: "2026-07-01T00:00:00.000Z",
+          recordKey: "profile-name",
+        },
+      ],
+    });
+  });
+
+  it("rejects profile-name records with a drifting record key", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "profile-name.v0",
+        records: [
+          {
+            data: { displayName: "Theo" },
+            occurredAt: "2026-07-01T00:00:00.000Z",
+            recordKey: "profile-name-2",
+          },
+        ],
+      })
+    ).toThrow(/recordKey must be "profile-name"/u);
+  });
+
+  it("rejects blank, oversized, and control-character display names", () => {
+    for (const displayName of ["", "  ", "a".repeat(121), "The\u0000o"]) {
+      expect(() =>
+        parseHostedVaultShareDeliverRequest({
+          projectionKind: "profile-name.v0",
+          records: [
+            {
+              data: { displayName },
+              occurredAt: "2026-07-01T00:00:00.000Z",
+              recordKey: "profile-name",
+            },
+          ],
+        })
+      ).toThrow(/displayName/u);
+    }
+  });
+});

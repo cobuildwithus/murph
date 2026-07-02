@@ -48,6 +48,7 @@
         "meal_add",
         "export_pack",
         "preferences_update",
+        "profile_update",
         "provider_delete",
         "provider_upsert",
         "raw_copy",
