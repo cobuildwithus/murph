@@ -401,10 +401,10 @@ test("hosted provider cleanup plan queues terminal Linq cleanup as checkpoint wo
 
     assert.deepEqual(plan, {
       checkpoint: {
-        nextWakeAt: null,
+        nextWakeAt: "2026-07-01T00:12:01.000Z",
       },
       deferred: false,
-      due: true,
+      due: false,
       requiresCheckpoint: true,
       stateQueued: true,
     });

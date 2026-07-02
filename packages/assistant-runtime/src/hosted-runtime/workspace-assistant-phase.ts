@@ -3341,10 +3341,15 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
   const providerCleanupDrainDeferred =
     !input.providerCleanupPlan.deferred
     && input.shouldYieldBackgroundDrain?.() === true;
+  // Hot drains are reserved for cleanup state already due from an existing
+  // durable checkpoint; ids queued in this pass wait for their scheduled wake
+  // so provider deletion never precedes the durable snapshot.
+  const providerCleanupHotDrainAllowed =
+    !input.providerCleanupPlan.deferred && input.providerCleanupPlan.due;
   let providerCleanupNextWakeAt: string | null;
   let providerCleanupRedactedStatus: HostedRuntimeRedactedJson = {};
 
-  if (!input.providerCleanupPlan.deferred && !providerCleanupDrainDeferred) {
+  if (providerCleanupHotDrainAllowed && !providerCleanupDrainDeferred) {
     const providerCleanup = await drainHostedProviderCleanupAfterCommit({
       assistantDeliveryOutcomes: input.assistantDeliveryOutcomes,
       assertLiveness: async () => {

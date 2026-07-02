@@ -224,9 +224,17 @@ export async function prepareHostedProviderCleanupPlan(input: {
   const terminalCleanupQueued =
     recovery.queuedIds || recovery.completedNow || pendingLinqMessageIds.length > 0;
   if (pendingLinqMessageIds.length > 0) {
+    // Current-pass ids are never due in the same invocation: provider-visible
+    // deletion may only drain after the recording pass has durably
+    // checkpointed, so schedule them past the idle horizon like the deferred
+    // path does. Hot drains are reserved for state already due from an
+    // existing durable checkpoint.
     await recordHostedProviderCleanupBeforeCommit({
       checkpoint: {
-        nextWakeAt: null,
+        nextWakeAt: resolveHostedProviderCleanupFirstDeferredWakeAt({
+          idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+          nowMs: input.nowMs,
+        }),
       },
       linqMessageIds: pendingLinqMessageIds,
       vaultRoot: input.vaultRoot,
@@ -234,10 +242,9 @@ export async function prepareHostedProviderCleanupPlan(input: {
   }
 
   const checkpoint =
-    input.initialCheckpoint
-    ?? (terminalCleanupQueued
-      ? { nextWakeAt: null }
-      : await readHostedProviderCleanupCheckpoint(input.vaultRoot));
+    terminalCleanupQueued || !input.initialCheckpoint
+      ? await readHostedProviderCleanupCheckpoint(input.vaultRoot)
+      : input.initialCheckpoint;
   return buildHostedProviderCleanupPlan({
     checkpoint,
     deferred: false,

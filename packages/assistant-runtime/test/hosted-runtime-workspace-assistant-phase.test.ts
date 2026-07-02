@@ -402,9 +402,14 @@ beforeEach(() => {
     const stateQueued = pendingLinqMessageIds.length > 0;
     let checkpoint = input.initialCheckpoint ?? null;
     if (stateQueued) {
+      // Mirrors the real plan: current-pass ids are scheduled past the idle
+      // horizon and are never due in the same invocation.
       checkpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
         checkpoint: {
-          nextWakeAt: null,
+          nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
+            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            nowMs: input.nowMs,
+          }),
         },
         linqMessageIds: pendingLinqMessageIds,
         vaultRoot: input.vaultRoot,
@@ -5025,13 +5030,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         statusSummary: "sent:1",
       }),
     }));
-    expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupAfterDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        assistantDeliveryOutcomes: [expect.objectContaining({
+        outcomes: [expect.objectContaining({
           deliveryChannel: "telegram",
           providerMessageId: "provider_synthetic",
         })],
-        env: {},
         vaultRoot: "/tmp/murph-vault",
       }),
     );
@@ -5704,11 +5709,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledTimes(1);
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
-      nextWakeAt: null,
+      nextWakeAt: "2026-05-08T16:05:08.000Z",
       redactedStatus: expect.objectContaining({
-        hostedAssistantNextWakeAt: null,
+        hostedAssistantNextWakeAt: "2026-05-08T16:05:08.000Z",
         hostedOutboxDeliverySent: 1,
-        nextWakeAt: null,
+        nextWakeAt: "2026-05-08T16:05:08.000Z",
       }),
     }));
   });
@@ -9528,7 +9533,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
-      nextWakeAt: null,
+      nextWakeAt: expect.any(String),
       redactedStatus: expect.objectContaining({
         hostedOutboxDeliveryAttempted: 1,
         hostedOutboxDeliverySent: 1,
@@ -9541,9 +9546,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "mailbox.system_processed",
       "outbox.delivery_finished",
     ]);
-    expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupAfterDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        assistantDeliveryOutcomes: [expect.objectContaining({
+        outcomes: [expect.objectContaining({
           deliveryChannel: "linq",
           providerMessageId: "provider_synthetic",
         })],
@@ -9552,9 +9558,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
     const deliveryDrainInput = mocks.drainHostedPreparedAssistantDeliveries
       .mock.calls[0]?.[0];
-    const cleanupDrainInput = mocks.drainHostedProviderCleanupAfterCommit.mock.calls[0]?.[0];
     await expect(deliveryDrainInput.assertLiveness()).resolves.toBeUndefined();
-    await expect(cleanupDrainInput.assertLiveness()).resolves.toBeUndefined();
   });
 
   it("flushes member-channel updates before auto-reply delivery dispatch", async () => {
@@ -10089,9 +10093,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
       nextWakeAt: providerCleanupWakeAt,
     });
-    mocks.resolveHostedProviderCleanupScheduledWakeAt
-      .mockResolvedValueOnce(providerCleanupWakeAt)
-      .mockResolvedValueOnce(null);
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      providerCleanupWakeAt,
+    );
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationCurrentTurnDeliveryIntentIds: [],
       assistantAutomationProgressed: true,
@@ -10148,23 +10152,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const postCheckpoint = await result.afterCheckpoint?.();
 
-    expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
+    // Not-yet-due cleanup state must wait for its scheduled wake; the
+    // background delivery pass records outbound ids instead of draining hot.
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupAfterDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        checkpoint: {
-          nextWakeAt: providerCleanupWakeAt,
-        },
         vaultRoot: "/tmp/murph-vault",
       }),
     );
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
-      nextWakeAt: null,
-      redactedStatus: expect.objectContaining({
-        hostedProviderCleanupAttemptedLinqItems: 1,
-        hostedProviderCleanupDeletedLinqItems: 1,
-        hostedProviderCleanupFailedLinqItems: 0,
-        nextWakeAt: null,
-      }),
+      nextWakeAt: providerCleanupWakeAt,
     }));
   });
 
@@ -10228,7 +10226,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
     expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
       checkpoint: {
-        nextWakeAt: null,
+        nextWakeAt: expect.any(String),
       },
       linqMessageIds: ["linq_msg_terminal_cleanup"],
       vaultRoot: "/tmp/murph-vault",
@@ -10236,21 +10234,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     const postCheckpoint = await result.afterCheckpoint?.();
 
-    expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        assistantDeliveryOutcomes: [],
-        checkpoint: {
-          nextWakeAt: null,
-        },
-        vaultRoot: "/tmp/murph-vault",
-      }),
-    );
+    // Round-47 validation: current-pass terminal cleanup records durable
+    // state and requests a checkpoint, but the same invocation never drains
+    // provider-visible deletion; the scheduled wake after the durable
+    // checkpoint does.
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "provider_cleanup",
-      redactedStatus: expect.objectContaining({
-        hostedProviderCleanupAttemptedLinqItems: 1,
-        hostedProviderCleanupDeletedLinqItems: 1,
-      }),
     }));
   });
 });
