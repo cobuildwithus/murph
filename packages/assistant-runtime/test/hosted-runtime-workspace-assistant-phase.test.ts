@@ -343,59 +343,84 @@ beforeEach(() => {
     terminalCleanupMessageIds?: readonly string[] | null;
     vaultRoot: string;
   }) => {
-    let checkpoint = input.initialCheckpoint ?? null;
     const pendingLinqMessageIds = [...new Set(input.terminalCleanupMessageIds ?? [])];
-    if (input.deferred && pendingLinqMessageIds.length > 0) {
-      const queuedCheckpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
-        checkpoint: {
-          nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
-            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
-            nowMs: input.nowMs,
-          }),
-        },
-        linqMessageIds: pendingLinqMessageIds,
-        vaultRoot: input.vaultRoot,
-      });
-      return {
-        checkpoint: queuedCheckpoint,
-        deferred: true,
-        due: false,
-        requiresCheckpoint: true,
-        stateQueued: true,
-        wakeAt: queuedCheckpoint?.nextWakeAt ?? null,
-      };
-    }
-    const stateQueued = !input.deferred && pendingLinqMessageIds.length > 0;
-    if (!input.deferred) {
-      if (stateQueued) {
-        checkpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
+    if (input.deferred) {
+      if (pendingLinqMessageIds.length > 0) {
+        const queuedCheckpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
           checkpoint: {
-            nextWakeAt: null,
+            nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
+              idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+              nowMs: input.nowMs,
+            }),
           },
           linqMessageIds: pendingLinqMessageIds,
           vaultRoot: input.vaultRoot,
         });
-      } else {
-        checkpoint ??= await mocks.readHostedProviderCleanupCheckpoint(input.vaultRoot);
+        return {
+          checkpoint: queuedCheckpoint,
+          deferred: true,
+          due: false,
+          requiresCheckpoint: true,
+          stateQueued: true,
+        };
       }
+      const storedCheckpoint =
+        await mocks.readHostedProviderCleanupCheckpoint(input.vaultRoot);
+      const storedWakeMs = Date.parse(storedCheckpoint?.nextWakeAt ?? "");
+      if (
+        storedCheckpoint
+        && (!Number.isFinite(storedWakeMs) || storedWakeMs <= input.nowMs)
+      ) {
+        // Mirrors the real plan: a due/invalid stored checkpoint re-arms
+        // durably into hosted-provider-cleanup.json.
+        const rearmedCheckpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
+          checkpoint: {
+            nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
+              idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+              nowMs: input.nowMs,
+            }),
+          },
+          linqMessageIds: [],
+          vaultRoot: input.vaultRoot,
+        });
+        return {
+          checkpoint: rearmedCheckpoint,
+          deferred: true,
+          due: false,
+          requiresCheckpoint: true,
+          stateQueued: true,
+        };
+      }
+      return {
+        checkpoint: input.initialCheckpoint ?? null,
+        deferred: true,
+        due: false,
+        requiresCheckpoint: false,
+        stateQueued: false,
+      };
     }
-    const wakeAt = await mocks.resolveHostedProviderCleanupScheduledWakeAt({
-      deferDueOrInvalid: input.deferred,
-      idleCheckpointDelayMs: input.idleCheckpointDelayMs,
-      nowMs: input.nowMs,
-      vaultRoot: input.vaultRoot,
-    });
+    const stateQueued = pendingLinqMessageIds.length > 0;
+    let checkpoint = input.initialCheckpoint ?? null;
+    if (stateQueued) {
+      checkpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
+        checkpoint: {
+          nextWakeAt: null,
+        },
+        linqMessageIds: pendingLinqMessageIds,
+        vaultRoot: input.vaultRoot,
+      });
+    } else {
+      checkpoint ??= await mocks.readHostedProviderCleanupCheckpoint(input.vaultRoot);
+    }
     const wakeMs = Date.parse(checkpoint?.nextWakeAt ?? "");
-    const due = !input.deferred
-      && checkpoint !== null
+    const due = checkpoint !== null
       && (!Number.isFinite(wakeMs) || wakeMs <= input.nowMs);
     return {
       checkpoint,
-      deferred: input.deferred,
+      deferred: false,
       due,
       requiresCheckpoint: due || stateQueued,
       stateQueued,
-      wakeAt,
     };
   });
   mocks.applyMurphManagedAutomations.mockResolvedValue({
@@ -450,9 +475,26 @@ beforeEach(() => {
       nextWakeAt,
     };
   });
-  mocks.recordHostedProviderCleanupBeforeCommit.mockImplementation(async (input) =>
-    input.checkpoint
-  );
+  // The mocked owner state: checkpoints recorded this test are what the
+  // scheduled-wake read resolves, mirroring hosted-provider-cleanup.json as
+  // the single owner of the next cleanup wake.
+  const recordedProviderCleanupCheckpoints = new Map<
+    string,
+    { nextWakeAt?: string | null } | null
+  >();
+  mocks.recordHostedProviderCleanupBeforeCommit.mockImplementation(async (input) => {
+    recordedProviderCleanupCheckpoints.set(input.vaultRoot, input.checkpoint ?? null);
+    return input.checkpoint;
+  });
+  mocks.resolveHostedProviderCleanupScheduledWakeAt.mockImplementation(async (input: {
+    nowMs: number;
+    vaultRoot: string;
+  }) => {
+    const recorded = recordedProviderCleanupCheckpoints.get(input.vaultRoot) ?? null;
+    const nextWakeAt = recorded?.nextWakeAt ?? null;
+    const nextWakeMs = Date.parse(nextWakeAt ?? "");
+    return Number.isFinite(nextWakeMs) && nextWakeMs > input.nowMs ? nextWakeAt : null;
+  });
   mocks.resolveHostedProviderCleanupFirstDeferredWakeAt.mockImplementation((input = {}) => {
     const record = input as { nowMs?: number | null };
     const nowMs = Number.isFinite(record.nowMs)
@@ -477,7 +519,6 @@ beforeEach(() => {
     }
     return nextWakeAt;
   });
-  mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(null);
   mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValue({
     failed: 0,
     nextWakeAt: null,
@@ -2260,13 +2301,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("keeps the recorded provider-cleanup wake when fresh managed automation seeding replaces the phase wake", async () => {
     // Regression: a fresh Linq inbound records deferred provider cleanup into
-    // hosted-provider-cleanup.json and schedules the plan's wake on the phase
-    // result. The managed-automation post-checkpoint result replaces that
-    // wake in the workspace runner, so it must include the plan's cleanup
+    // hosted-provider-cleanup.json, the single owner of the next cleanup
+    // wake. The managed-automation post-checkpoint result replaces the phase
+    // wake in the workspace runner, so it must include the owner's scheduled
     // wake instead of stranding the deletion until the next unrelated cron
-    // wake. The mocked first-deferred wake is now + 5 minutes.
+    // wake.
     const cronNextWakeAt = "2026-04-27T17:00:00.000Z";
     const providerCleanupWakeAt = "2026-04-27T00:05:00.000Z";
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      providerCleanupWakeAt,
+    );
     const defaultRoute = {
       channel: "linq",
       deliverySource: null,
@@ -2329,10 +2373,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("keeps the re-armed provider-cleanup wake when the persisted checkpoint is stale", async () => {
     // Regression: prepareHostedProviderCleanupPlan's deferred branch re-arms
-    // a null/stale persisted checkpoint into an effective future wake in
-    // memory only (hosted-provider-cleanup.json is not rewritten). The
-    // managed-automation post-checkpoint result must carry the plan's
-    // re-armed wake rather than re-reading the stale owner file.
+    // a null/stale persisted checkpoint by writing the deferred wake back
+    // into hosted-provider-cleanup.json. The managed-automation
+    // post-checkpoint result must carry that durably re-armed owner wake.
     const cronNextWakeAt = "2026-04-27T17:00:00.000Z";
     const reArmedProviderCleanupWakeAt = "2026-04-27T00:05:00.000Z";
     const defaultRoute = {
@@ -2374,7 +2417,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue({
       nextWakeAt: null,
     });
-    // The deferred plan re-arms the stale checkpoint in memory only.
+    // After the deferred plan re-arms the stale checkpoint durably, the
+    // owner file resolves to the re-armed wake.
     mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
       reArmedProviderCleanupWakeAt,
     );
@@ -2489,8 +2533,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       progressed: true,
     }));
 
-    const providerCleanupWakeReadsBeforePostCheckpoint =
-      mocks.resolveHostedProviderCleanupScheduledWakeAt.mock.calls.length;
     const postCheckpoint = await result.afterCheckpoint?.();
 
     expect(postCheckpoint).toEqual(expect.objectContaining({
@@ -2501,10 +2543,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         murphManagedAutomationUpdated: 0,
       }),
     }));
+    // A status-only post-checkpoint result never manufactures a wake, even
+    // when the cleanup owner has one scheduled; the phase result already
+    // carries the owner wake and the runner keeps it.
     expect(postCheckpoint).not.toHaveProperty("nextWakeAt");
-    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledTimes(
-      providerCleanupWakeReadsBeforePostCheckpoint,
-    );
   });
 
   it("keeps a managed automation retry wake after a fresh-input checkpoint failure", async () => {
@@ -2803,10 +2845,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
-    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith({
-      deferDueOrInvalid: true,
-      idleCheckpointDelayMs: undefined,
-      nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
+    // The due checkpoint re-arms durably into the cleanup owner state.
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: "2026-04-27T00:14:00.000Z",
+      },
+      linqMessageIds: [],
       vaultRoot: "/tmp/murph-vault",
     });
     expect(result).toEqual(expect.objectContaining({
@@ -2873,10 +2917,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       shouldYieldBackgroundMaintenance,
     }));
 
-    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith({
-      deferDueOrInvalid: true,
-      idleCheckpointDelayMs: undefined,
-      nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
+    // The due checkpoint re-arms durably into the cleanup owner state.
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: "2026-04-27T00:14:00.000Z",
+      },
+      linqMessageIds: [],
       vaultRoot: "/tmp/murph-vault",
     });
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
@@ -2899,12 +2945,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       checkpointReason: "system_mailbox_receipt",
       nextWakeAt: "2026-04-27T00:14:00.000Z",
     }));
-    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith({
-      deferDueOrInvalid: true,
-      idleCheckpointDelayMs: undefined,
-      nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
-      vaultRoot: "/tmp/murph-vault",
-    });
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
   });
 
@@ -3635,14 +3675,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("defers due provider cleanup when foreground input appears before post-checkpoint cleanup", async () => {
     let shouldYield = false;
     const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);
-    const deviceSyncWakeAt = "2026-04-27T00:01:00.000Z";
-    const providerCleanupWakeAt = "2026-04-27T00:00:30.000Z";
-    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+    const deviceSyncWakeAt = "2026-04-27T00:10:00.000Z";
+    // The re-armed first-deferred wake (mocked as now + 5 minutes) recorded
+    // into the cleanup owner state when the yielded drain defers.
+    const providerCleanupWakeAt = "2026-04-27T00:05:00.000Z";
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue({
       nextWakeAt: null,
     });
-    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockImplementation(async (input) =>
-      input.deferDueOrInvalid ? providerCleanupWakeAt : null
-    );
     mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
       deviceSyncProcessed: 1,
       deviceSyncSkipped: false,
@@ -3682,10 +3721,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const postCheckpoint = await result.afterCheckpoint?.();
 
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
-    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith({
-      deferDueOrInvalid: true,
-      idleCheckpointDelayMs: undefined,
-      nowMs: Date.parse("2026-04-27T00:00:00.000Z"),
+    // The yielded drain re-arms the due checkpoint durably into the cleanup
+    // owner state instead of carrying a plan-only wake.
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: providerCleanupWakeAt,
+      },
+      linqMessageIds: [],
       vaultRoot: "/tmp/murph-vault",
     });
     expect(postCheckpoint).toEqual(expect.objectContaining({
@@ -7748,7 +7790,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
-    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
@@ -8360,7 +8401,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       preferredIntentIds: [],
       vaultRoot: expect.any(String),
     });
-    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
@@ -8371,9 +8411,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   });
 
   it("re-arms due provider cleanup when fresh foreground input has no delivery effects", async () => {
-    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValueOnce(
-      "2026-04-27T00:14:00.000Z",
-    );
+    // Stored cleanup checkpoint is already due when the foreground turn runs.
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue({
+      nextWakeAt: "2026-04-27T00:08:00.000Z",
+    });
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationCurrentTurnDeliveryIntentIds: [],
       assistantAutomationProgressed: true,
@@ -8401,14 +8442,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       preferredIntentIds: [],
       vaultRoot: expect.any(String),
     });
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
-    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
-    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith({
-      deferDueOrInvalid: true,
-      idleCheckpointDelayMs: undefined,
-      nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
+    // The due checkpoint re-arms durably into the cleanup owner state; the
+    // phase wake derives from that single owner.
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: "2026-04-27T00:14:00.000Z",
+      },
+      linqMessageIds: [],
       vaultRoot: "/tmp/murph-vault",
     });
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "canonical_runtime_commit",
       nextWakeAt: "2026-04-27T00:14:00.000Z",
@@ -8453,7 +8496,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     }));
 
-    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
       checkpoint: {
@@ -8568,7 +8610,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
-    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
     expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
@@ -8629,7 +8670,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeAt: "2026-04-27T00:14:00.000Z",
       progressed: true,
     }));
-    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(
       mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0],
@@ -8691,7 +8731,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         includeBackgroundDueIntents: true,
       }),
     );
-    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
     expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
@@ -9680,10 +9719,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
-  it("re-arms due provider cleanup when a member-channel barrier blocks auto-reply delivery", async () => {
+  it("keeps the owner cleanup wake when a member-channel barrier blocks auto-reply delivery", async () => {
     const deliveryEffect = createDeliveryEffect();
     const preparedDispatches = createPreparedDispatchesForDeliveryEffect(deliveryEffect);
-    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValueOnce(
+    // The cleanup owner state already carries a scheduled wake.
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
       "2026-04-27T00:14:00.000Z",
     );
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
@@ -9719,12 +9759,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         hostedMemberChannelPreDispatchBlocked: 1,
       }),
     }));
-    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith({
-      deferDueOrInvalid: true,
-      idleCheckpointDelayMs: undefined,
-      nowMs: Date.parse("2026-04-27T00:09:00.000Z"),
-      vaultRoot: "/tmp/murph-vault",
-    });
+    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vaultRoot: "/tmp/murph-vault",
+      }),
+    );
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
     expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
@@ -9890,7 +9929,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
     expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith(
       expect.objectContaining({
-        deferDueOrInvalid: false,
         vaultRoot: "/tmp/murph-vault",
       }),
     );

@@ -80,6 +80,7 @@ import {
 import {
   drainHostedProviderCleanupAfterCommit,
   recordHostedProviderCleanupAfterDelivery,
+  resolveHostedProviderCleanupScheduledWakeAt,
   type HostedProviderCleanupCheckpoint,
   type HostedProviderCleanupPlan,
   prepareHostedProviderCleanupPlan,
@@ -645,22 +646,17 @@ export async function runHostedWorkspaceAssistantPhase(
       const result = mergeContinuingSystemMailboxResult(
         withFreshHostedManagedAutomationsAfterCheckpoint({
           input,
-          providerCleanupWakeAt: providerCleanupPlan.wakeAt,
           result: timedForegroundAssistantResult,
         }),
       );
-      let checkpointableResult: HostedWorkspaceRunnerAssistantPhaseResult = result;
       if (providerCleanupPlan.stateQueued && !result.progressed) {
-        checkpointableResult = {
+        return {
           ...result,
           checkpointReason: "provider_cleanup",
           progressed: true,
         };
       }
-      return withHostedProviderCleanupPlanWake({
-        providerCleanupPlan,
-        result: checkpointableResult,
-      });
+      return result;
     }
     const assistantCronWakeAfterPass =
       shouldResolveHostedAssistantCronWakeAfterAssistantPass({
@@ -787,13 +783,21 @@ export async function runHostedWorkspaceAssistantPhase(
     const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
       vaultRoot: input.restored.vaultRoot,
     });
+    const providerCleanupScheduledWakeAt =
+      await resolveHostedProviderCleanupScheduledWakeAt({
+        nowMs: resolveHostedAssistantPhaseNowMs(input),
+        vaultRoot: input.restored.vaultRoot,
+      });
     const nextWake = selectHostedRuntimeWakeCandidate([
       createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
       assistantCronWakeAfterPassCandidate,
       deviceSyncFollowUpWake,
       createHostedRuntimeWakeCandidate(outboxWakeAt, "assistant"),
       systemMailboxWake,
-      createHostedRuntimeWakeCandidate(providerCleanupPlan.wakeAt, HOSTED_ASSISTANT_WAKE_REASON),
+      createHostedRuntimeWakeCandidate(
+        providerCleanupScheduledWakeAt,
+        HOSTED_ASSISTANT_WAKE_REASON,
+      ),
     ]);
     const nextWakeAt = nextWake.at;
     const wakeStateProgressed = hostedAssistantWakeStateProgressed({
@@ -911,10 +915,7 @@ export async function runHostedWorkspaceAssistantPhase(
       progressed: true,
       redactedStatus,
     });
-    return withHostedProviderCleanupPlanWake({
-      providerCleanupPlan,
-      result,
-    });
+    return result;
   } finally {
     releaseChannelAbortRelay();
     channelAbortController.abort();
@@ -1100,7 +1101,6 @@ async function applyHostedManagedAutomationsBestEffort(input: {
 
 function withFreshHostedManagedAutomationsAfterCheckpoint(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
-  providerCleanupWakeAt: string | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
 }): HostedWorkspaceRunnerAssistantPhaseResult {
   const assistantInputIds =
@@ -1116,7 +1116,6 @@ function withFreshHostedManagedAutomationsAfterCheckpoint(input: {
         input.result.afterCheckpoint,
         async () => await applyFreshHostedManagedAutomationsAfterCheckpoint({
           input: input.input,
-          providerCleanupWakeAt: input.providerCleanupWakeAt,
         }),
       ],
     }),
@@ -1125,7 +1124,6 @@ function withFreshHostedManagedAutomationsAfterCheckpoint(input: {
 
 async function applyFreshHostedManagedAutomationsAfterCheckpoint(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
-  providerCleanupWakeAt: string | null;
 }): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null> {
   if (input.input.shouldYieldBackgroundMaintenance?.() === true) {
     return null;
@@ -1167,10 +1165,12 @@ async function applyFreshHostedManagedAutomationsAfterCheckpoint(input: {
     ),
     // When this post-checkpoint result owns a wake it replaces the phase
     // result's wake in the workspace runner, so it must not drop the
-    // effective cleanup wake resolved by prepareHostedProviderCleanupPlan
-    // (which may re-arm a stale persisted checkpoint in memory only).
+    // scheduled wake owned by hosted-provider-cleanup.json.
     createHostedRuntimeWakeCandidate(
-      input.providerCleanupWakeAt,
+      await resolveHostedProviderCleanupScheduledWakeAt({
+        nowMs: resolveHostedAssistantPhaseNowMs(input.input),
+        vaultRoot: input.input.restored.vaultRoot,
+      }),
       HOSTED_ASSISTANT_WAKE_REASON,
     ),
   ]);
@@ -1430,10 +1430,7 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
     nowMs: resolveHostedAssistantPhaseNowMs(input.input),
     vaultRoot: input.input.restored.vaultRoot,
   });
-  const result = withHostedProviderCleanupPlanWake({
-    providerCleanupPlan,
-    result: input.result,
-  });
+  const result = input.result;
   if (
     !providerCleanupPlan.requiresCheckpoint
     || postCheckpointDeliveryResultOwnsProviderCleanup(result)
@@ -1938,30 +1935,20 @@ function withHostedRuntimeWakeCandidate(input: {
   return nextResult;
 }
 
-function withHostedProviderCleanupPlanWake(input: {
-  providerCleanupPlan: HostedProviderCleanupPlan;
-  result: HostedWorkspaceRunnerAssistantPhaseResult;
-}): HostedWorkspaceRunnerAssistantPhaseResult {
-  return withHostedRuntimeWakeCandidate({
-    result: input.result,
-    wake: createHostedRuntimeWakeCandidate(
-      input.providerCleanupPlan.wakeAt,
-      HOSTED_ASSISTANT_WAKE_REASON,
-    ),
-  });
-}
-
 async function resolveHostedBackgroundMaintenanceWakeCandidate(input: {
   assistantCronWake?: HostedRuntimeWakeCandidate | null;
   deviceActivityAutomation?: HostedDeviceActivityAutomationScheduleResult | null;
   deviceSyncFollowUpWake?: HostedRuntimeWakeCandidate | null;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   pendingAssistantInputWakeAt?: string | null;
-  providerCleanupWakeAt?: string | null;
   systemMailboxWake?: HostedRuntimeWakeCandidate | null;
   systemMailboxWakeAt?: string | null;
 }): Promise<HostedRuntimeWakeCandidate> {
   const outboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
+    vaultRoot: input.input.restored.vaultRoot,
+  });
+  const providerCleanupWakeAt = await resolveHostedProviderCleanupScheduledWakeAt({
+    nowMs: resolveHostedAssistantPhaseNowMs(input.input),
     vaultRoot: input.input.restored.vaultRoot,
   });
   const systemMailboxWake = Object.hasOwn(input, "systemMailboxWake")
@@ -1979,7 +1966,7 @@ async function resolveHostedBackgroundMaintenanceWakeCandidate(input: {
     createHostedRuntimeWakeCandidate(input.pendingAssistantInputWakeAt ?? null, "assistant"),
     createHostedDeviceActivityAutomationWakeCandidate(input.deviceActivityAutomation ?? null),
     input.assistantCronWake,
-    createHostedRuntimeWakeCandidate(input.providerCleanupWakeAt ?? null, "assistant"),
+    createHostedRuntimeWakeCandidate(providerCleanupWakeAt, "assistant"),
   ]);
 }
 
@@ -2439,7 +2426,6 @@ async function runSystemMailboxMaintenancePhase(input: {
 
   const phaseInput = input.input;
   let initialProviderCleanupCheckpoint: HostedProviderCleanupCheckpoint | null = null;
-  let providerCleanupPlan: HostedProviderCleanupPlan | null = null;
   let assistantCronWakeState: HostedAssistantCronWakeState | null = null;
   const readAssistantCronWakeState = async (): Promise<HostedAssistantCronWakeState> => {
     if (assistantCronWakeState) {
@@ -2501,22 +2487,6 @@ async function runSystemMailboxMaintenancePhase(input: {
   if (!hasPendingAssistantInputWakeOverride && !pendingAssistantInputWakeAt) {
     pendingAssistantInputWakeAt = await resolvePendingAssistantInputWakeAt(phaseInput);
   }
-  const resolveProviderCleanupPlan = async (): Promise<HostedProviderCleanupPlan> => {
-    if (providerCleanupPlan) {
-      return providerCleanupPlan;
-    }
-    providerCleanupPlan = await prepareHostedProviderCleanupPlan({
-      deferred:
-        shouldYieldAfterSystemMailboxPreparation
-        || phaseInput.shouldYieldBackgroundMaintenance?.() === true,
-      idleCheckpointDelayMs: phaseInput.request.idleCheckpointDelayMs,
-      initialCheckpoint: initialProviderCleanupCheckpoint,
-      nowMs: resolveHostedAssistantPhaseNowMs(phaseInput),
-      vaultRoot: phaseInput.restored.vaultRoot,
-    });
-    initialProviderCleanupCheckpoint = providerCleanupPlan.checkpoint;
-    return providerCleanupPlan;
-  };
   const shouldRunDirtyDeviceSyncWorkSource = shouldRunIdleDeviceSyncMaintenance({
     phaseInput,
     pendingAssistantInputBlocksMaintenance,
@@ -2553,7 +2523,6 @@ async function runSystemMailboxMaintenancePhase(input: {
       };
     }
     if (dirtyDeviceSyncMetrics) {
-      const cleanupPlan = await resolveProviderCleanupPlan();
       const dirtyAssistantCronWakeState = await readAssistantCronWakeState();
       const assistantCronWake = resolveHostedAssistantCronWakeCandidate({
         phaseInput,
@@ -2564,7 +2533,6 @@ async function runSystemMailboxMaintenancePhase(input: {
         deviceActivityAutomation: dirtyDeviceActivityAutomation,
         input: phaseInput,
         pendingAssistantInputWakeAt,
-        providerCleanupWakeAt: cleanupPlan.wakeAt,
       });
       return {
         backgroundMaintenanceYielded: shouldYieldAfterSystemMailboxPreparation,
@@ -2587,7 +2555,6 @@ async function runSystemMailboxMaintenancePhase(input: {
         phaseInput,
       });
     if (contextSnapshotRefresh) {
-      const cleanupPlan = await resolveProviderCleanupPlan();
       const contextAssistantCronWakeState = await readAssistantCronWakeState();
       const assistantCronWake = resolveHostedAssistantCronWakeCandidate({
         phaseInput,
@@ -2597,7 +2564,6 @@ async function runSystemMailboxMaintenancePhase(input: {
         assistantCronWake,
         input: phaseInput,
         pendingAssistantInputWakeAt,
-        providerCleanupWakeAt: cleanupPlan.wakeAt,
       });
       return {
         backgroundMaintenanceYielded: shouldYieldAfterSystemMailboxPreparation,
@@ -2666,7 +2632,15 @@ async function runSystemMailboxMaintenancePhase(input: {
   const deviceSyncMaintenanceRan =
     systemMailboxDeviceSyncRan
     || (dirtyDeviceSyncMetrics !== null && !dirtyDeviceSyncMetrics.deviceSyncSkipped);
-  const cleanupPlan = await resolveProviderCleanupPlan();
+  const cleanupPlan = await prepareHostedProviderCleanupPlan({
+    deferred:
+      shouldYieldAfterSystemMailboxPreparation
+      || phaseInput.shouldYieldBackgroundMaintenance?.() === true,
+    idleCheckpointDelayMs: phaseInput.request.idleCheckpointDelayMs,
+    nowMs: resolveHostedAssistantPhaseNowMs(phaseInput),
+    vaultRoot: phaseInput.restored.vaultRoot,
+  });
+  initialProviderCleanupCheckpoint = cleanupPlan.checkpoint;
   const deviceSyncFollowUpWake = resolveHostedDeviceSyncFollowUpWake({
     deviceSyncMaintenanceRan,
     input: phaseInput,
@@ -2697,7 +2671,6 @@ async function runSystemMailboxMaintenancePhase(input: {
     deviceSyncFollowUpWake,
     input: phaseInput,
     pendingAssistantInputWakeAt,
-    providerCleanupWakeAt: cleanupPlan.wakeAt,
     systemMailboxWake,
   });
   const nextWake = selectHostedRuntimeWakeCandidate([
@@ -2921,7 +2894,6 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       deviceSyncFollowUpWake: input.deviceSyncFollowUpWake,
       input: input.input,
       pendingAssistantInputWakeAt: input.pendingAssistantInputWakeAt,
-      providerCleanupWakeAt: input.providerCleanupPlan.wakeAt,
       systemMailboxWake: createHostedRuntimeWakeCandidate(
         statusCallback.nextWakeAt,
         statusCallback.nextWakeReason ?? "assistant",
@@ -3015,7 +2987,6 @@ async function runSystemMailboxPostCheckpointPhase(input: {
     deviceSyncFollowUpWake: input.deviceSyncFollowUpWake,
     input: input.input,
     pendingAssistantInputWakeAt: input.pendingAssistantInputWakeAt,
-    providerCleanupWakeAt: input.providerCleanupPlan.wakeAt,
     systemMailboxWake: input.systemMailboxWake,
   });
   const dirtyNextWake = selectHostedRuntimeWakeCandidate([
@@ -3236,6 +3207,11 @@ async function runForegroundAssistantReplyPhase(input: {
   const assistantNextWakeReason = resolveHostedAssistantAutomationNextWakeReason({
     assistantNextWakeAt,
   });
+  const providerCleanupScheduledWakeAt =
+    await resolveHostedProviderCleanupScheduledWakeAt({
+      nowMs: resolveHostedAssistantPhaseNowMs(input.input),
+      vaultRoot: input.input.restored.vaultRoot,
+    });
   const nextWake = selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(assistantNextWakeAt, assistantNextWakeReason),
     input.foregroundWorkspaceWake,
@@ -3243,7 +3219,7 @@ async function runForegroundAssistantReplyPhase(input: {
     createHostedRuntimeWakeCandidate(outboxWakeAt, "assistant"),
     input.systemMailboxWake,
     createHostedRuntimeWakeCandidate(
-      deliveryEffects.length === 0 ? input.providerCleanupPlan.wakeAt : null,
+      providerCleanupScheduledWakeAt,
       HOSTED_ASSISTANT_WAKE_REASON,
     ),
   ]);
@@ -3390,23 +3366,25 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
       outcomes: input.assistantDeliveryOutcomes,
       vaultRoot: input.phaseInput.restored.vaultRoot,
     });
-    const deferredPlan = providerCleanupDrainDeferred
-      ? await prepareHostedProviderCleanupPlan({
-          deferred: true,
-          idleCheckpointDelayMs: input.phaseInput.request.idleCheckpointDelayMs,
-          nowMs: resolveHostedAssistantPhaseNowMs(input.phaseInput),
-          vaultRoot: input.phaseInput.restored.vaultRoot,
-        })
-      : null;
-    providerCleanupNextWakeAt =
-      providerCleanup.nextWakeAt
-      ?? deferredPlan?.wakeAt
-      ?? input.providerCleanupPlan.wakeAt;
     if (providerCleanupDrainDeferred) {
+      // Re-arms any due stored checkpoint and persists the deferred wake
+      // into hosted-provider-cleanup.json, the single owner of the wake.
+      await prepareHostedProviderCleanupPlan({
+        deferred: true,
+        idleCheckpointDelayMs: input.phaseInput.request.idleCheckpointDelayMs,
+        nowMs: resolveHostedAssistantPhaseNowMs(input.phaseInput),
+        vaultRoot: input.phaseInput.restored.vaultRoot,
+      });
       providerCleanupRedactedStatus = {
         hostedProviderCleanupYielded: 1,
       };
     }
+    providerCleanupNextWakeAt =
+      providerCleanup.nextWakeAt
+      ?? await resolveHostedProviderCleanupScheduledWakeAt({
+        nowMs: resolveHostedAssistantPhaseNowMs(input.phaseInput),
+        vaultRoot: input.phaseInput.restored.vaultRoot,
+      });
   }
 
   const providerCleanupWake = createHostedRuntimeWakeCandidate(

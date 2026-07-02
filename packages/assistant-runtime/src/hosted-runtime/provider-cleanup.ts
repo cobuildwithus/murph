@@ -50,7 +50,6 @@ export interface HostedProviderCleanupPlan {
   due: boolean;
   requiresCheckpoint: boolean;
   stateQueued: boolean;
-  wakeAt: string | null;
 }
 
 export interface HostedProviderCleanupDrainResult {
@@ -85,6 +84,20 @@ export async function readHostedProviderCleanupCheckpoint(
   return (await readHostedProviderCleanupState(vaultRoot))?.checkpoint ?? null;
 }
 
+// hosted-provider-cleanup.json is the single owner of the next cleanup wake.
+// This returns the durable wake only while it is still in the future; a due
+// stored wake belongs to the drain paths, never to phase wake assembly.
+export async function resolveHostedProviderCleanupScheduledWakeAt(input: {
+  nowMs: number;
+  vaultRoot: string;
+}): Promise<string | null> {
+  return resolveHostedProviderCleanupCheckpointWakeAt({
+    checkpoint: await readHostedProviderCleanupCheckpoint(input.vaultRoot),
+    deferDueOrInvalid: false,
+    nowMs: input.nowMs,
+  });
+}
+
 export async function prepareHostedProviderCleanupPlan(input: {
   deferred: boolean;
   idleCheckpointDelayMs?: number | null;
@@ -114,16 +127,39 @@ export async function prepareHostedProviderCleanupPlan(input: {
         due: false,
         requiresCheckpoint: true,
         stateQueued: true,
-        wakeAt: checkpoint.nextWakeAt ?? null,
       };
     }
 
+    const storedCheckpoint = await readHostedProviderCleanupCheckpoint(input.vaultRoot);
     const scheduledWakeAt = resolveHostedProviderCleanupCheckpointWakeAt({
-      checkpoint: await readHostedProviderCleanupCheckpoint(input.vaultRoot),
+      checkpoint: storedCheckpoint,
       deferDueOrInvalid: true,
       idleCheckpointDelayMs: input.idleCheckpointDelayMs,
       nowMs: input.nowMs,
     });
+    // A due or invalid stored checkpoint re-arms to a future wake. Persist
+    // the re-armed wake so hosted-provider-cleanup.json stays the single
+    // owner of the next cleanup wake; phase wake assembly derives its
+    // candidate from that file, never from a plan-only value.
+    if (
+      scheduledWakeAt !== null
+      && scheduledWakeAt !== (storedCheckpoint?.nextWakeAt ?? null)
+    ) {
+      const checkpoint = await recordHostedProviderCleanupBeforeCommit({
+        checkpoint: {
+          nextWakeAt: scheduledWakeAt,
+        },
+        linqMessageIds: [],
+        vaultRoot: input.vaultRoot,
+      });
+      return {
+        checkpoint,
+        deferred: true,
+        due: false,
+        requiresCheckpoint: true,
+        stateQueued: true,
+      };
+    }
     // Migration bootstrap (delete together with
     // recoverLegacyPendingTerminalLinqCleanupOnce): a pre-upgrade vault whose
     // first post-upgrade touch is foreground-only would otherwise never
@@ -152,7 +188,6 @@ export async function prepareHostedProviderCleanupPlan(input: {
         due: false,
         requiresCheckpoint: true,
         stateQueued: true,
-        wakeAt: checkpoint.nextWakeAt ?? null,
       };
     }
 
@@ -162,7 +197,6 @@ export async function prepareHostedProviderCleanupPlan(input: {
       due: false,
       requiresCheckpoint: false,
       stateQueued: false,
-      wakeAt: scheduledWakeAt,
     };
   }
 
@@ -188,7 +222,6 @@ export async function prepareHostedProviderCleanupPlan(input: {
   return buildHostedProviderCleanupPlan({
     checkpoint,
     deferred: false,
-    idleCheckpointDelayMs: input.idleCheckpointDelayMs,
     nowMs: input.nowMs,
     stateQueued: terminalCleanupQueued,
   });
@@ -475,7 +508,6 @@ function resolveHostedProviderCleanupRecoveryPath(vaultRoot: string): string {
 function buildHostedProviderCleanupPlan(input: {
   checkpoint: HostedProviderCleanupCheckpoint | null;
   deferred: boolean;
-  idleCheckpointDelayMs?: number | null;
   nowMs: number;
   stateQueued: boolean;
 }): HostedProviderCleanupPlan {
@@ -488,12 +520,6 @@ function buildHostedProviderCleanupPlan(input: {
     due,
     requiresCheckpoint: due || input.stateQueued,
     stateQueued: input.stateQueued,
-    wakeAt: resolveHostedProviderCleanupCheckpointWakeAt({
-      checkpoint: input.checkpoint,
-      deferDueOrInvalid: input.deferred,
-      idleCheckpointDelayMs: input.idleCheckpointDelayMs,
-      nowMs: input.nowMs,
-    }),
   };
 }
 

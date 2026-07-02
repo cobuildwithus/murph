@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { buildHostedExecutionRuntimeTimerWake } from "@murphai/hosted-execution";
@@ -31,6 +31,7 @@ import {
   readHostedProviderCleanupCheckpoint,
   recordHostedProviderCleanupBeforeCommit,
   resolveHostedProviderCleanupFirstDeferredWakeAt,
+  resolveHostedProviderCleanupScheduledWakeAt,
 } from "../src/hosted-runtime/provider-cleanup.ts";
 
 const checkpoint = {
@@ -141,7 +142,7 @@ test("hosted provider cleanup replaces a stale due checkpoint when appending def
   }
 });
 
-test("hosted provider cleanup deferred plan re-arms due cleanup without scanning terminal evidence", async () => {
+test("hosted provider cleanup deferred plan persists a re-armed due cleanup wake into the owner state", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
 
   try {
@@ -160,17 +161,30 @@ test("hosted provider cleanup deferred plan re-arms due cleanup without scanning
       vaultRoot,
     });
 
+    // hosted-provider-cleanup.json is the single owner of the next cleanup
+    // wake: re-arming a due/invalid checkpoint writes the deferred wake back
+    // into the file and requires a checkpoint so the re-arm is durable.
     assert.deepEqual(plan, {
-      checkpoint: null,
+      checkpoint: {
+        nextWakeAt: "2026-07-01T00:09:02.000Z",
+      },
       deferred: true,
       due: false,
-      requiresCheckpoint: false,
-      stateQueued: false,
-      wakeAt: "2026-07-01T00:09:02.000Z",
+      requiresCheckpoint: true,
+      stateQueued: true,
     });
     assert.deepEqual(await readHostedProviderCleanupCheckpoint(vaultRoot), {
-      nextWakeAt: null,
+      nextWakeAt: "2026-07-01T00:09:02.000Z",
     });
+    assert.equal(
+      await resolveHostedProviderCleanupScheduledWakeAt({
+        nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
+        vaultRoot,
+      }),
+      "2026-07-01T00:09:02.000Z",
+    );
+    const raw = await readHostedProviderCleanupFile(vaultRoot);
+    assert.deepEqual(raw.linqMessageIds, ["linq_inbound_1"]);
   } finally {
     await cleanup();
   }
@@ -196,7 +210,6 @@ test("hosted provider cleanup deferred plan durably queues terminal cleanup writ
       due: false,
       requiresCheckpoint: true,
       stateQueued: true,
-      wakeAt: "2026-07-01T00:09:02.000Z",
     });
     const raw = await readHostedProviderCleanupFile(vaultRoot);
     assert.deepEqual(raw.linqMessageIds, ["linq_terminal_1"]);
@@ -227,7 +240,14 @@ test("hosted provider cleanup queued this turn survives a foreground preemption 
       vaultRoot,
     });
 
-    assert.equal(preemptedPlan.wakeAt, "2026-07-01T00:09:02.000Z");
+    assert.equal(preemptedPlan.requiresCheckpoint, false);
+    assert.equal(
+      await resolveHostedProviderCleanupScheduledWakeAt({
+        nowMs: Date.parse("2026-07-01T00:09:01.000Z"),
+        vaultRoot,
+      }),
+      "2026-07-01T00:09:02.000Z",
+    );
     const raw = await readHostedProviderCleanupFile(vaultRoot);
     assert.deepEqual(raw.linqMessageIds, ["linq_terminal_1"]);
 
@@ -238,7 +258,14 @@ test("hosted provider cleanup queued this turn survives a foreground preemption 
       vaultRoot,
     });
 
-    assert.equal(duePlan.wakeAt, "2026-07-01T00:10:02.000Z");
+    // The due wake re-arms durably: the owner file carries the new wake and
+    // the queued ids survive.
+    assert.equal(duePlan.requiresCheckpoint, true);
+    assert.deepEqual(await readHostedProviderCleanupCheckpoint(vaultRoot), {
+      nextWakeAt: "2026-07-01T00:10:02.000Z",
+    });
+    const rearmedRaw = await readHostedProviderCleanupFile(vaultRoot);
+    assert.deepEqual(rearmedRaw.linqMessageIds, ["linq_terminal_1"]);
   } finally {
     await cleanup();
   }
@@ -255,8 +282,15 @@ test("hosted provider cleanup deferred plan does not bootstrap on vaults without
       vaultRoot,
     });
 
-    assert.equal(plan.wakeAt, null);
+    assert.equal(plan.requiresCheckpoint, false);
     assert.equal(plan.stateQueued, false);
+    assert.equal(
+      await resolveHostedProviderCleanupScheduledWakeAt({
+        nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
+        vaultRoot,
+      }),
+      null,
+    );
     await assert.rejects(readHostedProviderCleanupFile(vaultRoot), {
       code: "ENOENT",
     });
@@ -282,8 +316,15 @@ test("hosted provider cleanup deferred plan stays wakeless after recovery withou
       vaultRoot,
     });
 
-    assert.equal(plan.wakeAt, null);
+    assert.equal(plan.requiresCheckpoint, false);
     assert.equal(plan.stateQueued, false);
+    assert.equal(
+      await resolveHostedProviderCleanupScheduledWakeAt({
+        nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
+        vaultRoot,
+      }),
+      null,
+    );
   } finally {
     await cleanup();
   }
@@ -313,7 +354,6 @@ test("hosted provider cleanup deferred plan bootstraps a recovery wake before th
       due: false,
       requiresCheckpoint: true,
       stateQueued: true,
-      wakeAt: "2026-07-01T00:09:02.000Z",
     });
     expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
     assert.equal(await hasHostedProviderCleanupRecoveryCompleted(vaultRoot), false);
@@ -327,8 +367,14 @@ test("hosted provider cleanup deferred plan bootstraps a recovery wake before th
       vaultRoot,
     });
 
-    assert.equal(rearmedPlan.wakeAt, "2026-07-01T00:09:02.000Z");
     assert.equal(rearmedPlan.stateQueued, false);
+    assert.equal(
+      await resolveHostedProviderCleanupScheduledWakeAt({
+        nowMs: Date.parse("2026-07-01T00:09:01.000Z"),
+        vaultRoot,
+      }),
+      "2026-07-01T00:09:02.000Z",
+    );
   } finally {
     await cleanup();
   }
@@ -353,7 +399,6 @@ test("hosted provider cleanup plan queues terminal Linq cleanup as checkpoint wo
       due: true,
       requiresCheckpoint: true,
       stateQueued: true,
-      wakeAt: null,
     });
     const raw = await readHostedProviderCleanupFile(vaultRoot);
     assert.deepEqual(raw.linqMessageIds, ["linq_terminal_1"]);
@@ -364,6 +409,65 @@ test("hosted provider cleanup plan queues terminal Linq cleanup as checkpoint wo
 
 
 
+
+test("hosted provider cleanup keeps a bounded steady-state file count", async () => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+
+  try {
+    const listProviderCleanupFiles = async (): Promise<string[]> =>
+      (await readdir(resolveAssistantStatePaths(vaultRoot).assistantStateRoot))
+        .filter((name) => name.startsWith("hosted-provider-cleanup"))
+        .sort();
+
+    // Repeated queueing and re-arming overwrites the single owner file.
+    await prepareHostedProviderCleanupPlan({
+      deferred: true,
+      idleCheckpointDelayMs: 1_000,
+      nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
+      terminalCleanupMessageIds: ["linq_terminal_1"],
+      vaultRoot,
+    });
+    await prepareHostedProviderCleanupPlan({
+      deferred: true,
+      idleCheckpointDelayMs: 1_000,
+      nowMs: Date.parse("2026-07-01T00:10:00.000Z"),
+      terminalCleanupMessageIds: ["linq_terminal_2"],
+      vaultRoot,
+    });
+    assert.deepEqual(await listProviderCleanupFiles(), [
+      "hosted-provider-cleanup.json",
+    ]);
+
+    // The one-shot legacy recovery adds at most the single migration marker.
+    await prepareHostedProviderCleanupPlan({
+      deferred: false,
+      nowMs: Date.parse("2026-07-01T00:11:00.000Z"),
+      vaultRoot,
+    });
+    assert.deepEqual(await listProviderCleanupFiles(), [
+      "hosted-provider-cleanup-recovery.json",
+      "hosted-provider-cleanup.json",
+    ]);
+
+    // A successful drain deletes the queue file; only the temporary
+    // migration marker remains until its delete-together code is removed.
+    await drainHostedProviderCleanupAfterCommit({
+      assistantDeliveryOutcomes: [],
+      env: {
+        LINQ_API_TOKEN: "test-token",
+      },
+      fetchImplementation: vi.fn<typeof fetch>(),
+      checkpoint,
+      vaultRoot,
+      wake,
+    });
+    assert.deepEqual(await listProviderCleanupFiles(), [
+      "hosted-provider-cleanup-recovery.json",
+    ]);
+  } finally {
+    await cleanup();
+  }
+});
 
 test("hosted provider cleanup upgrade recovery queues legacy unqueued evidence once", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
