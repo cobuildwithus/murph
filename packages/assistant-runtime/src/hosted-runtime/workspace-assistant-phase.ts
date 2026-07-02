@@ -585,7 +585,10 @@ export async function runHostedWorkspaceAssistantPhase(
       deferredPendingSystemMailboxMaintenance?.initialProviderCleanupCheckpoint
       ?? systemMailboxMaintenance.initialProviderCleanupCheckpoint;
     const providerCleanupPlan = await prepareHostedProviderCleanupPlan({
-      deferred: backgroundMaintenanceYielded || foregroundAssistantPass,
+      deferred:
+        backgroundMaintenanceYielded
+        || foregroundAssistantPass
+        || input.shouldYieldBackgroundMaintenance?.() === true,
       idleCheckpointDelayMs: input.request.idleCheckpointDelayMs,
       initialCheckpoint: initialProviderCleanupCheckpoint,
       nowMs: resolveHostedAssistantPhaseNowMs(input),

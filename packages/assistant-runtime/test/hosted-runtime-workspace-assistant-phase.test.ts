@@ -2995,6 +2995,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("defers cleanup planning when the foreground-yield hook is already tripped", async () => {
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:09:00.000Z",
+      shouldYieldBackgroundMaintenance: () => true,
+    }));
+
+    expect(result).toBeDefined();
+    for (const call of mocks.prepareHostedProviderCleanupPlan.mock.calls) {
+      expect(call[0]).toEqual(expect.objectContaining({ deferred: true }));
+    }
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+  });
+
   it("durably queues cleanup with a future wake when a foreground turn terminalizes Linq input without delivery effects", async () => {
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       activeTurnInputIngested: true,
