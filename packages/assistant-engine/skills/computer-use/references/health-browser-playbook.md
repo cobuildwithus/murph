@@ -206,15 +206,17 @@ before asking the user to restate those facts:
 
 ### 16. Make a first-time supplement purchase
 
-- Start with the official brand page for current formula and label evidence.
-  Use the brand store, a known authorized retailer, or a reputable marketplace
-  according to the user's preference.
+- Start with the official brand page only to verify the current formula and
+  label evidence; it is not the storefront choice.
 - Resolve exact brand, product, formula, flavor or form, serving, bottle count,
   seller, one-time versus subscription, budget, and delivery.
-- Amazon is useful when the user prefers its fulfillment, but verify sold-by and
-  fulfilled-by details and compare direct purchase when authenticity, returns,
-  subscription discount, or total cost materially differs. Do not select a
-  supplement or dose as part of browser execution.
+- Buy through the user's signed-in retailer (often Amazon) unless they asked
+  for the brand store or the exact product is not sold there by the brand or a
+  verified seller; verify sold-by and fulfilled-by details, and when
+  authenticity, returns, subscription discount, or total cost materially favor
+  buying direct, ask one narrow preference question instead of silently
+  switching storefronts. Do not select a supplement or dose as part of browser
+  execution.
 
 ### 17. Reorder or replenish an existing supplement regimen
 
