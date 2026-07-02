@@ -592,6 +592,7 @@ export async function runHostedWorkspaceAssistantPhase(
       idleCheckpointDelayMs: input.request.idleCheckpointDelayMs,
       initialCheckpoint: initialProviderCleanupCheckpoint,
       nowMs: resolveHostedAssistantPhaseNowMs(input),
+      shouldYield: input.shouldYieldBackgroundMaintenance ?? null,
       terminalCleanupMessageIds:
         assistantMetrics.assistantAutomationTerminalLinqCleanup ?? null,
       vaultRoot: input.restored.vaultRoot,
@@ -1431,6 +1432,7 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
     idleCheckpointDelayMs: input.input.request.idleCheckpointDelayMs,
     initialCheckpoint: input.initialProviderCleanupCheckpoint,
     nowMs: resolveHostedAssistantPhaseNowMs(input.input),
+    shouldYield: input.input.shouldYieldBackgroundMaintenance ?? null,
     vaultRoot: input.input.restored.vaultRoot,
   });
   const result = input.result;
@@ -2641,6 +2643,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       || phaseInput.shouldYieldBackgroundMaintenance?.() === true,
     idleCheckpointDelayMs: phaseInput.request.idleCheckpointDelayMs,
     nowMs: resolveHostedAssistantPhaseNowMs(phaseInput),
+    shouldYield: phaseInput.shouldYieldBackgroundMaintenance ?? null,
     vaultRoot: phaseInput.restored.vaultRoot,
   });
   initialProviderCleanupCheckpoint = cleanupPlan.checkpoint;

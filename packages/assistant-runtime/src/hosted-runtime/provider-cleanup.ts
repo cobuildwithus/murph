@@ -103,6 +103,7 @@ export async function prepareHostedProviderCleanupPlan(input: {
   idleCheckpointDelayMs?: number | null;
   initialCheckpoint?: HostedProviderCleanupCheckpoint | null;
   nowMs: number;
+  shouldYield?: (() => boolean) | null;
   terminalCleanupMessageIds?: readonly string[] | null;
   vaultRoot: string;
 }): Promise<HostedProviderCleanupPlan> {
@@ -200,8 +201,10 @@ export async function prepareHostedProviderCleanupPlan(input: {
     };
   }
 
-  const recoveredCleanupQueued =
-    await recoverLegacyPendingTerminalLinqCleanupOnce(input.vaultRoot);
+  const recoveredCleanupQueued = await recoverLegacyPendingTerminalLinqCleanupOnce({
+    shouldYield: input.shouldYield ?? null,
+    vaultRoot: input.vaultRoot,
+  });
   const terminalCleanupQueued =
     recoveredCleanupQueued || pendingLinqMessageIds.length > 0;
   if (pendingLinqMessageIds.length > 0) {
@@ -419,9 +422,11 @@ function resolveHostedProviderCleanupCheckpointWakeAt(input: {
 // uses: listPendingAssistantAutoReplyLinqCleanupEvidence,
 // markAssistantAutoReplyLinqCleanupQueued) once production vaults have all
 // written the recovery marker.
-async function recoverLegacyPendingTerminalLinqCleanupOnce(
-  vaultRoot: string,
-): Promise<boolean> {
+async function recoverLegacyPendingTerminalLinqCleanupOnce(input: {
+  shouldYield: (() => boolean) | null;
+  vaultRoot: string;
+}): Promise<boolean> {
+  const { shouldYield, vaultRoot } = input;
   if (await hasHostedProviderCleanupRecoveryCompleted(vaultRoot)) {
     return false;
   }
@@ -429,6 +434,12 @@ async function recoverLegacyPendingTerminalLinqCleanupOnce(
   let recoveredCleanupQueued = false;
   const queuedCaptureIds = new Set<string>();
   for (;;) {
+    // Fresh foreground work preempts the migration between batches. Recovered
+    // batches are already durable in cleanup state; the marker stays absent so
+    // the next non-foreground pass resumes the scan where it left off.
+    if (shouldYield?.() === true) {
+      return recoveredCleanupQueued;
+    }
     const pending = await listPendingAssistantAutoReplyLinqCleanupEvidence({
       vault: vaultRoot,
     });

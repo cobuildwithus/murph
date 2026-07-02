@@ -514,6 +514,53 @@ test("hosted provider cleanup upgrade recovery queues legacy unqueued evidence o
   }
 });
 
+test("hosted provider cleanup upgrade recovery yields to foreground between batches and resumes later", async () => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+
+  try {
+    let scannedBatches = 0;
+    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockImplementationOnce(async () => {
+      scannedBatches += 1;
+      return {
+        captureIds: ["capture_batch_1"],
+        linqMessageIds: ["linq_legacy_1"],
+      };
+    });
+
+    const plan = await prepareHostedProviderCleanupPlan({
+      deferred: false,
+      nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
+      shouldYield: () => scannedBatches >= 1,
+      vaultRoot,
+    });
+
+    assert.equal(plan.stateQueued, true);
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).toHaveBeenCalledTimes(1);
+    const raw = await readHostedProviderCleanupFile(vaultRoot);
+    assert.deepEqual(raw.linqMessageIds, ["linq_legacy_1"]);
+    assert.equal(await hasHostedProviderCleanupRecoveryCompleted(vaultRoot), false);
+
+    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockClear();
+    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence
+      .mockResolvedValueOnce({
+        captureIds: ["capture_batch_2"],
+        linqMessageIds: ["linq_legacy_2"],
+      });
+    const resumedPlan = await prepareHostedProviderCleanupPlan({
+      deferred: false,
+      nowMs: Date.parse("2026-07-01T00:20:00.000Z"),
+      vaultRoot,
+    });
+
+    assert.equal(resumedPlan.stateQueued, true);
+    assert.equal(await hasHostedProviderCleanupRecoveryCompleted(vaultRoot), true);
+    const resumed = await readHostedProviderCleanupFile(vaultRoot);
+    assert.deepEqual(resumed.linqMessageIds, ["linq_legacy_1", "linq_legacy_2"]);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("hosted provider cleanup upgrade recovery stops when marking makes no progress", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
   mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValue({
