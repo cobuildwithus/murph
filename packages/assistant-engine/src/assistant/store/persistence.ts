@@ -633,8 +633,26 @@ export async function synchronizeAssistantIndexes(
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases,
     conversationKeys,
+    recentSessions: pruneAssistantRecentSessions({
+      ...store.recentSessions,
+      [session.sessionId]: session.lastTurnAt ?? session.updatedAt,
+    }),
   })
   await writeJsonFileAtomic(paths.indexesPath, updated)
+}
+
+const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 32
+
+function pruneAssistantRecentSessions(
+  recentSessions: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(recentSessions)
+      .sort(([, left], [, right]) =>
+        compareAssistantTimestampsAscending(right, left),
+      )
+      .slice(0, ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT),
+  )
 }
 
 export async function writeAutomationState(
@@ -709,10 +727,11 @@ function createInitialAssistantIndexStore(): AssistantAliasStore {
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases: {},
     conversationKeys: {},
+    recentSessions: {},
   })
 }
 
-async function rebuildAssistantIndexStore(
+export async function rebuildAssistantIndexStore(
   paths: AssistantStatePaths,
 ): Promise<AssistantAliasStore> {
   const entries = await readdir(paths.sessionsDirectory, {
@@ -742,6 +761,7 @@ async function rebuildAssistantIndexStore(
 
   const aliases: Record<string, string> = {}
   const conversationKeys: Record<string, string> = {}
+  const recentSessions: Record<string, string> = {}
   for (const session of sortSessionsForIndexRebuild(sessions)) {
     if (session.alias) {
       aliases[session.alias] = session.sessionId
@@ -749,12 +769,14 @@ async function rebuildAssistantIndexStore(
     if (session.binding.conversationKey) {
       conversationKeys[session.binding.conversationKey] = session.sessionId
     }
+    recentSessions[session.sessionId] = session.lastTurnAt ?? session.updatedAt
   }
 
   const rebuilt = assistantAliasStoreSchema.parse({
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases,
     conversationKeys,
+    recentSessions: pruneAssistantRecentSessions(recentSessions),
   })
   await writeJsonFileAtomic(paths.indexesPath, rebuilt)
   await appendAssistantRuntimeEventAtPaths(paths, {

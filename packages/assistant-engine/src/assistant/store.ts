@@ -1,5 +1,4 @@
-import { readdir, stat } from 'node:fs/promises'
-import path from 'node:path'
+import { readdir } from 'node:fs/promises'
 import {
   assistantAutomationStateSchema,
   parseAssistantSessionRecord,
@@ -38,6 +37,7 @@ import {
   readAssistantTranscriptEntries,
   readAssistantTranscriptTailEntries,
   readAutomationState,
+  rebuildAssistantIndexStore,
   writeAutomationState,
   replaceTranscriptEntries,
   synchronizeAssistantIndexes,
@@ -352,10 +352,10 @@ export async function listAssistantSessionsLocal(
   })
 }
 
-// Bounded variant for recurring maintenance work: stats session files and
-// fully parses only the newest `limit` by file modification time, instead of
-// reading every session record in a growing directory. Callers still filter
-// on record timestamps; mtime ordering is only the read bound.
+// Bounded variant for recurring maintenance work: reads the bounded
+// recent-session projection from the assistant index store (maintained on
+// every session save, rebuilt from durable session records when missing) and
+// parses only the newest `limit` sessions by durable last-activity timestamp.
 export async function listRecentAssistantSessions(
   vault: string,
   options: { limit: number },
@@ -363,26 +363,23 @@ export async function listRecentAssistantSessions(
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
 
-    const sessionIds = await listAssistantSessionFileIds(paths)
-    const candidates = (await Promise.all(
-      sessionIds.map(async (sessionId) => {
-        try {
-          const stats = await stat(
-            path.join(paths.sessionsDirectory, `${sessionId}.json`),
-          )
-          return { mtimeMs: stats.mtimeMs, sessionId }
-        } catch {
-          return null
-        }
-      }),
-    )).filter((candidate) => candidate !== null)
-
+    let indexes = await readAssistantIndexStore(paths)
+    if (
+      Object.keys(indexes.recentSessions).length === 0 &&
+      (await listAssistantSessionFileIds(paths)).length > 0
+    ) {
+      // Index written before the recent-sessions projection existed (or
+      // restored without it): rebuild once from durable session records.
+      indexes = await rebuildAssistantIndexStore(paths)
+    }
     return readAssistantSessionsSorted(
       paths,
-      candidates
-        .sort((left, right) => right.mtimeMs - left.mtimeMs)
+      Object.entries(indexes.recentSessions)
+        .sort(([, left], [, right]) =>
+          compareAssistantTimestampsAscending(right, left),
+        )
         .slice(0, Math.max(0, options.limit))
-        .map((candidate) => candidate.sessionId),
+        .map(([sessionId]) => sessionId),
     )
   })
 }

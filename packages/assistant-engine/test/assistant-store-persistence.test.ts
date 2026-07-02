@@ -427,6 +427,7 @@ describe('assistant store persistence seams', () => {
       version: 1,
       aliases: {},
       conversationKeys: {},
+      recentSessions: {},
     })
 
     const previous = createSession({
@@ -455,6 +456,9 @@ describe('assistant store persistence seams', () => {
       conversationKeys: {
         'telegram:user-1:thread-2': 'session-index-shared',
       },
+      recentSessions: {
+        'session-index-shared': '2026-04-08T00:06:00.000Z',
+      },
     })
     expect(JSON.parse(await readFile(paths.indexesPath, 'utf8'))).toEqual({
       version: 1,
@@ -463,6 +467,9 @@ describe('assistant store persistence seams', () => {
       },
       conversationKeys: {
         'telegram:user-1:thread-2': 'session-index-shared',
+      },
+      recentSessions: {
+        'session-index-shared': '2026-04-08T00:06:00.000Z',
       },
     })
   })
@@ -494,6 +501,9 @@ describe('assistant store persistence seams', () => {
         local: 'session-local',
       },
       conversationKeys: {},
+      recentSessions: {
+        'session-local': '2026-04-08T00:07:00.000Z',
+      },
     })
   })
 
@@ -520,6 +530,7 @@ describe('assistant store persistence seams', () => {
       conversationKeys: {
         'telegram:user-1:thread-external': 'session-external',
       },
+      recentSessions: {},
     })
   })
 
@@ -546,6 +557,9 @@ describe('assistant store persistence seams', () => {
       },
       conversationKeys: {
         'telegram:user-1:thread-good': 'session-good',
+      },
+      recentSessions: {
+        'session-good': '2026-04-08T00:05:00.000Z',
       },
     })
 
@@ -611,6 +625,10 @@ describe('assistant store persistence seams', () => {
       conversationKeys: {
         'linq:user-1:thread-shared': 'session-newer',
       },
+      recentSessions: {
+        'session-newer': expect.any(String),
+        'session-older': expect.any(String),
+      },
     })
 
     const runtimeEvents = await listAssistantRuntimeEventsAtPath(paths.runtimeEventsPath)
@@ -661,6 +679,10 @@ describe('assistant store persistence seams', () => {
       },
       conversationKeys: {
         'linq:user-1:thread-shared': 'session-newer',
+      },
+      recentSessions: {
+        'session-newer': expect.any(String),
+        'session-older': expect.any(String),
       },
     })
   })

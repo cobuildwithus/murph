@@ -1,4 +1,4 @@
-import { rm, utimes } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
 import { afterEach, expect, test } from 'vitest'
 
 import {
@@ -17,7 +17,6 @@ import {
   saveAssistantSession,
 } from '../src/assistant/store.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
-import { resolveAssistantSessionPath } from '../src/assistant/store/persistence.ts'
 import { createTempVaultContext } from './test-helpers.js'
 
 const cleanupPaths: string[] = []
@@ -181,7 +180,7 @@ test('bounds transcript evidence reads to the tail byte cap', async () => {
   )
 })
 
-test('bounds session reads to the newest session files', async () => {
+test('bounds session reads to the newest sessions by durable activity', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-maintenance-evidence-session-cap-',
   )
@@ -191,33 +190,39 @@ test('bounds session reads to the newest session files', async () => {
     vaultRoot,
     createEvidenceTestSession({
       lastTurnAt: '2026-06-29T21:00:00.000Z',
-      sessionId: 'session-old-file',
+      sessionId: 'session-older-activity',
     }),
   )
   await saveAssistantSession(
     vaultRoot,
     createEvidenceTestSession({
       lastTurnAt: '2026-06-29T22:00:00.000Z',
-      sessionId: 'session-new-file',
+      sessionId: 'session-newer-activity',
     }),
-  )
-  const paths = resolveAssistantStatePaths(vaultRoot)
-  const past = new Date('2026-06-01T00:00:00.000Z')
-  await utimes(
-    resolveAssistantSessionPath(paths, 'session-old-file'),
-    past,
-    past,
   )
 
   const limited = await listRecentAssistantSessions(vaultRoot, { limit: 1 })
   expect(limited.map((session) => session.sessionId)).toEqual([
-    'session-new-file',
+    'session-newer-activity',
   ])
 
   const unlimited = await listRecentAssistantSessions(vaultRoot, { limit: 10 })
   expect(unlimited.map((session) => session.sessionId).sort()).toEqual([
-    'session-new-file',
-    'session-old-file',
+    'session-newer-activity',
+    'session-older-activity',
+  ])
+
+  // Recovery path: an index without the projection (or restored without it)
+  // is rebuilt once from durable session records instead of staying blind.
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await writeFile(
+    paths.indexesPath,
+    JSON.stringify({ version: 1, aliases: {}, conversationKeys: {} }),
+    'utf8',
+  )
+  const rebuilt = await listRecentAssistantSessions(vaultRoot, { limit: 1 })
+  expect(rebuilt.map((session) => session.sessionId)).toEqual([
+    'session-newer-activity',
   ])
 })
 

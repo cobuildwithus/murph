@@ -649,9 +649,15 @@ export async function executeClaimedAssistantCronJob(input: {
             status = 'skipped'
           } else {
             status = 'succeeded'
+            // Background maintenance success is terminal even when foreground
+            // input arrived during the turn: the provider work (including any
+            // memory writes) already happened, so treating it as yielded would
+            // replay a completed occurrence. Preemption for maintenance only
+            // applies before or during provider work.
             if (
               foregroundYieldedAfterNotification &&
-              result.deliveryOutcome?.kind !== 'sent'
+              result.deliveryOutcome?.kind !== 'sent' &&
+              !assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
             ) {
               throw buildAssistantCronForegroundYieldedError(claimedJob.name)
             }
