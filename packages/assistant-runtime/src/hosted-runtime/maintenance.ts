@@ -341,6 +341,11 @@ export async function runHostedAssistantAutomation(
     selectedInputIds: selectedInputIds.inputIds,
     vaultRoot,
   });
+  const shouldDeferCronForSelectedForegroundInput =
+    selectedInputIds.mode === "foreground" && selectedInputIds.inputIds.length > 0;
+  const shouldDeferCron = shouldDeferCronForSelectedForegroundInput
+    ? () => true
+    : options?.shouldYieldBackgroundMaintenance;
   const inputSource: AssistantInputSource = {
     ...baseInputSource,
     async listInputCandidates(query) {
@@ -505,10 +510,9 @@ export async function runHostedAssistantAutomation(
       vaultServices,
       maxPerScan,
       requestId,
-      ...(options?.shouldYieldBackgroundMaintenance
-        ? { shouldDeferCron: options.shouldYieldBackgroundMaintenance }
-        : {}),
+      ...(shouldDeferCron ? { shouldDeferCron } : {}),
       signal,
+      shouldYieldBackgroundMaintenance: options?.shouldYieldBackgroundMaintenance ?? null,
       inputSource,
       turnEnvironment: turnEnvironment ?? null,
       vault: vaultRoot,

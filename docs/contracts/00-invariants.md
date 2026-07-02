@@ -157,7 +157,7 @@
 - Vector search is deferred unless it is explicitly added to the contract.
 - No OCR-heavy lab parser.
 - No local-model requirement.
-- No automatic promotion of local or provider chat transcripts into canonical health state.
+- No automatic promotion of local or provider chat transcripts into canonical health state. The overnight memory consolidation managed automation is the one approved transcript-promotion boundary, and it is deliberately narrower than health state: it may write non-health durable user context into canonical vault memory through `vault-cli memory upsert`/`vault-cli memory update` only, sourced solely from the engine-supplied bounded conversation-evidence window, and must never save medical or health details, credentials, identifiers, or transient task detail from conversation text.
 
 ## Frozen Current Choices
 

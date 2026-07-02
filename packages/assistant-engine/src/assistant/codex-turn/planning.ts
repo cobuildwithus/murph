@@ -219,6 +219,7 @@ export type AssistantCodexTurnPromptProfile =
 export type AssistantCodexTurnToolProfile =
   | 'provider-turn'
   | 'notification-turn'
+  | 'maintenance-turn'
 
 export type AssistantCodexThreadScope =
   | 'session-thread'
@@ -436,8 +437,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.promptProfile === 'conversation' &&
     input.sharedPlan.onboardingGuidanceOpen
   const assistantToolNameAliases = null
-  const assistantDynamicContextPrompts =
-    input.executionContext?.hosted?.dynamicContextPrompts ?? []
+  // Maintenance turns consume only the engine-supplied conversation evidence
+  // plus canonical memory; the context snapshot (which carries health
+  // domains) and hosted dynamic context prompts must not reach their system
+  // prompt, or the prompt itself would hand the model forbidden sources.
+  const maintenanceTurn = input.profile.toolProfile === 'maintenance-turn'
+  const assistantDynamicContextPrompts = maintenanceTurn
+    ? []
+    : input.executionContext?.hosted?.dynamicContextPrompts ?? []
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
@@ -471,17 +478,18 @@ export async function resolveAssistantRouteTurnPlan(input: {
         )
       : []
   let assistantContextSnapshotElapsedMs: number | null = null
-  const assistantContextSnapshotPrompt =
-    await measureRoutePlanningAsync(
-      routePlanningSpans,
-      'assistantContextSnapshotElapsedMs',
-      () => readAssistantContextSnapshotPrompt({
-        vaultRoot: input.input.vault,
-      }),
-      (elapsedMs) => {
-        assistantContextSnapshotElapsedMs = elapsedMs
-      },
-    )
+  const assistantContextSnapshotPrompt = maintenanceTurn
+    ? null
+    : await measureRoutePlanningAsync(
+        routePlanningSpans,
+        'assistantContextSnapshotElapsedMs',
+        () => readAssistantContextSnapshotPrompt({
+          vaultRoot: input.input.vault,
+        }),
+        (elapsedMs) => {
+          assistantContextSnapshotElapsedMs = elapsedMs
+        },
+      )
   const modelBehaviorProfile = resolveAssistantModelBehaviorProfile(
     input.route.providerOptions,
   )
@@ -494,6 +502,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       ? buildAssistantNotificationDecisionSystemPromptWithCacheMetadata({
             assistantContextSnapshotPrompt,
             assistantDynamicContextPrompts,
+            maintenanceTurn,
             assistantHostedDeviceConnectAvailable:
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:
@@ -566,25 +575,30 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const allowFinishWithoutReply =
     input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
-  const dynamicTools = resolveMurphDynamicTools({
-    allowFinishWithoutReply,
-    allowMessageReactions: messageReactionsAvailable,
-    computerToolsAvailable:
-      input.hostedToolContext?.computerToolsAvailable === true,
-    progressUpdatesAvailable: input.progressDelivery != null,
-    connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
-    familyPlanAvailable: input.hostedToolContext?.familyPlanTool != null,
-    groupAvailable: input.hostedToolContext?.groupTool != null,
-    productFeedbackAvailable:
-      productFeedbackAcceptedInputIds.length > 0 &&
-      typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
-    phoneCallsAvailable:
-      phoneCallAcceptedInputIds.length > 0 &&
-      input.hostedToolContext?.phoneCalls != null,
-    voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
-    vaultFileSendAvailable:
-      input.hostedToolContext?.vaultFileSendAvailable === true,
-  })
+// Maintenance turns run without a delivery target and must not expose any
+  // external-capable or delivery-facing tool surface, so the gate is the
+  // resolved tool set itself rather than prompt text.
+  const dynamicTools = maintenanceTurn
+    ? []
+    : resolveMurphDynamicTools({
+        allowFinishWithoutReply,
+        allowMessageReactions: messageReactionsAvailable,
+        computerToolsAvailable:
+          input.hostedToolContext?.computerToolsAvailable === true,
+        progressUpdatesAvailable: input.progressDelivery != null,
+        connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
+        familyPlanAvailable: input.hostedToolContext?.familyPlanTool != null,
+        groupAvailable: input.hostedToolContext?.groupTool != null,
+        productFeedbackAvailable:
+          productFeedbackAcceptedInputIds.length > 0 &&
+          typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
+        phoneCallsAvailable:
+          phoneCallAcceptedInputIds.length > 0 &&
+          input.hostedToolContext?.phoneCalls != null,
+        voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
+        vaultFileSendAvailable:
+          input.hostedToolContext?.vaultFileSendAvailable === true,
+      })
   const reactionDynamicToolAvailable = dynamicTools.some(
     (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
   )
@@ -634,9 +648,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
           ? fallbackConversationHistoryMessages
           : undefined,
       developerInstructions: threadStartDeveloperInstructions,
-      sessionContext: {
-        binding: input.session.binding,
-      },
+      // Maintenance turns must not receive binding context: the provider
+      // prepends it to the prompt as identity/actor/thread/delivery lines,
+      // which are forbidden source material for canonical memory writes.
+      sessionContext: maintenanceTurn
+        ? undefined
+        : {
+            binding: input.session.binding,
+          },
       turnContextPrompt,
     }
   }
@@ -701,7 +720,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         routePlanningSpans.supportedExperimentProtocolsElapsedMs ?? null,
     },
     resume,
-    sessionContext: shouldPrepareBootstrapContext
+    sessionContext: shouldPrepareBootstrapContext && !maintenanceTurn
       ? {
           binding: input.session.binding,
         }
@@ -843,7 +862,7 @@ function limitAssistantConversationHistoryMessages(
   return retained.reverse()
 }
 
-function limitAssistantConversationHistoryTextBytes(
+export function limitAssistantConversationHistoryTextBytes(
   value: string | null,
   maxBytes: number,
 ): string | null {
@@ -870,7 +889,7 @@ function limitAssistantConversationHistoryTextBytes(
   return normalizeNullableString(codePoints.slice(0, low).join('').trimEnd())
 }
 
-function assistantConversationHistoryUtf8Bytes(value: string): number {
+export function assistantConversationHistoryUtf8Bytes(value: string): number {
   return assistantConversationHistoryTextEncoder.encode(value).byteLength
 }
 

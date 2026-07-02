@@ -96,6 +96,7 @@ export interface RunAssistantAutomationInput {
   onInboxEvent?: (event: InboxRunEvent) => void
   once?: boolean
   requestId?: string | null
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null
   shouldDeferCron?: (() => boolean) | null
   signal?: AbortSignal
   startDaemon?: boolean
@@ -989,6 +990,8 @@ export async function runAssistantAutomationPass(
         shouldYield: input.shouldDeferCron ?? null,
         vault: input.vault,
         signal: input.signal,
+        shouldYieldBackgroundMaintenance:
+          input.shouldYieldBackgroundMaintenance ?? null,
         turnEnvironment: input.turnEnvironment ?? null,
         limit: input.maxPerScan,
       })
@@ -1014,7 +1017,12 @@ export async function runAssistantAutomationPass(
     stateBeforeScan,
     state,
   )
-  const cronStatus = await getAssistantCronStatus(input.vault)
+  const cronStatus = await getAssistantCronStatus(input.vault, {
+    executionContext,
+    shouldYieldBackgroundMaintenance:
+      input.shouldYieldBackgroundMaintenance ?? null,
+    turnEnvironment: input.turnEnvironment ?? null,
+  })
   const cronNextRunAt = resolveAssistantCronNextWakeAt({
     applyCanonicalWrites,
     cronStatus,
