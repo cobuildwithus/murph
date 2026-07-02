@@ -671,35 +671,54 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
 }): Promise<void> {
   const template = input.effect.payload.template;
   try {
-    const milestone = await markHostedLinqDeliveryAcceptedTx({
-      idempotencyKey: input.effect.effectId,
-      linqChatId: input.chatId,
-      messageId: input.messageId,
-      prisma: input.prisma,
-    });
     // A terminal receipt can beat this milestone write (it only just learned
     // the provider message id); the milestone replays that receipt and this
     // applies the same daily-state consequence as live receipt ingestion.
-    if (milestone.reopenOnboardingLink) {
-      await releaseHostedLinqOnboardingLinkNoticeClaim({
-        memberId: milestone.reopenOnboardingLink.memberId,
-        occurredAt: milestone.reopenOnboardingLink.occurredAt,
-        prisma: input.prisma,
+    // Milestone and consequence commit atomically: a replayed failure must
+    // never mark the delivery terminally failed while leaving the member/day
+    // marked sent, or the planner suppresses retries for the rest of the day.
+    await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
+      const milestone = await markHostedLinqDeliveryAcceptedTx({
+        idempotencyKey: input.effect.effectId,
+        linqChatId: input.chatId,
+        messageId: input.messageId,
+        prisma,
       });
-    }
-    if (milestone.restoreOnboardingLink) {
-      await markHostedLinqOnboardingLinkNoticeSent({
-        memberId: milestone.restoreOnboardingLink.memberId,
-        occurredAt: milestone.restoreOnboardingLink.occurredAt,
-        prisma: input.prisma,
-      });
-    }
+      if (milestone.reopenOnboardingLink) {
+        await releaseHostedLinqOnboardingLinkNoticeClaim({
+          memberId: milestone.reopenOnboardingLink.memberId,
+          occurredAt: milestone.reopenOnboardingLink.occurredAt,
+          prisma,
+        });
+      }
+      if (milestone.restoreOnboardingLink) {
+        await markHostedLinqOnboardingLinkNoticeSent({
+          memberId: milestone.restoreOnboardingLink.memberId,
+          occurredAt: milestone.restoreOnboardingLink.occurredAt,
+          prisma,
+        });
+      }
+    });
   } catch (error) {
     console.warn("Hosted Linq delivery accepted recording failed.", {
       errorName: error instanceof Error ? error.name : "UnknownError",
       template,
     });
   }
+}
+
+async function runHostedLinqTransportTransaction<TResult>(
+  prisma: HostedLinqTransportPersistenceClient,
+  callback: (transaction: HostedLinqTransportPersistenceClient) => Promise<TResult>,
+): Promise<TResult> {
+  const candidate = prisma as HostedLinqTransportPersistenceClient & {
+    $transaction?: <T>(
+      operation: (transaction: Prisma.TransactionClient) => Promise<T>,
+    ) => Promise<T>;
+  };
+  return candidate.$transaction
+    ? candidate.$transaction(callback)
+    : callback(prisma);
 }
 
 async function markHostedLinqDeliveryFailedBestEffort(input: {
