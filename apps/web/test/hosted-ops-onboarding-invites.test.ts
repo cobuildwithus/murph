@@ -637,6 +637,41 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(1);
   });
 
+  it("reuses a bare same-line claim even after its line left the assignable pool", async () => {
+    const assignedAt = new Date("2026-06-30T14:15:00.000Z");
+    routingState = {
+      linqChatId: null,
+      linqHomeLineAssignedAt: assignedAt,
+      linqRecipientPhone: "+15557654321",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+    };
+    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(null);
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-bare-claim-disabled-line",
+    })).resolves.toMatchObject({
+      chatId: "chat_created",
+      deliveryMode: "new_chat",
+      newChatCreated: true,
+    });
+
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      homeLineAssignedAt: assignedAt,
+      memberId: "member_123",
+      prisma: tx,
+      recipientPhone: "+15557654321",
+    });
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects new-chat sends when the member already has a direct Linq home-line route", async () => {
     routingState = {
       linqChatId: null,
@@ -949,7 +984,7 @@ describe("hosted ops onboarding invites", () => {
     );
   });
 
-  it("does not reuse an existing pending Linq chat after its sender line is disabled", async () => {
+  it("reuses an existing pending Linq chat even after its sender line left the assignable pool", async () => {
     mocks.sendHostedLinqChatMessage
       .mockRejectedValueOnce(new Error("provider timed out after sending invite"));
 
@@ -967,14 +1002,21 @@ describe("hosted ops onboarding invites", () => {
       linqFromPhoneNumber: "+15557654321",
       recipientPhoneNumber: "+15551234567",
       requestId: "request-retry-disabled-pending-chat",
-    })).rejects.toMatchObject({
-      code: "HOSTED_OPS_ONBOARDING_FROM_PHONE_UNAUTHORIZED",
+    })).resolves.toMatchObject({
+      chatId: "chat_created",
+      deliveryMode: "new_chat",
+      newChatCreated: false,
     });
 
+    // The pending route is durable authority; pool eligibility gates only
+    // new claims, so the retry reuses the chat instead of failing.
     expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledTimes(1);
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(1);
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
+    expect(readIdempotencyKey(mocks.sendHostedLinqChatMessage, 1)).toBe(
+      readIdempotencyKey(mocks.sendHostedLinqChatMessage, 0),
+    );
   });
 
   it("changes the invite text idempotency key when a post-send failed retry targets a different chat", async () => {

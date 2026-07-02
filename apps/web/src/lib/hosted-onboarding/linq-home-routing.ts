@@ -56,8 +56,9 @@ export type HostedLinqHomeLineNewChatDeliveryResult =
       kind: "existing_pending";
     }
   | {
+      assignedAt: Date;
       kind: "reserved";
-      reservation: HostedLinqHomeLineAssignmentReservation;
+      senderPhoneNumber: string;
     }
   | {
       kind: "already_bound";
@@ -281,11 +282,44 @@ export async function resolveHostedMemberLinqHomeLineNewChatDeliveryTx(input: {
     prisma: input.prisma,
   });
 
-  const now = new Date();
   const routing = await readHostedMemberRoutingState({
     memberId: input.memberId,
     prisma: input.prisma,
   });
+  const authority = readHostedLinqHomeLineAuthority(routing);
+
+  // Existing authority resolves from the routing row alone; the assignable
+  // pool gates only new claims, so retries survive a line that has since
+  // left the pool.
+  if (authority.kind === "pending" && authority.recipientPhone === senderPhone) {
+    return {
+      chatId: authority.chatId,
+      kind: "existing_pending",
+    };
+  }
+
+  // Reclaim this member's own bare same-line reservation (left when a crash
+  // or failed bind interrupted a prior attempt after the claim committed)
+  // instead of blocking the retry. Legacy direct routes carry no assignment
+  // timestamp and still fail closed below.
+  if (
+    authority.kind === "bare"
+    && authority.recipientPhone === senderPhone
+    && authority.assignedAt
+  ) {
+    return {
+      assignedAt: authority.assignedAt,
+      kind: "reserved",
+      senderPhoneNumber: authority.recipientPhone,
+    };
+  }
+
+  if (authority.kind !== "none") {
+    return {
+      kind: "already_bound",
+    };
+  }
+
   const line = await readHostedLinqAssignableHomeLineByPhone({
     phoneNumber: senderPhone,
     prisma: input.prisma,
@@ -297,50 +331,23 @@ export async function resolveHostedMemberLinqHomeLineNewChatDeliveryTx(input: {
     };
   }
 
-  const pendingRecipientPhone = normalizePhoneNumber(routing?.pendingLinqRecipientPhone);
-  const homeRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
-  if (
-    routing?.pendingLinqChatId
-    && homeRecipientPhone === line.phoneNumber
-    && pendingRecipientPhone === line.phoneNumber
-  ) {
-    return {
-      chatId: routing.pendingLinqChatId,
-      kind: "existing_pending",
-    };
-  }
-
-  // Reclaim this member's own bare same-line reservation (left when a crash
-  // or failed bind interrupted a prior attempt after the claim committed)
-  // instead of blocking the retry. Legacy direct routes carry no assignment
-  // timestamp and still fail closed below.
-  if (
-    routing
-    && !routing.linqChatId
-    && !routing.pendingLinqChatId
-    && homeRecipientPhone === line.phoneNumber
-    && routing.linqHomeLineAssignedAt
-  ) {
-    return {
-      kind: "reserved",
-      reservation: {
-        assignedAt: routing.linqHomeLineAssignedAt,
-        line,
-      },
-    };
-  }
-
-  if (routing?.linqChatId || routing?.pendingLinqChatId || homeRecipientPhone) {
-    return {
-      kind: "already_bound",
-    };
-  }
-
-  return reserveHostedLinqHomeLineForLineAfterLockTx({
+  const reservationResult = await reserveHostedLinqHomeLineForLineAfterLockTx({
     line,
-    now,
+    now: new Date(),
     prisma: input.prisma,
   });
+
+  if (reservationResult.kind !== "reserved") {
+    return {
+      kind: reservationResult.kind,
+    };
+  }
+
+  return {
+    assignedAt: reservationResult.reservation.assignedAt,
+    kind: "reserved",
+    senderPhoneNumber: reservationResult.reservation.line.phoneNumber,
+  };
 }
 
 export async function resolveHostedMemberActivationLinqRoute(input: {
@@ -401,20 +408,22 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
     ?? input.member.emailAuthorization?.verifiedEmail?.lookupKey
     ?? null;
 
-  if (routing?.linqChatId) {
-    if (routing.pendingLinqChatId) {
+  const authority = readHostedLinqHomeLineAuthority(routing);
+
+  if (authority.kind === "home") {
+    if (routing?.pendingLinqChatId) {
       await upsertHostedMemberHomeLinqBindingTx({
         clearPending: true,
-        linqChatId: routing.linqChatId,
+        linqChatId: authority.chatId,
         memberId: input.member.core.id,
         prisma: input.prisma,
-        recipientPhone: routing.linqRecipientPhone,
+        recipientPhone: authority.recipientPhone,
       });
     }
 
     return {
       welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
-        linqChatId: routing.linqChatId,
+        linqChatId: authority.chatId,
         linqContactLookupKey,
         memberId: input.member.core.id,
         memberPhoneNumber,
@@ -425,27 +434,26 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
 
   // An existing pending route is durable authority; promoting it must not
   // depend on the line still being in the assignable pool.
-  const pendingLinqRecipientPhone = normalizePhoneNumber(routing?.pendingLinqRecipientPhone);
   if (
-    routing?.pendingLinqChatId
+    authority.kind === "pending"
     && linqContactLookupKey
     && (
       memberPhoneNumber
-        ? pendingLinqRecipientPhone !== null
+        ? authority.recipientPhone !== null
         : true
     )
   ) {
     await upsertHostedMemberHomeLinqBindingTx({
       clearPending: true,
-      linqChatId: routing.pendingLinqChatId,
+      linqChatId: authority.chatId,
       memberId: input.member.core.id,
       prisma: input.prisma,
-      recipientPhone: pendingLinqRecipientPhone,
+      recipientPhone: authority.recipientPhone,
     });
 
     return {
       welcomeRoute: resolveHostedMemberAssistantNotificationRoute({
-        linqChatId: routing.pendingLinqChatId,
+        linqChatId: authority.chatId,
         linqContactLookupKey,
         memberId: input.member.core.id,
         memberPhoneNumber,

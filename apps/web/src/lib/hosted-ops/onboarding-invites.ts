@@ -354,10 +354,10 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
     // commit. The provider chat-open call must run outside this transaction
     // so the home-line pool lock is never held across provider I/O.
     await upsertHostedMemberHomeLinqRecipientPhoneTx({
-      homeLineAssignedAt: deliveryResult.reservation.assignedAt,
+      homeLineAssignedAt: deliveryResult.assignedAt,
       memberId,
       prisma: tx,
-      recipientPhone: deliveryResult.reservation.line.phoneNumber,
+      recipientPhone: deliveryResult.senderPhoneNumber,
     });
 
     return {
@@ -367,8 +367,8 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
       },
       kind: "reserved" as const,
       reservation: {
-        assignedAt: deliveryResult.reservation.assignedAt,
-        senderPhoneNumber: deliveryResult.reservation.line.phoneNumber,
+        assignedAt: deliveryResult.assignedAt,
+        senderPhoneNumber: deliveryResult.senderPhoneNumber,
       },
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);

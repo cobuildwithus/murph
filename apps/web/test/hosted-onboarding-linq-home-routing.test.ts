@@ -388,6 +388,38 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
   });
 
+  it("promotes a pending Linq thread whose reservation phone lives on the home column", async () => {
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member: buildMember({
+          linqHomeLineAssignedAt: new Date("2026-06-30T14:15:00.000Z"),
+          linqRecipientPhone: "+15550100001",
+          pendingLinqChatId: "chat_pending",
+          pendingLinqRecipientPhone: null,
+        }),
+        prisma: {} as never,
+      }),
+    ).resolves.toMatchObject({
+      welcomeRoute: {
+        delivery: {
+          kind: "thread",
+          target: "chat_pending",
+        },
+      },
+    });
+
+    // The pending route must promote, not be cleared by a bare recipient
+    // write that drops the pending chat.
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
+      clearPending: true,
+      linqChatId: "chat_pending",
+      memberId: "member_123",
+      prisma: {} as never,
+      recipientPhone: "+15550100001",
+    });
+  });
+
   it("promotes a reserved pending Linq thread even when its line left the assignable pool", async () => {
     mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(null);
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
