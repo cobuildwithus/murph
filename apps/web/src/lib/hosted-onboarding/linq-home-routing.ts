@@ -191,9 +191,16 @@ async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
     };
   }
 
+  // A durable bare line assignment (recipient phone with no chat bound yet)
+  // is home-line authority: it must redirect other-line inbound traffic the
+  // same way a chat-bound home route does.
+  const assignedHomeRecipientPhone =
+    currentRoute?.recipientPhone
+    ?? normalizePhoneNumber(routing?.linqRecipientPhone);
+
   const routeDecision = resolveHostedLinqActiveRouteDecision({
     homeChatId: currentRoute?.chatId ?? null,
-    homeRecipientPhone: currentRoute?.recipientPhone ?? null,
+    homeRecipientPhone: assignedHomeRecipientPhone,
     incomingChatId: input.incomingChatId,
     incomingDirectAttested: input.incomingDirectAttested,
     incomingRecipientPhone: input.incomingRecipientPhone,
@@ -208,7 +215,7 @@ async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
 
   const recipientPhone = resolveHostedLinqHomeBindingRecipientPhone({
     homeChatId: currentRoute?.chatId ?? null,
-    homeRecipientPhone: currentRoute?.recipientPhone ?? null,
+    homeRecipientPhone: assignedHomeRecipientPhone,
     incomingChatId: input.incomingChatId,
     incomingRecipientPhone: input.incomingRecipientPhone,
   });

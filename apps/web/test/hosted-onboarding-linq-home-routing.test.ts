@@ -539,6 +539,42 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
   });
 
+  it("redirects other-line inbound to a bare assigned home line without reserving", async () => {
+    const assignedAt = new Date("2026-06-30T14:15:00.000Z");
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: null,
+      linqHomeLineAssignedAt: assignedAt,
+      linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+
+    await expect(
+      resolveHostedMemberLinqHomeLineRouteBindingTx({
+        incomingChatId: "chat_other_line",
+        incomingDirectAttested: true,
+        incomingRecipientPhone: "+15550100002",
+        memberId: "member_123",
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      homeRecipientPhone: "+15550100001",
+      kind: "redirect_to_home",
+    });
+
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+  });
+
   it("acquires the pool lock and re-resolves routing before reserving a new assignment", async () => {
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
 
