@@ -324,6 +324,10 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
         mailboxItemId: mailboxAppend.item.id,
         source: "whatsapp",
         userId: member.id,
+        wakeMailboxCheckpoint: {
+          lane: mailboxAppend.item.lane,
+          laneSeq: mailboxAppend.item.laneSeq,
+        },
       },
     };
   }
@@ -338,6 +342,10 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
       mailboxItemId: mailboxAppend.item.id,
       source: "whatsapp",
       userId: member.id,
+      wakeMailboxCheckpoint: {
+        lane: mailboxAppend.item.lane,
+        laneSeq: mailboxAppend.item.laneSeq,
+      },
     },
   };
 }

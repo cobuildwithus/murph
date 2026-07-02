@@ -118,8 +118,78 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
 
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(consoleWarn).toHaveBeenCalledWith(
+        "Hosted direct ensure wake failed.",
+        expect.objectContaining({ source: "linq" }),
+      );
+    });
+    consoleWarn.mockRestore();
+  });
+
+  it("never puts the direct ensure on the webhook response path, even with no scheduler", async () => {
+    // A control endpoint that never responds must not delay the handoff.
+    mocks.ensureRuntimeProcessing.mockReturnValue(new Promise(() => undefined));
+
+    await expect(maybeHandoffHostedExecutionWebhookWake({
+      eventId: "evt_123",
+      mailboxItemId: "mailbox_123",
+      response,
+      source: "telegram",
+      userId: "member_123",
+      wakeMailboxCheckpoint: {
+        lane: "conversation",
+        laneSeq: "42",
+      },
+    })).resolves.toMatchObject({
+      reason: "temporal-signaled",
+      signalAccepted: true,
+    });
+
+    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a hanging direct ensure off the failure path when the Temporal signal throws", async () => {
+    mocks.ensureRuntimeProcessing.mockReturnValue(new Promise(() => undefined));
+    mocks.signalHostedMailboxAppendRuntime.mockRejectedValue(new Error("temporal down"));
+
+    await expect(maybeHandoffHostedExecutionWebhookWake({
+      eventId: "evt_123",
+      mailboxItemId: "mailbox_123",
+      response,
+      source: "linq",
+      userId: "member_123",
+      wakeMailboxCheckpoint: {
+        lane: "conversation",
+        laneSeq: "42",
+      },
+    })).rejects.toThrow("temporal down");
+
+    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
+  });
+
+  it("proceeds to the Temporal signal when the control client setup throws synchronously", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.readHostedExecutionControlClientIfConfigured.mockImplementation(() => {
+      throw new TypeError("Hosted execution baseUrl must be configured.");
+    });
+
+    await expect(maybeHandoffHostedExecutionWebhookWake({
+      eventId: "evt_123",
+      mailboxItemId: "mailbox_123",
+      response,
+      source: "linq",
+      userId: "member_123",
+      wakeMailboxCheckpoint: {
+        lane: "conversation",
+        laneSeq: "42",
+      },
+    })).resolves.toMatchObject({ signalAccepted: true });
+
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(1);
     expect(consoleWarn).toHaveBeenCalledWith(
-      "Hosted direct ensure wake failed.",
+      "Hosted direct ensure wake client is misconfigured.",
       expect.objectContaining({ source: "linq" }),
     );
     consoleWarn.mockRestore();
@@ -197,10 +267,12 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     })).rejects.toThrow("temporal down");
 
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
-    expect(consoleInfo).toHaveBeenCalledWith(
-      "Hosted direct ensure wake completed.",
-      expect.objectContaining({ action: "woken", source: "linq" }),
-    );
+    await vi.waitFor(() => {
+      expect(consoleInfo).toHaveBeenCalledWith(
+        "Hosted direct ensure wake completed.",
+        expect.objectContaining({ action: "woken", source: "linq" }),
+      );
+    });
     consoleInfo.mockRestore();
   });
 });

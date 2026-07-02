@@ -31,6 +31,7 @@ export type HostedWebhookWakeHandoff = {
   mailboxItemId: string;
   source: "linq" | "telegram" | "whatsapp";
   userId: string;
+  wakeMailboxCheckpoint?: HostedWebhookWakeMailboxCheckpoint;
 };
 
 export type HostedStripeWebhookResponse = {
