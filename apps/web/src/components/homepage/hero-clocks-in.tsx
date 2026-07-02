@@ -745,7 +745,7 @@ export function HeroClocksIn({
             then build habits that stick.
           </p>
 
-          <div className="mt-8 max-w-[52ch] text-[1.0625rem] [&_a]:w-full [&_button]:w-full lg:mt-10 lg:max-w-none lg:[&_a]:w-auto lg:[&_button]:w-auto">
+          <div className="mt-10 hidden lg:block">
             <LandingAuthActions
               authLabel="Meet Murph"
               authenticated={authenticated}
@@ -845,6 +845,14 @@ export function HeroClocksIn({
           </div>
         </div>
 
+        <div className="relative mx-auto mt-2 w-full max-w-[320px] lg:hidden [&_a]:w-full [&_button]:w-full">
+          <LandingAuthActions
+            authLabel="Meet Murph"
+            authenticated={authenticated}
+            context="hero"
+            leadingIcon={channelIcon}
+          />
+        </div>
       </div>
     </section>
   );
@@ -1043,7 +1051,7 @@ function BloodworkCard({ result }: { result: BloodworkResult }) {
 
 function PhoneShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative rounded-[2.75rem] bg-[#0a0a0a] p-[4px] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.55)]">
+    <div className="relative rounded-[2.75rem] bg-[#0a0a0a] p-[4px] shadow-[0_16px_36px_-18px_rgba(0,0,0,0.4)] lg:shadow-[0_30px_80px_-20px_rgba(0,0,0,0.55)]">
       <div className="overflow-hidden rounded-[2.5rem] bg-[#f5f0e8]">
         {children}
       </div>
