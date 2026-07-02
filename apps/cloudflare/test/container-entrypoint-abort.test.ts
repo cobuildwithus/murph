@@ -200,9 +200,6 @@ describe("container entrypoint abort boundary", () => {
     const invocationStarted = createDeferred<AbortSignal>();
     const finishInvocation = createDeferred();
     const exit = vi.fn();
-    const readdir = vi.fn(async () => [
-      { isDirectory: () => true, name: String(process.pid) },
-    ]);
     const readFile = vi.fn(async () => {
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
@@ -224,7 +221,7 @@ describe("container entrypoint abort boundary", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
-        processApi: { readFile, readdir },
+        processApi: { readFile },
       },
     });
     servers.push(server);

@@ -54,8 +54,9 @@ export type HostedIdleMaintenanceOutcome =
 // One idle-checkpoint maintenance step: opportunistic, fail-open thread
 // compaction. Runs only on TTL idle shutdown (never deploy evacuation). A
 // pending wake aborts it immediately; the engine kills the warm process before
-// returning, so container cleanup never snapshots teardown in progress. Future
-// idle-time maintenance belongs here as additional plain statements.
+// returning, so the idle checkpoint that snapshots the Codex home never
+// captures a rollout mid-teardown. Future idle-time maintenance belongs here
+// as additional plain statements.
 export async function runHostedIdleCheckpointMaintenance(input: {
   credentialSource: AssistantUsageCredentialSource;
   materializeRetentionCandidatePaths?: ((

@@ -43,7 +43,10 @@ import {
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "./runner-injected-credential.ts";
-import { startHostedContainerCpuWatchdog } from "./container-cpu-watchdog.ts";
+import {
+  startHostedContainerCpuWatchdog,
+  type HostedContainerCpuWatchdogProcessApi,
+} from "./container-cpu-watchdog.ts";
 import {
   HOSTED_CONTAINER_FATAL_REPORT_TIMEOUT_MS,
   reportHostedContainerFatalBestEffort,
@@ -111,17 +114,14 @@ const HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH =
   "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 const HOSTED_CONTAINER_CODEX_SMOKE_HOME_DIRECTORY = ".codex-deploy-smoke";
 
-interface HostedContainerProcessDirectoryEntryLike {
-  isDirectory(): boolean;
-  name: string;
-}
-
 interface HostedContainerProcessApi {
   readFile(path: string, encoding: BufferEncoding): Promise<string>;
-  readdir(path: string): Promise<HostedContainerProcessDirectoryEntryLike[]>;
 }
 
-const defaultHostedContainerProcessApi: HostedContainerProcessApi = {
+// readdir is only part of the CPU watchdog's file-system surface; the
+// entrypoint itself reads files but never scans directories.
+const defaultHostedContainerProcessApi: HostedContainerProcessApi &
+  HostedContainerCpuWatchdogProcessApi = {
   async readFile(path, encoding) {
     return await readFile(path, encoding);
   },
@@ -301,7 +301,9 @@ type HostedContainerRuntimeWakeNotification = {
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
 };
 
-type HostedContainerCleanupStatus = "not_run" | "passed" | "failed";
+// The only remaining cleanup is the off-invocation warm-Codex stop, and it
+// reports only failure; success leaves the status untouched.
+type HostedContainerCleanupStatus = "not_run" | "failed";
 
 export async function startHostedContainerEntrypoint(input: {
   port?: number;
@@ -892,11 +894,9 @@ export async function startHostedContainerEntrypoint(input: {
             userId: null,
           });
         },
-        onCleanupStatus(status) {
-          lastCleanupStatus = status;
-          if (status === "failed") {
-            hostedContainerPoisoned = true;
-          }
+        onCleanupFailed() {
+          lastCleanupStatus = "failed";
+          hostedContainerPoisoned = true;
         },
         ...(coldNodeStartupMs === null ? {} : { nodeStartupMs: coldNodeStartupMs }),
         ...(dispatchMilestones ? { dispatch: dispatchMilestones } : {}),
@@ -2699,40 +2699,13 @@ async function readHostedRunnerBundleManifestSummary(
   };
 }
 
-async function runHostedWorkspaceInvocation(
-  input: HostedExecutionRunnerJobInput,
-  runtime: HostedContainerRuntimeDependencies,
-  options?: {
-    dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
-    nodeStartupMs?: number | null;
-    onRuntimeWakeReady?: (
-      sendWake: (notification?: HostedContainerRuntimeWakeNotification) => boolean
-    ) => void;
-    orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
-    runnerJobAcceptedAt?: string | null;
-    shutdownSignal?: AbortSignal | null;
-    signal?: AbortSignal;
-  },
-): Promise<Awaited<ReturnType<typeof runHostedWorkspaceInvocationDirect>>> {
-  return await runtime.runWorkspaceInvocation(input, {
-    dispatch: options?.dispatch ?? null,
-    nodeStartupMs: options?.nodeStartupMs ?? null,
-    onRuntimeWakeReady: options?.onRuntimeWakeReady,
-    orchestration: options?.orchestration ?? null,
-    runnerJobAcceptedAt: options?.runnerJobAcceptedAt ?? null,
-    shutdownSignal: options?.shutdownSignal ?? null,
-    signal: options?.signal,
-    supervisorEnv: runtime.startupConfig.supervisorEnv,
-  });
-}
-
 async function runHostedWorkspaceInvocationWithWarmCodexCleanup(
   input: HostedExecutionRunnerJobInput,
   runtime: HostedContainerRuntimeDependencies,
   options?: {
     dispatch?: { invokeReceivedAtEpochMs?: number; containerEnsureReadyStartedAtEpochMs?: number } | null;
     nodeStartupMs?: number | null;
-    onCleanupStatus?: (status: Exclude<HostedContainerCleanupStatus, "not_run">) => void;
+    onCleanupFailed?: () => void;
     onRuntimeWakeReady?: (
       sendWake: (notification?: HostedContainerRuntimeWakeNotification) => boolean
     ) => void;
@@ -2745,7 +2718,16 @@ async function runHostedWorkspaceInvocationWithWarmCodexCleanup(
   await stopWarmCodexAfterCliBridgeOffInvocationViolation(runtime, options);
 
   try {
-    return await runHostedWorkspaceInvocation(input, runtime, options);
+    return await runtime.runWorkspaceInvocation(input, {
+      dispatch: options?.dispatch ?? null,
+      nodeStartupMs: options?.nodeStartupMs ?? null,
+      onRuntimeWakeReady: options?.onRuntimeWakeReady,
+      orchestration: options?.orchestration ?? null,
+      runnerJobAcceptedAt: options?.runnerJobAcceptedAt ?? null,
+      shutdownSignal: options?.shutdownSignal ?? null,
+      signal: options?.signal,
+      supervisorEnv: runtime.startupConfig.supervisorEnv,
+    });
   } finally {
     await stopWarmCodexAfterCliBridgeOffInvocationViolation(runtime, options);
   }
@@ -2791,7 +2773,7 @@ async function stopWarmCodexWithLifecycleLog(
 async function stopWarmCodexAfterCliBridgeOffInvocationViolation(
   runtime: HostedContainerRuntimeDependencies,
   options?: {
-    onCleanupStatus?: (status: Exclude<HostedContainerCleanupStatus, "not_run">) => void;
+    onCleanupFailed?: () => void;
   },
 ): Promise<void> {
   const violationPending = await runtime.consumeCliBridgeOffInvocationViolation();
@@ -2806,7 +2788,7 @@ async function stopWarmCodexAfterCliBridgeOffInvocationViolation(
       reason: "cli-bridge-off-invocation-request",
     });
   } catch (error) {
-    options?.onCleanupStatus?.("failed");
+    options?.onCleanupFailed?.();
     throw error;
   }
 }
