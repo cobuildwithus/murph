@@ -628,19 +628,31 @@ export async function startHostedLocalDevStack(input: {
       // configured lines the same way the Vercel deploy does. Without this a
       // fresh local database has no assignable line and onboarding activation
       // fails closed with LINQ_CONVERSATION_PHONE_REQUIRED. Provider inventory
-      // sync is skipped locally so startup needs no Linq API call.
-      await runCommand("pnpm", [
-        "--dir",
-        "apps/web",
-        "linq:sync-lines",
-        "--",
-        "--skip-provider-inventory",
-      ], {
-        cwd: repoRoot,
-        env: runtimeEnv,
-        name: "setup",
-        signal: input.abortSignal,
-      });
+      // sync is skipped locally so startup needs no Linq API call. With no
+      // configured conversation phones there is nothing to seed and the
+      // script's pool-ready assertion would fail startup, so skip it: e2e
+      // scenarios seed their own line inventory, and a dev stack without Linq
+      // env keeps failing closed at activation exactly as before.
+      const configuredLinqConversationPhones =
+        runtimeEnv.HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS?.trim() ?? "";
+      if (configuredLinqConversationPhones.length > 0) {
+        await runCommand("pnpm", [
+          "--dir",
+          "apps/web",
+          "linq:sync-lines",
+          "--",
+          "--skip-provider-inventory",
+        ], {
+          cwd: repoRoot,
+          env: runtimeEnv,
+          name: "setup",
+          signal: input.abortSignal,
+        });
+      } else {
+        (input.stderrTarget ?? process.stderr).write(
+          "[setup] No HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS configured; skipping hosted Linq line seeding.\n",
+        );
+      }
     }
 
     if (!config.skipWeb) {
