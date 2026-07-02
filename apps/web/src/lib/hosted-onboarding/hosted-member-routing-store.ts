@@ -198,32 +198,6 @@ export async function lookupHostedMemberRoutingByHomeLinqChatId(input: {
   });
 }
 
-export async function lookupHostedMemberRoutingByPendingLinqChatId(input: {
-  linqChatId: string | null | undefined;
-  prisma: HostedOnboardingReadClient;
-}): Promise<HostedMemberRoutingLookup | null> {
-  const lookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.linqChatId);
-  if (lookupKeys.length === 0) {
-    return null;
-  }
-
-  const routingRecords = await input.prisma.hostedMemberRouting.findMany({
-    where: {
-      pendingLinqChatLookupKey: {
-        in: lookupKeys,
-      },
-    },
-    select: hostedMemberRoutingLookupSelect,
-  });
-
-  return resolveUniqueHostedMemberRoutingLookup({
-    ambiguityCode: "LINQ_PENDING_CHAT_ROUTING_LOOKUP_AMBIGUOUS",
-    matchedBy: "pendingLinqChatLookupKey",
-    prisma: input.prisma,
-    routingRecords,
-  });
-}
-
 export async function lookupHostedMemberRoutingByTelegramUserId(input: {
   prisma: HostedOnboardingReadClient;
   telegramUserId: string;

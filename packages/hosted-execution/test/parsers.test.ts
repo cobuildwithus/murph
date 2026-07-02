@@ -472,22 +472,107 @@ describe("parseHostedRuntimeGroupTool", () => {
     status: "active",
   };
 
-  it("parses read requests and rejects mutations", () => {
+  it("parses read and create_join_link requests and rejects other mutations", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_current",
     })).toEqual({
       action: "read_current",
     });
 
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "create_join_link",
+    })).toEqual({
+      action: "create_join_link",
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "create_join_link",
+      joinLink: {
+        displayName: "Sunday sleep crew",
+        kind: "friends",
+        requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+      },
+    })).toEqual({
+      action: "create_join_link",
+      joinLink: {
+        displayName: "Sunday sleep crew",
+        kind: "friends",
+        requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+      },
+    });
+
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
-        action: "create_join_link",
+        action: "delete_group",
       })
     ).toThrow(/not supported/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "read_current",
         requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+      })
+    ).toThrow(/not allowed/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "create_join_link",
+        joinLink: { kind: "everyone" },
+      })
+    ).toThrow(/not supported/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionKinds: ["all-health-data"] },
+      })
+    ).toThrow(/unsupported projection kind/u);
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "create_join_link",
+        joinLink: { displayName: "   " },
+      })
+    ).toThrow(/must not be blank/u);
+  });
+
+  it("parses create_join_link responses", () => {
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "create_join_link",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://example.com/groups/join/abc123",
+        status: "ok",
+      },
+    })).toEqual({
+      action: "create_join_link",
+      result: {
+        group: GROUP_SUMMARY,
+        joinUrl: "https://example.com/groups/join/abc123",
+        status: "ok",
+      },
+    });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "create_join_link",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "not_group_runtime",
+      },
+    })).toEqual({
+      action: "create_join_link",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "not_group_runtime",
+      },
+    });
+
+    expect(() =>
+      parseHostedRuntimeGroupToolResponse({
+        action: "create_join_link",
+        result: {
+          group: GROUP_SUMMARY,
+          joinCode: "abc123",
+          joinUrl: "https://example.com/groups/join/abc123",
+          status: "ok",
+        },
       })
     ).toThrow(/not allowed/u);
   });

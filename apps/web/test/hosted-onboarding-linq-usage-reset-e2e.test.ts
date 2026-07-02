@@ -118,7 +118,6 @@ const mocks = vi.hoisted(() => {
     readHostedMemberRoutingState: vi.fn(),
     sendHostedLinqChatMessage: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
-    startHostedLinqTypingIndicator: vi.fn(),
     startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
       baseDetails,
       startedAtMs: 0,
@@ -223,7 +222,6 @@ vi.mock("../src/lib/hosted-onboarding/linq", async () => {
     assertHostedLinqWebhookSignature: vi.fn(),
     sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
     sendHostedLinqReadReceipt: mocks.sendHostedLinqReadReceipt,
-    startHostedLinqTypingIndicator: mocks.startHostedLinqTypingIndicator,
     // This regression isolates usage reset behavior; Linq HMAC verification is
     // covered by dedicated webhook-auth tests.
     verifyAndParseHostedLinqWebhookRequest: vi.fn((input: { rawBody: string }) =>
