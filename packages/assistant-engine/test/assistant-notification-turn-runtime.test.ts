@@ -1621,11 +1621,13 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
 
   vi.clearAllMocks()
 
+  const maintenanceProviderStartHook = vi.fn()
   const maintenanceResult = await sendAssistantNotificationLocal({
     executionContext: {
       hosted: null,
     },
     instructions: 'Run overnight memory maintenance.',
+    onProviderRequestStarted: maintenanceProviderStartHook,
     serviceTier: 'flex',
     turnPolicy: {
       kind: 'maintenance-exact-skip',
@@ -1657,6 +1659,9 @@ test('sendAssistantNotificationLocal returns skip decisions without delivering',
         ),
         suppressProviderFailureTranscriptAudit: true,
       }),
+      // The replay barrier depends on the runner receiving this hook
+      // top-level; the message-input copy alone never fires in production.
+      onProviderRequestStarted: maintenanceProviderStartHook,
       profile: expect.objectContaining({
         nativeResumePolicy: 'disabled',
         threadScope: 'isolated-thread',

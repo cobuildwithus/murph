@@ -297,6 +297,7 @@ export async function sendAssistantNotificationLocal(
         const providerOutcome = await executeCodexTurnWithRecovery({
           allowFinishWithoutReply: false,
           input: messageInput,
+          onProviderRequestStarted: messageInput.onProviderRequestStarted ?? null,
           plan: sharedPlan,
           progressDelivery,
           profile: resolveAssistantNotificationTurnProfile(input),
