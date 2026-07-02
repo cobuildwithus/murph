@@ -140,9 +140,11 @@ describe('assistant protocol index planning', () => {
     })
   })
 
-  it('resolves no dynamic tools for maintenance turns', async () => {
+  it('resolves no dynamic tools and no non-evidence prompt context for maintenance turns', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
-    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+      'Context snapshot: active condition hypertension.',
+    )
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: false,
     })
@@ -150,9 +152,16 @@ describe('assistant protocol index planning', () => {
       currentLocalDate: '2026-05-04',
       currentTimeZone: 'Asia/Kuala_Lumpur',
     }
+    const executionContext = {
+      hosted: {
+        dynamicContextPrompts: ['Hosted dynamic prompt: device sync pending.'],
+        memberId: 'member-maintenance-context',
+        userEnvKeys: [],
+      },
+    }
 
     const maintenancePlan = await resolveAssistantRouteTurnPlan({
-      executionContext: null,
+      executionContext,
       input: createMessageInput(),
       profile: {
         promptProfile: 'notification-decision',
@@ -165,9 +174,12 @@ describe('assistant protocol index planning', () => {
       sharedPlan: createSharedPlan(),
     })
     expect(maintenancePlan.dynamicTools).toEqual([])
+    expect(maintenancePlan.systemPrompt).not.toContain('hypertension')
+    expect(maintenancePlan.systemPrompt).not.toContain('device sync pending')
+    expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
 
     const notificationPlan = await resolveAssistantRouteTurnPlan({
-      executionContext: null,
+      executionContext,
       input: createMessageInput(),
       profile: {
         promptProfile: 'notification-decision',
@@ -184,6 +196,8 @@ describe('assistant protocol index planning', () => {
     )
     expect(notificationToolNames).toContain('generate_image')
     expect(notificationToolNames).toContain('attach_response_media')
+    expect(notificationPlan.systemPrompt).toContain('hypertension')
+    expect(notificationPlan.systemPrompt).toContain('device sync pending')
   })
 
   it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {

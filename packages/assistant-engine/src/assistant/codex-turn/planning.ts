@@ -437,8 +437,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.promptProfile === 'conversation' &&
     input.sharedPlan.onboardingGuidanceOpen
   const assistantToolNameAliases = null
-  const assistantDynamicContextPrompts =
-    input.executionContext?.hosted?.dynamicContextPrompts ?? []
+  // Maintenance turns consume only the engine-supplied conversation evidence
+  // plus canonical memory; the context snapshot (which carries health
+  // domains) and hosted dynamic context prompts must not reach their system
+  // prompt, or the prompt itself would hand the model forbidden sources.
+  const maintenanceTurn = input.profile.toolProfile === 'maintenance-turn'
+  const assistantDynamicContextPrompts = maintenanceTurn
+    ? []
+    : input.executionContext?.hosted?.dynamicContextPrompts ?? []
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
@@ -472,17 +478,18 @@ export async function resolveAssistantRouteTurnPlan(input: {
         )
       : []
   let assistantContextSnapshotElapsedMs: number | null = null
-  const assistantContextSnapshotPrompt =
-    await measureRoutePlanningAsync(
-      routePlanningSpans,
-      'assistantContextSnapshotElapsedMs',
-      () => readAssistantContextSnapshotPrompt({
-        vaultRoot: input.input.vault,
-      }),
-      (elapsedMs) => {
-        assistantContextSnapshotElapsedMs = elapsedMs
-      },
-    )
+  const assistantContextSnapshotPrompt = maintenanceTurn
+    ? null
+    : await measureRoutePlanningAsync(
+        routePlanningSpans,
+        'assistantContextSnapshotElapsedMs',
+        () => readAssistantContextSnapshotPrompt({
+          vaultRoot: input.input.vault,
+        }),
+        (elapsedMs) => {
+          assistantContextSnapshotElapsedMs = elapsedMs
+        },
+      )
   const modelBehaviorProfile = resolveAssistantModelBehaviorProfile(
     input.route.providerOptions,
   )
@@ -570,7 +577,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // Maintenance turns run without a delivery target and must not expose any
   // external-capable or delivery-facing tool surface, so the gate is the
   // resolved tool set itself rather than prompt text.
-  const dynamicTools = input.profile.toolProfile === 'maintenance-turn'
+  const dynamicTools = maintenanceTurn
     ? []
     : resolveMurphDynamicTools({
         allowFinishWithoutReply,
