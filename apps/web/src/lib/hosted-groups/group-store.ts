@@ -378,15 +378,18 @@ export async function acceptHostedGroupJoinCodeTx(input: {
       });
     }
   }
+  // Membership itself binds to the durable group runtime, not just the
+  // sharing branch: a stale link must not admit members after the group
+  // runtime or owner loses active access.
+  if (!group.runtimeMemberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_NOT_ACTIVE",
+      httpStatus: 410,
+      message: "This group is no longer active.",
+    });
+  }
+  await assertHostedGroupRuntimeDestinationTx(input.tx, group.runtimeMemberId);
   if (selected.length > 0) {
-    if (!group.runtimeMemberId) {
-      throw hostedOnboardingError({
-        code: "HOSTED_GROUP_RUNTIME_REQUIRED",
-        httpStatus: 409,
-        message: "This group cannot receive shared health data yet.",
-      });
-    }
-    await assertHostedGroupRuntimeDestinationTx(input.tx, group.runtimeMemberId);
     await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: input.tx });
   }
 
@@ -416,7 +419,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   const grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[] = [];
   const revokedVaultShareProjectionKinds: HostedVaultShareProjectionKind[] = [];
   const vaultShareCleanupSignals: HostedVaultShareCleanupSignal[] = [];
-  if (group.runtimeMemberId && policy.requestedVaultShareProjectionKinds.length > 0) {
+  if (policy.requestedVaultShareProjectionKinds.length > 0) {
     for (const projectionKind of policy.requestedVaultShareProjectionKinds) {
       if (selected.includes(projectionKind)) {
         await assertHostedGroupVaultShareGrantLimitTx(input.tx, {

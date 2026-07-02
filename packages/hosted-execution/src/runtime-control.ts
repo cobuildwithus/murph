@@ -772,7 +772,20 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
   recorded: boolean;
 }
 
-export type HostedRuntimeGroupToolAction = "read_current";
+export type HostedRuntimeGroupToolAction = "read_current" | "create_join_link";
+
+export const HOSTED_RUNTIME_GROUP_KINDS = [
+  "couple",
+  "custom",
+  "family",
+  "friends",
+  "household",
+  "team",
+] as const;
+
+export type HostedRuntimeGroupKind = (typeof HOSTED_RUNTIME_GROUP_KINDS)[number];
+
+export const HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH = 120;
 
 export interface HostedRuntimeGroupSummary {
   displayName: string | null;
@@ -783,15 +796,30 @@ export interface HostedRuntimeGroupSummary {
   status: string;
 }
 
-export type HostedRuntimeGroupToolRequest = { action: "read_current" };
+export interface HostedRuntimeGroupCreateJoinLinkRequest {
+  displayName?: string | null;
+  kind?: HostedRuntimeGroupKind | null;
+  requestedVaultShareProjectionKinds?: HostedVaultShareProjectionKind[] | null;
+}
 
-export type HostedRuntimeGroupToolResponse = {
-  action: "read_current";
-  result:
-    | { status: "ok"; group: HostedRuntimeGroupSummary }
-    | { status: "none"; group: null }
-    | { status: "unavailable"; unavailableReason: string; group: null };
-};
+export type HostedRuntimeGroupToolRequest =
+  | { action: "read_current" }
+  | { action: "create_join_link"; joinLink?: HostedRuntimeGroupCreateJoinLinkRequest | null };
+
+export type HostedRuntimeGroupToolResponse =
+  | {
+      action: "read_current";
+      result:
+        | { status: "ok"; group: HostedRuntimeGroupSummary }
+        | { status: "none"; group: null }
+        | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "create_join_link";
+      result:
+        | { status: "ok"; group: HostedRuntimeGroupSummary; joinUrl: string }
+        | { status: "unavailable"; unavailableReason: string; group: null };
+    };
 
 export type HostedRuntimeFamilyPlanToolAction =
   | "create_invite"
