@@ -604,13 +604,7 @@ export async function synchronizeAssistantIndexes(
   session: AssistantSession,
   previous: AssistantSession | null,
 ): Promise<void> {
-  let store = await readAssistantIndexStore(paths, { fresh: true })
-  if (!store.recentSessions) {
-    // Index predates the recent-sessions projection: rebuild once from
-    // durable session records before merging, so the projection starts
-    // complete instead of containing only post-deploy sessions.
-    store = await rebuildAssistantIndexStore(paths)
-  }
+  const store = await readAssistantIndexStore(paths, { fresh: true })
   const aliases = {
     ...store.aliases,
   }
@@ -639,10 +633,18 @@ export async function synchronizeAssistantIndexes(
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases,
     conversationKeys,
-    recentSessions: pruneAssistantRecentSessions({
-      ...(store.recentSessions ?? {}),
-      [session.sessionId]: session.lastTurnAt ?? session.updatedAt,
-    }),
+    // Foreground saves never rebuild the projection (that would scan every
+    // session file on the reply commit path). While the projection is absent
+    // it stays absent, so the idle maintenance read can tell "not built yet"
+    // from "partially built" and do the one-time rebuild off the hot path.
+    ...(store.recentSessions === undefined
+      ? {}
+      : {
+          recentSessions: pruneAssistantRecentSessions({
+            ...store.recentSessions,
+            [session.sessionId]: session.lastTurnAt ?? session.updatedAt,
+          }),
+        }),
   })
   await writeJsonFileAtomic(paths.indexesPath, updated)
 }
