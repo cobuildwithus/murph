@@ -6,6 +6,8 @@ import { expect, test } from 'vitest'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import {
   findAssistantAutoReplyDeliveryIntentIds,
+  listPendingAssistantAutoReplyLinqCleanupEvidence,
+  markAssistantAutoReplyLinqCleanupQueued,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   writeAssistantAutoReplySuppressionEvidence,
 } from '../src/assistant/automation/evidence.js'
@@ -165,13 +167,27 @@ test('auto-reply Linq cleanup handles input-id keyed terminal evidence', async (
       ['linq_message_input'],
     )
 
-    await expect(
-      readAssistantAutoReplyTerminalEvidenceByEvidenceId(vaultRoot, 'ain_input_cleanup'),
-    ).resolves.toMatchObject({
-      providerCleanup: {
+    assert.deepEqual(
+      await listPendingAssistantAutoReplyLinqCleanupEvidence({ vault: vaultRoot }),
+      {
+        captureIds: ['ain_input_cleanup'],
         linqMessageIds: ['linq_message_input'],
       },
+    )
+
+    await markAssistantAutoReplyLinqCleanupQueued({
+      captureIds: ['ain_input_cleanup'],
+      queuedAt: '2026-04-08T00:01:00.000Z',
+      vault: vaultRoot,
     })
+
+    assert.deepEqual(
+      await listPendingAssistantAutoReplyLinqCleanupEvidence({ vault: vaultRoot }),
+      {
+        captureIds: [],
+        linqMessageIds: [],
+      },
+    )
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
   }

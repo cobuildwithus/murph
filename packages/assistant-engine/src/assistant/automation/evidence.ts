@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { sendAssistantMessage } from '../service.js'
 import type { AssistantOutboxIntent } from '@murphai/operator-config/assistant-cli-contracts'
@@ -277,6 +277,95 @@ export async function writeAssistantAutoReplySuppressionEvidence(input: {
     ),
   )
   return providerCleanup.linqMessageIds
+}
+
+export async function listPendingAssistantAutoReplyLinqCleanupEvidence(input: {
+  limit?: number
+  vault: string
+}): Promise<{
+  captureIds: string[]
+  linqMessageIds: string[]
+}> {
+  const evidenceDirectory = resolveAssistantAutoReplyEvidenceDirectory(input.vault)
+  let entries: string[]
+  try {
+    entries = await readdir(evidenceDirectory)
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return {
+        captureIds: [],
+        linqMessageIds: [],
+      }
+    }
+    throw error
+  }
+
+  const captureIds: string[] = []
+  const messageIds = new Set<string>()
+  const limit = input.limit ?? 100
+  for (const entry of entries.sort((left, right) => left.localeCompare(right))) {
+    if (!entry.endsWith('.json')) {
+      continue
+    }
+    const raw = await readFile(path.join(evidenceDirectory, entry), 'utf8')
+      .catch((error) => {
+        if (isMissingFileError(error)) {
+          return null
+        }
+        throw error
+      })
+    if (!raw) {
+      continue
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      continue
+    }
+    const evidence = parseAssistantAutoReplyTerminalEvidence(parsed)
+    if (!evidence || evidence.providerCleanup.queuedAt) {
+      continue
+    }
+    if (evidence.providerCleanup.linqMessageIds.length === 0) {
+      continue
+    }
+    captureIds.push(evidence.captureId)
+    for (const messageId of evidence.providerCleanup.linqMessageIds) {
+      messageIds.add(messageId)
+    }
+    if (captureIds.length >= limit) {
+      break
+    }
+  }
+
+  return {
+    captureIds,
+    linqMessageIds: [...messageIds],
+  }
+}
+
+export async function markAssistantAutoReplyLinqCleanupQueued(input: {
+  captureIds: readonly string[]
+  queuedAt?: string
+  vault: string
+}): Promise<void> {
+  const queuedAt = input.queuedAt ?? new Date().toISOString()
+  await Promise.all(
+    input.captureIds.map(async (captureId) => {
+      const evidence = await readAssistantAutoReplyTerminalEvidenceByEvidenceId(input.vault, captureId)
+      if (!evidence || evidence.providerCleanup.queuedAt) {
+        return
+      }
+      await writeAssistantAutoReplyTerminalEvidence(input.vault, captureId, {
+        ...evidence,
+        providerCleanup: {
+          ...evidence.providerCleanup,
+          queuedAt,
+        },
+      })
+    }),
+  )
 }
 
 function normalizeEvidenceGroup(input: {

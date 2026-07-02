@@ -8,6 +8,10 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
+  listPendingAssistantAutoReplyLinqCleanupEvidence,
+  markAssistantAutoReplyLinqCleanupQueued,
+} from "@murphai/assistant-engine/assistant-automation";
+import {
   resolveAssistantStatePaths,
   writeAssistantStateJson,
 } from "@murphai/runtime-state/node/assistant-state-fs";
@@ -22,6 +26,10 @@ import {
 
 const HOSTED_PROVIDER_CLEANUP_SCHEMA = "murph.hosted-provider-cleanup.v1";
 const HOSTED_PROVIDER_CLEANUP_FILE_NAME = "hosted-provider-cleanup.json";
+const HOSTED_PROVIDER_CLEANUP_RECOVERY_SCHEMA =
+  "murph.hosted-provider-cleanup-recovery.v1";
+const HOSTED_PROVIDER_CLEANUP_RECOVERY_FILE_NAME =
+  "hosted-provider-cleanup-recovery.json";
 const HOSTED_PROVIDER_CLEANUP_DEFAULT_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const HOSTED_PROVIDER_CLEANUP_AFTER_IDLE_BUFFER_MS = 1_000;
 const HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS = 5 * 60_000;
@@ -139,8 +147,11 @@ export async function prepareHostedProviderCleanupPlan(input: {
     };
   }
 
-  const terminalCleanupQueued = pendingLinqMessageIds.length > 0;
-  if (terminalCleanupQueued) {
+  const recoveredCleanupQueued =
+    await recoverLegacyPendingTerminalLinqCleanupOnce(input.vaultRoot);
+  const terminalCleanupQueued =
+    recoveredCleanupQueued || pendingLinqMessageIds.length > 0;
+  if (pendingLinqMessageIds.length > 0) {
     await recordHostedProviderCleanupBeforeCommit({
       checkpoint: {
         nextWakeAt: null,
@@ -346,6 +357,83 @@ export function resolveHostedProviderCleanupCheckpointWakeAt(input: {
   }
 
   return checkpointWakeAt;
+}
+
+// One-shot migration per vault: terminal evidence written before producers
+// carried cleanup message ids used a queuedAt marker as the pending-cleanup
+// queue. Drain any such evidence into hosted-provider-cleanup.json in bounded
+// batches, then mark recovery complete so steady-state wakes never scan the
+// evidence directory. Delete this migration (and the evidence-scan helpers it
+// uses: listPendingAssistantAutoReplyLinqCleanupEvidence,
+// markAssistantAutoReplyLinqCleanupQueued) once production vaults have all
+// written the recovery marker.
+async function recoverLegacyPendingTerminalLinqCleanupOnce(
+  vaultRoot: string,
+): Promise<boolean> {
+  if (await hasHostedProviderCleanupRecoveryCompleted(vaultRoot)) {
+    return false;
+  }
+
+  let recoveredCleanupQueued = false;
+  const queuedCaptureIds = new Set<string>();
+  for (;;) {
+    const pending = await listPendingAssistantAutoReplyLinqCleanupEvidence({
+      vault: vaultRoot,
+    });
+    if (
+      pending.linqMessageIds.length === 0
+      || pending.captureIds.every((captureId) => queuedCaptureIds.has(captureId))
+    ) {
+      break;
+    }
+    recoveredCleanupQueued = true;
+    for (const captureId of pending.captureIds) {
+      queuedCaptureIds.add(captureId);
+    }
+    await recordHostedProviderCleanupBeforeCommit({
+      checkpoint: {
+        nextWakeAt: null,
+      },
+      linqMessageIds: pending.linqMessageIds,
+      vaultRoot,
+    });
+    await markAssistantAutoReplyLinqCleanupQueued({
+      captureIds: pending.captureIds,
+      vault: vaultRoot,
+    });
+  }
+  await markHostedProviderCleanupRecoveryCompleted(vaultRoot);
+  return recoveredCleanupQueued;
+}
+
+async function hasHostedProviderCleanupRecoveryCompleted(
+  vaultRoot: string,
+): Promise<boolean> {
+  try {
+    const raw = await readFile(
+      resolveHostedProviderCleanupRecoveryPath(vaultRoot),
+      "utf8",
+    );
+    return (JSON.parse(raw) as { schema?: unknown }).schema
+      === HOSTED_PROVIDER_CLEANUP_RECOVERY_SCHEMA;
+  } catch {
+    return false;
+  }
+}
+
+async function markHostedProviderCleanupRecoveryCompleted(
+  vaultRoot: string,
+): Promise<void> {
+  await writeAssistantStateJson(resolveHostedProviderCleanupRecoveryPath(vaultRoot), {
+    schema: HOSTED_PROVIDER_CLEANUP_RECOVERY_SCHEMA,
+  });
+}
+
+function resolveHostedProviderCleanupRecoveryPath(vaultRoot: string): string {
+  return path.join(
+    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+    HOSTED_PROVIDER_CLEANUP_RECOVERY_FILE_NAME,
+  );
 }
 
 function buildHostedProviderCleanupPlan(input: {
