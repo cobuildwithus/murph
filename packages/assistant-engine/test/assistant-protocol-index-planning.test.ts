@@ -178,6 +178,12 @@ describe('assistant protocol index planning', () => {
     expect(maintenancePlan.systemPrompt).not.toContain('device sync pending')
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
     expect(maintenancePlan.systemPrompt).toContain('Maintenance execution rules:')
+    expect(maintenancePlan.systemPrompt).toContain(
+      'Never save medical or health details, credentials, identifiers of any kind',
+    )
+    expect(maintenancePlan.systemPrompt).toContain(
+      'deduplication and update targeting only',
+    )
     expect(maintenancePlan.systemPrompt).not.toContain('Notification execution rules:')
     expect(maintenancePlan.systemPrompt).not.toContain('same full read and write tools')
     expect(maintenancePlan.systemPrompt).not.toContain('meals')

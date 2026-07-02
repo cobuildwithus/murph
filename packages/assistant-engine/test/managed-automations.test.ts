@@ -396,6 +396,13 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.instructions).toContain('hidden Codex memory state')
     expect(seed.instructions).toContain('Do not read transcript files or session storage')
     expect(seed.instructions).toContain('Do not save assistant speculation')
+    expect(seed.instructions).toContain('identifiers of any kind, or medical or health details')
+    expect(seed.instructions).toContain(
+      'clearly supported by the supplied conversation evidence',
+    )
+    expect(seed.instructions).toContain(
+      'deduplication and update targeting only',
+    )
     expect(seed.instructions).not.toContain('generated memory extraction')
     expect(seed.instructions).toContain(
       '{"kind":"skip","privateSummary":"Overnight memory consolidation maintenance wake completed."}',
