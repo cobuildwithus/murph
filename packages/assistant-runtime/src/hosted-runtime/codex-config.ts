@@ -73,11 +73,45 @@ const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 100_000;
 // only treats user messages as authorization to spawn sub-agents, which
 // overrides Murph's skill-directed delegation (onboarding supplement-label
 // and lab ingestion). The skill/AGENTS.md authorization clause only lands in
-// Codex 0.143; until then this root-agent usage hint (also a per-turn
-// developer message) is the supported config lever that makes Murph's own
-// delegation instructions count as authorization.
-const HOSTED_CODEX_ROOT_AGENT_USAGE_HINT =
-  "Murph system-prompt and skill instructions that direct delegating work to a sub-agent, such as onboarding supplement-label or lab-result ingestion, count as explicit user requests for sub-agent work under any multi-agent mode instruction.";
+// Codex 0.143; until then the root-agent usage hint (also a per-turn
+// developer message) is the supported config lever. Configuring it REPLACES
+// Codex's default root hint rather than appending, so everything above the
+// final Murph sentence is the default hint from the pinned @openai/codex
+// 0.142.5 (codex-rs/core/src/config/mod.rs, default
+// max_concurrent_threads_per_session = 4) copied verbatim; re-copy it on any
+// Codex version bump.
+export const HOSTED_CODEX_ROOT_AGENT_USAGE_HINT = [
+  "You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.",
+  "",
+  "At the start of your turn, you are the active agent.",
+  "You can spawn sub-agents to handle subtasks, and those sub-agents can spawn their own sub-agents.",
+  "All agents in the team, including the agents that you can assign tasks to, are equally intelligent and capable, and have access to the same set of tools.",
+  "",
+  "You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task and trigger a turn, and `send_message` to pass a message to a running agent without triggering a turn.",
+  "Child agents can also spawn their own sub-agents.",
+  "You can decide how much context you want to propagate to your sub-agents with the `fork_turns` parameter.",
+  "",
+  "You will receive messages in the analysis channel in the form:",
+  "```",
+  "Message Type: MESSAGE | FINAL_ANSWER",
+  "Task name: <recipient>",
+  "Sender: <author>",
+  "Payload:",
+  "<payload text>",
+  "```",
+  "They may be addressed as to=/root",
+  "",
+  'Note that collaboration tools cannot be called from inside `functions.exec`. Call `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and `list_agents` only as direct tool calls using the recipient shown in their tool definitions, such as `to=functions.spawn_agent` without a configured namespace or `to=functions.agents.spawn_agent` with `tool_namespace = "agents"`, since they are intentionally absent from the `functions.exec` `tools.*` namespace. Available tools in `functions.exec` are explicitly described with a `tools` namespace in the developer message.',
+  "",
+  "All agents share the same directory. In detail:",
+  "- All agents have access to the same container and filesystem as you.",
+  "- All agents use the same current working directory.",
+  "- As a result, edits made by one agent are immediately visible to all other agents.",
+  "",
+  "There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.",
+  "",
+  "Murph system-prompt and skill instructions that direct delegating work to a sub-agent, such as onboarding supplement-label or lab-result ingestion, count as explicit user requests for sub-agent work under any multi-agent mode instruction.",
+].join("\n");
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
 const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 5;
@@ -563,8 +597,9 @@ export function buildHostedCodexConfigToml(input: {
     "",
     "# Murph prompts and skills direct sub-agent delegation for slow ingestion",
     "# (lab PDFs, supplement labels), but Codex 0.142.x's multi-agent mode",
-    "# message only recognizes explicit user requests. This per-turn root-agent",
-    "# hint makes skill-directed delegation count as an explicit request.",
+    "# message only recognizes explicit user requests. The root-agent hint",
+    "# REPLACES Codex's default, so it restates the 0.142.5 default verbatim",
+    "# and appends the Murph skill-delegation authorization sentence.",
     "[features.multi_agent_v2]",
     "enabled = true",
     `root_agent_usage_hint_text = ${tomlString(HOSTED_CODEX_ROOT_AGENT_USAGE_HINT)}`,
