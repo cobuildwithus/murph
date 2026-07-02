@@ -430,10 +430,16 @@ export async function executeClaimedAssistantCronJob(input: {
   let foregroundYielded = false
   let status: AssistantCronRunRecord['status'] = 'failed'
   let pendingDeliveryIntentId: string | null = null
+  // Preemptible background maintenance has exactly one yield owner: the
+  // maintenance cancellation below. Wiring the generic foreground poller too
+  // (hosted passes the same predicate as both callbacks) created a race
+  // where whichever poll aborted first decided between a clean maintenance
+  // release and a spurious failed foreground-yield run.
+  const maintenanceJob = assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
   const foregroundPreemption = createAssistantCronForegroundPreemption({
     jobName: claimedJob.name,
     parentSignal: input.signal,
-    shouldYield: input.shouldYield ?? null,
+    shouldYield: maintenanceJob ? null : input.shouldYield ?? null,
   })
   const occurrenceAt =
     input.job.kind === 'canonical'
@@ -594,10 +600,12 @@ export async function executeClaimedAssistantCronJob(input: {
             throw createAssistantCronBackgroundMaintenanceYieldError()
           }
 
-          assertAssistantCronForegroundNotYielded({
-            jobName: claimedJob.name,
-            shouldYield: input.shouldYield ?? null,
-          })
+          if (!maintenanceJob) {
+            assertAssistantCronForegroundNotYielded({
+              jobName: claimedJob.name,
+              shouldYield: input.shouldYield ?? null,
+            })
+          }
           const result = await sendAssistantNotificationLocal({
             vault: input.vault,
             ...automationTurn,
@@ -646,8 +654,9 @@ export async function executeClaimedAssistantCronJob(input: {
           sessionId = result.session.sessionId
           response = result.response ?? result.decision.privateSummary
           const foregroundYieldedAfterNotification =
-            foregroundPreemption.wasForegroundYielded() ||
-            input.shouldYield?.() === true
+            !maintenanceJob &&
+            (foregroundPreemption.wasForegroundYielded() ||
+              input.shouldYield?.() === true)
           if (result.deliveryOutcome?.kind === 'queued') {
             pendingDeliveryIntentId = result.deliveryOutcome.intentId
             status = 'skipped'
@@ -660,8 +669,7 @@ export async function executeClaimedAssistantCronJob(input: {
             // applies before or during provider work.
             if (
               foregroundYieldedAfterNotification &&
-              result.deliveryOutcome?.kind !== 'sent' &&
-              !assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
+              result.deliveryOutcome?.kind !== 'sent'
             ) {
               throw buildAssistantCronForegroundYieldedError(claimedJob.name)
             }

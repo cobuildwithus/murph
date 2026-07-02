@@ -2255,6 +2255,71 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
+  it('releases overnight memory consolidation deterministically when the dual hosted yield predicate flips during provider work', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-overnight-memory-dual-yield-provider-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    addOvernightMemoryConsolidationAutomation(vaultRoot)
+    // Hosted wiring passes the same foreground-arrival predicate as both the
+    // generic cron shouldYield and shouldYieldBackgroundMaintenance. The
+    // maintenance cancellation must be the only yield owner, so the abort is
+    // always classified as a clean maintenance release, never a failed
+    // foreground-yield run that depends on poll timing.
+    let shouldYield = false
+    const yieldPredicate = () => shouldYield
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
+      async (input: { abortSignal?: AbortSignal }) => {
+        expect(input.abortSignal?.aborted).toBe(false)
+        shouldYield = true
+        await vi.advanceTimersByTimeAsync(300)
+        expect(input.abortSignal?.aborted).toBe(true)
+        throw input.abortSignal?.reason ??
+          new VaultCliError(
+            'ASSISTANT_TURN_ABORTED',
+            'Assistant turn was aborted.',
+          )
+      },
+    )
+
+    const summary = await processDueAssistantCronJobsLocal({
+      executionContext: {
+        hosted: {
+          memberId: 'member-hosted',
+          userEnvKeys: [],
+        },
+      },
+      limit: 1,
+      shouldYield: yieldPredicate,
+      shouldYieldBackgroundMaintenance: yieldPredicate,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeRecord = runtimeStore.jobs.find(
+      (record) =>
+        record.jobId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+    )
+    expect(runtimeRecord?.state.runningAt).toBeNull()
+    expect(runtimeRecord?.state.pendingOccurrenceAt).not.toBeNull()
+    expect(runtimeRecord?.state.retryAfterAt).not.toBeNull()
+    expect(runtimeRecord?.state.lastRunAt).toBeNull()
+    expect(runtimeRecord?.state.lastFailedAt).toBeNull()
+    await expect(listAssistantCronRuns({
+      job: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      runs: [],
+    })
+  })
+
   it('consumes overnight memory consolidation when hosted maintenance yields after provider work', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))
