@@ -329,6 +329,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
       source: "linq",
       userId: plan.wakeUserId,
+      wakeMailboxCheckpoint: plan.wakeMailboxCheckpoint,
     });
     const sendReadReceipt = () => maybeSendHostedLinqIngressReadReceipt({
       currentInboundReply,
@@ -564,6 +565,7 @@ function buildBlockedHostedLinqFirstContactAdmissionPlan(
 
 export async function handleHostedOnboardingTelegramWebhook(input: {
   rawBody: string;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
   secretToken: string | null;
   prisma?: PrismaClient;
   signal?: AbortSignal;
@@ -593,8 +595,10 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     eventId,
     mailboxItemId: plan.wakeMailboxItemId,
     response: plan.response,
+    scheduleAfterResponse: input.scheduleAfterResponse,
     source: "telegram",
     userId: plan.wakeUserId,
+    wakeMailboxCheckpoint: plan.wakeMailboxCheckpoint,
   });
   return plan.response;
 }
@@ -602,6 +606,7 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
 export async function handleHostedOnboardingWhatsAppWebhook(input: {
   rawBody: string;
   prisma?: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
   signature: string | null;
   signal?: AbortSignal;
 }): Promise<HostedOnboardingWhatsAppWebhookResponse> {
@@ -656,8 +661,10 @@ export async function handleHostedOnboardingWhatsAppWebhook(input: {
         eventId: wakeHandoff.eventId,
         mailboxItemId: wakeHandoff.mailboxItemId,
         response: plan.response,
+        scheduleAfterResponse: input.scheduleAfterResponse,
         source: "whatsapp",
         userId: wakeHandoff.userId,
+        wakeMailboxCheckpoint: wakeHandoff.wakeMailboxCheckpoint,
       });
     }
 

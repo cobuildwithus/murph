@@ -142,7 +142,11 @@ in `@murphai/contracts` so local CLI and hosted Worker validation cannot drift.
 
 Hosted Linq typing events are verified and ignored. There is no direct
 web-to-Cloudflare prewarm or nudge path; the Temporal mailbox signal is the
-only wake authority for hosted runtime work.
+only wake authority for hosted runtime work. (A direct web ensure fast path
+was attempted 2026-07-02 and withdrawn: without workflow-side coordination it
+races the Temporal reconcile-ensure track into duplicate invocations — see PR
+#362. Any future direct wake must make the workflow skip its immediate ensure
+for direct-woken pointers.)
 
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the signup-link path only. It runs after cheap deterministic ingress filters and

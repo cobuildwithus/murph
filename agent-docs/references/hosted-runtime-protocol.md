@@ -265,7 +265,13 @@ orchestration; Temporal then re-reads web-owned reconciliation facts and, if
 processing is needed, calls Cloudflare's short-lived `ensure-processing`
 adapter. There is no
 webhook-to-Cloudflare runner nudge path, no direct web-to-Cloudflare message
-path, and no second wake authority. If the
+path, and no second wake authority. A direct web ensure fast path was
+attempted and withdrawn 2026-07-02 (PR #362): because runtime import/consume
+watermarks publish at checkpoint, the workflow's reconcile-ensure loop treats
+a direct-woken pointer as still-lagging and lands extra ensures in
+inter-invocation gaps, producing invocation churn and a reachable duplicate
+turn on already-replied input. Any future direct wake must carry pointer
+awareness into the workflow so it skips its immediate ensure. If the
 Temporal signal cannot be accepted after the mailbox row exists, the failure is
 logged as a post-commit best-effort handoff failure and does not make provider
 ingress fail. Web does not run a mailbox-lag cron backstop: missed post-commit

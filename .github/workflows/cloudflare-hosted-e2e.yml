@@ -28,6 +28,9 @@ env:
   # all-synthetic local stack (stub tokens, loopback Postgres), so streaming
   # exposes no real credentials; deploy lanes keep this set to "0".
   MURPH_E2E_STREAM_DEV_LOGS: "1"
+  # Log every assistant-provider stub request (method + URL only) so timing
+  # regressions in wake/turn interleaving are diagnosable from the CI log.
+  MURPH_E2E_DEBUG_ASSISTANT_PROVIDER_STUB: "1"
   HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101
   HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
   HOSTED_MAILBOX_FINGERPRINT_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
