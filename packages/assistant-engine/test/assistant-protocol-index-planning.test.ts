@@ -177,6 +177,11 @@ describe('assistant protocol index planning', () => {
     expect(maintenancePlan.systemPrompt).not.toContain('hypertension')
     expect(maintenancePlan.systemPrompt).not.toContain('device sync pending')
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+    expect(maintenancePlan.systemPrompt).toContain('Maintenance execution rules:')
+    expect(maintenancePlan.systemPrompt).not.toContain('Notification execution rules:')
+    expect(maintenancePlan.systemPrompt).not.toContain('same full read and write tools')
+    expect(maintenancePlan.systemPrompt).not.toContain('meals')
+    expect(maintenancePlan.systemPrompt).not.toContain('Health Commons')
 
     const notificationPlan = await resolveAssistantRouteTurnPlan({
       executionContext,
@@ -198,6 +203,8 @@ describe('assistant protocol index planning', () => {
     expect(notificationToolNames).toContain('attach_response_media')
     expect(notificationPlan.systemPrompt).toContain('hypertension')
     expect(notificationPlan.systemPrompt).toContain('device sync pending')
+    expect(notificationPlan.systemPrompt).toContain('Notification execution rules:')
+    expect(notificationPlan.systemPrompt).not.toContain('Maintenance execution rules:')
   })
 
   it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {

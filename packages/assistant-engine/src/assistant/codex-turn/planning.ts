@@ -502,6 +502,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       ? buildAssistantNotificationDecisionSystemPromptWithCacheMetadata({
             assistantContextSnapshotPrompt,
             assistantDynamicContextPrompts,
+            maintenanceTurn,
             assistantHostedDeviceConnectAvailable:
               promptCapabilityAvailability.assistantHostedDeviceConnectAvailable,
             assistantHostedDeviceConnectProviders:
