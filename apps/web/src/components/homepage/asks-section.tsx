@@ -83,10 +83,15 @@ function WideFeature({
         )}
       >
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_80%_at_20%_-10%,rgba(255,255,255,0.55)_0%,rgba(255,255,255,0)_55%)]" />
+        {/* Below lg the bubble sits in flow above the artifact: with the
+            fixed-reserve overlay, long bubble copy wraps on narrow screens
+            and collides with the artifact card. */}
         <div
           className={cn(
-            "absolute z-20 top-6 sm:top-8",
-            artifactSide === "left" ? "left-5 sm:left-7" : "right-5 sm:right-7",
+            "relative z-20 flex px-5 pt-6 sm:px-7 sm:pt-8 lg:absolute lg:top-8 lg:px-0 lg:pt-0",
+            artifactSide === "left"
+              ? "justify-start lg:left-7"
+              : "justify-end lg:right-7",
           )}
         >
           <div
@@ -101,7 +106,7 @@ function WideFeature({
             {bubble}
           </div>
         </div>
-        <div className="relative z-10 flex h-full items-end justify-center px-5 pb-6 pt-24 sm:px-8 sm:pb-8 sm:pt-28 lg:pt-32">
+        <div className="relative z-10 flex h-full items-end justify-center px-5 pb-6 pt-5 sm:px-8 sm:pb-8 sm:pt-6 lg:pt-32">
           <div className="w-full max-w-[440px]">{artifact}</div>
         </div>
       </div>

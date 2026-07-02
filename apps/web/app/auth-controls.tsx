@@ -177,11 +177,15 @@ export function LandingAuthActions({
   useHostedAuthPanelIslandIdlePreload(preloadAuthPanel && !authenticated);
 
   if (authenticated) {
+    const showArrow = context !== "nav";
     return (
       <div className={styles.container}>
         <a
           href="/home"
-          className={cn(styles.settings, leadingIcon ? "gap-2" : null)}
+          className={cn(
+            styles.settings,
+            showArrow ? "group gap-2" : leadingIcon ? "gap-2" : null,
+          )}
         >
           {leadingIcon ? (
             <span aria-hidden="true" className="inline-flex shrink-0">
@@ -189,6 +193,14 @@ export function LandingAuthActions({
             </span>
           ) : null}
           {authLabel}
+          {showArrow ? (
+            <span
+              aria-hidden="true"
+              className="inline-block transition-transform group-hover:translate-x-0.5"
+            >
+              &rarr;
+            </span>
+          ) : null}
         </a>
       </div>
     );
