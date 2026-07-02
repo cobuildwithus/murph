@@ -835,22 +835,31 @@ export async function planHostedOnboardingLinqWebhook(input: {
         }));
 
   const incomingLinePhone = normalizePhoneNumber(recipientPhoneNumber);
-  const assignedPhone = normalizePhoneNumber(bindingResult.recipientPhone);
+  let assignedPhone = normalizePhoneNumber(bindingResult.recipientPhone);
   if (assignedPhone && incomingLinePhone && assignedPhone !== incomingLinePhone) {
     const memberPhone = normalizePhoneNumber(participantPhoneNumber);
     if (!memberPhone) {
       return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
     }
 
-    await upsertHostedMemberHomeLinqRecipientPhoneTx({
-      clearPending: true,
-      ...(bindingResult.homeLineAssignedAt === null
-        ? {}
-        : { homeLineAssignedAt: bindingResult.homeLineAssignedAt }),
+    const refreshedRouting = await readHostedMemberRoutingState({
       memberId: member.id,
-      recipientPhone: assignedPhone,
       prisma: input.prisma,
     });
+    const existingAssignedPhone = normalizePhoneNumber(refreshedRouting?.linqRecipientPhone);
+    if (existingAssignedPhone) {
+      assignedPhone = existingAssignedPhone;
+    } else {
+      await upsertHostedMemberHomeLinqRecipientPhoneTx({
+        clearPending: true,
+        ...(bindingResult.homeLineAssignedAt === null
+          ? {}
+          : { homeLineAssignedAt: bindingResult.homeLineAssignedAt }),
+        memberId: member.id,
+        recipientPhone: assignedPhone,
+        prisma: input.prisma,
+      });
+    }
 
     const dailyState = await incrementHostedLinqInboundDailyState({
       memberId: member.id,

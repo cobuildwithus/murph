@@ -5585,6 +5585,204 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it("keeps same-phone fallback first-contact races on the first assigned home line", async () => {
+    const incomingLinePhone = "+15550000000";
+    const firstFallbackLinePhone = "+15550100001";
+    const secondFallbackLinePhone = "+15550100002";
+    const memberPhone = "+15551234567";
+    let createdMemberId: string | null = null;
+    let identityLookupCount = 0;
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
+    hostedMemberRouting.findMany.mockResolvedValue([]);
+    let dailyAssignmentCountReadCount = 0;
+    hostedMemberRouting.groupBy.mockImplementation(async (
+      input: { where?: { linqHomeLineAssignedAt?: unknown } },
+    ) => {
+      if (!input.where?.linqHomeLineAssignedAt) {
+        return [];
+      }
+
+      dailyAssignmentCountReadCount += 1;
+      return dailyAssignmentCountReadCount === 1
+        ? [
+            {
+              linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(incomingLinePhone),
+              _count: { _all: 1 },
+            },
+            {
+              linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(secondFallbackLinePhone),
+              _count: { _all: 1 },
+            },
+          ]
+        : [
+            {
+              linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(incomingLinePhone),
+              _count: { _all: 1 },
+            },
+            {
+              linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(firstFallbackLinePhone),
+              _count: { _all: 1 },
+            },
+          ];
+    });
+    const hostedMemberIdentity = {
+      createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findMany: vi.fn(async () => {
+        identityLookupCount += 1;
+        if (identityLookupCount !== 4 || !createdMemberId) {
+          return [];
+        }
+
+        return [{
+          maskedPhoneNumberHint: "*** 4567",
+          member: {
+            billingStatus: HostedBillingStatus.not_started,
+            createdAt: new Date("2026-03-26T00:00:00.000Z"),
+            id: createdMemberId,
+            suspendedAt: null,
+            updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+          },
+          memberId: createdMemberId,
+          phoneLookupKey: createHostedPhoneLookupKey(memberPhone),
+          phoneNumberEncrypted: null,
+          phoneNumberVerifiedAt: null,
+          privyUserIdEncrypted: null,
+          signupPhoneCodeSendAttemptId: null,
+          signupPhoneCodeSendAttemptStartedAt: null,
+          signupPhoneCodeSentAt: null,
+          signupPhoneNumberEncrypted: null,
+          walletAddressEncrypted: null,
+          walletChainType: null,
+          walletCreatedAt: null,
+          walletProvider: null,
+        }];
+      }),
+      findUnique: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn(async ({ create, update }: {
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
+      }) => ({
+        ...create,
+        ...update,
+      })),
+    };
+    let inviteRecord: Record<string, unknown> | null = null;
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          inviteRecord = {
+            ...data,
+            sentAt: null,
+            status: "pending",
+          };
+          return inviteRecord;
+        }),
+        findFirst: vi.fn(async () => inviteRecord),
+        update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          inviteRecord = {
+            ...(inviteRecord ?? {}),
+            ...data,
+          };
+          return inviteRecord;
+        }),
+      },
+      hostedLinqLine: buildHostedLinqLinePoolFixture({
+        lines: [
+          {
+            maxNewConversationsPerDay: 1,
+            phoneNumber: incomingLinePhone,
+          },
+          {
+            maxNewConversationsPerDay: 1,
+            phoneNumber: firstFallbackLinePhone,
+          },
+          {
+            maxNewConversationsPerDay: 2,
+            phoneNumber: secondFallbackLinePhone,
+          },
+        ],
+      }),
+      hostedMember: {
+        create: vi.fn(async ({ data }: { data: { id: string } }) => {
+          createdMemberId = data.id;
+          return {
+            billingStatus: HostedBillingStatus.not_started,
+            createdAt: new Date("2026-03-26T00:00:00.000Z"),
+            id: data.id,
+            suspendedAt: null,
+            updatedAt: new Date("2026-03-26T00:00:00.000Z"),
+          };
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+      hostedMemberIdentity,
+      hostedMemberRouting,
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    const firstResponse = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_fallback_race_first",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+    const secondResponse = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_fallback_race_second",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(firstResponse).toMatchObject({
+      ok: true,
+      reason: "sent-signup-link",
+    });
+    expect(secondResponse).toMatchObject({
+      ok: true,
+      reason: "sent-signup-link",
+    });
+    expect(createdMemberId).toEqual(expect.any(String));
+    expect(prisma.hostedMember.create).toHaveBeenCalledTimes(1);
+    expect(hostedMemberIdentity.createMany).toHaveBeenCalledTimes(1);
+    expect(readHostedMemberRoutingUpsertMock(prisma)).toHaveBeenCalledTimes(1);
+    expect(readHostedMemberRoutingUpsertMock(prisma)).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        linqChatLookupKey: null,
+        linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(firstFallbackLinePhone),
+        pendingLinqChatLookupKey: null,
+      }),
+    }));
+    expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(2);
+    expect(mocks.createHostedLinqChat).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      from: firstFallbackLinePhone,
+      idempotencyKey: `linq-invite-signup:${createdMemberId}:2026-03-26T00:00:00.000Z`,
+      to: [memberPhone],
+    }));
+    expect(mocks.createHostedLinqChat).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      from: firstFallbackLinePhone,
+      idempotencyKey: `linq-invite-signup:${createdMemberId}:2026-03-26T00:00:00.000Z`,
+      to: [memberPhone],
+    }));
+  });
+
   it("retries fallback signup delivery after provider failure instead of redirecting to the fallback line", async () => {
     const incomingLinePhone = "+15550000000";
     const fallbackLinePhone = "+15550100001";
