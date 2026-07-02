@@ -154,6 +154,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /approval_policy = "never"/u);
   assert.match(config, /sandbox_mode = "danger-full-access"/u);
   assert.match(config, /^check_for_update_on_startup = false$/mu);
+  assert.match(config, /^allow_login_shell = false$/mu);
   assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
   assert.doesNotMatch(config, /\[model_providers\."openai"\]/u);
   assert.match(config, /\[model_providers\."hosted-openai"\]/u);
@@ -1270,6 +1271,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       'approval_policy = "never"',
       'sandbox_mode = "danger-full-access"',
       "check_for_update_on_startup = false",
+      "allow_login_shell = false",
       "",
       '[model_providers."openai"]',
       'name = "OpenAI"',
