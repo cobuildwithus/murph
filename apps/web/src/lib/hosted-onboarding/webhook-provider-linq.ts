@@ -31,6 +31,7 @@ import {
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
   upsertHostedMemberHomeLinqBindingTx,
+  upsertHostedMemberHomeLinqRecipientPhoneTx,
 } from "./hosted-member-routing-store";
 import {
   sanitizeHostedOnboardingStructuredLogDetails,
@@ -40,6 +41,7 @@ import {
 } from "./logging";
 import {
   HOSTED_LINQ_DAILY_TEXT_LIMIT,
+  claimHostedLinqOnboardingLinkNotice,
   incrementHostedLinqInboundDailyState,
   incrementHostedLinqOutboundDailyState,
   readHostedLinqDailyState,
@@ -66,6 +68,7 @@ import {
   buildAiUsageQuotaReplyResponse,
   buildActiveMemberDirectPlan,
   buildConversationHomeRedirectResponse,
+  buildFallbackSignupLinkResponse,
   buildFamilyInviteAcceptedResponse,
   buildIgnoredLinqWebhookPlan,
   buildQuotaReplyResponse,
@@ -100,6 +103,7 @@ import type {
   HostedOnboardingLinqDirectPlan,
 } from "./webhook-provider-linq-types";
 import { type HostedLinqParticipantContact } from "./linq-participant-contact";
+import { normalizePhoneNumber } from "./phone";
 
 const HOSTED_LINQ_MESSAGE_MAX_PARTS = 32;
 const HOSTED_LINQ_CONVERSATION_WAKE_INLINE_TARGET_BYTES = 128 * 1024;
@@ -147,6 +151,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     messageEvent,
     occurredAt,
     participantContact,
+    participantPhoneNumber,
     recipientPhoneNumber,
     summary,
   } = context;
@@ -782,6 +787,76 @@ export async function planHostedOnboardingLinqWebhook(input: {
           observedAt: new Date(occurredAt),
           prisma: input.prisma,
         }));
+
+  const incomingLinePhone = normalizePhoneNumber(recipientPhoneNumber);
+  const assignedPhone = normalizePhoneNumber(bindingResult.recipientPhone);
+  if (assignedPhone && incomingLinePhone && assignedPhone !== incomingLinePhone) {
+    const memberPhone = normalizePhoneNumber(participantPhoneNumber);
+    if (!memberPhone) {
+      return buildUnassignableHomeLinePlan("ignored-unassignable-home-line");
+    }
+
+    await upsertHostedMemberHomeLinqRecipientPhoneTx({
+      clearPending: true,
+      ...(bindingResult.homeLineAssignedAt === null
+        ? {}
+        : { homeLineAssignedAt: bindingResult.homeLineAssignedAt }),
+      memberId: member.id,
+      recipientPhone: assignedPhone,
+      prisma: input.prisma,
+    });
+
+    const dailyState = await incrementHostedLinqInboundDailyState({
+      memberId: member.id,
+      occurredAt,
+      prisma: input.prisma,
+    });
+    const claimedOnboardingLink = await claimHostedLinqOnboardingLinkNotice({
+      memberId: member.id,
+      occurredAt,
+      prisma: input.prisma,
+    });
+
+    if (!claimedOnboardingLink) {
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildIgnoredLinqWebhookPlan("signup-link-already-sent"),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
+          dailyInboundCount: dailyState.inboundCount,
+          existingMemberActive: existingMemberEffectiveActive,
+          existingMemberMatch,
+          reason: "signup-link-already-sent",
+          routeStage: "first-contact-signup-already-sent",
+        }),
+      );
+    }
+
+    const invite = await issueHostedInviteTx({
+      channel: "linq",
+      memberId: member.id,
+      prisma: input.prisma,
+    });
+
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildFallbackSignupLinkResponse({
+        assignedPhone,
+        inviteCode: invite.inviteCode,
+        inviteId: invite.id,
+        memberId: member.id,
+        memberPhone,
+        occurredAt,
+        sourceEventId: input.event.event_id,
+      }),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        chatDirectAttested: isHostedLinqDirectChatAttested(messageEvent),
+        dailyInboundCount: dailyState.inboundCount,
+        existingMemberActive: existingMemberEffectiveActive,
+        existingMemberMatch,
+        fallbackLine: true,
+        reason: "sent-signup-link",
+        routeStage: "first-contact-signup-link",
+      }),
+    );
+  }
 
   const dailyState = await bindHostedMemberPendingLinqChatAndTrackInbound({
     chatId: summary.chatId,

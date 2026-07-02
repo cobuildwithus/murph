@@ -160,6 +160,38 @@ export function buildSignupLinkResponse(input: {
   });
 }
 
+export function buildFallbackSignupLinkResponse(input: {
+  assignedPhone: string;
+  inviteCode: string;
+  inviteId: string;
+  memberId: string;
+  memberPhone: string;
+  occurredAt: string;
+  sourceEventId: string;
+}): HostedOnboardingLinqDirectPlan {
+  const joinUrl = buildHostedInviteUrl(input.inviteCode);
+
+  return buildActiveMemberDirectPlan({
+    desiredSideEffects: [
+      createHostedWebhookLinqMessageSideEffect({
+        assignedRecipientPhone: input.assignedPhone,
+        inviteId: input.inviteId,
+        memberId: input.memberId,
+        memberPhone: input.memberPhone,
+        occurredAt: input.occurredAt,
+        sourceEventId: input.sourceEventId,
+        template: "invite_signup_fallback",
+      }),
+    ],
+    response: {
+      ok: true,
+      inviteCode: input.inviteCode,
+      joinUrl,
+      reason: "sent-signup-link",
+    },
+  });
+}
+
 export function buildFamilyInviteAcceptedResponse(input: {
   chatId: string;
   memberId: string;

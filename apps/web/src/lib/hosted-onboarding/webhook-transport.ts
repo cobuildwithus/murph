@@ -28,6 +28,7 @@ import { normalizePhoneNumber } from "./phone";
 import {
   claimHostedLinqQuotaReplyNotice,
   markHostedLinqOnboardingLinkNoticeSent,
+  releaseHostedLinqOnboardingLinkNoticeClaim,
   releaseHostedLinqQuotaReplyNoticeClaim,
   resolveHostedLinqDayUtc,
 } from "./linq-daily-state";
@@ -37,6 +38,9 @@ import {
   buildHostedLinqConversationHomeRedirectReply,
   sendHostedLinqChatMessage,
 } from "./linq";
+import {
+  createHostedLinqChat,
+} from "./linq-client";
 import {
   maybeShareHostedLinqContactCardAfterOutboundForRuntime,
 } from "./linq-contact-card-share";
@@ -123,6 +127,17 @@ export type HostedLinqInviteSignupMessagePayload = {
   template: "invite_signup";
 };
 
+export type HostedLinqInviteSignupFallbackMessagePayload = {
+  assignedRecipientPhone: string;
+  chatId: null;
+  inviteId: string;
+  memberId: string;
+  memberPhone: string;
+  occurredAt: string;
+  replyToMessageId: null;
+  template: "invite_signup_fallback";
+};
+
 export type HostedLinqInviteSigninMessagePayload = {
   chatId: string;
   inviteId: string;
@@ -133,6 +148,7 @@ export type HostedLinqInviteSigninMessagePayload = {
 };
 
 export type HostedLinqInviteMessagePayload =
+  | HostedLinqInviteSignupFallbackMessagePayload
   | HostedLinqInviteSigninMessagePayload
   | HostedLinqInviteSignupMessagePayload;
 
@@ -218,6 +234,15 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       template: "family_invite_reply";
     }
   | {
+      assignedRecipientPhone: string;
+      inviteId: string;
+      memberId: string;
+      memberPhone: string;
+      occurredAt: string;
+      sourceEventId: string;
+      template: "invite_signup_fallback";
+    }
+  | {
       chatId: string;
       inviteId: string;
       memberId: string;
@@ -232,7 +257,9 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
 export function createHostedWebhookLinqMessageSideEffect(
   input: CreateHostedWebhookLinqMessageSideEffectInput,
 ): HostedLinqMessageSideEffect {
-  const replyToMessageId = input.replyToMessageId ?? null;
+  const replyToMessageId = "replyToMessageId" in input
+    ? input.replyToMessageId ?? null
+    : null;
 
   return {
     effectId: buildHostedWebhookLinqMessageEffectId(input),
@@ -243,7 +270,7 @@ export function createHostedWebhookLinqMessageSideEffect(
 function buildHostedWebhookLinqMessageEffectId(
   input: CreateHostedWebhookLinqMessageSideEffectInput,
 ): string {
-  if (input.template === "invite_signup") {
+  if (input.template === "invite_signup" || input.template === "invite_signup_fallback") {
     const dayUtc = resolveHostedLinqDayUtc(input.occurredAt).toISOString();
     return `linq-invite-signup:${input.memberId}:${dayUtc}`;
   }
@@ -346,6 +373,28 @@ async function sendHostedLinqSideEffect(
   });
 
   try {
+    if (effect.payload.template === "invite_signup_fallback") {
+      const result = await createHostedLinqChat({
+        from: effect.payload.assignedRecipientPhone,
+        idempotencyKey: effect.effectId,
+        message: await buildHostedLinqSideEffectMessage(effect, options.prisma),
+        signal: options.signal,
+        to: [effect.payload.memberPhone],
+      });
+
+      scheduleHostedLinqDeliveryMilestoneAfterAttempt({
+        attemptTask: deliveryAttemptTask,
+        milestoneTask: () => markHostedLinqDeliveryAcceptedBestEffort({
+          chatId: result.chatId,
+          effect,
+          messageId: result.messageId,
+          prisma: options.prisma,
+        }),
+        scheduleAfterResponse: options.scheduleAfterResponse,
+      });
+      return { status: "sent" };
+    }
+
     const route = await assertHostedLinqSideEffectRouteAuthority(effect, options.prisma);
     const currentInboundReply = isHostedLinqCurrentInboundSideEffect(
       effect,
@@ -404,7 +453,10 @@ async function sendHostedLinqSideEffect(
       scheduleAfterResponse: options.scheduleAfterResponse,
     });
   } catch (error) {
-    if (effect.payload.template === "invite_signup") {
+    if (
+      effect.payload.template === "invite_signup"
+      || effect.payload.template === "invite_signup_fallback"
+    ) {
       await deliveryAttemptTask;
       await markHostedLinqDeliveryFailedBestEffort({
         effect,
@@ -448,11 +500,15 @@ function queueHostedLinqContactCardSideEffectShare(share: {
   const threadIsDirect = "threadIsDirect" in share.effect.payload
     ? share.effect.payload.threadIsDirect ?? null
     : null;
+  const chatId = readHostedLinqSideEffectChatId(share.effect.payload);
+  if (!chatId) {
+    return;
+  }
 
   void maybeShareHostedLinqContactCardAfterOutboundForRuntime({
     authority: share.routeAuthority,
     boundUserId: share.memberId,
-    chatId: share.effect.payload.chatId,
+    chatId,
     eligibility: {
       service,
       threadIsDirect,
@@ -522,11 +578,16 @@ async function recordHostedLinqDeliveryAttemptBestEffort(input: {
     await recordHostedLinqDeliveryAttemptTx({
       attemptedAt: new Date(input.startedAtMs),
       idempotencyKey: input.effect.effectId,
-      linqChatId: input.effect.payload.chatId,
+      linqChatId: readHostedLinqSideEffectChatId(input.effect.payload),
+      phoneNumber: input.effect.payload.template === "invite_signup_fallback"
+        ? input.effect.payload.assignedRecipientPhone
+        : undefined,
       prisma: input.prisma,
       source: "hosted_webhook_side_effect",
       sourceRef: input.effect.effectId,
-      targetKind: "thread",
+      targetKind: input.effect.payload.template === "invite_signup_fallback"
+        ? "participant"
+        : "thread",
       template: input.effect.payload.template,
     });
   } catch (error) {
@@ -561,7 +622,7 @@ function normalizeTransportText(value: string | null | undefined): string | null
 }
 
 async function markHostedLinqDeliveryAcceptedBestEffort(input: {
-  chatId: string;
+  chatId: string | null;
   effect: HostedLinqMessageSideEffect;
   messageId: string | null;
   prisma: HostedLinqTransportPersistenceClient;
@@ -657,7 +718,7 @@ function buildHostedLinqContactCardSideEffectLogDetails(
     : null;
 
   return sanitizeHostedOnboardingStructuredLogDetails({
-    chatIdSuffix: toHostedOnboardingLogIdSuffix(effect.payload.chatId),
+    chatIdSuffix: toHostedOnboardingLogIdSuffix(readHostedLinqSideEffectChatId(effect.payload)),
     errorCode: readHostedLinqSideEffectString(errorRecord, "code"),
     errorMessage:
       error instanceof Error
@@ -700,6 +761,12 @@ function readHostedLinqSideEffectMemberId(
     : null;
 }
 
+function readHostedLinqSideEffectChatId(
+  payload: HostedLinqMessagePayload,
+): string | null {
+  return typeof payload.chatId === "string" ? payload.chatId : null;
+}
+
 function readErrorRecord(error: unknown): Record<string, unknown> | null {
   return error && typeof error === "object" ? error as Record<string, unknown> : null;
 }
@@ -735,6 +802,7 @@ async function buildHostedLinqSideEffectMessage(
       });
     }
     case "invite_signup":
+    case "invite_signup_fallback":
     case "invite_signin":
       return buildHostedInviteSideEffectMessage({
         effectId: effect.effectId,
@@ -788,7 +856,9 @@ function isHostedInviteLinqMessagePayload(
   payload: HostedLinqMessagePayload,
 ): payload is HostedLinqInviteMessagePayload {
   return (
-    payload.template === "invite_signup" || payload.template === "invite_signin"
+    payload.template === "invite_signup"
+    || payload.template === "invite_signup_fallback"
+    || payload.template === "invite_signin"
   );
 }
 
@@ -861,6 +931,17 @@ function buildHostedWebhookLinqMessagePayload(
         ...buildHostedLinqContactCardShareEligibilityPayload(input),
         template: input.template,
       };
+    case "invite_signup_fallback":
+      return {
+        assignedRecipientPhone: input.assignedRecipientPhone,
+        chatId: null,
+        inviteId: input.inviteId,
+        memberId: input.memberId,
+        memberPhone: input.memberPhone,
+        occurredAt: input.occurredAt,
+        replyToMessageId: null,
+        template: input.template,
+      };
   }
 }
 
@@ -924,6 +1005,19 @@ async function claimHostedLinqNoticeForSideEffect(
   prisma: HostedLinqTransportPersistenceClient,
 ): Promise<boolean> {
   switch (effect.payload.template) {
+    case "invite_signup_fallback": {
+      const claim = await claimHostedLinqDeliveryProviderDispatchTx({
+        idempotencyKey: effect.effectId,
+        linqChatId: null,
+        phoneNumber: effect.payload.assignedRecipientPhone,
+        prisma,
+        source: "hosted_webhook_side_effect",
+        sourceRef: effect.effectId,
+        targetKind: "participant",
+        template: effect.payload.template,
+      });
+      return claim.claimed;
+    }
     case "invite_signup": {
       const claim = await claimHostedLinqDeliveryProviderDispatchTx({
         idempotencyKey: effect.effectId,
@@ -958,6 +1052,13 @@ async function releaseHostedLinqNoticeClaimForSideEffect(
 ): Promise<void> {
   try {
     switch (effect.payload.template) {
+      case "invite_signup_fallback":
+        await releaseHostedLinqOnboardingLinkNoticeClaim({
+          memberId: effect.payload.memberId,
+          occurredAt: effect.payload.occurredAt,
+          prisma,
+        });
+        return;
       case "invite_signup":
         return;
       case "daily_quota":
@@ -995,7 +1096,10 @@ async function markHostedLinqNoticeSentForSideEffect(
   effect: HostedLinqMessageSideEffect,
   prisma: HostedLinqTransportPersistenceClient,
 ): Promise<void> {
-  if (effect.payload.template !== "invite_signup") {
+  if (
+    effect.payload.template !== "invite_signup"
+    && effect.payload.template !== "invite_signup_fallback"
+  ) {
     return;
   }
 
@@ -1014,7 +1118,7 @@ async function markHostedLinqDeliverySkippedBestEffort(input: {
   try {
     await markHostedLinqDeliverySkippedTx({
       idempotencyKey: input.effect.effectId,
-      linqChatId: input.effect.payload.chatId,
+      linqChatId: readHostedLinqSideEffectChatId(input.effect.payload),
       prisma: input.prisma,
       reason: buildHostedLinqRecentInboundSkipReason(input.lastInboundAt),
       source: "hosted_webhook_side_effect",

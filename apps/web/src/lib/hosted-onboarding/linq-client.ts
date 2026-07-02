@@ -1,5 +1,7 @@
 import type { TextPart } from "@linqapp/sdk/resources";
 import type {
+  ChatCreateParams,
+  ChatCreateResponse,
   MessageSendParams,
   MessageSendResponse,
 } from "@linqapp/sdk/resources/chats";
@@ -13,6 +15,47 @@ export type HostedLinqSendResult = {
   chatId: string | null;
   messageId: string | null;
 };
+
+export async function createHostedLinqChat(input: {
+  from: string;
+  idempotencyKey?: string | null;
+  message: string;
+  signal?: AbortSignal;
+  to: string[];
+}): Promise<HostedLinqSendResult> {
+  const messageBody = buildHostedLinqTextMessageBody({
+    idempotencyKey: input.idempotencyKey,
+    message: input.message,
+  });
+  const body: ChatCreateParams = {
+    from: normalizeRequiredString(input.from, "from"),
+    message: messageBody.message,
+    to: normalizeRequiredStringList(input.to, "recipient"),
+  };
+
+  const response = await fetchHostedLinqApiOrThrow({
+    body: JSON.stringify(body),
+    method: "POST",
+    operation: "chat create",
+    path: "chats",
+    signal: input.signal,
+    timeoutMessage: "Linq chat create timed out.",
+  });
+
+  if (!response.ok) {
+    throw buildHostedLinqRequestFailedError({
+      operation: "chat create",
+      retryable: isRetryableHostedLinqStatus(response.status),
+      status: response.status,
+    });
+  }
+
+  const payload = await readHostedLinqOptionalJsonResponse<ChatCreateResponse>(response);
+  return {
+    chatId: normalizeNullableString(payload?.chat?.id),
+    messageId: normalizeNullableString(payload?.chat?.message?.id),
+  };
+}
 
 export async function sendHostedLinqChatMessage(input: {
   chatId: string;
@@ -164,6 +207,18 @@ function normalizeRequiredString(value: unknown, label: string): string {
   }
 
   return normalized;
+}
+
+function normalizeRequiredStringList(values: readonly string[], label: string): string[] {
+  const normalizedValues = values
+    .map((value) => normalizeRequiredString(value, label))
+    .filter((value, index, array) => array.indexOf(value) === index);
+
+  if (normalizedValues.length === 0) {
+    throw new TypeError(`${label} list must contain at least one non-empty value.`);
+  }
+
+  return normalizedValues;
 }
 
 function isRetryableHostedLinqStatus(status: number): boolean {

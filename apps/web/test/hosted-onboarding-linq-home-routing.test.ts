@@ -663,6 +663,9 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
 
   it("acquires the pool lock and re-resolves routing before reserving a new assignment", async () => {
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+      buildLine("+15550100001"),
+    ]);
 
     const result = await resolveHostedMemberLinqHomeLineRouteBindingTx({
       incomingChatId: "chat_first_bind",

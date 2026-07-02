@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HostedBillingStatus } from "@prisma/client";
 
+vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
+  createHostedLinqChat: vi.fn().mockResolvedValue({
+    chatId: "chat-created",
+    messageId: "provider-message-created",
+  }),
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   readHostedMemberHomeLinqRoute: vi.fn(),
 }));
@@ -73,6 +80,9 @@ import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
   releaseHostedAiUsageLimitNotice,
 } from "@/src/lib/hosted-execution/usage-allowance";
+import {
+  createHostedLinqChat,
+} from "@/src/lib/hosted-onboarding/linq-client";
 import {
   createHostedExternalThreadLookupKey,
   createHostedLinqChatLookupKey,
@@ -753,6 +763,66 @@ describe("hosted Linq webhook transport", () => {
     expect(firstEffect.effectId).toBe("linq-invite-signup:member-1:2026-03-26T00:00:00.000Z");
     expect(sameDayEffect.effectId).toBe(firstEffect.effectId);
     expect(laterEffect.effectId).toBe("linq-invite-signup:member-1:2026-03-27T00:00:00.000Z");
+  });
+
+  it("creates fallback signup chats without thread-authority delivery", async () => {
+    const prisma = {
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue({
+          inviteCode: "invite-code",
+        }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      assignedRecipientPhone: "+15550100001",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      memberPhone: "+15551234567",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      sourceEventId: "event-fallback-invite",
+      template: "invite_signup_fallback",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        currentInboundReply,
+        prisma: prisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith({
+      idempotencyKey: effect.effectId,
+      linqChatId: null,
+      phoneNumber: "+15550100001",
+      prisma,
+      source: "hosted_webhook_side_effect",
+      sourceRef: effect.effectId,
+      targetKind: "participant",
+      template: "invite_signup_fallback",
+    });
+    expect(createHostedLinqChat).toHaveBeenCalledWith({
+      from: "+15550100001",
+      idempotencyKey: effect.effectId,
+      message: "invite-reply",
+      signal: undefined,
+      to: ["+15551234567"],
+    });
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalledWith({
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      prisma,
+    });
+    expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
+      where: {
+        id: "invite-1",
+      },
+      data: {
+        sentAt: expect.any(Date),
+      },
+    });
   });
 
   it("releases AI usage quota notice claims when delivery fails", async () => {
