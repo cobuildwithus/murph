@@ -212,27 +212,19 @@ test('bounds session reads to the newest sessions by durable activity', async ()
     'session-older-activity',
   ])
 
-  // Recovery path: an index without the projection (or restored without it)
-  // is rebuilt once from durable session records instead of staying blind.
+  // Legacy index without the projection: the recurring path never rebuilds
+  // from session files (that would scan all sessions under the runtime write
+  // lock). It initializes an empty projection and warms up from normal
+  // bounded saves instead.
   const paths = resolveAssistantStatePaths(vaultRoot)
   await writeFile(
     paths.indexesPath,
     JSON.stringify({ version: 1, aliases: {}, conversationKeys: {} }),
     'utf8',
   )
-  const rebuilt = await listRecentAssistantSessions(vaultRoot, { limit: 1 })
-  expect(rebuilt.map((session) => session.sessionId)).toEqual([
-    'session-newer-activity',
-  ])
+  const initialized = await listRecentAssistantSessions(vaultRoot, { limit: 10 })
+  expect(initialized).toEqual([])
 
-  // A session save arriving before the first maintenance read must not turn
-  // the missing projection into a partial one: the merge rebuilds first, so
-  // pre-existing durable sessions stay visible.
-  await writeFile(
-    paths.indexesPath,
-    JSON.stringify({ version: 1, aliases: {}, conversationKeys: {} }),
-    'utf8',
-  )
   await saveAssistantSession(
     vaultRoot,
     createEvidenceTestSession({
@@ -240,10 +232,8 @@ test('bounds session reads to the newest sessions by durable activity', async ()
       sessionId: 'session-post-deploy',
     }),
   )
-  const merged = await listRecentAssistantSessions(vaultRoot, { limit: 10 })
-  expect(merged.map((session) => session.sessionId).sort()).toEqual([
-    'session-newer-activity',
-    'session-older-activity',
+  const warmed = await listRecentAssistantSessions(vaultRoot, { limit: 10 })
+  expect(warmed.map((session) => session.sessionId)).toEqual([
     'session-post-deploy',
   ])
 })

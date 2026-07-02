@@ -37,7 +37,7 @@ import {
   readAssistantTranscriptEntries,
   readAssistantTranscriptTailEntries,
   readAutomationState,
-  rebuildAssistantIndexStore,
+  ensureAssistantRecentSessionsProjection,
   writeAutomationState,
   replaceTranscriptEntries,
   synchronizeAssistantIndexes,
@@ -363,12 +363,7 @@ export async function listRecentAssistantSessions(
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
 
-    let indexes = await readAssistantIndexStore(paths)
-    if (!indexes.recentSessions) {
-      // Index written before the recent-sessions projection existed (or
-      // restored without it): rebuild once from durable session records.
-      indexes = await rebuildAssistantIndexStore(paths)
-    }
+    const indexes = await ensureAssistantRecentSessionsProjection(paths)
     return readAssistantSessionsSorted(
       paths,
       Object.entries(indexes.recentSessions ?? {})

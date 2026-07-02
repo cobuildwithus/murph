@@ -651,6 +651,28 @@ export async function synchronizeAssistantIndexes(
 
 const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 32
 
+// One-time, O(1) migration for index files written before the projection
+// existed: persist an empty projection so subsequent bounded foreground
+// saves populate it. Never rebuilds from session files on this path; a
+// legacy vault's first maintenance wakes simply see fewer sessions until
+// normal saves warm the projection up.
+export async function ensureAssistantRecentSessionsProjection(
+  paths: AssistantStatePaths,
+): Promise<AssistantAliasStore> {
+  const store = await readAssistantIndexStore(paths, { fresh: true })
+  if (store.recentSessions !== undefined) {
+    return store
+  }
+  const updated = assistantAliasStoreSchema.parse({
+    version: ASSISTANT_INDEX_STORE_VERSION,
+    aliases: store.aliases,
+    conversationKeys: store.conversationKeys,
+    recentSessions: {},
+  })
+  await writeJsonFileAtomic(paths.indexesPath, updated)
+  return updated
+}
+
 function pruneAssistantRecentSessions(
   recentSessions: Record<string, string>,
 ): Record<string, string> {
@@ -739,7 +761,7 @@ function createInitialAssistantIndexStore(): AssistantAliasStore {
   })
 }
 
-export async function rebuildAssistantIndexStore(
+async function rebuildAssistantIndexStore(
   paths: AssistantStatePaths,
 ): Promise<AssistantAliasStore> {
   const entries = await readdir(paths.sessionsDirectory, {
