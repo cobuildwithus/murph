@@ -1,4 +1,4 @@
-import { readFile, rm } from "node:fs/promises";
+import { readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -118,18 +118,51 @@ export async function prepareHostedProviderCleanupPlan(input: {
       };
     }
 
+    const scheduledWakeAt = resolveHostedProviderCleanupCheckpointWakeAt({
+      checkpoint: await readHostedProviderCleanupCheckpoint(input.vaultRoot),
+      deferDueOrInvalid: true,
+      idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+      nowMs: input.nowMs,
+    });
+    // Migration bootstrap (delete together with
+    // recoverLegacyPendingTerminalLinqCleanupOnce): a pre-upgrade vault whose
+    // first post-upgrade touch is foreground-only would otherwise never
+    // schedule the non-deferred pass that runs the one-shot recovery. Record
+    // an empty cleanup checkpoint with a future wake so that pass happens.
+    // Gated on the evidence directory existing (an O(1) stat, not a scan) so
+    // vaults with no auto-reply history never bootstrap.
+    if (
+      scheduledWakeAt === null
+      && !(await hasHostedProviderCleanupRecoveryCompleted(input.vaultRoot))
+      && (await hasAssistantAutoReplyEvidenceDirectory(input.vaultRoot))
+    ) {
+      const checkpoint = await recordHostedProviderCleanupBeforeCommit({
+        checkpoint: {
+          nextWakeAt: resolveHostedProviderCleanupFirstDeferredWakeAt({
+            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            nowMs: input.nowMs,
+          }),
+        },
+        linqMessageIds: [],
+        vaultRoot: input.vaultRoot,
+      });
+      return {
+        checkpoint,
+        deferred: true,
+        due: false,
+        requiresCheckpoint: true,
+        stateQueued: true,
+        wakeAt: checkpoint.nextWakeAt ?? null,
+      };
+    }
+
     return {
       checkpoint: input.initialCheckpoint ?? null,
       deferred: true,
       due: false,
       requiresCheckpoint: false,
       stateQueued: false,
-      wakeAt: resolveHostedProviderCleanupCheckpointWakeAt({
-        checkpoint: await readHostedProviderCleanupCheckpoint(input.vaultRoot),
-        deferDueOrInvalid: true,
-        idleCheckpointDelayMs: input.idleCheckpointDelayMs,
-        nowMs: input.nowMs,
-      }),
+      wakeAt: scheduledWakeAt,
     };
   }
 
@@ -390,6 +423,23 @@ async function recoverLegacyPendingTerminalLinqCleanupOnce(
   }
   await markHostedProviderCleanupRecoveryCompleted(vaultRoot);
   return recoveredCleanupQueued;
+}
+
+// Mirrors the engine's evidence directory layout; migration-only, delete with
+// the recovery block above.
+async function hasAssistantAutoReplyEvidenceDirectory(
+  vaultRoot: string,
+): Promise<boolean> {
+  try {
+    await stat(path.join(
+      resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+      "auto-reply",
+      "evidence",
+    ));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function hasHostedProviderCleanupRecoveryCompleted(
