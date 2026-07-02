@@ -587,6 +587,11 @@ export function buildHostedCodexConfigToml(input: {
     `approval_policy = ${tomlString(DEFAULT_HOSTED_CODEX_APPROVAL_POLICY)}`,
     `sandbox_mode = ${tomlString(DEFAULT_HOSTED_CODEX_SANDBOX)}`,
     "check_for_update_on_startup = false",
+    // Login shells re-source /etc/profile, which resets PATH to the stock
+    // system dirs and drops /app/node_modules/.bin (vault-cli). The runner
+    // image has no profile.d content worth sourcing, so force non-login
+    // shells and let shell_environment_policy own the exec environment.
+    "allow_login_shell = false",
     "",
     ...providerConfigLines,
     "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
