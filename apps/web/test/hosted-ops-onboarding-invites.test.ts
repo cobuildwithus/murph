@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   createHostedLinqChat: vi.fn(),
   createHostedLinqChatLookupKey: vi.fn(),
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
+  clearHostedMemberBareHomeLinqReservationTx: vi.fn(),
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   ensureHostedMemberForPhoneTx: vi.fn(),
@@ -64,6 +65,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx:
     mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
+  clearHostedMemberBareHomeLinqReservationTx:
+    mocks.clearHostedMemberBareHomeLinqReservationTx,
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince:
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone:
@@ -184,6 +187,24 @@ describe("hosted ops onboarding invites", () => {
           pendingLinqRecipientPhone: null,
           telegramThreadId: null,
         };
+      },
+    );
+    mocks.clearHostedMemberBareHomeLinqReservationTx.mockImplementation(
+      async (input: { homeLineAssignedAt: Date; recipientPhone: string }) => {
+        if (
+          routingState
+          && !routingState.linqChatId
+          && !routingState.pendingLinqChatId
+          && routingState.linqRecipientPhone === input.recipientPhone
+          && routingState.linqHomeLineAssignedAt?.getTime()
+            === input.homeLineAssignedAt.getTime()
+        ) {
+          routingState = {
+            ...routingState,
+            linqHomeLineAssignedAt: null,
+            linqRecipientPhone: null,
+          };
+        }
       },
     );
     mocks.upsertHostedMemberPendingLinqBindingTx.mockImplementation(
@@ -378,7 +399,12 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledTimes(1);
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalledTimes(1);
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma: tx,
+      recipientPhone: "+15557654321",
+    });
     expect(mocks.createHostedLinqChat).toHaveBeenCalledWith({
       from: "+15557654321",
       idempotencyKey: expect.stringMatching(
@@ -427,16 +453,19 @@ describe("hosted ops onboarding invites", () => {
     expect(JSON.stringify(result)).not.toContain("+15557654321");
   });
 
-  it("holds the home-line claim until the pending Linq route is durable", async () => {
+  it("commits the persisted home-line claim before the provider call and binds after", async () => {
     const events: string[] = [];
-    prisma.$transaction.mockImplementationOnce(
+    prisma.$transaction.mockImplementation(
       async (callback: (transaction: MockedTx) => Promise<unknown>) => {
-        events.push("owner:start");
+        events.push("tx:start");
         const result = await callback(tx);
-        events.push("owner:commit");
+        events.push("tx:commit");
         return result;
       },
     );
+    mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockImplementationOnce(async () => {
+      events.push("reservation:persist");
+    });
     mocks.createHostedLinqChat.mockImplementationOnce(async () => {
       events.push("provider:create");
       return {
@@ -452,14 +481,20 @@ describe("hosted ops onboarding invites", () => {
       deliveryMode: "new_chat",
       linqFromPhoneNumber: "+15557654321",
       recipientPhoneNumber: "+15551234567",
-      requestId: "request-provider-inside-claim",
+      requestId: "request-provider-outside-claim",
     });
 
+    // The DB owns the reservation across provider I/O: the claim commits
+    // (releasing the pool lock) before the provider call, and the pending
+    // bind lands in its own transaction afterwards.
     expect(events).toEqual([
-      "owner:start",
+      "tx:start",
+      "reservation:persist",
+      "tx:commit",
       "provider:create",
+      "tx:start",
       "pending:bind",
-      "owner:commit",
+      "tx:commit",
     ]);
   });
 
@@ -677,7 +712,14 @@ describe("hosted ops onboarding invites", () => {
       memberId: "member_123",
       prisma: tx,
     });
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    // The persisted reservation is released when the provider open fails.
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledTimes(1);
+    expect(mocks.clearHostedMemberBareHomeLinqReservationTx).toHaveBeenCalledWith({
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma,
+      recipientPhone: "+15557654321",
+    });
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
@@ -720,7 +762,8 @@ describe("hosted ops onboarding invites", () => {
     );
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalledTimes(2);
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledTimes(2);
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledTimes(2);
+    expect(mocks.clearHostedMemberBareHomeLinqReservationTx).toHaveBeenCalledTimes(1);
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(1);
   });
 
@@ -859,7 +902,8 @@ describe("hosted ops onboarding invites", () => {
     });
 
     expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledTimes(1);
+    expect(mocks.clearHostedMemberBareHomeLinqReservationTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
     expect(readIdempotencyKey(mocks.sendHostedLinqChatMessage, 1)).toBe(
@@ -890,7 +934,7 @@ describe("hosted ops onboarding invites", () => {
     });
 
     expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(1);
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledTimes(1);
     expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(1);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
   });

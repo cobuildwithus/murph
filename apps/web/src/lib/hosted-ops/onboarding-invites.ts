@@ -18,8 +18,10 @@ import {
   uploadHostedLinqAttachment,
 } from "../hosted-onboarding/linq-client";
 import {
+  clearHostedMemberBareHomeLinqReservationTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqChatId,
+  upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberPendingLinqBindingTx,
 } from "../hosted-onboarding/hosted-member-routing-store";
 import {
@@ -45,11 +47,6 @@ const HOSTED_OPS_ONBOARDING_DEFAULT_INVITE_MESSAGE =
   "Murph setup link:\n{{inviteUrl}}\n\nReply here when you are in.";
 const HOSTED_OPS_ONBOARDING_DEFAULT_NEW_CHAT_OPENER =
   "Hey, I am sending the Murph setup link next.";
-const HOSTED_OPS_ONBOARDING_NEW_CHAT_TRANSACTION_OPTIONS = {
-  ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-  timeout: 30_000,
-} as const;
-
 type HostedOpsOnboardingInviteDeliveryMode = "existing_chat" | "new_chat";
 
 export interface HostedOpsOnboardingVoiceMemoInput {
@@ -322,6 +319,7 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
           invite,
           memberId,
         },
+        kind: "existing_pending" as const,
       };
     }
 
@@ -352,52 +350,90 @@ async function issueHostedOpsOnboardingInviteAndCreateNewChatForRequest(input: {
       });
     }
 
+    // Persist the reservation so the database owns the line claim, then
+    // commit. The provider chat-open call must run outside this transaction
+    // so the home-line pool lock is never held across provider I/O.
+    await upsertHostedMemberHomeLinqRecipientPhoneTx({
+      homeLineAssignedAt: deliveryResult.reservation.assignedAt,
+      memberId,
+      prisma: tx,
+      recipientPhone: deliveryResult.reservation.line.phoneNumber,
+    });
+
     return {
-      delivery: await createHostedOpsOnboardingNewLinqChatAndBindPendingTx({
-        assignedAt: deliveryResult.reservation.assignedAt,
-        memberId,
-        prisma: tx,
-        request: input.request,
-        senderPhoneNumber: deliveryResult.reservation.line.phoneNumber,
-      }),
       issued: {
         invite,
         memberId,
       },
+      kind: "reserved" as const,
+      reservation: {
+        assignedAt: deliveryResult.reservation.assignedAt,
+        senderPhoneNumber: deliveryResult.reservation.line.phoneNumber,
+      },
     };
-  }, HOSTED_OPS_ONBOARDING_NEW_CHAT_TRANSACTION_OPTIONS);
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  if (prepared.kind === "existing_pending") {
+    return {
+      delivery: prepared.delivery,
+      issued: prepared.issued,
+    };
+  }
 
   return {
-    delivery: prepared.delivery,
+    delivery: await createHostedOpsOnboardingNewLinqChatAndBindPending({
+      assignedAt: prepared.reservation.assignedAt,
+      memberId: prepared.issued.memberId,
+      prisma: input.prisma,
+      request: input.request,
+      senderPhoneNumber: prepared.reservation.senderPhoneNumber,
+    }),
     issued: prepared.issued,
   };
 }
 
-async function createHostedOpsOnboardingNewLinqChatAndBindPendingTx(input: {
+async function createHostedOpsOnboardingNewLinqChatAndBindPending(input: {
   assignedAt: Date;
   memberId: string;
-  prisma: Prisma.TransactionClient;
+  prisma: PrismaClient;
   request: NormalizedHostedOpsOnboardingInviteInput;
   senderPhoneNumber: string;
 }): Promise<HostedOpsOnboardingInviteDelivery> {
-  // The open key must survive a rolled-back transaction: a freshly generated
-  // member id does not, so key the provider chat open on the stable line and
-  // recipient phone pair only.
-  const createdChat = await createHostedLinqChat({
-    from: input.senderPhoneNumber,
-    idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
-      parts: [
-        input.senderPhoneNumber,
-        input.request.recipientPhoneNumber,
-      ],
-      step: "open",
-    }),
-    message: input.request.newChatOpeningMessage,
-    to: [input.request.recipientPhoneNumber],
-  });
+  // The open key must survive retries after a failed attempt: a freshly
+  // generated member id does not, so key the provider chat open on the
+  // stable line and recipient phone pair only.
+  let createdChat: Awaited<ReturnType<typeof createHostedLinqChat>>;
+  try {
+    createdChat = await createHostedLinqChat({
+      from: input.senderPhoneNumber,
+      idempotencyKey: buildHostedOpsOnboardingIdempotencyKey({
+        parts: [
+          input.senderPhoneNumber,
+          input.request.recipientPhoneNumber,
+        ],
+        step: "open",
+      }),
+      message: input.request.newChatOpeningMessage,
+      to: [input.request.recipientPhoneNumber],
+    });
+  } catch (error) {
+    await clearHostedMemberBareHomeLinqReservationTx({
+      homeLineAssignedAt: input.assignedAt,
+      memberId: input.memberId,
+      prisma: input.prisma,
+      recipientPhone: input.senderPhoneNumber,
+    });
+    throw error;
+  }
   const chatId = normalizeNullableString(createdChat.chatId);
 
   if (!chatId) {
+    await clearHostedMemberBareHomeLinqReservationTx({
+      homeLineAssignedAt: input.assignedAt,
+      memberId: input.memberId,
+      prisma: input.prisma,
+      recipientPhone: input.senderPhoneNumber,
+    });
     throw hostedOnboardingError({
       code: "HOSTED_OPS_ONBOARDING_CHAT_CREATE_FAILED",
       httpStatus: 502,
@@ -406,13 +442,15 @@ async function createHostedOpsOnboardingNewLinqChatAndBindPendingTx(input: {
     });
   }
 
-  await upsertHostedMemberPendingLinqBindingTx({
-    homeLineAssignedAt: input.assignedAt,
-    linqChatId: chatId,
-    memberId: input.memberId,
-    prisma: input.prisma,
-    recipientPhone: input.senderPhoneNumber,
-  });
+  await input.prisma.$transaction(async (tx) => {
+    await upsertHostedMemberPendingLinqBindingTx({
+      homeLineAssignedAt: input.assignedAt,
+      linqChatId: chatId,
+      memberId: input.memberId,
+      prisma: tx,
+      recipientPhone: input.senderPhoneNumber,
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   return {
     chatId,

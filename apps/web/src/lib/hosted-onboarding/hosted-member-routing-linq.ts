@@ -191,6 +191,38 @@ export async function upsertHostedMemberHomeLinqBindingTx(input: {
   });
 }
 
+export async function clearHostedMemberBareHomeLinqReservationTx(input: {
+  homeLineAssignedAt: Date;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  recipientPhone: string;
+}): Promise<void> {
+  const recipientPhone = normalizePhoneNumber(input.recipientPhone);
+  const lookupKeys = createHostedPhoneLookupKeyReadCandidates(recipientPhone);
+  if (lookupKeys.length === 0) {
+    return;
+  }
+
+  // Release only the exact bare reservation this request created; a route
+  // that gained a chat binding in the meantime must keep its line.
+  await input.prisma.hostedMemberRouting.updateMany({
+    where: {
+      linqChatLookupKey: null,
+      linqHomeLineAssignedAt: input.homeLineAssignedAt,
+      linqRecipientPhoneLookupKey: {
+        in: [...lookupKeys],
+      },
+      memberId: input.memberId,
+      pendingLinqChatLookupKey: null,
+    },
+    data: {
+      linqHomeLineAssignedAt: null,
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+    },
+  });
+}
+
 export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
   clearPending?: boolean;
   homeLineAssignedAt?: Date;
