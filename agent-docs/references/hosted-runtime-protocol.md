@@ -340,11 +340,13 @@ stops on the first signal failure. It is not a scheduler, queue, or generic
 admin job framework.
 
 The same ops page may also expose narrow hosted-runtime setup actions that reuse
-existing source-of-truth services, such as manually ensuring a Linq
-external-thread route through `/api/ops/thread-routes`. Those actions must use
-the same hosted app-session, allowlist, and same-origin mutation gate, and must
-delegate to the owning service primitive rather than hand-writing persisted
-runtime rows.
+existing source-of-truth services. Those actions must use the same hosted
+app-session, allowlist, and same-origin mutation gate, and must delegate to the
+owning service primitive rather than hand-writing persisted runtime rows. Linq
+group-thread containers are no longer operator-provisioned: the Linq webhook
+planner auto-provisions the thread-container route through
+`ensureHostedThreadContainerRouteTx` when an attested group message arrives from
+an active member texting their own home line.
 
 For hard-cut rollouts, deploy consumers before producers: Cloudflare and the
 runtime parser must understand the new mailbox kind before web emits it. After
@@ -440,6 +442,8 @@ recheck instead of being cleared from the pointer alone; only the wake path may
 then replace the fence after it explicitly reports no active child. Inactive
 liveness is explicit no-active-child proof, so the controller clears and
 replaces that fence directly instead of asking web status to complete it first.
+For the active-wake probe, a verifiably stopped container shell
+(`ctx.container.running === false`) is the same explicit no-active-child proof.
 Committed-progress recovery stays in the transport-failure adapter, where the
 transport outcome is the thing being reconciled. Mismatched liveness probes
 clear the fence because they prove the active child is not the fenced attempt;
@@ -557,8 +561,12 @@ projection metadata. These projection updates must not request an additional
 workspace checkpoint. Linq inbound message deletion is still eventual, but it is
 queued only after terminal handling evidence is durable under
 `.runtime/operations/assistant/auto-reply/evidence/<captureId>.json` and is
-drained through the hosted provider-cleanup retry state after the next successful
-runtime-owned idle or scheduled-wake workspace checkpoint.
+drained through hosted provider-cleanup after the next successful runtime-owned
+idle or scheduled-wake workspace checkpoint. The first deferred cleanup wake is
+scheduled after the configured idle-checkpoint horizon so cleanup cannot shorten
+the warm idle window; actual cleanup failures use the provider-cleanup retry
+delay. Post-checkpoint delivery and provider-cleanup drains recompute cleanup
+wakes from the post-side-effect state, not from a pre-side-effect base wake.
 
 The hosted workspace checkpoint ref may be a v2 direct-R2 snapshot ref, a
 legacy full/base workspace bundle, a legacy working `{base, delta}` ref, or a

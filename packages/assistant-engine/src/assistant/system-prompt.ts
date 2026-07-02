@@ -58,6 +58,7 @@ export interface AssistantNotificationDecisionSystemPromptInput {
   channel: string | null;
   currentLocalDate: string;
   currentTimeZone: string;
+  maintenanceTurn?: boolean;
 }
 
 export interface AssistantSystemPromptLayers {
@@ -230,6 +231,7 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantConnectedAppsGuidanceText(),
     buildAssistantProductFeedbackGuidanceText(),
     buildAssistantFamilyPlanGuidanceText(),
+    buildAssistantHostedGroupGuidanceText(),
     buildAssistantKnowledgeGuidanceText({
       assistantKnowledgeToolsAvailable:
         input.assistantKnowledgeToolsAvailable ?? false,
@@ -305,6 +307,16 @@ function buildAssistantFamilyPlanGuidanceText(): string {
   ].join("\n");
 }
 
+function buildAssistantHostedGroupGuidanceText(): string {
+  return [
+    "Hosted groups:",
+    "- When `murph.group` is available, use `action=\"read_current\"` to read the current hosted group for the connected group-chat runtime, and `action=\"create_join_link\"` when the user asks to invite someone to this group chat; share the returned join URL plainly. Do not use it for member management, and do not promise a link unless the tool returns one.",
+    "- Hosted groups are separate from Murph Family billing/account groups. Joining a hosted group does not grant billing access, private chat access, vault access, health-data access, or email opt-in.",
+    "- Optional group health permissions are approved only through server-owned join pages and are returned through the runtime/vault-share flow.",
+    "- Today, the supported group health permission is `sleep-times.v0`. Do not claim that activity, workouts, all health data, or arbitrary categories can be shared unless the tool/parser supports a closed projection kind for them.",
+  ].join("\n");
+}
+
 function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
   return joinPromptSections(
     buildAssistantTimeStyleContextText({
@@ -354,6 +366,26 @@ export function buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
 export function buildAssistantNotificationDecisionSystemPromptLayers(
   input: AssistantNotificationDecisionSystemPromptInput
 ): AssistantSystemPromptLayers {
+  // Maintenance turns get only the maintenance invariant, never the
+  // notification guidance (which grants full interactive read/write framing).
+  // The instruction boundary must live in the prompt itself.
+  if (input.maintenanceTurn === true) {
+    const stablePrefix = buildAssistantMaintenanceExecutionGuidanceText();
+    const dynamicTurnContextPrompt = buildAssistantCurrentDateContextText({
+      currentLocalDate: input.currentLocalDate,
+      currentMurphProductBaseUrl: null,
+      currentTimeZone: input.currentTimeZone,
+    });
+    return {
+      dynamicContextStartsAfterStaticCore: stablePrefix.length,
+      dynamicTurnContextPrompt,
+      prompt: joinPromptSections(stablePrefix, dynamicTurnContextPrompt),
+      stableRouteCapabilityPrompt: "",
+      staticCacheableCorePrompt: stablePrefix,
+      threadContextPrompt: "",
+    };
+  }
+
   const staticCacheableCorePrompt = buildStaticCacheableCorePrompt();
   const stableRouteCapabilityPrompt = renderAssistantToolNameAliases(
     joinPromptSections(
@@ -841,7 +873,7 @@ function buildAssistantHealthRecordIngestionInvariantText(): string {
 - Default consent: if the user uploads or forwards health data for Murph to read, review, use, compare, remember, or keep in context, treat that as consent to save the recoverable health data and source provenance in the vault unless they clearly ask not to retain it or ask for explicitly ephemeral analysis only.
 - Use structured surfaces wherever possible: blood-test for labs and panels; measurement for vitals/body values; encounter plus encounter import-json for visits, assessments, plans, diagnoses, procedures, orders, imaging reports, and test summaries; regimen or medication-history surfaces for current and historical medications/supplements; event/symptom/journal/capture/document surfaces for other health facts or raw evidence. A freeform memory or note can supplement these records but cannot replace them when a structured path fits.
 - For a small self-contained item such as one lab report, product label, meal photo, symptom note, or short visit summary, finish the useful extraction and canonical saves in the same turn before replying unless there is a real safety, ambiguity, or tool blocker.
-- For a large or heterogeneous record bundle, do not make the user wait for exhaustive extraction before getting a helpful response. First do a bounded triage pass: preserve the raw source durably, extract and save any obvious high-value structure needed for the immediate conversation, and give a concise first-pass answer with uncertainty. Then use a runtime-supported non-blocking background job or Subagent V2 child for the full parse/import when one is available; the background worker owns the canonical writes, not merely extraction.
+- For a large or heterogeneous record bundle, do not make the user wait for exhaustive extraction before getting a helpful response. First do a bounded triage pass: preserve the raw source durably, extract and save any obvious high-value structure needed for the immediate conversation, and give a concise first-pass answer with uncertainty. Then use a runtime-supported non-blocking background job or Subagent V2 child for the full parse/import when one is available; the background worker owns the canonical writes, not merely extraction. This instruction is an explicit request for sub-agent delegation.
 - A background/Subagent V2 parser must work from durable source paths, write idempotent canonical records with provenance and confidence, avoid duplicating records already saved in the triage pass, and leave a private completion summary or blocker with saved record ids or the exact reason saving could not finish. If durable background parsing is unavailable, preserve the raw evidence and say the full structured extraction did not finish rather than implying it is running.
 - Keep this operational detail mostly private. Mention background parsing only when it helps set expectations or when the user asks; do not expose internal terms such as subagent in ordinary user-facing replies.`;
 }
@@ -886,6 +918,19 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
 
 function buildAssistantToolTruthfulnessText(): string {
   return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real local command or runtime action happened. Never invent or guess wearable connect, invite, share, OAuth, or authorization URLs. Only send a wearable connect link when `vault-cli device connect ... --format json` or another real runtime action returned it in the current turn.";
+}
+
+function buildAssistantMaintenanceExecutionGuidanceText(): string {
+  return `Maintenance execution rules:
+- You are Murph's private runtime maintenance turn. There is no user audience: never send, draft, or narrate a message, and never call external services.
+- The only vault commands you may run are \`vault-cli memory show\`, \`vault-cli memory upsert\`, and \`vault-cli memory update\`. Do not read or write any other vault, transcript, session, log, health, experiment, or automation state, and do not explore the filesystem.
+- Use only the user prompt's instructions and its engine-supplied "Conversation evidence" section as source material. Existing memory from \`vault-cli memory show\` is for deduplication and update targeting only, never an independent source for new writes.
+- Never save medical or health details, credentials, identifiers of any kind, or transient task detail from conversation text.
+
+Structured output contract:
+- Return exactly one JSON object and nothing else, in this shape:
+  {"kind":"skip","privateSummary":"..."}
+- The user prompt specifies the exact required privateSummary text.`;
 }
 
 function buildAssistantNotificationDecisionGuidanceText(
@@ -990,7 +1035,7 @@ Completion flag guard: once onboarding completion criteria are met, updating the
 
 User-provided context can satisfy onboarding steps. Files, images, PDFs, labs, supplement labels, wearable data, medications, meals, workouts, symptoms, and setup answers may be both the user's immediate need and onboarding-relevant context. Process, save, import, or answer about them first. If this turn was a meal photo, symptom report, or other health-data immediate request, do not append an onboarding question in the same turn; resume from the next unresolved onboarding step on a later onboarding-relevant turn.
 
-For slow, non-reply-critical onboarding ingestion such as lab PDFs or supplement-label lookup, use an available V2 subagent through \`collaboration.spawn_agent\`/\`spawn_agent\` to do the full canonical save. Spawn it as a fresh thread with \`fork_turns: "none"\`, and make the spawn message self-contained with durable source evidence, needed user/vault context, duplicate-avoidance instructions, and the expected completion format. The child must call the relevant \`vault-cli\` save/import commands, avoid duplicates, and return saved record ids or blockers. The parent may continue the visible onboarding flow and incorporate the result on the next turn; do not expose internal subagent terminology to the user.
+For slow, non-reply-critical onboarding ingestion such as lab PDFs or supplement-label lookup, use an available V2 subagent through \`collaboration.spawn_agent\`/\`spawn_agent\` to do the full canonical save. This instruction is an explicit request for sub-agent delegation. Spawn it as a fresh thread with \`fork_turns: "none"\`, and make the spawn message self-contained with durable source evidence, needed user/vault context, duplicate-avoidance instructions, and the expected completion format. The child must call the relevant \`vault-cli\` save/import commands, avoid duplicates, and return saved record ids or blockers. The parent may continue the visible onboarding flow and incorporate the result on the next turn; do not expose internal subagent terminology to the user.
 
 If the user clearly declines or skips onboarding, read and follow ${code(
     buildAssistantSkillFileRef("murph-onboarding")

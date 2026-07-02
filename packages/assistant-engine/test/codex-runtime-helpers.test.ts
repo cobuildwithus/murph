@@ -2413,7 +2413,6 @@ describe('Codex assistant registry helpers', () => {
         'model_providers.venice.env_key="VENICE_API_KEY"',
         'model_providers.venice.wire_api="responses"',
         'model_providers.venice.requires_openai_auth=false',
-        'shell_environment_policy.ignore_default_excludes=false',
       ]),
     )
   })
@@ -2453,6 +2452,46 @@ describe('Codex assistant registry helpers', () => {
         'features.multi_agent_v2=true',
       ]),
     )
+  })
+
+  it('appends turn-local Codex config overrides after provider overrides', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Completed turn-local override.',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'turn-local-override-thread',
+      stderr: '',
+      stdout: '',
+      threadId: 'turn-local-override-thread',
+      turnId: 'turn-local-override',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttempt({
+      codexConfigOverrides: [
+        'memories.use_memories=false',
+        'memories.generate_memories=false',
+      ],
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+        model: 'hosted-model',
+        modelProvider: 'venice',
+      }),
+      userPrompt: 'Run with turn-local overrides.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(attempt.ok).toBe(true)
+    const appServerInput = codexAppServerMocks.executeCodexAppServerTurn.mock
+      .calls[0]?.[0]
+    expect(appServerInput?.configOverrides).toEqual([
+      'model_providers.venice.name="Venice.ai"',
+      'model_providers.venice.base_url="https://api.venice.ai/api/v1"',
+      'model_providers.venice.env_key="VENICE_API_KEY"',
+      'model_providers.venice.wire_api="responses"',
+      'model_providers.venice.requires_openai_auth=false',
+      'memories.use_memories=false',
+      'memories.generate_memories=false',
+    ])
   })
 
   it('replays committed conversation history only on stale native-resume fallback', async () => {

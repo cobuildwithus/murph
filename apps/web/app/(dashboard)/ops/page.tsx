@@ -18,24 +18,9 @@ export const metadata: Metadata = {
 
 const OPS_TOOLS = [
   {
-    description: "Dry-run and apply the hosted 10-day Pulse Trial reset for eligible active trials.",
-    href: "/ops/pulse-trial-reset",
-    label: "Pulse Trial reset",
-  },
-  {
     description: "Wake checkpointed hosted workspaces and run runtime support diagnostics.",
     href: "/ops/runtime-maintenance",
     label: "Runtime maintenance",
-  },
-  {
-    description: "Send hosted onboarding invites through approved internal channels.",
-    href: "/ops/onboarding-invites",
-    label: "Onboarding invites",
-  },
-  {
-    description: "Activate a hosted onboarding invite when the normal handoff needs operator help.",
-    href: "/ops/onboarding-activation",
-    label: "Onboarding activation",
   },
   {
     description: "Inspect hosted runtime latency measurements.",
@@ -59,7 +44,7 @@ export default async function HostedOpsPage() {
             Ops
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Internal controls for hosted support, billing, onboarding, and runtime maintenance.
+            Internal controls for hosted runtime maintenance and latency.
           </p>
         </div>
       </header>

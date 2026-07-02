@@ -301,9 +301,6 @@ Hosted onboarding extras:
 - `PRIVY_VERIFICATION_KEY`
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
 - `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`
-- `HOSTED_ONBOARDING_LINQ_ATTACHMENT_UPLOAD_ALLOWED_HOSTS` for hosted ops voice
-  memo attachments. Configure the exact Linq-owned upload host returned by the
-  attachment API; uploads fail closed when unset.
 - `HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS` for local `pnpm dev` or hosted-local runs only. Set this in local env when a development tunnel shares real Linq credentials so non-allowlisted inbound senders are accepted and ignored before mailbox append or assistant wake. Do not set it in production.
 - `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER`
 - `RETELL_API_KEY`, `RETELL_FROM_NUMBER`, `RETELL_AGENT_ID`,
@@ -699,18 +696,6 @@ Hosted onboarding surfaces:
 - `GET /api/hosted-onboarding/billing/success`
 - `POST /api/hosted-onboarding/linq/webhook`
 - `POST /api/hosted-onboarding/stripe/webhook`
-
-Hosted ops repair surfaces:
-
-- `/ops/onboarding-activation` and `POST /api/ops/onboarding-activation`
-  let allowlisted hosted ops members activate a verified hosted signup that
-  stopped before billing. The route accepts an existing invite code or join
-  URL, issues or reuses a fresh internal web invite for the same member, then
-  delegates to the no-card Pulse Trial enrollment path so billing state,
-  activation mailbox work, hosted crypto provisioning, runtime wake, and
-  welcome email behavior stay on the canonical signup path. It returns status
-  metadata only, not invite codes, invite URLs, phone numbers, or contact
-  targets.
 
 The onboarding lane is intentionally thin:
 

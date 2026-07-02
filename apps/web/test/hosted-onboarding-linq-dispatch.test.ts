@@ -146,7 +146,6 @@ const mocks = vi.hoisted(() => {
     })),
     sendHostedLinqChatMessage: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
-    startHostedLinqTypingIndicator: vi.fn(),
     signalHostedMailboxAppendRuntime: vi.fn(async () => ({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
@@ -300,7 +299,6 @@ vi.mock("../src/lib/hosted-onboarding/linq", async () => {
     ),
     sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
     sendHostedLinqReadReceipt: mocks.sendHostedLinqReadReceipt,
-    startHostedLinqTypingIndicator: mocks.startHostedLinqTypingIndicator,
   };
 });
 
@@ -584,10 +582,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       messageId: "provider_msg_123",
     });
     mocks.sendHostedLinqReadReceipt.mockResolvedValue({
-      ok: true,
-      status: 204,
-    });
-    mocks.startHostedLinqTypingIndicator.mockResolvedValue({
       ok: true,
       status: 204,
     });
@@ -1006,7 +1000,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("ignores Linq group chats before active-member or signup side effects", async () => {
+  it("ignores unbound Linq group chats from non-members before signup side effects", async () => {
     const prisma = asPrismaTransactionClient({
       hostedInvite: {
         create: vi.fn(),
@@ -1019,6 +1013,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMemberIdentity: {
         findFirst: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([]),
         findUnique: vi.fn(),
       },
       hostedMemberRouting: {
@@ -1066,8 +1061,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "group-chat",
     });
-    expect(prisma.hostedMemberIdentity.findFirst).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberIdentity.findUnique).not.toHaveBeenCalled();
+    // The sender identity read is expected (it gates auto-provisioning), but a
+    // non-member group message must produce no onboarding or runtime side effects.
+    expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledTimes(1);
     expect(prisma.hostedMemberRouting.findFirst).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
@@ -1478,7 +1474,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
     expectHostedLinqPointerSignalAccepted("evt_required_nudge_failed");
     expectHostedLinqReadReceiptSent();
-    expect(mocks.startHostedLinqTypingIndicator).not.toHaveBeenCalled();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
         step: "hosted-onboarding.webhook.linq.wake-handoff",
@@ -1881,7 +1876,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       mailboxItemId: "mailbox_evt_ingress_read_receipt_skipped",
     });
     expect(mocks.nudgeHostedRunnerUserBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.startHostedLinqTypingIndicator).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({

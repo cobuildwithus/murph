@@ -458,6 +458,7 @@ async function executeAssistantCodexAttempt(input: {
           session: attemptPlan.session,
           sharedPlan: executionPlan.sharedPlan,
         }),
+        codexConfigOverrides: executionPlan.input.codexConfigOverrides ?? null,
         conversationHistoryMessages:
           attemptPlan.routePlan.conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,
@@ -577,9 +578,6 @@ async function executeAssistantCodexAttempt(input: {
         assistantContractFingerprint:
           attemptPlan.routePlan.assistantContractFingerprint,
         attemptCount: attemptPlan.attemptCount,
-        nonReplayableProviderWork:
-          attemptMetadata.executedToolCount > 0 ||
-          attemptMetadata.providerActionCount > 0,
         onboardingGuidanceInjected: attemptPlan.routePlan.onboardingGuidanceInjected,
         codexContinuation:
           result.codexContinuation ?? effectiveCodexContinuation,
@@ -623,15 +621,17 @@ async function executeAssistantCodexAttempt(input: {
       policy: attemptPlan.routePlan.diagnosticsPolicy,
       vault: executionPlan.input.vault,
     })
-    void appendAssistantTranscriptEntries(
-      executionPlan.input.vault,
-      session.sessionId,
-      buildAssistantProviderTranscriptAuditEntries({
-        error,
-        rawToolEvents: attemptMetadata.rawToolEvents,
-        routeLabel: attemptPlan.route.label,
-      }),
-    ).catch(() => undefined)
+    if (executionPlan.input.suppressProviderFailureTranscriptAudit !== true) {
+      void appendAssistantTranscriptEntries(
+        executionPlan.input.vault,
+        session.sessionId,
+        buildAssistantProviderTranscriptAuditEntries({
+          error,
+          rawToolEvents: attemptMetadata.rawToolEvents,
+          routeLabel: attemptPlan.route.label,
+        }),
+      ).catch(() => undefined)
+    }
 
     await recordCodexAttemptFailed({
       activityLabels: attemptMetadata.activityLabels,

@@ -1,11 +1,17 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { parseHostedVaultShareDeliverRequest } from "@murphai/hosted-execution/vault-share";
+import {
+  HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  parseHostedVaultShareDeliverRequest,
+} from "@murphai/hosted-execution/vault-share";
 import { describe, expect, it, vi } from "vitest";
 
-import { importHostedVaultShareDeliveryWake } from "../src/hosted-runtime/vault-share-import.ts";
+import {
+  applyHostedVaultShareRevokeWake,
+  importHostedVaultShareDeliveryWake,
+} from "../src/hosted-runtime/vault-share-import.ts";
 import {
   HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
   offerHostedVaultShareProjectionBestEffort,
@@ -144,6 +150,8 @@ describe("importHostedVaultShareDeliveryWake", () => {
     occurredAt: "2026-06-10T07:00:00.000Z",
     userId: "member_referee",
   };
+  const storePath = (vaultRoot: string) =>
+    join(vaultRoot, "derived", "vault-share", "projections.json");
 
   it("lands the shared record as durable vault content, idempotently", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
@@ -154,27 +162,319 @@ describe("importHostedVaultShareDeliveryWake", () => {
     expect(first).toEqual({ status: "imported" });
     expect(second).toEqual({ status: "imported" });
 
-    // The recordKey-based path is byte-identical to the previous night-date-based one.
     const stored = JSON.parse(
       await readFile(
-        join(vaultRoot, "raw", "shared", "sleep-times.v0", "member_grantor", "2026-06-09.json"),
+        storePath(vaultRoot),
         "utf8",
       ),
     );
-    expect(stored.record).toEqual(RECORD);
-    expect(stored.shareId).toBe("share_1");
-    expect(stored.receivedEventId).toBe(wake.eventId);
+    const grantor = stored.projections["sleep-times.v0"].grantors.member_grantor;
+    expect(grantor.records).toHaveLength(1);
+    expect(grantor.records[0].record).toEqual(RECORD);
+    expect(grantor.records[0].shareId).toBe("share_1");
+    expect(grantor.records[0].receivedEventId).toBe(wake.eventId);
+    await expect(readFile(
+      join(vaultRoot, "raw", "shared", "vault-share-projections.json"),
+      "utf8",
+    )).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("quarantines as a non-retryable block when the vault path is unwritable", async () => {
+  it("replaces a shared record when a corrected delivery revision arrives", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
+    const correctedRecord = {
+      ...RECORD,
+      data: {
+        ...RECORD.data,
+        sleepEndAt: "2026-06-10T06:59:00.000Z",
+      },
+    };
+
+    await expect(importHostedVaultShareDeliveryWake({ vaultRoot, wake }))
+      .resolves.toEqual({ status: "imported" });
+    await expect(importHostedVaultShareDeliveryWake({
+      vaultRoot,
+      wake: {
+        ...wake,
+        delivery: {
+          ...wake.delivery,
+          record: correctedRecord,
+        },
+        eventId: "vault-share:share_1:2026-06-09:revision_2",
+      },
+    })).resolves.toEqual({ status: "imported" });
+
+    const stored = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
+    const grantor = stored.projections["sleep-times.v0"].grantors.member_grantor;
+    expect(grantor.records).toHaveLength(1);
+    expect(grantor.records[0].record).toEqual(correctedRecord);
+    expect(grantor.records[0].receivedEventId)
+      .toBe("vault-share:share_1:2026-06-09:revision_2");
+  });
+
+  it("keeps one compact file with only the latest bounded records", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
+
+    for (let day = 1; day <= HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS + 1; day += 1) {
+      const date = `2026-06-${String(day).padStart(2, "0")}`;
+      const nextDate = `2026-06-${String(day + 1).padStart(2, "0")}`;
+      const record = {
+        data: {
+          date,
+          sleepEndAt: `${nextDate}T06:31:00.000Z`,
+          sleepStartAt: `${date}T22:04:00.000Z`,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+      };
+
+      await expect(importHostedVaultShareDeliveryWake({
+        vaultRoot,
+        wake: {
+          ...wake,
+          delivery: { ...wake.delivery, record },
+          eventId: `vault-share:share_1:${date}`,
+          occurredAt: record.occurredAt,
+        },
+      })).resolves.toEqual({ status: "imported" });
+    }
+
+    const stored = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
+    const records = stored.projections["sleep-times.v0"].grantors.member_grantor.records;
+    expect(records).toHaveLength(HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS);
+    expect(records.map((entry: { record: { recordKey: string } }) => entry.record.recordKey))
+      .not.toContain("2026-06-01");
+    await expect(readFile(
+      join(vaultRoot, "raw", "shared", "sleep-times.v0", "member_grantor", "2026-06-09.json"),
+      "utf8",
+    )).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("applies revoke wakes by removing the grantor projection entry", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
+    await importHostedVaultShareDeliveryWake({ vaultRoot, wake });
+
+    await expect(applyHostedVaultShareRevokeWake({
+      vaultRoot,
+      wake: {
+        eventId: "vault-share-revoke:share_1:2026-07-01T00:00:00.000Z",
+        kind: "vault-share.revoke",
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        revoke: {
+          grantorMemberId: "member_grantor",
+          projectionKind: "sleep-times.v0",
+          revokedAt: "2026-07-01T00:00:00.000Z",
+          schema: "murph.vault-share.revoke.v1",
+          shareId: "share_1",
+        },
+        userId: "member_referee",
+      },
+    })).resolves.toEqual({ status: "imported" });
+
+    await expect(readFile(storePath(vaultRoot), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("preserves legacy raw shared records when a share is revoked", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
+    const legacyDirectory = join(vaultRoot, "raw", "shared", "sleep-times.v0", "member_grantor");
+    const revokedLegacyPath = join(legacyDirectory, "2026-06-09.json");
+    const activeLegacyPath = join(legacyDirectory, "2026-06-10.json");
+    await mkdir(legacyDirectory, { recursive: true });
+    await writeFile(
+      revokedLegacyPath,
+      JSON.stringify({
+        grantorMemberId: "member_grantor",
+        projectionKind: "sleep-times.v0",
+        receivedEventId: "vault-share:share_1:2026-06-09",
+        record: RECORD,
+        schema: "murph.vault-share.delivery.v1",
+        shareId: "share_1",
+      }),
+    );
+    await writeFile(
+      activeLegacyPath,
+      JSON.stringify({
+        grantorMemberId: "member_grantor",
+        projectionKind: "sleep-times.v0",
+        receivedEventId: "vault-share:share_2:2026-06-10",
+        record: {
+          ...RECORD,
+          recordKey: "2026-06-10",
+        },
+        schema: "murph.vault-share.delivery.v1",
+        shareId: "share_2",
+      }),
+    );
+
+    await expect(applyHostedVaultShareRevokeWake({
+      vaultRoot,
+      wake: {
+        eventId: "vault-share-revoke:share_1:2026-07-01T00:00:00.000Z",
+        kind: "vault-share.revoke",
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        revoke: {
+          grantorMemberId: "member_grantor",
+          projectionKind: "sleep-times.v0",
+          revokedAt: "2026-07-01T00:00:00.000Z",
+          schema: "murph.vault-share.revoke.v1",
+          shareId: "share_1",
+        },
+        userId: "member_referee",
+      },
+    })).resolves.toEqual({ status: "imported" });
+
+    await expect(readFile(revokedLegacyPath, "utf8")).resolves.toContain("share_1");
+    await expect(readFile(activeLegacyPath, "utf8")).resolves.toContain("share_2");
+    await expect(readFile(storePath(vaultRoot), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("does not let a stale revoke remove a newer grant epoch", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
+    await importHostedVaultShareDeliveryWake({
+      vaultRoot,
+      wake: {
+        ...wake,
+        delivery: { ...wake.delivery, shareId: "share_2" },
+        eventId: "vault-share:share_2:2026-06-09",
+      },
+    });
+
+    await expect(applyHostedVaultShareRevokeWake({
+      vaultRoot,
+      wake: {
+        eventId: "vault-share-revoke:share_1:2026-07-01T00:00:00.000Z",
+        kind: "vault-share.revoke",
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        revoke: {
+          grantorMemberId: "member_grantor",
+          projectionKind: "sleep-times.v0",
+          revokedAt: "2026-07-01T00:00:00.000Z",
+          schema: "murph.vault-share.revoke.v1",
+          shareId: "share_1",
+        },
+        userId: "member_referee",
+      },
+    })).resolves.toEqual({ status: "imported" });
+
+    const stored = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
+    const grantor = stored.projections["sleep-times.v0"].grantors.member_grantor;
+    expect(grantor.shareId).toBe("share_2");
+    expect(grantor.records).toHaveLength(1);
+  });
+
+  it("starts a fresh record list when a delivery arrives for a new grant epoch", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
+    await importHostedVaultShareDeliveryWake({ vaultRoot, wake });
+
+    const nextRecord = {
+      data: {
+        date: "2026-06-10",
+        sleepEndAt: "2026-06-11T06:31:00.000Z",
+        sleepStartAt: "2026-06-10T22:04:00.000Z",
+      },
+      occurredAt: "2026-06-10T00:00:00.000Z",
+      recordKey: "2026-06-10",
+    };
+    await expect(importHostedVaultShareDeliveryWake({
+      vaultRoot,
+      wake: {
+        ...wake,
+        delivery: {
+          ...wake.delivery,
+          record: nextRecord,
+          shareId: "share_2",
+        },
+        eventId: "vault-share:share_2:2026-06-10",
+        occurredAt: "2026-06-10T00:00:00.000Z",
+      },
+    })).resolves.toEqual({ status: "imported" });
+
+    const stored = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
+    const grantor = stored.projections["sleep-times.v0"].grantors.member_grantor;
+    expect(grantor.shareId).toBe("share_2");
+    expect(grantor.records.map((entry: { record: { recordKey: string } }) =>
+      entry.record.recordKey,
+    )).toEqual(["2026-06-10"]);
+  });
+
+  it("repairs a corrupt derived projection file before importing a delivery", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
+    await mkdir(join(vaultRoot, "derived", "vault-share"), { recursive: true });
+    await writeFile(storePath(vaultRoot), "{not-json");
+
+    await expect(importHostedVaultShareDeliveryWake({ vaultRoot, wake }))
+      .resolves.toEqual({ status: "imported" });
+
+    const stored = JSON.parse(await readFile(storePath(vaultRoot), "utf8"));
+    const grantor = stored.projections["sleep-times.v0"].grantors.member_grantor;
+    expect(grantor.records).toHaveLength(1);
+    expect(grantor.records[0].record).toEqual(RECORD);
+  });
+
+  it("repairs a corrupt derived projection file before consuming a revoke", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-import-"));
+    await mkdir(join(vaultRoot, "derived", "vault-share"), { recursive: true });
+    await writeFile(
+      storePath(vaultRoot),
+      JSON.stringify({ schema: "murph.shared-vault-projections.v0" }),
+    );
+
+    await expect(applyHostedVaultShareRevokeWake({
+      vaultRoot,
+      wake: {
+        eventId: "vault-share-revoke:share_1:2026-07-01T00:00:00.000Z",
+        kind: "vault-share.revoke",
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        revoke: {
+          grantorMemberId: "member_grantor",
+          projectionKind: "sleep-times.v0",
+          revokedAt: "2026-07-01T00:00:00.000Z",
+          schema: "murph.vault-share.revoke.v1",
+          shareId: "share_1",
+        },
+        userId: "member_referee",
+      },
+    })).resolves.toEqual({ status: "imported" });
+
+    await expect(readFile(storePath(vaultRoot), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("keeps delivery import read failures retryable so shared data is not consumed", async () => {
     const result = await importHostedVaultShareDeliveryWake({
       vaultRoot: "/dev/null/not-a-dir",
       wake,
     });
 
     expect(result).toEqual({
-      reasonCode: "vault_share.write_failed",
-      retryable: false,
+      reasonCode: "vault_share.read_failed",
+      retryable: true,
+      status: "blocked",
+    });
+  });
+
+  it("keeps revoke import read failures retryable so stale shared data is not consumed", async () => {
+    const result = await applyHostedVaultShareRevokeWake({
+      vaultRoot: "/dev/null/not-a-dir",
+      wake: {
+        eventId: "vault-share-revoke:share_1:2026-07-01T00:00:00.000Z",
+        kind: "vault-share.revoke",
+        occurredAt: "2026-07-01T00:00:00.000Z",
+        revoke: {
+          grantorMemberId: "member_grantor",
+          projectionKind: "sleep-times.v0",
+          revokedAt: "2026-07-01T00:00:00.000Z",
+          schema: "murph.vault-share.revoke.v1",
+          shareId: "share_1",
+        },
+        userId: "member_referee",
+      },
+    });
+
+    expect(result).toEqual({
+      reasonCode: "vault_share.read_failed",
+      retryable: true,
       status: "blocked",
     });
   });

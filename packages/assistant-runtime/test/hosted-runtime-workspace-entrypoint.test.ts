@@ -95,8 +95,21 @@ const mocks = vi.hoisted(() => ({
   createHostedWorkspaceSnapshotCheckpointRequestBuilder: vi.fn(),
   ensureHostedInboxSidecarReady: vi.fn(),
   refreshHostedBrowserVaultReplicaFromRuntime: vi.fn(),
+  summarizeWearableSleepRuntime: vi.fn(),
   snapshotHostedPortableWorkspaceDelta: vi.fn(),
 }));
+
+vi.mock("@murphai/query", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@murphai/query")>();
+
+  return {
+    ...actual,
+    summarizeWearableSleepRuntime:
+      mocks.summarizeWearableSleepRuntime.mockImplementation(
+        actual.summarizeWearableSleepRuntime,
+      ),
+  };
+});
 
 vi.mock("@murphai/runtime-state/node", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@murphai/runtime-state/node")>();
@@ -185,6 +198,10 @@ import type {
 import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "../src/hosted-runtime/pending-assistant-input.ts";
+import {
+  readHostedProviderCleanupCheckpoint,
+  recordHostedProviderCleanupBeforeCommit,
+} from "../src/hosted-runtime/provider-cleanup.ts";
 import {
   enqueueHostedSystemMailboxItem,
 } from "../src/hosted-runtime/system-mailbox.ts";
@@ -3979,10 +3996,11 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("post-checkpoint projected wakes wait for the idle checkpoint", async () => {
+  test("post-checkpoint projected wakes replace consumed phase wakes and wait for the idle checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-post-checkpoint-wake-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const phaseWakeAt = new Date(Date.now() + 30_000).toISOString();
     const postCheckpointWakeAt = new Date(Date.now() + 60_000).toISOString();
     let assistantPhaseCalls = 0;
 
@@ -4038,8 +4056,11 @@ describe("hosted workspace runtime entrypoint", () => {
                 nextWakeReason: "assistant",
               }),
               checkpointReason: "outbox_sending",
+              nextWakeAt: phaseWakeAt,
+              nextWakeReason: "assistant",
               progressed: true,
               redactedStatus: {
+                hostedAssistantNextWakeAt: phaseWakeAt,
                 hostedOutboxPendingDeliveryEffects: 1,
               },
             };
@@ -4054,6 +4075,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "idle_shutdown",
       ]);
+      assert.notEqual(result.nextWakeAt, phaseWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeAt, postCheckpointWakeAt);
       assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
     } finally {
@@ -7394,6 +7416,267 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("late foreground input during vault-share delivery runs before the delivery completes", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-vault-share-preempt-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const mailboxItems = [
+      createMailboxItem({
+        id: "mailbox_item_entrypoint_vault_share_preempt_initial",
+        laneSeq: "1",
+      }),
+    ];
+    const importedInputIds: string[] = [];
+    let assistantPhaseCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.summarizeWearableSleepRuntime.mockResolvedValueOnce([{
+        date: "2026-04-26",
+        sleepEndAt: "2026-04-27T06:31:00.000Z",
+        sleepStartAt: "2026-04-26T22:04:00.000Z",
+      }]);
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_vault_share_preempt",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-vault-share-preempt.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.lane !== "conversation") {
+              return { status: "imported" };
+            }
+
+            const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            importedInputIds.push(inputId);
+            return {
+              assistantInputId: inputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: mailboxItems,
+            }),
+            vaultSharePort: {
+              async deliver() {
+                events.push("vault-share.deliver:start");
+                mailboxItems.push(createMailboxItem({
+                  id: "mailbox_item_entrypoint_vault_share_preempt_late",
+                  laneSeq: "2",
+                  occurredAt: "2026-04-27T00:00:01.000Z",
+                }));
+                runtimeWakeSignal.notify();
+                await waitUntil(() => {
+                  assert.equal(assistantPhaseCalls, 2);
+                });
+                events.push("vault-share.deliver:done");
+                return { status: "delivered" };
+              },
+            },
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            const inputId = importedInputIds.shift();
+            if (inputId) {
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId,
+                vaultRoot,
+              });
+            }
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              nextWakeAt: null,
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      await waitUntil(() => {
+        assert.equal(assistantPhaseCalls, 2);
+      });
+      const result = await resultPromise;
+
+      assert.ok(events.includes(
+        "mailbox.importItem:mailbox_item_entrypoint_vault_share_preempt_late",
+      ));
+      assert.ok(events.includes("vault-share.deliver:done"));
+      assert.ok(
+        requireEventIndex(events, "workspace.checkpoint")
+          < requireEventIndex(events, "vault-share.deliver:start"),
+        "dirty source workspace must checkpoint before vault-share delivery starts",
+      );
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:2")
+          < requireEventIndex(events, "vault-share.deliver:done"),
+        "fresh foreground input should run before the slow vault-share delivery completes",
+      );
+      assert.ok(
+        fetchRequests.some((request) =>
+          request.lanes.some((lane) => lane.lane === "conversation")
+        ),
+      );
+      assert.equal(checkpointRequests.length, 2);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(checkpointRequests[1]?.reason, "idle_shutdown");
+      assert.equal(result.status, "idle");
+    } finally {
+      runtimeAbortController.abort();
+      mocks.summarizeWearableSleepRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("failed dirty checkpoint prevents vault-share delivery from egressing uncheckpointed source state", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-vault-share-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeAbortController = new AbortController();
+    const checkpointFailure = new Error("synthetic checkpoint failed");
+    const importedInputIds: string[] = [];
+    let vaultShareDeliverCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.summarizeWearableSleepRuntime.mockResolvedValueOnce([{
+        date: "2026-04-26",
+        sleepEndAt: "2026-04-27T06:31:00.000Z",
+        sleepStartAt: "2026-04-26T22:04:00.000Z",
+      }]);
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await expect(runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_vault_share_checkpoint_failure",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/runtime-vault-share-checkpoint.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            const inputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              vaultRoot,
+            });
+            importedInputIds.push(inputId);
+            return {
+              assistantInputId: inputId,
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_vault_share_checkpoint_failure",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            vaultSharePort: {
+              async deliver() {
+                vaultShareDeliverCalls += 1;
+                events.push("vault-share.deliver:start");
+                return { status: "delivered" };
+              },
+            },
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              checkpointWorkspace() {
+                throw checkpointFailure;
+              },
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            const inputId = importedInputIds.shift();
+            assert.ok(inputId);
+            await writeSyntheticAssistantAutoReplyTerminalEvidence({
+              inputId,
+              vaultRoot,
+            });
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              nextWakeAt: null,
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          signal: runtimeAbortController.signal,
+          vaultRoot,
+        },
+      )).rejects.toBe(checkpointFailure);
+
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(vaultShareDeliverCalls, 0);
+      assert.ok(!events.includes("vault-share.deliver:start"));
+    } finally {
+      runtimeAbortController.abort();
+      mocks.summarizeWearableSleepRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("late foreground input after checkpoint-gated system pass clears stale gate", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-stale-gate-"));
     const events: string[] = [];
@@ -8288,6 +8571,188 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests.length, 1);
       assert.ok(elapsedMs >= 200);
       assert.ok(elapsedMs < 5_000);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("deferred provider cleanup wake does not bypass the foreground idle checkpoint delay", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const idleCheckpointDelayMs = 1_000;
+    const providerCleanupWakeAt = new Date(Date.now() + 5 * 60_000).toISOString();
+    let snapshotStartedAtMs: number | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const startedAt = performance.now();
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_provider_cleanup_idle_delay",
+            idleCheckpointDelayMs,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            snapshotStartedAtMs = performance.now();
+            events.push(`snapshot:${snapshotInput.reason}`);
+            assert.equal(snapshotInput.reason, "idle_shutdown");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "6".repeat(64),
+                key: "users/bundles/member-synthetic/provider-cleanup-idle-delay.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            return {
+              checkpointReason: "outbox_receipt",
+              nextWakeAt: providerCleanupWakeAt,
+              nextWakeReason: "assistant",
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantNextWakeAt: providerCleanupWakeAt,
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, providerCleanupWakeAt);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, providerCleanupWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.ok(snapshotStartedAtMs !== null);
+      assert.ok(snapshotStartedAtMs - startedAt >= idleCheckpointDelayMs - 50);
+      assert.ok(snapshotStartedAtMs - startedAt < 5_000);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("deferred provider cleanup append replaces an older wake inside the idle window", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-provider-cleanup-replace-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const idleCheckpointDelayMs = 250;
+    let replacementWakeAt: string | null = null;
+    let snapshotStartedAtMs: number | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await recordHostedProviderCleanupBeforeCommit({
+        checkpoint: {
+          nextWakeAt: new Date(Date.now() + 500).toISOString(),
+        },
+        linqMessageIds: ["linq_existing_cleanup"],
+        vaultRoot,
+      });
+
+      const startedAt = performance.now();
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_provider_cleanup_replace_idle_delay",
+            idleCheckpointDelayMs,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            snapshotStartedAtMs = performance.now();
+            events.push(`snapshot:${snapshotInput.reason}`);
+            assert.equal(snapshotInput.reason, "idle_shutdown");
+            return {
+              snapshotRef: createBundleRef({
+                hash: "7".repeat(64),
+                key: "users/bundles/member-synthetic/provider-cleanup-replace-idle-delay.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [createMailboxItem({ laneSeq: "1" })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            return {
+              afterCheckpoint: async () => {
+                replacementWakeAt = new Date(
+                  Date.now() + idleCheckpointDelayMs + 1_000,
+                ).toISOString();
+                const checkpoint = await recordHostedProviderCleanupBeforeCommit({
+                  checkpoint: {
+                    nextWakeAt: replacementWakeAt,
+                  },
+                  linqMessageIds: ["linq_new_cleanup"],
+                  vaultRoot,
+                });
+                return {
+                  checkpointReason: "provider_cleanup" as const,
+                  nextWakeAt: checkpoint.nextWakeAt ?? null,
+                  nextWakeReason: "assistant" as const,
+                };
+              },
+              checkpointReason: "outbox_receipt",
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.ok(replacementWakeAt);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, replacementWakeAt);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, replacementWakeAt);
+      assert.deepEqual(await readHostedProviderCleanupCheckpoint(vaultRoot), {
+        nextWakeAt: replacementWakeAt,
+      });
+      assert.ok(snapshotStartedAtMs !== null);
+      assert.ok(snapshotStartedAtMs - startedAt >= idleCheckpointDelayMs - 50);
+      assert.ok(snapshotStartedAtMs - startedAt < 5_000);
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -12845,6 +13310,7 @@ function createPlatform(input: {
   runtimeLivenessPort?: RuntimeLivenessPort | null;
   runtimeLivenessRequired?: boolean | null;
   stageSamples?: StageTimingSample[];
+  vaultSharePort?: HostedRuntimePlatform["vaultSharePort"] | null;
   workspacePort: HostedRuntimeWorkspacePort | null;
   workspaceSnapshotPort?: HostedRuntimePlatform["workspaceSnapshotPort"] | null;
 }): HostedRuntimePlatform {
@@ -12917,6 +13383,7 @@ function createPlatform(input: {
     ...(input.runtimeLivenessRequired !== undefined
       ? { runtimeLivenessRequired: input.runtimeLivenessRequired }
       : {}),
+    ...(input.vaultSharePort ? { vaultSharePort: input.vaultSharePort } : {}),
     ...(input.workspacePort ? { workspacePort: input.workspacePort } : {}),
     ...(input.workspaceSnapshotPort ? { workspaceSnapshotPort: input.workspaceSnapshotPort } : {}),
   };

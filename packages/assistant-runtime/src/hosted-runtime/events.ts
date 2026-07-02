@@ -244,6 +244,12 @@ async function executeHostedSystemWake(input: {
       throw new TypeError(
         'Hosted vault-share delivery wakes are landed at mailbox import and must never reach system wake execution.',
       );
+    case "vault-share.revoke":
+      // Vault-share revokes are applied deterministically at mailbox import
+      // (vault-share-import.ts) and never enter the system wake execution path.
+      throw new TypeError(
+        'Hosted vault-share revoke wakes are applied at mailbox import and must never reach system wake execution.',
+      );
   }
 
   const exhaustiveWake: never = input.wake;

@@ -115,6 +115,12 @@ export const ASSISTANT_SKILLS = [
     triggerHint:
       'Use for running, walking, cycling, aerobic-base or Zone 2 work, cardio conditioning, low-impact conditioning, cardio around strength or sport, limited-time maintenance, and non-event speed development. For a named event, date, competition category, qualifying target, concrete benchmark, or event-specific performance goal, use competition-training when registered; otherwise read running-cardio and keep support bounded to general capacity and preparation rather than event-specific tapering, peaking, race rules, or benchmark-specific progression. Use physical-therapy first for active pain, injury, rehabilitation, or return-to-run clearance. Use chronic-illness-support when illness determines capacity and behavior-followthrough when recurring support is central.',
   },
+  {
+    slug: 'group-chat',
+    name: 'group-chat',
+    triggerHint:
+      'Read before replying in any group chat, meaning any conversation with multiple human participants, such as when the murph.group tool is available or inbound messages carry sender handles. Governs when to reply, stay silent, react, or joke, and how to use shared challenge data.',
+  },
 ] as const
 
 export type AssistantSkillSlug = typeof ASSISTANT_SKILLS[number]['slug']

@@ -38,7 +38,6 @@ import {
   executeCodexManagedAccountOperation,
   readCodexAppServerTurnFailureContext,
   resolveCodexDisplayOptions,
-  snapshotExpectedCodexRootProcess,
   stopWarmCodexAppServer,
 } from '../src/assistant-codex.ts'
 import type {
@@ -197,7 +196,7 @@ async function runCodexResponseMediaToolTurn(
 
     expect(args).toEqual(['app-server'])
     expect(options).toMatchObject({
-      cwd: path.resolve(workingDirectory),
+      cwd: tmpdir(),
       env: {
         CODEX_HOME: codexHome,
         PATH: '/custom/bin',
@@ -313,7 +312,7 @@ async function runCodexTelegramVoiceMemoOnlyTurn() {
 
     expect(args).toEqual(['app-server'])
     expect(options).toMatchObject({
-      cwd: path.resolve(workingDirectory),
+      cwd: tmpdir(),
       env: {
         CODEX_HOME: codexHome,
         ELEVENLABS_API_KEY: 'elevenlabs-test-key',
@@ -967,7 +966,7 @@ describe('assistant codex runtime', () => {
       })
 
       expect(options).toMatchObject({
-        cwd: path.resolve(workingDirectory),
+        cwd: tmpdir(),
         env: {
           CODEX_HOME: codexHome,
           [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
@@ -2203,7 +2202,7 @@ describe('assistant codex runtime', () => {
 
       expect(args).toEqual(['app-server'])
       expect(options).toMatchObject({
-        cwd: path.resolve(workingDirectory),
+        cwd: tmpdir(),
         env: {
           CODEX_HOME: codexHome,
           PATH: '/custom/bin',
@@ -4075,10 +4074,27 @@ describe('assistant codex runtime', () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-abort-barrier-work-')
     const codexHome = await createTempDir('assistant-codex-compact-abort-barrier-home-')
     const barrierReady = createDeferred<Record<string, unknown>>()
+    const releaseProcessClose = createDeferred<void>()
     const threadId = 'thread-compact-abort-barrier'
     const turnId = 'turn-compact-abort-barrier'
     const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
+    vi.mocked(process.kill).mockImplementation((pid, signal) => {
+      const child = spawnedChildren.find(
+        (candidate) => pid === -candidate.pid || pid === candidate.pid,
+      )
+      if (
+        child &&
+        (signal === 'SIGTERM' || signal === 'SIGKILL') &&
+        child.exitCode === null &&
+        child.signalCode === null
+      ) {
+        void releaseProcessClose.promise.then(() => {
+          child.emit('exit', null, signal)
+          child.emit('close', null, signal)
+        })
+      }
+      return true
+    })
 
     codexMocks.spawn.mockImplementation(() => {
       const child = new MockChildProcess()
@@ -4165,174 +4181,27 @@ describe('assistant codex runtime', () => {
     abortController.abort()
     spawnedChildren[0]!.stdout.write(jsonLine({ id: barrier.id, result: {} }))
 
+    await expect(
+      Promise.race([
+        outcome.then(() => 'settled' as const),
+        new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 25)),
+      ]),
+    ).resolves.toBe('pending')
+    expect(process.kill).toHaveBeenCalledWith(-25_650, 'SIGTERM')
+    releaseProcessClose.resolve()
+
     await expect(outcome).resolves.toMatchObject({
       kind: 'failed',
       reason: 'aborted',
       threadContextTokensBefore: 125_000,
       threadId,
     })
-    await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(
       readWrittenRpcMessages(spawnedChildren[0]!).some(
         (message) => message.method === 'thread/compact/start',
       ),
     ).toBe(false)
-    expect(process.kill).toHaveBeenCalledWith(-25_650, 'SIGTERM')
-  })
-
-  it.each([
-    {
-      label: 'previous-turn completion before current turn/start response',
-      staleEvent: {
-        method: 'turn/completed',
-        params: {
-          turn: {
-            id: 'turn-provider-stale-usage-1',
-            status: 'completed',
-            usage: {
-              input_tokens: 100,
-              output_tokens: 50,
-              total_tokens: 150,
-            },
-          },
-          turnId: 'turn-provider-stale-usage-1',
-        },
-      },
-    },
-    {
-      label: 'untagged token usage before current turn/start response',
-      staleEvent: {
-        method: 'thread/tokenUsage/updated',
-        params: {
-          tokenUsage: {
-            last: {
-              input_tokens: 100,
-              output_tokens: 50,
-              total_tokens: 150,
-            },
-            total: {
-              input_tokens: 110,
-              output_tokens: 55,
-              total_tokens: 165,
-            },
-          },
-        },
-      },
-    },
-  ])('keeps stale warm-process usage out of failed provider turns: $label', async ({
-    staleEvent,
-  }) => {
-    const workingDirectory = await createTempDir('assistant-codex-provider-stale-usage-work-')
-    const codexHome = await createTempDir('assistant-codex-provider-stale-usage-home-')
-    const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 25_700 + spawnedChildren.length
-      spawnedChildren.push(child)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-provider-stale-usage-1',
-            turnId: 'turn-provider-stale-usage-1',
-          })
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-provider-stale-usage-1',
-                status: 'completed',
-                usage: {
-                  input_tokens: 10,
-                  output_tokens: 5,
-                  total_tokens: 15,
-                },
-              },
-            },
-          }))
-
-          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondThread.id,
-            result: {
-              thread: {
-                id: 'thread-provider-stale-usage-2',
-              },
-            },
-          }))
-          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
-          child.stdout.write(jsonLine(staleEvent))
-          if (staleEvent.method === 'turn/completed') {
-            child.stdout.write(jsonLine({
-              id: secondTurn.id,
-              result: {
-                turn: {
-                  id: 'turn-provider-stale-usage-2',
-                },
-              },
-            }))
-          }
-        })()
-      })
-
-      return child
-    })
-
-    const providerConfig = normalizeAssistantProviderConfig({
-      approvalPolicy: 'never',
-      codexHome,
-      provider: 'codex-cli',
-      sandbox: 'workspace-write',
-    })
-    const baseInput = {
-      developerInstructions: 'Stable Murph instructions.',
-      dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
-      env: {
-        PATH: '/custom/bin',
-      },
-      providerConfig,
-      systemPrompt: 'Stable Murph instructions.',
-      turnContextPrompt: 'Current runtime context.',
-      workingDirectory,
-    }
-
-    await expect(
-      executeCodexAssistantTurnAttempt({
-        ...baseInput,
-        userPrompt: 'First provider turn before stale usage',
-      }),
-    ).resolves.toMatchObject({
-      ok: true,
-    })
-
-    const failedAttempt = await executeCodexAssistantTurnAttempt({
-      ...baseInput,
-      userPrompt: 'Second provider turn with stale usage',
-    })
-
-    expect(failedAttempt).toMatchObject({
-      ok: false,
-    })
-    if (failedAttempt.ok) {
-      throw new Error('Expected stale usage provider attempt to fail.')
-    }
-    expect(failedAttempt.usage).toBeUndefined()
-    expect(failedAttempt.rawEvents).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          method: staleEvent.method,
-        }),
-      ]),
-    )
-    expect(process.kill).toHaveBeenCalledWith(-25_700, 'SIGTERM')
   })
 
   it('accepts reused warm events with alternate current-turn id shapes', async () => {
@@ -4443,7 +4312,7 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('buffers tagged reused warm events until the turn/start response confirms the turn', async () => {
+  it('trusts tagged turn/started when the turn/start response omits the turn id', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-prestart-tagged-work-')
     const codexHome = await createTempDir('assistant-codex-local-prestart-tagged-home-')
     const spawnedChildren: MockChildProcess[] = []
@@ -4495,11 +4364,7 @@ describe('assistant codex runtime', () => {
           }))
           child.stdout.write(jsonLine({
             id: secondTurn.id,
-            result: {
-              turn: {
-                id: 'turn-local-prestart-tagged-2',
-              },
-            },
+            result: {},
           }))
           child.stdout.write(jsonLine({
             method: 'assistant.message.delta',
@@ -4508,7 +4373,7 @@ describe('assistant codex runtime', () => {
                 id: 'assistant-local-prestart-tagged-2',
                 type: 'assistant_message',
               },
-              delta: 'Buffered event succeeded',
+              delta: 'Tagged event succeeded',
               turnId: 'turn-local-prestart-tagged-2',
             },
           }))
@@ -4550,16 +4415,16 @@ describe('assistant codex runtime', () => {
     await expect(
       executeCodexAppServerTurn({
         ...stableInput,
-        prompt: 'second local turn with tagged prestart event',
+        prompt: 'second local turn with tagged prestart turn/started',
       }),
     ).resolves.toMatchObject({
-      finalMessage: 'Buffered event succeeded',
+      finalMessage: 'Tagged event succeeded',
       sessionId: 'thread-local-prestart-tagged-2',
       turnId: 'turn-local-prestart-tagged-2',
     })
   })
 
-  it('buffers tagged pre-start warm server requests until the turn/start response confirms the turn', async () => {
+  it('accepts tagged warm server requests after turn/started establishes the current turn', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-prestart-request-work-')
     const codexHome = await createTempDir('assistant-codex-local-prestart-request-home-')
     const progressUpdates: string[] = []
@@ -4603,6 +4468,14 @@ describe('assistant codex runtime', () => {
           }))
           const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
           child.stdout.write(jsonLine({
+            method: 'turn/started',
+            params: {
+              turn: {
+                id: 'turn-local-prestart-request-2',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
             id: 99,
             method: 'item/tool/call',
             params: {
@@ -4614,12 +4487,6 @@ describe('assistant codex runtime', () => {
               turnId: 'turn-local-prestart-request-2',
             },
           }))
-
-          await new Promise((resolve) => setTimeout(resolve, 0))
-          expect(
-            readWrittenRpcMessages(child).some((message) => message.id === 99),
-          ).toBe(false)
-
           child.stdout.write(jsonLine({
             id: secondTurn.id,
             result: {
@@ -4628,6 +4495,7 @@ describe('assistant codex runtime', () => {
               },
             },
           }))
+
           const response = await waitForRpcResponse(child, 99)
           expect(response).toMatchObject({
             id: 99,
@@ -4691,7 +4559,7 @@ describe('assistant codex runtime', () => {
     await expect(
       executeCodexAppServerTurn({
         ...stableInput,
-        prompt: 'second local turn with prestart server request',
+        prompt: 'second local turn with started server request',
       }),
     ).resolves.toMatchObject({
       finalMessage: 'Pre-start request completed',
@@ -4701,7 +4569,430 @@ describe('assistant codex runtime', () => {
     expect(progressUpdates).toEqual(['Starting early work'])
   })
 
-  it('keeps live steering closed after a buffered pre-start computer pause request', async () => {
+  it('ignores stale same-thread messages tagged with an older turn id', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-local-stale-turn-id-work-')
+    const codexHome = await createTempDir('assistant-codex-local-stale-turn-id-home-')
+    const progressDelivery = createProgressDeliveryMock()
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 25_940 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-local-stale-turn-id',
+            turnId: 'turn-local-stale-turn-id-1',
+          })
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-local-stale-turn-id',
+              turn: {
+                id: 'turn-local-stale-turn-id-1',
+                status: 'completed',
+              },
+            },
+          }))
+
+          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondThread.id,
+            result: {
+              thread: {
+                id: 'thread-local-stale-turn-id',
+              },
+            },
+          }))
+          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            id: 98,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                text: 'This pre-start stale progress must not send',
+              },
+              namespace: 'murph',
+              threadId: 'thread-local-stale-turn-id',
+              tool: 'send_progress_update',
+              turnId: 'turn-local-stale-turn-id-1',
+            },
+          }))
+
+          await expect(waitForRpcResponse(child, 98)).resolves.toMatchObject({
+            error: {
+              code: -32000,
+              message: 'Codex parent-thread request arrived before the active turn id was known.',
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: {
+                id: 'turn-local-stale-turn-id-2',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-local-stale-turn-id',
+              turn: {
+                id: 'turn-local-stale-turn-id-1',
+                status: 'completed',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 99,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                text: 'This stale progress must not send',
+              },
+              namespace: 'murph',
+              threadId: 'thread-local-stale-turn-id',
+              tool: 'send_progress_update',
+              turnId: 'turn-local-stale-turn-id-1',
+            },
+          }))
+
+          await expect(waitForRpcResponse(child, 99)).resolves.toMatchObject({
+            error: {
+              code: -32000,
+              message: 'Codex message turn id does not match the active turn.',
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            method: 'assistant.message.delta',
+            params: {
+              item: {
+                id: 'assistant-local-stale-turn-id-2',
+                type: 'assistant_message',
+              },
+              delta: 'Current turn survived stale output',
+              threadId: 'thread-local-stale-turn-id',
+              turnId: 'turn-local-stale-turn-id-2',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-local-stale-turn-id',
+              turn: {
+                id: 'turn-local-stale-turn-id-2',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const stableInput = {
+      approvalPolicy: 'never',
+      codexHome,
+      env: {
+        PATH: '/custom/bin',
+      },
+      progressDelivery,
+      sandbox: 'workspace-write' as const,
+      workingDirectory,
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        prompt: 'first local turn before stale same-thread output',
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-local-stale-turn-id',
+      turnId: 'turn-local-stale-turn-id-1',
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        prompt: 'second local turn should ignore stale same-thread output after start',
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Current turn survived stale output',
+      sessionId: 'thread-local-stale-turn-id',
+      turnId: 'turn-local-stale-turn-id-2',
+    })
+    expect(progressDelivery.send).not.toHaveBeenCalled()
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects untagged parent-thread server requests on reused warm processes', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-local-untagged-request-work-')
+    const codexHome = await createTempDir('assistant-codex-local-untagged-request-home-')
+    const progressDelivery = createProgressDeliveryMock()
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 25_955 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-local-untagged-request',
+            turnId: 'turn-local-untagged-request-1',
+          })
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-local-untagged-request',
+              turn: {
+                id: 'turn-local-untagged-request-1',
+                status: 'completed',
+              },
+            },
+          }))
+
+          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondThread.id,
+            result: {
+              thread: {
+                id: 'thread-local-untagged-request',
+              },
+            },
+          }))
+          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            id: 99,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                text: 'This unscoped progress must not send',
+              },
+              namespace: 'murph',
+              tool: 'send_progress_update',
+            },
+          }))
+
+          await expect(waitForRpcResponse(child, 99)).resolves.toMatchObject({
+            error: {
+              code: -32000,
+              message: 'Codex parent-thread request did not include the active turn id.',
+            },
+          })
+          child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: {
+                id: 'turn-local-untagged-request-2',
+              },
+            },
+          }))
+
+          child.stdout.write(jsonLine({
+            method: 'assistant.message.delta',
+            params: {
+              item: {
+                id: 'assistant-local-untagged-request-2',
+                type: 'assistant_message',
+              },
+              delta: 'Current turn rejected untagged request',
+              threadId: 'thread-local-untagged-request',
+              turnId: 'turn-local-untagged-request-2',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-local-untagged-request',
+              turn: {
+                id: 'turn-local-untagged-request-2',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const stableInput = {
+      approvalPolicy: 'never',
+      codexHome,
+      env: {
+        PATH: '/custom/bin',
+      },
+      progressDelivery,
+      sandbox: 'workspace-write' as const,
+      workingDirectory,
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        prompt: 'first local turn before untagged server request',
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-local-untagged-request',
+      turnId: 'turn-local-untagged-request-1',
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        prompt: 'second local turn should reject untagged server request',
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Current turn rejected untagged request',
+      sessionId: 'thread-local-untagged-request',
+      turnId: 'turn-local-untagged-request-2',
+    })
+    expect(progressDelivery.send).not.toHaveBeenCalled()
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops untagged parent-thread assistant output on reused warm processes', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-local-untagged-output-work-')
+    const codexHome = await createTempDir('assistant-codex-local-untagged-output-home-')
+    const spawnedChildren: MockChildProcess[] = []
+    mockProcessGroupSignalsForChildren(spawnedChildren)
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+      child.pid = 25_970 + spawnedChildren.length
+      spawnedChildren.push(child)
+
+      queueMicrotask(() => {
+        void (async () => {
+          const initialize = await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 1,
+            threadId: 'thread-local-untagged-output',
+            turnId: 'turn-local-untagged-output-1',
+          })
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-local-untagged-output',
+              turn: {
+                id: 'turn-local-untagged-output-1',
+                status: 'completed',
+              },
+            },
+          }))
+
+          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
+          child.stdout.write(jsonLine({
+            id: secondThread.id,
+            result: {
+              thread: {
+                id: 'thread-local-untagged-output',
+              },
+            },
+          }))
+          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            method: 'assistant.message.delta',
+            params: {
+              delta: 'This unscoped output must not be accepted',
+              item: {
+                id: 'assistant-local-untagged-output-2',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: {
+                id: 'turn-local-untagged-output-2',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'assistant.message.delta',
+            params: {
+              delta: 'Current turn ignored untagged output',
+              item: {
+                id: 'assistant-local-untagged-output-current',
+                type: 'assistant_message',
+              },
+              threadId: 'thread-local-untagged-output',
+              turnId: 'turn-local-untagged-output-2',
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              threadId: 'thread-local-untagged-output',
+              turn: {
+                id: 'turn-local-untagged-output-2',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const stableInput = {
+      approvalPolicy: 'never',
+      codexHome,
+      env: {
+        PATH: '/custom/bin',
+      },
+      sandbox: 'workspace-write' as const,
+      workingDirectory,
+    }
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        prompt: 'first local turn before untagged assistant output',
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'thread-local-untagged-output',
+      turnId: 'turn-local-untagged-output-1',
+    })
+
+    await expect(
+      executeCodexAppServerTurn({
+        ...stableInput,
+        prompt: 'second local turn should ignore untagged assistant output',
+      }),
+    ).resolves.toMatchObject({
+      finalMessage: 'Current turn ignored untagged output',
+      sessionId: 'thread-local-untagged-output',
+      turnId: 'turn-local-untagged-output-2',
+    })
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps live steering closed after a pre-lifecycle computer pause request', async () => {
     const workingDirectory = await createTempDir('assistant-codex-prestart-pause-live-turn-work-')
     const codexHome = await createTempDir('assistant-codex-prestart-pause-live-turn-home-')
     const spawnedChildren: MockChildProcess[] = []
@@ -4770,6 +5061,14 @@ describe('assistant codex runtime', () => {
           }))
           const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
           child.stdout.write(jsonLine({
+            id: secondTurn.id,
+            result: {
+              turn: {
+                id: 'turn-prestart-pause-live-turn-2',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
             id: 101,
             method: 'item/tool/call',
             params: {
@@ -4785,19 +5084,14 @@ describe('assistant codex runtime', () => {
             },
           }))
 
-          await new Promise((resolve) => setTimeout(resolve, 0))
-          expect(
-            readWrittenRpcMessages(child).some((message) => message.id === 101),
-          ).toBe(false)
-
-          child.stdout.write(jsonLine({
-            id: secondTurn.id,
+          await expect(waitForRpcResponse(child, 101)).resolves.toMatchObject({
+            id: 101,
             result: {
-              turn: {
-                id: 'turn-prestart-pause-live-turn-2',
-              },
+              success: true,
             },
-          }))
+          })
+          expect(liveTurnRegistrations).toBe(0)
+
           child.stdout.write(jsonLine({
             method: 'turn/started',
             params: {
@@ -4806,14 +5100,6 @@ describe('assistant codex runtime', () => {
               },
             },
           }))
-
-          await expect(waitForRpcResponse(child, 101)).resolves.toMatchObject({
-            id: 101,
-            result: {
-              success: true,
-            },
-          })
-          expect(liveTurnRegistrations).toBe(0)
 
           child.stdout.write(jsonLine({
             method: 'assistant.message.delta',
@@ -5133,306 +5419,6 @@ describe('assistant codex runtime', () => {
       },
       message: expect.stringContaining('data failure detail'),
     })
-  })
-
-  it('poisons warm Codex when a reused process emits untagged turn output', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-local-untagged-work-')
-    const codexHome = await createTempDir('assistant-codex-local-untagged-home-')
-    const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 26_000 + spawnedChildren.length
-      spawnedChildren.push(child)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-local-untagged-1',
-            turnId: 'turn-local-untagged-1',
-          })
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-local-untagged-1',
-                status: 'completed',
-              },
-            },
-          }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 2,
-            threadId: 'thread-local-untagged-2',
-            turnId: 'turn-local-untagged-2',
-          })
-          child.stdout.write(jsonLine({
-            method: 'assistant.message.delta',
-            params: {
-              delta: 'stale untagged text',
-              item: {
-                id: 'assistant-local-untagged-2',
-                type: 'assistant_message',
-              },
-            },
-          }))
-        })()
-      })
-
-      return child
-    })
-
-    const stableInput = {
-      approvalPolicy: 'never',
-      codexHome,
-      env: {
-        PATH: '/custom/bin',
-      },
-      sandbox: 'workspace-write' as const,
-      workingDirectory,
-    }
-
-    await expect(
-      executeCodexAppServerTurn({
-        ...stableInput,
-        prompt: 'first local turn before untagged output',
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-local-untagged-1',
-      turnId: 'turn-local-untagged-1',
-    })
-
-    await expect(
-      executeCodexAppServerTurn({
-        ...stableInput,
-        prompt: 'second local turn with untagged output',
-      }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_APP_SERVER_STALE_TURN_EVENT',
-      context: {
-        eventMethod: 'assistant.message.delta',
-        eventTurnIdPresent: false,
-        expectedTurnIdPresent: true,
-        retryable: true,
-      },
-    })
-    expect(process.kill).toHaveBeenCalledWith(-26_000, 'SIGTERM')
-  })
-
-  it.each([
-    {
-      label: 'unsupported dynamic tool',
-      params: {
-        namespace: 'murph',
-        tool: 'send_message',
-        arguments: {
-          text: 'stale progress',
-        },
-      },
-    },
-    {
-      label: 'invalid progress arguments',
-      params: {
-        namespace: 'murph',
-        tool: 'send_progress_update',
-        arguments: {
-          text: '',
-        },
-      },
-    },
-  ])('poisons warm Codex before replying to an untagged reused-process $label request', async (scenario) => {
-    const workingDirectory = await createTempDir('assistant-codex-local-untagged-tool-work-')
-    const codexHome = await createTempDir('assistant-codex-local-untagged-tool-home-')
-    const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 26_500 + spawnedChildren.length
-      spawnedChildren.push(child)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-local-untagged-tool-1',
-            turnId: 'turn-local-untagged-tool-1',
-          })
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-local-untagged-tool-1',
-                status: 'completed',
-              },
-            },
-          }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 2,
-            threadId: 'thread-local-untagged-tool-2',
-            turnId: 'turn-local-untagged-tool-2',
-          })
-          child.stdout.write(jsonLine({
-            id: 99,
-            method: 'item/tool/call',
-            params: scenario.params,
-          }))
-        })()
-      })
-
-      return child
-    })
-
-    const stableInput = {
-      approvalPolicy: 'never',
-      codexHome,
-      env: {
-        PATH: '/custom/bin',
-      },
-      sandbox: 'workspace-write' as const,
-      workingDirectory,
-    }
-
-    await expect(
-      executeCodexAppServerTurn({
-        ...stableInput,
-        prompt: 'first local turn before untagged dynamic tool',
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-local-untagged-tool-1',
-      turnId: 'turn-local-untagged-tool-1',
-    })
-
-    await expect(
-      executeCodexAppServerTurn({
-        ...stableInput,
-        prompt: 'second local turn with untagged dynamic tool',
-      }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_APP_SERVER_STALE_TURN_EVENT',
-      context: {
-        eventMethod: 'item/tool/call',
-        eventTurnIdPresent: false,
-        expectedTurnIdPresent: true,
-        retryable: true,
-      },
-    })
-
-    expect(process.kill).toHaveBeenCalledWith(-26_500, 'SIGTERM')
-    expect(
-      readWrittenRpcMessages(requireMockChildProcess(spawnedChildren[0] ?? null))
-      .some((message) => message.id === 99),
-    ).toBe(false)
-  })
-
-  it('requires turn/start ids before reusing warm Codex event correlation', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-local-missing-turn-id-work-')
-    const codexHome = await createTempDir('assistant-codex-local-missing-turn-id-home-')
-    const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
-
-    codexMocks.spawn.mockImplementation(() => {
-      const child = new MockChildProcess()
-      child.pid = 27_000 + spawnedChildren.length
-      spawnedChildren.push(child)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialize = await waitForRpcMethod(child, 'initialize')
-          child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child,
-            requestCount: 1,
-            threadId: 'thread-local-missing-turn-id-1',
-            turnId: 'turn-local-missing-turn-id-1',
-          })
-          child.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-local-missing-turn-id-1',
-                status: 'completed',
-              },
-            },
-          }))
-
-          const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondThread.id,
-            result: {
-              thread: {
-                id: 'thread-local-missing-turn-id-2',
-              },
-            },
-          }))
-          const secondTurn = await waitForRpcMethodCount(child, 'turn/start', 2)
-          child.stdout.write(jsonLine({
-            id: secondTurn.id,
-            result: {},
-          }))
-          child.stdout.write(jsonLine({
-            method: 'assistant.message.delta',
-            params: {
-              delta: 'stale tagged text',
-              item: {
-                id: 'assistant-local-missing-turn-id-2',
-                type: 'assistant_message',
-              },
-              turnId: 'turn-local-missing-turn-id-1',
-            },
-          }))
-        })()
-      })
-
-      return child
-    })
-
-    const stableInput = {
-      approvalPolicy: 'never',
-      codexHome,
-      env: {
-        PATH: '/custom/bin',
-      },
-      sandbox: 'workspace-write' as const,
-      workingDirectory,
-    }
-
-    await expect(
-      executeCodexAppServerTurn({
-        ...stableInput,
-        prompt: 'first local turn before missing id',
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-local-missing-turn-id-1',
-      turnId: 'turn-local-missing-turn-id-1',
-    })
-
-    await expect(
-      executeCodexAppServerTurn({
-        ...stableInput,
-        prompt: 'second local turn without turn/start id',
-      }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_APP_SERVER_TURN_ID_MISSING',
-      context: {
-        retryable: true,
-      },
-    })
-    expect(process.kill).toHaveBeenCalledWith(-27_000, 'SIGTERM')
   })
 
   it('poisons warm Codex after malformed active-turn output before local reuse', async () => {
@@ -6261,7 +6247,7 @@ describe('assistant codex runtime', () => {
       codexCommand,
       ['app-server'],
       expect.objectContaining({
-        cwd: path.resolve(workingDirectory),
+        cwd: tmpdir(),
         env: expect.objectContaining({
           MURPH_HOSTED_RUNTIME_PROCESS: '1',
           PATH: '/usr/bin',
@@ -6695,95 +6681,6 @@ describe('assistant codex runtime', () => {
     },
   )
 
-  it('rejects stale warm turn completion events', async () => {
-    const hostedCodexHome = await createTempDir('assistant-codex-warm-stale-complete-home-')
-    const workingDirectory = await createTempDir('assistant-codex-warm-stale-complete-work-')
-    const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
-
-    codexMocks.spawn.mockImplementation(() => {
-      const spawnedChild = new MockChildProcess()
-      spawnedChild.pid = 21_000 + spawnedChildren.length
-      spawnedChildren.push(spawnedChild)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialized = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialized.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 1,
-            threadId: 'thread-stale-complete-one',
-            turnId: 'turn-stale-complete-one',
-          })
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-stale-complete-one',
-                status: 'completed',
-              },
-            },
-          }))
-
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 2,
-            threadId: 'thread-stale-complete-two',
-            turnId: 'turn-stale-complete-two',
-          })
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-stale-complete-one',
-                status: 'completed',
-              },
-            },
-          }))
-        })()
-      })
-
-      return spawnedChild
-    })
-
-    const hostedEnv = {
-      CODEX_HOME: hostedCodexHome,
-      MURPH_HOSTED_RUNTIME_PROCESS: '1',
-      NODE_ENV: 'test',
-      PATH: '/usr/bin',
-    }
-
-    await expect(
-      executeCodexAppServerTurn({
-        env: hostedEnv,
-        prompt: 'first stale completion turn',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      sessionId: 'thread-stale-complete-one',
-      turnId: 'turn-stale-complete-one',
-    })
-
-    await expect(
-      executeCodexAppServerTurn({
-        env: hostedEnv,
-        prompt: 'second stale completion turn',
-        workingDirectory,
-      }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_APP_SERVER_STALE_TURN_EVENT',
-      context: {
-        eventMethod: 'turn/completed',
-        eventTurnIdPresent: true,
-        expectedTurnIdPresent: true,
-        retryable: true,
-      },
-    })
-    expect(process.kill).toHaveBeenCalledWith(-spawnedChildren[0]!.pid, 'SIGTERM')
-  })
-
   it('handles current Codex v2 turn-tagged assistant events across warm turns', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-v2-events-home-')
     const workingDirectory = await createTempDir('assistant-codex-warm-v2-events-work-')
@@ -6865,99 +6762,6 @@ describe('assistant codex runtime', () => {
       .toHaveLength(2)
   })
 
-  it('rejects stale warm assistant progress events before delivery', async () => {
-    const hostedCodexHome = await createTempDir('assistant-codex-warm-stale-progress-home-')
-    const workingDirectory = await createTempDir('assistant-codex-warm-stale-progress-work-')
-    const progressDelivery = createProgressDeliveryMock()
-    const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
-
-    codexMocks.spawn.mockImplementation(() => {
-      const spawnedChild = new MockChildProcess()
-      spawnedChild.pid = 22_000 + spawnedChildren.length
-      spawnedChildren.push(spawnedChild)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialized = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialized.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 1,
-            threadId: 'thread-stale-progress-one',
-            turnId: 'turn-stale-progress-one',
-          })
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-stale-progress-one',
-                status: 'completed',
-              },
-            },
-          }))
-
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 2,
-            threadId: 'thread-stale-progress-two',
-            turnId: 'turn-stale-progress-two',
-          })
-          spawnedChild.stdout.write(jsonLine({
-            method: 'item/completed',
-            params: {
-              turnId: 'turn-stale-progress-one',
-              item: {
-                id: 'assistant-stale-progress',
-                type: 'assistant_message',
-                phase: 'commentary',
-                message: 'This stale progress must not be delivered.',
-              },
-            },
-          }))
-        })()
-      })
-
-      return spawnedChild
-    })
-
-    const hostedEnv = {
-      CODEX_HOME: hostedCodexHome,
-      MURPH_HOSTED_RUNTIME_PROCESS: '1',
-      NODE_ENV: 'test',
-      PATH: '/usr/bin',
-    }
-
-    await expect(
-      executeCodexAppServerTurn({
-        env: hostedEnv,
-        prompt: 'first stale progress turn',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      turnId: 'turn-stale-progress-one',
-    })
-
-    await expect(
-      executeCodexAppServerTurn({
-        env: hostedEnv,
-        progressDelivery,
-        prompt: 'second stale progress turn',
-        workingDirectory,
-      }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_APP_SERVER_STALE_TURN_EVENT',
-      context: {
-        eventMethod: 'item/completed',
-        eventTurnIdPresent: true,
-        expectedTurnIdPresent: true,
-        retryable: true,
-      },
-    })
-    expect(progressDelivery.send).not.toHaveBeenCalled()
-  })
-
   it('denies known unsupported warm server requests without turn ids', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-unsupported-request-home-')
     const workingDirectory = await createTempDir('assistant-codex-warm-unsupported-request-work-')
@@ -7029,176 +6833,7 @@ describe('assistant codex runtime', () => {
     expect(requireMockChildProcess(child).killed).toBe(false)
   })
 
-  it('rejects stale unsupported warm server requests before replying', async () => {
-    const hostedCodexHome = await createTempDir('assistant-codex-warm-stale-unsupported-request-home-')
-    const workingDirectory = await createTempDir('assistant-codex-warm-stale-unsupported-request-work-')
-    let child: MockChildProcess | null = null
-
-    codexMocks.spawn.mockImplementation(() => {
-      const spawnedChild = new MockChildProcess()
-      spawnedChild.pid = 22_550
-      child = spawnedChild
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialized = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialized.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 1,
-            threadId: 'thread-stale-unsupported-request',
-            turnId: 'turn-stale-unsupported-request-one',
-          })
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              status: 'completed',
-              turnId: 'turn-stale-unsupported-request-one',
-            },
-          }))
-
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 2,
-            threadId: 'thread-stale-unsupported-request',
-            turnId: 'turn-stale-unsupported-request-two',
-          })
-          spawnedChild.stdout.write(jsonLine({
-            id: 99,
-            method: 'approval/request',
-            params: {
-              reason: 'stale unsupported request shape',
-              turnId: 'turn-stale-unsupported-request-one',
-            },
-          }))
-        })()
-      })
-
-      return spawnedChild
-    })
-
-    const hostedEnv = {
-      CODEX_HOME: hostedCodexHome,
-      MURPH_HOSTED_RUNTIME_PROCESS: '1',
-      NODE_ENV: 'test',
-      PATH: '/usr/bin',
-    }
-
-    await expect(
-      executeCodexAppServerTurn({
-        env: hostedEnv,
-        prompt: 'first stale unsupported request turn',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      turnId: 'turn-stale-unsupported-request-one',
-    })
-
-    await expect(
-      executeCodexAppServerTurn({
-        env: hostedEnv,
-        prompt: 'second stale unsupported request turn',
-        workingDirectory,
-      }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_APP_SERVER_STALE_TURN_EVENT',
-      context: {
-        eventMethod: 'approval/request',
-        eventTurnIdPresent: true,
-        expectedTurnIdPresent: true,
-        retryable: true,
-      },
-    })
-
-    expect(
-      readWrittenRpcMessages(requireMockChildProcess(child)).some(
-        (message) => message.id === 99,
-      ),
-    ).toBe(false)
-  })
-
-  it('poisons warm Codex on unknown RPC responses during an active turn', async () => {
-    const hostedCodexHome = await createTempDir('assistant-codex-warm-late-rpc-home-')
-    const workingDirectory = await createTempDir('assistant-codex-warm-late-rpc-work-')
-    const spawnedChildren: MockChildProcess[] = []
-    mockProcessGroupSignalsForChildren(spawnedChildren)
-
-    codexMocks.spawn.mockImplementation(() => {
-      const spawnedChild = new MockChildProcess()
-      spawnedChild.pid = 23_000 + spawnedChildren.length
-      spawnedChildren.push(spawnedChild)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialized = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialized.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 1,
-            threadId: 'thread-late-rpc-one',
-            turnId: 'turn-late-rpc-one',
-          })
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              turn: {
-                id: 'turn-late-rpc-one',
-                status: 'completed',
-              },
-            },
-          }))
-
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 2,
-            threadId: 'thread-late-rpc-two',
-            turnId: 'turn-late-rpc-two',
-          })
-          spawnedChild.stdout.write(jsonLine({
-            id: 999_999,
-            result: {},
-          }))
-        })()
-      })
-
-      return spawnedChild
-    })
-
-    const hostedEnv = {
-      CODEX_HOME: hostedCodexHome,
-      MURPH_HOSTED_RUNTIME_PROCESS: '1',
-      NODE_ENV: 'test',
-      PATH: '/usr/bin',
-    }
-
-    await expect(
-      executeCodexAppServerTurn({
-        env: hostedEnv,
-        prompt: 'first late rpc turn',
-        workingDirectory,
-      }),
-    ).resolves.toMatchObject({
-      turnId: 'turn-late-rpc-one',
-    })
-
-    await expect(
-      executeCodexAppServerTurn({
-        env: hostedEnv,
-        prompt: 'second late rpc turn',
-        workingDirectory,
-      }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_APP_SERVER_LATE_RESPONSE',
-      context: {
-        retryable: true,
-      },
-    })
-    expect(process.kill).toHaveBeenCalledWith(-spawnedChildren[0]!.pid, 'SIGTERM')
-  })
-
-  it('stops warm Codex when output arrives outside an active turn', async () => {
+  it('keeps warm Codex when idle notifications arrive outside an active turn', async () => {
     const hostedCodexHome = await createTempDir('assistant-codex-warm-off-turn-output-home-')
     const workingDirectory = await createTempDir('assistant-codex-warm-off-turn-output-work-')
     const spawnedChildren: MockChildProcess[] = []
@@ -7225,6 +6860,20 @@ describe('assistant codex runtime', () => {
             params: {
               status: 'completed',
               turnId: 'turn-off-turn-one',
+            },
+          }))
+
+          await writeWarmTurnStarted({
+            child: spawnedChild,
+            requestCount: 2,
+            threadId: 'thread-off-turn-two',
+            turnId: 'turn-off-turn-two',
+          })
+          spawnedChild.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              status: 'completed',
+              turnId: 'turn-off-turn-two',
             },
           }))
         })()
@@ -7256,37 +6905,20 @@ describe('assistant codex runtime', () => {
         threadId: 'thread-off-turn-one',
       },
     }))
-    await waitForProcessKill(-spawnedChildren[0]!.pid, 'SIGTERM')
-
-    expect(await snapshotExpectedCodexRootProcess()).toBeNull()
-
-    codexMocks.spawn.mockImplementationOnce(() => {
-      const spawnedChild = new MockChildProcess()
-      spawnedChild.pid = 24_500
-      spawnedChildren.push(spawnedChild)
-
-      queueMicrotask(() => {
-        void (async () => {
-          const initialized = await waitForRpcMethod(spawnedChild, 'initialize')
-          spawnedChild.stdout.write(jsonLine({ id: initialized.id, result: {} }))
-
-          await writeWarmTurnStarted({
-            child: spawnedChild,
-            requestCount: 1,
-            threadId: 'thread-off-turn-two',
-            turnId: 'turn-off-turn-two',
-          })
-          spawnedChild.stdout.write(jsonLine({
-            method: 'turn/completed',
-            params: {
-              status: 'completed',
-              turnId: 'turn-off-turn-two',
-            },
-          }))
-        })()
-      })
-
-      return spawnedChild
+    spawnedChildren[0]!.stdout.write(jsonLine({
+      id: 99,
+      method: 'approval/request',
+      params: {
+        reason: 'idle request outside a parent turn',
+      },
+    }))
+    await expect(
+      waitForRpcResponse(spawnedChildren[0]!, 99),
+    ).resolves.toMatchObject({
+      error: {
+        code: -32000,
+        message: 'Server requests outside an active Codex turn are not supported.',
+      },
     })
 
     await expect(
@@ -7298,7 +6930,8 @@ describe('assistant codex runtime', () => {
     ).resolves.toMatchObject({
       turnId: 'turn-off-turn-two',
     })
-    expect(codexMocks.spawn).toHaveBeenCalledTimes(2)
+    expect(codexMocks.spawn).toHaveBeenCalledTimes(1)
+    expect(process.kill).not.toHaveBeenCalledWith(-spawnedChildren[0]!.pid, 'SIGTERM')
   })
 
   it('keeps the warm Codex app-server process when explicit per-thread model settings change', async () => {
@@ -11135,7 +10768,10 @@ describe('assistant codex runtime', () => {
         codexLiveTurnOpen: false,
         codexPendingRpcCount: 1,
         codexPendingRpcMethod: 'turn/start',
-        codexProviderRequestStarted: false,
+        // True since the provider-start barrier arms at request write: an
+        // exit during turn/start is post-admission (the child may have
+        // executed commands), never pre-provider work.
+        codexProviderRequestStarted: true,
         codexShutdownRequested: false,
         codexSignalPresent: true,
         codexStderrBytes: 'killed while waiting for turn/start response\n'.length,
@@ -12339,252 +11975,6 @@ describe('assistant codex event shaping', () => {
     ])
   })
 
-  it('extracts fallback helpers, session ids, status lines, and connection-loss text accurately', () => {
-    expect(
-      extractAssistantMessageFallback({
-        assistantStreamOrder: [''],
-        assistantStreams: new Map(),
-      }),
-    ).toBeNull()
-
-    expect(
-      extractAssistantMessageFallback({
-        assistantStreamOrder: ['', 'assistant:empty', 'assistant:last'],
-        assistantStreams: new Map([
-          ['assistant:empty', ''],
-          ['assistant:last', '  Final streamed reply  '],
-        ]),
-      }),
-    ).toBe('Final streamed reply')
-
-    expect(
-      extractCodexSessionId({
-        data: {
-          threadId: 'nested-thread',
-        },
-        type: 'thread.updated',
-      }),
-    ).toBe('nested-thread')
-    expect(
-      extractCodexSessionId({
-        conversation_id: 'conv-9',
-        type: 'turn.completed',
-      }),
-    ).toBe('conv-9')
-
-    const recursiveArray: unknown[] = []
-    const recursiveThreadEvent = {
-      data: recursiveArray,
-      type: 'thread.updated',
-    }
-    recursiveArray.push(recursiveThreadEvent, {
-      conversationId: 'recursive-conversation',
-    })
-    expect(extractCodexSessionId(recursiveThreadEvent)).toBe('recursive-conversation')
-
-    expect(
-      extractCodexErrorMessage({
-        errorMessage: 'fatal',
-        type: 'turn.error',
-      }),
-    ).toBe('fatal')
-    expect(extractCodexErrorMessage(null)).toBeNull()
-    expect(
-      extractCodexErrorMessage({
-        message: 'ignored',
-        type: 'item.completed',
-      }),
-    ).toBeNull()
-
-    // Wire shape from the app-server v2 ErrorNotification:
-    // { method: 'error', params: { error: TurnError, threadId, turnId, willRetry } }
-    expect(
-      extractCodexErrorInfo({
-        method: 'error',
-        params: {
-          error: {
-            codexErrorInfo: 'usageLimitExceeded',
-            message: 'You have reached your monthly cap.',
-          },
-          threadId: 'thread-1',
-          turnId: 'turn-1',
-          willRetry: false,
-        },
-      }),
-    ).toEqual({
-      httpStatusCode: null,
-      kind: 'usageLimitExceeded',
-    })
-    expect(
-      extractCodexErrorInfo({
-        method: 'error',
-        params: {
-          error: {
-            codexErrorInfo: {
-              httpConnectionFailed: {
-                httpStatusCode: 502,
-              },
-            },
-            message: 'connection failed',
-          },
-          threadId: 'thread-1',
-          turnId: 'turn-1',
-          willRetry: true,
-        },
-      }),
-    ).toEqual({
-      httpStatusCode: 502,
-      kind: 'httpConnectionFailed',
-    })
-    expect(
-      extractCodexErrorInfo({
-        method: 'error',
-        params: {
-          error: {
-            message: 'no structured info attached',
-          },
-        },
-      }),
-    ).toBeNull()
-    // Carrier variants are single-key enums: a multi-key object is not a
-    // valid CodexErrorInfo and must not be guessed at.
-    expect(
-      extractCodexErrorInfo({
-        method: 'error',
-        params: {
-          error: {
-            codexErrorInfo: {
-              httpConnectionFailed: {
-                httpStatusCode: 502,
-              },
-              serverOverloaded: {},
-            },
-            message: 'ambiguous payload',
-          },
-        },
-      }),
-    ).toBeNull()
-    expect(
-      extractCodexErrorInfo({
-        params: {
-          error: {
-            codex_error_info: 'usageLimitExceeded',
-            message: 'snake_case wire key',
-          },
-        },
-        type: 'turn.error',
-      }),
-    ).toEqual({
-      httpStatusCode: null,
-      kind: 'usageLimitExceeded',
-    })
-    expect(
-      extractCodexErrorInfo({
-        codexErrorInfo: 'usageLimitExceeded',
-        type: 'item.completed',
-      }),
-    ).toBeNull()
-    expect(extractCodexErrorInfo(null)).toBeNull()
-
-    // A failed turn embeds its TurnError directly on turn/completed
-    // (Turn.error is only populated for failed turns at codex 0.135.0), so
-    // classification works even if the standalone error notification never
-    // arrived.
-    expect(
-      extractCodexErrorInfo({
-        method: 'turn/completed',
-        params: {
-          turn: {
-            error: {
-              codexErrorInfo: 'usageLimitExceeded',
-              message: 'You have reached your monthly cap.',
-            },
-            id: 'turn-embedded-error',
-            status: 'failed',
-          },
-        },
-      }),
-    ).toEqual({
-      httpStatusCode: null,
-      kind: 'usageLimitExceeded',
-    })
-    expect(
-      extractCodexErrorInfo({
-        method: 'turn/completed',
-        params: {
-          turn: {
-            error: null,
-            id: 'turn-successful',
-            status: 'completed',
-          },
-        },
-      }),
-    ).toBeNull()
-
-    expect(
-      normalizeStatusText(
-        `  connection closed under ${codexMocks.fakeHome}/workspace/project  `,
-      ),
-    ).toBe('connection closed under ~/workspace/project')
-    expect(normalizeStatusText(null)).toBeNull()
-    codexMocks.fakeHome = '   '
-    expect(normalizeStatusText(' untouched path ')).toBe('untouched path')
-    codexMocks.fakeHome = '/home/tester'
-
-    expect(
-      extractCodexStatusEventFromStderrLine('Retrying after timeout while contacting OpenAI'),
-    ).toEqual({
-      id: 'codex-connection-status',
-      kind: 'status',
-      rawEvent: {
-        line: 'Retrying after timeout while contacting OpenAI',
-        type: 'stderr',
-      },
-      state: 'running',
-      text: 'Retrying after timeout while contacting OpenAI',
-    })
-    expect(
-      extractCodexStatusEventFromStderrLine('Connection closed by remote host'),
-    ).toEqual({
-      id: 'codex-connection-status',
-      kind: 'status',
-      rawEvent: {
-        line: 'Connection closed by remote host',
-        type: 'stderr',
-      },
-      state: 'completed',
-      text: 'Connection closed by remote host',
-    })
-
-    expect(
-      extractCodexStatusEventFromStderrLine(
-        'required MCP servers failed to initialize: connection closed',
-      ),
-    ).toBeNull()
-
-    expect(
-      isCodexConnectionLossText('socket hang up while waiting for completion'),
-    ).toBe(true)
-    expect(
-      isCodexConnectionLossText('required MCP servers failed to initialize'),
-    ).toBe(false)
-
-    expect(
-      extractCodexTraceUpdates({
-        itemId: 'assistant-10',
-        summary: 'Draft answer',
-        type: 'agent.plan.updated',
-      }),
-    ).toEqual([
-      {
-        kind: 'thinking',
-        mode: 'replace',
-        streamKey: 'thinking:assistant-10',
-        text: 'Draft answer',
-      },
-    ])
-  })
-
   describe('codex subagent thread events', () => {
     it('tolerates subagent thread events and records their usage as additional drafts', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-usage-work-')
@@ -12857,60 +12247,6 @@ describe('assistant codex event shaping', () => {
 
       expect(result.finalMessage).toBe('Parent unaffected')
       expect(result.additionalUsages).toEqual([])
-    })
-
-    it('still rejects parent-thread events that do not match the active turn', async () => {
-      const workingDirectory = await createTempDir('assistant-codex-subagent-strict-work-')
-      const codexHome = await createTempDir('assistant-codex-subagent-strict-home-')
-      const spawnedChildren: MockChildProcess[] = []
-      mockProcessGroupSignalsForChildren(spawnedChildren)
-
-      codexMocks.spawn.mockImplementation(() => {
-        const child = new MockChildProcess()
-        child.pid = 31_300 + spawnedChildren.length
-        spawnedChildren.push(child)
-
-        queueMicrotask(() => {
-          void (async () => {
-            const initialize = await waitForRpcMethod(child, 'initialize')
-            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
-            await writeWarmTurnStarted({
-              child,
-              requestCount: 1,
-              threadId: 'thread-subagent-strict-parent',
-              turnId: 'turn-subagent-strict-parent',
-            })
-            // Same parent thread, mismatched turn id: the strict correlation
-            // contract is unchanged by subagent routing.
-            child.stdout.write(jsonLine({
-              method: 'item/agentMessage/delta',
-              params: {
-                delta: 'rogue output',
-                itemId: 'rogue-item',
-                threadId: 'thread-subagent-strict-parent',
-                turnId: 'turn-subagent-strict-other',
-              },
-            }))
-          })()
-        })
-
-        return child
-      })
-
-      await expect(
-        executeCodexAppServerTurn({
-          approvalPolicy: 'never',
-          codexHome,
-          env: {
-            PATH: '/custom/bin',
-          },
-          prompt: 'strictness stays intact',
-          sandbox: 'workspace-write',
-          workingDirectory,
-        }),
-      ).rejects.toMatchObject({
-        code: 'ASSISTANT_CODEX_APP_SERVER_STALE_TURN_EVENT',
-      })
     })
 
     it('includes observed subagent usage drafts in the failure context when the turn fails', async () => {
@@ -13486,9 +12822,16 @@ describe('assistant codex event shaping', () => {
         turnId: 'turn-subagent-idle-one',
       })
 
-      // Subagent threads outlive parent turns: a late token-usage flush and a
-      // late server request arrive while no turn is active. Neither may
-      // poison the warm process; the request gets a deny response.
+      // Subagent threads outlive parent turns. Global app-server notifications
+      // from the child's post-turn work can arrive without a thread id, and
+      // late child-thread traffic can follow. None of that may poison the warm
+      // process; child server requests still get a deny response.
+      spawnedChildren[0]!.stdout.write(jsonLine({
+        method: 'account/rateLimits/updated',
+        params: {
+          rateLimits: [],
+        },
+      }))
       spawnedChildren[0]!.stdout.write(jsonLine({
         method: 'thread/tokenUsage/updated',
         params: {
@@ -13577,8 +12920,8 @@ describe('assistant codex event shaping', () => {
 
             // The second turn has bound the warm process, but its
             // thread/start response has not been written yet: a late child
-            // event lands in that window and must be routed, not treated as
-            // a stale-turn correlation failure.
+            // event lands in that window and must stay out of the parent
+            // turn's output/tool path.
             const secondThread = await waitForRpcMethodCount(child, 'thread/start', 2)
             child.stdout.write(jsonLine({
               method: 'thread/tokenUsage/updated',

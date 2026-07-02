@@ -1,4 +1,4 @@
-import { access, readdir, readFile } from 'node:fs/promises'
+import { access, open, readdir, readFile, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import {
@@ -163,23 +163,65 @@ export async function readAssistantTranscriptEntries(
   const transcriptPath = resolveAssistantTranscriptPath(paths, sessionId)
 
   try {
-    const raw = await readFile(transcriptPath, 'utf8')
-    const parsed = parseAssistantJsonLinesWithTailSalvage(raw, (value) =>
-      assistantTranscriptEntrySchema.parse(value),
-    )
-    if (parsed.malformedLineCount > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_TRANSCRIPT_CORRUPTED',
-        'Assistant transcript contains malformed committed entries.',
-      )
-    }
-    return parsed.values
+    return parseAssistantTranscriptRaw(await readFile(transcriptPath, 'utf8'))
   } catch (error) {
     if (isMissingFileError(error)) {
       return []
     }
 
     throw error
+  }
+}
+
+function parseAssistantTranscriptRaw(raw: string): AssistantTranscriptEntry[] {
+  const parsed = parseAssistantJsonLinesWithTailSalvage(raw, (value) =>
+    assistantTranscriptEntrySchema.parse(value),
+  )
+  if (parsed.malformedLineCount > 0) {
+    throw new VaultCliError(
+      'ASSISTANT_TRANSCRIPT_CORRUPTED',
+      'Assistant transcript contains malformed committed entries.',
+    )
+  }
+  return parsed.values
+}
+
+// Bounded tail read for recurring maintenance work: reads at most maxBytes
+// from the end of the committed transcript JSONL instead of parsing the whole
+// file. A partial first line from the byte cut is dropped before parsing.
+export async function readAssistantTranscriptTailEntries(
+  paths: AssistantStatePaths,
+  sessionId: string,
+  maxBytes: number,
+): Promise<AssistantTranscriptEntry[]> {
+  const transcriptPath = resolveAssistantTranscriptPath(paths, sessionId)
+
+  let handle: FileHandle
+  try {
+    handle = await open(transcriptPath, 'r')
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return []
+    }
+    throw error
+  }
+
+  try {
+    const size = (await handle.stat()).size
+    const readBytes = Math.min(size, Math.max(0, maxBytes))
+    if (readBytes === 0) {
+      return []
+    }
+    const buffer = Buffer.alloc(readBytes)
+    await handle.read(buffer, 0, readBytes, size - readBytes)
+    let raw = buffer.toString('utf8')
+    if (readBytes < size) {
+      const firstNewlineIndex = raw.indexOf('\n')
+      raw = firstNewlineIndex === -1 ? '' : raw.slice(firstNewlineIndex + 1)
+    }
+    return parseAssistantTranscriptRaw(raw)
+  } finally {
+    await handle.close()
   }
 }
 
@@ -591,8 +633,75 @@ export async function synchronizeAssistantIndexes(
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases,
     conversationKeys,
+    // Foreground saves never rebuild the projection (that would scan every
+    // session file on the reply commit path). While the projection is absent
+    // it stays absent, so the idle maintenance read can tell "not built yet"
+    // from "partially built" and do the one-time rebuild off the hot path.
+    ...(store.recentSessions === undefined
+      ? {}
+      : {
+          recentSessions: pruneAssistantRecentSessions({
+            ...store.recentSessions,
+            [session.sessionId]: session.lastTurnAt ?? session.updatedAt,
+          }),
+        }),
   })
   await writeJsonFileAtomic(paths.indexesPath, updated)
+}
+
+const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 32
+
+// Recurring-maintenance projection reader. Deliberately does NOT go through
+// readAssistantIndexStore: that reader's missing/corrupt fallbacks rebuild
+// the index by scanning every session file, which is only acceptable on
+// explicit repair/routing paths. Here a parseable legacy index gets an
+// empty projection persisted once (O(1)) so bounded foreground saves warm
+// it up, and a missing or corrupt index just yields no evidence this wake.
+export async function ensureAssistantRecentSessionsProjection(
+  paths: AssistantStatePaths,
+): Promise<Record<string, string>> {
+  let raw: string
+  try {
+    raw = await readFile(paths.indexesPath, 'utf8')
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return {}
+    }
+    throw error
+  }
+
+  let store: AssistantAliasStore
+  try {
+    store = assistantAliasStoreSchema.parse(JSON.parse(raw))
+  } catch {
+    // Corrupt index: quarantine/rebuild belongs to the routing read path.
+    return {}
+  }
+
+  if (store.recentSessions !== undefined) {
+    return store.recentSessions
+  }
+
+  const updated = assistantAliasStoreSchema.parse({
+    version: ASSISTANT_INDEX_STORE_VERSION,
+    aliases: store.aliases,
+    conversationKeys: store.conversationKeys,
+    recentSessions: {},
+  })
+  await writeJsonFileAtomic(paths.indexesPath, updated)
+  return {}
+}
+
+function pruneAssistantRecentSessions(
+  recentSessions: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(recentSessions)
+      .sort(([, left], [, right]) =>
+        compareAssistantTimestampsAscending(right, left),
+      )
+      .slice(0, ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT),
+  )
 }
 
 export async function writeAutomationState(
@@ -667,6 +776,7 @@ function createInitialAssistantIndexStore(): AssistantAliasStore {
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases: {},
     conversationKeys: {},
+    recentSessions: {},
   })
 }
 
@@ -700,6 +810,7 @@ async function rebuildAssistantIndexStore(
 
   const aliases: Record<string, string> = {}
   const conversationKeys: Record<string, string> = {}
+  const recentSessions: Record<string, string> = {}
   for (const session of sortSessionsForIndexRebuild(sessions)) {
     if (session.alias) {
       aliases[session.alias] = session.sessionId
@@ -707,12 +818,14 @@ async function rebuildAssistantIndexStore(
     if (session.binding.conversationKey) {
       conversationKeys[session.binding.conversationKey] = session.sessionId
     }
+    recentSessions[session.sessionId] = session.lastTurnAt ?? session.updatedAt
   }
 
   const rebuilt = assistantAliasStoreSchema.parse({
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases,
     conversationKeys,
+    recentSessions: pruneAssistantRecentSessions(recentSessions),
   })
   await writeJsonFileAtomic(paths.indexesPath, rebuilt)
   await appendAssistantRuntimeEventAtPaths(paths, {
