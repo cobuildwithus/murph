@@ -154,7 +154,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /approval_policy = "never"/u);
   assert.match(config, /sandbox_mode = "danger-full-access"/u);
   assert.match(config, /^check_for_update_on_startup = false$/mu);
-  assert.match(config, /^allow_login_shell = false$/mu);
+  assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
   assert.doesNotMatch(config, /^model_provider = "openai"$/mu);
   assert.doesNotMatch(config, /\[model_providers\."openai"\]/u);
   assert.match(config, /\[model_providers\."hosted-openai"\]/u);
@@ -453,6 +453,7 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
   assert.match(config, /model_reasoning_effort = "low"/u);
   assert.match(config, /\[history\]\npersistence = "none"/u);
   assert.match(config, /\[shell_environment_policy\]/u);
+  assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
   assertHostedCodexAutoCompactTokenLimit(config);
 });
 
@@ -621,6 +622,7 @@ test("hosted Codex runtime config preserves managed ChatGPT auth", async () => {
   assert.match(config, /^model_provider = "openai"$/mu);
   assert.doesNotMatch(config, /\[model_providers\./u);
   assert.doesNotMatch(config, /chatgpt-refresh-token/u);
+  assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
   assertHostedCodexAutoCompactTokenLimit(config);
 });
 
@@ -1329,6 +1331,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "",
     ].join("\n"),
   );
+  assertHostedCodexConfigDisablesLoginShellAtTopLevel(config);
 });
 
 test("hosted Codex shell policy excludes ElevenLabs runtime capability env", () => {
@@ -1446,6 +1449,19 @@ function assertHostedCodexRootAgentUsageHintRetainsCodexDefaults(): void {
   assert.ok(HOSTED_CODEX_ROOT_AGENT_USAGE_HINT.endsWith(
     "Murph system-prompt and skill instructions that direct delegating work to a sub-agent, such as onboarding supplement-label or lab-result ingestion, count as explicit user requests for sub-agent work under any multi-agent mode instruction.",
   ));
+}
+
+function assertHostedCodexConfigDisablesLoginShellAtTopLevel(config: string): void {
+  const loginShellAssignments = config.match(/^allow_login_shell\s*=/gmu) ?? [];
+  assert.deepEqual(loginShellAssignments, ["allow_login_shell ="]);
+  assert.match(config, /^allow_login_shell = false$/mu);
+
+  const loginShellIndex = config.indexOf("allow_login_shell = false");
+  const firstSectionIndex = config.search(/^\[/mu);
+  assert.ok(
+    firstSectionIndex === -1 || loginShellIndex < firstSectionIndex,
+    "allow_login_shell must be a top-level Codex config key before the first TOML section",
+  );
 }
 
 function chatGptCodexAuthTokens(): Record<string, string> {
