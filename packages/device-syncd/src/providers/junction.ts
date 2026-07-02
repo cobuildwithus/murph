@@ -1518,7 +1518,12 @@ export function createJunctionDeviceSyncProvider(
           ),
         );
       } catch (error) {
-        const failure = classifyOptionalJunctionResourceFailure(error, "timeseries", resource);
+        const failure = classifyOptionalJunctionResourceFailure(
+          error,
+          "timeseries",
+          resource,
+          context.account.externalAccountId,
+        );
         if (!failure) {
           throw error;
         }
@@ -1685,7 +1690,12 @@ export function createJunctionDeviceSyncProvider(
     try {
       return await load();
     } catch (error) {
-      const failure = classifyOptionalJunctionResourceFailure(error, resourceCategory, resource);
+      const failure = classifyOptionalJunctionResourceFailure(
+        error,
+        resourceCategory,
+        resource,
+        context.account.externalAccountId,
+      );
       if (!failure) {
         throw error;
       }
@@ -1912,6 +1922,7 @@ function classifyOptionalJunctionResourceFailure(
   error: unknown,
   resourceCategory: JunctionResourceCategory,
   resource: string,
+  accountExternalId: string,
 ): JunctionOptionalResourceFailure | null {
   if (!isDeviceSyncError(error) || error.code !== "JUNCTION_API_REQUEST_FAILED") {
     return null;
@@ -1952,6 +1963,7 @@ function classifyOptionalJunctionResourceFailure(
   // provider's own explanation (redacted) so operators can see why it failed
   // without one broken optional endpoint aborting the whole sync job.
   const responseDetail = buildJunctionOptionalResourceResponseDetail({
+    accountExternalId,
     responseErrorCode,
     responseErrorDescription,
   });
@@ -1964,11 +1976,17 @@ function classifyOptionalJunctionResourceFailure(
 }
 
 function buildJunctionOptionalResourceResponseDetail(input: {
+  accountExternalId: string;
   responseErrorCode: string | null;
   responseErrorDescription: string | null;
 }): string | null {
-  const code = readJunctionDiagnosticToken(input.responseErrorCode);
-  const description = readJunctionDiagnosticText(input.responseErrorDescription);
+  // The generic redactor does not know the current Junction user id; strip it
+  // explicitly before the shared sanitizer so provider prose that embeds the
+  // account id can never reach logs or connection metadata.
+  const redactAccountId = (value: string | null): string | null =>
+    value === null ? null : value.split(input.accountExternalId).join("<redacted-account>");
+  const code = readJunctionDiagnosticToken(redactAccountId(input.responseErrorCode));
+  const description = readJunctionDiagnosticText(redactAccountId(input.responseErrorDescription));
   const detail = [code, description].filter(Boolean).join(": ");
   return detail || null;
 }

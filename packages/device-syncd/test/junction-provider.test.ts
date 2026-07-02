@@ -5742,6 +5742,67 @@ test("Junction polling skips request-shape optional resource failures as ambiguo
   }
 });
 
+test("Junction ambiguous skip detail redacts the account id from provider error text", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              profile: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
+      return createJsonResponse({
+        code: "invalid_request",
+        message: "User junction-user-1 cannot access this summary.",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["profile"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(warnings.length, 1);
+  assert.equal(
+    warnings[0]?.responseDetail,
+    "invalid_request: User <redacted-account> cannot access this summary.",
+  );
+  assert.equal(
+    result.metadataPatch?.junctionSkippedResourceLastDetail,
+    "invalid_request: User <redacted-account> cannot access this summary.",
+  );
+  assert.equal(JSON.stringify(warnings).includes("junction-user-1"), false);
+  assert.equal(JSON.stringify(result.metadataPatch).includes("junction-user-1"), false);
+});
+
 test("Junction resource jobs import direct daily data webhook payloads without Junction HTTP requests", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
