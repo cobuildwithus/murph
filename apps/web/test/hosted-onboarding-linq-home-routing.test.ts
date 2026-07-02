@@ -33,87 +33,9 @@ vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
 
 import {
   readHostedLinqHomeLineAuthority,
-  resolveHostedMemberLinqHomeLineNewChatDeliveryTx,
   resolveHostedMemberLinqHomeLineRouteBindingTx,
   resolveHostedMemberActivationLinqRoute,
 } from "@/src/lib/hosted-onboarding/linq-home-routing";
-
-describe("resolveHostedMemberLinqHomeLineNewChatDeliveryTx", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
-    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
-    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
-    mocks.readHostedMemberRoutingState.mockResolvedValue(null);
-    mocks.readHostedLinqAssignableHomeLineByPhone.mockImplementation(({ phoneNumber }) =>
-      Promise.resolve(buildLine(phoneNumber, { maxNewConversationsPerDay: 1 }))
-    );
-  });
-
-  it("resolves an existing pending route without the pool lock", async () => {
-    mocks.readHostedMemberRoutingState.mockResolvedValue({
-      linqChatId: null,
-      linqHomeLineAssignedAt: new Date("2026-06-30T14:15:00.000Z"),
-      linqRecipientPhone: "+15550100001",
-      memberId: "member_123",
-      pendingLinqChatId: "chat_pending",
-      pendingLinqParticipantContact: null,
-      pendingLinqRecipientPhone: "+15550100001",
-      replyAliasLookupKey: null,
-      telegramThreadId: null,
-      telegramUserId: null,
-      telegramUserLookupKey: null,
-    });
-
-    await expect(
-      resolveHostedMemberLinqHomeLineNewChatDeliveryTx({
-        memberId: "member_123",
-        prisma: {} as never,
-        senderPhone: "+15550100001",
-      }),
-    ).resolves.toEqual({
-      chatId: "chat_pending",
-      kind: "existing_pending",
-    });
-
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
-    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
-  });
-
-  it("does not double-claim when authority appears while waiting for the pool lock", async () => {
-    mocks.readHostedMemberRoutingState
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        linqChatId: null,
-        linqHomeLineAssignedAt: new Date("2026-06-30T14:15:00.000Z"),
-        linqRecipientPhone: "+15550100001",
-        memberId: "member_123",
-        pendingLinqChatId: "chat_pending",
-        pendingLinqParticipantContact: null,
-        pendingLinqRecipientPhone: "+15550100001",
-        replyAliasLookupKey: null,
-        telegramThreadId: null,
-        telegramUserId: null,
-        telegramUserLookupKey: null,
-      });
-
-    await expect(
-      resolveHostedMemberLinqHomeLineNewChatDeliveryTx({
-        memberId: "member_123",
-        prisma: {} as never,
-        senderPhone: "+15550100001",
-      }),
-    ).resolves.toEqual({
-      chatId: "chat_pending",
-      kind: "existing_pending",
-    });
-
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
-    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
-    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
-    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
-  });
-});
 
 describe("readHostedLinqHomeLineAuthority", () => {
   const baseRouting = {

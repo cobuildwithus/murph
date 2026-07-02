@@ -50,26 +50,6 @@ export type HostedLinqHomeLinePhoneReservationResult =
       kind: "capacity_exhausted";
     };
 
-export type HostedLinqHomeLineNewChatDeliveryResult =
-  | {
-      chatId: string;
-      kind: "existing_pending";
-    }
-  | {
-      assignedAt: Date;
-      kind: "reserved";
-      senderPhoneNumber: string;
-    }
-  | {
-      kind: "already_bound";
-    }
-  | {
-      kind: "unassignable";
-    }
-  | {
-      kind: "capacity_exhausted";
-    };
-
 export type HostedLinqHomeLineRouteBindingResult =
   | {
       homeLineAssignedAt: Date | null;
@@ -129,8 +109,7 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLineRouteBindingResult> {
   // Most inbound messages resolve onto an existing route. Decide without the
-  // shared pool lock so they never wait behind unrelated line assignment;
-  // the ops new-chat path holds that lock across a provider call.
+  // shared pool lock so they never wait behind unrelated line assignment.
   const decision = await resolveHostedMemberLinqHomeLineRouteBindingDecision(input);
   if (decision.kind === "done") {
     return decision.result;
@@ -266,125 +245,13 @@ async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
   };
 }
 
-export async function resolveHostedMemberLinqHomeLineNewChatDeliveryTx(input: {
-  memberId: string;
-  prisma: Prisma.TransactionClient;
-  senderPhone: string;
-}): Promise<HostedLinqHomeLineNewChatDeliveryResult> {
-  const senderPhone = normalizePhoneNumber(input.senderPhone);
-  if (!senderPhone) {
-    return {
-      kind: "unassignable",
-    };
-  }
-
-  // Existing authority resolves from the routing row alone, without the
-  // pool lock; the assignable pool and its lock exist only to create a new
-  // assignment.
-  const existing = await resolveHostedMemberLinqNewChatDeliveryFromAuthority({
-    memberId: input.memberId,
-    prisma: input.prisma,
-    senderPhone,
-  });
-  if (existing) {
-    return existing;
-  }
-
-  await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
-    prisma: input.prisma,
-  });
-  // Authority may have appeared while another transaction held the pool
-  // lock, so re-read before claiming a new line.
-  const existingUnderLock = await resolveHostedMemberLinqNewChatDeliveryFromAuthority({
-    memberId: input.memberId,
-    prisma: input.prisma,
-    senderPhone,
-  });
-  if (existingUnderLock) {
-    return existingUnderLock;
-  }
-
-  const line = await readHostedLinqAssignableHomeLineByPhone({
-    phoneNumber: senderPhone,
-    prisma: input.prisma,
-  });
-
-  if (!line) {
-    return {
-      kind: "unassignable",
-    };
-  }
-
-  const reservationResult = await reserveHostedLinqHomeLineForLineAfterLockTx({
-    line,
-    now: new Date(),
-    prisma: input.prisma,
-  });
-
-  if (reservationResult.kind !== "reserved") {
-    return {
-      kind: reservationResult.kind,
-    };
-  }
-
-  return {
-    assignedAt: reservationResult.reservation.assignedAt,
-    kind: "reserved",
-    senderPhoneNumber: reservationResult.reservation.line.phoneNumber,
-  };
-}
-
-async function resolveHostedMemberLinqNewChatDeliveryFromAuthority(input: {
-  memberId: string;
-  prisma: Prisma.TransactionClient;
-  senderPhone: string;
-}): Promise<HostedLinqHomeLineNewChatDeliveryResult | null> {
-  const routing = await readHostedMemberRoutingState({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
-  const authority = readHostedLinqHomeLineAuthority(routing);
-
-  if (authority.kind === "pending" && authority.recipientPhone === input.senderPhone) {
-    return {
-      chatId: authority.chatId,
-      kind: "existing_pending",
-    };
-  }
-
-  // Reclaim this member's own bare same-line reservation (left when a crash
-  // or failed bind interrupted a prior attempt after the claim committed)
-  // instead of blocking the retry. Legacy direct routes carry no assignment
-  // timestamp and still fail closed below.
-  if (
-    authority.kind === "bare"
-    && authority.recipientPhone === input.senderPhone
-    && authority.assignedAt
-  ) {
-    return {
-      assignedAt: authority.assignedAt,
-      kind: "reserved",
-      senderPhoneNumber: authority.recipientPhone,
-    };
-  }
-
-  if (authority.kind !== "none") {
-    return {
-      kind: "already_bound",
-    };
-  }
-
-  return null;
-}
-
 export async function resolveHostedMemberActivationLinqRoute(input: {
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberActivationLinqRouteResolution> {
   // Most activations promote an existing home, pending, or assigned-line
   // route. Resolve those without the shared pool lock so activation never
-  // waits behind unrelated line assignment; the ops new-chat path holds
-  // that lock across a provider call.
+  // waits behind unrelated line assignment.
   const promoted = await resolveHostedMemberActivationLinqRouteAttempt({
     claimNewHomeLine: false,
     member: input.member,
