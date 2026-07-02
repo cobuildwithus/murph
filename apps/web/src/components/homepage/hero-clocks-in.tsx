@@ -400,17 +400,12 @@ export function HeroClocksIn({
   useEffect(() => {
     const nextId = () => ++idRef.current;
 
-    // Below lg (Tailwind's 64rem breakpoint) the floaters that feed the
-    // animated demo are hidden and the thread cannot scroll, so seed a static
-    // conversation instead of running the timed demo into an empty
-    // bottom-anchored thread.
     if (
       typeof window !== "undefined" &&
-      (window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
-        !window.matchMedia("(min-width: 64rem)").matches)
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
       const seed: StreamItem[] = [];
-      [EXCHANGES[0], EXCHANGES[2]].forEach((ex) => {
+      [EXCHANGES[0]].forEach((ex) => {
         seed.push({ kind: "text", id: nextId(), from: "user", text: ex.user });
         if (ex.card)
           seed.push({ kind: "card", id: nextId(), result: ex.card });
