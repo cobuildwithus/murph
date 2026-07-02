@@ -1426,6 +1426,7 @@ describe("startHostedContainerEntrypoint", () => {
       expect(codexConfigToml).toContain("request_max_retries = 4");
       expect(codexConfigToml).toContain("stream_max_retries = 5");
       expect(codexConfigToml).toContain("multi_agent_v2 = true");
+      expectCodexConfigDisablesLoginShellAtTopLevel(codexConfigToml);
     } finally {
       if (previousHostedHome === undefined) {
         delete process.env.HOSTED_HOME;
@@ -3031,3 +3032,12 @@ describe("classifyRunnerJobError", () => {
     });
   });
 });
+
+function expectCodexConfigDisablesLoginShellAtTopLevel(config: string): void {
+  expect(config.match(/^allow_login_shell\s*=/gmu)).toEqual(["allow_login_shell ="]);
+  expect(config).toMatch(/^allow_login_shell = false$/mu);
+
+  const loginShellIndex = config.indexOf("allow_login_shell = false");
+  const firstSectionIndex = config.search(/^\[/mu);
+  expect(firstSectionIndex === -1 || loginShellIndex < firstSectionIndex).toBe(true);
+}

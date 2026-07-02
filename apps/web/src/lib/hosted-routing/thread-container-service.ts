@@ -3,7 +3,6 @@ import "server-only";
 import {
   HostedBillingStatus,
   Prisma,
-  type PrismaClient,
 } from "@prisma/client";
 import {
   buildHostedExecutionMemberActivatedWake,
@@ -28,22 +27,14 @@ import {
 } from "../hosted-onboarding/entitlement";
 import {
   hostedOnboardingError,
-  isHostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import {
   createHostedMember,
   readHostedMemberCoreState,
 } from "../hosted-onboarding/hosted-member-store";
 import {
-  signalHostedMemberActivationRuntimeWakeBestEffortResult,
-} from "../hosted-onboarding/member-activation-runtime-wake";
-import {
   generateHostedMemberId,
-  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "../hosted-onboarding/shared";
-import {
-  getPrisma,
-} from "../prisma";
 import type {
   HostedThreadRouteChannel,
 } from "./thread-route-store";
@@ -56,38 +47,6 @@ export interface HostedThreadContainerRouteEnsureResult {
   activationMailboxItemId: string | null;
   containerMemberId: string;
   created: boolean;
-}
-
-export async function ensureHostedThreadContainerRoute(input: {
-  accountLookupKey: string | null | undefined;
-  accountLookupKeys?: readonly (string | null | undefined)[];
-  channel: HostedThreadRouteChannel;
-  containerMemberId?: string | null;
-  monthlyUsageLimitUsdMicros?: bigint | null;
-  occurredAt?: Date;
-  ownerMemberId: string;
-  prisma?: PrismaClient;
-  threadId: string | number;
-}): Promise<HostedThreadContainerRouteEnsureResult> {
-  const prisma = input.prisma ?? getPrisma();
-  const result = await ensureHostedThreadContainerRouteWithRetry({
-    ...input,
-    occurredAt: input.occurredAt ?? new Date(),
-    prisma,
-    retryRouteConflict: true,
-  });
-
-  if (result.created && result.activationEventId && result.activationMailboxItemId) {
-    await signalHostedMemberActivationRuntimeWakeBestEffortResult({
-      hostedExecutionEventId: result.activationEventId,
-      mailboxItemId: result.activationMailboxItemId,
-      memberId: result.containerMemberId,
-      prisma,
-      source: "hosted-thread-container.ensure-route",
-    });
-  }
-
-  return result;
 }
 
 export async function ensureHostedThreadContainerRouteTx(input: {
@@ -303,47 +262,6 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     containerMemberId,
     created: true,
   };
-}
-
-async function ensureHostedThreadContainerRouteWithRetry(input: {
-  accountLookupKey: string | null | undefined;
-  accountLookupKeys?: readonly (string | null | undefined)[];
-  channel: HostedThreadRouteChannel;
-  containerMemberId?: string | null;
-  monthlyUsageLimitUsdMicros?: bigint | null;
-  occurredAt: Date;
-  ownerMemberId: string;
-  prisma: PrismaClient;
-  retryRouteConflict: boolean;
-  threadId: string | number;
-}): Promise<HostedThreadContainerRouteEnsureResult> {
-  try {
-    return await input.prisma.$transaction(async (tx) =>
-      ensureHostedThreadContainerRouteTx({
-        accountLookupKey: input.accountLookupKey,
-        accountLookupKeys: input.accountLookupKeys,
-        channel: input.channel,
-        containerMemberId: input.containerMemberId,
-        monthlyUsageLimitUsdMicros: input.monthlyUsageLimitUsdMicros,
-        occurredAt: input.occurredAt,
-        ownerMemberId: input.ownerMemberId,
-        prisma: tx,
-        threadId: input.threadId,
-      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  } catch (error) {
-    if (
-      input.retryRouteConflict
-      && isHostedOnboardingError(error)
-      && error.code === "HOSTED_THREAD_ROUTE_WRITE_CONFLICT"
-    ) {
-      return ensureHostedThreadContainerRouteWithRetry({
-        ...input,
-        retryRouteConflict: false,
-      });
-    }
-
-    throw error;
-  }
 }
 
 async function createHostedThreadRouteRowTx(input: {

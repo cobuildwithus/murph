@@ -1958,6 +1958,9 @@ function buildHostedContainerCodexShellSmokeConfig(model: string): string {
     'approval_policy = "never"',
     'sandbox_mode = "danger-full-access"',
     "check_for_update_on_startup = false",
+    // Mirror the hosted runtime config: non-login shells so the smoke probe
+    // exercises the same PATH semantics as production turns.
+    "allow_login_shell = false",
     "",
     "[features]",
     "plugins = false",
