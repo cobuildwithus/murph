@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
+  releaseHostedLinqContactCardShareAttempt: vi.fn(),
   reserveHostedLinqContactCardShareAttempt: vi.fn(),
   resolveMurphHostedLinqContactCardBackupPhoneNumber: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
@@ -39,6 +40,12 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   getHostedLinqChatHandles: mocks.getHostedLinqChatHandles,
+  isHostedLinqAttachmentSendPrepareFailure: (error: unknown) =>
+    Boolean(
+      error
+      && typeof error === "object"
+      && (error as { details?: { phase?: string } }).details?.phase === "prepare",
+    ),
   sendHostedLinqAttachmentMessage: mocks.sendHostedLinqAttachmentMessage,
 }));
 
@@ -52,6 +59,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-contact-card", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
+  releaseHostedLinqContactCardShareAttempt: mocks.releaseHostedLinqContactCardShareAttempt,
   reserveHostedLinqContactCardShareAttempt: mocks.reserveHostedLinqContactCardShareAttempt,
 }));
 
@@ -330,7 +338,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       core: { suspendedAt: null },
     });
     mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue(null);
-    mocks.reserveHostedLinqContactCardShareAttempt.mockResolvedValue({ action: "share" });
+    mocks.releaseHostedLinqContactCardShareAttempt.mockResolvedValue(undefined);
+    mocks.reserveHostedLinqContactCardShareAttempt.mockResolvedValue({
+      action: "share",
+      attemptedAt: new Date("2026-07-02T12:00:00Z"),
+    });
     mocks.resolveMurphHostedLinqContactCardBackupPhoneNumber.mockResolvedValue("+15558880000");
     mocks.sendHostedLinqAttachmentMessage.mockResolvedValue({
       chatId: "chat_group_1",
@@ -517,8 +529,8 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 
-  it("reports a failed provider send without retry side effects", async () => {
-    mocks.sendHostedLinqAttachmentMessage.mockRejectedValue(new Error("upload failed"));
+  it("keeps the reservation for an ambiguous message-send failure", async () => {
+    mocks.sendHostedLinqAttachmentMessage.mockRejectedValue(new Error("send maybe delivered"));
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -530,5 +542,66 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "send_failed",
       },
     });
+
+    expect(mocks.releaseHostedLinqContactCardShareAttempt).not.toHaveBeenCalled();
+  });
+
+  it("releases the reservation when the failure provably happened before the send", async () => {
+    const prepareFailure = Object.assign(new Error("upload failed"), {
+      details: { phase: "prepare" },
+    });
+    mocks.sendHostedLinqAttachmentMessage.mockRejectedValue(prepareFailure);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "share_contact_card", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "send_failed",
+      },
+    });
+
+    expect(mocks.releaseHostedLinqContactCardShareAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attemptedAt: new Date("2026-07-02T12:00:00Z"),
+        chatId: "chat_group_1",
+        memberId: "member_container",
+      }),
+    );
+  });
+
+  it("reports membership lookup trouble as structured unavailability", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockRejectedValue(new Error("identity store down"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "read_chat_participants",
+      result: {
+        participants: null,
+        status: "unavailable",
+        unavailableReason: "membership_lookup_unavailable",
+      },
+    });
+  });
+
+  it("treats an empty roster on share as provider trouble rather than a missing line", async () => {
+    mocks.getHostedLinqChatHandles.mockResolvedValue([]);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "share_contact_card", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    });
+
+    expect(mocks.reserveHostedLinqContactCardShareAttempt).not.toHaveBeenCalled();
   });
 });

@@ -18,6 +18,7 @@ import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/ho
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
 import {
   getHostedLinqChatHandles,
+  isHostedLinqAttachmentSendPrepareFailure,
   sendHostedLinqAttachmentMessage,
 } from "../hosted-onboarding/linq-client";
 import {
@@ -27,7 +28,10 @@ import {
   MURPH_CONTACT_CARD_VCF_FILE_NAME,
   resolveMurphHostedLinqContactCardBackupPhoneNumber,
 } from "../hosted-onboarding/linq-contact-card";
-import { reserveHostedLinqContactCardShareAttempt } from "../hosted-onboarding/linq-contact-card-share";
+import {
+  releaseHostedLinqContactCardShareAttempt,
+  reserveHostedLinqContactCardShareAttempt,
+} from "../hosted-onboarding/linq-contact-card-share";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
@@ -208,23 +212,29 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
 
   const prisma = getPrisma();
   const participants: HostedRuntimeGroupChatParticipant[] = [];
-  for (const handle of handles) {
-    if (handle.isMe) {
-      continue;
-    }
-    if (handle.status && handle.status.trim().toLowerCase() !== "active") {
-      continue;
-    }
-    if (participants.length >= HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX) {
-      break;
-    }
-    participants.push({
-      handle: handle.handle,
-      hasOwnMurph: await hasParticipantOwnMurphMembership({
+  try {
+    for (const handle of handles) {
+      if (handle.isMe) {
+        continue;
+      }
+      if (handle.status && handle.status.trim().toLowerCase() !== "active") {
+        continue;
+      }
+      if (participants.length >= HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX) {
+        break;
+      }
+      participants.push({
         handle: handle.handle,
-        prisma,
-      }),
-    });
+        hasOwnMurph: await hasParticipantOwnMurphMembership({
+          handle: handle.handle,
+          prisma,
+        }),
+      });
+    }
+  } catch {
+    // A failed identity lookup must not degrade into a guessed hasOwnMurph
+    // value or an unstructured route error.
+    return unavailable("membership_lookup_unavailable");
   }
 
   return {
@@ -279,22 +289,28 @@ async function handleHostedRuntimeGroupShareContactCard(input: {
   }
 
   let linePhoneNumber: string | null = null;
+  let rosterPresent = false;
   try {
     const handles = await getHostedLinqChatHandles({ chatId: authorized.chatId });
+    rosterPresent = handles.length > 0;
     linePhoneNumber = normalizePhoneNumber(
       handles.find((handle) => handle.isMe)?.handle ?? null,
     );
   } catch {
     return unavailable("provider_unavailable");
   }
+  if (!rosterPresent) {
+    return unavailable("provider_unavailable");
+  }
   if (!linePhoneNumber) {
     return unavailable("line_unresolved");
   }
 
+  const prisma = getPrisma();
   const reservation = await reserveHostedLinqContactCardShareAttempt({
     chatId: authorized.chatId,
     memberId: input.memberId,
-    prisma: getPrisma(),
+    prisma,
   });
   if (reservation.action !== "share") {
     if (reservation.reason === "recent_attempt") {
@@ -329,7 +345,21 @@ async function handleHostedRuntimeGroupShareContactCard(input: {
       // The chat id is Linq's own identifier, so no new exposure.
       idempotencyKey: `group-contact-card:${authorized.chatId}:${new Date().toISOString().slice(0, 10)}`,
     });
-  } catch {
+  } catch (error) {
+    if (isHostedLinqAttachmentSendPrepareFailure(error)) {
+      // Nothing reached the chat; free the 48h reservation so a later retry
+      // is not locked out. Ambiguous message-send failures keep it.
+      try {
+        await releaseHostedLinqContactCardShareAttempt({
+          attemptedAt: reservation.attemptedAt,
+          chatId: authorized.chatId,
+          memberId: input.memberId,
+          prisma,
+        });
+      } catch {
+        // Best effort: a stuck reservation only delays the next attempt.
+      }
+    }
     return unavailable("send_failed");
   }
 

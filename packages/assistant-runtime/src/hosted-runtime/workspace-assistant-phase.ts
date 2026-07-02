@@ -235,12 +235,12 @@ function resolveHostedGroupToolLinqThreadContext(
       continue;
     }
     eligible.set(
-      [
+      JSON.stringify([
         authority.channel,
         authority.containerMemberId,
         authority.accountLookupKey,
         authority.threadId,
-      ].join(" "),
+      ]),
       {
         authority,
         chatId: authority.threadId,

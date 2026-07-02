@@ -85,7 +85,7 @@ export type HostedLinqContactCardShareDecision =
     };
 
 type HostedLinqContactCardShareReserveDecision =
-  | Extract<HostedLinqContactCardShareDecision, { action: "share" }>
+  | { action: "share"; attemptedAt: Date }
   | Extract<HostedLinqContactCardShareDecision, { action: "skip" }>;
 
 export async function maybeShareHostedLinqContactCardAfterOutboundForRuntime(input: {
@@ -322,6 +322,7 @@ export async function reserveHostedLinqContactCardShareAttempt(input: {
 
   return {
     action: "share",
+    attemptedAt: now,
   };
 }
 
@@ -426,7 +427,36 @@ async function createHostedLinqContactCardShareAttemptReservation(input: {
 
   return {
     action: "share",
+    attemptedAt: input.now,
   };
+}
+
+/**
+ * Undo a reservation whose share provably never reached the provider (for
+ * example the attachment upload failed before the message send started).
+ * Matching on the exact reservation instant keeps a concurrent newer
+ * reservation untouched. Ambiguous send failures must NOT release.
+ */
+export async function releaseHostedLinqContactCardShareAttempt(input: {
+  attemptedAt: Date;
+  chatId: string;
+  memberId: string;
+  prisma: HostedLinqContactCardSharePersistenceClient;
+}): Promise<void> {
+  const chatLookup = resolveHostedLinqContactCardShareLookup(input.chatId);
+  if (!chatLookup) {
+    return;
+  }
+  await input.prisma.hostedLinqContactCardShare.updateMany({
+    where: {
+      lastContactCardShareAttemptedAt: input.attemptedAt,
+      linqChatLookupKey: chatLookup.writeKey,
+      memberId: input.memberId,
+    },
+    data: {
+      lastContactCardShareAttemptedAt: null,
+    },
+  });
 }
 
 function logHostedLinqContactCardShareFailure(input: {

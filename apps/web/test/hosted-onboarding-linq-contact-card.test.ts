@@ -27,6 +27,10 @@ import {
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  isHostedLinqAttachmentSendPrepareFailure,
+  sendHostedLinqAttachmentMessage,
+} from "@/src/lib/hosted-onboarding/linq-client";
+import {
   buildMurphHostedLinqContactCardVcf,
   fetchMurphHostedLinqContactCardVcfPhoto,
   resolveMurphHostedLinqContactCardBackupPhoneNumber,
@@ -541,5 +545,55 @@ describe("resolveMurphHostedLinqContactCardBackupPhoneNumber", () => {
       excludePhoneNumber: "+15550000001",
       prisma: {} as never,
     })).resolves.toBeNull();
+  });
+});
+
+describe("sendHostedLinqAttachmentMessage failure phases", () => {
+  it("tags pre-send failures as prepare and leaves message-send failures ambiguous", async () => {
+    const attachmentCreated = createJsonResponse({
+      attachment_id: "att_1",
+      required_headers: { "content-type": "text/vcard" },
+      upload_url: "https://uploads.example.test/att_1",
+    });
+
+    // Attachment create fails: provably nothing was sent.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("nope", { status: 500 })));
+    let prepareError: unknown;
+    await sendHostedLinqAttachmentMessage({
+      bytes: new Uint8Array([1]),
+      chatId: "chat_group_1",
+      contentType: "text/vcard",
+      fileName: "Murph.vcf",
+    }).catch((error: unknown) => {
+      prepareError = error;
+    });
+    expect(isHostedLinqAttachmentSendPrepareFailure(prepareError)).toBe(true);
+
+    // Create + upload succeed, the final message POST fails: ambiguous.
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof URL ? input : new URL(String(input));
+      if (url.pathname.endsWith("/attachments")) {
+        return attachmentCreated.clone();
+      }
+      if (url.hostname === "uploads.example.test") {
+        return new Response(null, { status: 200 });
+      }
+      if (url.pathname.endsWith("/messages")) {
+        return new Response("nope", { status: 500 });
+      }
+      throw new Error(`Unexpected Linq URL ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    let sendError: unknown;
+    await sendHostedLinqAttachmentMessage({
+      bytes: new Uint8Array([1]),
+      chatId: "chat_group_1",
+      contentType: "text/vcard",
+      fileName: "Murph.vcf",
+    }).catch((error: unknown) => {
+      sendError = error;
+    });
+    expect(sendError).toBeTruthy();
+    expect(isHostedLinqAttachmentSendPrepareFailure(sendError)).toBe(false);
   });
 });
