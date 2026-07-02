@@ -1000,7 +1000,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("ignores Linq group chats before active-member or signup side effects", async () => {
+  it("ignores unbound Linq group chats from non-members before signup side effects", async () => {
     const prisma = asPrismaTransactionClient({
       hostedInvite: {
         create: vi.fn(),
@@ -1013,6 +1013,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMemberIdentity: {
         findFirst: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([]),
         findUnique: vi.fn(),
       },
       hostedMemberRouting: {
@@ -1060,8 +1061,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "group-chat",
     });
-    expect(prisma.hostedMemberIdentity.findFirst).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberIdentity.findUnique).not.toHaveBeenCalled();
+    // The sender identity read is expected (it gates auto-provisioning), but a
+    // non-member group message must produce no onboarding or runtime side effects.
+    expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledTimes(1);
     expect(prisma.hostedMemberRouting.findFirst).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.findUnique).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();

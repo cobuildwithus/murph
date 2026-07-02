@@ -411,6 +411,52 @@ function createRichUserMessageContent(
 }
 
 describe('buildAssistantAutoReplyPrompt', () => {
+  it('renders the group sender handle for linq thread-container inbound', () => {
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({
+        captureOverrides: { text: 'morning crew' },
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: true,
+          replyToMessageId: null,
+          senderHandle: '+15551110000',
+          service: 'iMessage',
+        },
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).toContain('Sender: +15551110000')
+    expect(result.prompt).toContain('Message text:\nmorning crew')
+  })
+
+  it('renders no sender line when linq metadata has no sender handle', () => {
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({
+        captureOverrides: { text: 'morning' },
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: false,
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: false,
+          replyToMessageId: null,
+          service: 'iMessage',
+        },
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).not.toContain('Sender:')
+  })
+
   it('renders parser status instead of deferring pending attachments', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({

@@ -358,6 +358,11 @@ const assistantInputLinqSourceMetadataSchema = z
     replyToMessageId: safeNullableAssistantInputTokenSchema(
       'sourceMetadata.replyToMessageId',
     ),
+    // Group (thread-container) inbound only: the sending participant's handle,
+    // so the assistant can attribute messages and detect being addressed.
+    senderHandle: privateAssistantInputRouteScalarSchema(
+      'sourceMetadata.senderHandle',
+    ).nullish(),
     service: safeNullableAssistantInputTokenSchema('sourceMetadata.service'),
   })
   .strict()
