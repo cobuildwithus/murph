@@ -1480,6 +1480,12 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
   return {
     ...result,
     afterCheckpoint: afterProviderCleanupCheckpoint,
+    // The appended post-checkpoint step can drain provider cleanup, so keep
+    // the foreground import loop alive: a fresh message arriving mid-drain
+    // must be importable so the drain's yield hook preempts instead of the
+    // wake being consumed with the loop already stopped (Hosted Foreground
+    // Priority).
+    afterCheckpointKeepsForegroundImportLoop: true,
     checkpointReason: result.progressed === true
       ? result.checkpointReason ?? "assistant_runtime_commit"
       : "provider_cleanup",
