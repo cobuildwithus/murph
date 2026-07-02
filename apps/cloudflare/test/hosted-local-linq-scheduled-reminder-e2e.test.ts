@@ -35,8 +35,11 @@ import {
 const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
-const scheduledReminderLeadMs = 30_000;
-const setupLeadText = "about thirty seconds";
+const overlapReminderText = "Time to sleep. This is the overlap reminder.";
+const overlapForegroundInboundText = "still there while the bedtime reminder is due?";
+const overlapForegroundReplyText = "Yep mate, I am here.";
+const scheduledReminderLeadMs = 45_000;
+const setupLeadText = "about forty-five seconds";
 const setupReplyText = `Done - I will remind you here in ${setupLeadText}.`;
 const setupRequestText = `Remind me here in ${setupLeadText} to go to sleep.`;
 const scheduledReminderMinimumRunwayMs = 5_000;
@@ -168,15 +171,119 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       memberId: userId,
       notBeforeIso: reminderCronUsageNotBeforeIso,
     });
+
+    const overlapSetupTimes = resolveScheduledReminderTimes();
+    const overlapSetupBaselineCount = requireLinqStub().countObservedSends(reminderPath);
+    requireScenario().queueAssistantResponses(
+      buildHostedAssistantAutomationSaveResponses({
+        dueAtIso: overlapSetupTimes.dueAtIso,
+        deliveryTarget: scheduledChatId,
+        requestId: `hosted-local-overlap-reminder-${userId}`,
+        text: setupReplyText,
+      }),
+    );
+    const overlapSetupWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      scheduledChatId,
+      {
+        eventId: `evt_scheduled_reminder_overlap_setup_${userId}`,
+        messageId: `msg_scheduled_reminder_overlap_setup_${userId}`,
+        text: setupRequestText,
+      },
+    ));
+    expect(overlapSetupWebhookResponse.status).toBe(202);
+    await requireScenario().waitForLatestPendingWake(userId);
+    const overlapSetupSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: overlapSetupBaselineCount,
+      expectedPath: reminderPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(overlapSetupSend)).toBe(setupReplyText);
+    const overlapSetupStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(overlapSetupStatus.lastErrorCode ?? null).toBeNull();
+    assertScheduledReminderRunway(overlapSetupTimes.dueAtIso);
+
+    const heldOverlapReminderResponse = createHeldAssistantProviderTextResponse(
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver overlap sleep reminder",
+        text: overlapReminderText,
+      }),
+    );
+    requireScenario().queueAssistantResponses([
+      heldOverlapReminderResponse.response,
+      overlapForegroundReplyText,
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver overlap sleep reminder after foreground reply",
+        text: overlapReminderText,
+      }),
+    ]);
+    const overlapProviderBaselineCount = countAssistantProviderResponsesApiRequests();
+    const overlapSendBaselineCount = requireLinqStub().countObservedSends(reminderPath);
+    try {
+      await sleepUntil(overlapSetupTimes.dueAtIso);
+
+      const overlapScheduledWakeResult = await requireScenario().waitForLatestPendingWake(userId);
+      expect(overlapScheduledWakeResult.kind).toBe("runtime_processing_accepted");
+      await heldOverlapReminderResponse.started;
+      const overlapForegroundWebhookResponse = await postSignedLinqWebhook(
+        buildHostedLinqInboundEvent(
+          userId,
+          scheduledChatId,
+          {
+            eventId: `evt_scheduled_reminder_overlap_foreground_${userId}`,
+            messageId: `msg_scheduled_reminder_overlap_foreground_${userId}`,
+            text: overlapForegroundInboundText,
+          },
+        ),
+      );
+      expect(overlapForegroundWebhookResponse.status).toBe(202);
+      await waitForAssistantProviderResponsesApiRequestCount(
+        overlapProviderBaselineCount + 2,
+        userId,
+      );
+      const foregroundOverlapProviderRequest =
+        listAssistantProviderResponsesApiRequests()[overlapProviderBaselineCount + 1];
+      await assertAssistantProviderRequestContainsText({
+        baselineCount: overlapProviderBaselineCount,
+        expectedText: overlapForegroundInboundText,
+        request: foregroundOverlapProviderRequest,
+        userId,
+      });
+
+      const overlapForegroundSend = await requireLinqStub().waitForAdditionalSend({
+        baselineCount: overlapSendBaselineCount,
+        expectedPath: reminderPath,
+        scenario: requireScenario(),
+        userId,
+      });
+      expect(requireLinqStub().readObservedMessageText(overlapForegroundSend))
+        .toBe(overlapForegroundReplyText);
+      heldOverlapReminderResponse.release();
+      const overlapReminderSend = await requireLinqStub().waitForAdditionalSend({
+        baselineCount: overlapSendBaselineCount + 1,
+        expectedPath: reminderPath,
+        scenario: requireScenario(),
+        userId,
+      });
+      expect(requireLinqStub().readObservedMessageText(overlapReminderSend))
+        .toBe(overlapReminderText);
+      const overlapFinalStatus = await requireScenario().waitForHostedCompletion(userId, {
+        timeoutMs: scheduledReminderCompletionWaitMs,
+      });
+      expect(overlapFinalStatus.lastErrorCode ?? null).toBeNull();
+    } finally {
+      heldOverlapReminderResponse.release();
+    }
   }, 720_000);
 });
 
 describe("hosted local Linq scheduled reminder timing helpers", () => {
-  it("uses a thirty-second lead", () => {
+  it("uses a forty-five-second lead", () => {
     const now = new Date("2026-06-18T12:00:00.000Z");
 
     expect(resolveScheduledReminderTimes(now)).toEqual({
-      dueAtIso: "2026-06-18T12:00:30.000Z",
+      dueAtIso: "2026-06-18T12:00:45.000Z",
     });
     expect(scheduledReminderLeadMs).toBeGreaterThan(scheduledReminderMinimumRunwayMs);
   });
@@ -233,6 +340,89 @@ function summarizeAssistantProviderRequest(
       : null,
     url: request.url,
   };
+}
+
+function countAssistantProviderResponsesApiRequests(): number {
+  return listAssistantProviderResponsesApiRequests().length;
+}
+
+function listAssistantProviderResponsesApiRequests(): HostedLocalAssistantProviderStubRequest[] {
+  return requireScenario().assistantProviderRequests.filter((request) =>
+    request.method === "POST" && request.url === "/v1/responses"
+  );
+}
+
+async function waitForAssistantProviderResponsesApiRequestCount(
+  minimumCount: number,
+  userId: string,
+): Promise<void> {
+  const startedAt = Date.now();
+  while ((Date.now() - startedAt) < scheduledReminderSendWaitMs) {
+    if (countAssistantProviderResponsesApiRequests() >= minimumCount) {
+      return;
+    }
+
+    await sleep(250);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(userId, [
+    "Timed out waiting for hosted assistant provider request count.",
+    `expected minimum count: ${minimumCount}`,
+    `actual count: ${countAssistantProviderResponsesApiRequests()}`,
+  ]));
+}
+
+function readAssistantProviderRequestText(request: { body: string }): string {
+  return collectJsonStrings(JSON.parse(request.body)).join("\n\n");
+}
+
+async function assertAssistantProviderRequestContainsText(input: {
+  baselineCount: number;
+  expectedText: string;
+  request: HostedLocalAssistantProviderStubRequest | undefined;
+  userId: string;
+}): Promise<void> {
+  if (!input.request) {
+    throw new Error(await requireScenario().buildFailureMessage(input.userId, [
+      "Expected an overlap provider request, but none was recorded.",
+      `provider request baseline count: ${input.baselineCount}`,
+      `actual provider response API request count: ${countAssistantProviderResponsesApiRequests()}`,
+    ]));
+  }
+
+  const requestText = readAssistantProviderRequestText(input.request);
+  if (requestText.includes(input.expectedText)) {
+    return;
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(input.userId, [
+    "First overlap provider request was not the foreground reply request.",
+    `provider request baseline count: ${input.baselineCount}`,
+    `first request summary: ${JSON.stringify(summarizeAssistantProviderRequest(input.request))}`,
+    `first request contains foreground text: ${String(requestText.includes(overlapForegroundInboundText))}`,
+    `first request contains overlap reminder text: ${String(requestText.includes(overlapReminderText))}`,
+    `recent request summaries: ${JSON.stringify(
+      listAssistantProviderResponsesApiRequests()
+        .slice(input.baselineCount, input.baselineCount + 4)
+        .map(summarizeAssistantProviderRequest),
+    )}`,
+  ]));
+}
+
+function collectJsonStrings(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectJsonStrings(entry));
+  }
+
+  if (isRecord(value)) {
+    return Object.values(value).flatMap((entry) => collectJsonStrings(entry));
+  }
+
+  return [];
 }
 
 async function assertScheduledReminderCronUsagePricingMatchedProviderRequest(input: {
@@ -306,12 +496,14 @@ async function startScenario(): Promise<void> {
     requiredRunnerEnvProfile: "linq",
     scenarioLabel: "Local hosted Linq scheduled reminder e2e",
     streamLogs: streamDevLogs,
+    testControls: true,
   });
 }
 
 function buildHostedAssistantAutomationSaveResponses(input: {
   deliveryTarget: string;
   dueAtIso: string;
+  requestId?: string;
   text: string;
 }): readonly HostedLocalAssistantProviderScriptedResponse[] {
   return [
@@ -320,7 +512,7 @@ function buildHostedAssistantAutomationSaveResponses(input: {
       "save",
       "Sleep reminder",
       "--request-id",
-      `hosted-local-reminder-${userId}`,
+      input.requestId ?? `hosted-local-reminder-${userId}`,
       "--instructions",
       "Send the user a short reminder to go to sleep.",
       "--summary",
@@ -342,6 +534,31 @@ function buildHostedAssistantAutomationSaveResponses(input: {
     ]),
     input.text,
   ];
+}
+
+function createHeldAssistantProviderTextResponse(text: string): {
+  release: () => void;
+  response: HostedLocalAssistantProviderScriptedResponse;
+  started: Promise<void>;
+} {
+  let release = (): void => {};
+  let markStarted = (): void => {};
+  const releasePromise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+
+  return {
+    release,
+    response: {
+      beforeResponse: () => releasePromise,
+      onResponseStarted: markStarted,
+      text,
+    },
+    started,
+  };
 }
 
 function buildActivationWake(memberId: string) {

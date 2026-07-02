@@ -210,6 +210,49 @@ describe("runtime invocation transport failure fence handling", () => {
     ]);
   });
 
+  it("keeps the accepted write fence when liveness fails even if committed progress is visible", async () => {
+    const readHostedRuntimeStatusFromWeb = vi.fn(async (userId: string) => ({
+      mailboxLag: [],
+      userId,
+      workspace: {
+        createdAt: FIXED_NOW,
+        nextWakeAt: null,
+        nextWakeReason: null,
+        redactedStatus: {},
+        snapshotRef: null,
+        updatedAt: FIXED_NOW,
+        userId,
+        version: "1",
+      },
+    }));
+    const harness = await createTransportFailureHarness({
+      readActiveRuntimeUserFence: async () => {
+        throw new Error("container health still active");
+      },
+      readHostedRuntimeStatusFromWeb,
+    });
+
+    await expect(harness.invoke()).rejects.toThrow("container transport failed");
+
+    await expect(harness.stateStore.readWriteFenceToken()).resolves.toEqual(
+      expect.objectContaining({
+        attemptId: harness.token.attemptId,
+        userId: TEST_USER_ID,
+      }),
+    );
+    expect(harness.loggedFailureEntries()).toEqual([
+      expect.objectContaining({
+        eventCode: "runner.accepted_attempt_failed",
+        redactedJson: expect.objectContaining({
+          attemptLivenessProbeOutcome: "error",
+          attemptStillActive: false,
+          fenceCleared: false,
+        }),
+      }),
+    ]);
+    expect(readHostedRuntimeStatusFromWeb).not.toHaveBeenCalled();
+  });
+
   it("keeps the accepted write fence when the liveness probe hangs past its timeout but progress is not durable yet", async () => {
     const harness = await createTransportFailureHarness({
       readActiveRuntimeUserFence: () =>
@@ -245,6 +288,20 @@ describe("runtime invocation transport failure fence handling", () => {
   });
 
   it("clears the write fence when only the lease generation differs", async () => {
+    const readHostedRuntimeStatusFromWeb = vi.fn(async (userId: string) => ({
+      mailboxLag: [],
+      userId,
+      workspace: {
+        createdAt: FIXED_NOW,
+        nextWakeAt: "2026-06-11T00:05:00.000Z",
+        nextWakeReason: "scheduled_wake",
+        redactedStatus: { lastTurn: "ok" },
+        snapshotRef: null,
+        updatedAt: FIXED_NOW,
+        userId,
+        version: "1",
+      },
+    }));
     const harness = await createTransportFailureHarness({
       readActiveRuntimeUserFence: async (token) => ({
         active: true,
@@ -252,11 +309,13 @@ describe("runtime invocation transport failure fence handling", () => {
         leaseGeneration: "999",
         userId: TEST_USER_ID,
       }),
+      readHostedRuntimeStatusFromWeb,
     });
 
     await expect(harness.invoke()).rejects.toThrow("container transport failed");
 
     await expect(harness.stateStore.readWriteFenceToken()).resolves.toBeNull();
+    expect(readHostedRuntimeStatusFromWeb).not.toHaveBeenCalled();
     expect(harness.loggedFailureEntries()).toEqual([
       expect.objectContaining({
         eventCode: "runner.accepted_attempt_failed",
@@ -510,13 +569,23 @@ function createFailingInvokeContainerNamespace(input: {
     | (() => Promise<WorkerActiveRuntimeUserFenceResult>)
     | null;
 }): HostedExecutionContainerNamespaceLike {
+  const readActiveRuntimeUserFenceInput = input.readActiveRuntimeUserFence;
   const stub: HostedExecutionContainerStubLike = {
     destroyInstance: async () => {},
     invoke: async () => {
       throw new Error("container transport failed");
     },
-    ...(input.readActiveRuntimeUserFence
-      ? { readActiveRuntimeUserFence: input.readActiveRuntimeUserFence }
+    ...(readActiveRuntimeUserFenceInput
+      ? {
+          readActiveRuntimeUserFence: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["readActiveRuntimeUserFence"]>
+          >(
+            async function (this: HostedExecutionContainerStubLike) {
+              expect(this).toBe(stub);
+              return await readActiveRuntimeUserFenceInput.call(this);
+            },
+          ),
+        }
       : {}),
     smokeHealth: async () => ({
       ok: true,
@@ -528,6 +597,20 @@ function createFailingInvokeContainerNamespace(input: {
   return {
     getByName: () => stub,
   };
+}
+
+function createDirectOnlyRpcMethod<T extends (...args: never[]) => unknown>(
+  method: T,
+): T {
+  return new Proxy(method, {
+    get(target, property, receiver) {
+      if (property === "call" || property === "apply" || property === "bind") {
+        throw new TypeError("Cloudflare Durable Object RPC methods must be invoked directly on the stub.");
+      }
+
+      return Reflect.get(target, property, receiver);
+    },
+  });
 }
 
 function createHostedExecutionEnvironment() {

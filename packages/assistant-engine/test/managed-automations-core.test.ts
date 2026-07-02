@@ -5,11 +5,15 @@ import {
   showAutomation,
   upsertAutomation,
 } from '@murphai/core'
+import {
+  HOSTED_RUNTIME_PROCESS_ENV,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
+  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
@@ -203,6 +207,11 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(researchScoutRecord?.instructions).toContain('do not use a generic `tags` field')
     expect(researchScoutRecord?.instructions).toContain('YYYY-MM-DD dates or full ISO timestamps are accepted')
     expect(researchScoutRecord?.instructions).toContain('Suppress the scheduled message')
+    expect(researchScoutRecord?.instructions).toContain('The unit of value is the insight, not the paper')
+    expect(researchScoutRecord?.instructions).toContain('The scout-batch call is the retrieval budget')
+    expect(researchScoutRecord?.instructions).toContain('Recent conversation and automation/regimen changes are veto context')
+    expect(researchScoutRecord?.instructions).toContain('incremental value beyond known basics')
+    expect(researchScoutRecord?.instructions).toContain('Do not reuse the provider candidate\'s `actionOrQuestion` as advice')
 
     const productUpdatesRecord = await showAutomation({
       automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
@@ -242,6 +251,68 @@ describe('applyMurphManagedAutomations core integration', () => {
       '{"kind":"skip","privateSummary":"Changelog feed unavailable or empty."}',
     )
     expect(productUpdatesRecord?.instructions).not.toContain('finish_without_reply')
+    await expect(showAutomation({
+      automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toBeNull()
+  })
+
+  it('creates hosted overnight memory consolidation through the canonical automation registry', async () => {
+    const vaultRoot = await createVaultRoot()
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      runtimeEnv: {
+        [HOSTED_RUNTIME_PROCESS_ENV]: '1',
+        EXA_API_KEY: 'fixture-exa-key',
+      },
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 5,
+      skipped: 0,
+      updated: 0,
+    })
+
+    await expect(showAutomation({
+      automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      assistantTargetOverride: {
+        reasoningEffort: 'medium',
+      },
+      continuityPolicy: 'fresh',
+      route: defaultRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '0 3 * * 1,3,5',
+      },
+      slug: 'overnight-memory-consolidation',
+      status: 'active',
+      tags: expect.arrayContaining([
+        'murph-managed:overnight-memory-consolidation',
+        'runtime-maintenance',
+      ]),
+      title: 'Overnight memory consolidation',
+    })
+    const automation = await showAutomation({
+      automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      vaultRoot,
+    })
+    if (automation === null) {
+      throw new Error('Expected overnight memory consolidation automation')
+    }
+    expect(automation.instructions).toContain('Goal: consolidate durable user context')
+    expect(automation.instructions).toContain(
+      'engine-supplied "Conversation evidence" section',
+    )
+    expect(automation.instructions).toContain(
+      'bounded committed user and assistant conversation messages from the last 7 days',
+    )
+    expect(automation.instructions).toContain('supplied conversation evidence')
+    expect(automation.instructions).toContain('Do not read transcript files or session storage')
+    expect(automation.instructions).toContain('Do not save assistant speculation')
   })
 
   it('creates managed health automations for hosted email targets without a local sender identity', async () => {

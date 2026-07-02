@@ -2756,7 +2756,7 @@ function createPendingInvite(overrides: Partial<{
     acceptedByMemberId: null,
     channel: "family",
     createdAt: new Date("2026-06-18T12:00:00.000Z"),
-    expiresAt: new Date("2026-07-01T12:00:00.000Z"),
+    expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
     group: {
       billingStatus: HostedBillingStatus.active,
       id: "hbag_family",

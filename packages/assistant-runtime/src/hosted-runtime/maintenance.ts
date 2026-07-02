@@ -190,6 +190,7 @@ export async function runHostedAssistantAutomationLane(input: {
   assistantRuntimeState?: HostedAssistantRuntimeReadinessState | null;
   buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
   runtimeEnv?: Readonly<Record<string, string>>;
+  shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   signal?: AbortSignal;
   skipAssistantAutomation?: boolean;
   vaultRoot: string;
@@ -229,6 +230,12 @@ export async function runHostedAssistantAutomationLane(input: {
             input.buildBackgroundDynamicContextPrompt,
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           runtimeAttemptId: input.runtimeAttemptId ?? null,
+          ...(input.shouldYieldBackgroundMaintenance
+            ? {
+                shouldYieldBackgroundMaintenance:
+                  input.shouldYieldBackgroundMaintenance,
+              }
+            : {}),
         },
       )
     : {
@@ -281,6 +288,7 @@ export async function runHostedAssistantAutomation(
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     runtimeAttemptId?: string | null;
+    shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   },
 ): Promise<{
   currentTurnDeliveryIntentIds: string[];
@@ -330,6 +338,11 @@ export async function runHostedAssistantAutomation(
     selectedInputIds: selectedInputIds.inputIds,
     vaultRoot,
   });
+  const shouldDeferCronForSelectedForegroundInput =
+    selectedInputIds.mode === "foreground" && selectedInputIds.inputIds.length > 0;
+  const shouldDeferCron = shouldDeferCronForSelectedForegroundInput
+    ? () => true
+    : options?.shouldYieldBackgroundMaintenance;
   const inputSource: AssistantInputSource = {
     ...baseInputSource,
     async listInputCandidates(query) {
@@ -494,7 +507,9 @@ export async function runHostedAssistantAutomation(
       vaultServices,
       maxPerScan,
       requestId,
+      ...(shouldDeferCron ? { shouldDeferCron } : {}),
       signal,
+      shouldYieldBackgroundMaintenance: options?.shouldYieldBackgroundMaintenance ?? null,
       inputSource,
       turnEnvironment: turnEnvironment ?? null,
       vault: vaultRoot,

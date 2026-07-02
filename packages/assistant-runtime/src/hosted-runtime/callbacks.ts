@@ -1423,9 +1423,13 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
   linqEgressLatencyTrace?: HostedAssistantLinqEgressLatencyTrace | null;
+  onBackgroundDeliveryYield?: (input: {
+    yieldedEffectCount: number;
+  }) => void;
   platformEnv?: Readonly<Record<string, string>>;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
+  shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal?: AbortSignal | null;
   userEnv?: Readonly<Record<string, string>>;
   vaultRoot: string;
@@ -1464,6 +1468,13 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
     const assistantDeliveryEffect = input.assistantDeliveryEffects[index];
     if (!assistantDeliveryEffect) {
       continue;
+    }
+    if (await maybeYieldHostedPreparedAssistantDeliveryDrain({
+      effects: input.assistantDeliveryEffects.slice(index),
+      input,
+      preparedDispatchByIntentId,
+    })) {
+      break;
     }
     if (blockedForegroundDeliveryKeys.has(
       readHostedAssistantDeliveryEffectBoundaryKey(assistantDeliveryEffect),
@@ -1505,6 +1516,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         assertLiveness: input.assertLiveness,
         assistantDeliveryEffect,
         signal: input.signal ?? null,
+        shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery ?? null,
         linqEnv,
         linqDeliveryContexts,
         linqEgressLatencyTrace: input.linqEgressLatencyTrace ?? null,
@@ -1522,9 +1534,22 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
         preparedDispatchByIntentId,
         vaultRoot: input.vaultRoot,
       });
+      if (isHostedBackgroundDeliveryYieldedError(error)) {
+        input.onBackgroundDeliveryYield?.({
+          yieldedEffectCount: input.assistantDeliveryEffects.length - index,
+        });
+        break;
+      }
       throw error;
     }
     outcomes.push(outcome);
+    if (await maybeYieldHostedPreparedAssistantDeliveryDrain({
+      effects: input.assistantDeliveryEffects.slice(index + 1),
+      input,
+      preparedDispatchByIntentId,
+    })) {
+      break;
+    }
     if (shouldBlockLaterHostedAssistantForegroundDeliveries({
       effect: assistantDeliveryEffect,
       outcome,
@@ -1546,6 +1571,29 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   }
 
   return outcomes;
+}
+
+async function maybeYieldHostedPreparedAssistantDeliveryDrain(input: {
+  effects: readonly HostedAssistantDeliveryEffect[];
+  input: Pick<
+    Parameters<typeof drainHostedPreparedAssistantDeliveries>[0],
+    "onBackgroundDeliveryYield" | "shouldYieldBackgroundDelivery" | "vaultRoot"
+  >;
+  preparedDispatchByIntentId: ReadonlyMap<string, HostedAssistantDeliveryPreparedDispatch>;
+}): Promise<boolean> {
+  if (input.input.shouldYieldBackgroundDelivery?.() !== true) {
+    return false;
+  }
+
+  await resetHostedPreparedAssistantDeliveryEffects({
+    effects: input.effects,
+    preparedDispatchByIntentId: input.preparedDispatchByIntentId,
+    vaultRoot: input.input.vaultRoot,
+  });
+  input.input.onBackgroundDeliveryYield?.({
+    yieldedEffectCount: input.effects.length,
+  });
+  return true;
 }
 
 function shouldBlockLaterHostedAssistantForegroundDeliveries(input: {
@@ -1581,6 +1629,43 @@ function markHostedDeliveryMayHaveSucceeded(error: unknown): unknown {
   return Object.assign(new Error("Hosted provider delivery may have succeeded."), {
     deliveryMayHaveSucceeded: true,
   });
+}
+
+class HostedBackgroundDeliveryYieldedError extends VaultCliError {
+  constructor() {
+    super(
+      "HOSTED_BACKGROUND_DELIVERY_YIELDED",
+      "Hosted background delivery yielded to fresh foreground input.",
+      {
+        assistantDeliveryFailureClass: "transient",
+        assistantDeliveryResumeTrigger: "fresh_foreground_input",
+        retryable: true,
+      },
+    );
+  }
+}
+
+function isHostedBackgroundDeliveryYieldedError(
+  error: unknown,
+): error is HostedBackgroundDeliveryYieldedError {
+  return error instanceof HostedBackgroundDeliveryYieldedError;
+}
+
+function assertHostedBackgroundDeliveryNotYielded(input: {
+  shouldYieldBackgroundDelivery?: (() => boolean) | null;
+}): void {
+  if (input.shouldYieldBackgroundDelivery?.() === true) {
+    throw new HostedBackgroundDeliveryYieldedError();
+  }
+}
+
+async function assertHostedDeliveryCanEnterProvider(input: {
+  assertLiveness?: () => Promise<void>;
+  shouldYieldBackgroundDelivery?: (() => boolean) | null;
+  signal: AbortSignal | null;
+}): Promise<void> {
+  await assertHostedDeliveryLiveNow(input);
+  assertHostedBackgroundDeliveryNotYielded(input);
 }
 
 function isHostedAssistantReactionOnlyEffect(
@@ -1640,6 +1725,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   assertLiveness?: () => Promise<void>;
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
   signal: AbortSignal | null;
+  shouldYieldBackgroundDelivery: (() => boolean) | null;
   linqEnv: NodeJS.ProcessEnv;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
   linqEgressLatencyTrace: HostedAssistantLinqEgressLatencyTrace | null;
@@ -1689,6 +1775,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
     const linqDeliveryContexts = input.preparedDispatch?.linqDeliveryContext
       ? [input.preparedDispatch.linqDeliveryContext, ...input.linqDeliveryContexts]
       : input.linqDeliveryContexts;
+    assertHostedBackgroundDeliveryNotYielded(input);
     const dispatched = await dispatchAssistantOutboxIntent({
       dispatchHooks: {
         preflightDispatchIntent: async ({ intent, now: preflightNow, vault }) =>
@@ -1698,6 +1785,9 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             now: preflightNow,
             vaultRoot: vault,
           }),
+        shouldRethrowDispatchError: ({ error }) =>
+          input.preparedDispatch !== null
+          && isHostedBackgroundDeliveryYieldedError(error),
       },
       dependencies: {
         sendEmail: async (request) => {
@@ -1708,7 +1798,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             );
           }
 
-          await assertHostedDeliveryLiveNow(input);
+          await assertHostedDeliveryCanEnterProvider(input);
           providerDispatchEntered = true;
           // The binding identityId is a privacy-blinded conversation identifier,
           // never a sender address. Hosted email always sends from the
@@ -1725,7 +1815,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           return result;
         },
         sendTelegram: async (request) => {
-          await assertHostedDeliveryLiveNow(input);
+          await assertHostedDeliveryCanEnterProvider(input);
           const dependencies = requireHostedProviderFetchDependencies({
             env: input.telegramEnv,
             fetchImplementation: input.providerFetch,
@@ -1737,7 +1827,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           return result;
         },
         sendTelegramImage: async (request) => {
-          await assertHostedDeliveryLiveNow(input);
+          await assertHostedDeliveryCanEnterProvider(input);
           const dependencies = requireHostedProviderFetchDependencies({
             env: input.telegramEnv,
             fetchImplementation: input.providerFetch,
@@ -1757,7 +1847,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           return result;
         },
         setTelegramMessageReaction: async (request) => {
-          await assertHostedDeliveryLiveNow(input);
+          await assertHostedDeliveryCanEnterProvider(input);
           const dependencies = requireHostedProviderFetchDependencies({
             env: input.telegramEnv,
             fetchImplementation: input.providerFetch,
@@ -1772,6 +1862,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           env: input.telegramVoiceMemoEnv,
           fetchImplementation: createHostedProviderFetchBoundary({
             assertLive: () => assertHostedDeliveryLiveNow(input),
+            assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
             onTelegramVoiceMemoDispatchEntered: () => {
               providerDispatchEntered = true;
             },
@@ -1789,6 +1880,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
           linqEgressLatencyTrace: input.linqEgressLatencyTrace,
+          shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
@@ -1802,6 +1894,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
           linqEgressLatencyTrace: input.linqEgressLatencyTrace,
+          shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
           },
@@ -1810,7 +1903,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           signal: input.signal,
         }),
         setLinqMessageReaction: async (request) => {
-          await assertHostedDeliveryLiveNow(input);
           const deliveryContext = resolveHostedAssistantLinqReactionDeliveryContextFromCandidatesForRequest({
             contexts: linqDeliveryContexts,
             target: request.target,
@@ -1830,6 +1922,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             targetKind: "thread",
           });
           let reactionProviderDispatchEntered = false;
+          await assertHostedDeliveryCanEnterProvider(input);
           const result = await setHostedProviderLinqMessageReaction({
             reaction: request.reaction,
             targetMessageId: request.targetMessageId,
@@ -1861,7 +1954,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           };
         },
         sendWhatsApp: async (request) => {
-          await assertHostedDeliveryLiveNow(input);
+          await assertHostedDeliveryCanEnterProvider(input);
           const dependencies = requireHostedProviderFetchDependencies({
             env: input.whatsAppEnv,
             fetchImplementation: input.providerFetch,
@@ -1929,6 +2022,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   } catch (error) {
     if (input.preparedDispatch && shouldResetHostedPreparedDeliveryOnPreProviderAbort({
       assistantDeliveryEffect: input.assistantDeliveryEffect,
+      error,
       mirrorState,
       providerDispatchEntered,
       signal: input.signal,
@@ -1986,6 +2080,7 @@ async function maybeResetHostedPreparedDeliveryAfterPreProviderAbort(input: {
   }
   if (!shouldResetHostedPreparedDeliveryOnPreProviderAbort({
     assistantDeliveryEffect: input.assistantDeliveryEffect,
+    error: null,
     mirrorState: input.mirrorState,
     providerDispatchEntered: input.providerDispatchEntered,
     signal: input.signal,
@@ -2017,11 +2112,12 @@ async function maybeResetHostedPreparedDeliveryAfterPreProviderAbort(input: {
 
 function shouldResetHostedPreparedDeliveryOnPreProviderAbort(input: {
   assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  error: unknown;
   mirrorState: Awaited<ReturnType<typeof readAssistantOutboxIntentMirrorState>>;
   providerDispatchEntered: boolean;
   signal: AbortSignal | null;
 }): boolean {
-  return input.signal?.aborted === true
+  return (input.signal?.aborted === true || isHostedBackgroundDeliveryYieldedError(input.error))
     && input.mirrorState.sendingStartedAt !== null
     && !input.mirrorState.intent?.delivery
     && input.mirrorState.intent?.deliveryConfirmationPending !== true
@@ -2030,12 +2126,13 @@ function shouldResetHostedPreparedDeliveryOnPreProviderAbort(input: {
 
 function createHostedProviderFetchBoundary(input: {
   assertLive?: () => Promise<void>;
+  assertProviderEntryLive?: () => Promise<void>;
   onTelegramVoiceMemoDispatchEntered?: () => void;
   operation: string;
   providerFetch: typeof fetch | null;
 }): typeof fetch {
   return (async (request, init) => {
-    await input.assertLive?.();
+    await (input.assertProviderEntryLive ?? input.assertLive)?.();
     const fetchImplementation = requireHostedProviderFetch(
       input.providerFetch,
       input.operation,
@@ -2104,6 +2201,7 @@ function createHostedAssistantLinqSendDependency(input: {
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
+  shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal: AbortSignal | null;
   vaultRoot?: string | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
@@ -2148,6 +2246,7 @@ function createHostedAssistantLinqSendDependency(input: {
       media: request.media ?? [],
       vaultRoot: input.vaultRoot ?? null,
     });
+    await assertHostedDeliveryCanEnterProvider(input);
     const attemptedAt = new Date();
     input.onProviderDispatchEntered?.();
     let result: HostedRuntimeLinqSendResponse;
@@ -2351,6 +2450,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   linqEnv: NodeJS.ProcessEnv;
   onProviderDispatchEntered?: () => void;
   providerFetch: typeof fetch | null;
+  shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal: AbortSignal | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinqVoiceMemo"]> {
   return async (request) => {
@@ -2381,6 +2481,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       target: providerTarget,
       targetKind: "thread",
     });
+    await assertHostedDeliveryCanEnterProvider(input);
     const attemptedAt = new Date();
     input.onProviderDispatchEntered?.();
     let result: HostedRuntimeLinqSendResponse;

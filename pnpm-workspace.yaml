@@ -64,7 +64,7 @@ overrides:
 minimumReleaseAgeExclude:
   - '@openai/codex@0.142.5||0.142.5-darwin-arm64||0.142.5-darwin-x64||0.142.5-linux-arm64||0.142.5-linux-x64||0.142.5-win32-arm64||0.142.5-win32-x64'
   - incur@0.4.4
-  - '@cobuild/review-gpt@0.5.94'
+  - '@cobuild/review-gpt@0.5.95'
   - fast-uri@3.1.2
   - fast-xml-builder@1.2.0
 nodeVersion: 24.14.1

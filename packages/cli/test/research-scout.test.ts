@@ -367,6 +367,7 @@ describe('research scout', () => {
       }
       query?: unknown
       startPublishedDate?: unknown
+      systemPrompt?: unknown
       type?: unknown
     }
     expect(requestBody.type).toBe('deep-reasoning')
@@ -376,7 +377,11 @@ describe('research scout', () => {
     expect(requestBody.numResults).toBe(2)
     expect(requestBody.query).toEqual(expect.stringContaining('sleep'))
     expect(requestBody.query).toEqual(expect.stringContaining('hs-crp'))
+    expect(requestBody.query).toEqual(expect.stringContaining('local context decides send-worthiness'))
     expect(requestBody.query).not.toEqual(expect.stringContaining('raw lab'))
+    expect(requestBody.systemPrompt).toEqual(expect.stringContaining('practical interpretive value'))
+    expect(requestBody.systemPrompt).toEqual(expect.stringContaining('not personalized medical advice or tasks to do'))
+    expect(requestBody.systemPrompt).toEqual(expect.stringContaining('not a behavior prescription'))
     expect(requestBody.outputSchema?.properties?.candidates?.maxItems).toBe(2)
     expect(
       requestBody.outputSchema?.properties?.candidates?.items?.properties?.resultIndex,

@@ -31,6 +31,9 @@ export type HostedVaultShareProjectionKind =
 export const HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA =
   "murph.vault-share.delivery.v1";
 
+export const HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA =
+  "murph.vault-share.revoke.v1";
+
 export const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS = 7;
 
 const HOSTED_VAULT_SHARE_RECORD_KEY_MAX_LENGTH = 128;
@@ -72,6 +75,14 @@ export interface HostedVaultShareDeliveryPayload {
   shareId: string;
 }
 
+export interface HostedVaultShareRevokePayload {
+  grantorMemberId: string;
+  projectionKind: HostedVaultShareProjectionKind;
+  revokedAt: string;
+  schema: typeof HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA;
+  shareId: string;
+}
+
 export function isHostedVaultShareProjectionKind(
   value: unknown,
 ): value is HostedVaultShareProjectionKind {
@@ -91,11 +102,24 @@ function parseHostedVaultShareProjectionKind(
   throw new TypeError(`${label} must be a known vault-share projection kind.`);
 }
 
+/**
+ * Delivery dedupe separates logical record identity from revision identity: recordKey is
+ * the stable destination replacement key, while recordRevision is the stable hash of the
+ * validated payload that lets corrected facts append without duplicating exact retries.
+ */
 export function buildHostedVaultShareDeliveryDedupeKey(input: {
   recordKey: string;
+  recordRevision: string;
   shareId: string;
 }): string {
-  return `vault-share:${input.shareId}:${input.recordKey}`;
+  return `vault-share:${input.shareId}:${input.recordKey}:${input.recordRevision}`;
+}
+
+export function buildHostedVaultShareRevokeDedupeKey(input: {
+  revokedAt: string;
+  shareId: string;
+}): string {
+  return `vault-share-revoke:${input.shareId}:${input.revokedAt}`;
 }
 
 export function parseHostedVaultShareDeliveryRecord(
@@ -260,6 +284,36 @@ export function parseHostedVaultShareDeliveryPayload(
     record: parseHostedVaultShareDeliveryRecord(payload.record, projectionKind),
     schema: HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
     shareId: requireString(payload.shareId, "Vault share delivery payload shareId"),
+  };
+}
+
+export function parseHostedVaultShareRevokePayload(
+  value: unknown,
+): HostedVaultShareRevokePayload {
+  const payload = requireObject(value, "Vault share revoke payload");
+  const schema = requireString(payload.schema, "Vault share revoke payload schema");
+
+  if (schema !== HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA) {
+    throw new TypeError(
+      `Vault share revoke payload schema must be ${HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA}.`,
+    );
+  }
+
+  return {
+    grantorMemberId: requireString(
+      payload.grantorMemberId,
+      "Vault share revoke payload grantorMemberId",
+    ),
+    projectionKind: parseHostedVaultShareProjectionKind(
+      payload.projectionKind,
+      "Vault share revoke payload projectionKind",
+    ),
+    revokedAt: requireIsoTimestamp(
+      payload.revokedAt,
+      "Vault share revoke payload revokedAt",
+    ),
+    schema: HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
+    shareId: requireString(payload.shareId, "Vault share revoke payload shareId"),
   };
 }
 

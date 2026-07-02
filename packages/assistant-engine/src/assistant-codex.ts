@@ -3608,22 +3608,27 @@ async function runCodexAppServerTurnOnProcess(
 
     lifecycleStage = 'turn_start'
     codexProcess.noteBoundThreadServiceTier(input.serviceTier ?? null)
+    const turnStartRequest = sendRequest(
+      'turn/start',
+      buildCodexTurnStartParams({
+        input,
+        imagePaths: input.imagePaths,
+        codexThreadId,
+      }),
+    )
+    // The child can begin executing (including side-effecting commands) as
+    // soon as the turn/start request is written, so the provider-start
+    // barrier arms here rather than at the acknowledgement. A death between
+    // write and response must never be classified as pre-provider work.
+    notifyProviderRequestStarted()
     const turnResult = await withCodexRpcTimeout(
-      sendRequest(
-        'turn/start',
-        buildCodexTurnStartParams({
-          input,
-          imagePaths: input.imagePaths,
-          codexThreadId,
-        }),
-      ),
+      turnStartRequest,
       CODEX_RPC_DEFAULT_TIMEOUT_MS,
       'turn/start',
     )
     acceptTurnStartResultTurnId(extractCodexTurnIdFromResult(turnResult))
     lifecycleStage = 'turn_started'
     emitAppServerTimingTrace('turn-started')
-    notifyProviderRequestStarted()
     registerLiveTurn()
 
     lifecycleStage = 'turn_running'

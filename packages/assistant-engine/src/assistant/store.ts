@@ -35,7 +35,9 @@ import {
   readAssistantIndexStore,
   readAssistantSession,
   readAssistantTranscriptEntries,
+  readAssistantTranscriptTailEntries,
   readAutomationState,
+  ensureAssistantRecentSessionsProjection,
   writeAutomationState,
   replaceTranscriptEntries,
   synchronizeAssistantIndexes,
@@ -346,32 +348,64 @@ export async function listAssistantSessionsLocal(
 ): Promise<AssistantSession[]> {
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
+    return readAssistantSessionsSorted(paths, await listAssistantSessionFileIds(paths))
+  })
+}
 
-    const entries = await readdir(paths.sessionsDirectory, {
-      withFileTypes: true,
-    })
-    const sessions: AssistantSession[] = []
+// Bounded variant for recurring maintenance work: reads the bounded
+// recent-session projection from the assistant index store (maintained on
+// every session save, rebuilt from durable session records when missing) and
+// parses only the newest `limit` sessions by durable last-activity timestamp.
+export async function listRecentAssistantSessions(
+  vault: string,
+  options: { limit: number },
+): Promise<AssistantSession[]> {
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
 
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith('.json')) {
-        continue
-      }
-
-      const sessionId = entry.name.replace(/\.json$/u, '')
-      const session = await readAssistantSession({
-        paths,
-        sessionId,
-        treatCorruptedAsMissing: true,
-      })
-      if (session) {
-        sessions.push(session)
-      }
-    }
-
-    return sessions.sort((left, right) =>
-      compareAssistantTimestampsAscending(right.updatedAt, left.updatedAt),
+    const recentSessions = await ensureAssistantRecentSessionsProjection(paths)
+    return readAssistantSessionsSorted(
+      paths,
+      Object.entries(recentSessions)
+        .sort(([, left], [, right]) =>
+          compareAssistantTimestampsAscending(right, left),
+        )
+        .slice(0, Math.max(0, options.limit))
+        .map(([sessionId]) => sessionId),
     )
   })
+}
+
+async function listAssistantSessionFileIds(
+  paths: AssistantStatePaths,
+): Promise<string[]> {
+  const entries = await readdir(paths.sessionsDirectory, {
+    withFileTypes: true,
+  })
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .map((entry) => entry.name.replace(/\.json$/u, ''))
+}
+
+async function readAssistantSessionsSorted(
+  paths: AssistantStatePaths,
+  sessionIds: readonly string[],
+): Promise<AssistantSession[]> {
+  const sessions: AssistantSession[] = []
+  for (const sessionId of sessionIds) {
+    const session = await readAssistantSession({
+      paths,
+      sessionId,
+      treatCorruptedAsMissing: true,
+    })
+    if (session) {
+      sessions.push(session)
+    }
+  }
+
+  return sessions.sort((left, right) =>
+    compareAssistantTimestampsAscending(right.updatedAt, left.updatedAt),
+  )
 }
 
 export async function getAssistantSession(
@@ -442,6 +476,16 @@ export async function listAssistantTranscriptEntries(
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
   return readAssistantTranscriptEntries(paths, sessionId)
+}
+
+export async function listAssistantTranscriptTailEntries(
+  vault: string,
+  sessionId: string,
+  options: { maxBytes: number },
+): Promise<AssistantTranscriptEntry[]> {
+  const paths = resolveAssistantStatePaths(vault)
+  await ensureAssistantState(paths)
+  return readAssistantTranscriptTailEntries(paths, sessionId, options.maxBytes)
 }
 
 export async function appendAssistantTranscriptEntries(

@@ -3150,6 +3150,7 @@ describe("runHostedAssistantAutomationLane", () => {
       onProviderRequestStarted: expect.any(Function),
       onTraceEvent: expect.any(Function),
       requestId: "req_123",
+      shouldYieldBackgroundMaintenance: null,
       signal: undefined,
       turnEnvironment: {
         currentWorkingDirectory: null,
@@ -3199,6 +3200,98 @@ describe("runHostedAssistantAutomationLane", () => {
       },
     });
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
+  });
+
+  it("passes the background-yield signal into hosted cron deferral", async () => {
+    const shouldYieldBackgroundMaintenance = vi.fn().mockReturnValue(true);
+    mocks.runAssistantAutomationPass.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-08T01:00:00.000Z",
+      progressed: false,
+    });
+
+    await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_assistant_lane_yield",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      requestId: "req_yield",
+      runtime: createHostedAutomationRuntime(),
+      shouldYieldBackgroundMaintenance,
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(mocks.runAssistantAutomationPass).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "req_yield",
+        shouldDeferCron: shouldYieldBackgroundMaintenance,
+      }),
+    );
+  });
+
+  it("defers hosted cron when the current pass selected fresh foreground input", async () => {
+    let shouldDeferCronDuringPass: boolean | null = null;
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      shouldDeferCronDuringPass = input.shouldDeferCron?.() ?? null;
+      return {
+        cronProcessed: shouldDeferCronDuringPass ? 0 : 1,
+        nextWakeAt: shouldDeferCronDuringPass ? "2026-04-08T00:00:30.000Z" : null,
+        progressed: false,
+        replies: {
+          considered: 1,
+          failed: 0,
+          replied: 0,
+          skipped: 1,
+        },
+        routing: {
+          considered: 0,
+          failed: 0,
+          noAction: 0,
+          routed: 0,
+          skipped: 0,
+        },
+      };
+    });
+
+    const result = await runHostedAssistantAutomationLane({
+      wake: {
+        eventId: "evt_assistant_lane_current_foreground",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      executionContext: {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      freshAssistantInputIds: ["ain_current_foreground"],
+      requestId: "req_current_foreground",
+      runtime: createHostedAutomationRuntime(),
+      vaultRoot: "/tmp/vault-root",
+    });
+
+    expect(shouldDeferCronDuringPass).toBe(true);
+    expect(result.assistantAutomationCronProcessed).toBe(0);
+    const automationPassInput =
+      mocks.runAssistantAutomationPass.mock.calls[0]?.[0] as RunAssistantAutomationPassInput;
+    expect(automationPassInput.shouldYieldBackgroundMaintenance).toBeNull();
+    expect(mocks.selectHostedAssistantInputIds).toHaveBeenCalledWith(
+      expect.objectContaining({
+        freshAssistantInputIds: ["ain_current_foreground"],
+        mode: "foreground",
+      }),
+    );
   });
 
   it("records provider trace diagnostics from the maintenance automation lane", async () => {

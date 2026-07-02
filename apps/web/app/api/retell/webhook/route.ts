@@ -6,6 +6,7 @@ import {
   handleRetellCallEnded,
 } from "@/src/lib/phone-calls/result";
 import { verifyRetellSignature } from "@/src/lib/phone-calls/retell-signature";
+import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 
 const RETELL_WEBHOOK_MAX_BODY_BYTES = 4 * 1024 * 1024;
 
@@ -24,9 +25,16 @@ export const POST = withJsonError(async (request: Request) => {
     case "call_ended":
       await handleRetellCallEnded({ call: payload.call });
       break;
-    case "call_analyzed":
-      await handleRetellCallAnalyzed({ call: payload.call });
+    case "call_analyzed": {
+      const result = await handleRetellCallAnalyzed({ call: payload.call });
+      if (result.notificationMailboxItemId) {
+        await signalHostedMailboxAppendRuntime({
+          expectedUserId: result.notificationUserId,
+          mailboxItemId: result.notificationMailboxItemId,
+        });
+      }
       break;
+    }
   }
 
   return new Response(null, { status: 204 });

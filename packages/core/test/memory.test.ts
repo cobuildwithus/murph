@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -171,6 +172,59 @@ describe("core memory package wrapper", () => {
         )
         .map((record) => record.commandName),
     ).toContain("core.updateMemory");
+  });
+
+  test("deduplicates replayed anonymous upserts by normalized section and text", async () => {
+    const vaultRoot = await makeVaultRoot();
+
+    const results = await Promise.all([
+      upsertMemory(vaultRoot, {
+        now: new Date("2026-04-08T01:00:00.000Z"),
+        section: "Context",
+        text: "  Prefers concise answers  ",
+      }),
+      upsertMemory(vaultRoot, {
+        now: new Date("2026-04-08T01:05:00.000Z"),
+        section: "Context",
+        text: "Prefers   concise\nanswers",
+      }),
+    ]);
+    const first = results.find((result) => result.created);
+    const replay = results.find((result) => !result.created);
+
+    expect(first).toBeDefined();
+    expect(replay).toBeDefined();
+    assert(first);
+    assert(replay);
+    expect(replay.record.id).toBe(first.record.id);
+    expect(replay.record.createdAt).toBe(first.record.createdAt);
+    expect(replay.record.text).toBe("Prefers concise answers");
+
+    const snapshot = await readMemoryDocument(vaultRoot);
+    expect(snapshot.records).toHaveLength(1);
+    expect(snapshot.records[0]?.id).toBe(first.record.id);
+
+    const differentSection = await upsertMemory(vaultRoot, {
+      now: new Date("2026-04-08T01:10:00.000Z"),
+      section: "Identity",
+      text: "Prefers concise answers",
+    });
+
+    expect(differentSection.created).toBe(true);
+    expect(differentSection.record.id).not.toBe(first.record.id);
+    await expect(readMemoryDocument(vaultRoot))
+      .resolves.toMatchObject({
+        records: [
+          expect.objectContaining({
+            id: differentSection.record.id,
+            section: "Identity",
+          }),
+          expect.objectContaining({
+            id: first.record.id,
+            section: "Context",
+          }),
+        ],
+      });
   });
 
   test("serializes parallel upserts to the singleton memory document without losing records", async () => {

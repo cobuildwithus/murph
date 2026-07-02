@@ -3403,7 +3403,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toBeUndefined();
+    })).resolves.toBe("accepted");
 
     await expect(invokeResultPromise).resolves.toMatchObject({
       message: "workspace invocation preempted",
@@ -3480,7 +3480,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toBeUndefined();
+    })).resolves.toBe("accepted");
 
     await expect(invokeResultPromise).resolves.toMatchObject({
       message: "workspace invocation preempted",
@@ -3568,12 +3568,9 @@ describe("RunnerContainer", () => {
     });
 
     healthProbeFails = true;
-    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
-      active: true,
-      attemptId: request.attemptId,
-      leaseGeneration: request.leaseGeneration,
-      userId: "member_123",
-    });
+    await expect(container.readActiveRuntimeUserFence()).rejects.toThrow(
+      "health probe unavailable",
+    );
 
     const callsBeforeStaleWake = containerFetch.mock.calls.length;
     healthProbeFails = false;
@@ -3587,6 +3584,144 @@ describe("RunnerContainer", () => {
       reason: "no-active-child",
     });
     expect(containerFetch.mock.calls.slice(callsBeforeStaleWake).some(([url]) =>
+      String(url).endsWith("/internal/runtime-wake")
+    )).toBe(false);
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: false,
+      reason: "no_active_runtime",
+    });
+  });
+
+  it("does not report inactive liveness from a missing local pointer while health reports active work", async () => {
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({
+          ...createRunnerHealthResult(),
+          activeJobCount: 1,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    await expect(container.readActiveRuntimeUserFence()).rejects.toThrow(
+      "Hosted runner container health still reports active workspace work.",
+    );
+  });
+
+  it("posts workspace abort when the local active pointer is missing but the child is running", async () => {
+    const request = createRunnerRequest("evt_missing_pointer_abort");
+    const containerFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/internal/workspace-invocation/abort")) {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          attemptId: request.attemptId,
+          leaseGeneration: request.leaseGeneration,
+          userId: "member_123",
+        });
+        return new Response(null, {
+          headers: {
+            "x-workspace-invocation-abort-status": "accepted",
+          },
+          status: 204,
+        });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    await expect(container.abortWorkspaceInvocation({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toBe("requested");
+    expect(containerFetch).toHaveBeenCalledOnce();
+  });
+
+  it("reports inactive liveness from a missing local pointer only after running health is idle", async () => {
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify({
+          ...createRunnerHealthResult(),
+          activeJobCount: 0,
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      initialStatus: "running",
+    });
+
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: false,
+      reason: "no_active_runtime",
+    });
+  });
+
+  it("reports inactive liveness from a missing local pointer when the container is already gone", async () => {
+    const containerFetch = vi.fn(async () => {
+      throw new Error("health should not be probed for missing containers");
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      getState: vi.fn(async () => {
+        throw new Error("No such container");
+      }),
+    });
+
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: false,
+      reason: "no_active_runtime",
+    });
+    expect(containerFetch).not.toHaveBeenCalled();
+  });
+
+  it("clears preserved liveness when the accepted workspace container is gone", async () => {
+    const { container, markContainerGone } =
+      await createPreservedWorkspaceInvocationAfterLostResponse(
+        "evt_response_lost_then_container_gone",
+      );
+
+    markContainerGone();
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+      active: false,
+      reason: "no_active_runtime",
+    });
+  });
+
+  it("does not wake preserved liveness after the accepted workspace container is gone", async () => {
+    const { container, containerFetch, markContainerGone, request } =
+      await createPreservedWorkspaceInvocationAfterLostResponse(
+        "evt_response_lost_then_wake_after_gone",
+      );
+
+    const callsBeforeWake = containerFetch.mock.calls.length;
+    markContainerGone();
+    await expect(container.wakeRuntime({
+      attemptId: request.attemptId,
+      leaseGeneration: request.leaseGeneration,
+      userId: "member_123",
+    })).resolves.toEqual({
+      kind: "not-wakeable",
+      reason: "no-active-child",
+    });
+    expect(containerFetch.mock.calls.slice(callsBeforeWake).some(([url]) =>
       String(url).endsWith("/internal/runtime-wake")
     )).toBe(false);
     await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
@@ -3648,7 +3783,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toBeUndefined();
+    })).resolves.toBe("accepted");
 
     expect(destroy).toHaveBeenCalledTimes(1);
     await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
@@ -3707,7 +3842,7 @@ describe("RunnerContainer", () => {
       attemptId: request.attemptId,
       leaseGeneration: request.leaseGeneration,
       userId: "member_123",
-    })).resolves.toBeUndefined();
+    })).resolves.toBe("accepted");
 
     expect(abortPosted).toBe(true);
     expect(destroy).toHaveBeenCalledTimes(1);
@@ -5719,7 +5854,7 @@ describe("RunnerContainer", () => {
     const abortController = new AbortController();
     const abortWorkspaceInvocation = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
-    >(async () => {});
+    >(async () => "accepted");
     const destroyInstance = vi.fn(async () => {});
     const invoke = vi.fn<HostedExecutionContainerStubLike["invoke"]>(
       async () => new Promise<never>(() => {}),
@@ -5762,7 +5897,7 @@ describe("RunnerContainer", () => {
     const abortController = new AbortController();
     const abortWorkspaceInvocation = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["abortWorkspaceInvocation"]>
-    >(async () => {});
+    >(async () => "accepted");
     const destroyInstance = vi.fn(async () => {
       await new Promise<void>(() => undefined);
     });
@@ -6002,6 +6137,69 @@ function createContainerDouble(input: CreateContainerDoubleInput = {}) {
     destroy,
     getState,
     startAndWaitForPorts,
+  };
+}
+
+async function createPreservedWorkspaceInvocationAfterLostResponse(eventId: string) {
+  let runnerResponseLost = false;
+  let containerGone = false;
+  const getState = vi.fn(async () => {
+    if (containerGone) {
+      throw new Error("No such container");
+    }
+    return {
+      lastChange: Date.now(),
+      status: "running",
+    };
+  });
+  const containerFetch = vi.fn(async (url: string) => {
+    if (url.endsWith("/health")) {
+      if (containerGone) {
+        throw new Error("No such container");
+      }
+      return new Response(JSON.stringify({
+        ...createRunnerHealthResult(),
+        activeJobCount: runnerResponseLost ? 1 : 0,
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    }
+
+    if (!url.endsWith("/internal/workspace-invocation")) {
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    }
+
+    runnerResponseLost = true;
+    throw new Error("Network connection lost");
+  });
+  const result = createContainerDouble({
+    containerFetch,
+    getState,
+    initialStatus: "running",
+  });
+  const request = createRunnerRequest(eventId);
+
+  await expect(result.container.invoke({
+    job: {
+      kind: "workspace-invocation",
+      request,
+    },
+    timeoutMs: 30_000,
+    userId: "member_123",
+  })).rejects.toThrow("Network connection lost");
+
+  expect(result.startAndWaitForPorts).not.toHaveBeenCalled();
+  expect(result.destroy).not.toHaveBeenCalled();
+
+  return {
+    ...result,
+    markContainerGone: () => {
+      containerGone = true;
+    },
+    request,
   };
 }
 

@@ -43,6 +43,7 @@ import {
 
 import {
   buildHostedCodexConfigToml,
+  HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
   prepareHostedCodexRuntimeEnvironment,
 } from "../src/hosted-runtime/codex-config.ts";
 import {
@@ -62,6 +63,22 @@ const HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT_CEILING = 250_000;
 const HOSTED_CODEX_AUTOCOMPACTION_E2E_TOKEN_LIMIT = 12_000;
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
+
+test("hosted Codex memory diagnostics expose only safe config metadata", () => {
+  assert.deepEqual(HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS, {
+    codexOperatorMemoryDisableOnExternalContext: false,
+    codexOperatorMemoryFeatureEnabled: true,
+    codexOperatorMemoryGenerateMemories: true,
+    codexOperatorMemoryMaxRawMemoriesForConsolidation: 128,
+    codexOperatorMemoryMaxRolloutAgeDays: 10,
+    codexOperatorMemoryMaxRolloutsPerStartup: 1,
+    codexOperatorMemoryMaxUnusedDays: 30,
+    codexOperatorMemoryMinRateLimitRemainingPercent: 25,
+    codexOperatorMemoryMinRolloutIdleHours: 1,
+    codexOperatorMemoryMode: "codex-native-operator-context",
+    codexOperatorMemoryUseMemories: true,
+  });
+});
 
 function executeCodexAppServerTurn(
   input: Omit<CodexAppServerTurnInput, "dynamicTools"> & {
@@ -145,8 +162,11 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /^supports_websockets = true$/mu);
   assert.match(config, /^requires_openai_auth = false$/mu);
   assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
-  assert.match(config, /\[features\]\nplugins = false/u);
-  assert.match(config, /\[features\.multi_agent_v2\]\nenabled = true/u);
+  assert.match(config, /\[features\]\nplugins = false\nmulti_agent_v2 = true\nmemories = true/u);
+  assert.match(
+    config,
+    /\[memories\]\nuse_memories = true\ngenerate_memories = true\ndisable_on_external_context = false\nmin_rollout_idle_hours = 1\nmax_rollouts_per_startup = 1\nmax_rollout_age_days = 10\nmin_rate_limit_remaining_percent = 25\nmax_raw_memories_for_consolidation = 128\nmax_unused_days = 30/u,
+  );
   assert.doesNotMatch(config, /^plugins = true$/mu);
   assert.match(config, /\[skills\]\ninclude_instructions = false/u);
   assert.match(config, /\[skills\.bundled\]\nenabled = false/u);
@@ -1255,9 +1275,22 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
       "[features]",
       "plugins = false",
+      "multi_agent_v2 = true",
+      "memories = true",
       "",
-      "[features.multi_agent_v2]",
-      "enabled = true",
+      "# Codex-native memories are operator memory only. Murph product memory",
+      "# remains canonical in the vault; snapshots keep the Codex home allowlist",
+      "# narrow instead of recursively preserving every generated memory artifact.",
+      "[memories]",
+      "use_memories = true",
+      "generate_memories = true",
+      "disable_on_external_context = false",
+      "min_rollout_idle_hours = 1",
+      "max_rollouts_per_startup = 1",
+      "max_rollout_age_days = 10",
+      "min_rate_limit_remaining_percent = 25",
+      "max_raw_memories_for_consolidation = 128",
+      "max_unused_days = 30",
       "",
       "# Keep Codex skill file instructions out of hosted prompts. Their temporary",
       "# runner paths change on each wake and break provider prefix caching.",
@@ -1290,7 +1323,7 @@ test("hosted Codex shell policy excludes ElevenLabs runtime capability env", () 
   );
 });
 
-test("hosted Codex config keeps skill instructions disabled for stable prompt prefixes", () => {
+test("hosted Codex config keeps skill instructions disabled while enabling operator memory", () => {
   const config = buildHostedCodexConfigToml({
     model: "gpt-5.5",
     provider: {
@@ -1306,7 +1339,12 @@ test("hosted Codex config keeps skill instructions disabled for stable prompt pr
   assert.match(config, /\[skills\]\ninclude_instructions = false/u);
   assert.match(config, /\[skills\.bundled\]\nenabled = false/u);
   assert.match(config, /\[features\]\nplugins = false/u);
-  assert.match(config, /\[features\.multi_agent_v2\]\nenabled = true/u);
+  assert.match(config, /^multi_agent_v2 = true$/mu);
+  assert.match(config, /^memories = true$/mu);
+  assert.match(config, /\[memories\]\nuse_memories = true/u);
+  assert.match(config, /^generate_memories = true$/mu);
+  assert.match(config, /^disable_on_external_context = false$/mu);
+  assert.match(config, /^max_rollouts_per_startup = 1$/mu);
   assert.match(config, /^check_for_update_on_startup = false$/mu);
   assert.match(config, /\[history\]\npersistence = "none"/u);
   assert.match(config, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);

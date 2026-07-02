@@ -10768,7 +10768,10 @@ describe('assistant codex runtime', () => {
         codexLiveTurnOpen: false,
         codexPendingRpcCount: 1,
         codexPendingRpcMethod: 'turn/start',
-        codexProviderRequestStarted: false,
+        // True since the provider-start barrier arms at request write: an
+        // exit during turn/start is post-admission (the child may have
+        // executed commands), never pre-provider work.
+        codexProviderRequestStarted: true,
         codexShutdownRequested: false,
         codexSignalPresent: true,
         codexStderrBytes: 'killed while waiting for turn/start response\n'.length,

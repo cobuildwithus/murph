@@ -41,6 +41,7 @@ export type {
   AssistantNotificationInput,
   AssistantNotificationResponsePolicy,
   AssistantNotificationResult,
+  AssistantNotificationTurnPolicy,
 } from './notification-turn.js'
 
 export type AssistantSessionOptionsPatch = Pick<

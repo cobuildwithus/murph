@@ -65,15 +65,24 @@ export type HostedLocalAssistantProviderMode = "stub" | "live";
  * `exec_command`). Tool-call turns consume one queued response per provider
  * request: the tool call first, then the follow-up text.
  */
-export type HostedLocalAssistantProviderScriptedResponse =
-  | string
-  | {
+type HostedLocalAssistantProviderFunctionCallResponse = {
     functionCall: {
       arguments: Record<string, unknown>;
       name: string;
       namespace?: string;
     };
   };
+
+type HostedLocalAssistantProviderHeldTextResponse = {
+  beforeResponse?: (() => Promise<void> | void) | null;
+  onResponseStarted?: (() => void) | null;
+  text: string;
+};
+
+export type HostedLocalAssistantProviderScriptedResponse =
+  | string
+  | HostedLocalAssistantProviderFunctionCallResponse
+  | HostedLocalAssistantProviderHeldTextResponse;
 
 /**
  * Scripts a sandboxed shell execution through the real Codex app-server.
@@ -311,6 +320,18 @@ function buildAssistantProviderResponsesApiStubResponse(input: {
   };
 }
 
+async function prepareAssistantProviderScriptedResponse(
+  scriptedResponse: HostedLocalAssistantProviderScriptedResponse,
+): Promise<string | HostedLocalAssistantProviderFunctionCallResponse> {
+  if (typeof scriptedResponse === "string" || "functionCall" in scriptedResponse) {
+    return scriptedResponse;
+  }
+
+  scriptedResponse.onResponseStarted?.();
+  await scriptedResponse.beforeResponse?.();
+  return scriptedResponse.text;
+}
+
 function writeAssistantProviderResponsesApiStubStream(input: {
   modelId: string;
   response: ServerResponse;
@@ -408,9 +429,7 @@ function writeAssistantProviderResponsesApiStubStream(input: {
 }
 
 function buildAssistantProviderFunctionCallItem(input: {
-  functionCall: NonNullable<
-    Exclude<HostedLocalAssistantProviderScriptedResponse, string>
-  >["functionCall"];
+  functionCall: HostedLocalAssistantProviderFunctionCallResponse["functionCall"];
   responseId: string;
 }): Record<string, unknown> {
   return {
@@ -655,9 +674,12 @@ export async function startAssistantProviderStubServer(input: {
         return;
       }
 
-      if (typeof scriptedResponse !== "string") {
+      const preparedScriptedResponse =
+        await prepareAssistantProviderScriptedResponse(scriptedResponse);
+
+      if (typeof preparedScriptedResponse !== "string") {
         const functionCallItem = buildAssistantProviderFunctionCallItem({
-          functionCall: scriptedResponse.functionCall,
+          functionCall: preparedScriptedResponse.functionCall,
           responseId,
         });
         const usage = buildAssistantProviderStubUsage({
@@ -687,7 +709,7 @@ export async function startAssistantProviderStubServer(input: {
         return;
       }
 
-      const responseText = scriptedResponse;
+      const responseText = preparedScriptedResponse;
       const usage = buildAssistantProviderStubUsage({
         body,
         responseText,

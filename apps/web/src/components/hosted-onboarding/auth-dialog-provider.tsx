@@ -20,6 +20,7 @@ const COMPUTER_HANDOFF_PATH_PATTERN = /^\/computer\/handoff\/[^/]+$/u;
 const ACTION_APPROVAL_PATH_PATTERN = /^\/approve\/haa_[A-Za-z0-9_-]{32}$/u;
 const INTEGRATIONS_CONNECT_PATH_PATTERN =
   /^\/integrations\/connect\/cai_[A-Za-z0-9_-]{32}$/u;
+const SETTINGS_DATA_PRIVACY_PATH = "/settings/data-privacy";
 
 interface AuthContextValue {
   authenticated: boolean;
@@ -88,6 +89,7 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
     || shouldResumeCurrentDeviceConnectIntentUrl(payload)
     || shouldResumeCurrentComputerHandoffUrl(payload)
     || shouldResumeCurrentIntegrationsConnectUrl(payload)
+    || shouldResumeCurrentSettingsDataPrivacyUrl(payload)
   );
 }
 
@@ -154,6 +156,20 @@ function shouldResumeCurrentIntegrationsConnectUrl(
   }
 
   return INTEGRATIONS_CONNECT_PATH_PATTERN.test(window.location.pathname);
+}
+
+function shouldResumeCurrentSettingsDataPrivacyUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    return false;
+  }
+
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return window.location.pathname === SETTINGS_DATA_PRIVACY_PATH;
 }
 
 function readDeviceConnectIntentHashParams(hash: string | undefined): URLSearchParams | null {

@@ -22,6 +22,10 @@ import {
   HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 } from "./contracts.ts";
 
+import type {
+  HostedVaultShareProjectionKind,
+} from "./vault-share.ts";
+
 export const HOSTED_MAILBOX_LANES = [
   "system",
   "conversation",
@@ -36,6 +40,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "assistant.notification.requested",
   "device-sync.wake",
   "vault-share.delivery",
+  "vault-share.revoke",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -766,6 +771,55 @@ export interface HostedRuntimeProductFeedbackRecordResponse {
   feedbackId: string;
   recorded: boolean;
 }
+
+export type HostedRuntimeGroupToolAction = "read_current" | "create_join_link";
+
+export const HOSTED_RUNTIME_GROUP_KINDS = [
+  "couple",
+  "custom",
+  "family",
+  "friends",
+  "household",
+  "team",
+] as const;
+
+export type HostedRuntimeGroupKind = (typeof HOSTED_RUNTIME_GROUP_KINDS)[number];
+
+export const HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH = 120;
+
+export interface HostedRuntimeGroupSummary {
+  displayName: string | null;
+  id: string;
+  kind: string;
+  memberCount: number;
+  requestedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+  status: string;
+}
+
+export interface HostedRuntimeGroupCreateJoinLinkRequest {
+  displayName?: string | null;
+  kind?: HostedRuntimeGroupKind | null;
+  requestedVaultShareProjectionKinds?: HostedVaultShareProjectionKind[] | null;
+}
+
+export type HostedRuntimeGroupToolRequest =
+  | { action: "read_current" }
+  | { action: "create_join_link"; joinLink?: HostedRuntimeGroupCreateJoinLinkRequest | null };
+
+export type HostedRuntimeGroupToolResponse =
+  | {
+      action: "read_current";
+      result:
+        | { status: "ok"; group: HostedRuntimeGroupSummary }
+        | { status: "none"; group: null }
+        | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "create_join_link";
+      result:
+        | { status: "ok"; group: HostedRuntimeGroupSummary; joinUrl: string }
+        | { status: "unavailable"; unavailableReason: string; group: null };
+    };
 
 export type HostedRuntimeFamilyPlanToolAction =
   | "create_invite"

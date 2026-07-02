@@ -58,6 +58,7 @@ export interface AssistantNotificationDecisionSystemPromptInput {
   channel: string | null;
   currentLocalDate: string;
   currentTimeZone: string;
+  maintenanceTurn?: boolean;
 }
 
 export interface AssistantSystemPromptLayers {
@@ -230,6 +231,7 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantConnectedAppsGuidanceText(),
     buildAssistantProductFeedbackGuidanceText(),
     buildAssistantFamilyPlanGuidanceText(),
+    buildAssistantHostedGroupGuidanceText(),
     buildAssistantKnowledgeGuidanceText({
       assistantKnowledgeToolsAvailable:
         input.assistantKnowledgeToolsAvailable ?? false,
@@ -305,6 +307,16 @@ function buildAssistantFamilyPlanGuidanceText(): string {
   ].join("\n");
 }
 
+function buildAssistantHostedGroupGuidanceText(): string {
+  return [
+    "Hosted groups:",
+    "- When `murph.group` is available, use `action=\"read_current\"` to read the current hosted group for the connected group-chat runtime, and `action=\"create_join_link\"` when the user asks to invite someone to this group chat; share the returned join URL plainly. Do not use it for member management, and do not promise a link unless the tool returns one.",
+    "- Hosted groups are separate from Murph Family billing/account groups. Joining a hosted group does not grant billing access, private chat access, vault access, health-data access, or email opt-in.",
+    "- Optional group health permissions are approved only through server-owned join pages and are returned through the runtime/vault-share flow.",
+    "- Today, the supported group health permission is `sleep-times.v0`. Do not claim that activity, workouts, all health data, or arbitrary categories can be shared unless the tool/parser supports a closed projection kind for them.",
+  ].join("\n");
+}
+
 function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
   return joinPromptSections(
     buildAssistantTimeStyleContextText({
@@ -354,6 +366,26 @@ export function buildAssistantNotificationDecisionSystemPromptWithCacheMetadata(
 export function buildAssistantNotificationDecisionSystemPromptLayers(
   input: AssistantNotificationDecisionSystemPromptInput
 ): AssistantSystemPromptLayers {
+  // Maintenance turns get only the maintenance invariant, never the
+  // notification guidance (which grants full interactive read/write framing).
+  // The instruction boundary must live in the prompt itself.
+  if (input.maintenanceTurn === true) {
+    const stablePrefix = buildAssistantMaintenanceExecutionGuidanceText();
+    const dynamicTurnContextPrompt = buildAssistantCurrentDateContextText({
+      currentLocalDate: input.currentLocalDate,
+      currentMurphProductBaseUrl: null,
+      currentTimeZone: input.currentTimeZone,
+    });
+    return {
+      dynamicContextStartsAfterStaticCore: stablePrefix.length,
+      dynamicTurnContextPrompt,
+      prompt: joinPromptSections(stablePrefix, dynamicTurnContextPrompt),
+      stableRouteCapabilityPrompt: "",
+      staticCacheableCorePrompt: stablePrefix,
+      threadContextPrompt: "",
+    };
+  }
+
   const staticCacheableCorePrompt = buildStaticCacheableCorePrompt();
   const stableRouteCapabilityPrompt = renderAssistantToolNameAliases(
     joinPromptSections(
@@ -886,6 +918,19 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
 
 function buildAssistantToolTruthfulnessText(): string {
   return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real local command or runtime action happened. Never invent or guess wearable connect, invite, share, OAuth, or authorization URLs. Only send a wearable connect link when `vault-cli device connect ... --format json` or another real runtime action returned it in the current turn.";
+}
+
+function buildAssistantMaintenanceExecutionGuidanceText(): string {
+  return `Maintenance execution rules:
+- You are Murph's private runtime maintenance turn. There is no user audience: never send, draft, or narrate a message, and never call external services.
+- The only vault commands you may run are \`vault-cli memory show\`, \`vault-cli memory upsert\`, and \`vault-cli memory update\`. Do not read or write any other vault, transcript, session, log, health, experiment, or automation state, and do not explore the filesystem.
+- Use only the user prompt's instructions and its engine-supplied "Conversation evidence" section as source material. Existing memory from \`vault-cli memory show\` is for deduplication and update targeting only, never an independent source for new writes.
+- Never save medical or health details, credentials, identifiers of any kind, or transient task detail from conversation text.
+
+Structured output contract:
+- Return exactly one JSON object and nothing else, in this shape:
+  {"kind":"skip","privateSummary":"..."}
+- The user prompt specifies the exact required privateSummary text.`;
 }
 
 function buildAssistantNotificationDecisionGuidanceText(
