@@ -4,7 +4,10 @@ import { Check, Copy, Loader2, Minus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "@/src/components/hosted-onboarding/client-api";
 import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
 import {
@@ -187,6 +190,14 @@ export function HostedFamilyManager(props: {
       resetInviteForm();
       router.refresh();
     } catch (error) {
+      // The seat was added but Stripe is still confirming: refresh so the new
+      // seat shows, and keep the dialog open so the owner can resend in a moment.
+      if (
+        error instanceof HostedOnboardingApiError &&
+        error.code === "HOSTED_FAMILY_SEAT_ADDED_SYNCING"
+      ) {
+        router.refresh();
+      }
       setInviteError(toErrorMessage(error, "Could not create the invite right now."));
     } finally {
       setIsInviting(false);
