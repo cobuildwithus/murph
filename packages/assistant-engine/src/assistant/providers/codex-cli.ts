@@ -1,5 +1,4 @@
 import {
-  HOSTED_RUNTIME_PROCESS_ENV_MARKER,
   prepareAssistantDirectCliEnv,
 } from '../../assistant-cli-access.js'
 import {
@@ -193,8 +192,6 @@ export async function executeCodexAssistantTurnAttempt(
   const codexProcessEnv = prepareAssistantDirectCliEnv(input.env)
   const codexConfigOverrides = [
     ...(mergeCodexConfigOverrides({
-      enableMultiAgentV2:
-        codexProcessEnv[HOSTED_RUNTIME_PROCESS_ENV_MARKER]?.trim() === '1',
       modelProvider: providerConfig.target.modelProvider,
       showThinkingTraces: input.showThinkingTraces ?? false,
     }) ?? []),
