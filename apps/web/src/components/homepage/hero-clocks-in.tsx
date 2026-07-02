@@ -745,7 +745,7 @@ export function HeroClocksIn({
             then build habits that stick.
           </p>
 
-          <div className="mt-8 max-w-[360px] [&_a]:w-full [&_button]:w-full lg:mt-10 lg:max-w-none lg:[&_a]:w-auto lg:[&_button]:w-auto">
+          <div className="mt-8 max-w-[52ch] text-[1.0625rem] [&_a]:w-full [&_button]:w-full lg:mt-10 lg:max-w-none lg:[&_a]:w-auto lg:[&_button]:w-auto">
             <LandingAuthActions
               authLabel="Meet Murph"
               authenticated={authenticated}

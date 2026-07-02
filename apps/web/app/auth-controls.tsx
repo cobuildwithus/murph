@@ -71,6 +71,23 @@ export function LandingAuthDialogButton({
   );
 }
 
+export function LandingAuthDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <AuthDialog
+      open={open}
+      onCompleted={handleLandingAuthCompleted}
+      onOpenChange={onOpenChange}
+      requireLaunchConsentOnCompletion
+    />
+  );
+}
+
 function handleLandingAuthCompleted(
   payload: HostedPrivyCompletionPayload,
 ) {
@@ -96,9 +113,11 @@ function getLandingAuthClasses(
     case "nav":
       return {
         container: "flex items-center gap-2 sm:gap-3",
+        // Below md the standalone login button hides; StickyNav's burger menu
+        // carries the Log in entry instead.
         login: onDarkSurface
-          ? "inline-flex items-center justify-center rounded-lg border border-white/25 bg-transparent px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:border-white/45 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
-          : "inline-flex items-center justify-center rounded-lg border border-[#2d3436]/20 bg-transparent px-4 py-2.5 text-sm font-semibold text-[#2d3436] transition-colors hover:border-[#2d3436]/40 hover:bg-[#2d3436]/[0.06] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2d3436]/40",
+          ? "hidden items-center justify-center rounded-lg border border-white/25 bg-transparent px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:border-white/45 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 md:inline-flex"
+          : "hidden items-center justify-center rounded-lg border border-[#2d3436]/20 bg-transparent px-4 py-2.5 text-sm font-semibold text-[#2d3436] transition-colors hover:border-[#2d3436]/40 hover:bg-[#2d3436]/[0.06] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2d3436]/40 md:inline-flex",
         settings:
           "inline-flex items-center rounded-lg bg-[#5a6e32] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#4d5f2a]",
         signup:
@@ -115,14 +134,19 @@ function getLandingAuthClasses(
           "inline-flex items-center justify-center rounded-xl bg-[#5a6e32] px-5 py-3 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-[#4d5f2a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4b87a]",
       };
     case "hero":
+      // Below lg the CTA is a flat white pill with a warm hairline, matching
+      // the phone mock's message bubbles (no shadow, per DESIGN.md): the
+      // olive button reads as green-on-green next to the messenger logo on
+      // mobile. lg keeps the original olive button exactly (mobile-only
+      // styles are max-lg, olive restored via lg overrides).
       return {
         container: "flex flex-wrap items-center gap-4",
         login:
           "inline-flex items-center justify-center rounded-xl border border-white/35 bg-white/10 px-5 py-3.5 text-[0.9375rem] font-semibold text-white transition-colors hover:border-white/50 hover:bg-white/16 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70",
         settings:
-          "inline-flex items-center rounded-xl bg-[#5a6e32] px-5 py-3.5 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-[#4d5f2a]",
+          "inline-flex items-center rounded-xl border border-[#c4a882]/40 bg-white px-5 py-3.5 text-[0.9375rem] font-semibold text-[#2d3436] transition-colors max-lg:active:bg-[#c4a882]/10 lg:border-0 lg:bg-[#5a6e32] lg:text-white lg:hover:bg-[#4d5f2a]",
         signup:
-          "inline-flex items-center justify-center rounded-xl bg-[#5a6e32] px-5 py-3.5 text-[0.9375rem] font-semibold text-white transition-colors hover:bg-[#4d5f2a] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4b87a]",
+          "inline-flex items-center justify-center rounded-xl border border-[#c4a882]/40 bg-white px-5 py-3.5 text-[0.9375rem] font-semibold text-[#2d3436] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4b87a] max-lg:active:bg-[#c4a882]/10 max-lg:focus-visible:outline-[#5a6e32] lg:border-0 lg:bg-[#5a6e32] lg:text-white lg:hover:bg-[#4d5f2a]",
       };
   }
 }
