@@ -196,7 +196,7 @@ async function runCodexResponseMediaToolTurn(
 
     expect(args).toEqual(['app-server'])
     expect(options).toMatchObject({
-      cwd: path.resolve(workingDirectory),
+      cwd: tmpdir(),
       env: {
         CODEX_HOME: codexHome,
         PATH: '/custom/bin',
@@ -312,7 +312,7 @@ async function runCodexTelegramVoiceMemoOnlyTurn() {
 
     expect(args).toEqual(['app-server'])
     expect(options).toMatchObject({
-      cwd: path.resolve(workingDirectory),
+      cwd: tmpdir(),
       env: {
         CODEX_HOME: codexHome,
         ELEVENLABS_API_KEY: 'elevenlabs-test-key',
@@ -966,7 +966,7 @@ describe('assistant codex runtime', () => {
       })
 
       expect(options).toMatchObject({
-        cwd: path.resolve(workingDirectory),
+        cwd: tmpdir(),
         env: {
           CODEX_HOME: codexHome,
           [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
@@ -2202,7 +2202,7 @@ describe('assistant codex runtime', () => {
 
       expect(args).toEqual(['app-server'])
       expect(options).toMatchObject({
-        cwd: path.resolve(workingDirectory),
+        cwd: tmpdir(),
         env: {
           CODEX_HOME: codexHome,
           PATH: '/custom/bin',
@@ -6247,7 +6247,7 @@ describe('assistant codex runtime', () => {
       codexCommand,
       ['app-server'],
       expect.objectContaining({
-        cwd: path.resolve(workingDirectory),
+        cwd: tmpdir(),
         env: expect.objectContaining({
           MURPH_HOSTED_RUNTIME_PROCESS: '1',
           PATH: '/usr/bin',

@@ -1425,8 +1425,7 @@ describe("startHostedContainerEntrypoint", () => {
       expect(codexConfigToml).toContain("supports_websockets = false");
       expect(codexConfigToml).toContain("request_max_retries = 4");
       expect(codexConfigToml).toContain("stream_max_retries = 5");
-      expect(codexConfigToml).toContain("[features.multi_agent_v2]");
-      expect(codexConfigToml).toContain("enabled = true");
+      expect(codexConfigToml).toContain("multi_agent_v2 = true");
     } finally {
       if (previousHostedHome === undefined) {
         delete process.env.HOSTED_HOME;

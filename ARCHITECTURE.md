@@ -111,7 +111,12 @@ Current hosted external-data lookup boundary: `apps/web` owns read-only product 
 Assistant-engine intentionally keeps one warm Codex App Server slot per Node
 runtime/container. Overlapping turns fail busy instead of spawning parallel
 app-server processes; direct warm-process shutdown is for idle processes, while
-active turns must be aborted through the turn interrupt/abort path.
+active turns must be aborted through the turn interrupt/abort path. The warm
+process is spawned from a stable temp directory, never the workspace path:
+hosted restores delete and recreate the workspace between invocations, so an
+app-server anchored there would hold a dead cwd inode and fail its next
+thread-start config load. Threads receive the current workspace through the
+explicit per-thread `cwd` param instead.
 
 ## Control Flow
 
