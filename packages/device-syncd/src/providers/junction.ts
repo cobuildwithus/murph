@@ -27,6 +27,7 @@ import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-p
 
 import { deviceSyncError, isDeviceSyncError, type DeviceSyncError } from "../errors.ts";
 import { sanitizeHostedRuntimeDiagnosticText } from "../hosted-runtime.ts";
+import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
 import {
   assertValidJunctionClientUserIdSecret,
   normalizeJunctionDeviceSyncRuntimeConfig,
@@ -1982,12 +1983,24 @@ function buildJunctionOptionalResourceResponseDetail(input: {
 }): string | null {
   // The generic redactor does not know the current Junction user id; strip it
   // explicitly before the shared sanitizer so provider prose that embeds the
-  // account id can never reach logs or connection metadata.
+  // account id can never reach logs or connection metadata. Case-insensitive
+  // because the provider-diagnostics parser lowercases error codes.
+  const accountIdPattern = input.accountExternalId
+    ? new RegExp(input.accountExternalId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "giu")
+    : null;
   const redactAccountId = (value: string | null): string | null =>
-    value === null ? null : value.split(input.accountExternalId).join("<redacted-account>");
+    value === null || accountIdPattern === null
+      ? value
+      : value.replace(accountIdPattern, "<redacted-account>");
   const code = readJunctionDiagnosticToken(redactAccountId(input.responseErrorCode));
   const description = readJunctionDiagnosticText(redactAccountId(input.responseErrorDescription));
-  const detail = [code, description].filter(Boolean).join(": ");
+  // Clamp to the stored-metadata string cap so the persisted
+  // junctionSkippedResourceLastDetail is truncated instead of silently dropped.
+  const detail = [code, description]
+    .filter(Boolean)
+    .join(": ")
+    .slice(0, DEVICE_SYNC_METADATA_MAX_STRING_LENGTH)
+    .trimEnd();
   return detail || null;
 }
 

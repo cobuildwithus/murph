@@ -5765,7 +5765,7 @@ test("Junction ambiguous skip detail redacts the account id from provider error 
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
       return createJsonResponse({
         code: "invalid_request",
-        message: "User junction-user-1 cannot access this summary.",
+        message: "User Junction-User-1 cannot access this summary.",
       }, 422);
     }
 
@@ -5799,8 +5799,65 @@ test("Junction ambiguous skip detail redacts the account id from provider error 
     result.metadataPatch?.junctionSkippedResourceLastDetail,
     "invalid_request: User <redacted-account> cannot access this summary.",
   );
-  assert.equal(JSON.stringify(warnings).includes("junction-user-1"), false);
-  assert.equal(JSON.stringify(result.metadataPatch).includes("junction-user-1"), false);
+  assert.equal(JSON.stringify(warnings).toLowerCase().includes("junction-user-1"), false);
+  assert.equal(JSON.stringify(result.metadataPatch).toLowerCase().includes("junction-user-1"), false);
+});
+
+test("Junction ambiguous skip detail is clamped to the stored-metadata string cap", async () => {
+  const longMessage = "sleep cycle summaries are disabled for this integration tier. ".repeat(6).trim();
+  assert.ok(longMessage.length > 256 && longMessage.length < 512);
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              profile: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
+      return createJsonResponse({
+        code: "invalid_request",
+        message: longMessage,
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["profile"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const detail = result.metadataPatch?.junctionSkippedResourceLastDetail;
+  assert.equal(typeof detail, "string");
+  assert.ok(typeof detail === "string" && detail.length > 0 && detail.length <= 256);
+  assert.ok(typeof detail === "string" && detail.startsWith("invalid_request: sleep cycle summaries are disabled"));
+  assert.equal(warnings[0]?.responseDetail, detail);
 });
 
 test("Junction resource jobs import direct daily data webhook payloads without Junction HTTP requests", async () => {
