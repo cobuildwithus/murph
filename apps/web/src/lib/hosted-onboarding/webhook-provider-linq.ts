@@ -454,10 +454,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
             ok: true,
             reason: "duplicate-webhook-event",
           },
-          wakeMailboxCheckpoint: {
-            lane: existingMailboxItem.lane,
-            laneSeq: existingMailboxItem.laneSeq,
-          },
+          // No checkpoint on the duplicate read: this transaction did not run
+          // the append-path workspace upsert, so the retry keeps the legacy
+          // signal path that repairs a missing workspace row.
           wakeMailboxItemId: existingMailboxItem.id,
           wakeUserId: existingMember.id,
         }),
@@ -828,10 +827,9 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
           reason: "duplicate-webhook-event",
         },
         wakeLinqChatId: summary.chatId,
-        wakeMailboxCheckpoint: {
-          lane: existingMailboxItem.lane,
-          laneSeq: existingMailboxItem.laneSeq,
-        },
+        // No checkpoint on the duplicate read: this transaction did not run
+        // the append-path workspace upsert, so the retry keeps the legacy
+        // signal path that repairs a missing workspace row.
         wakeMailboxItemId: existingMailboxItem.id,
         wakeUserId: input.route.containerMemberId,
         linqReadReceiptRouteAuthority: routeAuthority,

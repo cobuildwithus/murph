@@ -152,7 +152,7 @@ describe("hosted runtime Temporal signaling", () => {
     expect(JSON.stringify(signal)).not.toMatch(/Please look|providerHeaders|messageText/u);
   });
 
-  it("skips the checkpoint re-read and workspace ensure when the caller supplies planner lane facts", async () => {
+  it("skips the checkpoint re-read and workspace ensure but still requires active access when the caller supplies planner lane facts", async () => {
     await expect(signalHostedMailboxAppendRuntime({
       client: buildClient(),
       expectedUserId: "member_123",
@@ -169,7 +169,7 @@ describe("hosted runtime Temporal signaling", () => {
 
     expect(mocks.readHostedMailboxItemCheckpointById).not.toHaveBeenCalled();
     expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
-    expect(mocks.hostedMemberFindUnique).not.toHaveBeenCalled();
+    expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
     expect(mocks.signalWithStart).toHaveBeenCalledWith(
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
       expect.objectContaining({
@@ -182,6 +182,22 @@ describe("hosted runtime Temporal signaling", () => {
         workflowId: "hosted-user-runtime:member_123",
       }),
     );
+  });
+
+  it("does not signal planner-checkpoint pointers for inactive members", async () => {
+    mocks.hostedMemberFindUnique.mockResolvedValue(null);
+
+    await expect(signalHostedMailboxAppendRuntime({
+      client: buildClient(),
+      expectedUserId: "member_123",
+      knownCheckpoint: {
+        lane: "conversation",
+        laneSeq: "42",
+        userId: "member_123",
+      },
+      mailboxItemId: "mailbox_123",
+    })).rejects.toThrow("Hosted runtime user is not active.");
+    expect(mocks.signalWithStart).not.toHaveBeenCalled();
   });
 
   it("rejects planner lane facts whose owner does not match the expected user", async () => {

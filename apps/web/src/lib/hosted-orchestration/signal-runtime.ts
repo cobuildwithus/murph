@@ -64,10 +64,12 @@ export interface SignalHostedMailboxAppendInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   expectedUserId?: string | null;
-  // Lane facts from the caller's own append/dedupe row in the current
-  // request. Presence means the appending transaction already proved the
-  // mailbox row, the active member, and the workspace row, so the signal
-  // path skips its checkpoint re-read and workspace ensure.
+  // Lane facts from the caller's own append row in the current request.
+  // Presence means the appending transaction already proved the mailbox row
+  // and the workspace row, so the signal path skips its checkpoint re-read
+  // and workspace upsert. Active access is still rechecked before signaling
+  // because legacy Temporal histories may execute mailbox pointers without
+  // the reconciliation gate.
   knownCheckpoint?: {
     lane: HostedMailboxLane;
     laneSeq: string;
@@ -136,6 +138,13 @@ export async function signalHostedMailboxAppendRuntime(
     expectedUserId: input.expectedUserId ?? null,
     mailboxItemUserId: mailboxItem.userId,
   });
+  if (input.knownCheckpoint) {
+    await requireHostedRuntimeActiveAccess(mailboxItem.userId, {
+      code: "HOSTED_RUNTIME_USER_INACTIVE",
+      message: "Hosted runtime user is not active.",
+      prisma: input.prisma ?? getPrisma(),
+    });
+  }
 
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
