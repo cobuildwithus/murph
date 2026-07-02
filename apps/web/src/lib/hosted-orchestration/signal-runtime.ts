@@ -14,11 +14,13 @@ import {
 import {
   parseHostedRuntimeSignal,
 } from "@murphai/hosted-execution/parsers";
+import type {
+  HostedMailboxLane,
+} from "@murphai/hosted-execution/runtime-control";
 
 import {
   appendHostedMailboxEnvelopeTx,
   readHostedMailboxItemCheckpointById,
-  type HostedMailboxItemCheckpointRecord,
 } from "../hosted-mailbox/store";
 import {
   requireHostedRuntimeActiveAccess,
@@ -62,6 +64,15 @@ export interface SignalHostedMailboxAppendInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
   expectedUserId?: string | null;
+  // Lane facts from the caller's own append/dedupe row in the current
+  // request. Presence means the appending transaction already proved the
+  // mailbox row, the active member, and the workspace row, so the signal
+  // path skips its checkpoint re-read and workspace ensure.
+  knownCheckpoint?: {
+    lane: HostedMailboxLane;
+    laneSeq: string;
+    userId: string;
+  };
   mailboxItemId: string;
   prisma?: PrismaClient;
 }
@@ -113,7 +124,7 @@ export function hostedUserRuntimeWorkflowId(userId: string): string {
 export async function signalHostedMailboxAppendRuntime(
   input: SignalHostedMailboxAppendInput,
 ): Promise<HostedRuntimeSignalResult> {
-  const mailboxItem = await readHostedMailboxItemCheckpointById({
+  const mailboxItem = input.knownCheckpoint ?? await readHostedMailboxItemCheckpointById({
     mailboxItemId: input.mailboxItemId,
     prisma: input.prisma,
   });
@@ -123,19 +134,19 @@ export async function signalHostedMailboxAppendRuntime(
   }
   assertExpectedHostedMailboxOwner({
     expectedUserId: input.expectedUserId ?? null,
-    mailboxItem,
+    mailboxItemUserId: mailboxItem.userId,
   });
 
   return signalHostedUserRuntimeWorkflow({
     client: input.client,
     environment: input.environment,
-    ensureWorkspace: true,
+    ensureWorkspace: input.knownCheckpoint === undefined,
     prisma: input.prisma,
     signal: parseHostedRuntimeSignal({
       kind: "mailbox_appended",
       lane: mailboxItem.lane,
       laneSeq: mailboxItem.laneSeq,
-      mailboxItemId: mailboxItem.id,
+      mailboxItemId: input.mailboxItemId,
     }),
     userId: mailboxItem.userId,
   });
@@ -461,13 +472,13 @@ async function ensureHostedRuntimeWorkspaceForActiveUser(
 
 function assertExpectedHostedMailboxOwner(input: {
   expectedUserId: string | null;
-  mailboxItem: HostedMailboxItemCheckpointRecord;
+  mailboxItemUserId: string;
 }): void {
   if (!input.expectedUserId) {
     return;
   }
 
-  if (input.expectedUserId !== input.mailboxItem.userId) {
+  if (input.expectedUserId !== input.mailboxItemUserId) {
     throw new Error("Hosted mailbox item owner does not match runtime signal user.");
   }
 }

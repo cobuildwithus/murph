@@ -329,6 +329,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       scheduleAfterResponse: input.scheduleAfterResponse,
       source: "linq",
       userId: plan.wakeUserId,
+      wakeMailboxCheckpoint: plan.wakeMailboxCheckpoint,
     });
     const sendReadReceipt = () => maybeSendHostedLinqIngressReadReceipt({
       currentInboundReply,
@@ -595,6 +596,7 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     response: plan.response,
     source: "telegram",
     userId: plan.wakeUserId,
+    wakeMailboxCheckpoint: plan.wakeMailboxCheckpoint,
   });
   return plan.response;
 }

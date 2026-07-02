@@ -1,8 +1,13 @@
+import { randomUUID } from "node:crypto";
+
 import {
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
 } from "@murphai/hosted-execution/runtime-control";
 
+import {
+  readHostedExecutionControlClientIfConfigured,
+} from "../hosted-execution/control";
 import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
@@ -16,7 +21,10 @@ import {
   startHostedOnboardingTiming,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
-import type { HostedWebhookServiceResponse } from "./webhook-service-types";
+import type {
+  HostedWebhookServiceResponse,
+  HostedWebhookWakeMailboxCheckpoint,
+} from "./webhook-service-types";
 
 // Latency traces are observability only. They are scheduled after the webhook
 // response so ingress wake handoff stays focused on durable mailbox acceptance
@@ -39,15 +47,32 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
   source: "linq" | "telegram" | "whatsapp";
   userId?: string;
+  wakeMailboxCheckpoint?: HostedWebhookWakeMailboxCheckpoint;
 }): Promise<HostedWebhookWakeHandoffResult | null> {
   if (!input.mailboxItemId) {
     return null;
   }
   const mailboxItemId = input.mailboxItemId;
+  // Guarded at runtime: a checkpoint missing lane facts falls back to the
+  // legacy signal path (checkpoint re-read + workspace ensure) instead of
+  // failing the wake on malformed planner data.
+  const knownCheckpoint =
+    input.userId
+    && typeof input.wakeMailboxCheckpoint?.lane === "string"
+    && input.wakeMailboxCheckpoint.lane.length > 0
+    && typeof input.wakeMailboxCheckpoint.laneSeq === "string"
+    && input.wakeMailboxCheckpoint.laneSeq.length > 0
+      ? {
+          lane: input.wakeMailboxCheckpoint.lane,
+          laneSeq: input.wakeMailboxCheckpoint.laneSeq,
+          userId: input.userId,
+        }
+      : undefined;
 
   const handoffTiming = startHostedOnboardingTiming(
     `hosted-onboarding.webhook.${input.source}.wake-handoff`,
     {
+      directEnsureWakeStarted: Boolean(knownCheckpoint),
       eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
       responseReason: input.response.reason,
       userIdPresent: Boolean(input.userId),
@@ -55,11 +80,30 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     },
   );
 
+  // Latency fast path: poke the idempotent Cloudflare ensure route directly so
+  // the runtime starts waking while the Temporal signal (still sent below,
+  // unconditionally, as the sole durable orchestrator) is in flight. Gated on
+  // the planner checkpoint because its presence proves the planning
+  // transaction already verified the active member and admission for this
+  // wake. Best-effort only: losing this call leaves exactly the Temporal path.
+  const directEnsureWake = knownCheckpoint && input.userId
+    ? startHostedDirectEnsureWakeBestEffort({
+        source: input.source,
+        userId: input.userId,
+      })
+    : null;
+  const keepDirectEnsureWakeAlive = async () => {
+    if (directEnsureWake) {
+      await directEnsureWake;
+    }
+  };
+
   let signal: Awaited<ReturnType<typeof signalHostedMailboxAppendRuntime>>;
   let temporalSignalAcceptedAt: Date | null = null;
   try {
     signal = await signalHostedMailboxAppendRuntime({
       expectedUserId: input.userId ?? null,
+      ...(knownCheckpoint ? { knownCheckpoint } : {}),
       mailboxItemId,
     });
     temporalSignalAcceptedAt = new Date();
@@ -71,6 +115,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       temporalSignalAcceptedAt,
       userId: input.userId ?? null,
     });
+    await keepDirectEnsureWakeAlive();
     const errorName = deriveHostedOnboardingTimingErrorName(error);
     finishHostedOnboardingTiming(handoffTiming, "failed", {
       errorName,
@@ -85,6 +130,13 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     temporalSignalAcceptedAt,
     userId: input.userId ?? null,
   });
+  if (directEnsureWake) {
+    if (input.scheduleAfterResponse) {
+      input.scheduleAfterResponse(keepDirectEnsureWakeAlive);
+    } else {
+      await keepDirectEnsureWakeAlive();
+    }
+  }
 
   finishHostedOnboardingTiming(handoffTiming, "temporal-signaled", {
     workflowIdSuffix: toHostedOnboardingLogIdSuffix(signal.workflowId),
@@ -95,6 +147,41 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     started: true,
     workflowId: signal.workflowId,
   };
+}
+
+// Starts the direct Cloudflare ensure request immediately and never rejects.
+// The returned promise exists only so callers can keep the request alive past
+// the webhook response; the Temporal signal never waits on it.
+function startHostedDirectEnsureWakeBestEffort(wake: {
+  source: "linq" | "telegram" | "whatsapp";
+  userId: string;
+}): Promise<void> {
+  const client = readHostedExecutionControlClientIfConfigured();
+  if (!client) {
+    return Promise.resolve();
+  }
+  const wakeSource = wake.source;
+
+  return client
+    .ensureRuntimeProcessing({
+      orchestrationAttemptId: `web-ingress-${randomUUID()}`,
+      userId: wake.userId,
+    })
+    .then((ensureResult) => {
+      console.info("Hosted direct ensure wake completed.", {
+        kind: ensureResult.kind,
+        ...(ensureResult.kind === "runtime_processing_accepted"
+          ? { action: ensureResult.action }
+          : {}),
+        source: wakeSource,
+      });
+    })
+    .catch((error: unknown) => {
+      console.warn("Hosted direct ensure wake failed.", {
+        errorName: deriveHostedOnboardingTimingErrorName(error),
+        source: wakeSource,
+      });
+    });
 }
 
 function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {

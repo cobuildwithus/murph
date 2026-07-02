@@ -152,6 +152,52 @@ describe("hosted runtime Temporal signaling", () => {
     expect(JSON.stringify(signal)).not.toMatch(/Please look|providerHeaders|messageText/u);
   });
 
+  it("skips the checkpoint re-read and workspace ensure when the caller supplies planner lane facts", async () => {
+    await expect(signalHostedMailboxAppendRuntime({
+      client: buildClient(),
+      expectedUserId: "member_123",
+      knownCheckpoint: {
+        lane: "conversation",
+        laneSeq: "42",
+        userId: "member_123",
+      },
+      mailboxItemId: "mailbox_123",
+    })).resolves.toEqual({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
+
+    expect(mocks.readHostedMailboxItemCheckpointById).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.hostedMemberFindUnique).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).toHaveBeenCalledWith(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      expect.objectContaining({
+        signalArgs: [{
+          kind: "mailbox_appended",
+          lane: "conversation",
+          laneSeq: "42",
+          mailboxItemId: "mailbox_123",
+        }],
+        workflowId: "hosted-user-runtime:member_123",
+      }),
+    );
+  });
+
+  it("rejects planner lane facts whose owner does not match the expected user", async () => {
+    await expect(signalHostedMailboxAppendRuntime({
+      client: buildClient(),
+      expectedUserId: "member_123",
+      knownCheckpoint: {
+        lane: "conversation",
+        laneSeq: "42",
+        userId: "member_other",
+      },
+      mailboxItemId: "mailbox_123",
+    })).rejects.toThrow("Hosted mailbox item owner does not match runtime signal user.");
+    expect(mocks.signalWithStart).not.toHaveBeenCalled();
+  });
+
   it("signals duplicate mailbox append attempts safely", async () => {
     const client = buildClient();
 

@@ -988,6 +988,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     temporalActivityStartedAtEpochMs?: number;
     temporalActivityRequestStartedAtEpochMs?: number;
     cloudflareRouteReceivedAtEpochMs?: number;
+    triggeredByWebDirect?: boolean;
     userRunnerEnsureStartedAtEpochMs?: number;
     activeWakeStartedAtEpochMs?: number;
     activeWakeFinishedAtEpochMs?: number;
@@ -1073,6 +1074,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "temporalActivityStartedAtEpochMs",
     "temporalActivityRequestStartedAtEpochMs",
     "cloudflareRouteReceivedAtEpochMs",
+    "triggeredByWebDirect",
     "userRunnerEnsureStartedAtEpochMs",
     "activeWakeStartedAtEpochMs",
     "activeWakeFinishedAtEpochMs",
@@ -1127,6 +1129,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
   [
     "orchestration.activeWakeAccepted",
     "orchestration.replacedStaleFence",
+    "orchestration.triggeredByWebDirect",
     "wake.activeRuntimePassForeground",
     "boot.restoreWasCold",
   ] as const;

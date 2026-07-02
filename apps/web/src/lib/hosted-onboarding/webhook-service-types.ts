@@ -1,7 +1,18 @@
+import type { HostedMailboxLane } from "@murphai/hosted-execution/runtime-control";
+
 import type { HostedOnboardingTelegramWebhookResponse } from "./webhook-provider-telegram";
 import type { HostedOnboardingLinqWebhookResponse } from "./webhook-provider-linq-types";
 import type { HostedOnboardingWhatsAppWebhookResponse } from "./webhook-provider-whatsapp";
 import type { HostedLinqThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
+
+// Lane facts from the planner's own mailbox append/dedupe row. Presence means
+// the planning transaction already proved the active member, admission, and
+// workspace row for this wake, so the handoff may skip its re-reads and fire
+// the direct runtime ensure fast path.
+export type HostedWebhookWakeMailboxCheckpoint = {
+  lane: HostedMailboxLane;
+  laneSeq: string;
+};
 
 export type HostedWebhookPlan<TResult, TSideEffect = never> = {
   desiredSideEffects: readonly TSideEffect[];
@@ -9,6 +20,7 @@ export type HostedWebhookPlan<TResult, TSideEffect = never> = {
   response: TResult;
   wakeHandoffs?: readonly HostedWebhookWakeHandoff[];
   wakeLinqChatId?: string;
+  wakeMailboxCheckpoint?: HostedWebhookWakeMailboxCheckpoint;
   wakeMailboxItemId?: string;
   wakeUserId?: string;
 };
