@@ -1704,15 +1704,6 @@ export interface HostedWorkspaceInvocationResult {
   status: HostedWorkspaceInvocationStatus;
 }
 
-export interface HostedExpectedCodexRootProcess {
-  commandLineDigest: string;
-  owner: "codex-app-server";
-  pid: number;
-  processGroupId: number | null;
-  startTimeTicksFromProcStat: string;
-  uid: number | null;
-}
-
 export function isHostedMailboxLane(value: string): value is HostedMailboxLane {
   return HOSTED_MAILBOX_LANES.includes(value as HostedMailboxLane);
 }

@@ -808,7 +808,6 @@ function isAllowedCloudflareAssistantEngineOwnerImport({
     relativeFilePath === "apps/cloudflare/src/container-entrypoint.ts"
     && specifier === "@murphai/assistant-engine/codex-lifecycle"
     && importsOnlyNamedBindingsFromSpecifier(source, specifier, [
-      "snapshotExpectedCodexRootProcess",
       "stopWarmCodexAppServer",
     ])
   );

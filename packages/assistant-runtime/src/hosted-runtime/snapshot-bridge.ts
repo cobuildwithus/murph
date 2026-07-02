@@ -27,6 +27,9 @@ import {
   compactHostedPendingAssistantInputIds,
 } from "./pending-input-index.ts";
 import {
+  hasHostedProviderCleanupRecoveryCompleted,
+} from "./provider-cleanup.ts";
+import {
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
@@ -401,6 +404,8 @@ async function createHostedWorkspaceV2Snapshot(
       assistantRuntimeResiduePruneResult = await pruneAssistantRuntimeResidue({
         now: new Date(),
         pendingInputIds,
+        protectPendingProviderCleanupEvidence:
+          !(await hasHostedProviderCleanupRecoveryCompleted(input.vaultRoot)),
         vault: input.vaultRoot,
       });
       if (

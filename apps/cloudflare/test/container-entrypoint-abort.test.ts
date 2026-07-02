@@ -200,9 +200,6 @@ describe("container entrypoint abort boundary", () => {
     const invocationStarted = createDeferred<AbortSignal>();
     const finishInvocation = createDeferred();
     const exit = vi.fn();
-    const readdir = vi.fn(async () => [
-      { isDirectory: () => true, name: String(process.pid) },
-    ]);
     const readFile = vi.fn(async () => {
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
@@ -224,8 +221,7 @@ describe("container entrypoint abort boundary", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
-        processApi: { readFile, readdir },
-        processIsolation: true,
+        processApi: { readFile },
       },
     });
     servers.push(server);
@@ -257,7 +253,7 @@ describe("container entrypoint abort boundary", () => {
       expect(health.status).toBe(200);
       expect(health.json).toMatchObject({
         activeJobCount: 0,
-        lastCleanupStatus: "passed",
+        lastCleanupStatus: "not_run",
         poisoned: false,
       });
     });
@@ -517,17 +513,12 @@ describe("container entrypoint abort boundary", () => {
   it("keeps cleanup failure as poison even when the response is already closed", async () => {
     const invocationStarted = createDeferred<AbortSignal>();
     const failCleanup = createDeferred();
+    const consumeCliBridgeOffInvocationViolation = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
     const exit = vi.fn();
-    const kill = vi.fn();
-    const readdir = vi.fn(async () => [
-      { isDirectory: () => true, name: String(process.pid) },
-      { isDirectory: () => true, name: String(process.pid + 1) },
-    ]);
-    const readFile = vi.fn(async (filePath: string) => {
-      if (String(filePath).endsWith(`/${process.pid + 1}/stat`)) {
-        return `${process.pid + 1} (node) S ${process.pid}`;
-      }
-      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    const stopWarmCodex = vi.fn(async () => {
+      throw new Error("warm stop failed");
     });
     mocks.runHostedWorkspaceInvocation.mockImplementation(
       async (_job, options) => {
@@ -546,9 +537,9 @@ describe("container entrypoint abort boundary", () => {
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
+        consumeCliBridgeOffInvocationViolation,
         exitScheduler: exit,
-        processApi: { kill, readFile, readdir },
-        processIsolation: true,
+        stopWarmCodex,
       },
     });
     servers.push(server);
@@ -584,6 +575,8 @@ describe("container entrypoint abort boundary", () => {
         poisoned: true,
       });
     }, 7000);
-    expect(exit).toHaveBeenCalledTimes(1);
+    expect(consumeCliBridgeOffInvocationViolation).toHaveBeenCalledTimes(2);
+    expect(stopWarmCodex).toHaveBeenCalledTimes(1);
+    expect(exit).not.toHaveBeenCalled();
   });
 });

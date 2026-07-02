@@ -181,12 +181,12 @@ export async function writeAssistantAutoReplyReplyIntentEvidence(input: {
   recordedAt: string
   result: Awaited<ReturnType<typeof sendAssistantMessage>>
   vault: string
-}): Promise<void> {
+}): Promise<string[]> {
   const terminalKind =
     input.outcome === 'deferred' && input.result.deliveryIntentId
       ? 'reply_intent_committed'
       : null
-  await writeAssistantAutoReplyReplyTerminalEvidence({
+  return await writeAssistantAutoReplyReplyTerminalEvidence({
     captureIds: input.captureIds,
     inputIds: input.inputIds,
     deliveryIntentId: input.result.deliveryIntentId,
@@ -209,7 +209,7 @@ export async function writeAssistantAutoReplyReplyTerminalEvidence(input: {
   sessionId: string
   terminalKind?: 'deferred' | 'replied' | 'reply_intent_committed'
   vault: string
-}): Promise<void> {
+}): Promise<string[]> {
   const group = normalizeEvidenceGroup({
     captureIds: input.captureIds,
     inputIds: input.inputIds,
@@ -239,6 +239,7 @@ export async function writeAssistantAutoReplyReplyTerminalEvidence(input: {
       }),
     ),
   )
+  return providerCleanup.linqMessageIds
 }
 
 export async function writeAssistantAutoReplySuppressionEvidence(input: {
@@ -248,7 +249,7 @@ export async function writeAssistantAutoReplySuppressionEvidence(input: {
   reason: string
   recordedAt?: string
   vault: string
-}): Promise<void> {
+}): Promise<string[]> {
   const group = normalizeEvidenceGroup({
     captureIds: input.captureIds,
     inputIds: input.inputIds,
@@ -275,6 +276,7 @@ export async function writeAssistantAutoReplySuppressionEvidence(input: {
       }),
     ),
   )
+  return providerCleanup.linqMessageIds
 }
 
 export async function listPendingAssistantAutoReplyLinqCleanupEvidence(input: {
