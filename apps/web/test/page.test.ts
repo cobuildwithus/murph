@@ -118,7 +118,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
   expect(mocks.getMurphGithubStarCount).toHaveBeenCalledTimes(1);
   expect(mocks.headers).toHaveBeenCalledTimes(1);
-  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(5);
+  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(4);
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
     1,
     {
@@ -143,16 +143,6 @@ test("HomePage renders the canonical landing page at the root route", async () =
   );
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
     3,
-    expect.objectContaining({
-      authenticated: false,
-      context: "hero",
-      authLabel: "Meet Murph",
-      leadingIcon: expect.anything(),
-    }),
-    undefined
-  );
-  expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
-    4,
     {
       authenticated: false,
       context: "footer",
@@ -163,7 +153,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
     undefined
   );
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
-    5,
+    4,
     {
       authenticated: false,
       context: "footer",
@@ -275,9 +265,9 @@ test("HomePage keeps the final CTA consistent for authenticated sessions", async
   const markup = renderToStaticMarkup(await HomePage());
 
   expect(mocks.headers).toHaveBeenCalledTimes(1);
-  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(5);
+  expect(mocks.LandingAuthActions).toHaveBeenCalledTimes(4);
   expect(mocks.LandingAuthActions).toHaveBeenNthCalledWith(
-    5,
+    4,
     {
       authenticated: true,
       context: "footer",
