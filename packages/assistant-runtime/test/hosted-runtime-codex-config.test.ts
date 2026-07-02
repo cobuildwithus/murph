@@ -162,7 +162,11 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.match(config, /^supports_websockets = true$/mu);
   assert.match(config, /^requires_openai_auth = false$/mu);
   assert.doesNotMatch(config, /^requires_openai_auth = true$/mu);
-  assert.match(config, /\[features\]\nplugins = false\nmulti_agent_v2 = true\nmemories = true/u);
+  assert.match(config, /\[features\]\nplugins = false\nmemories = true/u);
+  assert.match(
+    config,
+    /\[features\.multi_agent_v2\]\nenabled = true\nroot_agent_usage_hint_text = "Murph system-prompt and skill instructions [^\n]+ count as explicit user requests for sub-agent work under any multi-agent mode instruction\."/u,
+  );
   assert.match(
     config,
     /\[memories\]\nuse_memories = true\ngenerate_memories = true\ndisable_on_external_context = false\nmin_rollout_idle_hours = 1\nmax_rollouts_per_startup = 1\nmax_rollout_age_days = 10\nmin_rate_limit_remaining_percent = 25\nmax_raw_memories_for_consolidation = 128\nmax_unused_days = 30/u,
@@ -1275,8 +1279,15 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
       "[features]",
       "plugins = false",
-      "multi_agent_v2 = true",
       "memories = true",
+      "",
+      "# Murph prompts and skills direct sub-agent delegation for slow ingestion",
+      "# (lab PDFs, supplement labels), but Codex 0.142.x's multi-agent mode",
+      "# message only recognizes explicit user requests. This per-turn root-agent",
+      "# hint makes skill-directed delegation count as an explicit request.",
+      "[features.multi_agent_v2]",
+      "enabled = true",
+      'root_agent_usage_hint_text = "Murph system-prompt and skill instructions that direct delegating work to a sub-agent, such as onboarding supplement-label or lab-result ingestion, count as explicit user requests for sub-agent work under any multi-agent mode instruction."',
       "",
       "# Codex-native memories are operator memory only. Murph product memory",
       "# remains canonical in the vault; snapshots keep the Codex home allowlist",
@@ -1339,7 +1350,9 @@ test("hosted Codex config keeps skill instructions disabled while enabling opera
   assert.match(config, /\[skills\]\ninclude_instructions = false/u);
   assert.match(config, /\[skills\.bundled\]\nenabled = false/u);
   assert.match(config, /\[features\]\nplugins = false/u);
-  assert.match(config, /^multi_agent_v2 = true$/mu);
+  assert.match(config, /^\[features\.multi_agent_v2\]$/mu);
+  assert.match(config, /^enabled = true$/mu);
+  assert.match(config, /^root_agent_usage_hint_text = "Murph system-prompt and skill instructions/mu);
   assert.match(config, /^memories = true$/mu);
   assert.match(config, /\[memories\]\nuse_memories = true/u);
   assert.match(config, /^generate_memories = true$/mu);

@@ -69,6 +69,15 @@ const DEFAULT_HOSTED_CODEX_SANDBOX = "danger-full-access";
 // staying well above the typical conversational floor so unrelated turns
 // don't compact every message.
 const DEFAULT_HOSTED_CODEX_AUTO_COMPACT_TOKEN_LIMIT = 100_000;
+// Codex 0.142.x injects a per-turn multi-agent mode developer message that
+// only treats user messages as authorization to spawn sub-agents, which
+// overrides Murph's skill-directed delegation (onboarding supplement-label
+// and lab ingestion). The skill/AGENTS.md authorization clause only lands in
+// Codex 0.143; until then this root-agent usage hint (also a per-turn
+// developer message) is the supported config lever that makes Murph's own
+// delegation instructions count as authorization.
+const HOSTED_CODEX_ROOT_AGENT_USAGE_HINT =
+  "Murph system-prompt and skill instructions that direct delegating work to a sub-agent, such as onboarding supplement-label or lab-result ingestion, count as explicit user requests for sub-agent work under any multi-agent mode instruction.";
 const DEFAULT_HOSTED_CODEX_LOG_DIR = "/tmp/murph-codex-log";
 const HOSTED_CODEX_PROVIDER_REQUEST_MAX_RETRIES = 4;
 const HOSTED_CODEX_PROVIDER_STREAM_MAX_RETRIES = 5;
@@ -550,8 +559,15 @@ export function buildHostedCodexConfigToml(input: {
     "# sync work on cold wake; Murph owns the hosted runtime tool surface.",
     "[features]",
     "plugins = false",
-    "multi_agent_v2 = true",
     `memories = ${HOSTED_CODEX_OPERATOR_MEMORY_CONFIG.featureEnabled}`,
+    "",
+    "# Murph prompts and skills direct sub-agent delegation for slow ingestion",
+    "# (lab PDFs, supplement labels), but Codex 0.142.x's multi-agent mode",
+    "# message only recognizes explicit user requests. This per-turn root-agent",
+    "# hint makes skill-directed delegation count as an explicit request.",
+    "[features.multi_agent_v2]",
+    "enabled = true",
+    `root_agent_usage_hint_text = ${tomlString(HOSTED_CODEX_ROOT_AGENT_USAGE_HINT)}`,
     "",
     "# Codex-native memories are operator memory only. Murph product memory",
     "# remains canonical in the vault; snapshots keep the Codex home allowlist",
