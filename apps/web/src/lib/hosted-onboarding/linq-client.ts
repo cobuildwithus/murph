@@ -1,3 +1,5 @@
+import "server-only";
+
 import type { TextPart } from "@linqapp/sdk/resources";
 import type {
   MessageSendParams,
