@@ -25,12 +25,12 @@ import {
 import { sanitizeHostedOnboardingLogString } from "./http";
 import { buildHostedInviteUrl } from "./invite-service";
 import { normalizePhoneNumber } from "./phone";
+import { buildHostedLinqInviteSignupEffectId } from "./linq-invite-signup-effect-id";
 import {
   claimHostedLinqQuotaReplyNotice,
   markHostedLinqOnboardingLinkNoticeSent,
   releaseHostedLinqOnboardingLinkNoticeClaim,
   releaseHostedLinqQuotaReplyNoticeClaim,
-  resolveHostedLinqDayUtc,
 } from "./linq-daily-state";
 import {
   buildHostedDailyQuotaReply,
@@ -271,8 +271,7 @@ function buildHostedWebhookLinqMessageEffectId(
   input: CreateHostedWebhookLinqMessageSideEffectInput,
 ): string {
   if (input.template === "invite_signup" || input.template === "invite_signup_fallback") {
-    const dayUtc = resolveHostedLinqDayUtc(input.occurredAt).toISOString();
-    return `linq-invite-signup:${input.memberId}:${dayUtc}`;
+    return buildHostedLinqInviteSignupEffectId(input);
   }
 
   if (input.template === "ai_usage_quota" && input.claimToken) {

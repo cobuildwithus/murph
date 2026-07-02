@@ -11,6 +11,7 @@ import {
 import {
   createHostedLinqProviderEventLookupKey,
 } from "./linq-observability-identifiers";
+import { releaseHostedLinqOnboardingLinkNoticeClaim } from "./linq-daily-state";
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { sha256Hex } from "../primitives";
@@ -73,6 +74,13 @@ export async function ingestHostedLinqProviderEventTx(input: {
     event: input.event,
     prisma: input.prisma,
   });
+  if (deliveryReceipt.reopenOnboardingLink) {
+    await releaseHostedLinqOnboardingLinkNoticeClaim({
+      memberId: deliveryReceipt.reopenOnboardingLink.memberId,
+      occurredAt: deliveryReceipt.reopenOnboardingLink.occurredAt,
+      prisma: input.prisma,
+    });
+  }
   const outboundEchoDelivery = isHostedRuntimeOwnedOutboundEcho(input.event)
     ? await readHostedLinqDeliveryForProviderMessageTx({
         messageLookupKey: input.event.messageLookupKey,

@@ -15,6 +15,7 @@ import {
   createHostedLinqDeliveryIdempotencyLookupKey,
   createHostedLinqDeliverySourceRefLookupKey,
 } from "./linq-observability-identifiers";
+import { parseHostedLinqInviteSignupEffectId } from "./linq-invite-signup-effect-id";
 import {
   compareHostedLinqProviderEventProgress,
   createHostedLinqProviderEventProgress,
@@ -39,6 +40,11 @@ type HostedLinqDeliveryReceiptData = {
   phoneNumberLookupKey?: string | null;
   providerCreatedAt: Date;
   service: string | null;
+};
+
+type HostedLinqReopenOnboardingLink = {
+  memberId: string;
+  occurredAt: string;
 };
 
 export async function recordHostedLinqDeliveryAttemptTx(input: {
@@ -68,7 +74,10 @@ export async function recordHostedLinqDeliveryAttemptTx(input: {
     phoneNumberHint: phoneNumber ? readHostedPhoneHint(phoneNumber) : null,
     phoneNumberLookupKey,
     source: input.source,
-    sourceRef: createHostedLinqDeliverySourceRefLookupKey(normalizeNullable(input.sourceRef)),
+    sourceRef: normalizeHostedLinqDeliverySourceRef({
+      sourceRef: input.sourceRef,
+      template: input.template,
+    }),
     status: "attempted",
     targetKind: normalizeNullable(input.targetKind),
     template: normalizeNullable(input.template),
@@ -176,7 +185,10 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
     skippedAt: null,
     skipReason: null,
     source: input.source,
-    sourceRef: createHostedLinqDeliverySourceRefLookupKey(normalizeNullable(input.sourceRef)),
+    sourceRef: normalizeHostedLinqDeliverySourceRef({
+      sourceRef: input.sourceRef,
+      template: input.template,
+    }),
     status: "attempted",
     targetKind: normalizeNullable(input.targetKind),
     template: normalizeNullable(input.template),
@@ -672,7 +684,10 @@ export async function markHostedLinqDeliverySkippedTx(input: {
     skipReason: input.reason.slice(0, 160),
     skippedAt,
     source: input.source,
-    sourceRef: createHostedLinqDeliverySourceRefLookupKey(normalizeNullable(input.sourceRef)),
+    sourceRef: normalizeHostedLinqDeliverySourceRef({
+      sourceRef: input.sourceRef,
+      template: input.template,
+    }),
     status: "skipped",
     targetKind: normalizeNullable(input.targetKind),
     template: normalizeNullable(input.template),
@@ -736,12 +751,14 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
   advanced: boolean;
   deliveryId: string | null;
   phoneNumberLookupKey: string | null;
+  reopenOnboardingLink: HostedLinqReopenOnboardingLink | null;
 }> {
   if (!input.event.messageLookupKey || !input.event.deliveryStatus) {
     return {
       advanced: true,
       deliveryId: null,
       phoneNumberLookupKey: null,
+      reopenOnboardingLink: null,
     };
   }
   const delivery = await input.prisma.hostedLinqDelivery.findFirst({
@@ -754,7 +771,10 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
     },
     select: {
       id: true,
+      idempotencyKey: true,
       phoneNumberLookupKey: true,
+      sourceRef: true,
+      template: true,
     },
   });
 
@@ -763,6 +783,7 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
       advanced: true,
       deliveryId: null,
       phoneNumberLookupKey: null,
+      reopenOnboardingLink: null,
     };
   }
 
@@ -773,10 +794,14 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
     },
     data: buildReceiptUpdate(input.event),
   });
+  const advanced = updated.count === 1;
   return {
-    advanced: updated.count === 1,
+    advanced,
     deliveryId: delivery.id,
     phoneNumberLookupKey: delivery.phoneNumberLookupKey,
+    reopenOnboardingLink: advanced && input.event.deliveryStatus === "failed"
+      ? resolveHostedLinqReopenOnboardingLink(delivery)
+      : null,
   };
 }
 
@@ -1186,6 +1211,46 @@ async function runHostedLinqDeliveryStoreTransaction<T>(
   }
 
   return operation(prisma);
+}
+
+function resolveHostedLinqReopenOnboardingLink(input: {
+  idempotencyKey: string | null;
+  sourceRef: string | null;
+  template: string | null;
+}): HostedLinqReopenOnboardingLink | null {
+  if (!isHostedLinqInviteSignupDeliveryTemplate(input.template)) {
+    return null;
+  }
+
+  const parsed = parseHostedLinqInviteSignupEffectId(input.idempotencyKey)
+    ?? parseHostedLinqInviteSignupEffectId(input.sourceRef);
+  return parsed
+    ? {
+        memberId: parsed.memberId,
+        occurredAt: parsed.dayUtc,
+      }
+    : null;
+}
+
+function normalizeHostedLinqDeliverySourceRef(input: {
+  sourceRef: string | null | undefined;
+  template: string | null | undefined;
+}): string | null {
+  const sourceRef = normalizeNullable(input.sourceRef);
+  if (
+    isHostedLinqInviteSignupDeliveryTemplate(input.template)
+    && parseHostedLinqInviteSignupEffectId(sourceRef)
+  ) {
+    return sourceRef;
+  }
+
+  return createHostedLinqDeliverySourceRefLookupKey(sourceRef);
+}
+
+function isHostedLinqInviteSignupDeliveryTemplate(
+  template: string | null | undefined,
+): boolean {
+  return template === "invite_signup" || template === "invite_signup_fallback";
 }
 
 function normalizeNullable(value: string | null | undefined): string | null {

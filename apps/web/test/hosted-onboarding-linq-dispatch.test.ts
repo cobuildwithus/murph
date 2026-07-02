@@ -18,9 +18,12 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
 import {
   buildHostedInviteReply,
+  type HostedLinqWebhookEvent,
   parseHostedLinqWebhookEvent,
   requireHostedLinqMessageReceivedEvent,
 } from "@/src/lib/hosted-onboarding/linq";
+import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
+import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import { hostedLinqFirstContactContainsBlockedContent } from "@/src/lib/hosted-onboarding/webhook-provider-linq-shared";
 import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
@@ -5911,6 +5914,173 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
   });
 
+  it("re-emits fallback signup delivery after a terminal failed receipt reopens onboarding", async () => {
+    const incomingLinePhone = "+15550000000";
+    const fallbackLinePhone = "+15550100001";
+    const invite = {
+      channel: "linq",
+      id: "invite_fallback_receipt_retry",
+      inviteCode: "code_fallback_receipt_retry",
+      memberId: "member_123",
+      sentAt: null,
+      status: "pending",
+    };
+    let onboardingLinkSentAt: Date | null = null;
+    mocks.readHostedLinqDailyState.mockImplementation(async () =>
+      makeHostedLinqDailyState({
+        onboardingLinkSentAt,
+      })
+    );
+    mocks.incrementHostedLinqInboundDailyState.mockImplementation(async () =>
+      makeHostedLinqDailyState({
+        onboardingLinkSentAt,
+      })
+    );
+    mocks.markHostedLinqOnboardingLinkNoticeSent.mockImplementation(async () => {
+      onboardingLinkSentAt = new Date("2026-03-26T12:00:01.000Z");
+      return true;
+    });
+    mocks.releaseHostedLinqOnboardingLinkNoticeClaim.mockImplementation(async () => {
+      onboardingLinkSentAt = null;
+    });
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
+    const effectId = "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          id: "invite_fallback_receipt_retry",
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqAlert: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqDelivery: {
+        create: vi.fn().mockResolvedValue({ id: "hld_fallback_receipt_retry" }),
+        findFirst: vi.fn()
+          .mockResolvedValueOnce({
+            id: "hld_fallback_receipt_original",
+            idempotencyKey: null,
+            phoneNumberLookupKey: null,
+            sourceRef: effectId,
+            template: "invite_signup_fallback",
+          })
+          .mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue(undefined),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqLine: buildHostedLinqLinePoolFixture({
+        lines: [
+          {
+            phoneNumber: fallbackLinePhone,
+          },
+        ],
+      }),
+      hostedLinqProviderEvent: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+          suspendedAt: null,
+        }),
+        update: vi.fn(),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_degraded",
+            owner_handle: {
+              handle: incomingLinePhone,
+              id: "handle_owner_degraded",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+        },
+        eventId: "evt_fallback_receipt_first_contact",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+    expect(onboardingLinkSentAt).toEqual(new Date("2026-03-26T12:00:01.000Z"));
+
+    await ingestHostedLinqProviderEventTx({
+      event: requireParsedHostedLinqProviderEvent(buildHostedLinqProviderReceiptEvent({
+        eventId: "evt_fallback_receipt_failed",
+        eventType: "message.failed",
+        messageId: "provider_msg_fallback",
+      })),
+      prisma: prisma as never,
+    });
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          chat: {
+            id: "chat_degraded",
+            owner_handle: {
+              handle: incomingLinePhone,
+              id: "handle_owner_degraded",
+              is_me: true,
+              service: "iMessage",
+            },
+          },
+        },
+        eventId: "evt_fallback_receipt_second_contact",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(mocks.releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalledWith({
+      memberId: "member_123",
+      occurredAt: "2026-03-26T00:00:00.000Z",
+      prisma,
+    });
+    expect(response).toMatchObject({
+      inviteCode: "code_fallback_receipt_retry",
+      ok: true,
+      reason: "sent-signup-link",
+    });
+    expect(mocks.createHostedLinqChat).toHaveBeenCalledTimes(2);
+    expect(mocks.createHostedLinqChat).toHaveBeenNthCalledWith(2, {
+      from: fallbackLinePhone,
+      idempotencyKey: effectId,
+      message: expect.stringContaining("https://join.example.test/join/code_fallback_receipt_retry"),
+      signal: undefined,
+      to: ["+15551234567"],
+    });
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("keeps all-unassignable first-contact line routing ignored", async () => {
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
     const prismaMocks = {
@@ -7417,6 +7587,124 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it("re-sends a first-contact signup link after a terminal failed receipt reopens onboarding", async () => {
+    let onboardingLinkSentAt: Date | null = new Date("2026-03-26T12:00:01.000Z");
+    mocks.readHostedLinqDailyState.mockImplementation(async () =>
+      makeHostedLinqDailyState({
+        onboardingLinkSentAt,
+      })
+    );
+    mocks.incrementHostedLinqInboundDailyState.mockImplementation(async () =>
+      makeHostedLinqDailyState({
+        onboardingLinkSentAt,
+      })
+    );
+    mocks.releaseHostedLinqOnboardingLinkNoticeClaim.mockImplementation(async () => {
+      onboardingLinkSentAt = null;
+    });
+    const effectId = "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
+    const hostedInviteCreate = vi.fn().mockResolvedValue({
+      channel: "linq",
+      id: "invite_reopened",
+      inviteCode: "code_reopened",
+      memberId: "member_123",
+      sentAt: null,
+      status: "pending",
+    });
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: {
+        create: hostedInviteCreate,
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue({
+            inviteCode: "code_reopened",
+          }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      hostedLinqAlert: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqDelivery: {
+        create: vi.fn().mockResolvedValue({ id: "hld_reopened_retry" }),
+        findFirst: vi.fn()
+          .mockResolvedValueOnce({
+            id: "hld_reopened_original",
+            idempotencyKey: null,
+            phoneNumberLookupKey: null,
+            sourceRef: effectId,
+            template: "invite_signup",
+          })
+          .mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn().mockResolvedValue(undefined),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedLinqLine: buildHostedLinqLineFixture({
+        phoneNumber: "+15550000000",
+      }),
+      hostedLinqProviderEvent: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    await ingestHostedLinqProviderEventTx({
+      event: requireParsedHostedLinqProviderEvent(buildHostedLinqProviderReceiptEvent({
+        eventId: "evt_reopened_signup_failed",
+        eventType: "message.failed",
+        messageId: "provider_msg_123",
+      })),
+      prisma: prisma as never,
+    });
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_reopened_signup_next_inbound",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(mocks.releaseHostedLinqOnboardingLinkNoticeClaim).toHaveBeenCalledWith({
+      memberId: "member_123",
+      occurredAt: "2026-03-26T00:00:00.000Z",
+      prisma,
+    });
+    expect(response).toMatchObject({
+      inviteCode: "code_reopened",
+      ok: true,
+      reason: "sent-signup-link",
+    });
+    expect(hostedInviteCreate).toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: expect.stringContaining("https://join.example.test/join/code_reopened"),
+        replyToMessageId: "msg_123",
+      }),
+    );
+  });
+
   it("does not let a stale pre-send signup notice claim suppress first reach-out", async () => {
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValueOnce(false);
     mocks.readHostedLinqDailyState.mockResolvedValueOnce(null);
@@ -8585,6 +8873,45 @@ function buildHostedLinqWebhookBody(input: {
     event_id: input.eventId ?? "evt_123",
     event_type: "message.received",
   });
+}
+
+function buildHostedLinqProviderReceiptEvent(input: {
+  createdAt?: string;
+  eventId: string;
+  eventType: "message.delivered" | "message.failed";
+  messageId: string;
+}): HostedLinqWebhookEvent {
+  return {
+    api_version: "v3",
+    created_at: input.createdAt ?? "2026-03-26T12:00:02.000Z",
+    data: {
+      error: input.eventType === "message.failed"
+        ? {
+            code: "30007",
+            message: "carrier filtered",
+          }
+        : undefined,
+      message_id: input.messageId,
+      phone_number: "+15550000000",
+      service: "iMessage",
+    },
+    event_id: input.eventId,
+    event_type: input.eventType,
+    trace_id: "trace_delivery_receipt",
+    webhook_version: "2026-02-03",
+  } as HostedLinqWebhookEvent;
+}
+
+function requireParsedHostedLinqProviderEvent(event: HostedLinqWebhookEvent) {
+  const parsed = parseHostedLinqProviderEvent({
+    event,
+    rawBody: JSON.stringify(event),
+  });
+  if (!parsed) {
+    throw new TypeError("Expected hosted Linq provider receipt event to parse.");
+  }
+
+  return parsed;
 }
 
 function buildTypingWebhookBody(input: {
