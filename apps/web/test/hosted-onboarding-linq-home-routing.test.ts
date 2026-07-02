@@ -500,9 +500,7 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       recipientPhone: line.phoneNumber,
     });
 
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledWith({
-      prisma: {} as never,
-    });
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: {} as never,
@@ -513,6 +511,63 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     });
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
+  });
+
+  it("resolves an already-bound home chat without touching the shared pool lock", async () => {
+    const assignedAt = new Date("2026-06-30T14:15:00.000Z");
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "chat_123",
+      linqHomeLineAssignedAt: assignedAt,
+      linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+
+    await expect(
+      resolveHostedMemberLinqHomeLineRouteBindingTx({
+        incomingChatId: "chat_123",
+        incomingDirectAttested: true,
+        incomingRecipientPhone: "+15550100001",
+        memberId: "member_123",
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      homeLineAssignedAt: assignedAt,
+      kind: "bind",
+      recipientPhone: "+15550100001",
+    });
+
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+  });
+
+  it("acquires the pool lock and re-resolves routing before reserving a new assignment", async () => {
+    mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+
+    const result = await resolveHostedMemberLinqHomeLineRouteBindingTx({
+      incomingChatId: "chat_first_bind",
+      incomingDirectAttested: true,
+      incomingRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      prisma: {} as never,
+    });
+
+    expect(result).toMatchObject({
+      kind: "bind",
+      recipientPhone: "+15550100001",
+    });
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
+    // The routing state must be re-read under the lock before the claim.
+    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.readHostedMemberRoutingState.mock.invocationCallOrder[1]);
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalled();
   });
 
   it("rejects a stale home-chat member match before treating it as a first bind", async () => {

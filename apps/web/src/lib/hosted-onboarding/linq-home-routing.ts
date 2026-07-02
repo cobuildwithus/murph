@@ -109,6 +109,16 @@ export async function reserveHostedLinqHomeLineForPhoneTx(input: {
   });
 }
 
+type HostedLinqHomeLineRouteBindingDecision =
+  | {
+      kind: "done";
+      result: HostedLinqHomeLineRouteBindingResult;
+    }
+  | {
+      kind: "reserve";
+      line: HostedLinqAssignableHomeLine;
+    };
+
 export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
   incomingChatId: string;
   incomingDirectAttested: boolean;
@@ -117,11 +127,51 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLineRouteBindingResult> {
+  // Most inbound messages resolve onto an existing route. Decide without the
+  // shared pool lock so they never wait behind unrelated line assignment;
+  // the ops new-chat path holds that lock across a provider call.
+  const decision = await resolveHostedMemberLinqHomeLineRouteBindingDecision(input);
+  if (decision.kind === "done") {
+    return decision.result;
+  }
+
   await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
     prisma: input.prisma,
   });
+  // Routing and capacity may have changed while another transaction held the
+  // pool lock, so the claim decision must be re-resolved under it.
+  const lockedDecision = await resolveHostedMemberLinqHomeLineRouteBindingDecision(input);
+  if (lockedDecision.kind === "done") {
+    return lockedDecision.result;
+  }
 
-  const now = new Date();
+  const reservationResult = await reserveHostedLinqHomeLineForLineAfterLockTx({
+    line: lockedDecision.line,
+    now: new Date(),
+    prisma: input.prisma,
+  });
+
+  if (reservationResult.kind !== "reserved") {
+    return {
+      kind: reservationResult.kind,
+    };
+  }
+
+  return {
+    homeLineAssignedAt: reservationResult.reservation.assignedAt,
+    kind: "bind",
+    recipientPhone: reservationResult.reservation.line.phoneNumber,
+  };
+}
+
+async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
+  incomingChatId: string;
+  incomingDirectAttested: boolean;
+  incomingRecipientPhone: string | null;
+  memberAuthority?: HostedLinqHomeLineRouteBindingAuthority | null;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedLinqHomeLineRouteBindingDecision> {
   const routing = await readHostedMemberRoutingState({
     memberId: input.memberId,
     prisma: input.prisma,
@@ -134,7 +184,10 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
     routing,
   })) {
     return {
-      kind: "ignore_unknown_home",
+      kind: "done",
+      result: {
+        kind: "ignore_unknown_home",
+      },
     };
   }
 
@@ -147,7 +200,10 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
   });
 
   if (routeDecision.kind !== "bind_home") {
-    return routeDecision;
+    return {
+      kind: "done",
+      result: routeDecision,
+    };
   }
 
   const recipientPhone = resolveHostedLinqHomeBindingRecipientPhone({
@@ -166,27 +222,39 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
 
       if (!line) {
         return {
-          kind: "unassignable",
+          kind: "done",
+          result: {
+            kind: "unassignable",
+          },
         };
       }
 
       return {
-        homeLineAssignedAt: routing?.linqHomeLineAssignedAt ?? null,
-        kind: "bind",
-        recipientPhone: line.phoneNumber,
+        kind: "done",
+        result: {
+          homeLineAssignedAt: routing?.linqHomeLineAssignedAt ?? null,
+          kind: "bind",
+          recipientPhone: line.phoneNumber,
+        },
       };
     }
 
     return {
-      homeLineAssignedAt: routing?.linqHomeLineAssignedAt ?? null,
-      kind: "bind",
-      recipientPhone,
+      kind: "done",
+      result: {
+        homeLineAssignedAt: routing?.linqHomeLineAssignedAt ?? null,
+        kind: "bind",
+        recipientPhone,
+      },
     };
   }
 
   if (!recipientPhone) {
     return {
-      kind: "unassignable",
+      kind: "done",
+      result: {
+        kind: "unassignable",
+      },
     };
   }
 
@@ -197,15 +265,21 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
 
   if (!line) {
     return {
-      kind: "unassignable",
+      kind: "done",
+      result: {
+        kind: "unassignable",
+      },
     };
   }
 
   if (routing && currentRoute && currentRoute.recipientPhone === line.phoneNumber) {
     return {
-      homeLineAssignedAt: routing.linqHomeLineAssignedAt ?? null,
-      kind: "bind",
-      recipientPhone: line.phoneNumber,
+      kind: "done",
+      result: {
+        homeLineAssignedAt: routing.linqHomeLineAssignedAt ?? null,
+        kind: "bind",
+        recipientPhone: line.phoneNumber,
+      },
     };
   }
 
@@ -217,28 +291,18 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
     && homeRecipientPhone === line.phoneNumber
   ) {
     return {
-      homeLineAssignedAt: routing.linqHomeLineAssignedAt ?? null,
-      kind: "bind",
-      recipientPhone: line.phoneNumber,
-    };
-  }
-
-  const reservationResult = await reserveHostedLinqHomeLineForLineAfterLockTx({
-    line,
-    now,
-    prisma: input.prisma,
-  });
-
-  if (reservationResult.kind !== "reserved") {
-    return {
-      kind: reservationResult.kind,
+      kind: "done",
+      result: {
+        homeLineAssignedAt: routing.linqHomeLineAssignedAt ?? null,
+        kind: "bind",
+        recipientPhone: line.phoneNumber,
+      },
     };
   }
 
   return {
-    homeLineAssignedAt: reservationResult.reservation.assignedAt,
-    kind: "bind",
-    recipientPhone: reservationResult.reservation.line.phoneNumber,
+    kind: "reserve",
+    line,
   };
 }
 
