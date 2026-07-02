@@ -42,6 +42,10 @@ CREATE INDEX IF NOT EXISTS supplements_search_idx
   ON supplements
   USING GIN (to_tsvector('simple', search_text));
 
+CREATE INDEX IF NOT EXISTS supplements_search_english_idx
+  ON supplements
+  USING GIN (to_tsvector('english', search_text));
+
 CREATE INDEX IF NOT EXISTS supplements_name_trgm_idx
   ON supplements
   USING GIN (name gin_trgm_ops);
