@@ -774,13 +774,15 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         });
       }
     }
-    await reconcilePendingAssistantInputWake({
+    if (await reconcilePendingAssistantInputWake({
       foregroundConversationWorkObserved,
       now: input.now,
       projectedWakeRequiresCheckpoint,
       result: assistantPhaseResult,
       vaultRoot: input.vaultRoot,
-    });
+    })) {
+      projectedWakeRequiresCheckpoint = false;
+    }
     await stageHostedConversationMailboxConsumedAckBestEffort({
       afterDurableCheckpoint,
       assistantPhaseResult,
@@ -1739,16 +1741,20 @@ async function reconcilePendingAssistantInputWake(input: {
   projectedWakeRequiresCheckpoint: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
   vaultRoot: string;
-}): Promise<void> {
+}): Promise<boolean> {
   if (input.result.nextWakeAt) {
     const nextWakeReason = input.result.nextWakeReason ?? "assistant";
-    if (
+    const wakeIsImmediate = hostedWorkspaceRunnerWakeIsImmediate(input.result.nextWakeAt, input.now);
+    if (input.foregroundConversationWorkObserved && nextWakeReason === "assistant") {
+      if (input.projectedWakeRequiresCheckpoint && wakeIsImmediate) {
+        return false;
+      }
+    } else if (
       input.projectedWakeRequiresCheckpoint
-      ||
-      nextWakeReason !== "assistant"
-      || !hostedWorkspaceRunnerWakeIsImmediate(input.result.nextWakeAt, input.now)
+      || nextWakeReason !== "assistant"
+      || !wakeIsImmediate
     ) {
-      return;
+      return false;
     }
   }
   const wakeAt = await resolvePendingForegroundAssistantInputWakeAt({
@@ -1756,11 +1762,12 @@ async function reconcilePendingAssistantInputWake(input: {
     vaultRoot: input.vaultRoot,
   });
   if (!wakeAt) {
-    return;
+    return false;
   }
 
   input.result.nextWakeAt = wakeAt;
   input.result.nextWakeReason = "assistant";
+  return true;
 }
 
 async function notifyPendingForegroundAssistantInputWake(input: {
@@ -2333,10 +2340,6 @@ function mergeDeferredPostCheckpointWake(input: {
     return false;
   }
 
-  const previousWake = createHostedRuntimeWakeCandidate(
-    input.assistantPhaseResult.nextWakeAt ?? null,
-    input.assistantPhaseResult.nextWakeReason ?? null,
-  );
   if (input.postCheckpoint.nextWakeAt === null || input.postCheckpoint.nextWakeAt === undefined) {
     input.assistantPhaseResult.nextWakeAt = null;
     input.assistantPhaseResult.nextWakeReason = null;
@@ -2347,20 +2350,35 @@ function mergeDeferredPostCheckpointWake(input: {
     input.postCheckpoint.nextWakeAt ?? null,
     input.postCheckpoint.nextWakeReason ?? null,
   );
-  const selectedWake = selectHostedRuntimeWakeCandidate([
-    previousWake,
-    postCheckpointWake,
-  ]);
-  input.assistantPhaseResult.nextWakeAt = selectedWake.at;
-  input.assistantPhaseResult.nextWakeReason = selectedWake.reason;
+  const previousWake = createHostedRuntimeWakeCandidate(
+    input.assistantPhaseResult.nextWakeAt ?? null,
+    input.assistantPhaseResult.nextWakeReason ?? null,
+  );
   if (
-    selectedWake.at !== postCheckpointWake.at
-    || selectedWake.reason !== postCheckpointWake.reason
+    previousWake.at !== null
+    && previousWake.reason === "assistant"
+    && postCheckpointWake.at !== null
+    && postCheckpointWake.reason !== "assistant"
   ) {
-    return false;
+    // Assistant/user work can beat maintenance, but assistant post-checkpoint
+    // wakes replace earlier assistant wakes after their side effects run.
+    const selectedWake = selectHostedRuntimeWakeCandidate([
+      previousWake,
+      postCheckpointWake,
+    ]);
+    if (
+      selectedWake.at === previousWake.at
+      && selectedWake.reason === previousWake.reason
+    ) {
+      input.assistantPhaseResult.nextWakeAt = previousWake.at;
+      input.assistantPhaseResult.nextWakeReason = previousWake.reason;
+      return false;
+    }
   }
 
-  return selectedWake.at !== null;
+  input.assistantPhaseResult.nextWakeAt = postCheckpointWake.at;
+  input.assistantPhaseResult.nextWakeReason = postCheckpointWake.reason;
+  return postCheckpointWake.at !== null;
 }
 
 function appendHostedWorkspaceDurableCheckpointEffect(input: {

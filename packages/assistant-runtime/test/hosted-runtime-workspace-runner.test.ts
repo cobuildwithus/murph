@@ -5623,7 +5623,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("preserves earlier foreground assistant wake over later post-assistant cleanup wake", async () => {
+  test("replaces consumed assistant wake with post-checkpoint cleanup wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const { mailboxPort } = createMailboxPort({ items: [] });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -5632,7 +5632,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     try {
       const result = await runHostedWorkspaceUntilIdleOrBudget({
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-          attemptId: "attempt_synthetic_runner_post_checkpoint_preserve_wake",
+          attemptId: "attempt_synthetic_runner_post_checkpoint_replace_wake",
           expectedWorkspaceVersion: "0",
           leaseGeneration: "3",
           nextWakeAt: null,
@@ -5649,7 +5649,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           mailboxPort,
           workspacePort: createWorkspacePort({ checkpointRequests }),
         }),
-        requestId: "request_synthetic_runner_post_checkpoint_preserve_wake",
+        requestId: "request_synthetic_runner_post_checkpoint_replace_wake",
         async runAssistantPhase() {
           return {
             afterCheckpoint: async () => ({
@@ -5669,7 +5669,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
       assert.deepEqual(checkpointRequests, []);
       assert.equal(result.latestWorkspace?.version, "0");
-      assert.equal(result.assistantPhaseResult?.nextWakeAt, "2026-04-26T00:00:00.000Z");
+      assert.equal(result.assistantPhaseResult?.nextWakeAt, "2026-04-26T00:05:00.000Z");
       assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
       assert.deepEqual(
         logRequests.flatMap((request) => request.entries)
