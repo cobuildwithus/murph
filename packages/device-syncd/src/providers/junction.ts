@@ -154,28 +154,20 @@ const JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCE_SET = new Set<str
   JUNCTION_HISTORICAL_BACKFILL_COMPLETION_SUMMARY_RESOURCES,
 );
 
-type JunctionOptionalResourceFailureReason = "not_found" | "unavailable" | "unsupported";
+type JunctionOptionalResourceFailureReason = "not_found" | "unavailable" | "unsupported" | "ambiguous";
 
-interface JunctionOptionalResourceFailureSkip {
-  disposition: "skip";
+interface JunctionOptionalResourceFailure {
   reason: JunctionOptionalResourceFailureReason;
   responseStatus: number;
+  responseDetail?: string;
 }
-
-interface JunctionOptionalResourceFailureAmbiguous {
-  disposition: "ambiguous";
-  responseStatus: number;
-}
-
-type JunctionOptionalResourceFailure =
-  | JunctionOptionalResourceFailureAmbiguous
-  | JunctionOptionalResourceFailureSkip;
 
 interface JunctionSkippedOptionalResource {
   reason: JunctionOptionalResourceFailureReason;
   resource: string;
   resourceCategory: JunctionResourceCategory;
   responseStatus: number;
+  responseDetail?: string;
 }
 
 const JUNCTION_HISTORICAL_SUMMARY_METRIC_PATHS = Object.freeze({
@@ -1531,25 +1523,14 @@ export function createJunctionDeviceSyncProvider(
           throw error;
         }
 
-        if (failure.disposition === "ambiguous") {
-          throw buildAmbiguousOptionalJunctionResourceError(
-            error,
-            "timeseries",
-            resource,
-            failure.responseStatus,
-            context.now,
-          );
-        }
-
         if (!optionalFailureLogged) {
           logSkippedOptionalJunctionResource(context, "timeseries", resource, failure);
           optionalFailureLogged = true;
         }
         skippedOptionalResources.push({
-          reason: failure.reason,
+          ...failure,
           resource,
           resourceCategory: "timeseries",
-          responseStatus: failure.responseStatus,
         });
         break;
       }
@@ -1709,22 +1690,11 @@ export function createJunctionDeviceSyncProvider(
         throw error;
       }
 
-      if (failure.disposition === "ambiguous") {
-        throw buildAmbiguousOptionalJunctionResourceError(
-          error,
-          resourceCategory,
-          resource,
-          failure.responseStatus,
-          context.now,
-        );
-      }
-
       logSkippedOptionalJunctionResource(context, resourceCategory, resource, failure);
       skippedOptionalResources.push({
-        reason: failure.reason,
+        ...failure,
         resource,
         resourceCategory,
-        responseStatus: failure.responseStatus,
       });
       return [];
     }
@@ -1734,7 +1704,7 @@ export function createJunctionDeviceSyncProvider(
     context: ProviderJobContext,
     resourceCategory: JunctionResourceCategory,
     resource: string,
-    failure: JunctionOptionalResourceFailureSkip,
+    failure: JunctionOptionalResourceFailure,
   ): void {
     context.logger.warn?.("Skipping unavailable Junction resource response.", {
       errorCode: "JUNCTION_API_REQUEST_FAILED",
@@ -1743,6 +1713,7 @@ export function createJunctionDeviceSyncProvider(
       resource,
       resourceCategory,
       responseStatus: failure.responseStatus,
+      ...(failure.responseDetail ? { responseDetail: failure.responseDetail } : {}),
     });
   }
 
@@ -1920,6 +1891,7 @@ function buildJunctionSkippedResourceMetadataPatch(
       last.responseStatus,
       last.reason,
     ].join("."),
+    junctionSkippedResourceLastDetail: last.responseDetail ?? null,
   };
 }
 
@@ -1959,7 +1931,6 @@ function classifyOptionalJunctionResourceFailure(
 
   if (reason) {
     return {
-      disposition: "skip",
       reason,
       responseStatus: status,
     };
@@ -1972,143 +1943,34 @@ function classifyOptionalJunctionResourceFailure(
     && isJunctionProfileSummaryNotFoundResponse({ responseErrorCode, responseErrorDescription })
   ) {
     return {
-      disposition: "skip",
       reason: "not_found",
       responseStatus: status,
     };
   }
 
-  return {
-    disposition: "ambiguous",
-    responseStatus: status,
-  };
-}
-
-function buildAmbiguousOptionalJunctionResourceError(
-  error: unknown,
-  resourceCategory: JunctionResourceCategory,
-  resource: string,
-  responseStatus: number,
-  now: string,
-): Error {
-  const safeApiDetails = copySafeJunctionApiErrorDetails(error);
-  const safeResource = readJunctionDiagnosticToken(resource) ?? "unknown";
-  const responseErrorCode = readJunctionDiagnosticToken(safeApiDetails.responseErrorCode);
-  const responseShapeKind = readJunctionDiagnosticToken(safeApiDetails.responseShapeKind);
-
-  return deviceSyncError({
-    code: "JUNCTION_OPTIONAL_RESOURCE_RESPONSE_AMBIGUOUS",
-    message: `Junction ${resourceCategory} resource ${resource} returned an ambiguous ${responseStatus} response.`,
-    retryable: true,
-    httpStatus: 502,
-    details: {
-      ...safeApiDetails,
-      failureMetadataPatch: buildJunctionOptionalResourceFailureMetadataPatch({
-        at: now,
-        resource: safeResource,
-        resourceCategory,
-        responseErrorCode,
-        responseShapeKind,
-        responseStatus,
-      }),
-      providerOptionalResourceCategory: resourceCategory,
-      providerOptionalResourceFailureDisposition: "ambiguous",
-      providerOptionalResourceName: safeResource,
-      providerOptionalResourceStatus: responseStatus,
-    },
-    cause: error,
+  // Unrecognized 404/422 bodies skip only this optional resource. Keep the
+  // provider's own explanation (redacted) so operators can see why it failed
+  // without one broken optional endpoint aborting the whole sync job.
+  const responseDetail = buildJunctionOptionalResourceResponseDetail({
+    responseErrorCode,
+    responseErrorDescription,
   });
-}
 
-const JUNCTION_SAFE_API_DETAIL_TOKEN_KEYS = [
-  "requestAuthKind",
-  "requestAuthPlacement",
-  "requestBodyFieldNames",
-  "requestBodyKind",
-  "requestContentType",
-  "requestEndpointKind",
-  "requestMethod",
-  "requestQueryParameterNames",
-  "responseErrorCode",
-  "responseShapeKind",
-] as const;
-
-const JUNCTION_SAFE_API_DETAIL_TEXT_KEYS = [
-  "httpStatusText",
-  "responseErrorDescription",
-] as const;
-
-const JUNCTION_SAFE_API_DETAIL_NUMBER_KEYS = [
-  "requestBodyFieldCount",
-  "requestQueryParameterCount",
-  "status",
-] as const;
-
-const JUNCTION_SAFE_API_DETAIL_BOOLEAN_KEYS = [
-  "requestCredentialPresent",
-  "responseErrorDescriptionFieldPresent",
-  "responseErrorFieldPresent",
-] as const;
-
-function copySafeJunctionApiErrorDetails(error: unknown): Record<string, unknown> {
-  if (!isDeviceSyncError(error) || !error.details) {
-    return {};
-  }
-
-  const details: Record<string, unknown> = {};
-  for (const key of JUNCTION_SAFE_API_DETAIL_TOKEN_KEYS) {
-    const value = readJunctionDiagnosticToken(error.details[key]);
-    if (value !== null) {
-      details[key] = value;
-    }
-  }
-  for (const key of JUNCTION_SAFE_API_DETAIL_TEXT_KEYS) {
-    const value = readJunctionDiagnosticText(error.details[key]);
-    if (value !== null) {
-      details[key] = value;
-    }
-  }
-  for (const key of JUNCTION_SAFE_API_DETAIL_NUMBER_KEYS) {
-    const value = readJunctionDiagnosticNumber(error.details[key]);
-    if (value !== null) {
-      details[key] = value;
-    }
-  }
-  for (const key of JUNCTION_SAFE_API_DETAIL_BOOLEAN_KEYS) {
-    if (typeof error.details[key] === "boolean") {
-      details[key] = error.details[key];
-    }
-  }
-  return details;
-}
-
-function buildJunctionOptionalResourceFailureMetadataPatch(input: {
-  at: string;
-  resource: string;
-  resourceCategory: JunctionResourceCategory;
-  responseErrorCode: string | null;
-  responseShapeKind: string | null;
-  responseStatus: number;
-}): Record<string, unknown> {
-  const metadataPatch: Record<string, unknown> = {
-    junctionResourceDiagnostic: [
-      input.resourceCategory,
-      input.resource,
-      input.responseStatus,
-      "ambiguous",
-    ].join("."),
-    junctionResourceDiagnosticAt: input.at,
-    junctionResourceDiagnosticHttpStatus: input.responseStatus,
+  return {
+    reason: "ambiguous",
+    responseStatus: status,
+    ...(responseDetail ? { responseDetail } : {}),
   };
+}
 
-  if (input.responseErrorCode) {
-    metadataPatch.junctionResourceDiagnosticCode = input.responseErrorCode;
-  }
-  if (input.responseShapeKind) {
-    metadataPatch.junctionResourceDiagnosticShape = input.responseShapeKind;
-  }
-
-  return metadataPatch;
+function buildJunctionOptionalResourceResponseDetail(input: {
+  responseErrorCode: string | null;
+  responseErrorDescription: string | null;
+}): string | null {
+  const code = readJunctionDiagnosticToken(input.responseErrorCode);
+  const description = readJunctionDiagnosticText(input.responseErrorDescription);
+  const detail = [code, description].filter(Boolean).join(": ");
+  return detail || null;
 }
 
 function classifyClearOptionalJunctionResourceFailureReason(input: {
@@ -2226,10 +2088,6 @@ function readJunctionDiagnosticToken(value: unknown): string | null {
 
   const token = value.trim();
   return /^[A-Za-z0-9_.:-]{1,128}$/u.test(token) ? token : null;
-}
-
-function readJunctionDiagnosticNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 interface JunctionDiagnosticCallResult {
