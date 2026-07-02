@@ -677,6 +677,41 @@ describe('assistant auto-reply event-first path', () => {
     })
   })
 
+  it('keeps terminal Linq cleanup ids when the provider fails after no-reply evidence is written', async () => {
+    const vault = await createTempVault()
+    const candidate = createAssistantInputCandidate({
+      occurredAt: '2026-04-08T00:10:00.000Z',
+      optionalInboxCaptureId: null,
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'linq-user-message-1',
+        threadId: 'raw-linq-chat-1',
+      },
+      source: 'linq',
+      text: 'hey murph',
+      threadIsDirect: true,
+    })
+    replyEventPathMocks.sendAssistantMessage.mockReset().mockImplementation(async (input) => {
+      await input.onFinishWithoutReplyAccepted?.({
+        acceptedInputIds: [candidate.event.inputId],
+        messageReactionsAvailable: false,
+      })
+      throw new Error('provider connection dropped after final action')
+    })
+
+    const result = await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    expect(result.terminalLinqCleanup).toEqual(['linq-user-message-1'])
+  })
+
   it('does not report pending terminal Linq cleanup for reply evidence without Linq message ids', async () => {
     const vault = await createTempVault()
     const candidate = createAssistantInputCandidate({

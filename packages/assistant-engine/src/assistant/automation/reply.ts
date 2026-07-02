@@ -359,11 +359,23 @@ export async function processAssistantAutoReplyGroup(input: {
   vault: string
 }): Promise<AssistantAutoReplyProcessResult> {
   let latestContext = input.context
+  let observedTerminalLinqCleanup: string[] | null = null
+  const withObservedTerminalLinqCleanup = (
+    outcome: AssistantAutoReplyGroupOutcome,
+  ): AssistantAutoReplyGroupOutcome => ({
+    ...outcome,
+    ...(observedTerminalLinqCleanup && !outcome.terminalLinqCleanup
+      ? { terminalLinqCleanup: observedTerminalLinqCleanup }
+      : {}),
+  })
   try {
     const resolved = await resolveAssistantAutoReplyGroupOutcome({
       ...input,
       onAcceptedContext(context) {
         latestContext = context
+      },
+      onTerminalLinqCleanup(messageIds) {
+        observedTerminalLinqCleanup = messageIds
       },
     })
     return commitAssistantAutoReplyGroupOutcome({
@@ -394,14 +406,14 @@ export async function processAssistantAutoReplyGroup(input: {
       return commitAssistantAutoReplyGroupOutcome({
         context: latestContext,
         onEvent: input.onEvent,
-        outcome: createDeferredGroupOutcome({
+        outcome: withObservedTerminalLinqCleanup(createDeferredGroupOutcome({
           inputCount: latestContext.inputCount,
           nextWakeAt: computeAssistantAutomationRetryAt(
             ASSISTANT_AUTO_REPLY_DEFERRED_RETRY_DELAY_MS,
           ),
           reason,
           stopScanning: true,
-        }),
+        })),
         vault: input.vault,
       })
     }
@@ -409,10 +421,10 @@ export async function processAssistantAutoReplyGroup(input: {
     return commitAssistantAutoReplyGroupOutcome({
       context: latestContext,
       onEvent: input.onEvent,
-      outcome: classifyAssistantAutoReplyFailure({
+      outcome: withObservedTerminalLinqCleanup(classifyAssistantAutoReplyFailure({
         inputCount: latestContext.inputCount,
         error,
-      }),
+      })),
       vault: input.vault,
     })
   }
@@ -428,6 +440,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   onAcceptedContext?: (context: AssistantAutoReplyGroupContext) => void
+  onTerminalLinqCleanup?: (messageIds: string[]) => void
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
@@ -563,6 +576,11 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
             vault: input.vault,
           }),
         ])
+        if (terminalLinqCleanup) {
+          // Keep the caller's observer current so a provider failure after
+          // this hook cannot drop already-written cleanup obligations.
+          input.onTerminalLinqCleanup?.(terminalLinqCleanup)
+        }
       }
       for (const inputId of acceptedInputIds) {
         terminalSuppressedInputIds.add(inputId)
