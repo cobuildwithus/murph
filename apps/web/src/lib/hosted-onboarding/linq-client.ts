@@ -76,6 +76,170 @@ export async function sendHostedLinqReadReceipt(input: {
   };
 }
 
+const HOSTED_LINQ_ATTACHMENT_UPLOAD_TIMEOUT_MS = 30_000;
+
+export type HostedLinqChatHandleSummary = {
+  handle: string;
+  isMe: boolean;
+  status: string | null;
+};
+
+export async function getHostedLinqChatHandles(input: {
+  chatId: string;
+  signal?: AbortSignal;
+}): Promise<HostedLinqChatHandleSummary[]> {
+  const response = await fetchHostedLinqApiOrThrow({
+    method: "GET",
+    operation: "chat read",
+    path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}`,
+    signal: input.signal,
+    timeoutMessage: "Linq chat read timed out.",
+  });
+
+  if (!response.ok) {
+    throw buildHostedLinqRequestFailedError({
+      operation: "chat read",
+      retryable: isRetryableHostedLinqStatus(response.status),
+      status: response.status,
+    });
+  }
+
+  const payload = await readHostedLinqOptionalJsonResponse<{
+    chat?: { handles?: unknown } | null;
+    handles?: unknown;
+  }>(response);
+  const handles = Array.isArray(payload?.handles)
+    ? payload.handles
+    : Array.isArray(payload?.chat?.handles)
+      ? payload.chat.handles
+      : [];
+
+  return handles
+    .map(parseHostedLinqChatHandleSummary)
+    .filter((handle): handle is HostedLinqChatHandleSummary => handle !== null);
+}
+
+function parseHostedLinqChatHandleSummary(value: unknown): HostedLinqChatHandleSummary | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const handle = normalizeNullableString(record.handle);
+  if (!handle) {
+    return null;
+  }
+  return {
+    handle,
+    isMe: record.is_me === true,
+    status: normalizeNullableString(record.status),
+  };
+}
+
+export async function sendHostedLinqAttachmentMessage(input: {
+  bytes: Uint8Array;
+  chatId: string;
+  contentType: string;
+  fileName: string;
+  idempotencyKey?: string | null;
+  signal?: AbortSignal;
+}): Promise<HostedLinqSendResult> {
+  const chatId = normalizeRequiredString(input.chatId, "chat id");
+  const createResponse = await fetchHostedLinqApiOrThrow({
+    body: JSON.stringify({
+      content_type: normalizeRequiredString(input.contentType, "attachment content type"),
+      filename: normalizeRequiredString(input.fileName, "attachment file name"),
+      size_bytes: input.bytes.byteLength,
+    }),
+    method: "POST",
+    operation: "attachment create",
+    path: "attachments",
+    signal: input.signal,
+    timeoutMessage: "Linq attachment create timed out.",
+  });
+  if (!createResponse.ok) {
+    throw buildHostedLinqRequestFailedError({
+      operation: "attachment create",
+      retryable: isRetryableHostedLinqStatus(createResponse.status),
+      status: createResponse.status,
+    });
+  }
+  const created = await readHostedLinqOptionalJsonResponse<{
+    attachment_id?: unknown;
+    required_headers?: unknown;
+    upload_url?: unknown;
+  }>(createResponse);
+  const attachmentId = normalizeNullableString(created?.attachment_id);
+  const uploadUrl = normalizeNullableString(created?.upload_url);
+  if (!attachmentId || !uploadUrl) {
+    throw buildHostedLinqRequestFailedError({
+      operation: "attachment create",
+      retryable: false,
+      status: 502,
+    });
+  }
+
+  const uploadTimeout = AbortSignal.timeout(HOSTED_LINQ_ATTACHMENT_UPLOAD_TIMEOUT_MS);
+  const uploadResponse = await fetch(uploadUrl, {
+    body: new Uint8Array(input.bytes).buffer,
+    headers: parseHostedLinqAttachmentUploadHeaders(created?.required_headers),
+    method: "PUT",
+    signal: input.signal ? AbortSignal.any([input.signal, uploadTimeout]) : uploadTimeout,
+  });
+  if (!uploadResponse.ok) {
+    throw buildHostedLinqRequestFailedError({
+      operation: "attachment upload",
+      retryable: isRetryableHostedLinqStatus(uploadResponse.status),
+      status: uploadResponse.status,
+    });
+  }
+
+  const idempotencyKey = normalizeNullableString(input.idempotencyKey);
+  const sendResponse = await fetchHostedLinqApiOrThrow({
+    body: JSON.stringify({
+      message: {
+        parts: [
+          {
+            attachment_id: attachmentId,
+            type: "media",
+          },
+        ],
+        ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+      },
+    }),
+    method: "POST",
+    operation: "attachment send",
+    path: `chats/${encodeURIComponent(chatId)}/messages`,
+    signal: input.signal,
+    timeoutMessage: "Linq attachment send timed out.",
+  });
+  if (!sendResponse.ok) {
+    throw buildHostedLinqRequestFailedError({
+      operation: "attachment send",
+      retryable: isRetryableHostedLinqStatus(sendResponse.status),
+      status: sendResponse.status,
+    });
+  }
+
+  const payload = await readHostedLinqOptionalJsonResponse<MessageSendResponse>(sendResponse);
+  return {
+    chatId: normalizeNullableString(payload?.chat_id),
+    messageId: normalizeNullableString(payload?.message?.id),
+  };
+}
+
+function parseHostedLinqAttachmentUploadHeaders(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  const headers: Record<string, string> = {};
+  for (const [key, headerValue] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof headerValue === "string" && key.trim()) {
+      headers[key] = headerValue;
+    }
+  }
+  return headers;
+}
+
 export async function shareHostedLinqContactCard(input: {
   chatId: string;
   signal?: AbortSignal;

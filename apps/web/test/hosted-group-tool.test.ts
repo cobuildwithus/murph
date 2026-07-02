@@ -1,16 +1,62 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  assertHostedLinqRouteEgressAuthority: vi.fn(),
+  buildMurphHostedLinqContactCardVcf: vi.fn(),
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
+  fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
+  getHostedLinqChatHandles: vi.fn(),
+  hasHostedMemberActiveAccess: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
   hostedThreadContainerFindUnique: vi.fn(),
+  isHostedMemberSuspended: vi.fn(),
+  lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
+  lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
+  reserveHostedLinqContactCardShareAttempt: vi.fn(),
+  resolveMurphHostedLinqContactCardBackupPhoneNumber: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
+  sendHostedLinqAttachmentMessage: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   hasHostedRuntimeActiveAccess: mocks.hasHostedRuntimeActiveAccess,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/entitlement", () => ({
+  hasHostedMemberActiveAccess: mocks.hasHostedMemberActiveAccess,
+  isHostedMemberSuspended: mocks.isHostedMemberSuspended,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
+  lookupHostedMemberIdentityByPhoneNumber: mocks.lookupHostedMemberIdentityByPhoneNumber,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  lookupHostedMemberByVerifiedEmailAddress: mocks.lookupHostedMemberByVerifiedEmailAddress,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
+  getHostedLinqChatHandles: mocks.getHostedLinqChatHandles,
+  sendHostedLinqAttachmentMessage: mocks.sendHostedLinqAttachmentMessage,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-contact-card", () => ({
+  MURPH_CONTACT_CARD_VCF_CONTENT_TYPE: "text/vcard",
+  MURPH_CONTACT_CARD_VCF_FILE_NAME: "Murph.vcf",
+  buildMurphHostedLinqContactCardVcf: mocks.buildMurphHostedLinqContactCardVcf,
+  fetchMurphHostedLinqContactCardVcfPhoto: mocks.fetchMurphHostedLinqContactCardVcfPhoto,
+  resolveMurphHostedLinqContactCardBackupPhoneNumber:
+    mocks.resolveMurphHostedLinqContactCardBackupPhoneNumber,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
+  reserveHostedLinqContactCardShareAttempt: mocks.reserveHostedLinqContactCardShareAttempt,
+}));
+
+vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
+  assertHostedLinqRouteEgressAuthority: mocks.assertHostedLinqRouteEgressAuthority,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
@@ -253,5 +299,236 @@ describe("hosted group join policy", () => {
       label: "Recent sleep timing",
       projectionKind: "sleep-times.v0",
     }]);
+  });
+});
+
+describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
+  const LINQ_THREAD = {
+    authority: {
+      accountLookupKey: "hplk_account",
+      channel: "linq" as const,
+      containerMemberId: "member_container",
+      threadId: "chat_group_1",
+    },
+    chatId: "chat_group_1",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue({});
+    mocks.buildMurphHostedLinqContactCardVcf.mockReturnValue("BEGIN:VCARD\r\nEND:VCARD\r\n");
+    mocks.fetchMurphHostedLinqContactCardVcfPhoto.mockResolvedValue(null);
+    mocks.getHostedLinqChatHandles.mockResolvedValue([
+      { handle: "+15557770000", isMe: true, status: "active" },
+      { handle: "+15550000001", isMe: false, status: "active" },
+      { handle: "person@example.com", isMe: false, status: null },
+      { handle: "+15550000002", isMe: false, status: "left" },
+    ]);
+    mocks.hasHostedMemberActiveAccess.mockReturnValue(true);
+    mocks.isHostedMemberSuspended.mockReturnValue(false);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: { suspendedAt: null },
+    });
+    mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue(null);
+    mocks.reserveHostedLinqContactCardShareAttempt.mockResolvedValue({ action: "share" });
+    mocks.resolveMurphHostedLinqContactCardBackupPhoneNumber.mockResolvedValue("+15558880000");
+    mocks.sendHostedLinqAttachmentMessage.mockResolvedValue({
+      chatId: "chat_group_1",
+      messageId: "msg_1",
+    });
+  });
+
+  it("fails closed when the runtime supplied no linq thread context", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "read_chat_participants" },
+    })).resolves.toEqual({
+      action: "read_chat_participants",
+      result: {
+        participants: null,
+        status: "unavailable",
+        unavailableReason: "linq_thread_unavailable",
+      },
+    });
+
+    expect(mocks.getHostedLinqChatHandles).not.toHaveBeenCalled();
+    expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
+  });
+
+  it("rejects an authority that does not match the bound runtime member", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_other",
+      request: { action: "share_contact_card", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "linq_thread_unauthorized",
+      },
+    });
+
+    expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the thread-route authority assertion fails", async () => {
+    mocks.assertHostedLinqRouteEgressAuthority.mockRejectedValue(new Error("unauthorized"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "read_chat_participants",
+      result: {
+        participants: null,
+        status: "unavailable",
+        unavailableReason: "linq_thread_unauthorized",
+      },
+    });
+
+    expect(mocks.getHostedLinqChatHandles).not.toHaveBeenCalled();
+  });
+
+  it("classifies chat participants by Murph membership and skips the line and departed handles", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "read_chat_participants",
+      result: {
+        participants: [
+          { handle: "+15550000001", hasOwnMurph: true },
+          { handle: "person@example.com", hasOwnMurph: false },
+        ],
+        status: "ok",
+      },
+    });
+
+    expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith(
+      expect.objectContaining({ authority: LINQ_THREAD.authority }),
+    );
+    expect(mocks.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledTimes(1);
+    expect(mocks.lookupHostedMemberByVerifiedEmailAddress).toHaveBeenCalledWith(
+      expect.objectContaining({ address: "person@example.com" }),
+    );
+  });
+
+  it("treats an unrecognized empty roster as provider trouble, not an empty room", async () => {
+    mocks.getHostedLinqChatHandles.mockResolvedValue([]);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "read_chat_participants",
+      result: {
+        participants: null,
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    });
+  });
+
+  it("reports provider trouble as unavailable instead of throwing", async () => {
+    mocks.getHostedLinqChatHandles.mockRejectedValue(new Error("linq down"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "read_chat_participants",
+      result: {
+        participants: null,
+        status: "unavailable",
+        unavailableReason: "provider_unavailable",
+      },
+    });
+  });
+
+  it("sends the contact card vcf into the chat using the line's own handle", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "share_contact_card", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: { status: "sent" },
+    });
+
+    expect(mocks.buildMurphHostedLinqContactCardVcf).toHaveBeenCalledWith({
+      backupPhoneNumber: "+15558880000",
+      phoneNumber: "+15557770000",
+      photo: null,
+    });
+    expect(mocks.resolveMurphHostedLinqContactCardBackupPhoneNumber).toHaveBeenCalledWith(
+      expect.objectContaining({ excludePhoneNumber: "+15557770000" }),
+    );
+    expect(mocks.sendHostedLinqAttachmentMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_group_1",
+        contentType: "text/vcard",
+        fileName: "Murph.vcf",
+        idempotencyKey: expect.stringMatching(
+          /^group-contact-card:chat_group_1:\d{4}-\d{2}-\d{2}$/u,
+        ),
+      }),
+    );
+    expect(mocks.reserveHostedLinqContactCardShareAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_group_1",
+        memberId: "member_container",
+      }),
+    );
+  });
+
+  it("reports already_shared when the per-chat throttle is active", async () => {
+    mocks.reserveHostedLinqContactCardShareAttempt.mockResolvedValue({
+      action: "skip",
+      reason: "recent_attempt",
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "share_contact_card", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: { status: "already_shared" },
+    });
+
+    expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not reserve or send when the line handle is missing from the roster", async () => {
+    mocks.getHostedLinqChatHandles.mockResolvedValue([
+      { handle: "+15550000001", isMe: false, status: "active" },
+    ]);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "share_contact_card", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "line_unresolved",
+      },
+    });
+
+    expect(mocks.reserveHostedLinqContactCardShareAttempt).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed provider send without retry side effects", async () => {
+    mocks.sendHostedLinqAttachmentMessage.mockRejectedValue(new Error("upload failed"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "share_contact_card", linqThread: LINQ_THREAD },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "send_failed",
+      },
+    });
   });
 });

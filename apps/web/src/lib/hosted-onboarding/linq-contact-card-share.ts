@@ -223,19 +223,32 @@ async function reserveHostedLinqContactCardShareAttemptAfterOutbound(input: {
   now?: Date;
   prisma: HostedLinqContactCardSharePersistenceClient;
 }): Promise<HostedLinqContactCardShareReserveDecision> {
+  if (!isHostedLinqContactCardShareEligible(input.eligibility)) {
+    return {
+      action: "skip",
+      reason: "ineligible_chat",
+    };
+  }
+
+  return await reserveHostedLinqContactCardShareAttempt(input);
+}
+
+/**
+ * Shared per-chat share throttle. Callers own their eligibility/authority
+ * checks; this only guards the attempt cadence (one per chat per 48h).
+ */
+export async function reserveHostedLinqContactCardShareAttempt(input: {
+  chatId: string;
+  memberId: string;
+  now?: Date;
+  prisma: HostedLinqContactCardSharePersistenceClient;
+}): Promise<HostedLinqContactCardShareReserveDecision> {
   const now = input.now ?? new Date();
   const chatLookup = resolveHostedLinqContactCardShareLookup(input.chatId);
   if (!chatLookup) {
     return {
       action: "skip",
       reason: "missing_chat_id",
-    };
-  }
-
-  if (!isHostedLinqContactCardShareEligible(input.eligibility)) {
-    return {
-      action: "skip",
-      reason: "ineligible_chat",
     };
   }
 
