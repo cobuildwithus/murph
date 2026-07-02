@@ -118,6 +118,107 @@ describe('assistant protocol index planning', () => {
     expect(plan.onFinishWithoutReplyAccepted).toBe(onFinishWithoutReplyAccepted)
   })
 
+  it('resolves disabled native resume notification turns as isolated threads', async () => {
+    const plan = await buildCodexTurnExecutionPlan({
+      input: createMessageInput(),
+      plan: createSharedPlan(),
+      profile: {
+        nativeResumePolicy: 'disabled',
+        promptProfile: 'notification-decision',
+        toolProfile: 'notification-turn',
+      },
+      resolvedSession: createSession(),
+      route: createRoute(),
+      turnCreatedAt: '2026-05-04T00:00:00.000Z',
+      turnId: 'turn-isolated-notification',
+    })
+
+    expect(plan.profile).toEqual({
+      promptProfile: 'notification-decision',
+      threadScope: 'isolated-thread',
+      toolProfile: 'notification-turn',
+    })
+  })
+
+  it('resolves no dynamic tools and no non-evidence prompt context for maintenance turns', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+      'Context snapshot: active condition hypertension.',
+    )
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const promptTimeContext = {
+      currentLocalDate: '2026-05-04',
+      currentTimeZone: 'Asia/Kuala_Lumpur',
+    }
+    const executionContext = {
+      hosted: {
+        dynamicContextPrompts: ['Hosted dynamic prompt: device sync pending.'],
+        memberId: 'member-maintenance-context',
+        userEnvKeys: [],
+      },
+    }
+
+    const maintenancePlan = await resolveAssistantRouteTurnPlan({
+      executionContext,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'notification-decision',
+        threadScope: 'isolated-thread',
+        toolProfile: 'maintenance-turn',
+      },
+      promptTimeContext,
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    expect(maintenancePlan.dynamicTools).toEqual([])
+    expect(maintenancePlan.systemPrompt).not.toContain('hypertension')
+    expect(maintenancePlan.systemPrompt).not.toContain('device sync pending')
+    expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+    expect(maintenancePlan.systemPrompt).toContain('Maintenance execution rules:')
+    expect(maintenancePlan.systemPrompt).toContain(
+      'Never save medical or health details, credentials, identifiers of any kind',
+    )
+    expect(maintenancePlan.systemPrompt).toContain(
+      'deduplication and update targeting only',
+    )
+    expect(maintenancePlan.systemPrompt).not.toContain('Notification execution rules:')
+    expect(maintenancePlan.systemPrompt).not.toContain('same full read and write tools')
+    expect(maintenancePlan.systemPrompt).not.toContain('meals')
+    expect(maintenancePlan.systemPrompt).not.toContain('Health Commons')
+    // Binding context becomes identity/actor/thread/delivery prompt lines at
+    // the provider boundary; maintenance turns must never carry it.
+    expect(maintenancePlan.sessionContext).toBeUndefined()
+
+    const notificationPlan = await resolveAssistantRouteTurnPlan({
+      executionContext,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'notification-decision',
+        threadScope: 'session-thread',
+        toolProfile: 'notification-turn',
+      },
+      promptTimeContext,
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    const notificationToolNames = notificationPlan.dynamicTools.map(
+      (tool) => tool.name,
+    )
+    expect(notificationToolNames).toContain('generate_image')
+    expect(notificationToolNames).toContain('attach_response_media')
+    expect(notificationPlan.systemPrompt).toContain('hypertension')
+    expect(notificationPlan.systemPrompt).toContain('device sync pending')
+    expect(notificationPlan.systemPrompt).toContain('Notification execution rules:')
+    expect(notificationPlan.systemPrompt).not.toContain('Maintenance execution rules:')
+    expect(notificationPlan.sessionContext).toEqual({
+      binding: expect.anything(),
+    })
+  })
+
   it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -1631,6 +1732,85 @@ describe('assistant protocol index planning', () => {
           },
         ],
       })
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('does not resume or replay transcript messages for isolated notification maintenance turns', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(
+      path.join(os.tmpdir(), 'assistant-route-plan-notification-isolated-'),
+    )
+    const route = createRoute()
+    const initialPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: {
+        ...createMessageInput(),
+        vault,
+      },
+      profile: {
+        promptProfile: 'notification-decision',
+        threadScope: 'session-thread',
+        toolProfile: 'notification-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession({
+        turnCount: 1,
+      }),
+      sharedPlan: createSharedPlan(),
+    })
+    const session = createSession({
+      resumeState: {
+        assistantContractFingerprint: initialPlan.assistantContractFingerprint,
+        routeFingerprint: route.routeFingerprint ?? route.routeId,
+        threadId: 'thread-resume',
+      },
+      turnCount: 1,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          kind: 'user',
+          text: 'Prior sensitive context.',
+        },
+        {
+          kind: 'assistant',
+          text: 'Prior assistant context.',
+        },
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        profile: {
+          promptProfile: 'notification-decision',
+          threadScope: 'isolated-thread',
+          toolProfile: 'notification-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-05-04',
+          currentTimeZone: 'Asia/Kuala_Lumpur',
+        },
+        route,
+        session,
+        sharedPlan: createSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.conversationHistoryMessages).toBeUndefined()
     } finally {
       await rm(vault, { force: true, recursive: true })
     }

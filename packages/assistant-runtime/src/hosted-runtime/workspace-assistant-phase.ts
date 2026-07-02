@@ -23,6 +23,7 @@ import {
   readAssistantInputEvent,
   refreshAssistantContextSnapshotBestEffort,
   scheduleDeviceActivityTriggeredAutomations,
+  type AssistantCronStatusOptions,
   type AssistantExecutionContext,
   type HostedAssistantTurnTimingStage,
 } from "@murphai/assistant-engine";
@@ -56,6 +57,9 @@ import {
   buildHostedLinqChannelEnv,
   createHostedAssistantChannelTypingDependencies,
 } from "./channel-activity.ts";
+import {
+  createHostedAssistantTurnEnvironment,
+} from "./environment.ts";
 import {
   hydrateHostedExecutionDefaultTarget,
   prepareHostedAssistantAutomationForWake,
@@ -1716,7 +1720,10 @@ async function resolveHostedAssistantCronWakeStateBestEffort(
   phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): Promise<HostedAssistantCronWakeState> {
   try {
-    const cronStatus = await getAssistantCronStatus(phaseInput.restored.vaultRoot);
+    const cronStatus = await getAssistantCronStatus(
+      phaseInput.restored.vaultRoot,
+      buildHostedAssistantCronStatusOptions(phaseInput),
+    );
     return resolveHostedAssistantCronWakeState(phaseInput, cronStatus);
   } catch {
     return {
@@ -4906,9 +4913,26 @@ function normalizeHostedDeviceSyncConnectTargetKey(
 async function hasDueHostedAssistantCronJob(
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ): Promise<boolean> {
-  const cronStatus = await getAssistantCronStatus(input.restored.vaultRoot)
+  const cronStatus = await getAssistantCronStatus(
+    input.restored.vaultRoot,
+    buildHostedAssistantCronStatusOptions(input),
+  )
     .catch(() => null);
   return (cronStatus?.dueJobs ?? 0) > 0;
+}
+
+function buildHostedAssistantCronStatusOptions(
+  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput,
+): AssistantCronStatusOptions {
+  return {
+    shouldYieldBackgroundMaintenance:
+      phaseInput.shouldYieldBackgroundMaintenance ?? null,
+    turnEnvironment: createHostedAssistantTurnEnvironment({
+      operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
+      runtimeEnv: phaseInput.runtimeEnv,
+      vaultRoot: phaseInput.restored.vaultRoot,
+    }),
+  };
 }
 
 function resolveHostedWorkspaceIssueDeviceConnectLink(input: {

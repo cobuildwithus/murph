@@ -7,6 +7,9 @@ import {
   type AutomationRecord,
 } from '@murphai/core'
 import {
+  isHostedRuntimeProcessEnv,
+} from '@murphai/hosted-execution/cli-runtime-bridge'
+import {
   MURPH_PRODUCT_ORIGIN,
   type AutomationAssistantTargetOverride,
   type AutomationContinuityPolicy,
@@ -39,6 +42,7 @@ export interface MurphManagedAutomationSeed {
   automationId: string
   assistantTargetOverride?: AutomationAssistantTargetOverride | null
   continuityPolicy?: AutomationContinuityPolicy
+  hostedRuntimeOnly?: boolean
   instructions: string
   requiredRuntimeEnvKeys?: readonly string[]
   schedule: MurphManagedAutomationSchedule
@@ -74,6 +78,10 @@ export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
   'automation_01K0EXA5C0VT9F7X3KG6JMPZ5A'
 export const MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID =
   'automation_01K0Z7X9Y8W6V5T4S3R2Q1P0NM'
+export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID =
+  'automation_01K4Y0Q5C8M9N2P3R4S5T6V7WX'
+export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY =
+  'Overnight memory consolidation maintenance wake completed.'
 
 interface MurphManagedWeeklyScheduleSpread {
   daysOfWeek: readonly number[]
@@ -382,6 +390,40 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'On a later user turn, call `murph.submit_product_feedback` for explicit product frustration, feature requests, interest in shipped changelog items, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Use only structured kind, a concise product-only summary, and optional changelog item ids; do not include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
     ].join('\n'),
   },
+  {
+    automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+    slug: 'overnight-memory-consolidation',
+    title: 'Overnight memory consolidation',
+    summary:
+      'A hosted-only app-server maintenance wake for canonical vault memory.',
+    schedule: {
+      kind: 'cron',
+      // Alternating nights via day-of-month steps ('*/2') is wrong at month
+      // boundaries (a 31st fires again on the 1st). Fixed days-of-week keep
+      // the 03:00 local anchor with no consecutive-night occurrences.
+      expression: '0 3 * * 1,3,5',
+    },
+    continuityPolicy: 'fresh',
+    hostedRuntimeOnly: true,
+    assistantTargetOverride: {
+      reasoningEffort: 'medium',
+    },
+    tags: [
+      'murph-managed:overnight-memory-consolidation',
+      'runtime-maintenance',
+    ],
+    instructions: [
+      'Goal: consolidate durable user context from recent assistant/user conversation history into the canonical vault memory surface.',
+      '',
+      'Read existing saved context with `vault-cli memory show --format json` first. Existing memory is for deduplication and update targeting only; it is never an independent source for new writes.',
+      'Retrieval budget: use only the engine-supplied "Conversation evidence" section appended to this prompt. It already contains the bounded committed user and assistant conversation messages from the last 7 days; count assistant messages as support only when they record a completed user-approved action or directly clarify user context. If that section reports no messages, do not write any new memory.',
+      'Write durable memory only with `vault-cli memory upsert` or `vault-cli memory update` when a concise, user-useful fact is clearly supported by the supplied conversation evidence and is not already represented.',
+      'Before returning, validate each proposed write against existing memory and the supplied conversation evidence. Skip anything uncertain, duplicated, sensitive, or merely transient task detail.',
+      'Do not read transcript files or session storage, hidden Codex memory state, assistant runtime logs, unbounded filesystem trees, or vault health data. Do not call external services or send the user a message.',
+      'Do not save assistant speculation, generic advice, transient task details, credentials, payment details, contact details, identifiers of any kind, or medical or health details from conversation text.',
+      `Return exactly \`{"kind":"skip","privateSummary":"${MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY}"}\`.`,
+    ].join('\n'),
+  },
 ] satisfies readonly MurphManagedAutomationSeed[]
 
 export async function applyMurphManagedAutomations(
@@ -394,6 +436,9 @@ export async function applyMurphManagedAutomations(
       ...MURPH_MANAGED_AUTOMATIONS,
       ...(await buildExperimentFinalResultsSeeds({ vaultRoot: input.vaultRoot, now })),
     ]
+  const seeds = rawSeeds.filter((seed) =>
+    murphManagedAutomationAppliesToRuntime(seed, input.runtimeEnv)
+  )
   let scheduleStableKey: string | null | undefined
   let scheduleStableKeyUnavailable = false
   const resolveScheduleStableKey = async (): Promise<string | null> => {
@@ -419,7 +464,7 @@ export async function applyMurphManagedAutomations(
     updated: 0,
   }
 
-  for (const rawSeed of rawSeeds) {
+  for (const rawSeed of seeds) {
     const existing = await showAutomation({
       automationId: rawSeed.automationId,
       vaultRoot: input.vaultRoot,
@@ -842,6 +887,14 @@ function murphManagedAutomationRuntimeRequirementsMet(
   return seed.requiredRuntimeEnvKeys.every((key) =>
     typeof runtimeEnv[key] === 'string' && runtimeEnv[key].trim().length > 0
   )
+}
+
+function murphManagedAutomationAppliesToRuntime(
+  seed: MurphManagedAutomationSeed,
+  runtimeEnv: Readonly<Record<string, string | undefined>> | undefined,
+): boolean {
+  return seed.hostedRuntimeOnly !== true ||
+    isHostedRuntimeProcessEnv(runtimeEnv ?? {})
 }
 
 function normalizeMurphManagedAutomationSummary(

@@ -287,6 +287,13 @@ export const assistantAliasStoreSchema = z
     version: z.literal(1),
     aliases: z.record(z.string(), assistantSessionIdSchema),
     conversationKeys: z.record(z.string(), assistantSessionIdSchema),
+    // Bounded sessionId -> last-activity timestamp projection so recurring
+    // maintenance can pick recent sessions without scanning the directory.
+    // Absent (not defaulted) for index files written before the field
+    // existed, so readers can tell "no projection yet" from "no sessions"
+    // and rebuild from durable session records instead of trusting a
+    // partial merge.
+    recentSessions: z.record(z.string(), isoTimestampSchema).optional(),
   })
   .strict()
 
