@@ -33,7 +33,6 @@ import type {
   HostedAssistantAutomationLaneMetrics,
   HostedAssistantRuntimeDeviceSyncConfig,
   HostedMaintenanceMetrics,
-  HostedTerminalLinqCleanupRef,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
 import {
@@ -300,7 +299,7 @@ export async function runHostedAssistantAutomation(
   progressed: boolean;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   replyFailed: number;
-  terminalLinqCleanup: HostedTerminalLinqCleanupRef | null;
+  terminalLinqCleanup: string[] | null;
   timings?: {
     activeTurnInputIngested?: boolean | null;
     afterStateElapsedMs: number;

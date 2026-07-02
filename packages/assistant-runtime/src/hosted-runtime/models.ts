@@ -180,11 +180,6 @@ export interface HostedMailboxExecutionMetrics extends HostedMailboxEffect {
   mailboxLane: HostedMailboxLane;
 }
 
-export interface HostedTerminalLinqCleanupRef {
-  captureIds: readonly string[];
-  linqMessageIds: readonly string[];
-}
-
 export interface HostedMaintenanceMetrics {
   activeTurnInputIngested?: boolean | null;
   assistantAutomationAfterStateElapsedMs?: number | null;
@@ -195,7 +190,7 @@ export interface HostedMaintenanceMetrics {
   assistantAutomationPassElapsedMs?: number | null;
   assistantAutomationProgressed?: boolean | null;
   assistantAutomationReplyFailed?: number | null;
-  assistantAutomationTerminalLinqCleanup?: HostedTerminalLinqCleanupRef | null;
+  assistantAutomationTerminalLinqCleanup?: readonly string[] | null;
   assistantAutomationTotalElapsedMs?: number | null;
   assistantInputCandidateListed?: boolean | null;
   assistantInputCandidateQueryCount?: number | null;

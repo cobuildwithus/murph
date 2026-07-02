@@ -20,8 +20,6 @@ export {
 export {
   findAssistantAutoReplyDeliveryIntentIds,
   hasCompleteAssistantAutoReplyTerminalEvidence,
-  listPendingAssistantAutoReplyLinqCleanupEvidence,
-  markAssistantAutoReplyLinqCleanupQueued,
 } from './automation/evidence.js'
 export {
   compareAssistantInputCursors,

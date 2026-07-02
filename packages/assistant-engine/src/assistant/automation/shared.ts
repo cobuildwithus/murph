@@ -63,10 +63,7 @@ export interface AssistantAutoReplyScanResult {
   nextWakeAt: string | null
   replied: number
   skipped: number
-  terminalLinqCleanup?: {
-    captureIds: string[]
-    linqMessageIds: string[]
-  }
+  terminalLinqCleanup?: string[]
 }
 
 export interface AssistantAutomationScanStateProgress {

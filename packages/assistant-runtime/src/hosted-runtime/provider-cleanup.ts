@@ -8,17 +8,12 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import {
-  listPendingAssistantAutoReplyLinqCleanupEvidence,
-  markAssistantAutoReplyLinqCleanupQueued,
-} from "@murphai/assistant-engine/assistant-automation";
-import {
   resolveAssistantStatePaths,
   writeAssistantStateJson,
 } from "@murphai/runtime-state/node/assistant-state-fs";
 
 import type {
   HostedAssistantDeliveryOutcome,
-  HostedTerminalLinqCleanupRef,
 } from "./models.ts";
 import { deleteHostedLinqMessages } from "./message-cleanup.ts";
 import {
@@ -27,10 +22,6 @@ import {
 
 const HOSTED_PROVIDER_CLEANUP_SCHEMA = "murph.hosted-provider-cleanup.v1";
 const HOSTED_PROVIDER_CLEANUP_FILE_NAME = "hosted-provider-cleanup.json";
-const HOSTED_PROVIDER_CLEANUP_RECOVERY_SCHEMA =
-  "murph.hosted-provider-cleanup-recovery.v1";
-const HOSTED_PROVIDER_CLEANUP_RECOVERY_FILE_NAME =
-  "hosted-provider-cleanup-recovery.json";
 const HOSTED_PROVIDER_CLEANUP_DEFAULT_IDLE_CHECKPOINT_DELAY_MS = 180_000;
 const HOSTED_PROVIDER_CLEANUP_AFTER_IDLE_BUFFER_MS = 1_000;
 const HOSTED_PROVIDER_CLEANUP_RETRY_DELAY_MS = 5 * 60_000;
@@ -105,20 +96,22 @@ export async function prepareHostedProviderCleanupPlan(input: {
   idleCheckpointDelayMs?: number | null;
   initialCheckpoint?: HostedProviderCleanupCheckpoint | null;
   nowMs: number;
-  terminalCleanup?: HostedTerminalLinqCleanupRef | null;
+  terminalCleanupMessageIds?: readonly string[] | null;
   vaultRoot: string;
 }): Promise<HostedProviderCleanupPlan> {
+  const pendingLinqMessageIds =
+    normalizeHostedProviderMessageIds([...(input.terminalCleanupMessageIds ?? [])]);
+
   if (input.deferred) {
-    const pendingLinqMessageIds =
-      normalizeHostedProviderMessageIds([...(input.terminalCleanup?.linqMessageIds ?? [])]);
     if (pendingLinqMessageIds.length > 0) {
-      const checkpoint = await queueHostedTerminalLinqCleanup({
-        captureIds: input.terminalCleanup?.captureIds ?? [],
+      const checkpoint = await recordHostedProviderCleanupBeforeCommit({
+        checkpoint: {
+          nextWakeAt: resolveHostedProviderCleanupFirstDeferredWakeAt({
+            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            nowMs: input.nowMs,
+          }),
+        },
         linqMessageIds: pendingLinqMessageIds,
-        nextWakeAt: resolveHostedProviderCleanupFirstDeferredWakeAt({
-          idleCheckpointDelayMs: input.idleCheckpointDelayMs,
-          nowMs: input.nowMs,
-        }),
         vaultRoot: input.vaultRoot,
       });
       return {
@@ -146,20 +139,17 @@ export async function prepareHostedProviderCleanupPlan(input: {
     };
   }
 
-  const recoveredCleanupQueued =
-    await recoverLegacyPendingTerminalLinqCleanupOnce(input.vaultRoot);
-  const pendingLinqMessageIds =
-    normalizeHostedProviderMessageIds([...(input.terminalCleanup?.linqMessageIds ?? [])]);
-  if (pendingLinqMessageIds.length > 0) {
-    await queueHostedTerminalLinqCleanup({
-      captureIds: input.terminalCleanup?.captureIds ?? [],
+  const terminalCleanupQueued = pendingLinqMessageIds.length > 0;
+  if (terminalCleanupQueued) {
+    await recordHostedProviderCleanupBeforeCommit({
+      checkpoint: {
+        nextWakeAt: null,
+      },
       linqMessageIds: pendingLinqMessageIds,
-      nextWakeAt: null,
       vaultRoot: input.vaultRoot,
     });
   }
 
-  const terminalCleanupQueued = recoveredCleanupQueued || pendingLinqMessageIds.length > 0;
   const checkpoint =
     input.initialCheckpoint
     ?? (terminalCleanupQueued
@@ -172,43 +162,6 @@ export async function prepareHostedProviderCleanupPlan(input: {
     nowMs: input.nowMs,
     stateQueued: terminalCleanupQueued,
   });
-}
-
-// One-shot per vault: drain terminal cleanup evidence written before producers
-// carried cleanup refs, then mark recovery complete so steady-state wakes never
-// scan the evidence directory again.
-async function recoverLegacyPendingTerminalLinqCleanupOnce(
-  vaultRoot: string,
-): Promise<boolean> {
-  if (await hasHostedProviderCleanupRecoveryCompleted(vaultRoot)) {
-    return false;
-  }
-
-  let recoveredCleanupQueued = false;
-  const queuedCaptureIds = new Set<string>();
-  for (;;) {
-    const pending = await listPendingAssistantAutoReplyLinqCleanupEvidence({
-      vault: vaultRoot,
-    });
-    if (
-      pending.linqMessageIds.length === 0
-      || pending.captureIds.every((captureId) => queuedCaptureIds.has(captureId))
-    ) {
-      break;
-    }
-    recoveredCleanupQueued = true;
-    for (const captureId of pending.captureIds) {
-      queuedCaptureIds.add(captureId);
-    }
-    await queueHostedTerminalLinqCleanup({
-      captureIds: pending.captureIds,
-      linqMessageIds: pending.linqMessageIds,
-      nextWakeAt: null,
-      vaultRoot,
-    });
-  }
-  await markHostedProviderCleanupRecoveryCompleted(vaultRoot);
-  return recoveredCleanupQueued;
 }
 
 export async function recordHostedProviderCleanupAfterDelivery(input: {
@@ -246,6 +199,7 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch | null;
   checkpoint: HostedProviderCleanupCheckpoint;
+  shouldYield?: (() => boolean) | null;
   signal?: AbortSignal | null;
   vaultRoot: string;
   wake: HostedRuntimeEvent;
@@ -269,46 +223,67 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
     };
   }
 
-  try {
-    await assertHostedProviderCleanupLiveNow(input);
-    const dependencies = requireHostedProviderFetchDependencies({
-      env: input.env,
-      fetchImplementation: input.fetchImplementation,
-      ...(input.signal ? { signal: input.signal } : {}),
-    }, "Hosted Linq provider cleanup");
-    await deleteHostedLinqMessages({
-      ...dependencies,
-      messageIds,
-    });
-    await assertHostedProviderCleanupLiveNow(input);
-  } catch (error) {
-    const nextWakeAt = resolveHostedProviderCleanupRetryWakeAt();
-    await writeHostedProviderCleanupState(input.vaultRoot, {
-      schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
-      checkpoint: {
+  let deletedCount = 0;
+  for (let index = 0; index < messageIds.length; index += 1) {
+    if (input.shouldYield?.() === true) {
+      const nextWakeAt = resolveHostedProviderCleanupRetryWakeAt();
+      await writeHostedProviderCleanupState(input.vaultRoot, {
+        schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
+        checkpoint: {
+          nextWakeAt,
+        },
+        linqMessageIds: messageIds.slice(index),
+      });
+      return {
+        attemptedLinqMessageCount: deletedCount,
+        deletedLinqMessageCount: deletedCount,
+        failedLinqMessageCount: 0,
         nextWakeAt,
-      },
-      linqMessageIds: messageIds,
-    });
-    emitHostedExecutionStructuredLog({
-      component: "runtime",
-      details: {
-        linqMessageCount: messageIds.length,
-        provider: "linq",
-      },
-      error,
-      level: "warn",
-      message:
-        "Hosted runtime could not delete provider-visible Linq messages after commit; retry state remains in the runtime snapshot.",
-      phase: "outbox",
-      wake: input.wake,
-    });
-    return {
-      attemptedLinqMessageCount: messageIds.length,
-      deletedLinqMessageCount: 0,
-      failedLinqMessageCount: messageIds.length,
-      nextWakeAt,
-    };
+      };
+    }
+
+    try {
+      await assertHostedProviderCleanupLiveNow(input);
+      const dependencies = requireHostedProviderFetchDependencies({
+        env: input.env,
+        fetchImplementation: input.fetchImplementation,
+        ...(input.signal ? { signal: input.signal } : {}),
+      }, "Hosted Linq provider cleanup");
+      await deleteHostedLinqMessages({
+        ...dependencies,
+        messageIds: [messageIds[index]!],
+      });
+      deletedCount += 1;
+    } catch (error) {
+      const remainingMessageIds = messageIds.slice(index);
+      const nextWakeAt = resolveHostedProviderCleanupRetryWakeAt();
+      await writeHostedProviderCleanupState(input.vaultRoot, {
+        schema: HOSTED_PROVIDER_CLEANUP_SCHEMA,
+        checkpoint: {
+          nextWakeAt,
+        },
+        linqMessageIds: remainingMessageIds,
+      });
+      emitHostedExecutionStructuredLog({
+        component: "runtime",
+        details: {
+          linqMessageCount: remainingMessageIds.length,
+          provider: "linq",
+        },
+        error,
+        level: "warn",
+        message:
+          "Hosted runtime could not delete provider-visible Linq messages after commit; retry state remains in the runtime snapshot.",
+        phase: "outbox",
+        wake: input.wake,
+      });
+      return {
+        attemptedLinqMessageCount: deletedCount + remainingMessageIds.length,
+        deletedLinqMessageCount: deletedCount,
+        failedLinqMessageCount: remainingMessageIds.length,
+        nextWakeAt,
+      };
+    }
   }
 
   await clearHostedProviderCleanupState(input.vaultRoot);
@@ -371,26 +346,6 @@ export function resolveHostedProviderCleanupCheckpointWakeAt(input: {
   }
 
   return checkpointWakeAt;
-}
-
-async function queueHostedTerminalLinqCleanup(input: {
-  captureIds: readonly string[];
-  linqMessageIds: readonly string[];
-  nextWakeAt: string | null;
-  vaultRoot: string;
-}): Promise<HostedProviderCleanupCheckpoint> {
-  const checkpoint = await recordHostedProviderCleanupBeforeCommit({
-    checkpoint: {
-      nextWakeAt: input.nextWakeAt,
-    },
-    linqMessageIds: input.linqMessageIds,
-    vaultRoot: input.vaultRoot,
-  });
-  await markAssistantAutoReplyLinqCleanupQueued({
-    captureIds: input.captureIds,
-    vault: input.vaultRoot,
-  });
-  return checkpoint;
 }
 
 function buildHostedProviderCleanupPlan(input: {
@@ -534,36 +489,6 @@ function resolveHostedProviderCleanupStatePath(vaultRoot: string): string {
   return path.join(
     resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
     HOSTED_PROVIDER_CLEANUP_FILE_NAME,
-  );
-}
-
-async function hasHostedProviderCleanupRecoveryCompleted(
-  vaultRoot: string,
-): Promise<boolean> {
-  try {
-    const raw = await readFile(
-      resolveHostedProviderCleanupRecoveryPath(vaultRoot),
-      "utf8",
-    );
-    return (JSON.parse(raw) as { schema?: unknown }).schema
-      === HOSTED_PROVIDER_CLEANUP_RECOVERY_SCHEMA;
-  } catch {
-    return false;
-  }
-}
-
-async function markHostedProviderCleanupRecoveryCompleted(
-  vaultRoot: string,
-): Promise<void> {
-  await writeAssistantStateJson(resolveHostedProviderCleanupRecoveryPath(vaultRoot), {
-    schema: HOSTED_PROVIDER_CLEANUP_RECOVERY_SCHEMA,
-  });
-}
-
-function resolveHostedProviderCleanupRecoveryPath(vaultRoot: string): string {
-  return path.join(
-    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
-    HOSTED_PROVIDER_CLEANUP_RECOVERY_FILE_NAME,
   );
 }
 

@@ -588,7 +588,8 @@ export async function runHostedWorkspaceAssistantPhase(
       idleCheckpointDelayMs: input.request.idleCheckpointDelayMs,
       initialCheckpoint: initialProviderCleanupCheckpoint,
       nowMs: resolveHostedAssistantPhaseNowMs(input),
-      terminalCleanup: assistantMetrics.assistantAutomationTerminalLinqCleanup ?? null,
+      terminalCleanupMessageIds:
+        assistantMetrics.assistantAutomationTerminalLinqCleanup ?? null,
       vaultRoot: input.restored.vaultRoot,
     });
     const providerCleanupOwnedByPostCheckpointDelivery =
@@ -3358,6 +3359,7 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
       checkpoint: input.providerCleanupPlan.checkpoint ?? {
         nextWakeAt: null,
       },
+      shouldYield: input.shouldYieldBackgroundDrain ?? null,
       env: buildHostedLinqChannelEnv({
         forwardedEnv: input.phaseInput.runtime.forwardedEnv,
         userEnv: input.phaseInput.runtime.userEnv,

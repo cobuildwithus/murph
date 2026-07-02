@@ -673,10 +673,7 @@ describe('assistant auto-reply event-first path', () => {
 
     expect(result).toMatchObject({
       replied: 1,
-      terminalLinqCleanup: {
-        captureIds: ['ain_11111111111111111111111111111111'],
-        linqMessageIds: ['linq-user-message-1'],
-      },
+      terminalLinqCleanup: ['linq-user-message-1'],
     })
   })
 
