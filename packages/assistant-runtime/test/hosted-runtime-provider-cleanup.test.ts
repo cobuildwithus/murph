@@ -601,6 +601,51 @@ test("hosted provider cleanup deferred plans never run the upgrade recovery scan
   }
 });
 
+test("hosted provider cleanup scheduled read surfaces an immediate wake for due queued state", async () => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+
+  try {
+    await recordHostedProviderCleanupBeforeCommit({
+      linqMessageIds: ["linq_inbound_1"],
+      checkpoint: {
+        nextWakeAt: null,
+      },
+      vaultRoot,
+    });
+
+    assert.equal(
+      await resolveHostedProviderCleanupScheduledWakeAt({
+        nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
+        vaultRoot,
+      }),
+      "2026-07-01T00:09:00.000Z",
+    );
+
+    await drainHostedProviderCleanupAfterCommit({
+      assistantDeliveryOutcomes: [],
+      env: {
+        LINQ_API_TOKEN: "test-token",
+      },
+      fetchImplementation: vi.fn<typeof fetch>(),
+      checkpoint: {
+        nextWakeAt: null,
+      },
+      vaultRoot,
+      wake,
+    });
+
+    assert.equal(
+      await resolveHostedProviderCleanupScheduledWakeAt({
+        nowMs: Date.parse("2026-07-01T00:09:05.000Z"),
+        vaultRoot,
+      }),
+      null,
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
 test("hosted provider cleanup first defer wake follows the idle checkpoint delay", () => {
   assert.equal(
     resolveHostedProviderCleanupFirstDeferredWakeAt({

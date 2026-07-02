@@ -91,11 +91,24 @@ export async function resolveHostedProviderCleanupScheduledWakeAt(input: {
   nowMs: number;
   vaultRoot: string;
 }): Promise<string | null> {
-  return resolveHostedProviderCleanupCheckpointWakeAt({
-    checkpoint: await readHostedProviderCleanupCheckpoint(input.vaultRoot),
+  const state = await readHostedProviderCleanupState(input.vaultRoot);
+  const scheduledWakeAt = resolveHostedProviderCleanupCheckpointWakeAt({
+    checkpoint: state?.checkpoint ?? null,
     deferDueOrInvalid: false,
     nowMs: input.nowMs,
   });
+  if (scheduledWakeAt !== null) {
+    return scheduledWakeAt;
+  }
+
+  // Queued ids with a due/invalid checkpoint surface an immediate wake so the
+  // durable projection never checkpoints wakeless while cleanup still needs
+  // draining (a failed post-checkpoint drain must leave a retry path); a
+  // successful drain clears or replaces this through the post-checkpoint wake
+  // merge.
+  return state && state.linqMessageIds.length > 0
+    ? new Date(input.nowMs).toISOString()
+    : null;
 }
 
 export async function prepareHostedProviderCleanupPlan(input: {
