@@ -256,13 +256,6 @@ export function mergeCodexConfigOverrides(input: {
       'false',
     )
   }
-  if (modelProviderConfig) {
-    upsertCodexConfigOverride(
-      overrides,
-      'shell_environment_policy.ignore_default_excludes',
-      'false',
-    )
-  }
   if (input.enableMultiAgentV2) {
     upsertCodexConfigOverride(
       overrides,

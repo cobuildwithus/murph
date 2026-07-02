@@ -2413,7 +2413,6 @@ describe('Codex assistant registry helpers', () => {
         'model_providers.venice.env_key="VENICE_API_KEY"',
         'model_providers.venice.wire_api="responses"',
         'model_providers.venice.requires_openai_auth=false',
-        'shell_environment_policy.ignore_default_excludes=false',
       ]),
     )
   })
@@ -2490,7 +2489,6 @@ describe('Codex assistant registry helpers', () => {
       'model_providers.venice.env_key="VENICE_API_KEY"',
       'model_providers.venice.wire_api="responses"',
       'model_providers.venice.requires_openai_auth=false',
-      'shell_environment_policy.ignore_default_excludes=false',
       'memories.use_memories=false',
       'memories.generate_memories=false',
     ])

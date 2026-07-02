@@ -17,7 +17,6 @@ describe('Codex provider config overrides', () => {
       'model_providers.venice.env_key="VENICE_API_KEY"',
       'model_providers.venice.wire_api="responses"',
       'model_providers.venice.requires_openai_auth=false',
-      'shell_environment_policy.ignore_default_excludes=false',
     ])
     expect(JSON.stringify(overrides)).not.toContain('sk-venice-secret-test')
     expect(overrides?.some((override) => override.startsWith('model_provider='))).toBe(false)
@@ -30,7 +29,6 @@ describe('Codex provider config overrides', () => {
     })
 
     expect(overrides).toEqual([
-      'shell_environment_policy.ignore_default_excludes=false',
       'model_reasoning_summary="auto"',
       'hide_agent_reasoning=false',
     ])

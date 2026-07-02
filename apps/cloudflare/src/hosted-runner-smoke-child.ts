@@ -675,6 +675,8 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     "",
     "[shell_environment_policy]",
     `inherit = ${JSON.stringify(HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,
+    // Mirror the hosted runtime config: include_only is the single gate.
+    "ignore_default_excludes = true",
     `include_only = ${tomlStringArray(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)}`,
     "",
   ].join("\n");
