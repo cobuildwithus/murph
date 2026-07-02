@@ -158,7 +158,7 @@ describe('assistant runtime residue pruning', () => {
     await expectPathExists(resolveEvidencePath(paths, first.inputId))
   })
 
-  it('retains evidence with unqueued provider cleanup obligations', async () => {
+  it('prunes evidence with Linq cleanup ids on normal retention; cleanup state owns deletion', async () => {
     const { paths, vaultRoot } = await createAssistantVault(
       'assistant-runtime-residue-provider-cleanup-',
     )
@@ -182,13 +182,13 @@ describe('assistant runtime residue pruning', () => {
       vault: vaultRoot,
     })
 
-    expect(result.inputEventsPruned).toBe(0)
-    expect(result.autoReplyEvidenceFilesPruned).toBe(0)
-    await expectPathExists(resolveAssistantInputEventPath({
+    expect(result.inputEventsPruned).toBe(1)
+    expect(result.autoReplyEvidenceFilesPruned).toBe(1)
+    await expectPathMissing(resolveAssistantInputEventPath({
       inputId: event.inputId,
       paths,
     }))
-    await expectPathExists(resolveEvidencePath(paths, event.inputId))
+    await expectPathMissing(resolveEvidencePath(paths, event.inputId))
   })
 
   it('retains orphan input events referenced by active auto-reply receipt metadata', async () => {

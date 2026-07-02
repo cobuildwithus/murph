@@ -231,7 +231,6 @@ function planAssistantRuntimeResiduePrune(input: {
       !setIntersects(group.inputIds, pendingInputIds) &&
       !setIntersects(group.inputIds, retainedJournalInputIds) &&
       !setIntersects(group.inputIds, activeAutoReplyInputIds) &&
-      !group.records.some(hasPendingAssistantProviderCleanup) &&
       group.records.every((evidence) => {
         const intentId = readEvidenceDeliveryIntentId(evidence)
         return intentId === null || !activeIntentIds.has(intentId)
@@ -415,15 +414,6 @@ function isActiveAssistantOutboxIntent(intent: AssistantOutboxIntent): boolean {
     intent.status === 'pending' ||
     intent.status === 'sending' ||
     intent.status === 'retryable'
-  )
-}
-
-function hasPendingAssistantProviderCleanup(
-  evidence: AssistantAutoReplyTerminalEvidence,
-): boolean {
-  return (
-    evidence.providerCleanup.linqMessageIds.length > 0 &&
-    evidence.providerCleanup.queuedAt === null
   )
 }
 
