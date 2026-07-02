@@ -214,12 +214,15 @@ export async function prepareHostedProviderCleanupPlan(input: {
     };
   }
 
-  const recoveredCleanupQueued = await recoverLegacyPendingTerminalLinqCleanupOnce({
+  const recovery = await recoverLegacyPendingTerminalLinqCleanupOnce({
     shouldYield: input.shouldYield ?? null,
     vaultRoot: input.vaultRoot,
   });
+  // completedNow counts as checkpoint work even with nothing queued so the
+  // recovery marker becomes durable on this pass instead of being lost to a
+  // no-progress checkpoint skip and rescanned after a cold restore.
   const terminalCleanupQueued =
-    recoveredCleanupQueued || pendingLinqMessageIds.length > 0;
+    recovery.queuedIds || recovery.completedNow || pendingLinqMessageIds.length > 0;
   if (pendingLinqMessageIds.length > 0) {
     await recordHostedProviderCleanupBeforeCommit({
       checkpoint: {
@@ -438,10 +441,15 @@ function resolveHostedProviderCleanupCheckpointWakeAt(input: {
 async function recoverLegacyPendingTerminalLinqCleanupOnce(input: {
   shouldYield: (() => boolean) | null;
   vaultRoot: string;
-}): Promise<boolean> {
+}): Promise<{ completedNow: boolean; queuedIds: boolean }> {
   const { shouldYield, vaultRoot } = input;
   if (await hasHostedProviderCleanupRecoveryCompleted(vaultRoot)) {
-    return false;
+    return { completedNow: false, queuedIds: false };
+  }
+  // Vaults with no auto-reply history have nothing to migrate: skip the scan,
+  // the marker, and the forced checkpoint entirely (O(1) stat per pass).
+  if (!(await hasAssistantAutoReplyEvidenceDirectory(vaultRoot))) {
+    return { completedNow: false, queuedIds: false };
   }
 
   let recoveredCleanupQueued = false;
@@ -451,7 +459,7 @@ async function recoverLegacyPendingTerminalLinqCleanupOnce(input: {
     // batches are already durable in cleanup state; the marker stays absent so
     // the next non-foreground pass resumes the scan where it left off.
     if (shouldYield?.() === true) {
-      return recoveredCleanupQueued;
+      return { completedNow: false, queuedIds: recoveredCleanupQueued };
     }
     const pending = await listPendingAssistantAutoReplyLinqCleanupEvidence({
       vault: vaultRoot,
@@ -479,7 +487,7 @@ async function recoverLegacyPendingTerminalLinqCleanupOnce(input: {
     });
   }
   await markHostedProviderCleanupRecoveryCompleted(vaultRoot);
-  return recoveredCleanupQueued;
+  return { completedNow: true, queuedIds: recoveredCleanupQueued };
 }
 
 // Mirrors the engine's evidence directory layout; migration-only, delete with

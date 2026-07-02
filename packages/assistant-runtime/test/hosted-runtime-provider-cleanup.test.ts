@@ -45,6 +45,14 @@ const wake = buildHostedExecutionRuntimeTimerWake({
   userId: "member_123",
 });
 
+async function createLegacyEvidenceDirectory(vaultRoot: string): Promise<void> {
+  await mkdir(path.join(
+    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+    "auto-reply",
+    "evidence",
+  ), { recursive: true });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.deleteHostedLinqMessages.mockResolvedValue(undefined);
@@ -412,6 +420,7 @@ test("hosted provider cleanup plan queues terminal Linq cleanup as checkpoint wo
 
 test("hosted provider cleanup keeps a bounded steady-state file count", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+  await createLegacyEvidenceDirectory(vaultRoot);
 
   try {
     const listProviderCleanupFiles = async (): Promise<string[]> =>
@@ -471,6 +480,7 @@ test("hosted provider cleanup keeps a bounded steady-state file count", async ()
 
 test("hosted provider cleanup upgrade recovery queues legacy unqueued evidence once", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+  await createLegacyEvidenceDirectory(vaultRoot);
   mocks.listPendingAssistantAutoReplyLinqCleanupEvidence
     .mockResolvedValueOnce({
       captureIds: ["capture_batch_1"],
@@ -516,6 +526,7 @@ test("hosted provider cleanup upgrade recovery queues legacy unqueued evidence o
 
 test("hosted provider cleanup upgrade recovery yields to foreground between batches and resumes later", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+  await createLegacyEvidenceDirectory(vaultRoot);
 
   try {
     let scannedBatches = 0;
@@ -561,8 +572,37 @@ test("hosted provider cleanup upgrade recovery yields to foreground between batc
   }
 });
 
+test("hosted provider cleanup no-op recovery still forces a checkpoint so the marker is durable", async () => {
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+  await createLegacyEvidenceDirectory(vaultRoot);
+
+  try {
+    const plan = await prepareHostedProviderCleanupPlan({
+      deferred: false,
+      nowMs: Date.parse("2026-07-01T00:09:00.000Z"),
+      vaultRoot,
+    });
+
+    assert.equal(plan.requiresCheckpoint, true);
+    assert.equal(await hasHostedProviderCleanupRecoveryCompleted(vaultRoot), true);
+
+    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockClear();
+    const secondPlan = await prepareHostedProviderCleanupPlan({
+      deferred: false,
+      nowMs: Date.parse("2026-07-01T00:20:00.000Z"),
+      vaultRoot,
+    });
+
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+    assert.equal(secondPlan.requiresCheckpoint, false);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("hosted provider cleanup upgrade recovery stops when marking makes no progress", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+  await createLegacyEvidenceDirectory(vaultRoot);
   mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValue({
     captureIds: ["capture_stuck"],
     linqMessageIds: ["linq_stuck_1"],
