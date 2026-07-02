@@ -278,46 +278,30 @@ export async function resolveHostedMemberLinqHomeLineNewChatDeliveryTx(input: {
     };
   }
 
+  // Existing authority resolves from the routing row alone, without the
+  // pool lock; the assignable pool and its lock exist only to create a new
+  // assignment.
+  const existing = await resolveHostedMemberLinqNewChatDeliveryFromAuthority({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    senderPhone,
+  });
+  if (existing) {
+    return existing;
+  }
+
   await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
     prisma: input.prisma,
   });
-
-  const routing = await readHostedMemberRoutingState({
+  // Authority may have appeared while another transaction held the pool
+  // lock, so re-read before claiming a new line.
+  const existingUnderLock = await resolveHostedMemberLinqNewChatDeliveryFromAuthority({
     memberId: input.memberId,
     prisma: input.prisma,
+    senderPhone,
   });
-  const authority = readHostedLinqHomeLineAuthority(routing);
-
-  // Existing authority resolves from the routing row alone; the assignable
-  // pool gates only new claims, so retries survive a line that has since
-  // left the pool.
-  if (authority.kind === "pending" && authority.recipientPhone === senderPhone) {
-    return {
-      chatId: authority.chatId,
-      kind: "existing_pending",
-    };
-  }
-
-  // Reclaim this member's own bare same-line reservation (left when a crash
-  // or failed bind interrupted a prior attempt after the claim committed)
-  // instead of blocking the retry. Legacy direct routes carry no assignment
-  // timestamp and still fail closed below.
-  if (
-    authority.kind === "bare"
-    && authority.recipientPhone === senderPhone
-    && authority.assignedAt
-  ) {
-    return {
-      assignedAt: authority.assignedAt,
-      kind: "reserved",
-      senderPhoneNumber: authority.recipientPhone,
-    };
-  }
-
-  if (authority.kind !== "none") {
-    return {
-      kind: "already_bound",
-    };
+  if (existingUnderLock) {
+    return existingUnderLock;
   }
 
   const line = await readHostedLinqAssignableHomeLineByPhone({
@@ -348,6 +332,49 @@ export async function resolveHostedMemberLinqHomeLineNewChatDeliveryTx(input: {
     kind: "reserved",
     senderPhoneNumber: reservationResult.reservation.line.phoneNumber,
   };
+}
+
+async function resolveHostedMemberLinqNewChatDeliveryFromAuthority(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+  senderPhone: string;
+}): Promise<HostedLinqHomeLineNewChatDeliveryResult | null> {
+  const routing = await readHostedMemberRoutingState({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const authority = readHostedLinqHomeLineAuthority(routing);
+
+  if (authority.kind === "pending" && authority.recipientPhone === input.senderPhone) {
+    return {
+      chatId: authority.chatId,
+      kind: "existing_pending",
+    };
+  }
+
+  // Reclaim this member's own bare same-line reservation (left when a crash
+  // or failed bind interrupted a prior attempt after the claim committed)
+  // instead of blocking the retry. Legacy direct routes carry no assignment
+  // timestamp and still fail closed below.
+  if (
+    authority.kind === "bare"
+    && authority.recipientPhone === input.senderPhone
+    && authority.assignedAt
+  ) {
+    return {
+      assignedAt: authority.assignedAt,
+      kind: "reserved",
+      senderPhoneNumber: authority.recipientPhone,
+    };
+  }
+
+  if (authority.kind !== "none") {
+    return {
+      kind: "already_bound",
+    };
+  }
+
+  return null;
 }
 
 export async function resolveHostedMemberActivationLinqRoute(input: {

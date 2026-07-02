@@ -623,6 +623,7 @@ describe("hosted ops onboarding invites", () => {
     });
 
     // The reclaim consumes no new capacity and keeps the original claim.
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
@@ -661,6 +662,8 @@ describe("hosted ops onboarding invites", () => {
       newChatCreated: true,
     });
 
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
