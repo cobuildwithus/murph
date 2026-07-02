@@ -8,11 +8,9 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import {
-  createHostedLinqWebhookSubscription,
   sendHostedLinqChatMessage,
   sendHostedLinqReadReceipt,
   shareHostedLinqContactCard,
-  startHostedLinqTypingIndicator,
 } from "@/src/lib/hosted-onboarding/linq";
 
 const originalFetch = globalThis.fetch;
@@ -281,110 +279,5 @@ describe("shareHostedLinqContactCard", () => {
       message: "Linq contact-card share failed with HTTP 429.",
       retryable: false,
     });
-  });
-});
-
-describe("startHostedLinqTypingIndicator", () => {
-  afterEach(() => {
-    if (originalFetch) {
-      vi.stubGlobal("fetch", originalFetch);
-      return;
-    }
-
-    Reflect.deleteProperty(globalThis, "fetch");
-  });
-
-  it("posts typing indicators to the v3 chat typing endpoint", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return new Response(null, { status: 204 });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(startHostedLinqTypingIndicator({
-      chatId: "chat_123",
-      timeoutMs: 750,
-    })).resolves.toEqual({
-      ok: true,
-      status: 204,
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      new URL("chats/chat_123/typing", "https://linq.example.test/api/partner/v3/"),
-      expect.objectContaining({
-        method: "POST",
-        signal: expect.any(AbortSignal),
-      }),
-    );
-  });
-});
-
-describe("createHostedLinqWebhookSubscription", () => {
-  afterEach(() => {
-    if (originalFetch) {
-      vi.stubGlobal("fetch", originalFetch);
-      return;
-    }
-
-    Reflect.deleteProperty(globalThis, "fetch");
-  });
-
-  it("posts webhook subscriptions to the v3 webhook-subscriptions endpoint", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      void _input;
-      void _init;
-      return createJsonResponse({
-        created_at: "2026-04-04T00:00:00.000Z",
-        id: "whsub_123",
-        is_active: true,
-        phone_numbers: ["+15550000000"],
-        signing_secret: "whsec_123",
-        subscribed_events: ["message.received"],
-        target_url: "https://www.withmurph.ai/api/hosted-onboarding/linq/webhook?version=2026-02-03",
-        updated_at: "2026-04-04T00:00:00.000Z",
-      }, 201);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const result = await createHostedLinqWebhookSubscription({
-      phoneNumbers: ["+15550000000"],
-      subscribedEvents: ["message.received"],
-      targetUrl: "https://www.withmurph.ai/api/hosted-onboarding/linq/webhook?version=2026-02-03",
-    });
-
-    expect(result).toEqual({
-      createdAt: "2026-04-04T00:00:00.000Z",
-      id: "whsub_123",
-      isActive: true,
-      phoneNumbers: ["+15550000000"],
-      signingSecret: "whsec_123",
-      subscribedEvents: ["message.received"],
-      targetUrl: "https://www.withmurph.ai/api/hosted-onboarding/linq/webhook?version=2026-02-03",
-      updatedAt: "2026-04-04T00:00:00.000Z",
-    });
-    expect(fetchMock).toHaveBeenCalledWith(
-      new URL("webhook-subscriptions", "https://linq.example.test/api/partner/v3/"),
-      expect.objectContaining({
-        body: JSON.stringify({
-          phone_numbers: ["+15550000000"],
-          subscribed_events: ["message.received"],
-          target_url: "https://www.withmurph.ai/api/hosted-onboarding/linq/webhook?version=2026-02-03",
-        }),
-        method: "POST",
-      }),
-    );
-  });
-
-  it("rejects webhook subscriptions with events outside the pinned Linq SDK contract", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(createHostedLinqWebhookSubscription({
-      subscribedEvents: ["message.received", "unsupported.event"],
-      targetUrl: "https://www.withmurph.ai/api/hosted-onboarding/linq/webhook?version=2026-02-03",
-    })).rejects.toThrow("Linq subscribed event is not supported by the Linq SDK contract.");
-
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
