@@ -351,6 +351,26 @@ export async function resolveHostedMemberLinqHomeLineNewChatDeliveryTx(input: {
     };
   }
 
+  // Reclaim this member's own bare same-line reservation (left when a crash
+  // or failed bind interrupted a prior attempt after the claim committed)
+  // instead of blocking the retry. Legacy direct routes carry no assignment
+  // timestamp and still fail closed below.
+  if (
+    routing
+    && !routing.linqChatId
+    && !routing.pendingLinqChatId
+    && homeRecipientPhone === line.phoneNumber
+    && routing.linqHomeLineAssignedAt
+  ) {
+    return {
+      kind: "reserved",
+      reservation: {
+        assignedAt: routing.linqHomeLineAssignedAt,
+        line,
+      },
+    };
+  }
+
   if (routing?.linqChatId || routing?.pendingLinqChatId || homeRecipientPhone) {
     return {
       kind: "already_bound",

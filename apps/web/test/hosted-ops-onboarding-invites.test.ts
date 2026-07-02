@@ -599,6 +599,44 @@ describe("hosted ops onboarding invites", () => {
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
   });
 
+  it("reuses this member's bare same-line claim when retrying after a crashed new-chat attempt", async () => {
+    const assignedAt = new Date("2026-06-30T14:15:00.000Z");
+    routingState = {
+      linqChatId: null,
+      linqHomeLineAssignedAt: assignedAt,
+      linqRecipientPhone: "+15557654321",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+    };
+
+    await expect(service.sendHostedOpsOnboardingInvite({
+      deliveryMode: "new_chat",
+      linqFromPhoneNumber: "+15557654321",
+      recipientPhoneNumber: "+15551234567",
+      requestId: "request-crash-retry",
+    })).resolves.toMatchObject({
+      chatId: "chat_created",
+      deliveryMode: "new_chat",
+      newChatCreated: true,
+    });
+
+    // The reclaim consumes no new capacity and keeps the original claim.
+    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      homeLineAssignedAt: assignedAt,
+      memberId: "member_123",
+      prisma: tx,
+      recipientPhone: "+15557654321",
+    });
+    expect(readIdempotencyKey(mocks.createHostedLinqChat, 0)).toMatch(
+      /^ops-onboarding-invite:open:[a-f0-9]{64}$/u,
+    );
+    expect(mocks.upsertHostedMemberPendingLinqBindingTx).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects new-chat sends when the member already has a direct Linq home-line route", async () => {
     routingState = {
       linqChatId: null,
