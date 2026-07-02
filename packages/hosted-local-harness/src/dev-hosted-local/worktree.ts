@@ -730,13 +730,23 @@ function buildHostedLocalWorktreeLinqEnv(input: {
   const skipRegister = input.baseEnv.MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER?.trim();
   const publicUrl = input.baseEnv.MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL?.trim();
   const tunnelConfig = input.baseEnv.MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG?.trim();
+  // Worktrees default to no live Linq webhook. Only one local stack can own the
+  // single shared dev webhook subscription at a time, so defaulting worktrees
+  // off lets multiple worktrees and e2e runs execute in parallel without
+  // contending for it. Live delivery is opt-in per session via
+  // MURPH_DEV_LINQ_WEBHOOK_TUNNEL=auto|required or an explicit public URL.
   const explicitlyDisabledTunnel = tunnelMode !== undefined
     && tunnelMode.length > 0
     && ["0", "false", "no", "off", "disabled"].includes(tunnelMode.toLowerCase());
-  const shouldRegister = skipRegister !== "1" && !explicitlyDisabledTunnel;
-  const resolvedTunnelMode = explicitlyDisabledTunnel
-    ? "0"
-    : tunnelMode || "auto";
+  const explicitlyEnabledTunnel = !explicitlyDisabledTunnel
+    && (
+      (tunnelMode !== undefined && tunnelMode.length > 0)
+      || (publicUrl !== undefined && publicUrl.length > 0)
+    );
+  const shouldRegister = explicitlyEnabledTunnel && skipRegister !== "1";
+  const resolvedTunnelMode = explicitlyEnabledTunnel
+    ? tunnelMode || "auto"
+    : "0";
 
   return {
     ...(publicUrl ? { MURPH_DEV_LINQ_WEBHOOK_PUBLIC_URL: publicUrl } : {}),
