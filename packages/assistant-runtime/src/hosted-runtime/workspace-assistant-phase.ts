@@ -79,7 +79,6 @@ import {
 } from "./pending-assistant-input.ts";
 import {
   drainHostedProviderCleanupAfterCommit,
-  readHostedProviderCleanupCheckpoint,
   recordHostedProviderCleanupAfterDelivery,
   type HostedProviderCleanupCheckpoint,
   type HostedProviderCleanupPlan,
@@ -646,6 +645,7 @@ export async function runHostedWorkspaceAssistantPhase(
       const result = mergeContinuingSystemMailboxResult(
         withFreshHostedManagedAutomationsAfterCheckpoint({
           input,
+          providerCleanupWakeAt: providerCleanupPlan.wakeAt,
           result: timedForegroundAssistantResult,
         }),
       );
@@ -1100,6 +1100,7 @@ async function applyHostedManagedAutomationsBestEffort(input: {
 
 function withFreshHostedManagedAutomationsAfterCheckpoint(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  providerCleanupWakeAt: string | null;
   result: HostedWorkspaceRunnerAssistantPhaseResult;
 }): HostedWorkspaceRunnerAssistantPhaseResult {
   const assistantInputIds =
@@ -1115,6 +1116,7 @@ function withFreshHostedManagedAutomationsAfterCheckpoint(input: {
         input.result.afterCheckpoint,
         async () => await applyFreshHostedManagedAutomationsAfterCheckpoint({
           input: input.input,
+          providerCleanupWakeAt: input.providerCleanupWakeAt,
         }),
       ],
     }),
@@ -1123,6 +1125,7 @@ function withFreshHostedManagedAutomationsAfterCheckpoint(input: {
 
 async function applyFreshHostedManagedAutomationsAfterCheckpoint(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  providerCleanupWakeAt: string | null;
 }): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint | null> {
   if (input.input.shouldYieldBackgroundMaintenance?.() === true) {
     return null;
@@ -1153,13 +1156,6 @@ async function applyFreshHostedManagedAutomationsAfterCheckpoint(input: {
           + HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS,
       ).toISOString();
   const hasManagedNextWakeAt = Object.hasOwn(result, "nextWakeAt");
-  // When this post-checkpoint result owns a wake it replaces the phase
-  // result's wake in the workspace runner, so it must not drop the wake
-  // scheduled by the provider-cleanup owner state
-  // (hosted-provider-cleanup.json).
-  const providerCleanupWakeAt =
-    (await readHostedProviderCleanupCheckpoint(input.input.restored.vaultRoot))
-      ?.nextWakeAt ?? null;
   const nextWake = selectHostedRuntimeWakeCandidate([
     createHostedRuntimeWakeCandidate(
       cronNextWakeAt,
@@ -1169,7 +1165,14 @@ async function applyFreshHostedManagedAutomationsAfterCheckpoint(input: {
       hasManagedNextWakeAt ? result.nextWakeAt ?? null : null,
       result.nextWakeReason ?? HOSTED_ASSISTANT_WAKE_REASON,
     ),
-    createHostedRuntimeWakeCandidate(providerCleanupWakeAt, HOSTED_ASSISTANT_WAKE_REASON),
+    // When this post-checkpoint result owns a wake it replaces the phase
+    // result's wake in the workspace runner, so it must not drop the
+    // effective cleanup wake resolved by prepareHostedProviderCleanupPlan
+    // (which may re-arm a stale persisted checkpoint in memory only).
+    createHostedRuntimeWakeCandidate(
+      input.providerCleanupWakeAt,
+      HOSTED_ASSISTANT_WAKE_REASON,
+    ),
   ]);
   const hasNextWakeAt = cronNextWakeAt !== null || hasManagedNextWakeAt;
 

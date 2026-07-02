@@ -2260,12 +2260,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("keeps the recorded provider-cleanup wake when fresh managed automation seeding replaces the phase wake", async () => {
     // Regression: a fresh Linq inbound records deferred provider cleanup into
-    // hosted-provider-cleanup.json and schedules its wake on the phase result.
-    // The managed-automation post-checkpoint result replaces that wake in the
-    // workspace runner, so it must include the cleanup owner's recorded wake
-    // instead of stranding the deletion until the next unrelated cron wake.
+    // hosted-provider-cleanup.json and schedules the plan's wake on the phase
+    // result. The managed-automation post-checkpoint result replaces that
+    // wake in the workspace runner, so it must include the plan's cleanup
+    // wake instead of stranding the deletion until the next unrelated cron
+    // wake. The mocked first-deferred wake is now + 5 minutes.
     const cronNextWakeAt = "2026-04-27T17:00:00.000Z";
-    const providerCleanupWakeAt = "2026-04-27T00:00:01.250Z";
+    const providerCleanupWakeAt = "2026-04-27T00:05:00.000Z";
     const defaultRoute = {
       channel: "linq",
       deliverySource: null,
@@ -2301,9 +2302,82 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runningJobs: 0,
       totalJobs: 3,
     });
-    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue({
-      nextWakeAt: providerCleanupWakeAt,
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      assistantAutomationTerminalLinqCleanup: ["linq_inbound_regression"],
+      nextWakeAt: null,
+      redactedLogEntries: [],
     });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: providerCleanupWakeAt,
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 3,
+      }),
+    }));
+  });
+
+  it("keeps the re-armed provider-cleanup wake when the persisted checkpoint is stale", async () => {
+    // Regression: prepareHostedProviderCleanupPlan's deferred branch re-arms
+    // a null/stale persisted checkpoint into an effective future wake in
+    // memory only (hosted-provider-cleanup.json is not rewritten). The
+    // managed-automation post-checkpoint result must carry the plan's
+    // re-armed wake rather than re-reading the stale owner file.
+    const cronNextWakeAt = "2026-04-27T17:00:00.000Z";
+    const reArmedProviderCleanupWakeAt = "2026-04-27T00:05:00.000Z";
+    const defaultRoute = {
+      channel: "linq",
+      deliverySource: null,
+      deliveryTarget: "chat_synthetic_seed_route",
+      identityId: "identity_synthetic_seed_route",
+      participantId: "participant_synthetic_seed_route",
+      threadId: "thread_synthetic_seed_route",
+    };
+    mocks.readAssistantInputEvent.mockResolvedValueOnce({
+      conversation: {
+        accountId: defaultRoute.identityId,
+        actorId: defaultRoute.participantId,
+        actorIsSelf: false,
+        source: defaultRoute.channel,
+        threadId: defaultRoute.threadId,
+        threadIsDirect: true,
+      },
+      replyTarget: {
+        channel: defaultRoute.channel,
+        messageId: "message_synthetic_seed_route",
+        threadId: defaultRoute.deliveryTarget,
+      },
+    });
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 3,
+      skipped: 0,
+      updated: 0,
+    });
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 0,
+      enabledJobs: 3,
+      nextRunAt: cronNextWakeAt,
+      runningJobs: 0,
+      totalJobs: 3,
+    });
+    // Persisted owner state is stale: pending ids with a null checkpoint.
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue({
+      nextWakeAt: null,
+    });
+    // The deferred plan re-arms the stale checkpoint in memory only.
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      reArmedProviderCleanupWakeAt,
+    );
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
       assistantAutomationCurrentTurnDeliveryIntentIds: [],
       assistantAutomationProgressed: true,
@@ -2321,7 +2395,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "assistant_runtime_commit",
-      nextWakeAt: providerCleanupWakeAt,
+      nextWakeAt: reArmedProviderCleanupWakeAt,
       redactedStatus: expect.objectContaining({
         murphManagedAutomationCreated: 3,
       }),
