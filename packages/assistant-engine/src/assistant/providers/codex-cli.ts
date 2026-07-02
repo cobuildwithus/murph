@@ -191,6 +191,15 @@ export async function executeCodexAssistantTurnAttempt(
     voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
   })
   const codexProcessEnv = prepareAssistantDirectCliEnv(input.env)
+  const codexConfigOverrides = [
+    ...(mergeCodexConfigOverrides({
+      enableMultiAgentV2:
+        codexProcessEnv[HOSTED_RUNTIME_PROCESS_ENV_MARKER]?.trim() === '1',
+      modelProvider: providerConfig.target.modelProvider,
+      showThinkingTraces: input.showThinkingTraces ?? false,
+    }) ?? []),
+    ...(input.codexConfigOverrides ?? []),
+  ]
 
   const baseAppServerInput = {
     abortSignal: input.abortSignal,
@@ -201,12 +210,8 @@ export async function executeCodexAssistantTurnAttempt(
     dynamicTools: input.dynamicTools,
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,
-    configOverrides: mergeCodexConfigOverrides({
-      enableMultiAgentV2:
-        codexProcessEnv[HOSTED_RUNTIME_PROCESS_ENV_MARKER]?.trim() === '1',
-      modelProvider: providerConfig.target.modelProvider,
-      showThinkingTraces: input.showThinkingTraces ?? false,
-    }),
+    configOverrides:
+      codexConfigOverrides.length > 0 ? codexConfigOverrides : undefined,
     loadAuthorizedReferenceImageRefs: input.loadAuthorizedReferenceImageRefs ?? null,
     env: codexProcessEnv,
     fetchImpl: input.providerFetch ?? undefined,

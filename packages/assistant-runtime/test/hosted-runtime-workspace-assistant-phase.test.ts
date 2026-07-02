@@ -996,6 +996,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.getAssistantCronStatus).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        turnEnvironment: expect.objectContaining({
+          env: expect.objectContaining({
+            [HOSTED_RUNTIME_PROCESS_ENV]: "1",
+          }),
+        }),
+      }),
+    );
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
   });
 

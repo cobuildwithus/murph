@@ -197,6 +197,33 @@ describe('assistant cron schedule helpers', () => {
     ).toBe('2026-04-09T09:15:00.000Z')
   })
 
+  it('keeps the overnight maintenance cadence off consecutive nights across month boundaries', () => {
+    // 2026-07-31 is a Friday. Day-of-month stepping ('*/2') resets each
+    // month, so after a 31st it fires again on the 1st — consecutive nights.
+    const afterFridayRun = new Date('2026-07-31T03:00:00.000Z')
+    expect(
+      computeAssistantCronNextRunAt(
+        {
+          expression: '0 3 */2 * *',
+          kind: 'cron',
+        },
+        afterFridayRun,
+      ),
+    ).toBe('2026-08-01T03:00:00.000Z')
+
+    // The seeded day-of-week cadence keeps the 03:00 anchor and never
+    // produces back-to-back nights: Friday's next occurrence is Monday.
+    expect(
+      computeAssistantCronNextRunAt(
+        {
+          expression: '0 3 * * 1,3,5',
+          kind: 'cron',
+        },
+        afterFridayRun,
+      ),
+    ).toBe('2026-08-03T03:00:00.000Z')
+  })
+
   it('finds the next Sunday occurrence when cron day-of-week uses 7', () => {
     expect(
       findNextAssistantCronOccurrence(
