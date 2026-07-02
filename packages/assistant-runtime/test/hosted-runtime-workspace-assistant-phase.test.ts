@@ -3673,7 +3673,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
       expect.objectContaining({
-        assistantDeliveryOutcomes: [],
         checkpoint: {
           nextWakeAt: null,
         },
@@ -9449,7 +9448,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
       expect.objectContaining({
-        assistantDeliveryOutcomes: [],
         checkpoint: {
           nextWakeAt: null,
         },
@@ -9939,7 +9937,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
     expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
       expect.objectContaining({
-        assistantDeliveryOutcomes: [],
         checkpoint: {
           nextWakeAt: null,
         },
@@ -10186,7 +10183,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
       expect.objectContaining({
-        assistantDeliveryOutcomes: [],
         checkpoint: {
           nextWakeAt: null,
         },

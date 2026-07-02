@@ -461,7 +461,6 @@ test("hosted provider cleanup keeps a bounded steady-state file count", async ()
     // A successful drain deletes the queue file; only the temporary
     // migration marker remains until its delete-together code is removed.
     await drainHostedProviderCleanupAfterCommit({
-      assistantDeliveryOutcomes: [],
       env: {
         LINQ_API_TOKEN: "test-token",
       },
@@ -662,7 +661,6 @@ test("hosted provider cleanup scheduled read surfaces an immediate wake for due 
     );
 
     await drainHostedProviderCleanupAfterCommit({
-      assistantDeliveryOutcomes: [],
       env: {
         LINQ_API_TOKEN: "test-token",
       },
@@ -696,7 +694,7 @@ test("hosted provider cleanup first defer wake follows the idle checkpoint delay
   );
 });
 
-test("hosted provider cleanup deletes persisted and delivered Linq ids after commit", async () => {
+test("hosted provider cleanup drains only persisted ids after commit", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
 
   try {
@@ -709,24 +707,6 @@ test("hosted provider cleanup deletes persisted and delivered Linq ids after com
     const providerFetch = vi.fn<typeof fetch>();
 
     const result = await drainHostedProviderCleanupAfterCommit({
-      assistantDeliveryOutcomes: [
-        {
-          deliveryChannel: "linq",
-          deliveryErrorCode: null,
-          deliveryErrorMessage: null,
-          deliveryStatus: "sent",
-          effectFingerprint: "fingerprint_1",
-          effectId: "effect_1",
-          journalMethod: null,
-          journalStatus: null,
-          providerMessageId: "linq_outbound_1",
-          providerMessageIds: ["linq_outbound_1", "linq_outbound_2"],
-          providerThreadId: "chat_1",
-          retryable: false,
-          target: "chat_1",
-          targetKind: "thread",
-        },
-      ],
       assertLiveness,
       env: {
         LINQ_API_TOKEN: "test-token",
@@ -737,27 +717,21 @@ test("hosted provider cleanup deletes persisted and delivered Linq ids after com
       wake,
     });
 
-    expect(assertLiveness).toHaveBeenCalledTimes(3);
+    expect(assertLiveness).toHaveBeenCalledTimes(1);
     assert.deepEqual(result, {
-      attemptedLinqMessageCount: 3,
-      deletedLinqMessageCount: 3,
+      attemptedLinqMessageCount: 1,
+      deletedLinqMessageCount: 1,
       failedLinqMessageCount: 0,
       nextWakeAt: null,
     });
-    expect(mocks.deleteHostedLinqMessages).toHaveBeenCalledTimes(3);
-    for (const [index, messageId] of [
-      "linq_inbound_1",
-      "linq_outbound_1",
-      "linq_outbound_2",
-    ].entries()) {
-      expect(mocks.deleteHostedLinqMessages).toHaveBeenNthCalledWith(index + 1, {
-        env: {
-          LINQ_API_TOKEN: "test-token",
-        },
-        fetchImplementation: providerFetch,
-        messageIds: [messageId],
-      });
-    }
+    expect(mocks.deleteHostedLinqMessages).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteHostedLinqMessages).toHaveBeenCalledWith({
+      env: {
+        LINQ_API_TOKEN: "test-token",
+      },
+      fetchImplementation: providerFetch,
+      messageIds: ["linq_inbound_1"],
+    });
     await assert.rejects(readHostedProviderCleanupFile(vaultRoot), {
       code: "ENOENT",
     });
@@ -783,7 +757,6 @@ test("hosted provider cleanup drain yields to foreground work between provider d
     });
 
     const result = await drainHostedProviderCleanupAfterCommit({
-      assistantDeliveryOutcomes: [],
       env: {
         LINQ_API_TOKEN: "test-token",
       },
@@ -824,7 +797,6 @@ test("hosted provider cleanup uses direct provider cleanup with provider fetch",
     const providerFetch = vi.fn<typeof fetch>();
 
     const result = await drainHostedProviderCleanupAfterCommit({
-      assistantDeliveryOutcomes: [],
       env: {
         LINQ_API_TOKEN: "legacy-token",
       },
@@ -865,7 +837,6 @@ test("hosted provider cleanup keeps runtime retry state when Linq deletion fails
     });
 
     const result = await drainHostedProviderCleanupAfterCommit({
-      assistantDeliveryOutcomes: [],
       env: {},
       fetchImplementation: null,
       checkpoint,
@@ -904,7 +875,6 @@ test("hosted provider cleanup persists a future retry checkpoint after failed de
     });
 
     const result = await drainHostedProviderCleanupAfterCommit({
-      assistantDeliveryOutcomes: [],
       env: {},
       fetchImplementation: null,
       checkpoint: {
@@ -947,7 +917,6 @@ test("hosted provider cleanup ignores malformed retry state", async () => {
     assert.equal(await readHostedProviderCleanupCheckpoint(vaultRoot), null);
 
     const result = await drainHostedProviderCleanupAfterCommit({
-      assistantDeliveryOutcomes: [],
       env: {},
       fetchImplementation: null,
       checkpoint: {

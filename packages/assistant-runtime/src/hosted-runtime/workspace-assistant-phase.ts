@@ -3350,8 +3350,11 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
   let providerCleanupRedactedStatus: HostedRuntimeRedactedJson = {};
 
   if (providerCleanupHotDrainAllowed && !providerCleanupDrainDeferred) {
+    // The hot drain deletes only ids already durable in
+    // hosted-provider-cleanup.json; current delivery outcomes are appended
+    // afterwards through the deferred recording path so they never delete in
+    // the invocation that produced them.
     const providerCleanup = await drainHostedProviderCleanupAfterCommit({
-      assistantDeliveryOutcomes: input.assistantDeliveryOutcomes,
       assertLiveness: async () => {
         assertHostedAssistantPhaseLiveness(input.phaseInput.signal);
       },
@@ -3368,7 +3371,13 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
       vaultRoot: input.phaseInput.restored.vaultRoot,
       wake: input.wake,
     });
-    providerCleanupNextWakeAt = providerCleanup.nextWakeAt;
+    const recorded = await recordHostedProviderCleanupAfterDelivery({
+      idleCheckpointDelayMs: input.phaseInput.request.idleCheckpointDelayMs,
+      nowMs: resolveHostedAssistantPhaseNowMs(input.phaseInput),
+      outcomes: input.assistantDeliveryOutcomes,
+      vaultRoot: input.phaseInput.restored.vaultRoot,
+    });
+    providerCleanupNextWakeAt = recorded.nextWakeAt ?? providerCleanup.nextWakeAt;
     providerCleanupRedactedStatus = buildHostedProviderCleanupRedactedStatus(providerCleanup);
   } else {
     const providerCleanup = await recordHostedProviderCleanupAfterDelivery({

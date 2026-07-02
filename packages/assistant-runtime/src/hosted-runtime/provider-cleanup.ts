@@ -283,7 +283,6 @@ export async function recordHostedProviderCleanupAfterDelivery(input: {
 }
 
 export async function drainHostedProviderCleanupAfterCommit(input: {
-  assistantDeliveryOutcomes: readonly HostedAssistantDeliveryOutcome[];
   assertLiveness?: () => Promise<void>;
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch | null;
@@ -297,7 +296,6 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
   const existing = await readHostedProviderCleanupState(input.vaultRoot);
   const messageIds = normalizeHostedProviderMessageIds([
     ...(existing?.linqMessageIds ?? []),
-    ...collectHostedLinqProviderMessageIds(input.assistantDeliveryOutcomes),
   ]);
 
   if (messageIds.length === 0) {
