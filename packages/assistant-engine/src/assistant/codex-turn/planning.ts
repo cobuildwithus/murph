@@ -647,9 +647,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
           ? fallbackConversationHistoryMessages
           : undefined,
       developerInstructions: threadStartDeveloperInstructions,
-      sessionContext: {
-        binding: input.session.binding,
-      },
+      // Maintenance turns must not receive binding context: the provider
+      // prepends it to the prompt as identity/actor/thread/delivery lines,
+      // which are forbidden source material for canonical memory writes.
+      sessionContext: maintenanceTurn
+        ? undefined
+        : {
+            binding: input.session.binding,
+          },
       turnContextPrompt,
     }
   }
@@ -714,7 +719,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         routePlanningSpans.supportedExperimentProtocolsElapsedMs ?? null,
     },
     resume,
-    sessionContext: shouldPrepareBootstrapContext
+    sessionContext: shouldPrepareBootstrapContext && !maintenanceTurn
       ? {
           binding: input.session.binding,
         }

@@ -188,6 +188,9 @@ describe('assistant protocol index planning', () => {
     expect(maintenancePlan.systemPrompt).not.toContain('same full read and write tools')
     expect(maintenancePlan.systemPrompt).not.toContain('meals')
     expect(maintenancePlan.systemPrompt).not.toContain('Health Commons')
+    // Binding context becomes identity/actor/thread/delivery prompt lines at
+    // the provider boundary; maintenance turns must never carry it.
+    expect(maintenancePlan.sessionContext).toBeUndefined()
 
     const notificationPlan = await resolveAssistantRouteTurnPlan({
       executionContext,
@@ -211,6 +214,9 @@ describe('assistant protocol index planning', () => {
     expect(notificationPlan.systemPrompt).toContain('device sync pending')
     expect(notificationPlan.systemPrompt).toContain('Notification execution rules:')
     expect(notificationPlan.systemPrompt).not.toContain('Maintenance execution rules:')
+    expect(notificationPlan.sessionContext).toEqual({
+      binding: expect.anything(),
+    })
   })
 
   it('soft-fails to an empty assistant protocol index when generated artifacts are unavailable', async () => {
