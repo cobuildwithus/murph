@@ -167,6 +167,7 @@ export interface AssistantNotificationInput
       | 'executionContext'
       | 'hostedDeliveryIdempotency'
       | 'onProviderEvent'
+      | 'onProviderRequestStarted'
       | 'onTraceEvent'
       | 'operatorAuthority'
       | 'assistantTargetOverride'
@@ -1050,6 +1051,7 @@ function buildAssistantNotificationMessageInput(
     modelProvider: input.modelProvider,
     oss: input.oss,
     onProviderEvent: input.onProviderEvent ?? null,
+    onProviderRequestStarted: input.onProviderRequestStarted ?? null,
     onTraceEvent: input.onTraceEvent,
     operatorAuthority: input.operatorAuthority,
     participantId: input.participantId,

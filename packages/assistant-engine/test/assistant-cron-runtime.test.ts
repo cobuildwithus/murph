@@ -2320,6 +2320,73 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
+  it('consumes overnight memory consolidation when yield aborts after provider admission without a completed command event', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-overnight-memory-provider-admitted-yield-',
+    )
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    addOvernightMemoryConsolidationAutomation(vaultRoot)
+    // Once the provider request was admitted, memory writes may have
+    // committed even though the completed command event never reached the
+    // buffered raw events. The occurrence must be consumed, never replayed.
+    let shouldYield = false
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
+      async (input: {
+        abortSignal?: AbortSignal
+        onProviderRequestStarted?: (event: { startedAt: string }) => void
+      }) => {
+        input.onProviderRequestStarted?.({
+          startedAt: '2026-04-09T03:10:00.000Z',
+        })
+        shouldYield = true
+        await vi.advanceTimersByTimeAsync(300)
+        throw input.abortSignal?.reason ??
+          new VaultCliError(
+            'ASSISTANT_TURN_ABORTED',
+            'Assistant turn was aborted.',
+          )
+      },
+    )
+
+    const summary = await processDueAssistantCronJobsLocal({
+      executionContext: {
+        hosted: {
+          memberId: 'member-hosted',
+          userEnvKeys: [],
+        },
+      },
+      limit: 1,
+      shouldYieldBackgroundMaintenance: () => shouldYield,
+      vault: vaultRoot,
+    })
+
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
+    const runtimeRecord = runtimeStore.jobs.find(
+      (record) =>
+        record.jobId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+    )
+    expect(runtimeRecord?.state.runningAt).toBeNull()
+    expect(runtimeRecord?.state.pendingOccurrenceAt).toBeNull()
+    expect(runtimeRecord?.state.retryAfterAt).toBeNull()
+    await expect(listAssistantCronRuns({
+      job: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      runs: [
+        expect.objectContaining({
+          status: 'skipped',
+        }),
+      ],
+    })
+  })
+
   it('consumes overnight memory consolidation when hosted maintenance yields after provider work', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))

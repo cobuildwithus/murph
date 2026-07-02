@@ -436,6 +436,7 @@ export async function executeClaimedAssistantCronJob(input: {
   // where whichever poll aborted first decided between a clean maintenance
   // release and a spurious failed foreground-yield run.
   const maintenanceJob = assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
+  let maintenanceProviderStarted = false
   const foregroundPreemption = createAssistantCronForegroundPreemption({
     jobName: claimedJob.name,
     parentSignal: input.signal,
@@ -609,6 +610,17 @@ export async function executeClaimedAssistantCronJob(input: {
           const result = await sendAssistantNotificationLocal({
             vault: input.vault,
             ...automationTurn,
+            // Replay barrier: once the provider was admitted, a yielded
+            // maintenance turn may already have committed memory writes even
+            // if the completed-command event never reached the buffered raw
+            // events, so the occurrence must be consumed, not retried.
+            ...(maintenanceJob
+              ? {
+                  onProviderRequestStarted: () => {
+                    maintenanceProviderStarted = true
+                  },
+                }
+              : {}),
             beforeCommit: async (context) => {
               await preemptAssistantCronNotificationCommitForForeground({
                 deliveryOutcome: context.deliveryOutcome ?? null,
@@ -682,8 +694,9 @@ export async function executeClaimedAssistantCronJob(input: {
       isAssistantCronBackgroundMaintenanceYieldError(error) ||
       yieldCancellation.yieldRequested()
     const nonReplayableBackgroundMaintenanceWork =
-      assistantCronJobIsPreemptibleBackgroundMaintenance(input.job) &&
-      assistantNotificationErrorHasNonReplayableProviderWork(error)
+      maintenanceJob &&
+      (assistantNotificationErrorHasNonReplayableProviderWork(error) ||
+        (backgroundMaintenanceYielded && maintenanceProviderStarted))
     if (nonReplayableBackgroundMaintenanceWork) {
       errorText = ASSISTANT_CRON_BACKGROUND_MAINTENANCE_NON_REPLAYABLE_WORK_ERROR
       errorCode = backgroundMaintenanceYielded
