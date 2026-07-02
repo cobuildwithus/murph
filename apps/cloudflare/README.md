@@ -159,9 +159,9 @@ Each invocation runs in-process through `packages/assistant-runtime` with
 per-user warm workspace roots and invocation-local cache/temp roots. Runtime
 effects use internal virtual hosts and write-fence headers instead of
 per-invocation outbound proxy tokens or dynamically installed outbound
-handlers. After each request, the container verifies process cleanup by
-snapshotting `/proc`, killing unexpected descendant or same-user orphan
-processes, and poisoning/exiting the warm shell if cleanup cannot be proven.
+handlers. The runner does not run a separate post-request PID sweep over the
+native Codex App Server; warm lifecycle is owned by the existing Codex
+app-server slot and explicit runner cleanup paths.
 
 The warm shell is destroyed when an invocation fails, warm health is stale,
 deploy smoke finishes, explicit cleanup is called, or Cloudflare reports idle

@@ -256,7 +256,7 @@ function buildExpectedScenarioBatches(
   let currentBatch: HostedLocalE2eScenario[] = [];
 
   for (const scenario of scenarios) {
-    if (scenario.processIsolation || scenario.testControls === true) {
+    if (scenario.dedicatedVitestProcess || scenario.testControls === true) {
       if (currentBatch.length > 0) {
         batches.push(currentBatch);
         currentBatch = [];
@@ -382,7 +382,7 @@ function batchRequiresDedicatedEnv(
   scenarios: readonly HostedLocalE2eScenario[],
 ): boolean {
   return scenarios.some((scenario) =>
-    scenario.processIsolation || scenario.testControls === true
+    scenario.dedicatedVitestProcess || scenario.testControls === true
   );
 }
 
