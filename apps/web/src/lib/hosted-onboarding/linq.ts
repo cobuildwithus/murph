@@ -16,14 +16,11 @@ export type {
 } from "./linq-webhook";
 
 export {
-  createHostedLinqChat,
   createHostedLinqWebhookSubscription,
   shareHostedLinqContactCard,
   startHostedLinqTypingIndicator,
   sendHostedLinqReadReceipt,
   sendHostedLinqChatMessage,
-  sendHostedLinqVoiceMemo,
-  uploadHostedLinqAttachment,
 } from "./linq-client";
 export type { HostedLinqWebhookSubscription } from "./linq-client";
 
