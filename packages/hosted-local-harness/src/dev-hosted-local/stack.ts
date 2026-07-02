@@ -623,6 +623,24 @@ export async function startHostedLocalDevStack(input: {
           signal: input.abortSignal,
         });
       }
+
+      // The DB is now the hosted Linq home-line authority, so seed the
+      // configured lines the same way the Vercel deploy does. Without this a
+      // fresh local database has no assignable line and onboarding activation
+      // fails closed with LINQ_CONVERSATION_PHONE_REQUIRED. Provider inventory
+      // sync is skipped locally so startup needs no Linq API call.
+      await runCommand("pnpm", [
+        "--dir",
+        "apps/web",
+        "linq:sync-lines",
+        "--",
+        "--skip-provider-inventory",
+      ], {
+        cwd: repoRoot,
+        env: runtimeEnv,
+        name: "setup",
+        signal: input.abortSignal,
+      });
     }
 
     if (!config.skipWeb) {
