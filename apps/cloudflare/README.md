@@ -6,10 +6,8 @@ Cloudflare-hosted execution plane for the hosted Murph path.
 
 ## What This App Owns
 
-- ensure-processing requests (callback-signed from the Temporal orchestrator or
-  Vercel OIDC-authenticated direct ingress wakes from `apps/web`) plus Vercel
-  OIDC-authenticated browser/session/status/deletion control requests from
-  `apps/web`
+- callback-signed Temporal ensure-processing requests plus Vercel OIDC-authenticated
+  browser/session/status/deletion control requests from `apps/web`
 - per-user execution coordination in `USER_RUNNER`
 - native runner-container lifecycle in `RUNNER_CONTAINER`
 - encrypted hosted workspace snapshots, legacy encrypted artifact blobs, encrypted runner-secrets blobs, and the execution-sidecar blobs needed to run hosted jobs in `BUNDLES`
@@ -29,14 +27,10 @@ Public routes:
 
 Internal control routes:
 
-- `POST /internal/users/:userId/runtime/ensure-processing` is the idempotent
-  processing adapter; it accepts either the Temporal orchestrator's callback
-  signature or web's Vercel OIDC credential (dispatched by presented
-  credential, never falling through a failed one), records which trigger won
-  as the `triggeredByWebDirect` orchestration latency leaf, and starts, wakes,
-  or accepts a pending runtime wake for only the bound user's runtime,
-  returning after that start/wake intent is accepted, not after the runtime
-  reaches idle
+- `POST /internal/users/:userId/runtime/ensure-processing` is the
+  callback-signed Temporal processing adapter; it starts, wakes, or accepts a
+  pending runtime wake for only the bound user's runtime and returns after that
+  start/wake intent is accepted, not after the runtime reaches idle
 - `POST /internal/users/:userId/browser-vault/session` creates an encrypted browser-vault read session for the latest web-owned replica ref
 - `GET /internal/users/:userId/status`
 - `POST /internal/deploy/container-smoke` is a signed deploy-verification callback, not a product control API

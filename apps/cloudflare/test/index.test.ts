@@ -64,7 +64,6 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
-  HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_ACTIVITY_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER,
@@ -1983,102 +1982,6 @@ describe("cloudflare worker routes", () => {
         },
         userId: "test-user",
       });
-    });
-
-    it("accepts web-plane OIDC runtime ensure-processing requests and stamps the direct-wake trigger", async () => {
-      const stub = createUserRunnerStub({
-        ensureRuntimeProcessingForUser: vi.fn(async () => ({
-          action: "woken" as const,
-          kind: "runtime_processing_accepted" as const,
-          recommendedRecheckAt: "2026-04-27T00:03:00.000Z",
-          runtimeAttemptId: "runtime-attempt-test",
-        })),
-      });
-      const env = createWorkerEnv(stub);
-
-      const response = await worker.fetch(
-        await signControlRequest(
-          new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
-            body: JSON.stringify({
-              orchestrationAttemptId: "web-ingress-attempt-test",
-            }),
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-            },
-            method: "POST",
-          }),
-        ),
-        env,
-      );
-
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({
-        action: "woken",
-        kind: "runtime_processing_accepted",
-        recommendedRecheckAt: "2026-04-27T00:03:00.000Z",
-        runtimeAttemptId: "runtime-attempt-test",
-      });
-      expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
-        orchestrationAttemptId: "web-ingress-attempt-test",
-        orchestration: {
-          cloudflareRouteReceivedAtEpochMs: expect.any(Number),
-          triggeredByWebDirect: true,
-        },
-        userId: "test-user",
-      });
-    });
-
-    it("rejects runtime ensure-processing requests whose only credential is an invalid OIDC bearer", async () => {
-      const stub = createUserRunnerStub();
-      const env = createWorkerEnv(stub);
-
-      const response = await worker.fetch(
-        new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
-          body: JSON.stringify({
-            orchestrationAttemptId: "web-ingress-attempt-test",
-          }),
-          headers: {
-            authorization: "Bearer not-a-jwt",
-            "content-type": "application/json; charset=utf-8",
-            [HOSTED_EXECUTION_USER_ID_HEADER]: "test-user",
-          },
-          method: "POST",
-        }),
-        env,
-      );
-
-      expect(response.status).toBe(401);
-      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
-    });
-
-    it("keeps a bad callback signature fail-closed even when a valid OIDC bearer is attached", async () => {
-      const stub = createUserRunnerStub();
-      const env = createWorkerEnv(stub);
-
-      const signedRequest = await signWebCallbackControlRequest(
-        new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
-          body: JSON.stringify({
-            orchestrationAttemptId: "orchestration-attempt-test",
-          }),
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        }),
-        env,
-      );
-      const tamperedHeaders = new Headers(signedRequest.headers);
-      tamperedHeaders.set(HOSTED_EXECUTION_SIGNATURE_HEADER, "invalid-signature");
-      installOidcJwksFetch();
-      tamperedHeaders.set("authorization", `Bearer ${createTestVercelOidcToken({})}`);
-
-      const response = await worker.fetch(
-        new Request(signedRequest, { headers: tamperedHeaders }),
-        env,
-      );
-
-      expect(response.status).toBe(401);
-      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
     it("returns a stable code for invalid runtime ensure-processing requests", async () => {

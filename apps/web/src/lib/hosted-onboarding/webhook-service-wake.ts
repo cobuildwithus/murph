@@ -1,13 +1,8 @@
-import { randomUUID } from "node:crypto";
-
 import {
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
 } from "@murphai/hosted-execution/runtime-control";
 
-import {
-  readHostedExecutionControlClientIfConfigured,
-} from "../hosted-execution/control";
 import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
@@ -72,36 +67,13 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   const handoffTiming = startHostedOnboardingTiming(
     `hosted-onboarding.webhook.${input.source}.wake-handoff`,
     {
-      directEnsureWakeStarted: Boolean(knownCheckpoint),
       eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
+      plannerCheckpointPresent: Boolean(knownCheckpoint),
       responseReason: input.response.reason,
       userIdPresent: Boolean(input.userId),
       userIdSuffix: input.userId ? toHostedOnboardingLogIdSuffix(input.userId) : null,
     },
   );
-
-  // Latency fast path: poke the idempotent Cloudflare ensure route directly so
-  // the runtime starts waking while the Temporal signal (still sent below,
-  // unconditionally, as the sole durable orchestrator) is in flight. Gated on
-  // the planner checkpoint because its presence proves the planning
-  // transaction already verified the active member and admission for this
-  // wake. Best-effort only: losing this call leaves exactly the Temporal path,
-  // and the webhook response never waits on it.
-  const directEnsureWake = knownCheckpoint && input.userId
-    ? startHostedDirectEnsureWakeBestEffort({
-        source: input.source,
-        userId: input.userId,
-      })
-    : null;
-  if (directEnsureWake) {
-    if (input.scheduleAfterResponse) {
-      // Keep the in-flight request alive past the response without ever
-      // putting its latency on the provider success path.
-      input.scheduleAfterResponse(() => directEnsureWake);
-    } else {
-      void directEnsureWake;
-    }
-  }
 
   let signal: Awaited<ReturnType<typeof signalHostedMailboxAppendRuntime>>;
   let temporalSignalAcceptedAt: Date | null = null;
@@ -144,59 +116,6 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     started: true,
     workflowId: signal.workflowId,
   };
-}
-
-// Starts the direct Cloudflare ensure request immediately and never throws or
-// rejects, including on synchronous client-configuration errors. The returned
-// promise exists only so callers can keep the request alive past the webhook
-// response; the Temporal signal never waits on it.
-function startHostedDirectEnsureWakeBestEffort(wake: {
-  source: "linq" | "telegram" | "whatsapp";
-  userId: string;
-}): Promise<void> {
-  const wakeSource = wake.source;
-  let client: ReturnType<typeof readHostedExecutionControlClientIfConfigured>;
-  try {
-    client = readHostedExecutionControlClientIfConfigured();
-  } catch (error) {
-    console.warn("Hosted direct ensure wake client is misconfigured.", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-      source: wakeSource,
-    });
-    return Promise.resolve();
-  }
-  if (!client) {
-    return Promise.resolve();
-  }
-
-  try {
-    return client
-      .ensureRuntimeProcessing({
-        orchestrationAttemptId: `web-ingress-${randomUUID()}`,
-        userId: wake.userId,
-      })
-      .then((ensureResult) => {
-        console.info("Hosted direct ensure wake completed.", {
-          kind: ensureResult.kind,
-          ...(ensureResult.kind === "runtime_processing_accepted"
-            ? { action: ensureResult.action }
-            : {}),
-          source: wakeSource,
-        });
-      })
-      .catch((error: unknown) => {
-        console.warn("Hosted direct ensure wake failed.", {
-          errorName: deriveHostedOnboardingTimingErrorName(error),
-          source: wakeSource,
-        });
-      });
-  } catch (error) {
-    console.warn("Hosted direct ensure wake failed.", {
-      errorName: deriveHostedOnboardingTimingErrorName(error),
-      source: wakeSource,
-    });
-    return Promise.resolve();
-  }
 }
 
 function scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse(input: {

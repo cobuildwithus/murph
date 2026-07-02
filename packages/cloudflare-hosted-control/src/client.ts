@@ -11,13 +11,9 @@ import {
   type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/contracts";
 import {
-  parseHostedRuntimeEnsureProcessingResponse,
   parseHostedRunnerStatusResponse,
   parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
-import type {
-  HostedRuntimeEnsureProcessingResponse,
-} from "@murphai/hosted-execution/orchestration-control";
 import type {
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
@@ -26,7 +22,6 @@ import { normalizeHostedExecutionBaseUrl } from "@murphai/hosted-execution/env";
 import {
   CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
   buildCloudflareHostedControlBrowserVaultSessionPath,
-  buildCloudflareHostedControlRuntimeEnsureProcessingPath,
   buildCloudflareHostedControlUserDataDeletionPath,
   buildCloudflareHostedControlUserStatusPath,
 } from "./routes.ts";
@@ -75,10 +70,6 @@ export interface CloudflareHostedControlClient {
     userId: string;
   }): Promise<CloudflareHostedControlBrowserVaultSession>;
   deleteUserData(userId: string): Promise<CloudflareHostedControlUserDataDeletionResult>;
-  ensureRuntimeProcessing(input: {
-    orchestrationAttemptId: string;
-    userId: string;
-  }): Promise<HostedRuntimeEnsureProcessingResponse>;
   getRunnerStatus(userId: string): Promise<HostedRunnerStatusResponse>;
 }
 
@@ -168,29 +159,6 @@ export function createCloudflareHostedControlClient(
         path: buildCloudflareHostedControlUserDataDeletionPath(expectedUserId),
         request: {
           body: "{}",
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          method: "POST",
-        },
-        timeoutMs: options.timeoutMs,
-      });
-    },
-    ensureRuntimeProcessing(input) {
-      const userId = requireCloudflareHostedControlUserId(input.userId);
-
-      return requestHostedExecutionAuthorizedJson({
-        baseUrl,
-        boundUserId: userId,
-        fetchImpl,
-        getAuthorizationHeader,
-        label: "runtime ensure-processing",
-        parse: parseHostedRuntimeEnsureProcessingResponse,
-        path: buildCloudflareHostedControlRuntimeEnsureProcessingPath(userId),
-        request: {
-          body: JSON.stringify({
-            orchestrationAttemptId: input.orchestrationAttemptId,
-          }),
           headers: {
             "content-type": "application/json; charset=utf-8",
           },

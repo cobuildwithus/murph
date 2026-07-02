@@ -1192,37 +1192,6 @@ describe("hosted runtime control contracts", () => {
     })).toBeNull();
   });
 
-  it("keeps the direct-wake trigger as a boolean orchestration leaf", () => {
-    expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
-      cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
-      triggeredByWebDirect: true,
-    })).toEqual({
-      cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
-      triggeredByWebDirect: true,
-    });
-
-    // Non-boolean values are dropped like any other schema-mismatched leaf.
-    expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
-      triggeredByWebDirect: 1,
-    })).toBeNull();
-
-    const merged = mergeHostedRuntimeLatencyPhaseBreakdownJson({
-      existing: {},
-      incoming: {
-        orchestration: {
-          cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
-          triggeredByWebDirect: true,
-        },
-        schemaVersion: 1,
-      },
-      phases: ["orchestration"],
-    });
-    expect(merged.value.orchestration).toEqual({
-      cloudflareRouteReceivedAtEpochMs: 1_777_000_000_000,
-      triggeredByWebDirect: true,
-    });
-  });
-
   it("parses workspace checkpoint contracts as the hosted commit primitive", () => {
     const workspace = createWorkspaceState();
 
