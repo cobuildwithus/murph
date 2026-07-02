@@ -663,6 +663,9 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     "model_auto_compact_token_limit = 128000",
     'approval_policy = "never"',
     'sandbox_mode = "danger-full-access"',
+    // Mirror the hosted runtime config: non-login shells so the smoke probe
+    // exercises the same PATH semantics as production turns.
+    "allow_login_shell = false",
     "",
     "[skills]",
     "include_instructions = false",
