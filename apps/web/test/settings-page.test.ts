@@ -151,6 +151,44 @@ test("SettingsPage metadata uses the shared preview image", async () => {
   ]);
 });
 
+test("SettingsDataPrivacyPage redirects signed-in users to the settings privacy section", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+
+  const { default: SettingsDataPrivacyPage } =
+    await import("../app/(dashboard)/settings/data-privacy/page");
+
+  await expect(SettingsDataPrivacyPage()).rejects.toThrow(
+    "NEXT_REDIRECT:/settings#data-privacy",
+  );
+});
+
+test("SettingsDataPrivacyPage opens the auth-required data privacy handoff for signed-out users", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsDataPrivacyPage } =
+    await import("../app/(dashboard)/settings/data-privacy/page");
+
+  const markup = renderToStaticMarkup(await SettingsDataPrivacyPage());
+
+  assert.match(markup, /Sign in to manage your data/);
+  assert.match(markup, /Data &amp; privacy section/);
+  assert.match(markup, /After sign-in, this link opens the deletion controls directly in settings\./);
+});
+
 test("SettingsPage reads the app session and persisted account settings into the settings tree", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue({

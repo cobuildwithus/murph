@@ -108,6 +108,7 @@ describe("hosted runtime control contracts", () => {
       "assistant.notification.requested",
       "device-sync.wake",
       "vault-share.delivery",
+      "vault-share.revoke",
       "runtime.manual-requested",
       "runtime.maintenance-requested",
       "runtime.browser-vault-refresh-requested",

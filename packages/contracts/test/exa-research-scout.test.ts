@@ -42,6 +42,10 @@ describe("Exa research scout contracts", () => {
     expect(request.numResults).toBe(4);
     expect(request.query).toContain("Behaviors: resistance training, yoga");
     expect(request.query).toContain("Conditions or concerns: menopause");
+    expect(request.query).toContain("local context decides send-worthiness");
+    expect(request.systemPrompt).toContain("practical interpretive value");
+    expect(request.systemPrompt).toContain("not personalized medical advice or tasks to do");
+    expect(request.systemPrompt).toContain("not a behavior prescription");
     expect(request.outputSchema).toEqual(buildExaResearchScoutOutputSchema(4));
     expect(parseExaResearchScoutRequestBody(request)).toEqual({
       numResults: 4,

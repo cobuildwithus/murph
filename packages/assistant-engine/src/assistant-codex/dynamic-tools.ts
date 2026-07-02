@@ -2,10 +2,14 @@ import { z } from 'zod'
 import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_KINDS,
   sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeFamilyPlanToolRequest,
+  type HostedRuntimeGroupToolRequest,
   type HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
+import { HOSTED_VAULT_SHARE_PROJECTION_KINDS } from '@murphai/hosted-execution/vault-share'
 import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
@@ -305,6 +309,46 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   },
 } as const
 
+export const MURPH_GROUP_TOOL = {
+  namespace: 'murph',
+  name: 'group',
+  description:
+    'Read the current hosted group for the connected group-chat runtime with action="read_current", or mint the shareable group join link with action="create_join_link" and include the returned join URL plainly in your reply. Joining through that link grants group membership only. This tool does not manage members, grant Family billing access, grant private chat access, grant raw vault access, share health data, or opt anyone into email.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      action: {
+        type: 'string',
+        enum: ['read_current', 'create_join_link'],
+      },
+      displayName: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
+        description:
+          'Optional group display name shown on the join page when creating a join link.',
+      },
+      kind: {
+        type: 'string',
+        enum: [...HOSTED_RUNTIME_GROUP_KINDS],
+        description: 'Optional group kind when creating a join link.',
+      },
+      requestedVaultShareProjectionKinds: {
+        type: 'array',
+        maxItems: 8,
+        items: {
+          type: 'string',
+          enum: [...HOSTED_VAULT_SHARE_PROJECTION_KINDS],
+        },
+        description:
+          'Optional bounded health projections the join page may offer joining members. Joining never shares them automatically; each member approves their own selection.',
+      },
+    },
+    required: ['action'],
+  },
+} as const
+
 export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
@@ -510,6 +554,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
+  MURPH_GROUP_TOOL,
   MURPH_GENERATE_SONG_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
@@ -541,6 +586,7 @@ export interface MurphDynamicToolAvailability {
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
   familyPlanAvailable?: boolean | null
+  groupAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
@@ -570,6 +616,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.allowMessageReactions)],
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
     [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
+    [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
@@ -623,6 +670,30 @@ const generateImageArgumentsSchema = z
     size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
   })
   .strict()
+
+const groupArgumentsSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('read_current'),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('create_join_link'),
+      displayName: z
+        .string()
+        .trim()
+        .min(1)
+        .max(HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH)
+        .optional(),
+      kind: z.enum(HOSTED_RUNTIME_GROUP_KINDS).optional(),
+      requestedVaultShareProjectionKinds: z
+        .array(z.enum(HOSTED_VAULT_SHARE_PROJECTION_KINDS))
+        .max(8)
+        .optional(),
+    })
+    .strict(),
+])
 
 const sendVaultFileArgumentsSchema = z
   .object({
@@ -961,8 +1032,16 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-group-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'family-plan'
       request: HostedRuntimeFamilyPlanToolRequest
+    }
+  | {
+      kind: 'group'
+      request: HostedRuntimeGroupToolRequest
     }
   | {
       kind: 'submit-product-feedback'
@@ -1128,6 +1207,19 @@ export function readMurphDynamicToolRequest(
       }
       return {
         kind: 'family-plan',
+        request: parsed.request,
+      }
+    }
+    case MURPH_GROUP_TOOL.name: {
+      const parsed = parseGroupArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-group-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+      return {
+        kind: 'group',
         request: parsed.request,
       }
     }
@@ -1330,6 +1422,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid product feedback arguments')
     case 'invalid-family-plan-arguments':
       return toolTextResult(false, 'invalid family plan arguments')
+    case 'invalid-group-arguments':
+      return toolTextResult(false, 'invalid group arguments')
     case 'invalid-finish-without-reply-arguments':
       return toolTextResult(false, 'invalid no-reply arguments')
     case 'invalid-response-media-arguments':
@@ -1461,6 +1555,11 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     case 'family-plan':
       return await executeFamilyPlanTool({
+        hostedToolContext: input.hostedToolContext ?? null,
+        request: input.request.request,
+      })
+    case 'group':
+      return await executeGroupTool({
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
       })
@@ -1687,6 +1786,22 @@ async function executeFamilyPlanTool(input: {
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
     return toolTextResult(false, 'family plan tool request failed')
+  }
+}
+
+async function executeGroupTool(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  request: HostedRuntimeGroupToolRequest
+}): Promise<MurphDynamicToolExecutionResult> {
+  const groupTool = input.hostedToolContext?.groupTool ?? null
+  if (!groupTool) {
+    return toolTextResult(false, 'group tools are unavailable for this turn')
+  }
+  try {
+    const result = await groupTool.request(input.request)
+    return toolTextResult(true, safeToolPayloadText(result))
+  } catch {
+    return toolTextResult(false, 'group tool request failed')
   }
 }
 
@@ -2347,6 +2462,51 @@ function parseFamilyPlanArguments(
       },
     },
   }
+}
+
+function parseGroupArguments(
+  value: unknown,
+):
+  | {
+      request: HostedRuntimeGroupToolRequest
+      ok: true
+    }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = groupArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.group.input',
+        schemaRootKeys: ['action'],
+        toolName: 'murph.group',
+      }),
+    }
+  }
+  if (parsed.data.action === 'create_join_link') {
+    const joinLink = {
+      ...(parsed.data.displayName !== undefined
+        ? { displayName: parsed.data.displayName }
+        : {}),
+      ...(parsed.data.kind !== undefined ? { kind: parsed.data.kind } : {}),
+      ...(parsed.data.requestedVaultShareProjectionKinds !== undefined
+        ? {
+            requestedVaultShareProjectionKinds:
+              parsed.data.requestedVaultShareProjectionKinds,
+          }
+        : {}),
+    }
+    return {
+      ok: true,
+      request:
+        Object.keys(joinLink).length > 0
+          ? { action: 'create_join_link', joinLink }
+          : { action: 'create_join_link' },
+    }
+  }
+  return { ok: true, request: { action: 'read_current' } }
 }
 
 function parseFinishWithoutReplyArguments(

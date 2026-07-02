@@ -575,7 +575,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   })
   const allowFinishWithoutReply =
     input.allowFinishWithoutReply ?? input.profile.toolProfile === 'provider-turn'
-  // Maintenance turns run without a delivery target and must not expose any
+// Maintenance turns run without a delivery target and must not expose any
   // external-capable or delivery-facing tool surface, so the gate is the
   // resolved tool set itself rather than prompt text.
   const dynamicTools = maintenanceTurn
@@ -588,6 +588,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         progressUpdatesAvailable: input.progressDelivery != null,
         connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
         familyPlanAvailable: input.hostedToolContext?.familyPlanTool != null,
+        groupAvailable: input.hostedToolContext?.groupTool != null,
         productFeedbackAvailable:
           productFeedbackAcceptedInputIds.length > 0 &&
           typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',

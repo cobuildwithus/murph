@@ -1665,14 +1665,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       } else if (committedInboxMediaRetentionWakeDue) {
         idleCheckpointStartByMs = Date.now();
       }
-      // Best-effort consented vault-share offer: runs once per wake after the foreground
-      // pass so it never delays user-facing work, holds no share state (web is the
-      // authority), and never throws.
-      const vaultShareOffer = await offerHostedVaultShareProjectionBestEffort({
-        vaultRoot: restored.vaultRoot,
-        vaultSharePort: guardedRuntime.platform.vaultSharePort ?? null,
+      let accumulatedProjection = buildHostedWorkspaceInvocationProjection({
+        mailboxBudgetExhausted: mailboxBudgetExhausted(),
+        result,
+        workspace: workspaceRead.workspace,
       });
-      if (vaultShareOffer.outcome === "error") {
+      let servicedProjectedRuntimeWakeKey: string | null = null;
+      const logHostedVaultShareProjectionOfferOutcome = (
+        vaultShareOffer: Awaited<ReturnType<typeof offerHostedVaultShareProjectionBestEffort>>,
+      ): void => {
+        if (vaultShareOffer.outcome !== "error") {
+          return;
+        }
+
         emitHostedExecutionStructuredLog({
           component: "runtime",
           details: {
@@ -1684,13 +1689,112 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           phase: "wake.running",
           userId: null,
         });
-      }
-      let accumulatedProjection = buildHostedWorkspaceInvocationProjection({
-        mailboxBudgetExhausted: mailboxBudgetExhausted(),
-        result,
-        workspace: workspaceRead.workspace,
-      });
-      let servicedProjectedRuntimeWakeKey: string | null = null;
+      };
+      const offerHostedVaultShareProjectionDuringIdle = async (): Promise<
+        HostedRuntimeWakeLatencySeed | null
+      > => {
+        const vaultSharePort = guardedRuntime.platform.vaultSharePort ?? null;
+        if (!vaultSharePort) {
+          return null;
+        }
+
+        const pendingWakeLatencySeed = consumePendingHostedRuntimeWake(
+          options.runtimeWakeSignal ?? null,
+          options.shutdownSignal ?? null,
+        );
+        if (pendingWakeLatencySeed) {
+          return pendingWakeLatencySeed;
+        }
+
+        const offer = offerHostedVaultShareProjectionBestEffort({
+          vaultRoot: restored.vaultRoot,
+          vaultSharePort,
+        });
+        const runtimeWakeSignal =
+          options.shutdownSignal?.aborted === true
+            ? null
+            : options.runtimeWakeSignal ?? null;
+        if (!runtimeWakeSignal) {
+          logHostedVaultShareProjectionOfferOutcome(
+            await raceHostedRuntimeCancellation(offer, runtimeAbortController.signal),
+          );
+          return null;
+        }
+
+        type VaultShareOfferWaitResult =
+          | { kind: "external_wake"; notification: RuntimeWakeNotification }
+          | { kind: "finished" }
+          | {
+            kind: "offer";
+            offer: Awaited<ReturnType<typeof offerHostedVaultShareProjectionBestEffort>>;
+          };
+
+        const wakeAbortController = new AbortController();
+        const abortWake = () => {
+          wakeAbortController.abort(readHostedRuntimeAbortReason(runtimeAbortController.signal));
+        };
+        const abortWakeAfterShutdown = () => {
+          wakeAbortController.abort(
+            options.shutdownSignal?.reason instanceof Error
+              ? options.shutdownSignal.reason
+              : new Error("Hosted vault-share projection offer skipped after shutdown."),
+          );
+        };
+        runtimeAbortController.signal.addEventListener("abort", abortWake, { once: true });
+        options.shutdownSignal?.addEventListener("abort", abortWakeAfterShutdown, { once: true });
+        const offerWithAbort = raceHostedRuntimeCancellation(offer, runtimeAbortController.signal);
+        let waitResult: VaultShareOfferWaitResult = { kind: "finished" };
+        let wake: Promise<VaultShareOfferWaitResult> = Promise.resolve({
+          kind: "finished",
+        });
+        try {
+          wake = runtimeWakeSignal.wait(wakeAbortController.signal)
+            .then((notification) => ({
+              kind: "external_wake" as const,
+              notification,
+            }))
+            .catch((error: unknown) => {
+              if (
+                wakeAbortController.signal.aborted
+                && !runtimeAbortController.signal.aborted
+              ) {
+                return { kind: "finished" as const };
+              }
+              throw error;
+            });
+          waitResult = await Promise.race([
+            offerWithAbort.then((vaultShareOffer) => ({
+              kind: "offer" as const,
+              offer: vaultShareOffer,
+            })),
+            wake,
+          ]);
+        } finally {
+          runtimeAbortController.signal.removeEventListener("abort", abortWake);
+          options.shutdownSignal?.removeEventListener("abort", abortWakeAfterShutdown);
+          if (!wakeAbortController.signal.aborted) {
+            wakeAbortController.abort();
+          }
+        }
+
+        if (waitResult.kind === "external_wake") {
+          void offerWithAbort.then(logHostedVaultShareProjectionOfferOutcome, () => undefined);
+          return createHostedRuntimeWakeLatencySeed(waitResult.notification);
+        }
+
+        const deliveredWakeResult = await wake;
+        if (deliveredWakeResult.kind === "external_wake") {
+          return createHostedRuntimeWakeLatencySeed(deliveredWakeResult.notification);
+        }
+
+        if (waitResult.kind === "offer") {
+          logHostedVaultShareProjectionOfferOutcome(waitResult.offer);
+        }
+        return consumePendingHostedRuntimeWake(
+          options.runtimeWakeSignal ?? null,
+          options.shutdownSignal ?? null,
+        );
+      };
       const runIdleWakeForegroundPass = async (wakeInput: {
         latencySeed?: HostedRuntimeWakeLatencySeed | null;
         projectedWakeKeyBeingServiced: string | null;
@@ -1739,6 +1843,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runtimeStateDirty ||= result.runtimeStateDirty;
         return result;
       };
+      if (!runtimeStateDirty) {
+        const vaultShareOfferWakeLatencySeed =
+          await offerHostedVaultShareProjectionDuringIdle();
+        if (vaultShareOfferWakeLatencySeed) {
+          await runIdleWakeForegroundPass({
+            latencySeed: vaultShareOfferWakeLatencySeed,
+            projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
+            requestIdKind: "idle-wake",
+          });
+        }
+      }
       while (runtimeStateDirty) {
         let checkpointBlockedProjectedWakeKey: string | null = null;
         if (
@@ -2078,6 +2193,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             latencySeed: null,
             projectedWakeKeyBeingServiced: checkpointBlockedProjectedWakeKey,
             requestIdKind: "checkpoint-wake",
+          });
+          continue;
+        }
+        const vaultShareOfferWakeLatencySeed =
+          await offerHostedVaultShareProjectionDuringIdle();
+        if (vaultShareOfferWakeLatencySeed) {
+          await runIdleWakeForegroundPass({
+            latencySeed: vaultShareOfferWakeLatencySeed,
+            projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
+            requestIdKind: "idle-wake",
           });
           continue;
         }

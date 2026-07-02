@@ -207,6 +207,11 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(researchScoutRecord?.instructions).toContain('do not use a generic `tags` field')
     expect(researchScoutRecord?.instructions).toContain('YYYY-MM-DD dates or full ISO timestamps are accepted')
     expect(researchScoutRecord?.instructions).toContain('Suppress the scheduled message')
+    expect(researchScoutRecord?.instructions).toContain('The unit of value is the insight, not the paper')
+    expect(researchScoutRecord?.instructions).toContain('The scout-batch call is the retrieval budget')
+    expect(researchScoutRecord?.instructions).toContain('Recent conversation and automation/regimen changes are veto context')
+    expect(researchScoutRecord?.instructions).toContain('incremental value beyond known basics')
+    expect(researchScoutRecord?.instructions).toContain('Do not reuse the provider candidate\'s `actionOrQuestion` as advice')
 
     const productUpdatesRecord = await showAutomation({
       automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
