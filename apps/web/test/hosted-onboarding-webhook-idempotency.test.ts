@@ -961,13 +961,19 @@ function createPrismaStub() {
     hostedLinqLine: {
       findMany: vi.fn(async (query: { where?: { phoneNumberLookupKey?: { in?: string[] } } }) => {
         const phoneNumber = "+15550000000";
-        const lookupKeys = new Set(query.where?.phoneNumberLookupKey?.in ?? []);
-        if (
-          !createHostedPhoneLookupKeyReadCandidates(phoneNumber).some((lookupKey) =>
-            lookupKeys.has(lookupKey)
-          )
-        ) {
-          return [];
+        // The assignable pool contains exactly the incoming line: the
+        // whole-pool list query (no lookup-key filter) and the by-phone query
+        // both resolve to it.
+        const lookupKeyFilter = query.where?.phoneNumberLookupKey?.in;
+        if (lookupKeyFilter) {
+          const lookupKeys = new Set(lookupKeyFilter);
+          if (
+            !createHostedPhoneLookupKeyReadCandidates(phoneNumber).some((lookupKey) =>
+              lookupKeys.has(lookupKey)
+            )
+          ) {
+            return [];
+          }
         }
         return [{
           activeMemberLimit: null,
