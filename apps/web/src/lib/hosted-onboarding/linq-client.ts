@@ -221,7 +221,6 @@ export async function createHostedLinqWebhookSubscription(input: {
 
 async function fetchHostedLinqApiOrThrow(input: {
   body?: string;
-  headers?: HeadersInit;
   method: string;
   operation: string;
   path: string;
@@ -235,7 +234,6 @@ async function fetchHostedLinqApiOrThrow(input: {
       apiBaseUrl,
       apiToken,
       body: input.body,
-      headers: input.headers,
       method: input.method,
       path: input.path,
       signal: input.signal,
