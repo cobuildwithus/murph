@@ -694,6 +694,48 @@ test("hosted provider cleanup first defer wake follows the idle checkpoint delay
   );
 });
 
+test("hosted provider cleanup drain defers to a re-armed future checkpoint", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+  const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
+
+  try {
+    await recordHostedProviderCleanupBeforeCommit({
+      linqMessageIds: ["linq_old_due", "linq_new_terminal"],
+      checkpoint: {
+        nextWakeAt: "2026-04-08T00:03:01.000Z",
+      },
+      vaultRoot,
+    });
+
+    const result = await drainHostedProviderCleanupAfterCommit({
+      assertLiveness: vi.fn(async () => undefined),
+      env: {
+        LINQ_API_TOKEN: "test-token",
+      },
+      fetchImplementation: vi.fn<typeof fetch>(),
+      checkpoint: {
+        nextWakeAt: null,
+      },
+      vaultRoot,
+      wake,
+    });
+
+    assert.deepEqual(result, {
+      attemptedLinqMessageCount: 0,
+      deletedLinqMessageCount: 0,
+      failedLinqMessageCount: 0,
+      nextWakeAt: "2026-04-08T00:03:01.000Z",
+    });
+    expect(mocks.deleteHostedLinqMessages).not.toHaveBeenCalled();
+    const raw = await readHostedProviderCleanupFile(vaultRoot);
+    assert.deepEqual(raw.linqMessageIds, ["linq_old_due", "linq_new_terminal"]);
+  } finally {
+    vi.useRealTimers();
+    await cleanup();
+  }
+});
+
 test("hosted provider cleanup drains only persisted ids after commit", async () => {
   const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace("hosted-provider-cleanup-");
 
@@ -748,7 +790,9 @@ test("hosted provider cleanup drain yields to foreground work between provider d
   try {
     await recordHostedProviderCleanupBeforeCommit({
       linqMessageIds: ["linq_inbound_1", "linq_inbound_2"],
-      checkpoint,
+      checkpoint: {
+        nextWakeAt: null,
+      },
       vaultRoot,
     });
     let deletesStarted = 0;
@@ -832,7 +876,9 @@ test("hosted provider cleanup keeps runtime retry state when Linq deletion fails
   try {
     await recordHostedProviderCleanupBeforeCommit({
       linqMessageIds: ["linq_inbound_1"],
-      checkpoint,
+      checkpoint: {
+        nextWakeAt: null,
+      },
       vaultRoot,
     });
 

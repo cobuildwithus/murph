@@ -294,6 +294,20 @@ export async function drainHostedProviderCleanupAfterCommit(input: {
 }): Promise<HostedProviderCleanupDrainResult> {
   assertHostedProviderCleanupLiveness(input.signal);
   const existing = await readHostedProviderCleanupState(input.vaultRoot);
+  // The file is the single owner: if its checkpoint was re-armed to a future
+  // wake after the caller's plan was prepared (for example the assistant lane
+  // recorded current-pass ids with a post-idle wake in the same invocation),
+  // a stale due plan must not delete those ids now. Defer to the file's own
+  // scheduled wake.
+  const existingWakeMs = Date.parse(existing?.checkpoint?.nextWakeAt ?? "");
+  if (Number.isFinite(existingWakeMs) && existingWakeMs > Date.now()) {
+    return {
+      attemptedLinqMessageCount: 0,
+      deletedLinqMessageCount: 0,
+      failedLinqMessageCount: 0,
+      nextWakeAt: existing?.checkpoint?.nextWakeAt ?? null,
+    };
+  }
   const messageIds = normalizeHostedProviderMessageIds([
     ...(existing?.linqMessageIds ?? []),
   ]);
