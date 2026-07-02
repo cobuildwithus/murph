@@ -32,7 +32,7 @@ Updated: 2026-06-30
 - In scope:
   - `packages/assistant-engine/src/assistant-codex.ts`
   - focused assistant-engine Codex runtime tests
-  - hosted runner Codex CLI 0.142.4 pin and config shape
+  - hosted runner Codex CLI 0.142.5 pin and config shape
   - hosted container process isolation tests already tied to the subagent loss
 - Out of scope:
   - durable subagent result storage
