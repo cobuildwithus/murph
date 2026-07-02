@@ -48,14 +48,19 @@ const mocks = vi.hoisted(() => ({
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
   prepareHostedAssistantAutomationForWake: vi.fn(),
   prepareHostedAssistantDeliveryEffectsForDispatch: vi.fn(),
+  prepareHostedProviderCleanupPlan: vi.fn(),
   prepareHostedSystemMailboxItemForCheckpoint: vi.fn(),
   readAssistantAutomationState: vi.fn(),
   readAssistantInputEvent: vi.fn(),
   readAssistantOutboxIntent: vi.fn(),
   recordHostedDeviceSyncDirtyPostCheckpointRecord: vi.fn(),
+  recordHostedProviderCleanupAfterDelivery: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
+  resolveHostedProviderCleanupCheckpointWakeAt: vi.fn(),
+  resolveHostedProviderCleanupFirstDeferredWakeAt: vi.fn(),
+  resolveHostedProviderCleanupScheduledWakeAt: vi.fn(),
   resolveHostedPendingAssistantInputWakeAt: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
   resolveHostedDeviceSyncNextWakeAt: vi.fn(),
@@ -132,8 +137,16 @@ vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
   collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes:
     mocks.collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes,
   drainHostedProviderCleanupAfterCommit: mocks.drainHostedProviderCleanupAfterCommit,
+  prepareHostedProviderCleanupPlan: mocks.prepareHostedProviderCleanupPlan,
+  recordHostedProviderCleanupAfterDelivery: mocks.recordHostedProviderCleanupAfterDelivery,
   recordHostedProviderCleanupBeforeCommit: mocks.recordHostedProviderCleanupBeforeCommit,
   readHostedProviderCleanupCheckpoint: mocks.readHostedProviderCleanupCheckpoint,
+  resolveHostedProviderCleanupCheckpointWakeAt:
+    mocks.resolveHostedProviderCleanupCheckpointWakeAt,
+  resolveHostedProviderCleanupFirstDeferredWakeAt:
+    mocks.resolveHostedProviderCleanupFirstDeferredWakeAt,
+  resolveHostedProviderCleanupScheduledWakeAt:
+    mocks.resolveHostedProviderCleanupScheduledWakeAt,
 }));
 
 vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
@@ -322,6 +335,99 @@ beforeEach(() => {
     linqMessageIds: [],
   });
   mocks.markAssistantAutoReplyLinqCleanupQueued.mockResolvedValue(undefined);
+  mocks.prepareHostedProviderCleanupPlan.mockImplementation(async (input: {
+    deferred: boolean;
+    idleCheckpointDelayMs?: number | null;
+    initialCheckpoint?: { nextWakeAt?: string | null } | null;
+    nowMs: number;
+    terminalCleanupMessageIds?: readonly string[] | null;
+    vaultRoot: string;
+  }) => {
+    const pendingLinqMessageIds = [...new Set(input.terminalCleanupMessageIds ?? [])];
+    if (input.deferred) {
+      if (pendingLinqMessageIds.length > 0) {
+        const queuedCheckpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
+          checkpoint: {
+            nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
+              idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+              nowMs: input.nowMs,
+            }),
+          },
+          linqMessageIds: pendingLinqMessageIds,
+          vaultRoot: input.vaultRoot,
+        });
+        return {
+          checkpoint: queuedCheckpoint,
+          deferred: true,
+          due: false,
+          requiresCheckpoint: true,
+          stateQueued: true,
+        };
+      }
+      const storedCheckpoint =
+        await mocks.readHostedProviderCleanupCheckpoint(input.vaultRoot);
+      const storedWakeMs = Date.parse(storedCheckpoint?.nextWakeAt ?? "");
+      if (
+        storedCheckpoint
+        && (!Number.isFinite(storedWakeMs) || storedWakeMs <= input.nowMs)
+      ) {
+        // Mirrors the real plan: a due/invalid stored checkpoint re-arms
+        // durably into hosted-provider-cleanup.json.
+        const rearmedCheckpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
+          checkpoint: {
+            nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
+              idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+              nowMs: input.nowMs,
+            }),
+          },
+          linqMessageIds: [],
+          vaultRoot: input.vaultRoot,
+        });
+        return {
+          checkpoint: rearmedCheckpoint,
+          deferred: true,
+          due: false,
+          requiresCheckpoint: true,
+          stateQueued: true,
+        };
+      }
+      return {
+        checkpoint: input.initialCheckpoint ?? null,
+        deferred: true,
+        due: false,
+        requiresCheckpoint: false,
+        stateQueued: false,
+      };
+    }
+    const stateQueued = pendingLinqMessageIds.length > 0;
+    let checkpoint = input.initialCheckpoint ?? null;
+    if (stateQueued) {
+      // Mirrors the real plan: current-pass ids are scheduled past the idle
+      // horizon and are never due in the same invocation.
+      checkpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
+        checkpoint: {
+          nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
+            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            nowMs: input.nowMs,
+          }),
+        },
+        linqMessageIds: pendingLinqMessageIds,
+        vaultRoot: input.vaultRoot,
+      });
+    } else {
+      checkpoint ??= await mocks.readHostedProviderCleanupCheckpoint(input.vaultRoot);
+    }
+    const wakeMs = Date.parse(checkpoint?.nextWakeAt ?? "");
+    const due = checkpoint !== null
+      && (!Number.isFinite(wakeMs) || wakeMs <= input.nowMs);
+    return {
+      checkpoint,
+      deferred: false,
+      due,
+      requiresCheckpoint: due || stateQueued,
+      stateQueued,
+    };
+  });
   mocks.applyMurphManagedAutomations.mockResolvedValue({
     created: 0,
     skipped: 1,
@@ -343,7 +449,81 @@ beforeEach(() => {
     recorded: 1,
     stillDirty: false,
   });
-  mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValue(undefined);
+  mocks.recordHostedProviderCleanupAfterDelivery.mockImplementation(async (input: {
+    idleCheckpointDelayMs?: number | null;
+    nowMs: number;
+    outcomes: readonly HostedAssistantDeliveryOutcome[];
+    vaultRoot: string;
+  }) => {
+    const linqMessageIds =
+      mocks.collectHostedProviderCleanupMessageIdsFromDeliveryOutcomes(input.outcomes);
+    if (linqMessageIds.length === 0) {
+      return {
+        nextWakeAt: null,
+      };
+    }
+
+    const checkpoint = await mocks.recordHostedProviderCleanupBeforeCommit({
+      checkpoint: {
+        nextWakeAt: mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
+          idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+          nowMs: input.nowMs,
+        }),
+      },
+      linqMessageIds,
+      vaultRoot: input.vaultRoot,
+    });
+    const nextWakeAt = typeof checkpoint?.nextWakeAt === "string"
+      ? checkpoint.nextWakeAt
+      : null;
+    return {
+      nextWakeAt,
+    };
+  });
+  // The mocked owner state: checkpoints recorded this test are what the
+  // scheduled-wake read resolves, mirroring hosted-provider-cleanup.json as
+  // the single owner of the next cleanup wake.
+  const recordedProviderCleanupCheckpoints = new Map<
+    string,
+    { nextWakeAt?: string | null } | null
+  >();
+  mocks.recordHostedProviderCleanupBeforeCommit.mockImplementation(async (input) => {
+    recordedProviderCleanupCheckpoints.set(input.vaultRoot, input.checkpoint ?? null);
+    return input.checkpoint;
+  });
+  mocks.resolveHostedProviderCleanupScheduledWakeAt.mockImplementation(async (input: {
+    nowMs: number;
+    vaultRoot: string;
+  }) => {
+    const recorded = recordedProviderCleanupCheckpoints.get(input.vaultRoot) ?? null;
+    const nextWakeAt = recorded?.nextWakeAt ?? null;
+    const nextWakeMs = Date.parse(nextWakeAt ?? "");
+    return Number.isFinite(nextWakeMs) && nextWakeMs > input.nowMs ? nextWakeAt : null;
+  });
+  mocks.resolveHostedProviderCleanupFirstDeferredWakeAt.mockImplementation((input = {}) => {
+    const record = input as { nowMs?: number | null };
+    const nowMs = Number.isFinite(record.nowMs)
+      ? Number(record.nowMs)
+      : Date.parse("2026-04-27T00:00:00.000Z");
+    return new Date(nowMs + 5 * 60_000).toISOString();
+  });
+  mocks.resolveHostedProviderCleanupCheckpointWakeAt.mockImplementation((input) => {
+    const checkpoint = input.checkpoint as { nextWakeAt?: string | null } | null;
+    if (!checkpoint) {
+      return null;
+    }
+    const nextWakeAt = checkpoint.nextWakeAt ?? null;
+    const nextWakeMs = Date.parse(nextWakeAt ?? "");
+    if (!Number.isFinite(nextWakeMs) || nextWakeMs <= input.nowMs) {
+      return input.deferDueOrInvalid
+        ? mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
+            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            nowMs: input.nowMs,
+          })
+        : null;
+    }
+    return nextWakeAt;
+  });
   mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValue({
     failed: 0,
     nextWakeAt: null,
@@ -436,6 +616,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(body).not.toContain("runHostedDeviceSyncWakeLane");
     expect(body).not.toContain("readHostedProviderCleanupCheckpoint");
     expect(body).not.toContain("includeBackgroundDueIntents: true");
+  });
+
+  it("uses post-delivery wake normalization for member-channel barriers", async () => {
+    const source = await readFile(
+      new URL("../src/hosted-runtime/workspace-assistant-phase.ts", import.meta.url),
+      "utf8",
+    );
+    const body = extractTopLevelFunctionBody(
+      source,
+      "buildHostedMemberChannelDeliveryBarrierResult",
+    );
+
+    expect(body).toContain("dropConsumedPostDeliveryWorkspaceAssistantWake");
+    expect(body).toContain("resolveHostedPostDeliveryBaseNextWake(input.input)");
+    expect(body).not.toContain("input.input.baseNextWake,");
   });
 
   it("hydrates the hosted default assistant target before running automation", async () => {
@@ -1403,6 +1598,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         domains: ["experiments"],
         vaultRoot,
       });
+      mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
+        captureIds: ["cap_terminal_cleanup"],
+        linqMessageIds: ["linq_msg_terminal_cleanup"],
+      });
 
       const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
         importedCount: 0,
@@ -1567,6 +1766,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         lastCompleted: null,
         pendingDirtyDomains: ["experiments"],
       });
+      expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+      expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+      expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
     } finally {
       await rm(parentRoot, {
         force: true,
@@ -2112,6 +2314,256 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("keeps the recorded provider-cleanup wake when fresh managed automation seeding replaces the phase wake", async () => {
+    // Regression: a fresh Linq inbound records deferred provider cleanup into
+    // hosted-provider-cleanup.json, the single owner of the next cleanup
+    // wake. The managed-automation post-checkpoint result replaces the phase
+    // wake in the workspace runner, so it must include the owner's scheduled
+    // wake instead of stranding the deletion until the next unrelated cron
+    // wake.
+    const cronNextWakeAt = "2026-04-27T17:00:00.000Z";
+    const providerCleanupWakeAt = "2026-04-27T00:05:00.000Z";
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      providerCleanupWakeAt,
+    );
+    const defaultRoute = {
+      channel: "linq",
+      deliverySource: null,
+      deliveryTarget: "chat_synthetic_seed_route",
+      identityId: "identity_synthetic_seed_route",
+      participantId: "participant_synthetic_seed_route",
+      threadId: "thread_synthetic_seed_route",
+    };
+    mocks.readAssistantInputEvent.mockResolvedValueOnce({
+      conversation: {
+        accountId: defaultRoute.identityId,
+        actorId: defaultRoute.participantId,
+        actorIsSelf: false,
+        source: defaultRoute.channel,
+        threadId: defaultRoute.threadId,
+        threadIsDirect: true,
+      },
+      replyTarget: {
+        channel: defaultRoute.channel,
+        messageId: "message_synthetic_seed_route",
+        threadId: defaultRoute.deliveryTarget,
+      },
+    });
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 3,
+      skipped: 0,
+      updated: 0,
+    });
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 0,
+      enabledJobs: 3,
+      nextRunAt: cronNextWakeAt,
+      runningJobs: 0,
+      totalJobs: 3,
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      assistantAutomationTerminalLinqCleanup: ["linq_inbound_regression"],
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: providerCleanupWakeAt,
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 3,
+      }),
+    }));
+  });
+
+  it("keeps the re-armed provider-cleanup wake when the persisted checkpoint is stale", async () => {
+    // Regression: prepareHostedProviderCleanupPlan's deferred branch re-arms
+    // a null/stale persisted checkpoint by writing the deferred wake back
+    // into hosted-provider-cleanup.json. The managed-automation
+    // post-checkpoint result must carry that durably re-armed owner wake.
+    const cronNextWakeAt = "2026-04-27T17:00:00.000Z";
+    const reArmedProviderCleanupWakeAt = "2026-04-27T00:05:00.000Z";
+    const defaultRoute = {
+      channel: "linq",
+      deliverySource: null,
+      deliveryTarget: "chat_synthetic_seed_route",
+      identityId: "identity_synthetic_seed_route",
+      participantId: "participant_synthetic_seed_route",
+      threadId: "thread_synthetic_seed_route",
+    };
+    mocks.readAssistantInputEvent.mockResolvedValueOnce({
+      conversation: {
+        accountId: defaultRoute.identityId,
+        actorId: defaultRoute.participantId,
+        actorIsSelf: false,
+        source: defaultRoute.channel,
+        threadId: defaultRoute.threadId,
+        threadIsDirect: true,
+      },
+      replyTarget: {
+        channel: defaultRoute.channel,
+        messageId: "message_synthetic_seed_route",
+        threadId: defaultRoute.deliveryTarget,
+      },
+    });
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 3,
+      skipped: 0,
+      updated: 0,
+    });
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 0,
+      enabledJobs: 3,
+      nextRunAt: cronNextWakeAt,
+      runningJobs: 0,
+      totalJobs: 3,
+    });
+    // Persisted owner state is stale: pending ids with a null checkpoint.
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue({
+      nextWakeAt: null,
+    });
+    // After the deferred plan re-arms the stale checkpoint durably, the
+    // owner file resolves to the re-armed wake.
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      reArmedProviderCleanupWakeAt,
+    );
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: reArmedProviderCleanupWakeAt,
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 3,
+      }),
+    }));
+  });
+
+  it("keeps an earlier assistant wake when fresh managed automation work is a no-op", async () => {
+    const assistantWakeAt = "2026-04-27T00:05:00.000Z";
+    const providerCleanupWakeAt = "2026-04-27T00:14:00.000Z";
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      providerCleanupWakeAt,
+    );
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: assistantWakeAt,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      afterCheckpoint: expect.any(Function),
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: assistantWakeAt,
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toBeNull();
+    expect(mocks.readAssistantInputEvent).toHaveBeenCalledWith({
+      inputId: "ain_00000000000000000000000000000001",
+      vault: "/tmp/murph-vault",
+    });
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+  });
+
+  it("does not add a cleanup wake to fresh managed automation post-checkpoint status", async () => {
+    const assistantWakeAt = "2026-04-27T00:05:00.000Z";
+    const providerCleanupWakeAt = "2026-04-27T00:14:00.000Z";
+    const defaultRoute = {
+      channel: "linq",
+      deliverySource: null,
+      deliveryTarget: "chat_synthetic_seed_route",
+      identityId: "identity_synthetic_seed_route",
+      participantId: "participant_synthetic_seed_route",
+      threadId: "thread_synthetic_seed_route",
+    };
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      providerCleanupWakeAt,
+    );
+    mocks.readAssistantInputEvent.mockResolvedValueOnce({
+      conversation: {
+        accountId: defaultRoute.identityId,
+        actorId: defaultRoute.participantId,
+        actorIsSelf: false,
+        source: defaultRoute.channel,
+        threadId: defaultRoute.threadId,
+        threadIsDirect: true,
+      },
+      replyTarget: {
+        channel: defaultRoute.channel,
+        messageId: "message_synthetic_seed_route",
+        threadId: defaultRoute.deliveryTarget,
+      },
+    });
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 1,
+      skipped: 0,
+      updated: 0,
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: assistantWakeAt,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      afterCheckpoint: expect.any(Function),
+      nextWakeAt: assistantWakeAt,
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 1,
+        murphManagedAutomationSkipped: 0,
+        murphManagedAutomationUpdated: 0,
+      }),
+    }));
+    // A status-only post-checkpoint result never manufactures a wake, even
+    // when the cleanup owner has one scheduled; the phase result already
+    // carries the owner wake and the runner keeps it.
+    expect(postCheckpoint).not.toHaveProperty("nextWakeAt");
+  });
+
   it("keeps a managed automation retry wake after a fresh-input checkpoint failure", async () => {
     const defaultRoute = {
       channel: "linq",
@@ -2315,6 +2767,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         status: "processed",
       };
     });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      activeTurnInputIngested: true,
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: true,
+      redactedLogEntries: [],
+    });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 0,
@@ -2351,6 +2815,152 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       runtime: expect.any(Object),
       vaultRoot: "/tmp/murph-vault",
     });
+  });
+
+  it("defers due provider cleanup when foreground input arrives during system mailbox preparation", async () => {
+    let shouldYield = false;
+    const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-27T00:08:00.000Z",
+    });
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      "2026-04-27T00:14:00.000Z",
+    );
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(async () => {
+      shouldYield = true;
+      return {
+        item: createSystemMailboxItem(),
+        itemId: "system_mailbox_item_processed",
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "assistant-notification",
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      };
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      activeTurnInputIngested: true,
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: true,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:09:00.000Z",
+      shouldYieldBackgroundMaintenance,
+    }));
+
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    // The due checkpoint re-arms durably into the cleanup owner state.
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: "2026-04-27T00:14:00.000Z",
+      },
+      linqMessageIds: [],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
+      item: expect.objectContaining({
+        itemId: "system_mailbox_item_processed",
+      }),
+      operatorHomeRoot: "/tmp/murph-operator-home",
+      runtime: expect.any(Object),
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+    }));
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+  });
+
+  it("keeps provider cleanup deferred when foreground-yield input is not ingested yet", async () => {
+    let shouldYield = false;
+    const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-27T00:08:00.000Z",
+    });
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      "2026-04-27T00:14:00.000Z",
+    );
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(async () => {
+      shouldYield = true;
+      return {
+        item: createSystemMailboxItem(),
+        itemId: "system_mailbox_item_processed",
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "assistant-notification",
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      };
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      activeTurnInputIngested: false,
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: false,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: false,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:09:00.000Z",
+      shouldYieldBackgroundMaintenance,
+    }));
+
+    // The due checkpoint re-arms durably into the cleanup owner state.
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: "2026-04-27T00:14:00.000Z",
+      },
+      linqMessageIds: [],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith({
+      item: expect.objectContaining({
+        itemId: "system_mailbox_item_processed",
+      }),
+      operatorHomeRoot: "/tmp/murph-operator-home",
+      runtime: expect.any(Object),
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+    }));
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
   });
 
   it("checkpoints a consumed alarm wake when foreground input was ingested", async () => {
@@ -2398,6 +3008,56 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeAt: null,
       progressed: true,
     }));
+  });
+
+  it("defers cleanup planning when the foreground-yield hook is already tripped", async () => {
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:09:00.000Z",
+      shouldYieldBackgroundMaintenance: () => true,
+    }));
+
+    expect(result).toBeDefined();
+    for (const call of mocks.prepareHostedProviderCleanupPlan.mock.calls) {
+      expect(call[0]).toEqual(expect.objectContaining({ deferred: true }));
+    }
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+  });
+
+  it("durably queues cleanup with a future wake when a foreground turn terminalizes Linq input without delivery effects", async () => {
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      activeTurnInputIngested: true,
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      assistantAutomationTerminalLinqCleanup: ["linq_terminal_1"],
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:09:00.000Z",
+    }));
+
+    expect(mocks.prepareHostedProviderCleanupPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deferred: true,
+        terminalCleanupMessageIds: ["linq_terminal_1"],
+      }),
+    );
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: "2026-04-27T00:14:00.000Z",
+      },
+      linqMessageIds: ["linq_terminal_1"],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      progressed: true,
+    }));
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
   });
 
   it("lets assistant work consume a legacy assistant-labeled alarm without running device-sync", async () => {
@@ -2860,14 +3520,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     }));
 
-    expect(result).toEqual({
+    expect(result).toEqual(expect.objectContaining({
       foregroundReplyFailed: 0,
+      nextWakeAt,
       progressed: false,
       redactedStatus: expect.objectContaining({
-        hostedAssistantNextWakeAt: null,
+        hostedAssistantNextWakeAt: nextWakeAt,
         hostedAssistantProgressed: false,
       }),
-    });
+    }));
   });
 
   it("schedules a near follow-up wake when active input consumes a due alarm and skips device sync", async () => {
@@ -2968,6 +3629,140 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeAt,
       nextWakeReason: "device-sync.reconcile",
       progressed: true,
+    }));
+  });
+
+  it("drains due provider cleanup after idle device-sync-only work", async () => {
+    const nextWakeAt = "2026-04-27T00:01:00.000Z";
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: null,
+    });
+    mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 1,
+      deviceSyncSkipped: false,
+      nextWakeAt,
+      nextWakeReason: "device-sync.reconcile",
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+    });
+    mocks.drainHostedProviderCleanupAfterCommit.mockResolvedValueOnce({
+      attemptedLinqMessageCount: 1,
+      deletedLinqMessageCount: 1,
+      failedLinqMessageCount: 0,
+      nextWakeAt: null,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      workspace: createDueAssistantWorkspace({
+        nextWakeReason: "device-sync.reconcile",
+      }),
+    }));
+
+    expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt,
+      nextWakeReason: "device-sync.reconcile",
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        checkpoint: {
+          nextWakeAt: null,
+        },
+        vaultRoot: "/tmp/murph-vault",
+      }),
+    );
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "provider_cleanup",
+      nextWakeAt,
+      nextWakeReason: "device-sync.reconcile",
+      redactedStatus: expect.objectContaining({
+        hostedProviderCleanupAttemptedLinqItems: 1,
+        hostedProviderCleanupDeletedLinqItems: 1,
+        hostedProviderCleanupFailedLinqItems: 0,
+      }),
+    }));
+  });
+
+  it("defers due provider cleanup when foreground input appears before post-checkpoint cleanup", async () => {
+    let shouldYield = false;
+    const shouldYieldBackgroundMaintenance = vi.fn(() => shouldYield);
+    const deviceSyncWakeAt = "2026-04-27T00:10:00.000Z";
+    // The re-armed first-deferred wake (mocked as now + 5 minutes) recorded
+    // into the cleanup owner state when the yielded drain defers.
+    const providerCleanupWakeAt = "2026-04-27T00:05:00.000Z";
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue({
+      nextWakeAt: null,
+    });
+    mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 1,
+      deviceSyncSkipped: false,
+      nextWakeAt: deviceSyncWakeAt,
+      nextWakeReason: "device-sync.reconcile",
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:00:00.000Z",
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      shouldYieldBackgroundMaintenance,
+      workspace: createDueAssistantWorkspace({
+        nextWakeReason: "device-sync.reconcile",
+      }),
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: deviceSyncWakeAt,
+      nextWakeReason: "device-sync.reconcile",
+      progressed: true,
+    }));
+
+    shouldYield = true;
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    // The yielded drain re-arms the due checkpoint durably into the cleanup
+    // owner state instead of carrying a plan-only wake.
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: providerCleanupWakeAt,
+      },
+      linqMessageIds: [],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "provider_cleanup",
+      nextWakeAt: providerCleanupWakeAt,
+      nextWakeReason: "assistant",
     }));
   });
 
@@ -3123,6 +3918,49 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         secret: "synthetic-device-sync-secret",
       },
       workspace: createDueAssistantWorkspace({
+        nextWakeReason: "device-sync.reconcile",
+      }),
+    }));
+
+    expectAssistantLaneCallWithoutDeviceSyncOptions({
+      freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
+    });
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      progressed: true,
+    }));
+  });
+
+  it("uses a skipped device-sync retry instead of a stale local schedule", async () => {
+    mocks.resolveHostedDeviceSyncNextWakeAt.mockReturnValueOnce("2026-04-26T23:59:59.000Z");
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: false,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+      resolvedDeviceSync: {
+        providerConfigs: {
+          whoop: {
+            clientId: "synthetic-whoop-client",
+            clientSecret: "synthetic-whoop-secret",
+          },
+        },
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "synthetic-device-sync-secret",
+      },
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-26T23:59:59.000Z",
         nextWakeReason: "device-sync.reconcile",
       }),
     }));
@@ -4201,13 +5039,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         statusSummary: "sent:1",
       }),
     }));
-    expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupAfterDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        assistantDeliveryOutcomes: [expect.objectContaining({
+        outcomes: [expect.objectContaining({
           deliveryChannel: "telegram",
           providerMessageId: "provider_synthetic",
         })],
-        env: {},
         vaultRoot: "/tmp/murph-vault",
       }),
     );
@@ -4288,6 +5126,75 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
     expect(outboxLogIndex).toBeGreaterThanOrEqual(0);
     expect(finishLogIndex).toBeGreaterThan(outboxLogIndex);
+  });
+
+  it("does not re-emit a stale pre-delivery outbox wake after deferred foreground delivery drains", async () => {
+    const staleOutboxWakeAt = "2026-05-08T16:00:05.000Z";
+    const deliveryEffect = createDeliveryEffect();
+    const deferredDeliveryEffect = {
+      ...deliveryEffect,
+      payload: {
+        ...deliveryEffect.payload,
+        transportIdempotent: false,
+      },
+    };
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [deferredDeliveryEffect.effectId],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deferredDeliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deferredDeliveryEffect),
+    });
+    mocks.resolveHostedAssistantOutboxNextWakeAt
+      .mockResolvedValueOnce(staleOutboxWakeAt)
+      .mockResolvedValueOnce(null);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "telegram",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: deferredDeliveryEffect.fingerprint,
+        effectId: deferredDeliveryEffect.effectId,
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: null,
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-05-08T16:00:00.000Z",
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      nextWakeAt: staleOutboxWakeAt,
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: null,
+      redactedStatus: expect.objectContaining({
+        hostedAssistantNextWakeAt: null,
+        nextWakeAt: null,
+      }),
+    }));
   });
 
   it("passes the runtime action-approval port into hosted delivery drain", async () => {
@@ -4496,7 +5403,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       return [{
         cleanupMessages: [],
         cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
+        deliveryChannel: "linq",
         deliveryErrorCode: null,
         deliveryErrorMessage: null,
         deliveryStatus: "sent",
@@ -4530,6 +5437,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     );
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: "2026-04-27T00:05:00.000Z",
+      },
+      linqMessageIds: ["provider_late_yield_first"],
+      vaultRoot: "/tmp/murph-vault",
+    });
     expect(mocks.resetHostedPreparedAssistantDeliveryEffects).not.toHaveBeenCalled();
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "assistant_runtime_commit",
@@ -4804,11 +5718,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.resolveHostedAssistantOutboxNextWakeAt).toHaveBeenCalledTimes(1);
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
-      nextWakeAt: null,
+      nextWakeAt: "2026-05-08T16:05:08.000Z",
       redactedStatus: expect.objectContaining({
-        hostedAssistantNextWakeAt: null,
+        hostedAssistantNextWakeAt: "2026-05-08T16:05:08.000Z",
         hostedOutboxDeliverySent: 1,
-        nextWakeAt: null,
+        nextWakeAt: "2026-05-08T16:05:08.000Z",
       }),
     }));
   });
@@ -6050,6 +6964,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
       nextWakeAt: providerCleanupWakeAt,
     });
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      providerCleanupWakeAt,
+    );
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       item: createSystemMailboxItem(),
       itemId: "system_mailbox_item_processed",
@@ -6083,6 +7000,61 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       checkpointReason: "system_mailbox_receipt",
       nextWakeAt: providerCleanupWakeAt,
       nextWakeReason: "assistant",
+    }));
+  });
+
+  it("does not preserve a consumed system mailbox wake while draining provider cleanup", async () => {
+    const staleSystemMailboxWakeAt = "2026-04-27T00:00:00.000Z";
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: null,
+    });
+    mocks.resolveHostedSystemMailboxNextWakeAt
+      .mockResolvedValueOnce(staleSystemMailboxWakeAt)
+      .mockResolvedValue(null);
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: createCodexAuthSystemMailboxItem(),
+      itemId: "system_mailbox_item_codex_auth",
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValueOnce({
+      failed: 0,
+      nextWakeAt: null,
+      recorded: 1,
+    });
+    mocks.drainHostedProviderCleanupAfterCommit.mockResolvedValueOnce({
+      attemptedLinqMessageCount: 1,
+      deletedLinqMessageCount: 1,
+      failedLinqMessageCount: 0,
+      nextWakeAt: null,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => staleSystemMailboxWakeAt,
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: staleSystemMailboxWakeAt,
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "provider_cleanup",
+      nextWakeAt: null,
+      redactedStatus: expect.objectContaining({
+        hostedProviderCleanupAttemptedLinqItems: 1,
+        hostedProviderCleanupDeletedLinqItems: 1,
+        hostedProviderCleanupFailedLinqItems: 0,
+        nextWakeAt: null,
+      }),
     }));
   });
 
@@ -6847,7 +7819,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
-    expect(mocks.readHostedProviderCleanupCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
       actionApprovalPort: null,
@@ -7299,15 +8270,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
-  it("defers cleanup for assistant input ids even when imported count is zero", async () => {
-    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
-      captureIds: ["cap_terminal_cleanup"],
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
-    });
-    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
-      nextWakeAt: null,
-    });
-
+  it("does not discover terminal Linq cleanup for foreground assistant input ids", async () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       assistantInputIds: ["ain_00000000000000000000000000000007"],
       importedCount: 0,
@@ -7315,10 +8278,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
     expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
     expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
-    expect(result.nextWakeAt).toBe("2026-04-27T00:09:00.000Z");
+    expect(result.checkpointReason).not.toBe("provider_cleanup");
   });
 
   it("collects only current-turn delivery effects on foreground conversation input", async () => {
@@ -7346,32 +8310,187 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
-  it("schedules terminal Linq cleanup after fresh conversation input without draining it first", async () => {
-    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
-      captureIds: ["cap_terminal_cleanup"],
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
+  it("does not scan terminal Linq cleanup during fresh conversation input", async () => {
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:09:00.000Z",
+    }));
+
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(result.checkpointReason).not.toBe("provider_cleanup");
+  });
+
+  it("preserves scheduled cleanup wake after foreground non-fast delivery without provider ids", async () => {
+    const providerCleanupWakeAt = "2026-04-27T00:14:00.000Z";
+    const baseDeliveryEffect = createDeliveryEffect();
+    const deliveryEffect = {
+      ...baseDeliveryEffect,
+      payload: {
+        ...baseDeliveryEffect.payload,
+        transportIdempotent: false,
+      },
+    };
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      providerCleanupWakeAt,
+    );
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [deliveryEffect.effectId],
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: true,
+      redactedLogEntries: [],
     });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+    });
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "telegram",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: deliveryEffect.fingerprint,
+        effectId: deliveryEffect.effectId,
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: null,
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => "2026-04-27T00:09:00.000Z",
     }));
 
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      nextWakeAt: providerCleanupWakeAt,
+      progressed: true,
+    }));
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
     expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
-    expect(result.nextWakeAt).toBe("2026-04-27T00:09:00.000Z");
-    expect(result.progressed).toBe(false);
-    expect(result.checkpointReason).toBeUndefined();
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: providerCleanupWakeAt,
+      redactedStatus: expect.objectContaining({
+        nextWakeAt: providerCleanupWakeAt,
+      }),
+    }));
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
   });
 
-  it("does not drain queued provider cleanup when fresh input also produces delivery effects", async () => {
-    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
-      captureIds: ["cap_terminal_cleanup"],
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
-    });
-    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+  it("preserves queued provider cleanup during later foreground input with no delivery effects", async () => {
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
       nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: true,
+      redactedLogEntries: [],
+    });
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:09:00.000Z",
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-27T00:12:00.000Z",
+        nextWakeReason: "assistant",
+      }),
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: [],
+      vaultRoot: expect.any(String),
+    });
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: "2026-04-27T00:12:00.000Z",
+      progressed: true,
+    }));
+  });
+
+  it("re-arms due provider cleanup when fresh foreground input has no delivery effects", async () => {
+    // Stored cleanup checkpoint is already due when the foreground turn runs.
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue({
+      nextWakeAt: "2026-04-27T00:08:00.000Z",
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: true,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:09:00.000Z",
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-27T00:08:00.000Z",
+        nextWakeReason: "assistant",
+      }),
+    }));
+
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: [],
+      vaultRoot: expect.any(String),
+    });
+    // The due checkpoint re-arms durably into the cleanup owner state; the
+    // phase wake derives from that single owner.
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: "2026-04-27T00:14:00.000Z",
+      },
+      linqMessageIds: [],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      progressed: true,
+    }));
+  });
+
+  it("uses the persisted provider cleanup wake after foreground Linq delivery behind a stale mailbox wake", async () => {
+    mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
     });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
@@ -7400,23 +8519,193 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => "2026-04-27T00:09:00.000Z",
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-27T00:08:00.000Z",
+        nextWakeReason: "mailbox",
+      }),
     }));
 
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
-    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
     expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
       checkpoint: {
-        nextWakeAt: null,
+        nextWakeAt: "2026-04-27T00:14:00.000Z",
       },
       linqMessageIds: ["provider_message_from_reply"],
       vaultRoot: "/tmp/murph-vault",
     });
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
-      nextWakeAt: "2026-04-27T00:09:00.000Z",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
       progressed: true,
     }));
+  });
+
+  it("uses the persisted provider cleanup wake after active-turn Linq delivery behind a stale device-sync wake", async () => {
+    mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      activeTurnInputIngested: true,
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: true,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "linq",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: "fingerprint_synthetic",
+        effectId: "effect_synthetic",
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: "provider_message_from_active_turn",
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:09:00.000Z",
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-27T00:08:00.000Z",
+        nextWakeReason: "device-sync.reconcile",
+      }),
+    }));
+
+    expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: "2026-04-27T00:14:00.000Z",
+      },
+      linqMessageIds: ["provider_message_from_active_turn"],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      progressed: true,
+    }));
+  });
+
+  it("does not drain queued provider cleanup when fresh input also produces delivery effects", async () => {
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "linq",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: "fingerprint_synthetic",
+        effectId: "effect_synthetic",
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: "provider_message_from_reply",
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:09:00.000Z",
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-27T00:08:00.000Z",
+        nextWakeReason: "assistant",
+      }),
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledTimes(1);
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
+      checkpoint: {
+        nextWakeAt: "2026-04-27T00:14:00.000Z",
+      },
+      linqMessageIds: ["provider_message_from_reply"],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      progressed: true,
+    }));
+  });
+
+  it("records provider cleanup only after foreground delivery drains", async () => {
+    mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "linq",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: "fingerprint_synthetic",
+        effectId: "effect_synthetic",
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: "provider_message_from_reply",
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:09:00.000Z",
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: "2026-04-27T00:08:00.000Z",
+        nextWakeReason: "mailbox",
+      }),
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      progressed: true,
+    }));
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(
+      mocks.drainHostedPreparedAssistantDeliveries.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.recordHostedProviderCleanupBeforeCommit.mock.invocationCallOrder[0] ??
+        Number.MAX_SAFE_INTEGER,
+    );
   });
 
   it("defers cleanup when input is admitted during the active turn", async () => {
@@ -7430,13 +8719,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       postCheckpointRecord: null,
       progressed: true,
       redactedLogEntries: [],
-    });
-    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
-      captureIds: ["cap_terminal_cleanup"],
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
-    });
-    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
-      nextWakeAt: null,
     });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       createDeliveryEffect(),
@@ -7478,19 +8760,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         includeBackgroundDueIntents: true,
       }),
     );
-    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledTimes(1);
     expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
     expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledTimes(1);
     expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
       checkpoint: {
-        nextWakeAt: null,
+        nextWakeAt: "2026-04-27T00:14:00.000Z",
       },
       linqMessageIds: ["provider_message_from_active_turn"],
       vaultRoot: "/tmp/murph-vault",
     });
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
-      nextWakeAt: "2026-04-27T00:09:00.000Z",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
       progressed: true,
     }));
   });
@@ -7563,6 +8846,38 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(
       mocks.resolveHostedPendingAssistantInputWakeAt.mock.calls[0]?.[0].now(),
     ).toBe("2026-04-27T00:10:00.000Z");
+  });
+
+  it("preserves queued provider cleanup when pending assistant input runs first", async () => {
+    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
+      "2026-04-27T00:10:00.000Z",
+    );
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+    });
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      "2026-04-27T00:14:00.000Z",
+    );
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => "2026-04-27T00:10:00.000Z",
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    expect(mocks.readHostedProviderCleanupCheckpoint).toHaveBeenCalledWith("/tmp/murph-vault");
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      progressed: true,
+    }));
   });
 
   it("runs pending assistant input before due device-sync work", async () => {
@@ -8138,12 +9453,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(result.checkpointReason).toBe("system_mailbox_receipt");
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    // Hosted Foreground Priority: a cleanup-capable post-checkpoint step must
+    // keep the foreground import loop alive so a message arriving mid-drain
+    // is imported and preempts via the yield hook.
+    expect(result.afterCheckpointKeepsForegroundImportLoop).toBe(true);
     const postCheckpoint = await result.afterCheckpoint?.();
 
     expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
       expect.objectContaining({
-        assistantDeliveryOutcomes: [],
         checkpoint: {
           nextWakeAt: null,
         },
@@ -8227,7 +9545,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
-      nextWakeAt: null,
+      nextWakeAt: expect.any(String),
       redactedStatus: expect.objectContaining({
         hostedOutboxDeliveryAttempted: 1,
         hostedOutboxDeliverySent: 1,
@@ -8240,9 +9558,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "mailbox.system_processed",
       "outbox.delivery_finished",
     ]);
-    expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupAfterDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        assistantDeliveryOutcomes: [expect.objectContaining({
+        outcomes: [expect.objectContaining({
           deliveryChannel: "linq",
           providerMessageId: "provider_synthetic",
         })],
@@ -8251,9 +9570,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
     const deliveryDrainInput = mocks.drainHostedPreparedAssistantDeliveries
       .mock.calls[0]?.[0];
-    const cleanupDrainInput = mocks.drainHostedProviderCleanupAfterCommit.mock.calls[0]?.[0];
     await expect(deliveryDrainInput.assertLiveness()).resolves.toBeUndefined();
-    await expect(cleanupDrainInput.assertLiveness()).resolves.toBeUndefined();
   });
 
   it("flushes member-channel updates before auto-reply delivery dispatch", async () => {
@@ -8433,6 +9750,226 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
+  it("keeps the owner cleanup wake when a member-channel barrier blocks auto-reply delivery", async () => {
+    const deliveryEffect = createDeliveryEffect();
+    const preparedDispatches = createPreparedDispatchesForDeliveryEffect(deliveryEffect);
+    // The cleanup owner state already carries a scheduled wake.
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      "2026-04-27T00:14:00.000Z",
+    );
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      errorCode: "HOSTED_MEMBER_CHANNELS_TRANSIENT",
+      errorMessage: "Hosted member-channel update failed.",
+      itemId: "system_mailbox_item_member_channels",
+      nextWakeAt: "2026-04-27T00:30:00.000Z",
+      status: "retryable_failed",
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches,
+    });
+    mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
+      intentId: deliveryEffect.effectId,
+      turnId: deliveryEffect.payload.turnId,
+    });
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValueOnce(
+      new Set([deliveryEffect.effectId]),
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:09:00.000Z",
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      redactedStatus: expect.objectContaining({
+        hostedMemberChannelPreDispatchBlocked: 1,
+      }),
+    }));
+    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vaultRoot: "/tmp/murph-vault",
+      }),
+    );
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
+    expect(mocks.resetHostedPreparedAssistantDeliveryEffects).toHaveBeenCalledWith({
+      effects: [deliveryEffect],
+      preparedDispatches,
+      vaultRoot: "/tmp/murph-vault",
+    });
+  });
+
+  it("preserves scheduled cleanup wake when a foreground member-channel barrier blocks delivery", async () => {
+    const providerCleanupWakeAt = "2026-04-27T00:14:00.000Z";
+    const baseDeliveryEffect = createDeliveryEffect();
+    const deliveryEffect = {
+      ...baseDeliveryEffect,
+      payload: {
+        ...baseDeliveryEffect.payload,
+        transportIdempotent: false,
+      },
+    };
+    const preparedDispatches = createPreparedDispatchesForDeliveryEffect(deliveryEffect);
+    const prepareAutoReplyDelivery = vi.fn(async () => ({
+      nextWakeAt: "2026-04-27T00:30:00.000Z",
+      nextWakeReason: "assistant",
+      redactedStatus: {
+        hostedMemberChannelPreDispatchImportBlocked: 1,
+      },
+    }));
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      providerCleanupWakeAt,
+    );
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [deliveryEffect.effectId],
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: true,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches,
+    });
+    mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
+      intentId: deliveryEffect.effectId,
+      turnId: deliveryEffect.payload.turnId,
+    });
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValueOnce(
+      new Set([deliveryEffect.effectId]),
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:09:00.000Z",
+      prepareAutoReplyDelivery,
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      nextWakeAt: providerCleanupWakeAt,
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: providerCleanupWakeAt,
+      redactedStatus: expect.objectContaining({
+        hostedMemberChannelPreDispatchImportBlocked: 1,
+        nextWakeAt: providerCleanupWakeAt,
+      }),
+    }));
+    expect(prepareAutoReplyDelivery).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
+    expect(mocks.resetHostedPreparedAssistantDeliveryEffects).toHaveBeenCalledWith({
+      effects: [deliveryEffect],
+      preparedDispatches,
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+  });
+
+  it("drains due provider cleanup before returning a background member-channel barrier", async () => {
+    const deliveryEffect = createDeliveryEffect();
+    const preparedDispatches = createPreparedDispatchesForDeliveryEffect(deliveryEffect);
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: null,
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint
+      .mockResolvedValueOnce({
+        item: createSystemMailboxItem(),
+        itemId: "system_mailbox_item_notification",
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "assistant-notification",
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      })
+      .mockResolvedValueOnce({
+        errorCode: "HOSTED_MEMBER_CHANNELS_TRANSIENT",
+        errorMessage: "Hosted member-channel update failed.",
+        itemId: "system_mailbox_item_member_channels",
+        nextWakeAt: "2026-04-27T00:30:00.000Z",
+        status: "retryable_failed",
+      });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches,
+    });
+    mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
+      intentId: deliveryEffect.effectId,
+      turnId: deliveryEffect.payload.turnId,
+    });
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValueOnce(
+      new Set([deliveryEffect.effectId]),
+    );
+    mocks.drainHostedProviderCleanupAfterCommit.mockResolvedValueOnce({
+      attemptedLinqMessageCount: 1,
+      deletedLinqMessageCount: 1,
+      failedLinqMessageCount: 0,
+      nextWakeAt: null,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({}));
+
+    expect(result).toEqual(expect.objectContaining({
+      afterCheckpoint: expect.any(Function),
+      checkpointReason: "outbox_sending",
+    }));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: "2026-04-27T00:30:00.000Z",
+      redactedStatus: expect.objectContaining({
+        hostedMemberChannelPreDispatchBlocked: 1,
+        hostedProviderCleanupAttemptedLinqItems: 1,
+        hostedProviderCleanupDeletedLinqItems: 1,
+        hostedProviderCleanupFailedLinqItems: 0,
+      }),
+    }));
+    expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        checkpoint: {
+          nextWakeAt: null,
+        },
+        vaultRoot: "/tmp/murph-vault",
+      }),
+    );
+    expect(mocks.resolveHostedProviderCleanupScheduledWakeAt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vaultRoot: "/tmp/murph-vault",
+      }),
+    );
+    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
+    expect(mocks.resetHostedPreparedAssistantDeliveryEffects).toHaveBeenCalledWith({
+      effects: [deliveryEffect],
+      preparedDispatches,
+      vaultRoot: "/tmp/murph-vault",
+    });
+  });
+
   it("resets prepared delivery claims when remote system catch-up returns a barrier", async () => {
     const deliveryEffect = createDeliveryEffect();
     const preparedDispatches = createPreparedDispatchesForDeliveryEffect(deliveryEffect);
@@ -8522,6 +10059,124 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
+  it("preserves queued provider cleanup during later non-foreground assistant progress", async () => {
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+    });
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      "2026-04-27T00:14:00.000Z",
+    );
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: "2026-04-27T00:30:00.000Z",
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: true,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:10:00.000Z",
+    }));
+
+    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
+      nextWakeAt: "2026-04-27T00:14:00.000Z",
+      progressed: true,
+    }));
+  });
+
+  it("does not preserve a consumed provider cleanup wake after background delivery drains cleanup", async () => {
+    const providerCleanupWakeAt = "2026-04-27T00:14:00.000Z";
+    const deliveryEffect = createDeliveryEffect();
+    const deferredDeliveryEffect = {
+      ...deliveryEffect,
+      payload: {
+        ...deliveryEffect.payload,
+        transportIdempotent: false,
+      },
+    };
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: providerCleanupWakeAt,
+    });
+    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
+      providerCleanupWakeAt,
+    );
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+      postCheckpointRecord: null,
+      progressed: true,
+      redactedLogEntries: [],
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deferredDeliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deferredDeliveryEffect),
+    });
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      {
+        cleanupMessages: [],
+        cleanupTargetAliases: [],
+        deliveryChannel: "telegram",
+        deliveryErrorCode: null,
+        deliveryErrorMessage: null,
+        deliveryStatus: "sent",
+        effectFingerprint: deferredDeliveryEffect.fingerprint,
+        effectId: deferredDeliveryEffect.effectId,
+        journalMethod: "PUT",
+        journalStatus: "200",
+        providerMessageId: null,
+        providerMessageIds: [],
+        providerThreadId: "thread_synthetic",
+        retryable: false,
+        target: null,
+        targetKind: null,
+      },
+    ]);
+    mocks.drainHostedProviderCleanupAfterCommit.mockResolvedValueOnce({
+      attemptedLinqMessageCount: 1,
+      deletedLinqMessageCount: 1,
+      failedLinqMessageCount: 0,
+      nextWakeAt: null,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      now: () => "2026-04-27T00:10:00.000Z",
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      nextWakeAt: providerCleanupWakeAt,
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    // Not-yet-due cleanup state must wait for its scheduled wake; the
+    // background delivery pass records outbound ids instead of draining hot.
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
+    expect(mocks.recordHostedProviderCleanupAfterDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vaultRoot: "/tmp/murph-vault",
+      }),
+    );
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_receipt",
+      nextWakeAt: providerCleanupWakeAt,
+    }));
+  });
+
   it("uses a hot provider cleanup checkpoint for cleanup-only progress", async () => {
     mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
       nextWakeAt: null,
@@ -8542,7 +10197,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
     expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
       expect.objectContaining({
-        assistantDeliveryOutcomes: [],
         checkpoint: {
           nextWakeAt: null,
         },
@@ -8561,9 +10215,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   });
 
   it("treats pending terminal Linq cleanup evidence as checkpoint progress", async () => {
-    mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValueOnce({
-      captureIds: ["cap_terminal_cleanup"],
-      linqMessageIds: ["linq_msg_terminal_cleanup"],
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: false,
+      assistantAutomationTerminalLinqCleanup: ["linq_msg_terminal_cleanup"],
+      nextWakeAt: null,
+      redactedLogEntries: [],
     });
     mocks.drainHostedProviderCleanupAfterCommit.mockResolvedValueOnce({
       attemptedLinqMessageCount: 1,
@@ -8579,33 +10236,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
     expect(mocks.recordHostedProviderCleanupBeforeCommit).toHaveBeenCalledWith({
       checkpoint: {
-        nextWakeAt: null,
+        nextWakeAt: expect.any(String),
       },
       linqMessageIds: ["linq_msg_terminal_cleanup"],
       vaultRoot: "/tmp/murph-vault",
     });
-    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).toHaveBeenCalledWith({
-      captureIds: ["cap_terminal_cleanup"],
-      vault: "/tmp/murph-vault",
-    });
 
     const postCheckpoint = await result.afterCheckpoint?.();
 
-    expect(mocks.drainHostedProviderCleanupAfterCommit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        assistantDeliveryOutcomes: [],
-        checkpoint: {
-          nextWakeAt: null,
-        },
-        vaultRoot: "/tmp/murph-vault",
-      }),
-    );
+    // Round-47 validation: current-pass terminal cleanup records durable
+    // state and requests a checkpoint, but the same invocation never drains
+    // provider-visible deletion; the scheduled wake after the durable
+    // checkpoint does.
+    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "provider_cleanup",
-      redactedStatus: expect.objectContaining({
-        hostedProviderCleanupAttemptedLinqItems: 1,
-        hostedProviderCleanupDeletedLinqItems: 1,
-      }),
     }));
   });
 });

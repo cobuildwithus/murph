@@ -29,11 +29,15 @@ const mocks = vi.hoisted(() => ({
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
   prepareHostedAssistantAutomationForWake: vi.fn(),
   prepareHostedAssistantDeliveryEffectsForDispatch: vi.fn(),
+  prepareHostedProviderCleanupPlan: vi.fn(),
   prepareHostedSystemMailboxItemForCheckpoint: vi.fn(),
   recordHostedDeviceSyncDirtyPostCheckpointRecord: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
+  resolveHostedProviderCleanupCheckpointWakeAt: vi.fn(),
+  resolveHostedProviderCleanupFirstDeferredWakeAt: vi.fn(),
+  resolveHostedProviderCleanupScheduledWakeAt: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
   resolveHostedSystemMailboxNextWakeCandidate: vi.fn(),
   resolveHostedSystemMailboxNextWakeAt: vi.fn(),
@@ -85,8 +89,15 @@ vi.mock("../src/hosted-runtime/maintenance.ts", () => ({
 
 vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
   drainHostedProviderCleanupAfterCommit: mocks.drainHostedProviderCleanupAfterCommit,
+  prepareHostedProviderCleanupPlan: mocks.prepareHostedProviderCleanupPlan,
   recordHostedProviderCleanupBeforeCommit: mocks.recordHostedProviderCleanupBeforeCommit,
   readHostedProviderCleanupCheckpoint: mocks.readHostedProviderCleanupCheckpoint,
+  resolveHostedProviderCleanupCheckpointWakeAt:
+    mocks.resolveHostedProviderCleanupCheckpointWakeAt,
+  resolveHostedProviderCleanupFirstDeferredWakeAt:
+    mocks.resolveHostedProviderCleanupFirstDeferredWakeAt,
+  resolveHostedProviderCleanupScheduledWakeAt:
+    mocks.resolveHostedProviderCleanupScheduledWakeAt,
 }));
 
 vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
@@ -135,6 +146,16 @@ beforeEach(() => {
   });
   mocks.hasPendingAssistantAutoReplyInput.mockResolvedValue(false);
   mocks.markAssistantAutoReplyLinqCleanupQueued.mockResolvedValue(undefined);
+  mocks.prepareHostedProviderCleanupPlan.mockImplementation(async (input: {
+    deferred: boolean;
+  }) => ({
+    checkpoint: null,
+    deferred: input.deferred,
+    due: false,
+    requiresCheckpoint: false,
+    stateQueued: false,
+    wakeAt: null,
+  }));
   mocks.prepareHostedAssistantAutomationForWake.mockResolvedValue(undefined);
   mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue(undefined);
   mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValue(null);
@@ -143,13 +164,40 @@ beforeEach(() => {
     recorded: 1,
     stillDirty: false,
   });
-  mocks.recordHostedProviderCleanupBeforeCommit.mockResolvedValue(undefined);
+  mocks.recordHostedProviderCleanupBeforeCommit.mockImplementation(async (input) =>
+    input.checkpoint
+  );
   mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockResolvedValue({
     failed: 0,
     nextWakeAt: null,
     recorded: 1,
   });
   mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue(null);
+  mocks.resolveHostedProviderCleanupFirstDeferredWakeAt.mockImplementation((input = {}) => {
+    const record = input as { nowMs?: number | null };
+    const nowMs = Number.isFinite(record.nowMs)
+      ? Number(record.nowMs)
+      : Date.parse("2026-04-27T00:00:00.000Z");
+    return new Date(nowMs + 5 * 60_000).toISOString();
+  });
+  mocks.resolveHostedProviderCleanupCheckpointWakeAt.mockImplementation((input) => {
+    const checkpoint = input.checkpoint as { nextWakeAt?: string | null } | null;
+    if (!checkpoint) {
+      return null;
+    }
+    const nextWakeAt = checkpoint.nextWakeAt ?? null;
+    const nextWakeMs = Date.parse(nextWakeAt ?? "");
+    if (!Number.isFinite(nextWakeMs) || nextWakeMs <= input.nowMs) {
+      return input.deferDueOrInvalid
+        ? mocks.resolveHostedProviderCleanupFirstDeferredWakeAt({
+            idleCheckpointDelayMs: input.idleCheckpointDelayMs,
+            nowMs: input.nowMs,
+          })
+        : null;
+    }
+    return nextWakeAt;
+  });
+  mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(null);
   mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(null);
   mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(null);
   mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(async () => {
