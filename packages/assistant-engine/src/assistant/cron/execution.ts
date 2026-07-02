@@ -693,10 +693,16 @@ export async function executeClaimedAssistantCronJob(input: {
     const backgroundMaintenanceYielded =
       isAssistantCronBackgroundMaintenanceYieldError(error) ||
       yieldCancellation.yieldRequested()
+    // Provider admission is the single replay barrier for maintenance: any
+    // terminal failure after admission may have committed memory writes even
+    // when the completed-command event was lost, so the occurrence is
+    // consumed. The overlapping evidence window makes a skipped night safe;
+    // a replay after a committed write is not. The raw-event detector stays
+    // only as a defensive signal for pre-admission edge cases.
     const nonReplayableBackgroundMaintenanceWork =
       maintenanceJob &&
-      (assistantNotificationErrorHasNonReplayableProviderWork(error) ||
-        (backgroundMaintenanceYielded && maintenanceProviderStarted))
+      (maintenanceProviderStarted ||
+        assistantNotificationErrorHasNonReplayableProviderWork(error))
     if (nonReplayableBackgroundMaintenanceWork) {
       errorText = ASSISTANT_CRON_BACKGROUND_MAINTENANCE_NON_REPLAYABLE_WORK_ERROR
       errorCode = backgroundMaintenanceYielded
