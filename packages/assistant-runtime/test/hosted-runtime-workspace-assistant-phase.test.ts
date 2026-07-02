@@ -2258,6 +2258,76 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("keeps the recorded provider-cleanup wake when fresh managed automation seeding replaces the phase wake", async () => {
+    // Regression: a fresh Linq inbound records deferred provider cleanup into
+    // hosted-provider-cleanup.json and schedules its wake on the phase result.
+    // The managed-automation post-checkpoint result replaces that wake in the
+    // workspace runner, so it must include the cleanup owner's recorded wake
+    // instead of stranding the deletion until the next unrelated cron wake.
+    const cronNextWakeAt = "2026-04-27T17:00:00.000Z";
+    const providerCleanupWakeAt = "2026-04-27T00:00:01.250Z";
+    const defaultRoute = {
+      channel: "linq",
+      deliverySource: null,
+      deliveryTarget: "chat_synthetic_seed_route",
+      identityId: "identity_synthetic_seed_route",
+      participantId: "participant_synthetic_seed_route",
+      threadId: "thread_synthetic_seed_route",
+    };
+    mocks.readAssistantInputEvent.mockResolvedValueOnce({
+      conversation: {
+        accountId: defaultRoute.identityId,
+        actorId: defaultRoute.participantId,
+        actorIsSelf: false,
+        source: defaultRoute.channel,
+        threadId: defaultRoute.threadId,
+        threadIsDirect: true,
+      },
+      replyTarget: {
+        channel: defaultRoute.channel,
+        messageId: "message_synthetic_seed_route",
+        threadId: defaultRoute.deliveryTarget,
+      },
+    });
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 3,
+      skipped: 0,
+      updated: 0,
+    });
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 0,
+      enabledJobs: 3,
+      nextRunAt: cronNextWakeAt,
+      runningJobs: 0,
+      totalJobs: 3,
+    });
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue({
+      nextWakeAt: providerCleanupWakeAt,
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(result.afterCheckpoint).toEqual(expect.any(Function));
+    const postCheckpoint = await result.afterCheckpoint?.();
+
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "assistant_runtime_commit",
+      nextWakeAt: providerCleanupWakeAt,
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 3,
+      }),
+    }));
+  });
+
   it("keeps an earlier assistant wake when fresh managed automation work is a no-op", async () => {
     const assistantWakeAt = "2026-04-27T00:05:00.000Z";
     const providerCleanupWakeAt = "2026-04-27T00:14:00.000Z";
