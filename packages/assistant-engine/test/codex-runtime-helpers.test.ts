@@ -2413,12 +2413,14 @@ describe('Codex assistant registry helpers', () => {
         'model_providers.venice.env_key="VENICE_API_KEY"',
         'model_providers.venice.wire_api="responses"',
         'model_providers.venice.requires_openai_auth=false',
-        'shell_environment_policy.ignore_default_excludes=false',
       ]),
     )
   })
 
-  it('passes hosted MultiAgent V2 as a Codex app-server process override', async () => {
+  it('never passes a multi_agent_v2 CLI override on hosted turns', async () => {
+    // Hosted config.toml owns [features.multi_agent_v2] (including
+    // root_agent_usage_hint_text); a CLI boolean override would take
+    // precedence and silently reset that table to feature defaults.
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Completed hosted turn.',
       jsonEvents: [],
@@ -2448,11 +2450,11 @@ describe('Codex assistant registry helpers', () => {
     expect(attempt.ok).toBe(true)
     const appServerInput = codexAppServerMocks.executeCodexAppServerTurn.mock
       .calls[0]?.[0]
-    expect(appServerInput?.configOverrides).toEqual(
-      expect.arrayContaining([
-        'features.multi_agent_v2=true',
-      ]),
-    )
+    expect(
+      appServerInput?.configOverrides?.some(
+        (override: string) => override.includes('multi_agent'),
+      ) ?? false,
+    ).toBe(false)
   })
 
   it('appends turn-local Codex config overrides after provider overrides', async () => {
@@ -2490,7 +2492,6 @@ describe('Codex assistant registry helpers', () => {
       'model_providers.venice.env_key="VENICE_API_KEY"',
       'model_providers.venice.wire_api="responses"',
       'model_providers.venice.requires_openai_auth=false',
-      'shell_environment_policy.ignore_default_excludes=false',
       'memories.use_memories=false',
       'memories.generate_memories=false',
     ])

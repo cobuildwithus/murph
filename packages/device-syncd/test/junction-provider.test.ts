@@ -5375,6 +5375,7 @@ test("Junction polling skips optional unavailable resource collections", async (
     junctionSkippedResourceJobCount: 2,
     junctionSkippedResourceLastAt: "2026-04-03T00:00:00.000Z",
     junctionSkippedResourceLast: "timeseries.stress_level.422.unsupported",
+    junctionSkippedResourceLastDetail: null,
   });
   const profileRequest = requireValue(
     requests.find((url) => new URL(url).pathname.includes("/v2/summary/profile/")),
@@ -5385,7 +5386,7 @@ test("Junction polling skips optional unavailable resource collections", async (
   assert.equal(profileSearchParams.has("end_date"), false);
 });
 
-test("Junction polling fails ambiguous optional resource responses for retry", async () => {
+test("Junction polling skips ambiguous optional resource responses and records the provider detail", async () => {
   const warnings: Record<string, unknown>[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -5425,46 +5426,143 @@ test("Junction polling fails ambiguous optional resource responses for retry", a
     timeseriesResources: [],
   });
 
-  await assert.rejects(
-    () => executeJunctionJob(
-      provider,
-      createJunctionJobContext({
-        importSnapshot: async (snapshot) => {
-          importedSnapshots.push(snapshot);
-          return { imported: true };
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
         },
-        logger: {
-          warn(_message, context) {
-            warnings.push(context ?? {});
-          },
-        },
-      }),
-      createJob("reconcile", {
-        windowStart: "2026-04-02T00:00:00.000Z",
-        windowEnd: "2026-04-03T00:00:00.000Z",
-      }),
-    ),
-    (error) => {
-      assert.ok(error instanceof DeviceSyncError);
-      assert.equal(error.code, "JUNCTION_OPTIONAL_RESOURCE_RESPONSE_AMBIGUOUS");
-      assert.equal(error.retryable, true);
-      assert.equal(error.details?.providerOptionalResourceCategory, "summary");
-      assert.equal(error.details?.providerOptionalResourceFailureDisposition, "ambiguous");
-      assert.equal(error.details?.providerOptionalResourceName, "profile");
-      assert.equal(error.details?.providerOptionalResourceStatus, 422);
-      assert.equal(error.details?.httpStatusText, "Validation failed at <redacted-url>");
-      assert.equal(error.details?.responseErrorCode, "invalid_request");
-      assert.equal(error.details?.responseErrorDescription, "The date window is invalid for this request.");
-      assert.equal(error.details?.responseErrorDescriptionFieldPresent, true);
-      assert.equal(error.details?.responseErrorFieldPresent, true);
-      assert.equal(error.details?.status, 422);
-      assert.equal(JSON.stringify(error).includes("junction-user-1"), false);
-      return true;
-    },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
   );
 
-  assert.equal(importedSnapshots.length, 0);
-  assert.deepEqual(warnings, []);
+  assert.equal(importedSnapshots.length, 1);
+  assert.deepEqual(warnings, [
+    {
+      errorCode: "JUNCTION_API_REQUEST_FAILED",
+      provider: "junction",
+      reason: "ambiguous",
+      resource: "profile",
+      resourceCategory: "summary",
+      responseStatus: 422,
+      responseDetail: "invalid_request: The date window is invalid for this request.",
+    },
+  ]);
+  assert.deepEqual(result.metadataPatch, {
+    junctionProfileSummaryCheckedAt: "2026-04-03T00:00:00.000Z",
+    junctionSkippedResourceTotal: 1,
+    junctionSkippedSummaryTotal: 1,
+    junctionSkippedTimeseriesTotal: 0,
+    junctionSkippedResourceJobCount: 1,
+    junctionSkippedResourceLastAt: "2026-04-03T00:00:00.000Z",
+    junctionSkippedResourceLast: "summary.profile.422.ambiguous",
+    junctionSkippedResourceLastDetail: "invalid_request: The date window is invalid for this request.",
+  });
+  assert.equal(JSON.stringify(warnings).includes("junction-user-1"), false);
+  assert.equal(JSON.stringify(result.metadataPatch).includes("junction-user-1"), false);
+});
+
+test("Junction ambiguous sleep_cycle summary failure still imports the other summaries", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+              sleep: true,
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({
+        data: [{ id: "activity-1", observedAt: "2026-04-02T12:00:00.000Z", steps: 1200 }],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep/junction-user-1")) {
+      return createJsonResponse({
+        data: [{ id: "sleep-1", calendar_date: "2026-04-02", score: 82, total: 27000 }],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        code: "invalid_request",
+        message: "sleep_cycle summaries are not enabled for this team.",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["activity", "sleep", "sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as { summaries?: Record<string, unknown[]> };
+  assert.equal(snapshot.summaries?.activity?.length, 1);
+  assert.equal(snapshot.summaries?.sleep?.length, 1);
+  assert.deepEqual(snapshot.summaries?.sleep_cycle, []);
+  assert.deepEqual(warnings, [
+    {
+      errorCode: "JUNCTION_API_REQUEST_FAILED",
+      provider: "junction",
+      reason: "ambiguous",
+      resource: "sleep_cycle",
+      resourceCategory: "summary",
+      responseStatus: 422,
+      responseDetail: "invalid_request: sleep_cycle summaries are not enabled for this team.",
+    },
+  ]);
+  assert.deepEqual(result.metadataPatch, {
+    junctionSkippedResourceTotal: 1,
+    junctionSkippedSummaryTotal: 1,
+    junctionSkippedTimeseriesTotal: 0,
+    junctionSkippedResourceJobCount: 1,
+    junctionSkippedResourceLastAt: "2026-04-03T00:00:00.000Z",
+    junctionSkippedResourceLast: "summary.sleep_cycle.422.ambiguous",
+    junctionSkippedResourceLastDetail: "invalid_request: sleep_cycle summaries are not enabled for this team.",
+  });
 });
 
 test("Junction polling treats missing profile summary as a one-shot optional skip", async () => {
@@ -5542,6 +5640,7 @@ test("Junction polling treats missing profile summary as a one-shot optional ski
     junctionSkippedResourceJobCount: 1,
     junctionSkippedResourceLastAt: "2026-04-03T00:00:00.000Z",
     junctionSkippedResourceLast: "summary.profile.404.not_found",
+    junctionSkippedResourceLastDetail: null,
   });
   const profileRequest = requireValue(
     requests.find((url) => new URL(url).pathname.includes("/v2/summary/profile/")),
@@ -5552,7 +5651,7 @@ test("Junction polling treats missing profile summary as a one-shot optional ski
   assert.equal(profileSearchParams.has("end_date"), false);
 });
 
-test("Junction polling fails request-shape optional resource text for retry", async () => {
+test("Junction polling skips request-shape optional resource failures as ambiguous", async () => {
   const ambiguousCases = [
     {
       code: "not_found",
@@ -5606,45 +5705,159 @@ test("Junction polling fails request-shape optional resource text for retry", as
       timeseriesResources: [],
     });
 
-    await assert.rejects(
-      () => executeJunctionJob(
-        provider,
-        createJunctionJobContext({
-          importSnapshot: async (snapshot) => {
-            importedSnapshots.push(snapshot);
-            return { imported: true };
+    const result = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        importSnapshot: async (snapshot) => {
+          importedSnapshots.push(snapshot);
+          return { imported: true };
+        },
+        logger: {
+          warn(_message, context) {
+            warnings.push(context ?? {});
           },
-          logger: {
-            warn(_message, context) {
-              warnings.push(context ?? {});
-            },
-          },
-        }),
-        createJob("reconcile", {
-          windowStart: "2026-04-02T00:00:00.000Z",
-          windowEnd: "2026-04-03T00:00:00.000Z",
-        }),
-      ),
-      (error) => {
-        assert.ok(error instanceof DeviceSyncError);
-        assert.equal(error.code, "JUNCTION_OPTIONAL_RESOURCE_RESPONSE_AMBIGUOUS");
-        assert.equal(error.retryable, true);
-        assert.equal(error.details?.providerOptionalResourceCategory, "summary");
-        assert.equal(error.details?.providerOptionalResourceFailureDisposition, "ambiguous");
-        assert.equal(error.details?.providerOptionalResourceName, "profile");
-        assert.equal(error.details?.providerOptionalResourceStatus, 422);
-        assert.equal(error.details?.responseErrorCode, code);
-        assert.equal(error.details?.responseErrorDescription, message);
-        assert.equal(error.details?.responseErrorDescriptionFieldPresent, true);
-        assert.equal(error.details?.responseErrorFieldPresent, true);
-        assert.equal(JSON.stringify(error).includes("junction-user-1"), false);
-        return true;
-      },
+        },
+      }),
+      createJob("reconcile", {
+        windowStart: "2026-04-02T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
+      }),
     );
 
-    assert.equal(importedSnapshots.length, 0);
-    assert.deepEqual(warnings, []);
+    assert.equal(importedSnapshots.length, 1);
+    assert.deepEqual(warnings, [
+      {
+        errorCode: "JUNCTION_API_REQUEST_FAILED",
+        provider: "junction",
+        reason: "ambiguous",
+        resource: "profile",
+        resourceCategory: "summary",
+        responseStatus: 422,
+        responseDetail: `${code}: ${message}`,
+      },
+    ]);
+    assert.equal(result.metadataPatch?.junctionSkippedResourceLast, "summary.profile.422.ambiguous");
+    assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, `${code}: ${message}`);
+    assert.equal(JSON.stringify(warnings).includes("junction-user-1"), false);
   }
+});
+
+test("Junction ambiguous skip detail redacts the account id from provider error text", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              profile: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
+      return createJsonResponse({
+        code: "invalid_request",
+        message: "User Junction-User-1 cannot access this summary.",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["profile"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(warnings.length, 1);
+  assert.equal(
+    warnings[0]?.responseDetail,
+    "invalid_request: User <redacted-account> cannot access this summary.",
+  );
+  assert.equal(
+    result.metadataPatch?.junctionSkippedResourceLastDetail,
+    "invalid_request: User <redacted-account> cannot access this summary.",
+  );
+  assert.equal(JSON.stringify(warnings).toLowerCase().includes("junction-user-1"), false);
+  assert.equal(JSON.stringify(result.metadataPatch).toLowerCase().includes("junction-user-1"), false);
+});
+
+test("Junction ambiguous skip detail is clamped to the stored-metadata string cap", async () => {
+  const longMessage = "sleep cycle summaries are disabled for this integration tier. ".repeat(6).trim();
+  assert.ok(longMessage.length > 256 && longMessage.length < 512);
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              profile: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
+      return createJsonResponse({
+        code: "invalid_request",
+        message: longMessage,
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["profile"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const detail = result.metadataPatch?.junctionSkippedResourceLastDetail;
+  assert.equal(typeof detail, "string");
+  assert.ok(typeof detail === "string" && detail.length > 0 && detail.length <= 256);
+  assert.ok(typeof detail === "string" && detail.startsWith("invalid_request: sleep cycle summaries are disabled"));
+  assert.equal(warnings[0]?.responseDetail, detail);
 });
 
 test("Junction resource jobs import direct daily data webhook payloads without Junction HTTP requests", async () => {
@@ -7419,10 +7632,11 @@ test("Junction timeseries optional later chunk preserves earlier chunk records",
     junctionSkippedResourceJobCount: 1,
     junctionSkippedResourceLastAt: "2026-04-03T00:00:00.000Z",
     junctionSkippedResourceLast: "timeseries.blood_oxygen.422.unsupported",
+    junctionSkippedResourceLastDetail: null,
   });
 });
 
-test("Junction timeseries ambiguous later chunk fails instead of preserving partial data", async () => {
+test("Junction timeseries ambiguous later chunk preserves fetched data and skips the rest", async () => {
   const warnings: Record<string, unknown>[] = [];
   const importedSnapshots: unknown[] = [];
   let timeseriesRequests = 0;
@@ -7468,46 +7682,50 @@ test("Junction timeseries ambiguous later chunk fails instead of preserving part
     timeseriesResources: ["blood_oxygen"],
   });
 
-  await assert.rejects(
-    () => executeJunctionJob(
-      provider,
-      createJunctionJobContext({
-        importSnapshot: async (snapshot) => {
-          importedSnapshots.push(snapshot);
-          return { imported: true };
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
         },
-        logger: {
-          warn(_message, context) {
-            warnings.push(context ?? {});
-          },
-        },
-      }),
-      createJob("resource", {
-        eventType: "daily.data.blood_oxygen.created",
-        objectId: "blood-oxygen-1",
-        occurredAt: "2026-04-02T00:00:00.000Z",
-        resource: "blood_oxygen",
-        sourceProviderSlug: "oura",
-        windowStart: "2026-04-01T00:00:00.000Z",
-        windowEnd: "2026-04-03T00:00:00.000Z",
-      }),
-    ),
-    (error) => {
-      assert.ok(error instanceof DeviceSyncError);
-      assert.equal(error.code, "JUNCTION_OPTIONAL_RESOURCE_RESPONSE_AMBIGUOUS");
-      assert.equal(error.retryable, true);
-      assert.equal(error.details?.providerOptionalResourceCategory, "timeseries");
-      assert.equal(error.details?.providerOptionalResourceFailureDisposition, "ambiguous");
-      assert.equal(error.details?.providerOptionalResourceName, "blood_oxygen");
-      assert.equal(error.details?.providerOptionalResourceStatus, 422);
-      assert.equal(error.details?.responseErrorCode, "invalid_request");
-      return true;
-    },
+      },
+    }),
+    createJob("resource", {
+      eventType: "daily.data.blood_oxygen.created",
+      objectId: "blood-oxygen-1",
+      occurredAt: "2026-04-02T00:00:00.000Z",
+      resource: "blood_oxygen",
+      sourceProviderSlug: "oura",
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
   );
 
   assert.equal(timeseriesRequests, 2);
-  assert.equal(importedSnapshots.length, 0);
-  assert.deepEqual(warnings, []);
+  assert.equal(importedSnapshots.length, 1);
+  const snapshot = importedSnapshots[0] as { timeseries?: Record<string, unknown[]> };
+  assert.equal(snapshot.timeseries?.blood_oxygen?.length, 1);
+  assert.deepEqual(warnings, [
+    {
+      errorCode: "JUNCTION_API_REQUEST_FAILED",
+      provider: "junction",
+      reason: "ambiguous",
+      resource: "blood_oxygen",
+      resourceCategory: "timeseries",
+      responseStatus: 422,
+      responseDetail: "invalid_request: The date window is invalid for this request.",
+    },
+  ]);
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLast, "timeseries.blood_oxygen.422.ambiguous");
+  assert.equal(
+    result.metadataPatch?.junctionSkippedResourceLastDetail,
+    "invalid_request: The date window is invalid for this request.",
+  );
 });
 
 test("Junction resource jobs fetch only the hinted resource window", async () => {

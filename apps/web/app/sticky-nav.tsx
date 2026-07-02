@@ -1,12 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import Link from "next/link";
+import { Menu } from "lucide-react";
 
-import { LandingAuthActions } from "./auth-controls";
+import { LandingAuthActions, LandingAuthDialog } from "./auth-controls";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@/src/components/ui/drawer";
 import { formatStarCount } from "@/src/lib/github-stars";
 
 const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
+
+const NAV_LINKS = [
+  { href: "/#how", label: "How it works" },
+  { href: "/#faq", label: "FAQ" },
+  { href: "/security", label: "Security" },
+] as const;
+
+// Large tap rows matching the /home sidebar's mobile nav sizing.
+const MOBILE_MENU_ROW =
+  "rounded-lg px-5 py-6 text-xl font-medium text-[#2d3436] transition-colors hover:bg-[#c4a882]/10 active:bg-[#c4a882]/15";
 
 export function StickyNav({
   authenticated,
@@ -20,6 +37,25 @@ export function StickyNav({
   splitUnauthenticatedAuth?: boolean;
 }) {
   const [scrolled, setScrolled] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
+
+  // While the drawer is open vaul pins the body on iOS and restores the
+  // pre-open scroll position on close, which swallows a same-page hash jump
+  // fired from inside it. Close first, then jump once the 500ms close
+  // animation and scroll restore have finished.
+  const handleMenuLinkClick = (
+    event: MouseEvent<HTMLAnchorElement>,
+    href: string,
+  ) => {
+    setMenuOpen(false);
+    if (!href.startsWith("/#") || window.location.pathname !== "/") return;
+    event.preventDefault();
+    const hash = href.slice(2);
+    window.setTimeout(() => {
+      window.location.hash = hash;
+    }, 600);
+  };
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 100);
@@ -57,11 +93,7 @@ export function StickyNav({
         />
       </Link>
       <div className="flex items-center gap-4 sm:gap-6">
-        {[
-          { href: "/#how", label: "How it works" },
-          { href: "/#faq", label: "FAQ" },
-          { href: "/security", label: "Security" },
-        ].map(({ href, label }) => (
+        {NAV_LINKS.map(({ href, label }) => (
           <a
             key={href}
             href={href}
@@ -83,7 +115,7 @@ export function StickyNav({
               ? `Star Murph on GitHub (${githubStarCount} stars)`
               : "Star Murph on GitHub"
           }
-          className={`hidden items-center gap-1.5 text-sm transition-colors sm:inline-flex ${
+          className={`hidden items-center gap-1.5 text-sm transition-colors md:inline-flex ${
             scrolled
               ? "text-white/75 hover:text-white"
               : "text-[#2d3436]/80 hover:text-[#2d3436]"
@@ -108,7 +140,67 @@ export function StickyNav({
           {...(preloadAuthPanel ? { preloadAuthPanel: true } : {})}
           splitUnauthenticated={splitUnauthenticatedAuth}
         />
+        <Drawer open={menuOpen} onOpenChange={setMenuOpen}>
+          <DrawerTrigger
+            aria-label="Open menu"
+            className={`inline-flex size-9 items-center justify-center rounded-lg transition-colors md:hidden ${
+              scrolled
+                ? "text-white/85 hover:bg-white/10"
+                : "text-[#2d3436]/85 hover:bg-[#2d3436]/[0.06]"
+            }`}
+          >
+            <Menu className="size-5" aria-hidden="true" />
+          </DrawerTrigger>
+          <DrawerContent
+            aria-describedby={undefined}
+            className="border-[#c4a882]/25 bg-[#f5f0e8]"
+          >
+            <DrawerTitle className="sr-only">Menu</DrawerTitle>
+            <nav className="flex flex-col px-3 pb-10 pt-2">
+              {NAV_LINKS.map(({ href, label }) => (
+                <a
+                  key={href}
+                  href={href}
+                  className={MOBILE_MENU_ROW}
+                  onClick={(event) => handleMenuLinkClick(event, href)}
+                >
+                  {label}
+                </a>
+              ))}
+              <a
+                href={GITHUB_REPO_URL}
+                target="_blank"
+                rel="noreferrer"
+                className={MOBILE_MENU_ROW}
+                onClick={() => setMenuOpen(false)}
+              >
+                GitHub
+              </a>
+              {!authenticated && splitUnauthenticatedAuth ? (
+                <>
+                  <div
+                    aria-hidden="true"
+                    className="mx-5 my-2 h-px bg-[#c4a882]/25"
+                  />
+                  <button
+                    type="button"
+                    className={`${MOBILE_MENU_ROW} text-left`}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setLoginOpen(true);
+                    }}
+                  >
+                    Log in
+                  </button>
+                </>
+              ) : null}
+            </nav>
+          </DrawerContent>
+        </Drawer>
       </div>
+      {!authenticated && splitUnauthenticatedAuth ? (
+        <LandingAuthDialog open={loginOpen} onOpenChange={setLoginOpen} />
+      ) : null}
     </nav>
   );
 }

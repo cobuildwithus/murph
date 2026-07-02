@@ -636,6 +636,11 @@ export function buildHostedCodexConfigToml(input: {
     "",
     "[shell_environment_policy]",
     `inherit = ${tomlString(HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,
+    // include_only is the single gate for shell env. Codex's default
+    // *KEY*/*TOKEN*/*SECRET* excludes run before include_only and can only
+    // subtract deliberately allowlisted vars (bridge token, provider keys),
+    // so they add no protection here and must stay off.
+    "ignore_default_excludes = true",
     `include_only = ${tomlStringArray(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)}`,
     "",
     "[shell_environment_policy.set]",

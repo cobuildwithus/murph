@@ -205,7 +205,6 @@ export function resolveAssistantProviderPrompt(
 }
 
 export function mergeCodexConfigOverrides(input: {
-  enableMultiAgentV2?: boolean
   modelProvider?: string | null
   showThinkingTraces: boolean
 }): readonly string[] | undefined {
@@ -256,21 +255,11 @@ export function mergeCodexConfigOverrides(input: {
       'false',
     )
   }
-  if (modelProviderConfig) {
-    upsertCodexConfigOverride(
-      overrides,
-      'shell_environment_policy.ignore_default_excludes',
-      'false',
-    )
-  }
-  if (input.enableMultiAgentV2) {
-    upsertCodexConfigOverride(
-      overrides,
-      'features.multi_agent_v2',
-      'true',
-    )
-  }
-
+  // Multi-agent V2 is enabled by the hosted config.toml's
+  // [features.multi_agent_v2] table (which also carries
+  // root_agent_usage_hint_text). A CLI `--config features.multi_agent_v2=true`
+  // boolean would take precedence over that table and silently reset the
+  // feature to defaults, dropping the configured usage hint — never emit it.
   if (!input.showThinkingTraces) {
     return overrides.length > 0 ? overrides : undefined
   }
