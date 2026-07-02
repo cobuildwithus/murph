@@ -2380,7 +2380,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("does not bind a new active member home route from a stale bare home-line recipient", async () => {
+  it("binds an active member's bare home-line recipient even when the line left the assignable pool", async () => {
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
       linqChatIdEncrypted: null,
       linqHomeLineAssignedAt: new Date("2026-03-26T12:00:00.000Z"),
@@ -2430,14 +2430,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       timestamp: null,
     });
 
+    // The bare assignment is durable authority: line-pool assignability
+    // gates new claims, not routes the member already owns.
     expect(response).toMatchObject({
-      ignored: true,
+      ignored: false,
       ok: true,
-      reason: "unassignable-home-line",
+      reason: "wake-appended-active-member",
     });
-    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
-    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(hostedMemberRouting.upsert).toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 

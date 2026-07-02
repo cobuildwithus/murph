@@ -176,7 +176,7 @@ async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  const currentRoute = resolveHostedMemberCurrentLinqRoute(routing);
+  const authority = readHostedLinqHomeLineAuthority(routing);
 
   if (!hostedLinqRouteBindingAuthorityMatchesCurrentRoute({
     authority: input.memberAuthority ?? { kind: "member-identity" },
@@ -191,16 +191,12 @@ async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
     };
   }
 
-  // A durable bare line assignment (recipient phone with no chat bound yet)
-  // is home-line authority: it must redirect other-line inbound traffic the
-  // same way a chat-bound home route does.
-  const assignedHomeRecipientPhone =
-    currentRoute?.recipientPhone
-    ?? normalizePhoneNumber(routing?.linqRecipientPhone);
+  const authorityChatId = authority.kind === "none" ? null : authority.chatId;
+  const authorityRecipientPhone = authority.kind === "none" ? null : authority.recipientPhone;
 
   const routeDecision = resolveHostedLinqActiveRouteDecision({
-    homeChatId: currentRoute?.chatId ?? null,
-    homeRecipientPhone: assignedHomeRecipientPhone,
+    homeChatId: authorityChatId,
+    homeRecipientPhone: authorityRecipientPhone,
     incomingChatId: input.incomingChatId,
     incomingDirectAttested: input.incomingDirectAttested,
     incomingRecipientPhone: input.incomingRecipientPhone,
@@ -214,42 +210,26 @@ async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
   }
 
   const recipientPhone = resolveHostedLinqHomeBindingRecipientPhone({
-    homeChatId: currentRoute?.chatId ?? null,
-    homeRecipientPhone: assignedHomeRecipientPhone,
+    homeChatId: authorityChatId,
+    homeRecipientPhone: authorityRecipientPhone,
     incomingChatId: input.incomingChatId,
     incomingRecipientPhone: input.incomingRecipientPhone,
   });
 
-  if (currentRoute?.chatId === input.incomingChatId) {
-    if (currentRoute.kind === "pending" && recipientPhone) {
-      const line = await readHostedLinqAssignableHomeLineByPhone({
-        phoneNumber: recipientPhone,
-        prisma: input.prisma,
-      });
-
-      if (!line) {
-        return {
-          kind: "done",
-          result: {
-            kind: "unassignable",
-          },
-        };
-      }
-
-      return {
-        kind: "done",
-        result: {
-          homeLineAssignedAt: routing?.linqHomeLineAssignedAt ?? null,
-          kind: "bind",
-          recipientPhone: line.phoneNumber,
-        },
-      };
-    }
-
+  // An existing authority binds from the routing row alone; the assignable
+  // pool gates only new claims, so a degraded or de-configured line never
+  // drops a route the member already owns.
+  if (
+    authority.kind !== "none"
+    && (
+      authority.chatId === input.incomingChatId
+      || (authority.recipientPhone !== null && authority.recipientPhone === recipientPhone)
+    )
+  ) {
     return {
       kind: "done",
       result: {
-        homeLineAssignedAt: routing?.linqHomeLineAssignedAt ?? null,
+        homeLineAssignedAt: authority.assignedAt,
         kind: "bind",
         recipientPhone,
       },
@@ -275,34 +255,6 @@ async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
       kind: "done",
       result: {
         kind: "unassignable",
-      },
-    };
-  }
-
-  if (routing && currentRoute && currentRoute.recipientPhone === line.phoneNumber) {
-    return {
-      kind: "done",
-      result: {
-        homeLineAssignedAt: routing.linqHomeLineAssignedAt ?? null,
-        kind: "bind",
-        recipientPhone: line.phoneNumber,
-      },
-    };
-  }
-
-  const homeRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
-  if (
-    routing
-    && !routing.linqChatId
-    && !routing.pendingLinqChatId
-    && homeRecipientPhone === line.phoneNumber
-  ) {
-    return {
-      kind: "done",
-      result: {
-        homeLineAssignedAt: routing.linqHomeLineAssignedAt ?? null,
-        kind: "bind",
-        recipientPhone: line.phoneNumber,
       },
     };
   }
@@ -471,21 +423,12 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
     };
   }
 
+  // An existing pending route is durable authority; promoting it must not
+  // depend on the line still being in the assignable pool.
   const pendingLinqRecipientPhone = normalizePhoneNumber(routing?.pendingLinqRecipientPhone);
-  const pendingLinqRecipientLine = pendingLinqRecipientPhone
-    ? await readHostedLinqAssignableHomeLineByPhone({
-        phoneNumber: pendingLinqRecipientPhone,
-        prisma: input.prisma,
-      })
-    : null;
   if (
     routing?.pendingLinqChatId
     && linqContactLookupKey
-    && (
-      pendingLinqRecipientPhone
-        ? pendingLinqRecipientLine !== null
-        : true
-    )
     && (
       memberPhoneNumber
         ? pendingLinqRecipientPhone !== null
@@ -641,21 +584,16 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
   routing: HostedMemberRoutingStateSnapshot | null;
 }): Promise<{ homeLineAssignedAt?: Date; recipientPhone: string | null } | "needs_claim"> {
   const routing = input.routing;
+  // An existing assigned line is durable authority; activation keeps it
+  // without rechecking assignable-pool eligibility.
   const existingRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
   if (existingRecipientPhone) {
-    const existingRecipientLine = await readHostedLinqAssignableHomeLineByPhone({
-      phoneNumber: existingRecipientPhone,
-      prisma: input.prisma,
-    });
-
-    if (existingRecipientLine) {
-      return {
-        ...(routing?.linqHomeLineAssignedAt
-          ? { homeLineAssignedAt: routing.linqHomeLineAssignedAt }
-          : {}),
-        recipientPhone: existingRecipientLine.phoneNumber,
-      };
-    }
+    return {
+      ...(routing?.linqHomeLineAssignedAt
+        ? { homeLineAssignedAt: routing.linqHomeLineAssignedAt }
+        : {}),
+      recipientPhone: existingRecipientPhone,
+    };
   }
 
   // Claiming a new line consumes pool capacity; the caller must hold the
@@ -702,11 +640,35 @@ async function reserveHostedLinqHomeLineForLineAfterLockTx(input: {
   };
 }
 
-function resolveHostedMemberCurrentLinqRoute(
+export type HostedLinqHomeLineAuthority =
+  | {
+      kind: "none";
+    }
+  | {
+      assignedAt: Date | null;
+      chatId: string;
+      kind: "home" | "pending";
+      recipientPhone: string | null;
+    }
+  | {
+      assignedAt: Date | null;
+      chatId: null;
+      kind: "bare";
+      recipientPhone: string;
+    };
+
+/**
+ * The single durable interpretation of a member's hosted_member_routing row
+ * as home-line authority. Every consumer resolves existing routes through
+ * this projection; only a "none" authority may claim a new line from the
+ * assignable pool.
+ */
+export function readHostedLinqHomeLineAuthority(
   routing: HostedMemberRoutingStateSnapshot | null,
-): { chatId: string; kind: "home" | "pending"; recipientPhone: string | null } | null {
+): HostedLinqHomeLineAuthority {
   if (routing?.linqChatId) {
     return {
+      assignedAt: routing.linqHomeLineAssignedAt ?? null,
       chatId: routing.linqChatId,
       kind: "home",
       recipientPhone: normalizePhoneNumber(routing.linqRecipientPhone),
@@ -715,13 +677,28 @@ function resolveHostedMemberCurrentLinqRoute(
 
   if (routing?.pendingLinqChatId) {
     return {
+      assignedAt: routing.linqHomeLineAssignedAt ?? null,
       chatId: routing.pendingLinqChatId,
       kind: "pending",
-      recipientPhone: normalizePhoneNumber(routing.pendingLinqRecipientPhone),
+      recipientPhone:
+        normalizePhoneNumber(routing.pendingLinqRecipientPhone)
+        ?? normalizePhoneNumber(routing.linqRecipientPhone),
     };
   }
 
-  return null;
+  const bareRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
+  if (routing && bareRecipientPhone) {
+    return {
+      assignedAt: routing.linqHomeLineAssignedAt ?? null,
+      chatId: null,
+      kind: "bare",
+      recipientPhone: bareRecipientPhone,
+    };
+  }
+
+  return {
+    kind: "none",
+  };
 }
 
 function hostedLinqRouteBindingAuthorityMatchesCurrentRoute(input: {
