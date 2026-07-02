@@ -1408,3 +1408,100 @@ describe("Linq group chat auto-provision", () => {
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 });
+
+describe("Linq group chat concurrent provisioning race", () => {
+  it("routes a concurrent-loser first group message into the winner's container", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    const senderCore = {
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_owner_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    };
+    const accountLookupKey = createHostedPhoneLookupKey("+15550000000");
+    const threadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey,
+      channel: "linq",
+      threadId: "chat_group_123",
+    });
+    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "linq",
+      threadId: "chat_group_123",
+    });
+    if (!threadLookupKey || !threadIdentityLookupKey) {
+      throw new Error("Expected test lookup keys.");
+    }
+    // Another active member on the same pooled line already won the provisioning
+    // race and committed this route while our webhook was in flight.
+    prisma.seedThreadRoute({
+      channel: "linq",
+      containerMemberId: "member_thread_container_999",
+      ownerMemberId: "member_winner_456",
+      threadIdentityLookupKey,
+      threadLookupKey,
+    });
+    // The planner's two initial route lookups ran before the winner committed,
+    // so they miss; every later read observes the committed route.
+    const statefulFindMany = prisma.hostedThreadRoute.findMany.getMockImplementation()!;
+    let findManyCalls = 0;
+    prisma.hostedThreadRoute.findMany.mockImplementation(async (args: never) => {
+      findManyCalls += 1;
+      if (findManyCalls <= 2) {
+        return [];
+      }
+      return statefulFindMany(args);
+    });
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).mockResolvedValue({
+      core: senderCore,
+      identity: {},
+      matchedBy: "phoneNumber",
+    } as Awaited<ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>>);
+    vi.mocked(memberRoutingStore.readHostedMemberHomeLinqRoute).mockResolvedValue({
+      linqChatId: "chat_home_123",
+      linqRecipientPhone: "+15550000000",
+    } as Awaited<ReturnType<typeof memberRoutingStore.readHostedMemberHomeLinqRoute>>);
+    vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue(senderCore);
+    vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValue(null);
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: buildHostedMailboxItem({
+        id: "mailbox_group_race_123",
+        userId: "member_thread_container_999",
+      }),
+    });
+    vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockResolvedValueOnce({
+      dayUtc: new Date("2026-06-24T00:00:00.000Z"),
+      inboundCount: 1,
+      memberId: "member_thread_container_999",
+      outboundCount: 0,
+      quotaReplySentAt: null,
+    } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
+    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
+      allowed: true,
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 4_500_000n,
+      memberId: "member_thread_container_999",
+      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      periodStart: new Date("2026-06-01T00:00:00.000Z"),
+      remainingUsdMicros: 4_500_000n,
+      spentUsdMicros: 0n,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+    expect(plan.wakeUserId).toBe("member_thread_container_999");
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
+  });
+});

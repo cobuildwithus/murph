@@ -1030,12 +1030,15 @@ async function planHostedLinqGroupChatWebhook(input: {
     });
   } catch (error) {
     if (
-      isHostedOnboardingError(error)
-      && HOSTED_LINQ_GROUP_PROVISION_UNAVAILABLE_ERROR_CODES.has(error.code)
+      !isHostedOnboardingError(error)
+      || !HOSTED_LINQ_GROUP_PROVISION_UNAVAILABLE_ERROR_CODES.has(error.code)
     ) {
-      return ignored("group-chat-provision-unavailable");
+      throw error;
     }
-    throw error;
+    // A concurrent first message may have bound this thread while this webhook
+    // was in flight (pooled lines allow two members of the same group to race).
+    // Fall through to the re-read and converge on the committed route instead
+    // of dropping an authorized inbound; a missing route still fails closed.
   }
 
   const route = await readHostedThreadRouteByExternalThread({

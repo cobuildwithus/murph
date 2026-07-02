@@ -1261,15 +1261,26 @@ function createHostedConversationAssistantInputSourceMetadata(
   identifierBlind: HostedAssistantConversationIdentifierBlind,
 ): UpsertAssistantInputEventInput["sourceMetadata"] {
   if (isHostedLinqConversationMessageWake(wake)) {
+    const externalThreadRouteAuthorityPresent = wake.message.routeAuthority !== undefined
+      && wake.message.routeAuthority !== null;
     return {
-      externalThreadRouteAuthorityPresent: wake.message.routeAuthority !== undefined
-        && wake.message.routeAuthority !== null,
+      externalThreadRouteAuthorityPresent,
       kind: "linq",
       partCount: wake.message.linqMessage.parts.length,
       reactionEligible: wake.message.linqMessage.reactionEligible === true,
       replyToMessageId: normalizeHostedAssistantInputSourceMetadataToken(
         wake.message.linqMessage.replyToMessageId ?? null,
       ),
+      // Thread-container (group) inbound carries the sending participant's
+      // handle so the assistant can attribute messages; 1:1 home threads have
+      // a single known sender and stay handle-free.
+      ...(externalThreadRouteAuthorityPresent
+        ? {
+            senderHandle: normalizeHostedAssistantInputSourceMetadataToken(
+              wake.message.linqMessage.from ?? null,
+            ),
+          }
+        : {}),
       service: normalizeHostedAssistantInputSourceMetadataToken(
         wake.message.linqMessage.service ?? null,
       ),
