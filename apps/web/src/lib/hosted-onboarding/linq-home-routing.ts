@@ -22,7 +22,6 @@ import {
 import {
   type HostedLinqAssignableHomeLine,
   listHostedLinqAssignableHomeLines,
-  readHostedLinqAssignableHomeLineByPhone,
 } from "./linq-line-store";
 import { normalizePhoneNumber } from "./phone";
 import { hostedOnboardingError } from "./errors";
@@ -76,16 +75,16 @@ export type HostedLinqHomeLineRouteBindingAuthority =
       kind: "member-identity";
     };
 
-export async function reserveHostedLinqHomeLineForPhoneTx(input: {
-  phoneNumber: string;
+export async function reserveHostedLinqHomeLineFromPoolTx(input: {
+  preferredRecipientPhone: string | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLinePhoneReservationResult> {
   await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
     prisma: input.prisma,
   });
 
-  return reserveHostedLinqHomeLineForPhoneAfterLockTx({
-    phoneNumber: input.phoneNumber,
+  return reserveHostedLinqHomeLineFromPoolAfterLockTx({
+    preferredRecipientPhone: input.preferredRecipientPhone,
     prisma: input.prisma,
   });
 }
@@ -436,39 +435,6 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
         line: chosen,
       }
     : null;
-}
-
-async function reserveHostedLinqHomeLineForPhoneAfterLockTx(input: {
-  phoneNumber: string;
-  prisma: Prisma.TransactionClient;
-}): Promise<HostedLinqHomeLinePhoneReservationResult> {
-  const line = await readHostedLinqAssignableHomeLineByPhone({
-    phoneNumber: input.phoneNumber,
-    prisma: input.prisma,
-  });
-
-  if (!line) {
-    return {
-      kind: "unassignable",
-    };
-  }
-
-  const reservation = await reserveHostedLinqHomeLineFromCandidatesTx({
-    lines: [line],
-    preferredRecipientPhone: line.phoneNumber,
-    prisma: input.prisma,
-  });
-
-  if (!reservation) {
-    return {
-      kind: "capacity_exhausted",
-    };
-  }
-
-  return {
-    kind: "reserved",
-    reservation,
-  };
 }
 
 async function resolveHostedMemberActivationTargetRecipientPhone(input: {

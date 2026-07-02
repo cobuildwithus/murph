@@ -306,44 +306,6 @@ export async function listHostedLinqAssignableHomeLines(input: {
   return mapHostedLinqAssignableHomeLineRows(rows);
 }
 
-export async function readHostedLinqAssignableHomeLineByPhone(input: {
-  phoneNumber: string;
-  prisma: HostedLinqLineClient;
-}): Promise<HostedLinqAssignableHomeLine | null> {
-  const phoneNumber = normalizePhoneNumber(input.phoneNumber);
-  const lookupKeys = createHostedPhoneLookupKeyReadCandidates(phoneNumber);
-  if (!phoneNumber || lookupKeys.length === 0) {
-    return null;
-  }
-
-  const rows = await input.prisma.hostedLinqLine.findMany({
-    where: {
-      configuredAt: { not: null },
-      egressPolicy: "enabled",
-      healthStatus: { in: ["healthy", "unknown"] },
-      phoneNumberEncrypted: { not: null },
-      phoneNumberLookupKey: {
-        in: lookupKeys,
-      },
-    },
-    orderBy: [
-      { phoneNumberLookupKey: "asc" },
-    ],
-    take: lookupKeys.length,
-    select: {
-      activeMemberLimit: true,
-      assignmentWeight: true,
-      maxNewConversationsPerDay: true,
-      phoneNumberEncrypted: true,
-      phoneNumberHint: true,
-      phoneNumberLookupKey: true,
-    },
-  });
-
-  return mapHostedLinqAssignableHomeLineRows(rows)
-    .find((line) => line.phoneNumber === phoneNumber) ?? null;
-}
-
 export async function assertHostedLinqAssignableHomeLinePoolReady(input: {
   prisma: HostedLinqLineClient;
 }): Promise<void> {

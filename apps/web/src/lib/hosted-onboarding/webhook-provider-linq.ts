@@ -81,7 +81,7 @@ import {
   type HostedLinqHomeLineRouteBindingAuthority,
   type HostedLinqHomeLineRouteBindingResult,
   resolveHostedMemberLinqHomeLineRouteBindingTx,
-  reserveHostedLinqHomeLineForPhoneTx,
+  reserveHostedLinqHomeLineFromPoolTx,
 } from "./linq-home-routing";
 import {
   createHostedPhoneLookupKeyReadCandidates,
@@ -952,8 +952,8 @@ async function resolveIncomingHostedLinqHomeLineRouteBindingTx(input: {
     };
   }
 
-  const reservationResult = await reserveHostedLinqHomeLineForPhoneTx({
-    phoneNumber: input.incomingRecipientPhone,
+  const reservationResult = await reserveHostedLinqHomeLineFromPoolTx({
+    preferredRecipientPhone: input.incomingRecipientPhone,
     prisma: input.prisma,
   });
 

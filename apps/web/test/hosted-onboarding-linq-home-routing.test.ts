@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   listHostedLinqAssignableHomeLines: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
-  readHostedLinqAssignableHomeLineByPhone: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberHomeLinqRecipientPhoneTx: vi.fn(),
 }));
@@ -28,11 +27,11 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
   listHostedLinqAssignableHomeLines: mocks.listHostedLinqAssignableHomeLines,
-  readHostedLinqAssignableHomeLineByPhone: mocks.readHostedLinqAssignableHomeLineByPhone,
 }));
 
 import {
   readHostedLinqHomeLineAuthority,
+  reserveHostedLinqHomeLineFromPoolTx,
   resolveHostedMemberLinqHomeLineRouteBindingTx,
   resolveHostedMemberActivationLinqRoute,
 } from "@/src/lib/hosted-onboarding/linq-home-routing";
@@ -102,6 +101,92 @@ describe("readHostedLinqHomeLineAuthority", () => {
   });
 });
 
+describe("reserveHostedLinqHomeLineFromPoolTx", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
+    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
+  });
+
+  it("reserves the preferred line when it is healthy and under quota", async () => {
+    const preferredLine = buildLine("+15550100001", { maxNewConversationsPerDay: 2 });
+    const fallbackLine = buildLine("+15550100002", { maxNewConversationsPerDay: 2 });
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+      fallbackLine,
+      preferredLine,
+    ]);
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
+      new Map([
+        [fallbackLine.phoneNumber, 0],
+        [preferredLine.phoneNumber, 1],
+      ]),
+    );
+
+    await expect(
+      reserveHostedLinqHomeLineFromPoolTx({
+        preferredRecipientPhone: preferredLine.phoneNumber,
+        prisma: {} as never,
+      }),
+    ).resolves.toMatchObject({
+      kind: "reserved",
+      reservation: {
+        line: preferredLine,
+      },
+    });
+
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.listHostedLinqAssignableHomeLines.mock.invocationCallOrder[0]);
+  });
+
+  it("falls over to another assignable line when the preferred line is at quota", async () => {
+    const preferredLine = buildLine("+15550100001", { maxNewConversationsPerDay: 1 });
+    const fallbackLine = buildLine("+15550100002", { maxNewConversationsPerDay: 1 });
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
+      preferredLine,
+      fallbackLine,
+    ]);
+    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
+      new Map([
+        [preferredLine.phoneNumber, 1],
+        [fallbackLine.phoneNumber, 0],
+      ]),
+    );
+
+    await expect(
+      reserveHostedLinqHomeLineFromPoolTx({
+        preferredRecipientPhone: preferredLine.phoneNumber,
+        prisma: {} as never,
+      }),
+    ).resolves.toMatchObject({
+      kind: "reserved",
+      reservation: {
+        line: fallbackLine,
+      },
+    });
+  });
+
+  it("falls over when the preferred line is not in the assignable pool", async () => {
+    const fallbackLine = buildLine("+15550100002");
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([fallbackLine]);
+
+    await expect(
+      reserveHostedLinqHomeLineFromPoolTx({
+        preferredRecipientPhone: "+15550100001",
+        prisma: {} as never,
+      }),
+    ).resolves.toMatchObject({
+      kind: "reserved",
+      reservation: {
+        line: fallbackLine,
+      },
+    });
+  });
+});
+
 describe("resolveHostedMemberActivationLinqRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -110,9 +195,6 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
-    mocks.readHostedLinqAssignableHomeLineByPhone.mockImplementation(({ phoneNumber }) =>
-      Promise.resolve(buildLine(phoneNumber))
-    );
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockResolvedValue(undefined);
   });
@@ -198,7 +280,6 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       activeMemberLimit: 1,
       maxNewConversationsPerDay: 1,
     });
-    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(line);
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([line]);
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockImplementation(async () => {
       throw new Error("existing direct routes must not consume daily capacity");
@@ -268,7 +349,6 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       memberId: "member_123",
       prisma: {} as never,
     });
-    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
     expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
       clearPending: true,
@@ -334,7 +414,6 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       memberId: "member_123",
       prisma: {} as never,
     });
-    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
     expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
       clearPending: true,
@@ -377,7 +456,6 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       memberId: "member_123",
       prisma: {} as never,
     });
-    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
     expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
       clearPending: true,
@@ -421,7 +499,6 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
   });
 
   it("promotes a reserved pending Linq thread even when its line left the assignable pool", async () => {
-    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(null);
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([
       buildLine("+15550100002"),
     ]);
@@ -542,9 +619,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
-    mocks.readHostedLinqAssignableHomeLineByPhone.mockImplementation(({ phoneNumber }) =>
-      Promise.resolve(buildLine(phoneNumber, { maxNewConversationsPerDay: 1 }))
-    );
   });
 
   it("reuses an existing pending route assignment without consuming another daily assignment", async () => {
@@ -563,7 +637,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       telegramUserId: null,
       telegramUserLookupKey: null,
     });
-    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(line);
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
       new Map([["+15550100001", 1]]),
     );
@@ -587,7 +660,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       memberId: "member_123",
       prisma: {} as never,
     });
-    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
   });
@@ -706,7 +778,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       kind: "ignore_unknown_home",
     });
 
-    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
   });
@@ -746,7 +817,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       kind: "ignore_unknown_home",
     });
 
-    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
   });
@@ -770,7 +840,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       telegramUserId: null,
       telegramUserLookupKey: null,
     });
-    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(line);
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockImplementation(async () => {
       throw new Error("existing same-phone route claims must not consume daily capacity");
     });
@@ -820,7 +889,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       kind: "ignore_unattested_direct",
     });
 
-    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
   });
@@ -852,7 +920,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       kind: "ignore_unattested_direct",
     });
 
-    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
   });
@@ -872,13 +939,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       telegramUserId: null,
       telegramUserLookupKey: null,
     });
-    mocks.readHostedLinqAssignableHomeLineByPhone.mockImplementation(async ({ phoneNumber }) => {
-      if (phoneNumber !== pendingLine.phoneNumber) {
-        throw new Error("pending route binding must not use the stale home recipient");
-      }
-      return pendingLine;
-    });
-
     await expect(
       resolveHostedMemberLinqHomeLineRouteBindingTx({
         incomingChatId: "chat_pending",
@@ -893,7 +953,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       recipientPhone: pendingLine.phoneNumber,
     });
 
-    expect(mocks.readHostedLinqAssignableHomeLineByPhone).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).not.toHaveBeenCalled();
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
   });
@@ -916,7 +975,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       telegramUserId: null,
       telegramUserLookupKey: null,
     });
-    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(line);
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockImplementation(async () => {
       throw new Error("migrated same-phone route claims must not consume daily capacity");
     });
@@ -956,7 +1014,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       telegramUserId: null,
       telegramUserLookupKey: null,
     });
-    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(line);
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockImplementation(async () => {
       throw new Error("existing direct routes must not consume daily capacity");
     });
@@ -1001,7 +1058,6 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       telegramUserId: null,
       telegramUserLookupKey: null,
     });
-    mocks.readHostedLinqAssignableHomeLineByPhone.mockResolvedValue(line);
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockImplementation(async () => {
       throw new Error("existing direct routes must not consume daily capacity");
     });

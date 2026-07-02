@@ -2911,7 +2911,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(response).toMatchObject({
       ignored: true,
       ok: true,
-      reason: "unassignable-home-line",
+      reason: "home-line-capacity-exhausted",
     });
     expect(hostedLinqLine.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
@@ -3429,7 +3429,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(response).toMatchObject({
       ignored: true,
       ok: true,
-      reason: "unassignable-home-line",
+      reason: "home-line-capacity-exhausted",
     });
     expect(prismaMocks.hostedLinqLine.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({

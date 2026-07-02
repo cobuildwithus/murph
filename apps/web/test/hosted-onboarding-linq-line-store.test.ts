@@ -10,7 +10,6 @@ import {
   HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT,
   listHostedLinqAssignableHomeLines,
   listHostedLinqContactCardLines,
-  readHostedLinqAssignableHomeLineByPhone,
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
@@ -138,44 +137,6 @@ describe("listHostedLinqAssignableHomeLines", () => {
       code: "HOSTED_LINQ_ASSIGNABLE_LINE_LIMIT_EXCEEDED",
       httpStatus: 500,
     });
-  });
-});
-
-describe("readHostedLinqAssignableHomeLineByPhone", () => {
-  it("looks up a sender line by readable phone blind indexes instead of scanning the pool", async () => {
-    const findMany = vi.fn().mockResolvedValue([
-      buildAssignableLineRow("+15550100001"),
-    ]);
-    const prisma = {
-      hostedLinqLine: {
-        findMany,
-      },
-    } as never;
-
-    await expect(
-      readHostedLinqAssignableHomeLineByPhone({
-        phoneNumber: "+1 (555) 010-0001",
-        prisma,
-      }),
-    ).resolves.toMatchObject({
-      phoneNumber: "+15550100001",
-      phoneNumberHint: "*** 0001",
-    });
-
-    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
-      take: expect.any(Number),
-      where: expect.objectContaining({
-        configuredAt: { not: null },
-        egressPolicy: "enabled",
-        healthStatus: { in: ["healthy", "unknown"] },
-        phoneNumberEncrypted: { not: null },
-        phoneNumberLookupKey: {
-          in: expect.arrayContaining([
-            expect.stringMatching(/^hbidx:phone:/u),
-          ]),
-        },
-      }),
-    }));
   });
 });
 
