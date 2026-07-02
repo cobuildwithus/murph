@@ -54,6 +54,7 @@ export function createSupplementsQueries(client: ProductLabelsQueryClient): {
 } {
   const queries = createProductLabelsQueries(client, "supplements", {
     brandScoping: true,
+    stemmedSearch: true,
     weakQueryTokens: SUPPLEMENT_SEARCH_WEAK_QUERY_TOKENS,
   });
 
