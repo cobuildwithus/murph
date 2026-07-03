@@ -1221,6 +1221,134 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("services an already-projected due assistant wake after durable follow-up checkpointing", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const dueWakeAt = new Date(Date.now() - 1_000).toISOString();
+    const durableEffect = vi.fn(async () => {
+      events.push("durable-effect");
+      return {
+        nextWakeAt: dueWakeAt,
+        nextWakeReason: "assistant",
+        requiresFollowUpCheckpoint: true,
+      };
+    });
+    let assistantPass = 0;
+    let snapshotCount = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_projected_follow_up_due_wake",
+            idleCheckpointDelayMs: 25,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            snapshotCount += 1;
+            events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: String(snapshotCount).repeat(64),
+                key: `users/bundles/member-synthetic/projected-follow-up-due-wake-${snapshotCount}.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assistantPass += 1;
+            events.push(`assistant:${assistantPass}`);
+
+            if (assistantPass === 1) {
+              return {
+                afterCheckpoint: async () => ({
+                  afterDurableCheckpoint: durableEffect,
+                  checkpointReason: "system_mailbox_receipt",
+                }),
+                checkpointReason: "system_mailbox_receipt",
+                nextWakeAt: dueWakeAt,
+                nextWakeReason: "assistant",
+                progressed: true,
+              };
+            }
+
+            if (assistantPass === 2) {
+              assert.equal(input.workspace?.nextWakeAt, dueWakeAt);
+              assert.equal(input.workspace?.nextWakeReason, "assistant");
+              assert.ok(events.includes("durable-effect"), events.join(","));
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: null,
+                nextWakeReason: null,
+                progressed: true,
+              };
+            }
+
+            throw new Error("Already-projected due wake should be serviced exactly once.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPass, 2, events.join(","));
+      assert.equal(durableEffect.mock.calls.length, 1);
+      assert.deepEqual(
+        checkpointRequests.map((request) => [
+          request.reason,
+          request.expectedWorkspaceVersion,
+          request.nextWakeAt,
+          request.nextWakeReason,
+        ]),
+        [
+          ["idle_shutdown", "0", dueWakeAt, "assistant"],
+          ["idle_shutdown", "1", dueWakeAt, "assistant"],
+          ["idle_shutdown", "2", null, null],
+        ],
+      );
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown:1")
+          < requireEventIndex(events, "durable-effect"),
+      );
+      assert.ok(
+        requireEventIndex(events, "durable-effect")
+          < requireEventIndex(events, "snapshot:idle_shutdown:2"),
+      );
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown:2")
+          < requireEventIndex(events, "assistant:2"),
+      );
+      assert.ok(
+        requireEventIndex(events, "assistant:2")
+          < requireEventIndex(events, "snapshot:idle_shutdown:3"),
+      );
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("services a checkpoint-blocked projected assistant wake after idle checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

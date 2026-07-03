@@ -2135,6 +2135,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               reason: durableCheckpointWakeReason,
             },
           ]);
+          const followUpCheckpointWakeKey = buildHostedRuntimeWakeKey({
+            nextWakeAt: followUpCheckpointWake.nextWakeAt,
+            nextWakeReason: followUpCheckpointWake.nextWakeReason,
+          });
           const followUpCheckpointWakeCameFromDurableEffect =
             durableCheckpointWakeAt !== null
             && hostedWorkspaceInvocationProjectionWakeMatches(followUpCheckpointWake, {
@@ -2145,12 +2149,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               followUpCheckpointWake,
               accumulatedProjection,
             );
+          const followUpCheckpointWakeRemainsServiceable =
+            followUpCheckpointWakeCameFromDurableEffect
+            || (
+              checkpointBlockedProjectedWakeKey !== null
+              && followUpCheckpointWakeKey === checkpointBlockedProjectedWakeKey
+            );
           accumulatedProjection = {
             ...accumulatedProjection,
             committedWorkspace: checkpoint.workspace,
             nextWakeAt: followUpCheckpointWake.nextWakeAt,
             nextWakeReason: followUpCheckpointWake.nextWakeReason,
-            projectedWakeCheckpointGateFresh: followUpCheckpointWakeCameFromDurableEffect,
+            projectedWakeCheckpointGateFresh: followUpCheckpointWakeRemainsServiceable,
             projectedWakeRequiresCheckpoint: true,
           };
           runtimeStateDirty = true;
