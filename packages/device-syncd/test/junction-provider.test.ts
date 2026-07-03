@@ -3590,6 +3590,32 @@ test("Junction completeConnection masks secret-bearing Link failure reason value
   );
 });
 
+test("Junction completeConnection masks colon-form token Link failure reasons", async () => {
+  const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
+
+  await assert.rejects(
+    requireJunctionConnectionHandler(provider).completeConnection({
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+      state: "state-1",
+      query: new URLSearchParams({
+        murph_state: "state-1",
+        error: "provider_connection_error",
+        error_description: "refresh token: abcdefghijklmnopqrst expired",
+      }),
+      now: "2026-04-03T00:00:00.000Z",
+      grantedScopes: [],
+    }),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_LINK_FAILED");
+      assert.ok(error.message.includes("error=provider_connection_error"));
+      assert.ok(error.message.includes("error_description=refresh token: <redacted-token> expired"));
+      assert.ok(!error.message.includes("abcdefghijklmnopqrst"));
+      return true;
+    },
+  );
+});
+
 test("Junction completeConnection rejects non-truthy success callbacks with the outcome suffix", async () => {
   const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
 
@@ -5977,6 +6003,69 @@ test("Junction ambiguous skip detail drops object-shaped display-name diagnostic
   const serializedWarnings = JSON.stringify(warnings);
   const serializedMetadata = JSON.stringify(result.metadataPatch);
   for (const sensitive of ["display_name", "Jane", "Doe"]) {
+    assert.equal(serializedWarnings.includes(sensitive), false);
+    assert.equal(serializedMetadata.includes(sensitive), false);
+  }
+});
+
+test("Junction ambiguous skip detail masks object-shaped direct user diagnostics", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        detail: {
+          type: "resource_misconfigured",
+          msg: "user: Jane Doe cannot access sleep_cycle",
+        },
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const expectedDetail = "resource_misconfigured: user: <redacted-id>";
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, expectedDetail);
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, expectedDetail);
+
+  const serializedWarnings = JSON.stringify(warnings);
+  const serializedMetadata = JSON.stringify(result.metadataPatch);
+  for (const sensitive of ["Jane", "Doe"]) {
     assert.equal(serializedWarnings.includes(sensitive), false);
     assert.equal(serializedMetadata.includes(sensitive), false);
   }

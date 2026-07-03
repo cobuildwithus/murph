@@ -44,8 +44,12 @@ const HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN =
 // renders; strip them before span matching so they cannot defeat the masks.
 const HOSTED_RUNTIME_DIAGNOSTIC_FORMAT_CHAR_PATTERN =
   /[\u00AD\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/gu;
+const HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_DELIMITED_PATTERN =
+  /\b((?:access|id|refresh|session)\s+token\b\s*[:=]\s*["']?)[^'",;\]\s]+/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_PATTERN =
   /\b((?:access|id|refresh|session)\s+token\s+["']?)[A-Za-z0-9._~+/=-]{16,}/giu;
+const HOSTED_RUNTIME_DIAGNOSTIC_DIRECT_IDENTIFIER_COLON_ASSIGNMENT_PATTERN =
+  /\b((?:account|client|external|member|owner|patient|provider[_\s-]?account|subject|team|user)\b\s*:\s*)(?:"[^"]*"|'[^']*'|[^,;\]\[]+)/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_COLON_ASSIGNMENT_PATTERN =
   /\b((?:account|client|external|member|owner|patient|provider[_\s-]?account|subject|team|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*:\s*)(?:"[^"]*"|'[^']*'|[A-Za-z0-9._~+/:=-]+)/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_ASSIGNMENT_TAIL_PATTERN =
@@ -2361,9 +2365,11 @@ export function sanitizeHostedRuntimeDiagnosticText(value: string | null): strin
     .replace(HOSTED_RUNTIME_ERROR_URL_PATTERN, "<redacted-url>")
     .replace(HOSTED_RUNTIME_ERROR_EMAIL_PATTERN, "<redacted-email>")
     .replace(HOSTED_RUNTIME_ERROR_PHONE_PATTERN, "<redacted-phone>")
+    .replace(HOSTED_RUNTIME_DIAGNOSTIC_DIRECT_IDENTIFIER_COLON_ASSIGNMENT_PATTERN, "$1<redacted-id>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_COLON_ASSIGNMENT_PATTERN, "$1<redacted-id>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_PHRASE_PATTERN, "$1<redacted-id>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_IPV4_PATTERN, "<redacted-ip>")
+    .replace(HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_DELIMITED_PATTERN, "$1<redacted-token>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_PATTERN, "$1<redacted-token>")
     .replace(
       HOSTED_RUNTIME_DIAGNOSTIC_DIGIT_TOKEN_PATTERN,

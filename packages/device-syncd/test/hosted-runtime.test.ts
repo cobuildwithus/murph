@@ -2011,6 +2011,9 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
       sanitizeHostedRuntimeDiagnosticText("display_name: Jane Doe cannot access sleep_cycle"),
     ).toBeNull();
     expect(
+      sanitizeHostedRuntimeDiagnosticText("user: Jane Doe cannot access sleep_cycle"),
+    ).toBe("user: <redacted-id>");
+    expect(
       sanitizeHostedRuntimeDiagnosticText("Provider reason: Refresh token expired. Reconnect WHOOP."),
     ).toBe("Provider reason: Refresh token expired. Reconnect WHOOP.");
   });
@@ -2022,6 +2025,9 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("refresh token abcdefghijklmnopqrst leaked"),
     ).toBe("refresh token <redacted-token> leaked");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("refresh token: abcdefghijklmnopqrst expired"),
+    ).toBe("refresh token: <redacted-token> expired");
     expect(
       sanitizeHostedRuntimeDiagnosticText("session token expired"),
     ).toBe("session token expired");

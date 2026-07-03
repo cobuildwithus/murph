@@ -58,6 +58,17 @@ test("provider diagnostics read nested JSON array validation entries", () => {
   );
 });
 
+test("provider diagnostics mask colon-form token descriptions", () => {
+  const diagnostics = inspectProviderErrorBody(JSON.stringify({
+    error_description: "refresh token: abcdefghijklmnopqrst expired",
+  }));
+
+  assert.equal(
+    diagnostics.responseErrorDescription,
+    "refresh token: <redacted-token> expired",
+  );
+});
+
 test("provider diagnostics ignore top-level primitive JSON array entries", () => {
   assert.deepEqual(
     inspectProviderErrorBody(JSON.stringify(["Jane Doe"])),
