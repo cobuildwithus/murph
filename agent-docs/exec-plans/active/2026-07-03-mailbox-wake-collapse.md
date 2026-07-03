@@ -345,6 +345,13 @@ Touch: `webhook-service-types.ts:17-26`;
   chats, keeping active-member webhook assertions isolated from onboarding
   follow-up automation. Focused local proof:
   `pnpm hosted-local e2e linq-webhook --no-bundle` passed.
+- PR 1 CI follow-up (2026-07-03): the rapid Linq webhook fixture now
+  scripts the grouped reply twice because CI can start the provider on
+  the first webhook and then steer the second webhook into that active
+  turn, consuming a second Responses API completion. The PDF media case
+  restarts the scenario before asserting attachment behavior so a failed
+  or leftover rapid turn cannot steal its queued response. Focused local
+  proof: `CI=true pnpm hosted-local e2e linq-webhook --no-bundle` passed.
 - PR 2: workflow replay tests per the patch procedure + Temporal
   orchestration E2E; full webhook owner suites for the wake-field
   collapse.

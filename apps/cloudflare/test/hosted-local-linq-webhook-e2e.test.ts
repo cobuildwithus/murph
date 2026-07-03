@@ -122,7 +122,12 @@ describe("hosted local Linq webhook e2e", () => {
       text: "I want to build more strength, improve endurance, and get fitter overall.",
     });
 
-    requireScenario().queueAssistantResponses([HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT]);
+    // CI can start the provider on the first webhook, then steer the second
+    // webhook into the active turn; cover both provider completions.
+    requireScenario().queueAssistantResponses([
+      HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
+      HOSTED_LINQ_GROUPED_ASSISTANT_REPLY_TEXT,
+    ]);
     const firstResponse = await postSignedLinqWebhook(firstWebhook);
     const secondResponse = await postSignedLinqWebhook(secondWebhook);
 
@@ -171,6 +176,7 @@ describe("hosted local Linq webhook e2e", () => {
   }, 300_000);
 
   it("keeps PDF-only iMessage media replyable with bounded attachment context", async () => {
+    await restartLinqScenario(buildLinqWebhookScenarioEnv);
     const { chatId: materializedChatId, replyChatPath: expectedReplyChatPath, userId } =
       await createActiveLinqWebhookMember("pdf");
     const outboundCountBeforeReply = requireLinqStub().countObservedSends(expectedReplyChatPath);
