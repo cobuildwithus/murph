@@ -23,6 +23,10 @@ import type { HostedRuntimeVaultSharePort } from "./platform.ts";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DAILY_MINUTES = 24 * 60;
 const HEART_RATE_ZONE_MINUTES_METRIC_KEY_PATTERN = /^heart-rate-zone-(\d+)-minutes$/u;
+const HEART_RATE_ZONE_MINUTES_METRIC_KEYS = Array.from(
+  { length: 21 },
+  (_, zone) => `heart-rate-zone-${zone}-minutes`,
+);
 
 export const HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW = 3;
 
@@ -306,16 +310,15 @@ export async function readProjectableHeartRateZoneDays(
   const cutoffDate = new Date(
     nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
   ).toISOString().slice(0, 10);
-  const points = await listMetricPoints(vaultRoot, {
-    from: cutoffDate,
-    limit: null,
-  });
-  const zoneMetricKeys = uniqueStrings(
-    points
-      .map((point) => point.metricKey)
-      .filter((metricKey) => HEART_RATE_ZONE_MINUTES_METRIC_KEY_PATTERN.test(metricKey)),
+  const points = await listMetricPointsBatch(
+    vaultRoot,
+    HEART_RATE_ZONE_MINUTES_METRIC_KEYS.map((metricKey) => ({
+      from: cutoffDate,
+      limit: null,
+      metricKey,
+    })),
   );
-  const rows = zoneMetricKeys.flatMap((metricKey) =>
+  const rows = HEART_RATE_ZONE_MINUTES_METRIC_KEYS.flatMap((metricKey) =>
     selectMetricSeries({
       duplicatePolicy: "selection-policy",
       from: cutoffDate,
@@ -652,8 +655,4 @@ function readContextString(context: MetricSeriesPoint["context"] | undefined, ke
   }
   const value = context[key];
   return typeof value === "string" ? value : undefined;
-}
-
-function uniqueStrings(values: readonly string[]): string[] {
-  return [...new Set(values)];
 }
