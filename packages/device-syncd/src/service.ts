@@ -841,10 +841,6 @@ class DeviceSyncServiceController {
       ensureJobLeasesOwned();
       ensureAccountActive();
 
-      if (!this.store.completeJobsIfOwned(activeJobs.map((activeJob) => activeJob.id), this.workerId, currentNow())) {
-        return finishPass();
-      }
-
       const successOptions: {
         localConnectionRevision: number;
         metadataPatch?: Record<string, unknown>;
@@ -861,18 +857,23 @@ class DeviceSyncServiceController {
         successOptions.nextReconcileAt = result.nextReconcileAt ?? null;
       }
 
-      const markedSucceeded = this.store.markSyncSucceeded(
-        storedAccount.id,
-        now,
+      const scheduledJobs = this.normalizeJobsForEnqueue(storedAccount, result.scheduledJobs ?? []);
+      const completion = this.store.completeJobsMarkSyncSucceededAndEnqueueJobs({
+        accountId: storedAccount.id,
+        completedAt: currentNow(),
         disconnectGeneration,
-        successOptions,
-      );
+        jobIds: activeJobs.map((activeJob) => activeJob.id),
+        jobs: scheduledJobs,
+        provider: provider.provider,
+        syncSucceededAt: now,
+        syncSuccessOptions: successOptions,
+        workerId: this.workerId,
+      });
 
-      if (!markedSucceeded) {
+      if (!completion.succeeded) {
         return finishPass();
       }
 
-      this.enqueueJobs(storedAccount, result.scheduledJobs ?? []);
       return finishPass();
     } catch (error) {
       if (isDeviceSyncJobExecutionYielded(error, jobAbortController.signal)) {
@@ -1317,19 +1318,25 @@ class DeviceSyncServiceController {
     account: Pick<PublicDeviceSyncAccount, "id" | "provider">,
     jobs: readonly DeviceSyncJobInput[],
   ): DeviceSyncJobRecord[] {
-    return jobs.map((job) => {
-      const normalizedJob = normalizeConfiguredDeviceSyncJobInput(account.provider, job, "enqueue");
-      return this.store.enqueueJob({
+    return this.normalizeJobsForEnqueue(account, jobs).map((job) =>
+      this.store.enqueueJob({
         provider: account.provider,
         accountId: account.id,
-        kind: normalizedJob.kind,
-        payload: normalizedJob.payload ?? {},
-        priority: normalizedJob.priority ?? 0,
-        availableAt: normalizedJob.availableAt,
-        maxAttempts: normalizedJob.maxAttempts,
-        dedupeKey: normalizedJob.dedupeKey,
-      });
-    });
+        kind: job.kind,
+        payload: job.payload ?? {},
+        priority: job.priority ?? 0,
+        availableAt: job.availableAt,
+        maxAttempts: job.maxAttempts,
+        dedupeKey: job.dedupeKey,
+      })
+    );
+  }
+
+  private normalizeJobsForEnqueue(
+    account: Pick<PublicDeviceSyncAccount, "provider">,
+    jobs: readonly DeviceSyncJobInput[],
+  ): DeviceSyncJobInput[] {
+    return jobs.map((job) => normalizeConfiguredDeviceSyncJobInput(account.provider, job, "enqueue"));
   }
 
   private async ensureWebhookAdminUpkeepAfterConnectionEstablished(provider: DeviceSyncProvider): Promise<void> {

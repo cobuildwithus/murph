@@ -2344,6 +2344,67 @@ test("device sync service preserves provider-level yield job results", async () 
   }
 });
 
+test("device sync service rolls back job success when scheduled follow-up enqueue fails", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-follow-up-enqueue-rollback");
+  const circularPayload: Record<string, unknown> = {};
+  circularPayload.self = circularPayload;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: {
+        warn() {
+          // The rollback is asserted through durable job/account state below.
+        },
+      },
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          return {
+            nextReconcileAt: "2026-03-19T00:00:00.000Z",
+            scheduledJobs: [
+              {
+                kind: "backfill",
+                payload: circularPayload,
+              },
+            ],
+          };
+        },
+      }),
+    ],
+  });
+
+  try {
+    const begin = await service.startConnection({
+      provider: "demo",
+    });
+    const connected = await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "enqueue-rollback",
+    });
+    const beforeWorker = store.getAccountById(connected.account.id);
+
+    const processedJob = await service.runWorkerOnce();
+    const jobs = readJobsForAccountForTesting(store, connected.account.id);
+    const afterWorker = store.getAccountById(connected.account.id);
+    const failedJob = store.getJobById(processedJob!.id);
+
+    assert.equal(processedJob?.kind, "backfill");
+    assert.equal(jobs.length, 1);
+    assert.equal(failedJob?.status, "dead");
+    assert.equal(failedJob?.lastErrorCode, "SYNC_JOB_FAILED");
+    assert.equal(afterWorker?.lastSyncCompletedAt, beforeWorker?.lastSyncCompletedAt);
+    assert.equal(afterWorker?.nextReconcileAt, beforeWorker?.nextReconcileAt);
+    assert.equal(afterWorker?.lastErrorCode, "SYNC_JOB_FAILED");
+  } finally {
+    close();
+  }
+});
+
 test("device sync worker skips claims while foreground work should yield", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-persistent-yield");
   const { service, store, close } = createServiceFixture({
@@ -3676,17 +3737,14 @@ test("device sync service fences success writes after local connection revision 
   });
   const accountBeforeWorker = store.getAccountById(connected.account.id);
   assert.ok(accountBeforeWorker);
-  const originalCompleteJobsIfOwned = store.completeJobsIfOwned.bind(store);
-  store.completeJobsIfOwned = (jobIds, workerId, now) => {
-    const completed = originalCompleteJobsIfOwned(jobIds, workerId, now);
-    if (completed) {
-      store.patchAccount(connected.account.id, {
-        metadata: {
-          localRevisionChanged: true,
-        },
-      });
-    }
-    return completed;
+  const originalCompleteAndSucceed = store.completeJobsMarkSyncSucceededAndEnqueueJobs.bind(store);
+  store.completeJobsMarkSyncSucceededAndEnqueueJobs = (input) => {
+    store.patchAccount(connected.account.id, {
+      metadata: {
+        localRevisionChanged: true,
+      },
+    });
+    return originalCompleteAndSucceed(input);
   };
 
   const workerPromise = service.runWorkerOnce();

@@ -33,6 +33,7 @@ import {
   completeDeviceSyncJob,
   completeDeviceSyncJobIfOwned,
   completeDeviceSyncJobsIfOwned,
+  completeDeviceSyncJobsIfOwnedInTransaction,
   enqueueDeviceSyncJobInTransaction,
   failDeviceSyncJob,
   failDeviceSyncJobIfOwned,
@@ -60,6 +61,7 @@ import {
   markConnectionSetupFailed as markStoredConnectionSetupFailed,
   markSyncStarted as markStoredSyncStarted,
   markSyncSucceeded as markStoredSyncSucceeded,
+  markSyncSucceededInTransaction as markStoredSyncSucceededInTransaction,
   markWebhookReceived as markStoredWebhookReceived,
   readNextActiveReconcileAt as readNextStoredActiveReconcileAt,
 } from "./store/sync-state.ts";
@@ -367,6 +369,61 @@ export class SqliteDeviceSyncStore {
       jobIds,
       now,
       workerId,
+    });
+  }
+
+  completeJobsMarkSyncSucceededAndEnqueueJobs(input: {
+    accountId: string;
+    completedAt: string;
+    disconnectGeneration: number | null;
+    jobIds: readonly string[];
+    jobs: readonly DeviceSyncJobInput[];
+    provider: string;
+    syncSucceededAt: string;
+    syncSuccessOptions: {
+      localConnectionRevision?: number | null;
+      metadataPatch?: Record<string, unknown>;
+      nextReconcileAt?: string | null;
+    };
+    workerId: string;
+  }): { queuedJobs: DeviceSyncJobRecord[]; succeeded: boolean } {
+    return withImmediateTransaction(this.database, () => {
+      const completed = completeDeviceSyncJobsIfOwnedInTransaction(this.database, {
+        jobIds: input.jobIds,
+        now: input.completedAt,
+        workerId: input.workerId,
+      });
+
+      if (!completed) {
+        return { queuedJobs: [], succeeded: false };
+      }
+
+      const markedSucceeded = markStoredSyncSucceededInTransaction(
+        this.database,
+        input.accountId,
+        input.syncSucceededAt,
+        input.disconnectGeneration,
+        input.syncSuccessOptions,
+      );
+
+      if (!markedSucceeded) {
+        return { queuedJobs: [], succeeded: false };
+      }
+
+      const queuedJobs = input.jobs.map((job) =>
+        enqueueDeviceSyncJobInTransaction(this.database, {
+          provider: input.provider,
+          accountId: input.accountId,
+          kind: job.kind,
+          payload: job.payload ?? {},
+          priority: job.priority ?? 0,
+          availableAt: job.availableAt,
+          maxAttempts: job.maxAttempts,
+          dedupeKey: job.dedupeKey,
+        })
+      );
+
+      return { queuedJobs, succeeded: true };
     });
   }
 
