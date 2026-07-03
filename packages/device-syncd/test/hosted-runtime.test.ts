@@ -13,6 +13,7 @@ import {
   parseHostedExecutionDeviceSyncRuntimeSnapshotRequest,
   parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   resolveHostedDeviceSyncWakeContext,
+  sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedRuntimeErrorText,
 } from "../src/hosted-runtime.ts";
 
@@ -1890,5 +1891,49 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         ],
       }),
     ).toThrow(/availableAt must be an ISO timestamp/i);
+  });
+});
+
+describe("sanitizeHostedRuntimeDiagnosticText", () => {
+  it("masks long opaque tokens in place instead of dropping the whole text", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText(
+        "Team 11649ed4-27e2-4718-959f-d68de1d1a120 is not configured for sleep_cycle.",
+      ),
+    ).toBe("Team <redacted-token> is not configured for sleep_cycle.");
+  });
+
+  it("masks identifier assignments while keeping the key visible", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("request rejected for user_id: hbm_abc123xyz upstream"),
+    ).toBe("request rejected for user_id: <redacted-id> upstream");
+  });
+
+  it("masks token phrases in prose", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("refresh token abc123 leaked"),
+    ).toBe("refresh token <redacted-token> leaked");
+  });
+
+  it("keeps bracketed validation prose", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText(
+        "Datetimes provided to dates should have zero time [type=date_from_datetime_inexact]",
+      ),
+    ).toBe("Datetimes provided to dates should have zero time [type=date_from_datetime_inexact]");
+  });
+
+  it("still fails closed on raw structured payload dumps", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText('unexpected body {"detail": "sleep_cycle disabled"}'),
+    ).toBeNull();
+  });
+
+  it("masks multiple unsafe spans in one string", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText(
+        "user 0123456789abcdef0123456789abcdef01 denied; retry as 11649ed4-27e2-4718-959f-d68de1d1a120",
+      ),
+    ).toBe("user <redacted-token> denied; retry as <redacted-token>");
   });
 });

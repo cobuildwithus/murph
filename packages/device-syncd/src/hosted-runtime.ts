@@ -33,14 +33,18 @@ const HOSTED_RUNTIME_ERROR_WINDOWS_PATH_PATTERN = /[A-Za-z]:\\[^\s)"']+/gu;
 const HOSTED_RUNTIME_ERROR_URL_PATTERN = /\bhttps?:\/\/[^\s)"']+/giu;
 const HOSTED_RUNTIME_ERROR_EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu;
 const HOSTED_RUNTIME_ERROR_PHONE_PATTERN = /(?:\+\d[\d().\s-]{7,}\d|\(\d{3}\)\s*\d{3}[-.\s]\d{4}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b)/gu;
+// Quoted-key colons signal a raw structured payload dump, which can carry
+// arbitrary values under keys the span redactors do not know; those stay
+// fail-closed. Bare brackets are allowed so bracketed prose (for example
+// pydantic validation suffixes) survives with its values span-redacted.
 const HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN =
-  /[{}\[\]]|["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
+  /["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
 const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN =
-  /\b(?:account|external|member|owner|provider[_\s-]?account|subject|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*[:=]\s*["']?[A-Za-z0-9._:-]{6,}/iu;
+  /\b((?:account|external|member|owner|provider[_\s-]?account|subject|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*[:=]\s*["']?)[A-Za-z0-9._:-]{6,}/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_TOKEN_PHRASE_PATTERN =
-  /\b(?:access|id|refresh|session)\s+token\s+(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{6,}/iu;
+  /\b((?:access|id|refresh|session)\s+token\s+)(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{6,}/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_LONG_TOKEN_PATTERN =
-  /\b(?=[A-Za-z0-9._~+/=-]{32,}\b)(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]+\b/u;
+  /\b(?=[A-Za-z0-9._~+/=-]{32,}\b)(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]+\b/gu;
 const HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_BLOCKED_KEY_SUBSTRINGS = [
   "secret",
   "authorization",
@@ -2232,6 +2236,10 @@ export function sanitizeHostedRuntimeErrorText(value: string | null): string | n
   return sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH);
 }
 
+// Redacts by masking the unsafe spans (ids, token phrases, long tokens) so
+// provider error prose stays debuggable; only raw structured payload dumps
+// (quoted-key colons) still fail closed, because their values can hide under
+// keys the span redactors do not know.
 export function sanitizeHostedRuntimeDiagnosticText(value: string | null): string | null {
   const sanitized = sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH)
     ?.replace(HOSTED_RUNTIME_ERROR_FILE_URL_PATTERN, "<redacted-path>")
@@ -2240,22 +2248,16 @@ export function sanitizeHostedRuntimeDiagnosticText(value: string | null): strin
     .replace(HOSTED_RUNTIME_ERROR_URL_PATTERN, "<redacted-url>")
     .replace(HOSTED_RUNTIME_ERROR_EMAIL_PATTERN, "<redacted-email>")
     .replace(HOSTED_RUNTIME_ERROR_PHONE_PATTERN, "<redacted-phone>")
+    .replace(HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN, "$1<redacted-id>")
+    .replace(HOSTED_RUNTIME_DIAGNOSTIC_TOKEN_PHRASE_PATTERN, "$1<redacted-token>")
+    .replace(HOSTED_RUNTIME_DIAGNOSTIC_LONG_TOKEN_PATTERN, "<redacted-token>")
     .trim();
 
   if (!sanitized) {
     return null;
   }
 
-  return isHostedRuntimeSafeDiagnosticText(sanitized) ? sanitized : null;
-}
-
-function isHostedRuntimeSafeDiagnosticText(value: string): boolean {
-  return !(
-    HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN.test(value)
-    || HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN.test(value)
-    || HOSTED_RUNTIME_DIAGNOSTIC_TOKEN_PHRASE_PATTERN.test(value)
-    || HOSTED_RUNTIME_DIAGNOSTIC_LONG_TOKEN_PATTERN.test(value)
-  );
+  return HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN.test(sanitized) ? null : sanitized;
 }
 
 function requireNumber(value: unknown, label: string): number {

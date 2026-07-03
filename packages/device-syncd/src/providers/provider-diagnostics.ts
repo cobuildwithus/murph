@@ -280,12 +280,18 @@ function readFirstSafeProviderErrorDescription(
   return null;
 }
 
-function readNestedErrorsCode(value: unknown): string | null {
-  if (!Array.isArray(value)) {
-    return null;
+// Nested error containers arrive as an array of entries, a single object, or
+// a single string depending on the provider (for example FastAPI's `detail`
+// is an array of objects, but object- and string-shaped bodies exist too).
+function readNestedErrorEntries(value: unknown): readonly unknown[] {
+  if (Array.isArray(value)) {
+    return value;
   }
+  return typeof value === "string" || (value !== null && typeof value === "object") ? [value] : [];
+}
 
-  for (const entry of value) {
+function readNestedErrorsCode(value: unknown): string | null {
+  for (const entry of readNestedErrorEntries(value)) {
     if (entry && typeof entry === "object" && !Array.isArray(entry)) {
       const code = readFirstSafeProviderErrorCode(
         entry as Record<string, unknown>,
@@ -301,11 +307,7 @@ function readNestedErrorsCode(value: unknown): string | null {
 }
 
 function readNestedErrorsDescription(value: unknown): string | null {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-
-  for (const entry of value) {
+  for (const entry of readNestedErrorEntries(value)) {
     if (typeof entry === "string") {
       const sanitized = sanitizeProviderDiagnosticReasonText(entry);
       if (sanitized) {
@@ -329,11 +331,7 @@ function readNestedErrorsDescription(value: unknown): string | null {
 }
 
 function hasNestedErrorsCode(value: unknown): boolean {
-  if (!Array.isArray(value)) {
-    return false;
-  }
-
-  return value.some((entry) =>
+  return readNestedErrorEntries(value).some((entry) =>
     entry
     && typeof entry === "object"
     && !Array.isArray(entry)
@@ -341,11 +339,7 @@ function hasNestedErrorsCode(value: unknown): boolean {
 }
 
 function hasNestedErrorsDescription(value: unknown): boolean {
-  if (!Array.isArray(value)) {
-    return false;
-  }
-
-  return value.some((entry) =>
+  return readNestedErrorEntries(value).some((entry) =>
     typeof entry === "string"
     || (entry
       && typeof entry === "object"
