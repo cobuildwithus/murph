@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/hosted-onboarding/logging", () => ({
   deriveHostedOnboardingTimingErrorName: () => "test_error",
   finishHostedOnboardingTiming: vi.fn(),
+  logHostedOnboardingDiagnostic: vi.fn(),
   startHostedOnboardingTiming: () => ({ startedAt: 0 }),
 }));
 

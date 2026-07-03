@@ -5,7 +5,9 @@ const {
   PrismaPg,
 } = vi.hoisted(() => {
   const PrismaClient = vi.fn().mockImplementation(function (options: unknown) {
-    return { $disconnect: vi.fn(), options };
+    const client: Record<string, unknown> = { $disconnect: vi.fn(), options };
+    client.$extends = vi.fn(() => client);
+    return client;
   });
   const PrismaPg = vi.fn().mockImplementation(function (options: unknown) {
     return { options };

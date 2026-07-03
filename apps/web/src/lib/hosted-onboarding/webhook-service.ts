@@ -38,9 +38,17 @@ import {
 import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
+  logHostedOnboardingDiagnostic,
   startHostedOnboardingTiming,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
+import {
+  runWithPrismaOperationTimings,
+  type PrismaOperationTiming,
+} from "../prisma-operation-timing";
+import {
+  buildHostedWebhookDbTimingLogDetails,
+} from "./webhook-db-timing";
 import {
   drainHostedLinqSideEffectsDirect,
   type HostedLinqCurrentInboundReplyProof,
@@ -692,7 +700,18 @@ async function runHostedOnboardingWebhookTransaction<TResult>(
   prisma: PrismaClient,
   callback: (transaction: Prisma.TransactionClient) => Promise<TResult>,
 ): Promise<TResult> {
-  return typeof prisma.$transaction === "function"
-    ? prisma.$transaction(callback)
-    : callback(prisma as Prisma.TransactionClient);
+  const startedAtMs = Date.now();
+  const operations: PrismaOperationTiming[] = [];
+  try {
+    return await runWithPrismaOperationTimings(operations, async () =>
+      typeof prisma.$transaction === "function"
+        ? prisma.$transaction(callback)
+        : callback(prisma as Prisma.TransactionClient),
+    );
+  } finally {
+    logHostedOnboardingDiagnostic("hosted-onboarding.webhook.plan-db", {
+      transactionMs: Date.now() - startedAtMs,
+      ...buildHostedWebhookDbTimingLogDetails(operations),
+    });
+  }
 }

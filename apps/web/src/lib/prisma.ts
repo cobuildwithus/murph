@@ -2,6 +2,10 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 
 import { assertHostedWebDatabaseUrlConfigured } from "./hosted-web/database-env";
+import {
+  isPrismaOperationTimingActive,
+  recordPrismaOperationTiming,
+} from "./prisma-operation-timing";
 import { installHostedWebWarningFilters } from "./process-warnings";
 
 const globalForPrisma = globalThis as typeof globalThis & {
@@ -37,7 +41,7 @@ function createPrismaAdapter(input: CreatePrismaClientInput): PrismaPg {
 export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient {
   const logLevels = resolvePrismaLogLevels();
 
-  return new PrismaClient({
+  const client = new PrismaClient({
     adapter: createPrismaAdapter(input),
     ...(logLevels.length > 0 ? { log: logLevels } : {}),
     transactionOptions: {
@@ -45,6 +49,38 @@ export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient
       timeout: PRISMA_TRANSACTION_TIMEOUT_MS,
     },
   });
+
+  // Diagnostic-only: records per-operation wall time when a request opted in
+  // via collectPrismaOperationTimings; a pass-through everywhere else. The
+  // extension keeps the full PrismaClient surface, so the assertion below is
+  // a type-level boundary only.
+  return client.$extends({
+    query: {
+      $allOperations({ args, model, operation, query }) {
+        if (!isPrismaOperationTimingActive()) {
+          return query(args);
+        }
+
+        const startedAtMs = Date.now();
+        const record = () => {
+          recordPrismaOperationTiming(
+            model ? `${model}.${operation}` : operation,
+            Date.now() - startedAtMs,
+          );
+        };
+        return query(args).then(
+          (result) => {
+            record();
+            return result;
+          },
+          (error: unknown) => {
+            record();
+            throw error;
+          },
+        );
+      },
+    },
+  }) as PrismaClient;
 }
 
 function createPrisma(): PrismaClient {

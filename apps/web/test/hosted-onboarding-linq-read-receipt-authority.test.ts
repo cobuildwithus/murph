@@ -39,6 +39,7 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
 vi.mock("@/src/lib/hosted-onboarding/logging", () => ({
   deriveHostedOnboardingTimingErrorName: mocks.deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming: mocks.finishHostedOnboardingTiming,
+  logHostedOnboardingDiagnostic: vi.fn(),
   startHostedOnboardingTiming: mocks.startHostedOnboardingTiming,
   toHostedOnboardingLogIdSuffix: vi.fn((value: string | null | undefined) =>
     value ? value.slice(-6) : null
