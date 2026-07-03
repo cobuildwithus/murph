@@ -340,6 +340,11 @@ Touch: `webhook-service-types.ts:17-26`;
   additionally proves foreground Linq sends are observed before due
   background reminders without the wait helper advancing hosted-local
   alarms.
+- PR 1 CI follow-up (2026-07-03): the Linq webhook media fixture binds
+  already-active home chats directly instead of creating signup-welcome
+  chats, keeping active-member webhook assertions isolated from onboarding
+  follow-up automation. Focused local proof:
+  `pnpm hosted-local e2e linq-webhook --no-bundle` passed.
 - PR 2: workflow replay tests per the patch procedure + Temporal
   orchestration E2E; full webhook owner suites for the wake-field
   collapse.

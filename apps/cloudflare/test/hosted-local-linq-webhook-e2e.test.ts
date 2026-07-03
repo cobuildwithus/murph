@@ -13,7 +13,6 @@ import {
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
-  buildHostedLinqSignupWelcomeWake,
   buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
@@ -696,22 +695,14 @@ async function activateLinqWebhookMember(userId: string): Promise<ActiveLinqWebh
 
   await requireScenario().runWake(buildActivationWake(userId), userId);
   await requireScenario().waitForHostedCompletion(userId);
-  await requireScenario().runWake(
-    buildHostedLinqSignupWelcomeWake({
-      eventId: `member.activated:local:${userId}:evt_linq_webhook`,
-      userId,
-    }),
-    userId,
-  );
-  await requireScenario().waitForHostedCompletion(userId);
-  await requireLinqStub().waitForSend({
-    expectedPath: requireLinqStub().createChatPath,
-    matchRequest: requireLinqStub().createCreateChatRequestMatcher(userId),
-    scenario: requireScenario(),
-    userId,
+
+  const chatId = `chat_local_linq_webhook_${userId}`;
+  await requireScenario().bindActiveHostedLinqHomeChat({
+    chatId,
+    memberId: userId,
+    recipientPhone: buildLinqRecipientPhoneNumber(userId),
   });
 
-  const chatId = requireLinqStub().requireObservedChatId(userId);
   return {
     chatId,
     replyChatPath: `/chats/${encodeURIComponent(chatId)}/messages`,
