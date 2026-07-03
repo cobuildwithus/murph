@@ -33,24 +33,26 @@ const HOSTED_RUNTIME_ERROR_WINDOWS_PATH_PATTERN = /[A-Za-z]:\\[^\s)"']+/gu;
 const HOSTED_RUNTIME_ERROR_URL_PATTERN = /\bhttps?:\/\/[^\s)"']+/giu;
 const HOSTED_RUNTIME_ERROR_EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu;
 const HOSTED_RUNTIME_ERROR_PHONE_PATTERN = /(?:\+\d[\d().\s-]{7,}\d|\(\d{3}\)\s*\d{3}[-.\s]\d{4}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b)/gu;
-// Quoted-key colons signal a raw structured payload dump, which can carry
-// arbitrary values under keys the span redactors do not know; those stay
-// fail-closed. Bare brackets are allowed so bracketed prose (for example
-// pydantic validation suffixes) survives with its values span-redacted.
+// Braces, quoted-entry arrays, and quoted-key colons signal a raw structured
+// payload dump (JSON or object-repr, quoted or not), which can carry arbitrary
+// values under keys the span redactors do not know; those stay fail-closed.
+// Bare square brackets around prose are allowed so bracketed validation
+// suffixes (for example pydantic's `[type=...]`) survive with their values
+// span-redacted.
 const HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN =
-  /["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
+  /[{}]|\[\s*["']|["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
 const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN =
-  /\b((?:account|external|member|owner|provider[_\s-]?account|subject|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*[:=]\s*["']?)[A-Za-z0-9._:-]{6,}/giu;
+  /\b((?:account|client|external|member|owner|patient|provider[_\s-]?account|subject|team|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*[:=]\s*["']?)[A-Za-z0-9._:-]{6,}/giu;
 // Validation errors often echo the offending input back (for example pydantic
 // `input_value=...` suffixes); those values can be identifiers, so mask them
 // regardless of what the surrounding prose looks like.
 const HOSTED_RUNTIME_DIAGNOSTIC_ECHOED_INPUT_PATTERN =
   /\b((?:input(?:[_\s-]?value)?|value|ctx)\s*[:=]\s*["']?)[^\s,;\])"']+/giu;
-// Identifier values also appear as bare phrases ("user hbm_abc123xyz"); mask
-// the value when it looks id-shaped (contains a digit or underscore) so plain
-// words ("user profile") stay readable.
+// Identifier values also appear as bare phrases ("user hbm_abc123xyz",
+// "user id hbm_abc123xyz"); mask the value when it looks id-shaped (contains a
+// digit or underscore) so plain words ("user profile") stay readable.
 const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_PHRASE_PATTERN =
-  /\b((?:account|client|external|member|owner|patient|subject|team|user)\s+)(?=[A-Za-z0-9._:-]*[\d_])[A-Za-z0-9._:-]{6,}\b/giu;
+  /\b((?:account|client|external|member|owner|patient|subject|team|user)(?:\s+(?:id|identifier))?\s+)(?=[A-Za-z0-9._:-]*[\d_])[A-Za-z0-9._:-]{6,}\b/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_TOKEN_PHRASE_PATTERN =
   /\b((?:access|id|refresh|session)\s+token\s+)(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{6,}/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_LONG_TOKEN_PATTERN =
@@ -2248,10 +2250,12 @@ export function sanitizeHostedRuntimeErrorText(value: string | null): string | n
 
 // Redacts by masking the unsafe spans (ids, token phrases, long tokens) so
 // provider error prose stays debuggable; only raw structured payload dumps
-// (quoted-key colons) still fail closed, because their values can hide under
-// keys the span redactors do not know.
+// still fail closed, because their values can hide under keys the span
+// redactors do not know. Masking runs on the wide-bounded normalized string
+// and the diagnostic length cap applies last, so a token can never straddle
+// the clamp boundary and escape as a short unmaskable prefix.
 export function sanitizeHostedRuntimeDiagnosticText(value: string | null): string | null {
-  const sanitized = sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH)
+  const sanitized = sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH)
     ?.replace(HOSTED_RUNTIME_ERROR_FILE_URL_PATTERN, "<redacted-path>")
     .replace(HOSTED_RUNTIME_ERROR_POSIX_PATH_PATTERN, "$1<redacted-path>")
     .replace(HOSTED_RUNTIME_ERROR_WINDOWS_PATH_PATTERN, "<redacted-path>")
@@ -2269,7 +2273,13 @@ export function sanitizeHostedRuntimeDiagnosticText(value: string | null): strin
     return null;
   }
 
-  return HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN.test(sanitized) ? null : sanitized;
+  if (HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN.test(sanitized)) {
+    return null;
+  }
+
+  return sanitized.length <= HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH
+    ? sanitized
+    : `${sanitized.slice(0, HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH - 3).trimEnd()}...`;
 }
 
 function requireNumber(value: unknown, label: string): number {

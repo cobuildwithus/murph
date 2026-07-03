@@ -1932,6 +1932,33 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText('unexpected body {"detail": "sleep_cycle disabled"}'),
     ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("{id: abc123, detail: disabled}"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText('["junction-user-1"]'),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText('{user_id:"junction-user-1", display_name:"Alice"}'),
+    ).toBeNull();
+  });
+
+  it("masks explicit id-noun phrases and camel-case team assignments", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("user id hbm_abc123xyz is blocked upstream"),
+    ).toBe("user id <redacted-id> is blocked upstream");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("request denied for teamId=hbm_abc123xyz"),
+    ).toBe("request denied for teamId=<redacted-id>");
+  });
+
+  it("masks long tokens that would straddle the diagnostic length cap", () => {
+    const filler = "safe words ".repeat(48).trim();
+    const token = "a1".repeat(50);
+    const sanitized = sanitizeHostedRuntimeDiagnosticText(`${filler} ${token}`);
+    expect(sanitized).not.toBeNull();
+    expect(sanitized).not.toContain("a1a1a1");
+    expect(sanitized?.length).toBeLessThanOrEqual(512);
   });
 
   it("masks echoed validation input values inside bracket suffixes", () => {

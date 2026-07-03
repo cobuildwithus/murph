@@ -3505,6 +3505,34 @@ test("Junction completeConnection preserves the sanitized Link failure reason", 
   );
 });
 
+test("Junction completeConnection drops JSON-array Link failure descriptions", async () => {
+  // A provider-controlled error_description carrying a structured dump must
+  // fail closed out of the reason instead of surfacing its entries.
+  const provider = createJunctionProvider(async () => createJsonResponse({ providers: [] }));
+
+  await assert.rejects(
+    requireJunctionConnectionHandler(provider).completeConnection({
+      callbackUrl: "https://sync.example.test/device-sync/connect/junction/callback",
+      state: "state-1",
+      query: new URLSearchParams({
+        murph_state: "state-1",
+        error: "provider_connection_error",
+        error_description: '["junction-user-1"]',
+      }),
+      now: "2026-04-03T00:00:00.000Z",
+      grantedScopes: [],
+    }),
+    (error) => {
+      assert.ok(error instanceof DeviceSyncError);
+      assert.equal(error.code, "JUNCTION_LINK_FAILED");
+      assert.ok(error.message.includes("error=provider_connection_error"));
+      assert.ok(!error.message.includes("junction-user-1"));
+      assert.ok(!error.message.includes("error_description="));
+      return true;
+    },
+  );
+});
+
 test("Junction completeConnection masks secret-bearing Link failure reason values", async () => {
   // sanitizeHostedRuntimeDiagnosticText masks the secret span so the rest of
   // the provider's explanation stays available for debugging.
