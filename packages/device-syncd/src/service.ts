@@ -433,7 +433,7 @@ class DeviceSyncServiceController {
       account,
       jobs.map((job) => ({
         ...job,
-        priority: Math.max(job.priority ?? 0, 80),
+        priority: job.kind === "reconcile" ? Math.max(job.priority ?? 0, 80) : job.priority,
         availableAt: now,
         dedupeKey:
           job.dedupeKey ??

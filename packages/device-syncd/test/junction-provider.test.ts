@@ -616,6 +616,39 @@ test("Junction empty historical backfill records a retrying window the scheduled
   );
 });
 
+test("Junction retrying historical backfill without attempts uses the first retry delay", () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  });
+  const executor = requireValue(provider.jobExecutor, "Junction provider should expose a job executor.");
+  const retryingAccount = createStoredAccount({
+    metadata: {
+      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2026-04-01T12:34:56.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T08:09:10.000Z",
+    },
+  });
+
+  const beforeDue = executor.createScheduledJobs?.(retryingAccount, "2026-04-04T00:05:00.000Z");
+  assert.equal(beforeDue?.jobs.some((job) => job.kind === "backfill"), false);
+
+  const due = executor.createScheduledJobs?.(retryingAccount, "2026-04-04T00:16:00.000Z");
+  const retryJob = due?.jobs.find((job) => job.kind === "backfill");
+  assert.deepEqual(retryJob?.payload, {
+    windowStart: "2026-04-01T12:34:56.000Z",
+    windowEnd: "2026-04-03T08:09:10.000Z",
+  });
+  assert.equal(
+    retryJob?.dedupeKey,
+    buildExpectedJunctionDedupeKey(
+      "backfill",
+      "2026-04-01T12:34:56.000Z",
+      "2026-04-03T08:09:10.000Z",
+    ),
+  );
+});
+
 test("Junction empty historical backfill preserves explicit windows", async () => {
   const provider = createEmptyJunctionBackfillProvider();
   const context = createJunctionJobContext({

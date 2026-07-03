@@ -12,6 +12,7 @@ import {
   createDeviceSyncService,
   resolveDeviceSyncStoreNextWakeAt,
 } from "../src/service.ts";
+import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import { scopeWebhookTraceId } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
@@ -3111,6 +3112,63 @@ test("manual reconcile queues every scheduled job and store claims only one job 
   );
 
   close();
+});
+
+test("manual reconcile boosts Junction reconcile priority without promoting historical backfill", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-manual-junction-backfill-priority");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => new Date("2026-04-03T12:34:56.000Z"),
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryResources: ["activity"],
+        timeseriesResources: [],
+        fetchImpl: async (input) => {
+          throw new Error(`Unexpected Junction request during manual queue test: ${readUrl(input)}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+
+    const reconcile = service.queueManualReconcile(account.id);
+    const queuedByKind = new Map(reconcile.jobs.map((job) => [job.kind, job]));
+
+    assert.equal(queuedByKind.get("reconcile")?.priority, 80);
+    assert.equal(queuedByKind.get("backfill")?.priority, 30);
+    assert.deepEqual(queuedByKind.get("backfill")?.payload, {
+      windowStart: "2025-10-03T00:00:00.000Z",
+      windowEnd: "2026-04-01T00:00:00.000Z",
+    });
+  } finally {
+    close();
+  }
 });
 
 test("device sync service fences in-flight jobs after disconnect", async () => {

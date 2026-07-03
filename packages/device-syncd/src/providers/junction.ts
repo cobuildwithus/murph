@@ -684,7 +684,7 @@ export function createJunctionDeviceSyncProvider(
       if (!windowStart || !windowEnd) {
         return [];
       }
-      const emptyAttempts = readHistoricalBackfillEmptyAttempts(metadata, windowStart, windowEnd);
+      const emptyAttempts = Math.max(1, readHistoricalBackfillEmptyAttempts(metadata, windowStart, windowEnd));
       const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
       if (retryDelayMs === null) {
         return [];
