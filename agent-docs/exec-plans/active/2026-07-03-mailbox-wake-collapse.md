@@ -193,10 +193,12 @@ Riders (independent deletions, separate commits):
 
 #### Part 1b — re-land the direct wake (revert of 3c2a41bda2)
 
-Restores the PR #362 fast path unchanged: webhook fires a fire-and-forget
-ensure at the Cloudflare worker in parallel with the unconditional Temporal
-signal. ~643 withdrawn lines return (web wake helper, CF dual-auth ensure
-route, control-client method, `triggeredByWebDirect` trace leaf, E2E).
+Restores the PR #362 fast path with a durable-ordering guard: webhook first
+gets the unconditional Temporal mailbox-append signal accepted, then fires a
+fire-and-forget ensure at the Cloudflare worker instead of waiting for the
+Temporal worker to dispatch the same ensure. ~643 withdrawn lines return (web
+wake helper, CF dual-auth ensure route, control-client method,
+`triggeredByWebDirect` trace leaf, E2E).
 With Part 1a live, racing ensures are harmless by construction: a stale
 invocation fetches the mailbox, sees input consumed (null reply target),
 finds no fresh work, exits.

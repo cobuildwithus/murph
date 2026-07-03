@@ -84,29 +84,6 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
     },
   );
 
-  // Latency fast path: poke the idempotent Cloudflare ensure route directly so
-  // the runtime starts waking while the Temporal signal (still sent below,
-  // unconditionally, as the sole durable orchestrator) is in flight. Gated on
-  // the planner checkpoint and Linq delivery-time consume authority because
-  // the planning transaction already verified the active member and admission
-  // for this wake. Best-effort only: losing this call leaves exactly the
-  // Temporal path, and the webhook response never waits on it.
-  const directEnsureWake = directEnsureEligible && input.userId
-    ? startHostedDirectEnsureWakeBestEffort({
-        source: "linq",
-        userId: input.userId,
-      })
-    : null;
-  if (directEnsureWake) {
-    if (input.scheduleAfterResponse) {
-      // Keep the in-flight request alive past the response without ever
-      // putting its latency on the provider success path.
-      input.scheduleAfterResponse(() => directEnsureWake);
-    } else {
-      void directEnsureWake;
-    }
-  }
-
   let signal: Awaited<ReturnType<typeof signalHostedMailboxAppendRuntime>>;
   let temporalSignalAcceptedAt: Date | null = null;
   try {
@@ -129,6 +106,29 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       errorName,
     });
     throw error;
+  }
+
+  // Latency fast path: after Temporal has accepted the durable mailbox append
+  // signal, poke the idempotent Cloudflare ensure route directly instead of
+  // waiting for the Temporal worker to dispatch the same ensure activity.
+  // Gated on the planner checkpoint and Linq delivery-time consume authority
+  // because the planning transaction already verified the active member and
+  // admission for this wake. Best-effort only: losing this call leaves exactly
+  // the Temporal path, and the webhook response never waits on it.
+  const directEnsureWake = directEnsureEligible && input.userId
+    ? startHostedDirectEnsureWakeBestEffort({
+        source: "linq",
+        userId: input.userId,
+      })
+    : null;
+  if (directEnsureWake) {
+    if (input.scheduleAfterResponse) {
+      // Keep the in-flight request alive past the response without ever
+      // putting its latency on the provider success path.
+      input.scheduleAfterResponse(() => directEnsureWake);
+    } else {
+      void directEnsureWake;
+    }
   }
 
   scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({

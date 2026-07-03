@@ -58,10 +58,15 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
   });
 
-  it("fires the direct Cloudflare ensure alongside the unconditional Temporal signal", async () => {
+  it("fires the direct Cloudflare ensure only after the unconditional Temporal signal accepts", async () => {
     const afterResponseTasks: Array<() => Promise<void>> = [];
+    const pendingSignal = createDeferred<{
+      signalAccepted: true;
+      workflowId: string;
+    }>();
+    mocks.signalHostedMailboxAppendRuntime.mockReturnValueOnce(pendingSignal.promise);
 
-    await expect(maybeHandoffHostedExecutionWebhookWake({
+    const handoff = maybeHandoffHostedExecutionWebhookWake({
       eventId: "evt_123",
       mailboxItemId: "mailbox_123",
       response,
@@ -74,7 +79,27 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
         lane: "conversation",
         laneSeq: "42",
       },
-    })).resolves.toEqual({
+    });
+
+    await Promise.resolve();
+
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      expectedUserId: "member_123",
+      knownCheckpoint: {
+        lane: "conversation",
+        laneSeq: "42",
+        userId: "member_123",
+      },
+      mailboxItemId: "mailbox_123",
+    });
+    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
+
+    pendingSignal.resolve({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_123",
+    });
+
+    await expect(handoff).resolves.toEqual({
       reason: "temporal-signaled",
       signalAccepted: true,
       started: true,
@@ -85,15 +110,6 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledWith({
       orchestrationAttemptId: expect.stringMatching(/^web-ingress-[0-9a-f-]{36}$/u),
       userId: "member_123",
-    });
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      expectedUserId: "member_123",
-      knownCheckpoint: {
-        lane: "conversation",
-        laneSeq: "42",
-        userId: "member_123",
-      },
-      mailboxItemId: "mailbox_123",
     });
     await Promise.all(afterResponseTasks.map((task) => task()));
   });
@@ -179,7 +195,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
   });
 
-  it("keeps a hanging direct ensure off the failure path when the Temporal signal throws", async () => {
+  it("does not start the direct ensure when the Temporal signal throws", async () => {
     mocks.ensureRuntimeProcessing.mockReturnValue(new Promise(() => undefined));
     mocks.signalHostedMailboxAppendRuntime.mockRejectedValue(new Error("temporal down"));
 
@@ -195,7 +211,8 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       },
     })).rejects.toThrow("temporal down");
 
-    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
+    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
   });
 
   it("proceeds to the Temporal signal when the control client setup throws synchronously", async () => {
@@ -279,8 +296,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
   });
 
-  it("still resolves the direct ensure when the Temporal signal fails", async () => {
-    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
+  it("leaves the direct ensure unstaged when the Temporal signal fails before acceptance", async () => {
     mocks.signalHostedMailboxAppendRuntime.mockRejectedValue(new Error("temporal down"));
 
     await expect(maybeHandoffHostedExecutionWebhookWake({
@@ -295,13 +311,21 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       },
     })).rejects.toThrow("temporal down");
 
-    expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
-    await vi.waitFor(() => {
-      expect(consoleInfo).toHaveBeenCalledWith(
-        "Hosted direct ensure wake completed.",
-        expect.objectContaining({ action: "woken", source: "linq" }),
-      );
-    });
-    consoleInfo.mockRestore();
+    expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
+    expect(mocks.ensureRuntimeProcessing).not.toHaveBeenCalled();
   });
 });
+
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  reject: (error: unknown) => void;
+  resolve: (value: T) => void;
+} {
+  let reject!: (error: unknown) => void;
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
+}
