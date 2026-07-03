@@ -87,7 +87,7 @@ export function MurphContactAvatarGrid({
   return (
     <div
       aria-label="Murph contact photo"
-      className="grid grid-cols-4 gap-x-2 gap-y-4"
+      className="grid grid-cols-3 gap-x-2 gap-y-4 min-[380px]:grid-cols-4"
       role="radiogroup"
     >
       {MURPH_CONTACT_AVATAR_OPTIONS.map((option) => {
@@ -152,6 +152,34 @@ export function MurphContactCardPreview({
   );
 }
 
+/**
+ * Self-contained "Add Murph to Contacts" button that opens the picker.
+ * Drop-in for server components (signup success, settings) that just need
+ * the entry point.
+ */
+export function MurphAddToContactsButton({
+  size = "lg",
+  variant = "outline",
+}: {
+  size?: React.ComponentProps<typeof Button>["size"];
+  variant?: React.ComponentProps<typeof Button>["variant"];
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Button onClick={() => setOpen(true)} size={size} type="button" variant={variant}>
+        Add Murph to Contacts
+      </Button>
+      <MurphContactCardPicker
+        onAddToContacts={() => setOpen(false)}
+        onOpenChange={setOpen}
+        open={open}
+      />
+    </>
+  );
+}
+
 const PICKER_TITLE = "Add Murph to your contacts";
 const PICKER_DESCRIPTION =
   "Pick the photo Murph shows up with in your contacts. Same Murph either way.";
@@ -176,7 +204,7 @@ export function MurphContactCardPicker({
   const body = (
     <div className="flex flex-col gap-6">
       <MurphContactCardPreview option={selected} />
-      <div className="-mx-1 max-h-72 overflow-y-auto px-1 py-1">
+      <div className="-mx-1 max-h-[42dvh] overflow-y-auto px-1 py-1">
         <MurphContactAvatarGrid onChange={setSelectedId} value={selectedId} />
       </div>
       <div className="flex flex-col gap-2">
@@ -208,7 +236,7 @@ export function MurphContactCardPicker({
   if (isMobile) {
     return (
       <Drawer onOpenChange={onOpenChange} open={open}>
-        <DrawerContent>
+        <DrawerContent className="max-h-[94dvh]">
           <DrawerHeader className="items-center text-center">
             <DrawerTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
               {PICKER_TITLE}
@@ -226,7 +254,7 @@ export function MurphContactCardPicker({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
-        className="max-h-[calc(100dvh-2rem)] max-w-md gap-6 overflow-y-auto rounded-2xl border border-border bg-popover p-6 text-popover-foreground ring-border md:p-7"
+        className="max-h-[calc(100dvh-2rem)] max-w-xl gap-6 overflow-y-auto rounded-2xl border border-border bg-popover p-6 text-popover-foreground ring-border md:p-7"
         showCloseButton={false}
       >
         <DialogHeader className="items-center gap-2 text-center">

@@ -14,6 +14,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { PlanVisual } from "@/src/components/ui/plan-visual";
 import { ConsentSkeleton } from "@/src/components/legal/hosted-legal-consent-card";
+import { MurphAddToContactsButton } from "@/src/components/murph/murph-contact-card-picker";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import {
   isHostedAutoPulseTrialEnabled,
@@ -39,7 +40,6 @@ import {
   JoinInviteSignOutButtonIsland,
 } from "./join-invite-islands";
 
-const MURPH_CONTACT_DOWNLOAD_FILENAME = "Murph.vcf";
 const MURPH_GITHUB_URL = "https://github.com/cobuildwithus/murph";
 
 const PULSE_TRIAL_FEATURES = [
@@ -558,40 +558,11 @@ function JoinInviteMurphContactActions({
       >
         Text Murph
       </Button>
-      <Button
-        render={
-          <a
-            download={MURPH_CONTACT_DOWNLOAD_FILENAME}
-            href={buildMurphVcardHref(murphPhoneNumber)}
-          />
-        }
-        nativeButton={false}
-        variant="outline"
-        size="lg"
-      >
-        Add Murph to Contacts
-      </Button>
+      <MurphAddToContactsButton />
     </div>
   );
 }
 
 function buildMurphSmsHref(phoneNumber: string): string {
   return `sms:${phoneNumber}`;
-}
-
-function buildMurphVcardHref(phoneNumber: string): string {
-  return `data:text/vcard;charset=utf-8,${encodeURIComponent(
-    buildMurphVcard(phoneNumber),
-  )}`;
-}
-
-function buildMurphVcard(phoneNumber: string): string {
-  return [
-    "BEGIN:VCARD",
-    "VERSION:3.0",
-    "FN:Murph",
-    `TEL;TYPE=CELL:${phoneNumber}`,
-    "END:VCARD",
-    "",
-  ].join("\r\n");
 }

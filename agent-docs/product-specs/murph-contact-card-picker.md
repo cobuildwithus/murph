@@ -1,20 +1,18 @@
 # Murph Contact Card Picker
 
 Last verified: 2026-07-03
-Status: Partially implemented (picker components on `/design?tab=components`; vCard download route live; signup-surface placement not started)
+Status: Implemented (picker on `/design?tab=components`, vCard route, initialVisit + signup-success placement); persisted avatar choice not started
 
 ## Why
 
 Murph's contact card ships with one canonical headshot (the hooded character). Some new members like it; some find it off-putting. Right after signup we want every member to add Murph as a contact, so the add-to-contacts moment should let them pick the avatar they save. The choice is cosmetic only: one Murph, one voice, different picture on the card.
 
-## User flow
+## User flow (implemented)
 
-Right after signup, the member sees an add-Murph-to-contacts step:
+Right after signup, adding Murph as a contact is the first thing the member sees:
 
-1. Signup-oriented landing auth routes to `/home?initialVisit=true`, which opens the one-shot welcome dialog (`apps/web/app/(dashboard)/home/initial-visit-dialog-client.tsx`). The picker becomes that dialog's contact step, keeping the existing "Text Murph" / "Start exploring" actions reachable.
-2. The website signup flow's success stage (join/invite) shows the same picker after the member finishes signup.
-
-The step shows Murph's contact preview with a selectable avatar grid and a primary "Add Murph to Contacts" button. Exact copy and presentation are TBD; the non-negotiable is that adding Murph as a contact is the primary action right after signup, and the avatar grid rides along as the personalization.
+1. `/home?initialVisit=true` (`apps/web/app/(dashboard)/home/initial-visit-dialog-client.tsx`) is a two-stage sequence: members whose primary contact channel is a text line see the contact-card picker first; on Add, Skip, or dismiss they land on the existing welcome dialog ("Text Murph" / "Start exploring"). Members without a text line (Telegram or email only) skip straight to the welcome dialog.
+2. The website signup success stage (`join-invite-stage-server.tsx`) renders `MurphAddToContactsButton`, which opens the same picker. This replaced the old inline `data:` URI vCard that had no photo and no backup line.
 
 Both surfaces reuse one component: `MurphContactCardPicker` in `apps/web/src/components/murph/murph-contact-card-picker.tsx` (drawer under 768px, dialog above, via `useIsMobile`).
 
@@ -42,4 +40,4 @@ Target range is five to ten options. Option ids are stable identifiers; never re
 
 ## Current state
 
-`MurphContactCardPicker`, `MurphContactAvatarGrid`, `MurphContactAvatarArt`, and `MurphContactCardPreview` are showcased under "Contact Card Picker" on `/design?tab=components`, and the picker's primary CTA downloads the real vCard from `/api/murph-contact-card`. Remaining: placing the picker in the `initialVisit` welcome dialog and the signup success stage, and the optional persisted avatar choice.
+`MurphContactCardPicker`, `MurphContactAvatarGrid`, `MurphContactAvatarArt`, `MurphContactCardPreview`, and `MurphAddToContactsButton` are live on `/design?tab=components`, in the `initialVisit` sequence, and on the signup success stage; the picker's primary CTA downloads the real vCard from `/api/murph-contact-card`. Remaining: the optional persisted avatar choice for group-share reuse.
