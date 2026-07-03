@@ -719,9 +719,14 @@ export async function resolveHostedAiUsageGate(input: {
     const allowanceBillingRef = allowanceAccess.billingRef;
     const familyAccessActive = allowanceAccess.familyAccessActive;
 
+    // Thread-container members are synthetic (`not_started` own billing):
+    // their access is the owner's, decided by the container branch of the
+    // allowance-period resolver below. Only non-container members are denied
+    // on their own billing here; suspension always fails closed.
     if (
       memberState.suspendedAt !== null ||
       (
+        !memberState.threadContainer &&
         memberState.billingStatus !== HostedBillingStatus.active &&
         !familyAccessActive
       )
@@ -815,9 +820,14 @@ export async function readHostedAiUsageGate(input: {
     const allowanceBillingRef = allowanceAccess.billingRef;
     const familyAccessActive = allowanceAccess.familyAccessActive;
 
+    // Thread-container members are synthetic (`not_started` own billing):
+    // their access is the owner's, decided by the container branch of the
+    // allowance-period resolver below. Only non-container members are denied
+    // on their own billing here; suspension always fails closed.
     if (
       memberState.suspendedAt !== null ||
       (
+        !memberState.threadContainer &&
         memberState.billingStatus !== HostedBillingStatus.active &&
         !familyAccessActive
       )
