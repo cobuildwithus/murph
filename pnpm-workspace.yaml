@@ -62,7 +62,7 @@ overrides:
   'fast-xml-parser@5.7.2>fast-xml-builder': 1.2.0
   'repomix@1.14.0>fast-xml-builder': 1.2.0
 minimumReleaseAgeExclude:
-  - '@openai/codex@0.143.0-alpha.34||0.143.0-alpha.34-darwin-arm64||0.143.0-alpha.34-darwin-x64||0.143.0-alpha.34-linux-arm64||0.143.0-alpha.34-linux-x64||0.143.0-alpha.34-win32-arm64||0.143.0-alpha.34-win32-x64'
+  - '@openai/codex@0.143.0-alpha.35||0.143.0-alpha.35-darwin-arm64||0.143.0-alpha.35-darwin-x64||0.143.0-alpha.35-linux-arm64||0.143.0-alpha.35-linux-x64||0.143.0-alpha.35-win32-arm64||0.143.0-alpha.35-win32-x64'
   - incur@0.4.4
   - '@cobuild/review-gpt@0.5.95'
   - fast-uri@3.1.2
