@@ -6,13 +6,13 @@ const mocks = vi.hoisted(() => ({
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   getHostedLinqChatHandles: vi.fn(),
-  hasHostedMemberActiveAccess: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
   hostedThreadContainerFindUnique: vi.fn(),
   isHostedMemberSuspended: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
+  readActiveHostedMemberAccess: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
   reserveHostedLinqContactCardShareAttempt: vi.fn(),
@@ -26,8 +26,11 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/entitlement", () => ({
-  hasHostedMemberActiveAccess: mocks.hasHostedMemberActiveAccess,
   isHostedMemberSuspended: mocks.isHostedMemberSuspended,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
@@ -332,11 +335,11 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       { handle: "person@example.com", isMe: false, status: null },
       { handle: "+15550000002", isMe: false, status: "left" },
     ]);
-    mocks.hasHostedMemberActiveAccess.mockReturnValue(true);
     mocks.isHostedMemberSuspended.mockReturnValue(false);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
-      core: { suspendedAt: null },
+      core: { id: "member_participant", suspendedAt: null },
     });
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue(null);
     mocks.releaseHostedLinqContactCardShareAttempt.mockResolvedValue(undefined);
     mocks.reserveHostedLinqContactCardShareAttempt.mockResolvedValue({

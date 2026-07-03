@@ -13,18 +13,12 @@ import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "@/src/lib/hosted-execution/logging";
 import {
-  hasHostedMemberEffectiveActiveAccessForMember,
-} from "@/src/lib/hosted-onboarding/family-plan";
-import {
   isHostedRuntimeInactiveAccessError,
   requireHostedRuntimeActiveAccess,
 } from "@/src/lib/hosted-mailbox/runtime-access";
 import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
-import {
-  readHostedMemberCoreState,
-} from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
   deliverHostedVaultShareRecords,
   findActiveHostedVaultShares,
@@ -79,19 +73,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   for (const share of shares) {
     try {
-      const destination = await readHostedMemberCoreState({
-        memberId: share.destinationMemberId,
-        prisma,
-      });
-
-      if (
-        destination
-        && await hasHostedMemberEffectiveActiveAccessForMember({
-          member: destination,
-          prisma,
-        })
-        && await hasDeliverableHostedRuntimeActiveAccess(share.destinationMemberId, prisma)
-      ) {
+      if (await hasDeliverableHostedRuntimeActiveAccess(share.destinationMemberId, prisma)) {
         activeShares.push(share);
       }
     } catch (error) {

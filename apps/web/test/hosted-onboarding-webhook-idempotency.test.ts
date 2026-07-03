@@ -1009,6 +1009,16 @@ function createPrismaStub() {
       }),
       update: vi.fn().mockResolvedValue(undefined),
     },
+    hostedMember: {
+      // Unified access read (readActiveHostedMemberAccess): member_123 is a
+      // direct-paid active member with no sponsorships.
+      findUnique: vi.fn().mockResolvedValue({
+        accountGroupMemberships: [],
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+        threadContainer: null,
+      }),
+    },
     hostedMemberRouting: {
       findFirst: vi.fn().mockResolvedValue(null),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),

@@ -2228,6 +2228,7 @@ function createGatePrisma(input: {
     : {
         monthlyUsageLimitUsdMicros: input.threadContainerLimitUsdMicros,
         owner: {
+          accountGroupMemberships: [],
           billingStatus: input.threadContainerOwnerBillingStatus ?? HostedBillingStatus.active,
           suspendedAt: input.threadContainerOwnerSuspendedAt ?? null,
         },

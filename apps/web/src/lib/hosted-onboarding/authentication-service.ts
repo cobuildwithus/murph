@@ -51,7 +51,7 @@ import {
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "./shared";
-import { hasActiveHostedFamilyAccess } from "./family-plan";
+import { readActiveHostedMemberAccess } from "./member-access";
 import type { HostedPostVerificationStage } from "./stage";
 import {
   hostedOnboardingError,
@@ -211,11 +211,11 @@ export async function completeHostedPrivyVerification(input: {
       memberId: member.id,
       prisma,
     });
-    const familyAccessActive = await hasActiveHostedFamilyAccess({
+    const accessActive = await readActiveHostedMemberAccess({
       memberId: member.id,
       prisma,
     });
-    const activationPending = member.billingStatus === HostedBillingStatus.active || familyAccessActive
+    const activationPending = accessActive
       ? await isHostedMemberActivationPending({
           billingStatus: HostedBillingStatus.active,
           memberId: member.id,
@@ -225,7 +225,7 @@ export async function completeHostedPrivyVerification(input: {
     const stage = deriveHostedPostVerificationStage({
       activationPending,
       billingStatus: member.billingStatus,
-      familyAccessActive,
+      sponsoredAccessActive: accessActive,
       suspendedAt: member.suspendedAt,
     });
     const messagingSetupRequired = isHostedMemberMessagingSetupRequired({

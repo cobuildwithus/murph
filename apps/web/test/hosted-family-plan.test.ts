@@ -1129,7 +1129,11 @@ describe("hosted Family plan", () => {
     }));
   });
 
-  it("fails closed for family access when active plus pending seats exceed billed seats", async () => {
+  it("grants family access on membership alone without re-counting seats at read time", async () => {
+    // Seat overage is enforced at write time: invite issuance/acceptance
+    // assert seat fit and the subscription webhook fails the whole group to
+    // `unpaid` when active members exceed billed seats. The read side trusts
+    // that invariant instead of re-deriving it on every access check.
     const tx = createTxMock({
       activeMembershipCount: 3,
       billedSeatCount: 4,
@@ -1150,25 +1154,14 @@ describe("hosted Family plan", () => {
 
     await expect(readHostedFamilyAccessForMember({
       memberId: "member_mom",
-      now: new Date("2026-06-18T12:00:00.000Z"),
       prisma: tx,
-    })).resolves.toBeNull();
+    })).resolves.toMatchObject({
+      groupId: "hbag_family",
+      memberId: "member_mom",
+    });
 
-    expect(tx.hostedAccountGroupMembership.count).toHaveBeenCalledWith({
-      where: {
-        groupId: "hbag_family",
-        status: "active",
-      },
-    });
-    expect(tx.hostedAccountGroupInvite.count).toHaveBeenCalledWith({
-      where: {
-        expiresAt: {
-          gt: new Date("2026-06-18T12:00:00.000Z"),
-        },
-        groupId: "hbag_family",
-        status: "pending",
-      },
-    });
+    expect(tx.hostedAccountGroupMembership.count).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupInvite.count).not.toHaveBeenCalled();
   });
 
   it("activates active family members when Stripe marks the group subscription active", async () => {

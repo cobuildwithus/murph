@@ -257,6 +257,7 @@ describe("hosted runtime Temporal signaling", () => {
     mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
       threadContainer: {
         owner: {
+          accountGroupMemberships: [],
           billingStatus: "paused",
           suspendedAt: null,
         },
@@ -809,6 +810,7 @@ describe("hosted runtime Temporal signaling", () => {
     mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
       threadContainer: {
         owner: {
+          accountGroupMemberships: [],
           billingStatus: "paused",
           suspendedAt: null,
         },
@@ -834,19 +836,35 @@ function buildClient() {
   };
 }
 
+const hostedSponsorAccessMembershipSelect = {
+  select: {
+    group: {
+      select: {
+        billingStatus: true,
+        suspendedAt: true,
+      },
+    },
+    status: true,
+  },
+  where: {
+    status: "active",
+  },
+};
+
 function expectHostedRuntimeActiveAccessRead(
   findUnique: typeof mocks.hostedMemberFindUnique,
   userId: string,
 ) {
   expect(findUnique).toHaveBeenCalledWith({
     select: {
+      accountGroupMemberships: hostedSponsorAccessMembershipSelect,
       billingStatus: true,
-      id: true,
       suspendedAt: true,
       threadContainer: {
         select: {
           owner: {
             select: {
+              accountGroupMemberships: hostedSponsorAccessMembershipSelect,
               billingStatus: true,
               suspendedAt: true,
             },
@@ -860,19 +878,28 @@ function expectHostedRuntimeActiveAccessRead(
   });
 }
 
+type HostedAccessSponsorMembership = {
+  status: string;
+  group: {
+    billingStatus: string;
+    suspendedAt: Date | null;
+  };
+};
+
 function buildActiveMemberRecord(overrides: Partial<{
-  id: string;
+  accountGroupMemberships: HostedAccessSponsorMembership[];
   billingStatus: string;
   suspendedAt: Date | null;
   threadContainer: {
     owner: {
+      accountGroupMemberships: HostedAccessSponsorMembership[];
       billingStatus: string;
       suspendedAt: Date | null;
     };
   } | null;
 }> = {}) {
   return {
-    id: "member_123",
+    accountGroupMemberships: [],
     billingStatus: "active",
     suspendedAt: null,
     threadContainer: null,

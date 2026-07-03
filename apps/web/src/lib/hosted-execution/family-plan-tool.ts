@@ -14,7 +14,7 @@ import {
   createHostedFamilyBillingCheckout,
   type HostedFamilyChatInviteResult,
   ensureHostedAccountGroupForOwnerTx,
-  hasActiveHostedFamilyAccess,
+  readHostedFamilyAccessForMember,
   issueHostedFamilyInviteFromOwnerTx,
   readHostedFamilyOwnerSnapshotForMember,
 } from "@/src/lib/hosted-onboarding/family-plan";
@@ -136,7 +136,7 @@ async function startHostedRuntimeFamilyPlanCheckout(
     };
   }
 
-  if (await hasActiveHostedFamilyAccess({
+  if (await readHostedFamilyAccessForMember({
     memberId,
     prisma,
   })) {

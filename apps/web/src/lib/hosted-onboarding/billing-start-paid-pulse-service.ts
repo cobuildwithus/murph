@@ -19,7 +19,7 @@ import {
   parseHostedBillingPlanCode,
 } from "./billing-plans";
 import {
-  assertHostedMemberActiveAccessAllowed,
+  assertHostedMemberOwnActiveBillingAllowed,
   assertHostedMemberNotSuspended,
 } from "./entitlement";
 import {
@@ -211,7 +211,7 @@ export async function startHostedPulseTrialPaidPlan(input: {
     });
   }
 
-  assertHostedMemberActiveAccessAllowed(member);
+  assertHostedMemberOwnActiveBillingAllowed(member);
   assertHostedStripePulseTrialSubscriptionCanStartPaid({
     now,
     subscription,

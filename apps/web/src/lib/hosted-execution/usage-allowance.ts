@@ -37,8 +37,10 @@ import {
   readHostedFamilyAccessForMember,
 } from "../hosted-onboarding/family-plan";
 import {
-  hasHostedMemberActiveAccess,
-} from "../hosted-onboarding/entitlement";
+  hasActiveHostedMemberAccess,
+  type HostedMemberPersonAccessState,
+  hostedMemberPersonAccessSelect,
+} from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
 import { sha256Hex } from "../primitives";
 import { renderUserFacingMessage } from "../hosted-messages/user-facing-messages";
@@ -230,7 +232,6 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
 }): Promise<HostedAiUsageAllowanceBillingRef | null> {
   const familyAccess = await readHostedFamilyAccessForMember({
     memberId: input.memberId,
-    now: input.at,
     prisma: input.tx,
   });
   if (!familyAccess) {
@@ -284,10 +285,7 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
 
 interface HostedAiUsageAllowanceThreadContainerRef {
   monthlyUsageLimitUsdMicros: bigint;
-  owner: {
-    billingStatus: HostedBillingStatus;
-    suspendedAt: Date | null;
-  };
+  owner: HostedMemberPersonAccessState;
 }
 
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION = "openai-api-pricing-2026-05-05-standard";
@@ -554,10 +552,7 @@ export async function accountHostedAiUsageForAllowanceTx(input: {
         select: {
           monthlyUsageLimitUsdMicros: true,
           owner: {
-            select: {
-              billingStatus: true,
-              suspendedAt: true,
-            },
+            select: hostedMemberPersonAccessSelect,
           },
         },
       },
@@ -696,10 +691,7 @@ export async function resolveHostedAiUsageGate(input: {
           select: {
             monthlyUsageLimitUsdMicros: true,
             owner: {
-              select: {
-                billingStatus: true,
-                suspendedAt: true,
-              },
+              select: hostedMemberPersonAccessSelect,
             },
           },
         },
@@ -795,10 +787,7 @@ export async function readHostedAiUsageGate(input: {
           select: {
             monthlyUsageLimitUsdMicros: true,
             owner: {
-              select: {
-                billingStatus: true,
-                suspendedAt: true,
-              },
+              select: hostedMemberPersonAccessSelect,
             },
           },
         },
@@ -1330,7 +1319,7 @@ function resolveHostedAiUsageAllowancePeriod(input: {
 
     if (
       threadContainerLimitUsdMicros === null
-      || !hasHostedMemberActiveAccess(input.threadContainer.owner)
+      || !hasActiveHostedMemberAccess(input.threadContainer.owner)
     ) {
       return {
         billingPlanCode,

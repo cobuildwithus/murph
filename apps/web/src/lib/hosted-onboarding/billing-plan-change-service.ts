@@ -13,7 +13,7 @@ import {
   parseHostedBillingPlanCode,
   type HostedBillingPlanCode,
 } from "./billing-plans";
-import { assertHostedMemberActiveAccessAllowed } from "./entitlement";
+import { assertHostedMemberOwnActiveBillingAllowed } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedMemberStripeBillingRef,
@@ -65,7 +65,7 @@ export async function upgradeHostedBillingPlan(input: {
     });
   }
 
-  assertHostedMemberActiveAccessAllowed(member);
+  assertHostedMemberOwnActiveBillingAllowed(member);
 
   const targetPlanCode = input.targetPlanCode;
   if (targetPlanCode !== "launch_edge_monthly") {

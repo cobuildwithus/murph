@@ -7,16 +7,18 @@ import {
 
 import { issueHostedInviteTx } from "./invite-service";
 import {
-  hasHostedMemberActiveAccess,
   isHostedMemberSuspended,
 } from "./entitlement";
+import {
+  hasActiveHostedThreadContainerAccess,
+  readActiveHostedMemberAccess,
+} from "./member-access";
 import {
   isHostedOnboardingError,
 } from "./errors";
 import {
   acceptHostedFamilyInviteFromPhoneTx,
   buildHostedFamilyInviteAcceptedReplyText,
-  hasHostedMemberEffectiveActiveAccessForMember,
   parseHostedFamilyInviteStartToken,
 } from "./family-plan";
 import {
@@ -303,8 +305,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
     ? isHostedMemberSuspended(existingMember.suspendedAt)
     : false;
   const existingMemberEffectiveActive = existingMember && !existingMemberSuspended
-    ? await hasHostedMemberEffectiveActiveAccessForMember({
-        member: existingMember,
+    ? await readActiveHostedMemberAccess({
+        memberId: existingMember.id,
         prisma: input.prisma,
       })
     : false;
@@ -733,7 +735,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         }),
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
-        existingMemberActive: existingMember ? hasHostedMemberActiveAccess(existingMember) : false,
+        existingMemberActive: Boolean(existingMemberEffectiveActive),
         existingMemberMatch,
         reason: "first-contact-admission-required",
         routeStage: "first-contact-admission-required",
@@ -1027,8 +1029,10 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
   } = input.context;
 
   if (
-    !hasHostedMemberActiveAccess(input.route.container)
-    || !hasHostedMemberActiveAccess(input.route.owner)
+    !hasActiveHostedThreadContainerAccess({
+      container: input.route.container,
+      owner: input.route.owner,
+    })
   ) {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("thread-container-inactive"),
@@ -1306,7 +1310,13 @@ async function planHostedLinqGroupChatWebhook(input: {
   if (!sender) {
     return ignored("ignored-group-chat");
   }
-  if (isHostedMemberSuspended(sender.suspendedAt) || !hasHostedMemberActiveAccess(sender)) {
+  if (
+    isHostedMemberSuspended(sender.suspendedAt)
+    || !(await readActiveHostedMemberAccess({
+      memberId: sender.id,
+      prisma: input.prisma,
+    }))
+  ) {
     return ignored("group-chat-sender-inactive");
   }
 

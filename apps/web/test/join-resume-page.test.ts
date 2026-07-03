@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   issueHostedInvite: vi.fn(),
+  readActiveHostedMemberAccess: vi.fn(),
   redirect: vi.fn((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
   }),
@@ -21,6 +22,10 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
   issueHostedInvite: mocks.issueHostedInvite,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
+}));
+
 describe("/join session resume page", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -33,6 +38,7 @@ describe("/join session resume page", () => {
     mocks.issueHostedInvite.mockResolvedValue({
       inviteCode: "resume invite",
     });
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
   });
 
   it("redirects anonymous visitors to the public entry", async () => {
@@ -86,6 +92,31 @@ describe("/join session resume page", () => {
 
     await expect(renderJoinResumePage()).rejects.toThrow("NEXT_REDIRECT:/home");
 
+    expect(mocks.issueHostedInvite).not.toHaveBeenCalled();
+    expect(mocks.redirect).toHaveBeenCalledWith("/home");
+  });
+
+  it("redirects Family-sponsored members home without issuing an invite", async () => {
+    const member = createHostedMember({
+      billingStatus: HostedBillingStatus.not_started,
+    });
+    mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+      authenticated: true,
+      authenticatedMember: member,
+      session: {
+        expiresAt: new Date("2026-06-25T00:00:00.000Z"),
+        member,
+        privyUserId: "did:privy:user_123",
+        sessionId: "hws_123",
+      },
+    });
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+
+    await expect(renderJoinResumePage()).rejects.toThrow("NEXT_REDIRECT:/home");
+
+    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith({
+      memberId: "member_123",
+    });
     expect(mocks.issueHostedInvite).not.toHaveBeenCalled();
     expect(mocks.redirect).toHaveBeenCalledWith("/home");
   });

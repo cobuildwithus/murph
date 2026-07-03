@@ -26,9 +26,9 @@ import {
   appendHostedFamilyChatNotificationTx,
   buildHostedFamilyInviteAcceptedReplyText,
   acceptHostedFamilyInviteFromPhoneTx,
-  hasHostedMemberEffectiveActiveAccessForMember,
   parseHostedFamilyInviteStartToken,
 } from "./family-plan";
+import { readActiveHostedMemberAccess } from "./member-access";
 import { normalizePhoneNumber } from "./phone";
 import {
   buildHostedWhatsAppWebhookEventId,
@@ -221,8 +221,8 @@ async function planHostedOnboardingWhatsAppInboundText(input: {
     return buildWhatsAppInboundTextNoWakePlan("suspended-member");
   }
 
-  if (!await hasHostedMemberEffectiveActiveAccessForMember({
-    member,
+  if (!await readActiveHostedMemberAccess({
+    memberId: member.id,
     prisma: input.prisma,
   })) {
     return buildWhatsAppInboundTextNoWakePlan("inactive-member");

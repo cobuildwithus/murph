@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   drainHostedLinqSideEffectsDirect: vi.fn(),
   fetch: vi.fn(),
   getPrisma: vi.fn(),
+  hostedMemberFindUnique: vi.fn(),
   readHostedMailboxConsumedSeqByLane: vi.fn(),
   readHostedMailboxFirstPendingConversationItem: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
@@ -101,6 +102,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.getPrisma.mockReturnValue(createPrismaClientStub());
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(MEMBER_ID);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
+    mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord());
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord());
     mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue(noMailboxBacklog());
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValue([
@@ -375,6 +377,9 @@ describe("hosted orchestration reconciliation facts", () => {
 
   it("preserves inactive workspace retention clocks for retention-only workflow dispatch", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
+      billingStatus: "canceled",
+    }));
+    mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord({
       billingStatus: "canceled",
     }));
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
@@ -942,6 +947,9 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
       billingStatus: "paused",
     }));
+    mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord({
+      billingStatus: "paused",
+    }));
 
     const response = await reconciliationRoute.GET(
       requestForFacts(),
@@ -1127,7 +1135,31 @@ function createPrismaClientStub() {
       count: vi.fn(async () => 0),
       findFirst: vi.fn(async () => null),
     },
+    hostedMember: {
+      findUnique: mocks.hostedMemberFindUnique,
+    },
     kind: "prisma",
+  };
+}
+
+function buildMemberAccessRecord(overrides: Partial<{
+  accountGroupMemberships: Array<{
+    status: string;
+    group: {
+      billingStatus: string;
+      suspendedAt: Date | null;
+    };
+  }>;
+  billingStatus: string;
+  suspendedAt: Date | null;
+  threadContainer: unknown;
+}> = {}) {
+  return {
+    accountGroupMemberships: [],
+    billingStatus: "active",
+    suspendedAt: null,
+    threadContainer: null,
+    ...overrides,
   };
 }
 

@@ -99,12 +99,24 @@ A hosted member has active access when either:
 - they have an active family membership in an active family group whose billing
   state grants access.
 
+`hosted_member.billing_status` records only the member's own Stripe
+relationship; sponsored access is derived, never materialized onto the member
+row. The single derivation owner is
+`apps/web/src/lib/hosted-onboarding/member-access.ts`
+(`hasActiveHostedMemberAccess` / `readActiveHostedMemberAccess`); every access
+gate (webhooks, runtime, pages, internal routes, egress, thread containers)
+must use it. The own-billing predicates in `entitlement.ts` are reserved for
+billing surfaces that genuinely mean "this member's own subscription".
+
 Sponsored access must fail closed when:
 
 - the family subscription is canceled, unpaid, paused, suspended, or otherwise
   inactive,
 - the member is removed from the group,
-- active memberships exceed the billed seat count,
+- active memberships exceed the billed seat count — enforced at write time:
+  invite issuance/acceptance assert seat fit, and the subscription webhook
+  fails the whole group to `unpaid` when active members exceed billed seats
+  (reads trust that invariant instead of re-counting seats per access check),
 - the membership is not accepted/active, or
 - required launch/legal consent is missing at the boundary that requires it.
 

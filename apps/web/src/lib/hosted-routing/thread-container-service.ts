@@ -23,8 +23,8 @@ import {
   normalizeHostedOpaqueInput,
 } from "../hosted-onboarding/contact-privacy";
 import {
-  hasHostedMemberActiveAccess,
-} from "../hosted-onboarding/entitlement";
+  readActiveHostedMemberAccess,
+} from "../hosted-onboarding/member-access";
 import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
@@ -65,7 +65,10 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     prisma: input.prisma,
   });
 
-  if (!owner || !hasHostedMemberActiveAccess(owner)) {
+  if (!owner || !(await readActiveHostedMemberAccess({
+    memberId: input.ownerMemberId,
+    prisma: input.prisma,
+  }))) {
     throw hostedOnboardingError({
       code: "HOSTED_THREAD_CONTAINER_OWNER_ACTIVE_ACCESS_REQUIRED",
       httpStatus: 403,
@@ -213,8 +216,11 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     input.monthlyUsageLimitUsdMicros,
   );
 
+  // Thread-container members are synthetic: they have no Stripe relationship
+  // of their own, so their billing status stays truthful (`not_started`) and
+  // access is always derived from the owner through `member-access.ts`.
   await createHostedMember({
-    billingStatus: HostedBillingStatus.active,
+    billingStatus: HostedBillingStatus.not_started,
     memberId: containerMemberId,
     prisma: input.prisma,
   });
