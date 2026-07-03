@@ -158,6 +158,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
 
 import { buildHostedInviteReply } from "@/src/lib/hosted-onboarding/linq";
 import {
+  createHostedLinqChatLookupKey,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -263,8 +264,10 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       return {
         hasPendingLinqRouteState: false,
         linqChatId: route?.linqChatId ?? null,
+        linqChatLookupKey: createHostedLinqChatLookupKey(route?.linqChatId ?? null),
         linqHomeLineAssignedAt: null,
         linqRecipientPhone: route?.linqRecipientPhone ?? null,
+        linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(route?.linqRecipientPhone ?? null),
         memberId: route?.memberId ?? "member_123",
         pendingLinqChatId: null,
         pendingLinqParticipantContact: null,

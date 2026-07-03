@@ -15,8 +15,10 @@ import type { HostedOnboardingReadClient } from "./shared";
 export const hostedMemberRoutingStateSelect =
   Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
     linqChatIdEncrypted: true,
+    linqChatLookupKey: true,
     linqHomeLineAssignedAt: true,
     linqRecipientPhoneEncrypted: true,
+    linqRecipientPhoneLookupKey: true,
     memberId: true,
     pendingLinqChatIdEncrypted: true,
     pendingLinqChatLookupKey: true,
@@ -39,8 +41,10 @@ export type HostedMemberRoutingRecord = Prisma.HostedMemberRoutingGetPayload<{
 export const hostedMemberRoutingLookupSelect =
   Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
     linqChatIdEncrypted: true,
+    linqChatLookupKey: true,
     linqHomeLineAssignedAt: true,
     linqRecipientPhoneEncrypted: true,
+    linqRecipientPhoneLookupKey: true,
     memberId: true,
     pendingLinqChatIdEncrypted: true,
     pendingLinqChatLookupKey: true,
@@ -77,8 +81,13 @@ export interface HostedMemberRoutingStateSnapshot {
   // the decoded fields.
   hasPendingLinqRouteState?: boolean;
   linqChatId: string | null;
+  // Raw persisted lookup keys for the home binding. Skip/no-op decisions
+  // must compare these against the current-generation computed keys so a
+  // stale or missing key still gets re-written.
+  linqChatLookupKey?: string | null;
   linqHomeLineAssignedAt: Date | null;
   linqRecipientPhone: string | null;
+  linqRecipientPhoneLookupKey?: string | null;
   memberId: string;
   pendingLinqChatId: string | null;
   pendingLinqParticipantContact: HostedLinqParticipantContactClaim | null;
@@ -133,8 +142,10 @@ export async function projectHostedMemberRoutingState(
       routing.pendingLinqRecipientPhoneLookupKey,
     ].some((column) => column !== null && column !== undefined),
     linqChatId: privateState.linqChatId,
+    linqChatLookupKey: routing.linqChatLookupKey ?? null,
     linqHomeLineAssignedAt: routing.linqHomeLineAssignedAt,
     linqRecipientPhone: privateState.linqRecipientPhone,
+    linqRecipientPhoneLookupKey: routing.linqRecipientPhoneLookupKey ?? null,
     memberId: routing.memberId,
     pendingLinqChatId: privateState.pendingLinqChatId,
     pendingLinqParticipantContact: projectHostedPendingLinqParticipantContact({

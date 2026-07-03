@@ -620,8 +620,10 @@ describe("hosted-member-store", () => {
       },
       select: {
         linqChatIdEncrypted: true,
+        linqChatLookupKey: true,
         linqHomeLineAssignedAt: true,
         linqRecipientPhoneEncrypted: true,
+        linqRecipientPhoneLookupKey: true,
         member: {
           select: {
             billingStatus: true,
@@ -720,8 +722,10 @@ describe("hosted-member-store", () => {
       },
       select: {
         linqChatIdEncrypted: true,
+        linqChatLookupKey: true,
         linqHomeLineAssignedAt: true,
         linqRecipientPhoneEncrypted: true,
+        linqRecipientPhoneLookupKey: true,
         member: {
           select: {
             billingStatus: true,
@@ -776,7 +780,9 @@ describe("hosted-member-store", () => {
     ).resolves.toEqual({
       hasPendingLinqRouteState: false,
       linqChatId: "chat_123",
+      linqChatLookupKey: "hbidx:linq-chat:v1:abc123",
       linqRecipientPhone: null,
+      linqRecipientPhoneLookupKey: null,
       memberId: "member_123",
       pendingLinqChatId: null,
       pendingLinqParticipantContact: null,
@@ -821,7 +827,9 @@ describe("hosted-member-store", () => {
     ).resolves.toEqual({
       hasPendingLinqRouteState: false,
       linqChatId: null,
+      linqChatLookupKey: null,
       linqRecipientPhone: null,
+      linqRecipientPhoneLookupKey: null,
       memberId: "member_123",
       pendingLinqChatId: null,
       pendingLinqParticipantContact: null,
@@ -2966,7 +2974,9 @@ describe("hosted-member-store", () => {
       routing: {
         hasPendingLinqRouteState: false,
         linqChatId: "chat_123",
+        linqChatLookupKey: "hbidx:linq-chat:v1:abc123",
         linqRecipientPhone: null,
+        linqRecipientPhoneLookupKey: null,
         memberId: "member_123",
         pendingLinqChatId: null,
         pendingLinqParticipantContact: null,

@@ -30,6 +30,10 @@ vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
 }));
 
 import {
+  createHostedLinqChatLookupKey,
+  createHostedPhoneLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy-core";
+import {
   readHostedLinqHomeLineAuthority,
   reserveHostedLinqHomeLineFromPoolTx,
   resolveHostedMemberLinqHomeLineRouteBindingTx,
@@ -669,8 +673,10 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     mocks.readHostedMemberRoutingState.mockResolvedValue({
       hasPendingLinqRouteState: false,
       linqChatId: "chat_123",
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
       linqHomeLineAssignedAt: assignedAt,
       linqRecipientPhone: "+15550100001",
+      linqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15550100001"),
       memberId: "member_123",
       pendingLinqChatId: null,
       pendingLinqParticipantContact: null,
@@ -739,6 +745,38 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       linqChatId: "chat_123",
       linqHomeLineAssignedAt: assignedAt,
       linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+
+    const result = await resolveHostedMemberLinqHomeLineRouteBindingTx({
+      incomingChatId: "chat_123",
+      incomingDirectAttested: true,
+      incomingRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      prisma: {} as never,
+    });
+    expect(result.kind).toBe("bind");
+    expect(
+      result.kind === "bind" ? result.routeAlreadyBound : null,
+    ).toBeUndefined();
+  });
+
+  it("keeps the rewrite when the stored home chat lookup key is not the current generation", async () => {
+    const assignedAt = new Date("2026-06-30T14:15:00.000Z");
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      hasPendingLinqRouteState: false,
+      linqChatId: "chat_123",
+      linqChatLookupKey: "hbidx:linq-chat:v-old:stale-digest",
+      linqHomeLineAssignedAt: assignedAt,
+      linqRecipientPhone: "+15550100001",
+      linqRecipientPhoneLookupKey: createHostedPhoneLookupKey("+15550100001"),
       memberId: "member_123",
       pendingLinqChatId: null,
       pendingLinqParticipantContact: null,
