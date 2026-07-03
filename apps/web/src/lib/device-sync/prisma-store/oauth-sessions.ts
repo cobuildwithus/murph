@@ -82,33 +82,47 @@ export class PrismaHostedOAuthSessionStore {
         };
       }
 
-      // Delete with a count check so duplicate callbacks or retries fail closed as
-      // already-consumed/missing instead of surfacing as a transaction error.
-      const deleteResult = await tx.deviceOauthSession.deleteMany({
+      const stateRecord = {
+        state: record.state,
+        provider: record.provider,
+        returnTo: record.returnTo,
+        ownerId: record.userId,
+        metadata: toJsonRecord(record.metadataJson),
+        createdAt: record.createdAt.toISOString(),
+        expiresAt: record.expiresAt.toISOString(),
+      } satisfies OAuthStateRecord;
+
+      if (record.consumedAt !== null) {
+        return {
+          status: "replayed",
+          record: stateRecord,
+        };
+      }
+
+      // Mark with a count check instead of deleting so redelivered callbacks
+      // and concurrent consumers resolve as replays of the earlier delivery
+      // instead of failing as unknown. Consumed rows stay until the normal
+      // expiry sweep removes them.
+      const consumeResult = await tx.deviceOauthSession.updateMany({
+        data: {
+          consumedAt: new Date(now),
+        },
         where: {
           state,
-          provider: record.provider,
-          ...(expectedOwnerId ? { userId: expectedOwnerId } : {}),
+          consumedAt: null,
         },
       });
 
-      if (deleteResult.count !== 1) {
+      if (consumeResult.count !== 1) {
         return {
-          status: "missing",
+          status: "replayed",
+          record: stateRecord,
         };
       }
 
       return {
         status: "consumed",
-        record: {
-          state: record.state,
-          provider: record.provider,
-          returnTo: record.returnTo,
-          ownerId: record.userId,
-          metadata: toJsonRecord(record.metadataJson),
-          createdAt: record.createdAt.toISOString(),
-          expiresAt: record.expiresAt.toISOString(),
-        } satisfies OAuthStateRecord,
+        record: stateRecord,
       };
     });
   }
