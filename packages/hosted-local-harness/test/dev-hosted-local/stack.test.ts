@@ -2554,7 +2554,7 @@ describe("hosted local dev stack", () => {
           slug: "gpt-5.4-nano",
           supports_parallel_tool_calls: false,
           supports_search_tool: false,
-          use_responses_lite: true,
+          use_responses_lite: false,
         },
       ],
     });

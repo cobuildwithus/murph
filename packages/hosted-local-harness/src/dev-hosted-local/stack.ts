@@ -2214,7 +2214,9 @@ function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string
       service_tiers: [],
       supports_parallel_tool_calls: false,
       supports_search_tool: false,
-      use_responses_lite: true,
+      // The OpenAI API rejects gpt-5.4-nano when Codex >= 0.143 sends the
+      // x-openai-internal-codex-responses-lite header.
+      use_responses_lite: false,
     });
   } else {
     const templateModel = parsed.models
@@ -2235,7 +2237,7 @@ function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string
       slug: HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG,
       supports_parallel_tool_calls: false,
       supports_search_tool: false,
-      use_responses_lite: true,
+      use_responses_lite: false,
     });
   }
 

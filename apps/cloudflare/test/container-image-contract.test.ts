@@ -525,10 +525,10 @@ describe("hosted runner container image contract", () => {
     expect(finalDockerfile).toContain('first_model("gpt-5.4-mini")');
     expect(finalDockerfile).toContain(".supports_search_tool = false");
     expect(finalDockerfile).toContain(".supports_parallel_tool_calls = false");
-    expect(finalDockerfile).toContain(".use_responses_lite = true");
+    expect(finalDockerfile).toContain(".use_responses_lite = false");
     expect(finalDockerfile).toContain('"id":"flex"');
     expect(finalDockerfile).toContain(
-      'jq -s -e \'length == 1 and (.[0] | any(.models[]?; .slug == "gpt-5.5" and any(.service_tiers[]?; .id == "flex")) and any(.models[]?; .slug == "gpt-5.4-nano" and .supports_search_tool == false and .supports_parallel_tool_calls == false and .use_responses_lite == true))\'',
+      'jq -s -e \'length == 1 and (.[0] | any(.models[]?; .slug == "gpt-5.5" and any(.service_tiers[]?; .id == "flex")) and any(.models[]?; .slug == "gpt-5.4-nano" and .supports_search_tool == false and .supports_parallel_tool_calls == false and .use_responses_lite == false))\'',
     );
     expect(finalDockerfile).toContain(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
@@ -626,7 +626,7 @@ describe("hosted runner container image contract", () => {
     expect(readCodexModel(patchedCatalog, "gpt-5.4-nano")).toMatchObject({
       supports_parallel_tool_calls: false,
       supports_search_tool: false,
-      use_responses_lite: true,
+      use_responses_lite: false,
     });
     expect(runJqFilter(validationFilter, patchedCatalog, { slurp: true }).trim()).toBe("true");
 
@@ -691,7 +691,7 @@ describe("hosted runner container image contract", () => {
     expect(readCodexModel(normalizedNanoCatalog, "gpt-5.4-nano")).toMatchObject({
       supports_parallel_tool_calls: false,
       supports_search_tool: false,
-      use_responses_lite: true,
+      use_responses_lite: false,
     });
     expect(runJqFilter(validationFilter, normalizedNanoCatalog, { slurp: true }).trim()).toBe("true");
 
