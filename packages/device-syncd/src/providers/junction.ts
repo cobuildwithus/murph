@@ -99,6 +99,10 @@ interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
 }
 
+type JunctionHistoricalBackfillFollowUp = Pick<ProviderJobResult, "metadataPatch"> & {
+  nextRetryAt?: string;
+};
+
 type JunctionResourceCategory = "summary" | "timeseries";
 
 interface JunctionDirectResourceJobInput {
@@ -827,13 +831,17 @@ export function createJunctionDeviceSyncProvider(
           windowEnd: window.windowEnd,
         })
       : {};
+    const { nextRetryAt, ...backfillFollowUpResult } = backfillFollowUp;
+    const nextReconcileAt = nextRetryAt
+      ? minIsoTimestamp(addMilliseconds(context.now, reconcileIntervalMs), nextRetryAt)
+      : addMilliseconds(context.now, reconcileIntervalMs);
 
     return withJunctionSkippedResourceMetadata(
       context,
       withJunctionMetadataPatch(
         {
-          ...backfillFollowUp,
-          nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+          ...backfillFollowUpResult,
+          nextReconcileAt,
         },
         profileMetadataPatch,
       ),
@@ -4294,7 +4302,7 @@ function buildHistoricalBackfillFollowUp(input: {
   now: string;
   windowStart: string;
   windowEnd: string;
-}): Pick<ProviderJobResult, "metadataPatch"> {
+}): JunctionHistoricalBackfillFollowUp {
   if (input.hasRecords) {
     return {
       metadataPatch: buildHistoricalBackfillMetadataPatch({
@@ -4333,6 +4341,7 @@ function buildHistoricalBackfillFollowUp(input: {
       windowStart: input.windowStart,
       windowEnd: input.windowEnd,
     }),
+    ...(retryDelayMs === null ? {} : { nextRetryAt: addMilliseconds(input.now, retryDelayMs) }),
   };
 }
 

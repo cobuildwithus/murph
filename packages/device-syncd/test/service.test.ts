@@ -3171,6 +3171,133 @@ test("manual reconcile boosts Junction reconcile priority without promoting hist
   }
 });
 
+test("device sync service wakes Junction retrying historical backfill at the retry due time", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-empty-backfill-wake");
+  const executedAt = "2026-04-04T00:00:00.000Z";
+  const retryDueAt = "2026-04-04T00:15:00.000Z";
+  const hourlyReconcileAt = "2026-04-04T01:00:00.000Z";
+  const ownerWindowStart = "2026-04-01T00:00:00.000Z";
+  const ownerWindowEnd = "2026-04-03T00:00:00.000Z";
+  let now = new Date(executedAt);
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => now,
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileIntervalMs: 60 * 60_000,
+        summaryBackfillDays: 2,
+        summaryResources: ["activity"],
+        timeseriesResources: [],
+        fetchImpl: async (input) => {
+          const url = readUrl(input);
+
+          if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+            return createJsonResponse({
+              providers: [
+                {
+                  id: "provider-garmin-1",
+                  slug: "garmin",
+                  name: "Garmin",
+                  status: "connected",
+                  resource_availability: {
+                    activity: true,
+                  },
+                },
+              ],
+            });
+          }
+
+          if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+            return createJsonResponse({ data: [] });
+          }
+
+          throw new Error(`Unexpected Junction request during empty backfill wake test: ${url}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: ownerWindowEnd,
+      nextReconcileAt: null,
+    });
+    const expectedDedupeKey = createHash("sha256")
+      .update(JSON.stringify(["junction", "backfill", ownerWindowStart, ownerWindowEnd]))
+      .digest("hex");
+
+    store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "backfill",
+      payload: {
+        windowStart: ownerWindowStart,
+        windowEnd: ownerWindowEnd,
+      },
+      availableAt: executedAt,
+      priority: 30,
+      dedupeKey: expectedDedupeKey,
+    });
+
+    const processedJob = await service.runWorkerOnce();
+    assert.equal(processedJob?.kind, "backfill");
+
+    const afterEmptyBackfill = store.getAccountById(account.id);
+    assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillStatus, "retrying");
+    assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillEmptyAttempts, 1);
+    assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillLastEmptyAt, executedAt);
+    assert.equal(afterEmptyBackfill?.nextReconcileAt, retryDueAt);
+    assert.notEqual(afterEmptyBackfill?.nextReconcileAt, hourlyReconcileAt);
+    assert.equal(service.getNextWakeAt(executedAt), retryDueAt);
+
+    now = new Date("2026-04-04T00:14:59.000Z");
+    await service.runSchedulerOnce();
+    assert.equal(
+      readJobsForAccountForTesting(store, account.id).filter((job) =>
+        job.kind === "backfill" && job.status === "queued"
+      ).length,
+      0,
+    );
+
+    now = new Date(retryDueAt);
+    await service.runSchedulerOnce();
+    const queuedBackfills = readJobsForAccountForTesting(store, account.id).filter((job) =>
+      job.kind === "backfill" && job.status === "queued"
+    );
+
+    assert.equal(queuedBackfills.length, 1);
+    const queuedBackfill = store.getJobById(queuedBackfills[0]!.id);
+    assert.deepEqual(queuedBackfill?.payload, {
+      windowStart: ownerWindowStart,
+      windowEnd: ownerWindowEnd,
+    });
+    assert.equal(queuedBackfill?.dedupeKey, expectedDedupeKey);
+  } finally {
+    close();
+  }
+});
+
 test("device sync service preserves Junction yielded backfill timeseries cursor in queued continuation", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-yielded-backfill-cursor");
   const ownerWindowStart = "2026-04-07T00:00:00.000Z";
