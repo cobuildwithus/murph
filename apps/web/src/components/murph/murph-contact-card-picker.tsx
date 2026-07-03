@@ -204,9 +204,11 @@ export function MurphContactCardPicker({
 
   const actions = (
     <div className="flex flex-col gap-2">
+      {/* No `download` attribute: the route serves the vCard inline so iOS
+          Safari opens its native contact preview; a download hint would
+          route it into Files instead. */}
       <a
         className={buttonVariants({ className: "w-full", size: "xl" })}
-        download
         href={murphContactCardDownloadHref(selected.id)}
         onClick={() => onAddToContacts?.(selected)}
       >

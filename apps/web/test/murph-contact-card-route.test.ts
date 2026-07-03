@@ -6,12 +6,13 @@ const mocks = vi.hoisted(() => ({
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   getPrisma: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
-  requireActivePrivyMemberAuth: vi.fn(),
+  requireActiveHostedAppSessionFromRequest: vi.fn(),
   resolveMurphHostedLinqContactCardBackupPhoneNumber: vi.fn(),
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireActivePrivyMemberAuth: mocks.requireActivePrivyMemberAuth,
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  requireActiveHostedAppSessionFromRequest:
+    mocks.requireActiveHostedAppSessionFromRequest,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
@@ -53,7 +54,7 @@ describe("murph contact card route", () => {
     vi.clearAllMocks();
     vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.getPrisma.mockReturnValue({});
-    mocks.requireActivePrivyMemberAuth.mockResolvedValue({
+    mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
       member: { id: "member_1" },
     });
     mocks.readHostedMemberRoutingState.mockResolvedValue({
@@ -129,6 +130,23 @@ describe("murph contact card route", () => {
     });
   });
 
+  it("uses the pending line while the member's line commit is in flight", async () => {
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqRecipientPhone: null,
+      pendingLinqRecipientPhone: "+14045550122",
+    });
+
+    const response = await route.GET(buildRequest());
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("TEL;TYPE=CELL:+14045550122");
+    expect(
+      mocks.resolveMurphHostedLinqContactCardBackupPhoneNumber,
+    ).toHaveBeenCalledWith({
+      excludePhoneNumber: "+14045550122",
+      prisma: {},
+    });
+  });
+
   it("returns 409 when the member has no conversation line", async () => {
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
 
@@ -139,7 +157,7 @@ describe("murph contact card route", () => {
   });
 
   it("propagates auth failures without building a card", async () => {
-    mocks.requireActivePrivyMemberAuth.mockRejectedValue(
+    mocks.requireActiveHostedAppSessionFromRequest.mockRejectedValue(
       hostedOnboardingError({
         code: "APP_SESSION_REQUIRED",
         message: "Sign in to continue.",

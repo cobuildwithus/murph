@@ -1,3 +1,4 @@
+import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
@@ -9,7 +10,6 @@ import {
   resolveMurphHostedLinqContactCardBackupPhoneNumber,
 } from "@/src/lib/hosted-onboarding/linq-contact-card";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
-import { requireActivePrivyMemberAuth } from "@/src/lib/hosted-onboarding/request-auth";
 import {
   DEFAULT_MURPH_CONTACT_AVATAR_ID,
   findMurphContactAvatarOption,
@@ -24,14 +24,21 @@ import { getPrisma } from "@/src/lib/prisma";
  * headshot; the no-photo option omits `PHOTO` entirely.
  */
 export const GET = withJsonError(async (request: Request) => {
-  const auth = await requireActivePrivyMemberAuth(request);
+  // Hosted app session (the same authority that rendered the picker UI),
+  // plus the active-access entitlement check, like the other member-bound
+  // settings GET routes.
+  const session = await requireActiveHostedAppSessionFromRequest(request);
   const prisma = getPrisma();
 
   const routing = await readHostedMemberRoutingState({
-    memberId: auth.member.id,
+    memberId: session.member.id,
     prisma,
   });
-  const phoneNumber = routing?.linqRecipientPhone ?? null;
+  // Same phone authority as the invite/home surfaces that show the CTA: a
+  // freshly signed-up member may only have a pending line committed yet.
+  const phoneNumber = routing?.linqRecipientPhone
+    ?? routing?.pendingLinqRecipientPhone
+    ?? null;
   if (!phoneNumber) {
     throw hostedOnboardingError({
       code: "MURPH_TEXT_LINE_NOT_READY",
