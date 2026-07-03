@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
+  readHostedMemberIdentity: vi.fn(),
   grantHostedVaultShareTx: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   readActiveHostedVaultShareProjectionKinds: vi.fn(),
@@ -23,12 +24,19 @@ vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
   revokeHostedVaultSharesWithCleanupTx: mocks.revokeHostedVaultSharesWithCleanupTx,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
+  readHostedMemberIdentity: mocks.readHostedMemberIdentity,
+}));
+
 import {
   acceptHostedGroupJoinCodeTx,
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   HOSTED_GROUP_VAULT_SHARE_DESTINATION_LIMIT_PER_PROJECTION,
   HOSTED_GROUP_VAULT_SHARE_GRANT_LIMIT_PER_GRANTOR_PROJECTION,
 } from "@/src/lib/hosted-groups/group-store";
+import {
+  normalizeHostedVaultShareProjectionKinds,
+} from "@/src/lib/hosted-groups/join-policy";
 
 const JOIN_POLICY = {
   requestedVaultShareProjectionKinds: ["sleep-times.v0"],
@@ -79,7 +87,12 @@ function buildTx(input?: {
       findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
     },
     hostedVaultShare: {
-      count: vi.fn(async (args: { where: { destinationMemberId?: string } }) => {
+      count: vi.fn(async (args: {
+        where: { destinationMemberId?: string; projectionKind?: string };
+      }) => {
+        if (args.where.projectionKind === "profile-name.v0") {
+          return 0;
+        }
         if (args.where.destinationMemberId) {
           return input?.activeDestinationGrantCount ?? 0;
         }
@@ -145,17 +158,19 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
   });
 
-  it("creates membership without launch consent when no permissions are selected", async () => {
+  it("requires launch consent and grants the profile name on every join", async () => {
     const tx = buildTx();
+    const now = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(acceptHostedGroupJoinCodeTx({
       joinCode: "join_1",
       memberId: "member_joiner",
-      now: new Date("2026-07-01T00:00:00.000Z"),
+      now,
       selectedVaultShareProjectionKinds: [],
       tx,
     })).resolves.toMatchObject({
       alreadyMember: false,
+      grantedVaultShareProjectionKinds: ["profile-name.v0"],
       membershipId: "membership_created",
     });
 
@@ -163,8 +178,17 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       "member_group_runtime",
       expect.anything(),
     );
-    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
-    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+    // Joining always shares the typed profile display name, so consent gates
+    // every join, and the only automatic grant is profile-name.v0.
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledTimes(1);
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledTimes(1);
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_joiner",
+      now,
+      projectionKind: "profile-name.v0",
+      tx,
+    });
   });
 
   it("refuses to add a group vault-share grant beyond the bounded fan-out cap", async () => {
@@ -190,7 +214,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
         status: "granted",
       },
     });
-    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(
+      expect.objectContaining({ projectionKind: "sleep-times.v0" }),
+    );
   });
 
   it("refuses to add a group vault-share grant beyond the destination projection cap", async () => {
@@ -217,7 +243,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
         status: "granted",
       },
     });
-    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(
+      expect.objectContaining({ projectionKind: "sleep-times.v0" }),
+    );
   });
 
   it("keeps an existing active group vault-share grant idempotent at the cap", async () => {
@@ -235,7 +263,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       tx,
     })).resolves.toMatchObject({
       alreadyMember: true,
-      grantedVaultShareProjectionKinds: ["sleep-times.v0"],
+      grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
       membershipId: "membership_existing",
     });
 
@@ -271,7 +299,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       tx,
     })).resolves.toMatchObject({
       alreadyMember: true,
-      grantedVaultShareProjectionKinds: [],
+      grantedVaultShareProjectionKinds: ["profile-name.v0"],
       membershipId: "membership_existing",
       revokedVaultShareProjectionKinds: ["sleep-times.v0"],
       vaultShareCleanupSignals: [{
@@ -293,7 +321,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+    mocks.readHostedMemberIdentity.mockResolvedValue({ phoneNumber: "+15551110000" });
   });
 
   it("requires the signed-in actor to own the thread container", async () => {
@@ -334,6 +364,14 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
         id: "group_1",
         kind: "friends",
         memberCount: 1,
+        members: [
+          {
+            grantedVaultShareProjectionKinds: ["profile-name.v0"],
+            handle: "+15551110000",
+            memberId: "member_owner",
+            role: "owner",
+          },
+        ],
         requestedVaultShareProjectionKinds: ["sleep-times.v0"],
         status: "active",
       },
@@ -384,7 +422,6 @@ function buildGroupLinkTx(input: {
         }
         if (args.where.id) {
           return {
-            _count: { members: 1 },
             displayName: "Sunday sleep crew",
             id: "group_1",
             joinPolicyJson: {
@@ -392,6 +429,7 @@ function buildGroupLinkTx(input: {
               schema: "murph.hosted-group.join-policy.v1",
             },
             kind: "friends",
+            members: [{ memberId: input.ownerMemberId, role: "owner" }],
             runtimeMemberId: "member_group_runtime",
           };
         }
@@ -401,6 +439,16 @@ function buildGroupLinkTx(input: {
     },
     hostedGroupMember: {
       upsert: vi.fn(async () => undefined),
+    },
+    hostedVaultShare: {
+      count: vi.fn(async () => 0),
+      findMany: vi.fn(async () => [
+        {
+          grantorMemberId: input.ownerMemberId,
+          projectionKind: "profile-name.v0",
+        },
+      ]),
+      findUnique: vi.fn(async () => null),
     },
     hostedThreadContainer: {
       findUnique: vi.fn(async () => ({
@@ -419,3 +467,14 @@ function buildGroupLinkTx(input: {
     };
   };
 }
+
+
+describe("normalizeHostedVaultShareProjectionKinds", () => {
+  it("keeps selectable health kinds and silently drops the membership-implied profile name", () => {
+    expect(normalizeHostedVaultShareProjectionKinds([
+      "profile-name.v0",
+      "sleep-times.v0",
+      "not-a-kind",
+    ])).toEqual(["sleep-times.v0"]);
+  });
+});

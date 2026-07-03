@@ -42,6 +42,9 @@ import {
   preferencesDocumentSchema as preferencesDocumentContract,
 } from "./preferences.ts";
 import {
+  profileDocumentFrontmatterSchema as profileFrontmatterContract,
+} from "./profile.ts";
+import {
   scheduledLogFrontmatterSchema as scheduledLogFrontmatterContract,
 } from "./scheduled-log.ts";
 
@@ -91,6 +94,7 @@ export const foodFrontmatterSchema = toJsonSchema(foodFrontmatterContract);
 export const assessmentResponseSchema = toJsonSchema(assessmentResponseContract);
 export const memoryDocumentFrontmatterSchema = toJsonSchema(memoryDocumentFrontmatterContract);
 export const preferencesDocumentSchema = toJsonSchema(preferencesDocumentContract);
+export const profileFrontmatterSchema = toJsonSchema(profileFrontmatterContract);
 export const providerFrontmatterSchema = toJsonSchema(providerFrontmatterContract);
 export const recipeFrontmatterSchema = toJsonSchema(recipeFrontmatterContract);
 export const scheduledLogFrontmatterSchema = toJsonSchema(scheduledLogFrontmatterContract);
@@ -125,6 +129,7 @@ export const schemaCatalog = Object.freeze({
   "frontmatter-goal": goalFrontmatterSchema,
   "frontmatter-journal-day": journalDayFrontmatterSchema,
   "frontmatter-memory": memoryDocumentFrontmatterSchema,
+  "frontmatter-profile": profileFrontmatterSchema,
   "frontmatter-provider": providerFrontmatterSchema,
   "frontmatter-protocol": protocolFrontmatterSchema,
   "frontmatter-regimen": regimenFrontmatterSchema,

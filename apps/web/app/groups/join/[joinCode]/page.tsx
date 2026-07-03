@@ -66,7 +66,7 @@ function renderGroupJoin(input: {
           {alreadyActiveMember ? `You're in ${groupName}` : `Join ${groupName}`}
         </h1>
         <ul className="flex flex-col gap-1.5 text-sm text-pretty text-muted-foreground">
-          <li>Joining this group adds you as a member in Murph.</li>
+          <li>Joining this group adds you as a member, and this group&apos;s Murph will know you by your name.</li>
           <li>It does not share your private Murph chats, health data, vault data, account data, or email settings.</li>
           <li>Any health permissions below are optional and explicit.</li>
         </ul>

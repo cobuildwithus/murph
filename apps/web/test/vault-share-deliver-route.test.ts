@@ -267,6 +267,51 @@ describe("vault-share deliver route", () => {
     });
   });
 
+  it("delivers a profile name no matter how long ago it was set", async () => {
+    // profile-name.v0 is a current-state record with one fixed recordKey, not a
+    // time-series: a name set months before the first group join is still the
+    // member's current name and must reach the destination.
+    const profileShare = { ...ACTIVE_SHARE, projectionKind: "profile-name.v0" };
+    mocks.findActiveHostedVaultShares.mockResolvedValue([profileShare]);
+    const record = {
+      data: { displayName: "Theo" },
+      occurredAt: new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString(),
+      recordKey: "profile-name",
+    };
+
+    const response = await deliverRoute.POST(
+      buildRequest({ projectionKind: "profile-name.v0", records: [record] }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "delivered" });
+    expect(mocks.deliverHostedVaultShareRecords).toHaveBeenCalledWith({
+      records: [record],
+      share: profileShare,
+    });
+  });
+
+  it("still drops a future-dated profile name", async () => {
+    mocks.findActiveHostedVaultShares.mockResolvedValue([
+      { ...ACTIVE_SHARE, projectionKind: "profile-name.v0" },
+    ]);
+
+    const response = await deliverRoute.POST(
+      buildRequest({
+        projectionKind: "profile-name.v0",
+        records: [{
+          data: { displayName: "Theo" },
+          occurredAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          recordKey: "profile-name",
+        }],
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "delivered" });
+    expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
+  });
+
   it("keeps delivering to later shares but returns retryable failure when an active delivery fails", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 

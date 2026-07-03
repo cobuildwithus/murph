@@ -373,6 +373,7 @@ export {
 export * from "./automation.ts";
 export * from "./health/index.ts";
 export * from "./memory.ts";
+export * from "./profile.ts";
 
 export async function listMetricPoints(
   vaultRoot: string,

@@ -24,6 +24,7 @@ import {
 
 import type {
   HostedVaultShareProjectionKind,
+  HostedVaultShareSelectableProjectionKind,
 } from "./vault-share.ts";
 
 export const HOSTED_MAILBOX_LANES = [
@@ -791,11 +792,19 @@ export type HostedRuntimeGroupKind = (typeof HOSTED_RUNTIME_GROUP_KINDS)[number]
 
 export const HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH = 120;
 
+export interface HostedRuntimeGroupMemberSummary {
+  grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+  handle: string | null;
+  memberId: string;
+  role: string;
+}
+
 export interface HostedRuntimeGroupSummary {
   displayName: string | null;
   id: string;
   kind: string;
   memberCount: number;
+  members: HostedRuntimeGroupMemberSummary[];
   requestedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
   status: string;
 }
@@ -803,7 +812,9 @@ export interface HostedRuntimeGroupSummary {
 export interface HostedRuntimeGroupCreateJoinLinkRequest {
   displayName?: string | null;
   kind?: HostedRuntimeGroupKind | null;
-  requestedVaultShareProjectionKinds?: HostedVaultShareProjectionKind[] | null;
+  // Closed over the individually selectable kinds: the membership-implied
+  // profile-name.v0 share is never requestable through a join link.
+  requestedVaultShareProjectionKinds?: HostedVaultShareSelectableProjectionKind[] | null;
 }
 
 /**

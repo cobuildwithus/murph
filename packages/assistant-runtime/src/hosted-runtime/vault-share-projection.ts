@@ -1,9 +1,13 @@
 import {
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
   type HostedVaultShareDeliveryRecord,
+  type HostedVaultShareProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
 import {
   type ProjectedWearableSleepSummary,
+  readProfileDocumentRuntime,
   summarizeWearableSleepRuntime,
 } from "@murphai/query";
 
@@ -23,16 +27,17 @@ export interface HostedVaultShareProjectionOfferResult {
 }
 
 /**
- * Deterministic, best-effort projection offer: read the latest fully-timed sleep nights
- * from the member's own vault and offer them as delivery records through the vault-share
- * port. The web control plane is the sole authority on whether shares exist; this step
- * holds no share state.
+ * Deterministic, best-effort projection offer: read each projectable kind from the
+ * member's own vault and offer it as delivery records through the vault-share port. The
+ * web control plane is the sole authority on whether shares exist; this step holds no
+ * share state.
  *
  * Never throws — a projection failure must never affect the runtime's primary work — and
- * sends nothing when the vault has no fully-timed nights, so members without sleep data
- * (or without wearables) make no delivery calls at all.
+ * sends nothing for a kind the vault cannot project (no fully-timed nights, no typed
+ * profile name), so members without that data make no delivery call for it at all.
  */
 export async function offerHostedVaultShareProjectionBestEffort(input: {
+  readProfileNameRecords?: (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]>;
   readRecords?: (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]>;
   vaultRoot: string;
   vaultSharePort: HostedRuntimeVaultSharePort | null | undefined;
@@ -43,26 +48,92 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
     return { outcome: "no-port" };
   }
 
-  const readRecords = input.readRecords ?? readProjectableSleepNights;
+  const outcomes = [
+    await offerHostedVaultShareKindBestEffort({
+      port,
+      projectionKind: "sleep-times.v0",
+      readRecords: input.readRecords ?? readProjectableSleepNights,
+      vaultRoot: input.vaultRoot,
+    }),
+    await offerHostedVaultShareKindBestEffort({
+      port,
+      projectionKind: "profile-name.v0",
+      readRecords: input.readProfileNameRecords ?? readProjectableProfileName,
+      vaultRoot: input.vaultRoot,
+    }),
+  ];
 
+  return { outcome: combineHostedVaultShareOfferOutcomes(outcomes) };
+}
+
+type HostedVaultShareOfferOutcome = HostedVaultShareProjectionOfferResult["outcome"];
+
+async function offerHostedVaultShareKindBestEffort(input: {
+  port: HostedRuntimeVaultSharePort;
+  projectionKind: HostedVaultShareProjectionKind;
+  readRecords: (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]>;
+  vaultRoot: string;
+}): Promise<HostedVaultShareOfferOutcome> {
   try {
-    const records = await readRecords(input.vaultRoot);
+    const records = await input.readRecords(input.vaultRoot);
 
     if (records.length === 0) {
-      return { outcome: "no-projectable-records" };
+      return "no-projectable-records";
     }
 
-    const response = await port.deliver({
-      projectionKind: "sleep-times.v0",
+    const response = await input.port.deliver({
+      projectionKind: input.projectionKind,
       records,
     });
 
-    return {
-      outcome: response.status === "delivered" ? "delivered" : "no-active-share",
-    };
+    return response.status === "delivered" ? "delivered" : "no-active-share";
   } catch {
-    return { outcome: "error" };
+    return "error";
   }
+}
+
+/**
+ * Kind outcomes collapse to one summary for the existing single-outcome logging seam:
+ * any error is worth the warn log, otherwise any delivery counts as delivered.
+ */
+function combineHostedVaultShareOfferOutcomes(
+  outcomes: readonly HostedVaultShareOfferOutcome[],
+): HostedVaultShareOfferOutcome {
+  for (const outcome of ["error", "delivered", "no-active-share"] as const) {
+    if (outcomes.includes(outcome)) {
+      return outcome;
+    }
+  }
+  return "no-projectable-records";
+}
+
+/**
+ * The profile display name projects only from the typed canonical profile document —
+ * never parsed out of freeform memory text. occurredAt reuses the document's own
+ * updatedAt so retries stay byte-identical and the only plaintext mailbox metadata is
+ * when the name was set.
+ */
+export async function readProjectableProfileName(
+  vaultRoot: string,
+): Promise<HostedVaultShareDeliveryRecord[]> {
+  const snapshot = await readProfileDocumentRuntime(vaultRoot);
+  const displayName = snapshot.frontmatter.displayName;
+
+  if (
+    !displayName
+    || displayName.length > HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH
+    || !Number.isFinite(Date.parse(snapshot.frontmatter.updatedAt))
+  ) {
+    return [];
+  }
+
+  return [
+    {
+      data: { displayName },
+      occurredAt: new Date(Date.parse(snapshot.frontmatter.updatedAt)).toISOString(),
+      recordKey: HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
+    },
+  ];
 }
 
 export async function readProjectableSleepNights(

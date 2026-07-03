@@ -34,6 +34,9 @@ import {
 } from "../hosted-onboarding/linq-contact-card-share";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
+import {
+  signalHostedRuntimeMaintenanceRuntime,
+} from "../hosted-orchestration/signal-runtime";
 import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
@@ -135,7 +138,7 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
         input.joinLink?.requestedVaultShareProjectionKinds ?? [],
       tx,
     });
-    return { kind: "ok" as const, ...result };
+    return { kind: "ok" as const, ownerMemberId: container.ownerMemberId, ...result };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   if (created.kind !== "ok") {
@@ -147,6 +150,16 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
   });
   if (!joinUrl) {
     return unavailable("join_links_unavailable");
+  }
+
+  try {
+    // The owner's membership grants profile-name.v0 in the transaction above;
+    // waking their runtime lets the name projection deliver promptly instead of
+    // waiting for the owner's next organic wake.
+    await signalHostedRuntimeMaintenanceRuntime({ userId: created.ownerMemberId });
+  } catch {
+    // Durable grant already committed; the owner's runtime offers the
+    // projection on a later wake if this best-effort signal fails.
   }
 
   return {

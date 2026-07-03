@@ -471,6 +471,10 @@ describe("parseHostedRuntimeGroupTool", () => {
     requestedVaultShareProjectionKinds: ["sleep-times.v0"],
     status: "active",
   };
+  const PARSED_GROUP_SUMMARY = {
+    ...GROUP_SUMMARY,
+    members: [],
+  };
 
   it("parses read and create_join_link requests and rejects other mutations", () => {
     expect(parseHostedRuntimeGroupToolRequest({
@@ -523,6 +527,14 @@ describe("parseHostedRuntimeGroupTool", () => {
         joinLink: { requestedVaultShareProjectionKinds: ["all-health-data"] },
       })
     ).toThrow(/unsupported projection kind/u);
+    // Membership-implied, never requestable: the join-link request contract is closed
+    // over the individually selectable kinds.
+    expect(() =>
+      parseHostedRuntimeGroupToolRequest({
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionKinds: ["profile-name.v0"] },
+      })
+    ).toThrow(/unsupported projection kind/u);
     expect(() =>
       parseHostedRuntimeGroupToolRequest({
         action: "create_join_link",
@@ -542,7 +554,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toEqual({
       action: "create_join_link",
       result: {
-        group: GROUP_SUMMARY,
+        group: PARSED_GROUP_SUMMARY,
         joinUrl: "https://example.com/groups/join/abc123",
         status: "ok",
       },
@@ -577,7 +589,9 @@ describe("parseHostedRuntimeGroupTool", () => {
     ).toThrow(/not allowed/u);
   });
 
-  it("parses group tool responses without exposing member lists or join state", () => {
+  it("parses group tool responses with the typed member roster only", () => {
+    // Summaries without a roster stay parseable so a runner updated before web
+    // keeps working during deploy skew.
     expect(parseHostedRuntimeGroupToolResponse({
       action: "read_current",
       result: {
@@ -587,11 +601,58 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toEqual({
       action: "read_current",
       result: {
-        group: GROUP_SUMMARY,
+        group: PARSED_GROUP_SUMMARY,
         status: "ok",
       },
     });
 
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_current",
+      result: {
+        group: {
+          ...GROUP_SUMMARY,
+          members: [
+            {
+              grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
+              handle: "+15551110000",
+              memberId: "member_owner_123",
+              role: "owner",
+            },
+            {
+              grantedVaultShareProjectionKinds: [],
+              handle: null,
+              memberId: "member_joiner_456",
+              role: "member",
+            },
+          ],
+        },
+        status: "ok",
+      },
+    })).toEqual({
+      action: "read_current",
+      result: {
+        group: {
+          ...GROUP_SUMMARY,
+          members: [
+            {
+              grantedVaultShareProjectionKinds: ["profile-name.v0", "sleep-times.v0"],
+              handle: "+15551110000",
+              memberId: "member_owner_123",
+              role: "owner",
+            },
+            {
+              grantedVaultShareProjectionKinds: [],
+              handle: null,
+              memberId: "member_joiner_456",
+              role: "member",
+            },
+          ],
+        },
+        status: "ok",
+      },
+    });
+
+    // Roster entries stay a closed shape: unknown member fields are rejected.
     expect(() =>
       parseHostedRuntimeGroupToolResponse({
         action: "read_current",

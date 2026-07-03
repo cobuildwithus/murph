@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { HostedVaultShareProjectionKind } from "@murphai/hosted-execution/vault-share";
+import { isHostedVaultShareProjectionKind } from "@murphai/hosted-execution/vault-share";
 
 import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
@@ -12,6 +13,7 @@ import {
   generateHostedGroupMemberId,
   generateHostedGroupJoinCode,
 } from "../hosted-onboarding/shared";
+import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
@@ -32,11 +34,19 @@ import { normalizeHostedGroupKind, type HostedGroupKind } from "./types";
 
 export type HostedGroupsReadClient = PrismaClient | Prisma.TransactionClient;
 
+export interface HostedGroupMemberRosterEntry {
+  grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
+  handle: string | null;
+  memberId: string;
+  role: string;
+}
+
 export interface HostedGroupSummary {
   displayName: string | null;
   id: string;
   kind: string;
   memberCount: number;
+  members: HostedGroupMemberRosterEntry[];
   requestedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
   status: string;
 }
@@ -110,6 +120,11 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
       memberId: container.ownerMemberId,
       now: input.now,
     });
+    await grantHostedGroupMembershipProfileNameTx(input.tx, {
+      groupRuntimeMemberId: container.memberId,
+      memberId: container.ownerMemberId,
+      now: input.now,
+    });
     if (requested.length > 0) {
       await mergeHostedGroupRequestedProjectionsTx(input.tx, {
         groupId: existing.id,
@@ -145,6 +160,11 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
   });
   await ensureHostedGroupOwnerMembershipTx(input.tx, {
     groupId: created.id,
+    memberId: container.ownerMemberId,
+    now: input.now,
+  });
+  await grantHostedGroupMembershipProfileNameTx(input.tx, {
+    groupRuntimeMemberId: container.memberId,
     memberId: container.ownerMemberId,
     now: input.now,
   });
@@ -389,9 +409,9 @@ export async function acceptHostedGroupJoinCodeTx(input: {
     });
   }
   await assertHostedGroupRuntimeDestinationTx(input.tx, group.runtimeMemberId);
-  if (selected.length > 0) {
-    await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: input.tx });
-  }
+  // Joining always shares the typed profile display name, so the launch consent
+  // gate applies to every join, not only joins that select health projections.
+  await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: input.tx });
 
   const existingMembership = await input.tx.hostedGroupMember.findUnique({
     where: { groupId_memberId: { groupId: group.id, memberId: input.memberId } },
@@ -419,6 +439,12 @@ export async function acceptHostedGroupJoinCodeTx(input: {
   const grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[] = [];
   const revokedVaultShareProjectionKinds: HostedVaultShareProjectionKind[] = [];
   const vaultShareCleanupSignals: HostedVaultShareCleanupSignal[] = [];
+  await grantHostedGroupMembershipProfileNameTx(input.tx, {
+    groupRuntimeMemberId: group.runtimeMemberId,
+    memberId: input.memberId,
+    now: input.now,
+  });
+  grantedVaultShareProjectionKinds.push("profile-name.v0");
   if (policy.requestedVaultShareProjectionKinds.length > 0) {
     for (const projectionKind of policy.requestedVaultShareProjectionKinds) {
       if (selected.includes(projectionKind)) {
@@ -521,6 +547,29 @@ function toHostedGroupJoinPolicyJson(policy: ReturnType<typeof mergeHostedGroupJ
   return JSON.parse(JSON.stringify(policy)) as Prisma.InputJsonValue;
 }
 
+/**
+ * Group membership implies exactly one automatic share: the member's typed profile
+ * display name, so the group runtime can introduce members without re-asking anyone.
+ * Health projections stay individually selected on the join page.
+ */
+async function grantHostedGroupMembershipProfileNameTx(
+  tx: Prisma.TransactionClient,
+  input: { groupRuntimeMemberId: string; memberId: string; now: Date },
+): Promise<void> {
+  await assertHostedGroupVaultShareGrantLimitTx(tx, {
+    destinationMemberId: input.groupRuntimeMemberId,
+    grantorMemberId: input.memberId,
+    projectionKind: "profile-name.v0",
+  });
+  await grantHostedVaultShareTx({
+    destinationMemberId: input.groupRuntimeMemberId,
+    grantorMemberId: input.memberId,
+    now: input.now,
+    projectionKind: "profile-name.v0",
+    tx,
+  });
+}
+
 async function readHostedGroupSummaryById(
   prisma: HostedGroupsReadClient,
   groupId: string,
@@ -532,7 +581,11 @@ async function readHostedGroupSummaryById(
       id: true,
       joinPolicyJson: true,
       kind: true,
-      _count: { select: { members: true } },
+      runtimeMemberId: true,
+      members: {
+        orderBy: { createdAt: "asc" },
+        select: { memberId: true, role: true },
+      },
     },
   });
   if (!group) return null;
@@ -540,11 +593,66 @@ async function readHostedGroupSummaryById(
     displayName: group.displayName,
     id: group.id,
     kind: group.kind,
-    memberCount: group._count.members,
+    memberCount: group.members.length,
+    members: await readHostedGroupMemberRoster(prisma, {
+      members: group.members,
+      runtimeMemberId: group.runtimeMemberId,
+    }),
     requestedVaultShareProjectionKinds:
       readHostedGroupJoinPolicy(group.joinPolicyJson).requestedVaultShareProjectionKinds,
     status: "active",
   };
+}
+
+/**
+ * Server-derived roster that joins the group's three identity namespaces for the
+ * runtime: membership (member id + role), the chat layer (the member's verified
+ * phone handle), and data sharing (which projection kinds this member currently
+ * grants to this group's runtime). Derived on read; no new persisted state.
+ */
+async function readHostedGroupMemberRoster(
+  prisma: HostedGroupsReadClient,
+  input: {
+    members: readonly { memberId: string; role: string }[];
+    runtimeMemberId: string | null;
+  },
+): Promise<HostedGroupMemberRosterEntry[]> {
+  if (input.members.length === 0) {
+    return [];
+  }
+
+  const grantsByMemberId = new Map<string, HostedVaultShareProjectionKind[]>();
+  if (input.runtimeMemberId) {
+    const grants = await prisma.hostedVaultShare.findMany({
+      where: {
+        destinationMemberId: input.runtimeMemberId,
+        grantorMemberId: { in: input.members.map((member) => member.memberId) },
+        status: "granted",
+      },
+      select: { grantorMemberId: true, projectionKind: true },
+    });
+    for (const grant of grants) {
+      if (!isHostedVaultShareProjectionKind(grant.projectionKind)) {
+        continue;
+      }
+      const kinds = grantsByMemberId.get(grant.grantorMemberId) ?? [];
+      kinds.push(grant.projectionKind);
+      grantsByMemberId.set(grant.grantorMemberId, kinds);
+    }
+  }
+
+  return await Promise.all(input.members.map(async (member) => {
+    const identity = await readHostedMemberIdentity({
+      memberId: member.memberId,
+      prisma,
+    });
+    return {
+      grantedVaultShareProjectionKinds: grantsByMemberId.get(member.memberId) ?? [],
+      handle: identity?.phoneNumber ?? null,
+      memberId: member.memberId,
+      role: member.role,
+    };
+  }));
 }
 
 async function assertHostedGroupRuntimeDestinationTx(

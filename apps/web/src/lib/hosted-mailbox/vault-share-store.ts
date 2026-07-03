@@ -8,6 +8,7 @@ import {
 import {
   buildHostedVaultShareDeliveryDedupeKey,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
+  isHostedVaultShareCurrentStateProjectionKind,
   isHostedVaultShareProjectionKind,
   type HostedVaultShareDeliveryRecord,
   type HostedVaultShareProjectionKind,
@@ -204,7 +205,13 @@ function deriveHostedVaultShareRecordRevision(input: {
 }): string {
   const canonicalRecord = JSON.stringify({
     data: input.record.data,
-    occurredAt: input.record.occurredAt,
+    // Current-state kinds hash the content alone: occurredAt is grantor-runtime-controlled
+    // metadata with no age bound for these kinds, so including it would let drifted
+    // timestamps mint unbounded dedupe keys for the same unchanged fact. Time-series kinds
+    // keep occurredAt in the revision (it is parser-pinned to the record identity there).
+    occurredAt: isHostedVaultShareCurrentStateProjectionKind(input.projectionKind)
+      ? null
+      : input.record.occurredAt,
     projectionKind: input.projectionKind,
     recordKey: input.record.recordKey,
     schema: HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,

@@ -1,7 +1,9 @@
 import {
+  isHostedVaultShareCurrentStateProjectionKind,
   parseHostedVaultShareDeliverRequest,
   type HostedVaultShareDeliverResponse,
   type HostedVaultShareDeliveryRecord,
+  type HostedVaultShareProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
 
 import {
@@ -112,7 +114,7 @@ export const POST = withJsonError(async (request: Request) => {
   // An all-stale offer appends nothing but still resolves `delivered`: the status reflects
   // share configuration only, so record staleness can never probe finer-grained share
   // state, and stale records never put the grantor runtime in a permanent error loop.
-  const records = filterDeliverableRecords(body.records);
+  const records = filterDeliverableRecords(body.records, body.projectionKind);
 
   if (records.length === 0) {
     return jsonOk(DELIVERED_RESPONSE);
@@ -188,17 +190,27 @@ function createHostedVaultShareDeliveryFailedError(): Error {
  * sane recency window are delivered. Out-of-window records are silently dropped rather than
  * rejected so one stale record never poisons delivery of the fresh ones. Honest runtimes
  * only ever offer the latest few records.
+ *
+ * The age bound applies only to time-series kinds whose recordKey space grows with time.
+ * Current-state kinds have one parser-enforced fixed recordKey and a content-only delivery
+ * revision (see isHostedVaultShareCurrentStateProjectionKind), so occurredAt neither mints
+ * dedupe keys nor needs a recency bound — a name set long ago is still the current name at
+ * a member's first group join.
  */
 function filterDeliverableRecords(
   records: readonly HostedVaultShareDeliveryRecord[],
+  projectionKind: HostedVaultShareProjectionKind,
 ): HostedVaultShareDeliveryRecord[] {
   const nowMs = Date.now();
+  const minOccurredAtMs = isHostedVaultShareCurrentStateProjectionKind(projectionKind)
+    ? Number.NEGATIVE_INFINITY
+    : nowMs - HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_AGE_DAYS * DAY_MS;
 
   return records.filter((record) => {
     const occurredAtMs = Date.parse(record.occurredAt);
 
     return !Number.isNaN(occurredAtMs)
       && occurredAtMs <= nowMs + HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_FUTURE_DAYS * DAY_MS
-      && occurredAtMs >= nowMs - HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_AGE_DAYS * DAY_MS;
+      && occurredAtMs >= minOccurredAtMs;
   });
 }
