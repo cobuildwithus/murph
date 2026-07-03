@@ -1001,7 +1001,10 @@ describe('assistant skill assets', () => {
       'Prefer existing Health Commons protocols when they fit',
     )
     expect(raw).toContain(
-      'Include a custom option only when the discovered protocols are missing, too burdensome, mismatched to the user\'s data',
+      'only around 40 protocols — and definitely not exhaustive',
+    )
+    expect(raw).toContain(
+      'design custom bounded experiment ideas from their goals, collected context, and available evidence',
     )
     expect(raw).toContain(
       'not a single recommendation',
