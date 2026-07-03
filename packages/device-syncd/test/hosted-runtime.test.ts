@@ -1820,6 +1820,42 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ]);
   });
 
+  it("parses Junction backfill job hints with a timeseries cursor", () => {
+    const hint = parseHostedExecutionDeviceSyncWakeHint({
+      jobs: [
+        {
+          kind: "backfill",
+          payload: {
+            timeseriesCursor: "2026-04-02T00:00:00Z",
+            windowEnd: "2026-04-03T00:00:00Z",
+            windowStart: "2026-04-01T00:00:00Z",
+          },
+        },
+      ],
+    });
+
+    expect(hint?.jobs?.[0]?.payload).toEqual({
+      timeseriesCursor: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+      windowStart: "2026-04-01T00:00:00.000Z",
+    });
+
+    expect(() =>
+      parseHostedExecutionDeviceSyncWakeHint({
+        jobs: [
+          {
+            kind: "backfill",
+            payload: {
+              timeseriesCursor: "not-a-timestamp",
+              windowEnd: "2026-04-03T00:00:00Z",
+              windowStart: "2026-04-01T00:00:00Z",
+            },
+          },
+        ],
+      }),
+    ).toThrow(/timeseriesCursor must be an ISO timestamp/i);
+  });
+
   it("drops empty string payload fields from hosted wake job hints", () => {
     const hint = parseHostedExecutionDeviceSyncWakeHint({
       jobs: [
