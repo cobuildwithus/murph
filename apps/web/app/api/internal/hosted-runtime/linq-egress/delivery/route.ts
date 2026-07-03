@@ -48,6 +48,10 @@ export const POST = withJsonError(async (request: Request) => {
     "acceptedAt",
   );
   const failedAt = parseOptionalHostedLinqDeliveryDate(body.failedAt, "failedAt");
+  const threadIsDirect = parseOptionalHostedLinqDeliveryBoolean(
+    body.threadIsDirect,
+    "threadIsDirect",
+  );
 
   if (!acceptedAt && !failedAt) {
     throw hostedOnboardingError({
@@ -116,6 +120,7 @@ export const POST = withJsonError(async (request: Request) => {
     sourceRef: readOptionalBodyString(body.intentId)
       ?? readOptionalBodyString(body.idempotencyKey),
     targetKind,
+    threadIsDirect,
     userId,
   });
 
@@ -267,6 +272,25 @@ function parseHostedLinqDeliveryTargetKind(
     code: "HOSTED_LINQ_DELIVERY_TARGET_KIND_INVALID",
     httpStatus: 400,
     message: "Hosted Linq delivery target kind is invalid.",
+    retryable: false,
+  });
+}
+
+function parseOptionalHostedLinqDeliveryBoolean(
+  value: unknown,
+  field: string,
+): boolean | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_LINQ_DELIVERY_BOOLEAN_INVALID",
+    details: { code: field },
+    httpStatus: 400,
+    message: "Hosted Linq delivery boolean is invalid.",
     retryable: false,
   });
 }

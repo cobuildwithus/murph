@@ -1880,6 +1880,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
           linqEgressLatencyTrace: input.linqEgressLatencyTrace,
+          threadIsDirect: input.assistantDeliveryEffect.payload.threadIsDirect ?? null,
           shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
@@ -1894,6 +1895,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
           linqEgressLatencyTrace: input.linqEgressLatencyTrace,
+          threadIsDirect: input.assistantDeliveryEffect.payload.threadIsDirect ?? null,
           shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
           onProviderDispatchEntered: () => {
             providerDispatchEntered = true;
@@ -2203,6 +2205,7 @@ function createHostedAssistantLinqSendDependency(input: {
   providerFetch: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal: AbortSignal | null;
+  threadIsDirect?: boolean | null;
   vaultRoot?: string | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
   return async (request) => {
@@ -2297,6 +2300,7 @@ function createHostedAssistantLinqSendDependency(input: {
           result: null,
           target: request.target,
           targetKind: request.targetKind ?? null,
+          threadIsDirect: input.threadIsDirect ?? deliveryContext?.threadIsDirect ?? null,
         }),
       });
       throw error;
@@ -2316,6 +2320,7 @@ function createHostedAssistantLinqSendDependency(input: {
         result,
         target: request.target,
         targetKind: request.targetKind ?? null,
+        threadIsDirect: input.threadIsDirect ?? deliveryContext?.threadIsDirect ?? null,
       }),
     });
     await assertHostedDeliveryLiveNow(input);
@@ -2454,6 +2459,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
   providerFetch: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
   signal: AbortSignal | null;
+  threadIsDirect?: boolean | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinqVoiceMemo"]> {
   return async (request) => {
     await assertHostedDeliveryLiveNow(input);
@@ -2510,6 +2516,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
           result: null,
           target: providerTarget,
           targetKind: "thread",
+          threadIsDirect: input.threadIsDirect ?? deliveryContext?.threadIsDirect ?? null,
         }),
       });
       throw error;
@@ -2529,6 +2536,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         result,
         target: providerTarget,
         targetKind: "thread",
+        threadIsDirect: input.threadIsDirect ?? deliveryContext?.threadIsDirect ?? null,
       }),
     });
     await assertHostedDeliveryLiveNow(input);
@@ -2552,6 +2560,7 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   result: HostedRuntimeLinqSendResponse | null;
   target: string | null;
   targetKind: HostedRuntimeProviderTargetKind | null;
+  threadIsDirect: boolean | null;
 }): HostedRuntimeLinqDeliveryOutcomeRequest {
   return {
     ...(input.acceptedAt ? { acceptedAt: input.acceptedAt.toISOString() } : {}),
@@ -2571,6 +2580,7 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
     routeAuthority: input.deliveryContext?.routeAuthority ?? null,
     target: input.targetKind === "participant" ? null : input.target,
     targetKind: input.targetKind,
+    threadIsDirect: input.threadIsDirect,
   };
 }
 

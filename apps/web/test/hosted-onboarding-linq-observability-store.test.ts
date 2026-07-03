@@ -1340,6 +1340,36 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
+  it("records group-thread runtime accepts as sent with no receipt expected", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
+
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      idempotencyKey: "assistant-outbox:intent_group",
+      linqChatId: "linq_chat_group",
+      messageId: "provider_message_group",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_group",
+      targetKind: "thread",
+      threadIsDirect: false,
+    })).resolves.toEqual({
+      deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      recorded: true,
+    });
+
+    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          acceptedAt,
+          status: "sent_no_receipt_expected",
+          targetKind: "thread",
+        }),
+      }),
+    );
+  });
+
   it("does not create or project a runtime raw sender line that is not already known", async () => {
     const fixture = createObservabilityPrismaFixture();
 
@@ -1560,6 +1590,44 @@ describe("hosted Linq observability stores", () => {
     );
     expect(fixture.hostedLinqDeliveryUpdateMany.mock.calls[0]?.[0]?.where)
       .not.toHaveProperty("skippedAt");
+  });
+
+  it("keeps group-thread receipt expectations when accepting a pre-provider delivery row", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_skipped_group_runtime_retry",
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      skippedAt: new Date("2026-03-26T12:00:00.000Z"),
+      status: "skipped",
+    });
+
+    await recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt: new Date("2026-03-26T12:05:01.000Z"),
+      attemptedAt: new Date("2026-03-26T12:05:00.000Z"),
+      idempotencyKey: "assistant-outbox:intent_group_retry",
+      linqChatId: "linq_chat_group",
+      messageId: "provider_message_group_retry",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_group_retry",
+      targetKind: "thread",
+      threadIsDirect: false,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          acceptedAt: new Date("2026-03-26T12:05:01.000Z"),
+          skippedAt: null,
+          skipReason: null,
+          status: "sent_no_receipt_expected",
+        }),
+      }),
+    );
   });
 
   it("treats concurrent runtime delivery creation as an idempotent accepted update", async () => {

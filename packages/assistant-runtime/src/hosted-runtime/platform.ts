@@ -229,6 +229,7 @@ export interface HostedRuntimeLinqDeliveryOutcomeRequest {
   routeAuthority?: HostedExecutionLinqExternalThreadRouteAuthority | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;
+  threadIsDirect?: boolean | null;
 }
 
 export interface HostedRuntimeWhatsAppSendRequest {

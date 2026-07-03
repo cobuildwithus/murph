@@ -440,6 +440,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
   prisma: HostedLinqDeliveryClient;
   sourceRef?: string | null;
   targetKind?: string | null;
+  threadIsDirect?: boolean | null;
   userId: string;
 }): Promise<{
   deliveryId: string | null;
@@ -479,6 +480,10 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
   const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
   const messageLookupKeyCandidates = createHostedLinqMessageLookupKeyReadCandidates(input.messageId);
   const deliveryId = buildHostedLinqDeliveryId(idempotencyKey);
+  const acceptedStatus = resolveHostedLinqRuntimeAcceptedStatus({
+    targetKind: input.targetKind ?? null,
+    threadIsDirect: input.threadIsDirect ?? null,
+  });
   const baseData = {
     attemptedAt,
     id: deliveryId,
@@ -508,7 +513,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
                 acceptedAt,
                 messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
                 messageLookupKey,
-                status: "accepted",
+                status: acceptedStatus,
               }
             : {
                 ...baseData,
@@ -548,6 +553,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
           prisma,
           sourceRef: input.sourceRef ?? null,
           targetKind: input.targetKind ?? null,
+          threadIsDirect: input.threadIsDirect ?? null,
         });
       }
     } else if (acceptedAt) {
@@ -565,6 +571,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
         prisma,
         sourceRef: input.sourceRef ?? null,
         targetKind: input.targetKind ?? null,
+        threadIsDirect: input.threadIsDirect ?? null,
       });
     } else if (failedAt) {
       await updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx({
@@ -581,6 +588,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
         prisma,
         sourceRef: input.sourceRef ?? null,
         targetKind: input.targetKind ?? null,
+        threadIsDirect: input.threadIsDirect ?? null,
       });
     }
 
@@ -661,6 +669,7 @@ async function updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx(input: {
   prisma: HostedLinqDeliveryClient;
   sourceRef: string | null;
   targetKind: string | null;
+  threadIsDirect: boolean | null;
 }): Promise<boolean> {
   if (input.acceptedAt) {
     const updated = await input.prisma.hostedLinqDelivery.updateMany({
@@ -695,7 +704,10 @@ async function updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx(input: {
         sourceRef: createHostedLinqDeliverySourceRefLookupKey(normalizeNullable(input.sourceRef)),
         skippedAt: null,
         skipReason: null,
-        status: "accepted",
+        status: resolveHostedLinqRuntimeAcceptedStatus({
+          targetKind: input.targetKind,
+          threadIsDirect: input.threadIsDirect,
+        }),
         targetKind: normalizeNullable(input.targetKind),
       },
     });
@@ -735,6 +747,17 @@ async function updateHostedLinqRuntimeDeliveryOutcomeIfPreProviderTx(input: {
     },
   });
   return false;
+}
+
+const HOSTED_LINQ_RUNTIME_GROUP_SENT_NO_RECEIPT_STATUS = "sent_no_receipt_expected";
+
+function resolveHostedLinqRuntimeAcceptedStatus(input: {
+  targetKind: string | null;
+  threadIsDirect: boolean | null;
+}): string {
+  return input.targetKind === "thread" && input.threadIsDirect === false
+    ? HOSTED_LINQ_RUNTIME_GROUP_SENT_NO_RECEIPT_STATUS
+    : "accepted";
 }
 
 export async function markHostedLinqDeliverySendFailedTx(input: {

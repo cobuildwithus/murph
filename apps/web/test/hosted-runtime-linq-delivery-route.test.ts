@@ -77,6 +77,7 @@ describe("hosted runtime Linq delivery route", () => {
       providerThreadId: "linq_chat_123",
       target: "+15550100001",
       targetKind: "participant",
+      threadIsDirect: true,
     }));
 
     expect(response.status).toBe(200);
@@ -100,6 +101,7 @@ describe("hosted runtime Linq delivery route", () => {
         phoneNumberLookupKey: null,
         sourceRef: "intent_123",
         targetKind: "participant",
+        threadIsDirect: true,
         userId: "member_123",
       }),
     );
@@ -107,6 +109,22 @@ describe("hosted runtime Linq delivery route", () => {
       ok: true,
       recorded: true,
     });
+  });
+
+  it("rejects malformed thread directness flags", async () => {
+    const response = await route.POST(buildDeliveryRequest({
+      acceptedAt: "2026-04-26T00:00:04.000Z",
+      attemptedAt: "2026-04-26T00:00:03.000Z",
+      idempotencyKey: "assistant-outbox:intent_123",
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread",
+      threadIsDirect: "false",
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
   });
 
   it("derives the active member Linq line from durable home routing for chat sends without route authority", async () => {
@@ -171,6 +189,7 @@ describe("hosted runtime Linq delivery route", () => {
       routeAuthority,
       target: "linq_chat_123",
       targetKind: "thread",
+      threadIsDirect: false,
     }));
 
     expect(response.status).toBe(200);
@@ -182,6 +201,7 @@ describe("hosted runtime Linq delivery route", () => {
       expect.objectContaining({
         phoneNumber: null,
         phoneNumberLookupKey: "hbidx:phone:v1:account",
+        threadIsDirect: false,
       }),
     );
 

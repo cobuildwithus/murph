@@ -5057,6 +5057,7 @@ describe("hosted runtime callbacks", () => {
         routeAuthority: null,
         target: null,
         targetKind: "participant",
+        threadIsDirect: true,
       }),
       { signal: expect.any(AbortSignal) },
     );
@@ -5067,6 +5068,7 @@ describe("hosted runtime callbacks", () => {
       bindingDeliveryTarget: "linq_chat_123",
       channel: "linq",
       explicitTarget: "linq_chat_123",
+      threadIsDirect: false,
       transportIdempotent: false,
     });
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -5123,6 +5125,13 @@ describe("hosted runtime callbacks", () => {
       }),
     ]);
     expect(recordDeliveryOutcome).toHaveBeenCalledTimes(1);
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetKind: "thread",
+        threadIsDirect: false,
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
     expect(warnSpy).toHaveBeenCalledWith(
       "Hosted Linq delivery outcome recording failed.",
       { errorName: "Error" },
