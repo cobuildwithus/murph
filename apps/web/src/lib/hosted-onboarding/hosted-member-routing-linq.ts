@@ -16,10 +16,12 @@ import {
   type HostedLinqParticipantContact,
 } from "./linq-participant-contact";
 import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
+import { hostedOnboardingError } from "./errors";
 import { normalizePhoneNumber } from "./phone";
 import { type HostedOnboardingReadClient } from "./shared";
 
 export async function upsertHostedMemberPendingLinqBindingTx(input: {
+  homeLineAssignedAt?: Date | null;
   linqChatId: string;
   memberId: string;
   participantContact?: HostedLinqParticipantContact | null;
@@ -29,6 +31,7 @@ export async function upsertHostedMemberPendingLinqBindingTx(input: {
 }): Promise<void> {
   await writeHostedMemberLinqBindingTx({
     clearPending: false,
+    homeLineAssignedAt: input.homeLineAssignedAt ?? null,
     kind: "pending",
     linqChatId: input.linqChatId,
     memberId: input.memberId,
@@ -169,6 +172,7 @@ export async function tryCreateHostedMemberPendingLinqParticipantContactTx(input
 
 export async function upsertHostedMemberHomeLinqBindingTx(input: {
   clearPending?: boolean;
+  homeLineAssignedAt?: Date | null;
   linqChatId: string;
   memberId: string;
   prisma: Prisma.TransactionClient;
@@ -183,11 +187,13 @@ export async function upsertHostedMemberHomeLinqBindingTx(input: {
     participantContactObservedAt: null,
     prisma: input.prisma,
     recipientPhone: input.recipientPhone,
+    homeLineAssignedAt: input.homeLineAssignedAt ?? null,
   });
 }
 
 export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
   clearPending?: boolean;
+  homeLineAssignedAt?: Date;
   memberId: string;
   prisma: Prisma.TransactionClient;
   recipientPhone: string;
@@ -228,6 +234,9 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
     create: {
       linqChatIdEncrypted: null,
       linqChatLookupKey: null,
+      ...(input.homeLineAssignedAt === undefined
+        ? {}
+        : { linqHomeLineAssignedAt: input.homeLineAssignedAt }),
       linqRecipientPhoneEncrypted: routingPrivateColumns.linqRecipientPhoneEncrypted,
       linqRecipientPhoneLookupKey: recipientPhoneLookupKey,
       memberId: input.memberId,
@@ -245,6 +254,9 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
     update: {
       linqChatIdEncrypted: null,
       linqChatLookupKey: null,
+      ...(input.homeLineAssignedAt === undefined
+        ? {}
+        : { linqHomeLineAssignedAt: input.homeLineAssignedAt }),
       linqRecipientPhoneEncrypted: routingPrivateColumns.linqRecipientPhoneEncrypted,
       linqRecipientPhoneLookupKey: recipientPhoneLookupKey,
       ...(input.clearPending
@@ -276,6 +288,8 @@ export async function acquireHostedMemberHomeLinqRecipientAssignmentLockTx(input
 }
 
 export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
+  excludedMemberId?: string | null;
+  now: Date;
   prisma: HostedOnboardingReadClient;
   recipientPhones: readonly string[];
 }): Promise<Map<string, number>> {
@@ -297,33 +311,138 @@ export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
     ] as const),
   );
 
-  const routingRecords = await input.prisma.hostedMemberRouting.findMany({
+  const groupedCounts = await input.prisma.hostedMemberRouting.groupBy({
+    by: ["linqRecipientPhoneLookupKey"],
     where: {
       linqRecipientPhoneLookupKey: {
         in: recipientPhoneEntries.map(({ lookupKey }) => lookupKey),
       },
-      member: {
-        is: {
-          billingStatus: HostedBillingStatus.active,
-          suspendedAt: null,
+      ...(input.excludedMemberId
+        ? {
+            memberId: {
+              not: input.excludedMemberId,
+            },
+          }
+        : {}),
+      OR: [
+        {
+          member: {
+            is: {
+              billingStatus: HostedBillingStatus.active,
+              suspendedAt: null,
+            },
+          },
         },
-      },
+        {
+          member: {
+            is: {
+              accountGroupMemberships: {
+                some: {
+                  group: {
+                    billingStatus: HostedBillingStatus.active,
+                    suspendedAt: null,
+                  },
+                  status: "active",
+                },
+              },
+              suspendedAt: null,
+            },
+          },
+        },
+        {
+          linqHomeLineAssignedAt: {
+            not: null,
+          },
+          member: {
+            is: {
+              billingStatus: {
+                in: [
+                  HostedBillingStatus.not_started,
+                  HostedBillingStatus.incomplete,
+                ],
+              },
+              invites: {
+                some: {
+                  channel: "linq",
+                  expiresAt: {
+                    gt: input.now,
+                  },
+                },
+              },
+              suspendedAt: null,
+            },
+          },
+        },
+      ],
     },
-    select: {
-      linqRecipientPhoneLookupKey: true,
+    _count: {
+      _all: true,
     },
   });
 
-  for (const routingRecord of routingRecords) {
-    const recipientPhone = routingRecord.linqRecipientPhoneLookupKey
-      ? recipientPhoneByLookupKey.get(routingRecord.linqRecipientPhoneLookupKey)
+  for (const groupedCount of groupedCounts) {
+    const recipientPhone = groupedCount.linqRecipientPhoneLookupKey
+      ? recipientPhoneByLookupKey.get(groupedCount.linqRecipientPhoneLookupKey)
       : null;
 
     if (!recipientPhone) {
       continue;
     }
 
-    counts.set(recipientPhone, (counts.get(recipientPhone) ?? 0) + 1);
+    counts.set(recipientPhone, (counts.get(recipientPhone) ?? 0) + groupedCount._count._all);
+  }
+
+  return counts;
+}
+
+export async function countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince(input: {
+  prisma: HostedOnboardingReadClient;
+  recipientPhones: readonly string[];
+  since: Date;
+}): Promise<Map<string, number>> {
+  const recipientPhoneEntries = buildHostedRecipientPhoneLookupEntries(
+    input.recipientPhones,
+  );
+
+  if (recipientPhoneEntries.length === 0) {
+    return new Map();
+  }
+
+  const counts = new Map<string, number>(
+    recipientPhoneEntries.map(({ recipientPhone }) => [recipientPhone, 0]),
+  );
+  const recipientPhoneByLookupKey = new Map(
+    recipientPhoneEntries.map(({ lookupKey, recipientPhone }) => [
+      lookupKey,
+      recipientPhone,
+    ] as const),
+  );
+
+  const groupedCounts = await input.prisma.hostedMemberRouting.groupBy({
+    by: ["linqRecipientPhoneLookupKey"],
+    where: {
+      linqHomeLineAssignedAt: {
+        gte: input.since,
+      },
+      linqRecipientPhoneLookupKey: {
+        in: recipientPhoneEntries.map(({ lookupKey }) => lookupKey),
+      },
+    },
+    _count: {
+      _all: true,
+    },
+  });
+
+  for (const groupedCount of groupedCounts) {
+    const recipientPhone = groupedCount.linqRecipientPhoneLookupKey
+      ? recipientPhoneByLookupKey.get(groupedCount.linqRecipientPhoneLookupKey)
+      : null;
+
+    if (!recipientPhone) {
+      continue;
+    }
+
+    counts.set(recipientPhone, (counts.get(recipientPhone) ?? 0) + groupedCount._count._all);
   }
 
   return counts;
@@ -331,6 +450,7 @@ export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
 
 async function writeHostedMemberLinqBindingTx(input: {
   clearPending: boolean;
+  homeLineAssignedAt: Date | null;
   kind: "home" | "pending";
   linqChatId: string;
   memberId: string;
@@ -351,9 +471,10 @@ async function writeHostedMemberLinqBindingTx(input: {
     : [];
   const recipientPhone = normalizePhoneNumber(input.recipientPhone);
   const recipientPhoneLookupKey = createHostedPhoneLookupKey(recipientPhone);
+  const reservesHomeRecipient = input.kind === "home" || input.homeLineAssignedAt !== null;
   const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
     linqChatId: input.kind === "home" ? input.linqChatId : null,
-    linqRecipientPhone: input.kind === "home" ? recipientPhone : null,
+    linqRecipientPhone: reservesHomeRecipient ? recipientPhone : null,
     memberId: input.memberId,
     pendingLinqChatId: input.kind === "pending" ? input.linqChatId : null,
     pendingLinqParticipantContact: input.kind === "pending"
@@ -409,6 +530,7 @@ async function writeHostedMemberLinqBindingTx(input: {
     },
     create: buildHostedMemberLinqBindingCreateData({
       kind: input.kind,
+      homeLineAssignedAt: input.homeLineAssignedAt,
       linqChatLookupKey,
       memberId: input.memberId,
       participantContact: input.participantContact,
@@ -419,6 +541,7 @@ async function writeHostedMemberLinqBindingTx(input: {
     update: buildHostedMemberLinqBindingUpdateData({
       clearPending: input.clearPending,
       kind: input.kind,
+      homeLineAssignedAt: input.homeLineAssignedAt,
       linqChatLookupKey,
       participantContact: input.participantContact,
       participantContactObservedAt: input.participantContactObservedAt,
@@ -431,6 +554,7 @@ async function writeHostedMemberLinqBindingTx(input: {
 }
 
 function buildHostedMemberLinqBindingCreateData(input: {
+  homeLineAssignedAt: Date | null;
   kind: "home" | "pending";
   linqChatLookupKey: string;
   memberId: string;
@@ -444,10 +568,13 @@ function buildHostedMemberLinqBindingCreateData(input: {
       ? input.routingPrivateColumns.linqChatIdEncrypted
       : null,
     linqChatLookupKey: input.kind === "home" ? input.linqChatLookupKey : null,
-    linqRecipientPhoneEncrypted: input.kind === "home"
+    ...(input.homeLineAssignedAt
+      ? { linqHomeLineAssignedAt: input.homeLineAssignedAt }
+      : {}),
+    linqRecipientPhoneEncrypted: input.kind === "home" || input.homeLineAssignedAt
       ? input.routingPrivateColumns.linqRecipientPhoneEncrypted
       : null,
-    linqRecipientPhoneLookupKey: input.kind === "home"
+    linqRecipientPhoneLookupKey: input.kind === "home" || input.homeLineAssignedAt
       ? input.recipientPhoneLookupKey
       : null,
     memberId: input.memberId,
@@ -480,6 +607,7 @@ function buildHostedMemberLinqBindingCreateData(input: {
 
 function buildHostedMemberLinqBindingUpdateData(input: {
   clearPending: boolean;
+  homeLineAssignedAt: Date | null;
   kind: "home" | "pending";
   linqChatLookupKey: string;
   participantContact: HostedLinqParticipantContact | null;
@@ -493,6 +621,9 @@ function buildHostedMemberLinqBindingUpdateData(input: {
     return {
       linqChatIdEncrypted: input.routingPrivateColumns.linqChatIdEncrypted,
       linqChatLookupKey: input.linqChatLookupKey,
+      ...(input.homeLineAssignedAt === null
+        ? {}
+        : { linqHomeLineAssignedAt: input.homeLineAssignedAt }),
       linqRecipientPhoneEncrypted: input.routingPrivateColumns.linqRecipientPhoneEncrypted,
       linqRecipientPhoneLookupKey: input.recipientPhoneLookupKey,
       ...(input.clearPending
@@ -513,6 +644,13 @@ function buildHostedMemberLinqBindingUpdateData(input: {
   }
 
   return {
+    ...(input.homeLineAssignedAt
+      ? {
+          linqHomeLineAssignedAt: input.homeLineAssignedAt,
+          linqRecipientPhoneEncrypted: input.routingPrivateColumns.linqRecipientPhoneEncrypted,
+          linqRecipientPhoneLookupKey: input.recipientPhoneLookupKey,
+        }
+      : {}),
     pendingLinqChatIdEncrypted: input.routingPrivateColumns.pendingLinqChatIdEncrypted,
     pendingLinqChatLookupKey: input.linqChatLookupKey,
     ...(input.participantContact
@@ -641,7 +779,9 @@ async function clearHostedMemberLinqChatConflicts(input: {
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
-  await input.tx.hostedMemberRouting.updateMany({
+  // Another member's home route is durable authority; binding over it must
+  // fail closed instead of silently clearing that member's route.
+  const conflictingHomeRoute = await input.tx.hostedMemberRouting.findFirst({
     where: {
       linqChatLookupKey: {
         in: [...input.linqChatLookupKeys],
@@ -650,17 +790,50 @@ async function clearHostedMemberLinqChatConflicts(input: {
         memberId: input.memberId,
       },
     },
-    data: {
-      linqChatIdEncrypted: null,
+    select: {
+      memberId: true,
+    },
+  });
+  if (conflictingHomeRoute && conflictingHomeRoute.memberId !== input.memberId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_CHAT_HOME_ROUTE_CONFLICT",
+      httpStatus: 409,
+      message: "Linq chat is already bound as another member's home chat.",
+      retryable: false,
+    });
+  }
+
+  await input.tx.hostedMemberRouting.updateMany({
+    where: {
       linqChatLookupKey: null,
+      pendingLinqChatLookupKey: {
+        in: [...input.linqChatLookupKeys],
+      },
+      NOT: {
+        memberId: input.memberId,
+      },
+    },
+    data: {
+      linqHomeLineAssignedAt: null,
       linqRecipientPhoneEncrypted: null,
       linqRecipientPhoneLookupKey: null,
-      linqLastInboundAt: null,
+      pendingLinqChatIdEncrypted: null,
+      pendingLinqChatLookupKey: null,
+      pendingLinqParticipantContactEncrypted: null,
+      pendingLinqParticipantContactKind: null,
+      pendingLinqParticipantContactLookupKey: null,
+      pendingLinqParticipantContactObservedAt: null,
+      pendingLinqRecipientPhoneEncrypted: null,
+      pendingLinqRecipientPhoneLookupKey: null,
+      pendingLinqLastInboundAt: null,
     },
   });
 
   await input.tx.hostedMemberRouting.updateMany({
     where: {
+      linqChatLookupKey: {
+        not: null,
+      },
       pendingLinqChatLookupKey: {
         in: [...input.linqChatLookupKeys],
       },

@@ -407,6 +407,7 @@ function makeMemberSnapshot(): HostedMemberSnapshot {
     },
     routing: {
       linqChatId: null,
+      linqHomeLineAssignedAt: null,
       linqRecipientPhone: null,
       memberId: "member_123",
       pendingLinqChatId: null,

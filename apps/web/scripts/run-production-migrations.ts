@@ -5,6 +5,16 @@ export const hostedWebProductionMigrationCommand = {
   args: ["--dir", "apps/web", "prisma:migrate:deploy"],
 } as const;
 
+export const hostedWebProductionPrismaGenerateCommand = {
+  command: resolvePnpmCommand(),
+  args: ["--dir", "apps/web", "prisma:generate"],
+} as const;
+
+export const hostedWebProductionLinqLineSyncCommand = {
+  command: resolvePnpmCommand(),
+  args: ["--dir", "apps/web", "linq:sync-lines", "--", "--skip-provider-inventory"],
+} as const;
+
 export type HostedWebProductionMigrationEnvironment = Record<string, string | undefined>;
 
 export type HostedWebProductionMigrationRunner = (
@@ -35,6 +45,16 @@ export async function runHostedWebProductionMigrationsIfNeeded(
   await runCommand(
     hostedWebProductionMigrationCommand.command,
     hostedWebProductionMigrationCommand.args,
+  );
+  console.log("Regenerating hosted web Prisma client for post-migration tasks.");
+  await runCommand(
+    hostedWebProductionPrismaGenerateCommand.command,
+    hostedWebProductionPrismaGenerateCommand.args,
+  );
+  console.log("Syncing hosted Linq DB home-line inventory.");
+  await runCommand(
+    hostedWebProductionLinqLineSyncCommand.command,
+    hostedWebProductionLinqLineSyncCommand.args,
   );
   return "ran";
 }

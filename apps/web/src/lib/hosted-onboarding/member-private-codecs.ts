@@ -57,10 +57,6 @@ export interface HostedMemberRoutingPrivateState {
   telegramUserId: string | null;
 }
 
-export interface HostedMemberHomeLinqRoutePrivateState {
-  linqChatId: string | null;
-  linqRecipientPhone: string | null;
-}
 
 export interface HostedMemberBillingPrivateState {
   stripeCustomerId: string | null;
@@ -304,33 +300,6 @@ export async function readHostedMemberRoutingTelegramPrivateState(
   return parseHostedMemberRoutingTelegramPrivateValue(decryptedValue);
 }
 
-export async function readHostedMemberHomeLinqRoutePrivateState(
-  routing: Pick<
-    HostedMemberRouting,
-    | "linqChatIdEncrypted"
-    | "linqRecipientPhoneEncrypted"
-    | "memberId"
-  >,
-  prisma?: HostedWebEncryptionPrismaClient,
-): Promise<HostedMemberHomeLinqRoutePrivateState> {
-  const linqChatId = await decryptHostedWebNullableString({
-    field: HOSTED_MEMBER_ROUTING_HOME_LINQ_CHAT_FIELD,
-    memberId: routing.memberId,
-    prisma,
-    value: routing.linqChatIdEncrypted,
-  });
-  const linqRecipientPhone = await decryptHostedWebNullableString({
-    field: HOSTED_MEMBER_ROUTING_HOME_LINQ_RECIPIENT_PHONE_FIELD,
-    memberId: routing.memberId,
-    prisma,
-    value: routing.linqRecipientPhoneEncrypted,
-  });
-
-  return {
-    linqChatId,
-    linqRecipientPhone,
-  };
-}
 
 function buildHostedMemberRoutingTelegramPrivateValue(input: {
   telegramThreadId: string | null;

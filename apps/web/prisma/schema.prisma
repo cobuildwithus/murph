@@ -595,6 +595,7 @@ model HostedMemberRouting {
   linqChatIdEncrypted                String?      @map("linq_chat_id_encrypted")
   linqRecipientPhoneLookupKey        String?      @map("linq_recipient_phone_lookup_key")
   linqRecipientPhoneEncrypted        String?      @map("linq_recipient_phone_encrypted")
+  linqHomeLineAssignedAt             DateTime?    @map("linq_home_line_assigned_at")
   linqLastInboundAt                  DateTime?    @map("linq_last_inbound_at")
   /// Pre-activation Linq acquisition/referral thread before a home line is chosen.
   pendingLinqChatLookupKey           String?      @unique @map("pending_linq_chat_lookup_key")
@@ -614,6 +615,7 @@ model HostedMemberRouting {
   member                             HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([linqRecipientPhoneLookupKey])
+  @@index([linqRecipientPhoneLookupKey, linqHomeLineAssignedAt])
   @@index([pendingLinqRecipientPhoneLookupKey])
   @@index([linqLastInboundAt])
   @@index([pendingLinqLastInboundAt])
@@ -1113,10 +1115,14 @@ model HostedThreadRoute {
 
 model HostedLinqLine {
   phoneNumberLookupKey       String    @id @map("phone_number_lookup_key")
+  phoneNumberEncrypted       String?   @map("phone_number_encrypted")
   phoneNumberHint            String    @map("phone_number_hint")
   source                     String    @default("unknown")
   configuredAt               DateTime? @map("configured_at")
   providerSeenAt             DateTime? @map("provider_seen_at")
+  providerPhoneNumberId      String?   @unique @map("provider_phone_number_id")
+  providerFirstSeenAt        DateTime? @map("provider_first_seen_at")
+  providerLastSeenAt         DateTime? @map("provider_last_seen_at")
   healthStatus               String    @default("unknown") @map("health_status")
   egressPolicy               String    @default("enabled") @map("egress_policy")
   providerStatus             String?   @map("provider_status")
@@ -1150,7 +1156,9 @@ model HostedLinqLine {
   alerts                     HostedLinqAlert[]
 
   @@index([healthStatus, egressPolicy])
+  @@index([configuredAt, egressPolicy, healthStatus])
   @@index([providerStatus])
+  @@index([providerLastSeenAt])
   @@index([lastFailedAt])
   @@map("hosted_linq_line")
 }

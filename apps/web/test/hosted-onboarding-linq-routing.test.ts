@@ -1,89 +1,76 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  chooseHostedLinqConversationRecipientPhone,
-  normalizeHostedLinqConversationRecipientPhones,
+  chooseHostedLinqHomeLine,
   resolveHostedLinqActiveRouteDecision,
   resolveHostedLinqHomeBindingRecipientPhone,
 } from "@/src/lib/hosted-onboarding/linq-routing-policy";
 
-describe("normalizeHostedLinqConversationRecipientPhones", () => {
-  it("normalizes, drops invalid values, and deduplicates the pool", () => {
+describe("chooseHostedLinqHomeLine", () => {
+  it("keeps a preferred DB line when active and daily caps have room", () => {
     expect(
-      normalizeHostedLinqConversationRecipientPhones([
-        "+1 (555) 010-0001",
-        "15550100001",
-        "+1 555 010 0002",
-        "invalid",
-      ]),
-    ).toEqual([
-      "+15550100001",
-      "+15550100002",
-    ]);
-  });
-});
-
-describe("chooseHostedLinqConversationRecipientPhone", () => {
-  it("keeps the preferred recipient phone when it is still under capacity", () => {
-    expect(
-      chooseHostedLinqConversationRecipientPhone({
-        activeMembersByRecipientPhone: new Map([
-          ["+15550100001", 2],
-          ["+15550100002", 1],
-        ]),
-        maxActiveMembersPerPhoneNumber: 3,
-        preferredRecipientPhone: "+1 555 010 0001",
-        recipientPhones: [
-          "+15550100001",
-          "+15550100002",
+      chooseHostedLinqHomeLine({
+        activeMembersByRecipientPhone: new Map([["+15550100001", 1]]),
+        lines: [
+          buildLine("+15550100001", {
+            activeMemberLimit: 3,
+            maxNewConversationsPerDay: 2,
+          }),
+          buildLine("+15550100002", {
+            activeMemberLimit: 3,
+            maxNewConversationsPerDay: 2,
+          }),
         ],
-      }),
+        newAssignmentsByRecipientPhone: new Map([["+15550100001", 1]]),
+        preferredRecipientPhone: "+15550100001",
+      })?.phoneNumber,
     ).toBe("+15550100001");
   });
 
-  it("chooses another pooled line when the preferred line is over capacity", () => {
+  it("skips DB lines that reached their daily new-conversation cap", () => {
     expect(
-      chooseHostedLinqConversationRecipientPhone({
+      chooseHostedLinqHomeLine({
         activeMembersByRecipientPhone: new Map([
-          ["+15550100001", 3],
+          ["+15550100001", 0],
           ["+15550100002", 2],
         ]),
-        maxActiveMembersPerPhoneNumber: 3,
-        preferredRecipientPhone: "+15550100001",
-        recipientPhones: [
-          "+15550100001",
-          "+15550100002",
+        lines: [
+          buildLine("+15550100001", {
+            activeMemberLimit: 3,
+            maxNewConversationsPerDay: 1,
+          }),
+          buildLine("+15550100002", {
+            activeMemberLimit: 3,
+            maxNewConversationsPerDay: 3,
+          }),
         ],
-      }),
+        newAssignmentsByRecipientPhone: new Map([
+          ["+15550100001", 1],
+          ["+15550100002", 0],
+        ]),
+        preferredRecipientPhone: "+15550100001",
+      })?.phoneNumber,
     ).toBe("+15550100002");
   });
 
-  it("falls back to the preferred line when every pooled line is already at capacity", () => {
+  it("fails closed when every DB line is over an assignment cap", () => {
     expect(
-      chooseHostedLinqConversationRecipientPhone({
-        activeMembersByRecipientPhone: new Map([
-          ["+15550100001", 3],
-          ["+15550100002", 3],
-        ]),
-        maxActiveMembersPerPhoneNumber: 3,
-        preferredRecipientPhone: "+15550100001",
-        recipientPhones: [
-          "+15550100001",
-          "+15550100002",
+      chooseHostedLinqHomeLine({
+        activeMembersByRecipientPhone: new Map([["+15550100001", 3]]),
+        lines: [
+          buildLine("+15550100001", {
+            activeMemberLimit: 3,
+            maxNewConversationsPerDay: 10,
+          }),
+          buildLine("+15550100002", {
+            activeMemberLimit: 3,
+            maxNewConversationsPerDay: 1,
+          }),
         ],
+        newAssignmentsByRecipientPhone: new Map([["+15550100002", 1]]),
+        preferredRecipientPhone: "+15550100001",
       }),
-    ).toBe("+15550100001");
-  });
-
-  it("falls back to the preferred line when the configured pool is empty", () => {
-    expect(
-      chooseHostedLinqConversationRecipientPhone({
-        activeMembersByRecipientPhone: new Map(),
-        maxActiveMembersPerPhoneNumber: 3,
-        preferredRecipientPhone: "+1 555 010 0009",
-        recipientPhones: [],
-      }),
-    ).toBe("+15550100009");
+    ).toBeNull();
   });
 });
 
@@ -205,6 +192,24 @@ describe("resolveHostedLinqActiveRouteDecision", () => {
   });
 });
 
+function buildLine(
+  phoneNumber: string,
+  overrides: Partial<{
+    activeMemberLimit: number | null;
+    assignmentWeight: number;
+    maxNewConversationsPerDay: number | null;
+  }> = {},
+) {
+  return {
+    activeMemberLimit: overrides.activeMemberLimit ?? null,
+    assignmentWeight: overrides.assignmentWeight ?? 100,
+    maxNewConversationsPerDay: overrides.maxNewConversationsPerDay ?? null,
+    phoneNumber,
+    phoneNumberHint: `*** ${phoneNumber.slice(-4)}`,
+    phoneNumberLookupKey: `lookup:${phoneNumber}`,
+  };
+}
+
 describe("resolveHostedLinqHomeBindingRecipientPhone", () => {
   it("keeps the saved home recipient phone when the incoming chat already matches the durable home chat", () => {
     expect(
@@ -217,7 +222,7 @@ describe("resolveHostedLinqHomeBindingRecipientPhone", () => {
     ).toBe("+15550100001");
   });
 
-  it("fills the saved home recipient phone from inbound metadata when the matching home chat is missing one", () => {
+  it("preserves a missing saved home recipient phone when the incoming chat already matches", () => {
     expect(
       resolveHostedLinqHomeBindingRecipientPhone({
         homeChatId: "chat_home",
@@ -225,7 +230,7 @@ describe("resolveHostedLinqHomeBindingRecipientPhone", () => {
         incomingChatId: "chat_home",
         incomingRecipientPhone: "+15550100002",
       }),
-    ).toBe("+15550100002");
+    ).toBeNull();
   });
 
   it("prefers the inbound recipient phone when rebinding onto a different chat", () => {

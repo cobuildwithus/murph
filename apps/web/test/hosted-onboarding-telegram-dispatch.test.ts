@@ -694,6 +694,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       expect(hostedMemberRoutingFindMany).toHaveBeenCalledWith({
         select: {
           linqChatIdEncrypted: true,
+          linqHomeLineAssignedAt: true,
           linqRecipientPhoneEncrypted: true,
           member: {
             select: {

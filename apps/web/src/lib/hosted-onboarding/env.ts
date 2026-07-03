@@ -340,7 +340,7 @@ function readHostedLinqConversationPhoneNumbers(
   return readHostedLinqPhoneNumberList(
     configured,
     "HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS",
-    true,
+    false,
   );
 }
 

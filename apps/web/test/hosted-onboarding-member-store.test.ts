@@ -119,6 +119,7 @@ describe("hosted-member-store", () => {
     };
     const routing: HostedMemberRoutingStateSnapshot = {
       linqChatId: "linq_chat_123",
+      linqHomeLineAssignedAt: null,
       linqRecipientPhone: null,
       memberId: core.id,
       pendingLinqChatId: null,
@@ -619,6 +620,7 @@ describe("hosted-member-store", () => {
       },
       select: {
         linqChatIdEncrypted: true,
+        linqHomeLineAssignedAt: true,
         linqRecipientPhoneEncrypted: true,
         member: {
           select: {
@@ -655,6 +657,7 @@ describe("hosted-member-store", () => {
     const findMany = vi.fn().mockResolvedValue([
       {
         linqChatIdEncrypted: null,
+        linqHomeLineAssignedAt: null,
         linqRecipientPhoneEncrypted: null,
         member: {
           billingStatus: HostedBillingStatus.active,
@@ -669,6 +672,7 @@ describe("hosted-member-store", () => {
       },
       {
         linqChatIdEncrypted: null,
+        linqHomeLineAssignedAt: null,
         linqRecipientPhoneEncrypted: null,
         member: {
           billingStatus: HostedBillingStatus.incomplete,
@@ -713,6 +717,7 @@ describe("hosted-member-store", () => {
       },
       select: {
         linqChatIdEncrypted: true,
+        linqHomeLineAssignedAt: true,
         linqRecipientPhoneEncrypted: true,
         member: {
           select: {
@@ -1049,11 +1054,13 @@ describe("hosted-member-store", () => {
 
   it("upserts home Linq chat bindings into the routing table with encrypted local storage", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
+    const findFirst = vi.fn().mockResolvedValue(null);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
+        findFirst,
         updateMany,
         upsert,
       },
@@ -1066,8 +1073,10 @@ describe("hosted-member-store", () => {
       recipientPhone: "+15550100001",
     });
 
-    expect(updateMany).toHaveBeenCalledTimes(2);
-    expect(updateMany).toHaveBeenNthCalledWith(1, {
+    expect(findFirst).toHaveBeenCalledWith({
+      select: {
+        memberId: true,
+      },
       where: {
         linqChatLookupKey: {
           in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
@@ -1076,16 +1085,38 @@ describe("hosted-member-store", () => {
           memberId: "member_123",
         },
       },
-      data: {
-        linqChatIdEncrypted: null,
+    });
+    expect(updateMany).toHaveBeenCalledTimes(2);
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
         linqChatLookupKey: null,
-        linqLastInboundAt: null,
+        pendingLinqChatLookupKey: {
+          in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
+        },
+        NOT: {
+          memberId: "member_123",
+        },
+      },
+      data: {
+        linqHomeLineAssignedAt: null,
         linqRecipientPhoneEncrypted: null,
         linqRecipientPhoneLookupKey: null,
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqParticipantContactEncrypted: null,
+        pendingLinqParticipantContactKind: null,
+        pendingLinqParticipantContactLookupKey: null,
+        pendingLinqParticipantContactObservedAt: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        pendingLinqRecipientPhoneLookupKey: null,
+        pendingLinqLastInboundAt: null,
       },
     });
     expect(updateMany).toHaveBeenNthCalledWith(2, {
       where: {
+        linqChatLookupKey: {
+          not: null,
+        },
         pendingLinqChatLookupKey: {
           in: [expect.stringMatching(/^hbidx:linq-chat:v1:/u)],
         },
@@ -1153,6 +1184,7 @@ describe("hosted-member-store", () => {
     const prisma = {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findUnique,
         updateMany,
         upsert,
@@ -1205,6 +1237,7 @@ describe("hosted-member-store", () => {
     const prisma = {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findUnique,
         updateMany,
         upsert,
@@ -1240,6 +1273,7 @@ describe("hosted-member-store", () => {
     const prisma = {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
         findUnique,
         updateMany,
         upsert,
@@ -1271,11 +1305,13 @@ describe("hosted-member-store", () => {
     });
 
     const executeRaw = vi.fn().mockResolvedValue(0);
+    const findFirst = vi.fn().mockResolvedValue(null);
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
+        findFirst,
         updateMany,
         upsert,
       },
@@ -1288,7 +1324,7 @@ describe("hosted-member-store", () => {
       recipientPhone: "+15550100001",
     });
 
-    expect(updateMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         linqChatLookupKey: {
           in: expect.arrayContaining([
@@ -1298,8 +1334,22 @@ describe("hosted-member-store", () => {
         },
       }),
     }));
+    expect(updateMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      where: expect.objectContaining({
+        linqChatLookupKey: null,
+        pendingLinqChatLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:linq-chat:v2:/u),
+            expect.stringMatching(/^hbidx:linq-chat:v1:/u),
+          ]),
+        },
+      }),
+    }));
     expect(updateMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
       where: expect.objectContaining({
+        linqChatLookupKey: {
+          not: null,
+        },
         pendingLinqChatLookupKey: {
           in: expect.arrayContaining([
             expect.stringMatching(/^hbidx:linq-chat:v2:/u),
@@ -1424,6 +1474,7 @@ describe("hosted-member-store", () => {
     const prisma = {
       $executeRaw: executeRaw,
       hostedMemberRouting: {
+        findFirst: vi.fn().mockResolvedValue(null),
         updateMany,
         upsert,
       },
@@ -1536,28 +1587,29 @@ describe("hosted-member-store", () => {
     }));
   });
 
-  it("counts active home-line assignments by recipient phone even before a home chat is bound", async () => {
+  it("counts active home-line assignments and pre-activation reservations by recipient phone", async () => {
     const homePhoneOne = "+15550100001";
     const homePhoneTwo = "+15550100002";
-    const findMany = vi.fn().mockResolvedValue([
+    const now = new Date("2026-06-30T12:00:00.000Z");
+    const groupBy = vi.fn().mockResolvedValue([
       {
         linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homePhoneOne),
-      },
-      {
-        linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homePhoneOne),
+        _count: { _all: 2 },
       },
       {
         linqRecipientPhoneLookupKey: createHostedPhoneLookupKey(homePhoneTwo),
+        _count: { _all: 1 },
       },
     ]);
     const prisma = {
       hostedMemberRouting: {
-        findMany,
+        groupBy,
       },
     } as never;
 
     await expect(
       countHostedMemberHomeLinqBindingsByRecipientPhone({
+        now,
         prisma,
         recipientPhones: [homePhoneOne, homePhoneTwo],
       }),
@@ -1568,7 +1620,8 @@ describe("hosted-member-store", () => {
       ]),
     );
 
-    expect(findMany).toHaveBeenCalledWith({
+    expect(groupBy).toHaveBeenCalledWith({
+      by: ["linqRecipientPhoneLookupKey"],
       where: {
         linqRecipientPhoneLookupKey: {
           in: expect.arrayContaining([
@@ -1576,15 +1629,59 @@ describe("hosted-member-store", () => {
             expect.stringMatching(/^hbidx:phone:v1:/u),
           ]),
         },
-        member: {
-          is: {
-            billingStatus: HostedBillingStatus.active,
-            suspendedAt: null,
+        OR: [
+          {
+            member: {
+              is: {
+                billingStatus: HostedBillingStatus.active,
+                suspendedAt: null,
+              },
+            },
           },
-        },
+          {
+            member: {
+              is: {
+                accountGroupMemberships: {
+                  some: {
+                    group: {
+                      billingStatus: HostedBillingStatus.active,
+                      suspendedAt: null,
+                    },
+                    status: "active",
+                  },
+                },
+                suspendedAt: null,
+              },
+            },
+          },
+          {
+            linqHomeLineAssignedAt: {
+              not: null,
+            },
+            member: {
+              is: {
+                billingStatus: {
+                  in: [
+                    HostedBillingStatus.not_started,
+                    HostedBillingStatus.incomplete,
+                  ],
+                },
+                invites: {
+                  some: {
+                    channel: "linq",
+                    expiresAt: {
+                      gt: now,
+                    },
+                  },
+                },
+                suspendedAt: null,
+              },
+            },
+          },
+        ],
       },
-      select: {
-        linqRecipientPhoneLookupKey: true,
+      _count: {
+        _all: true,
       },
     });
   });
@@ -1600,28 +1697,32 @@ describe("hosted-member-store", () => {
 
     const homePhone = "+15550100001";
     const [currentLookupKey, previousLookupKey] = createHostedPhoneLookupKeyReadCandidates(homePhone);
-    const findMany = vi.fn().mockResolvedValue([
+    const groupBy = vi.fn().mockResolvedValue([
       {
         linqRecipientPhoneLookupKey: previousLookupKey,
+        _count: { _all: 1 },
       },
       {
         linqRecipientPhoneLookupKey: currentLookupKey,
+        _count: { _all: 1 },
       },
     ]);
     const prisma = {
       hostedMemberRouting: {
-        findMany,
+        groupBy,
       },
     } as never;
 
     await expect(
       countHostedMemberHomeLinqBindingsByRecipientPhone({
+        now: new Date("2026-06-30T12:00:00.000Z"),
         prisma,
         recipientPhones: [homePhone],
       }),
     ).resolves.toEqual(new Map([[homePhone, 2]]));
 
-    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(groupBy).toHaveBeenCalledWith(expect.objectContaining({
+      by: ["linqRecipientPhoneLookupKey"],
       where: expect.objectContaining({
         linqRecipientPhoneLookupKey: {
           in: expect.arrayContaining([
@@ -1630,6 +1731,9 @@ describe("hosted-member-store", () => {
           ]),
         },
       }),
+      _count: {
+        _all: true,
+      },
     }));
   });
 

@@ -3,53 +3,227 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import {
   createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
   readHostedPhoneHint,
 } from "./contact-privacy";
 import {
   type HostedLinqProviderEventProgress,
   createHostedLinqProviderEventProgress,
 } from "./linq-provider-event-progress";
+import {
+  decryptHostedLinqLinePhoneNumber,
+  encryptHostedLinqLinePhoneNumber,
+} from "./linq-line-phone-codec";
+import { hostedOnboardingError } from "./errors";
 import { normalizePhoneNumber } from "./phone";
+import { normalizeNullableString } from "./shared";
 
 type HostedLinqLineClient = PrismaClient | Prisma.TransactionClient;
+
+export const HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT = 250;
+
+export type HostedLinqAssignableHomeLine = {
+  activeMemberLimit: number | null;
+  assignmentWeight: number;
+  maxNewConversationsPerDay: number | null;
+  phoneNumber: string;
+  phoneNumberHint: string;
+  phoneNumberLookupKey: string;
+};
+
+export type HostedLinqContactCardLine = {
+  phoneNumber: string;
+  phoneNumberHint: string;
+  phoneNumberLookupKey: string;
+  providerStatus: string | null;
+};
+
+type HostedLinqAssignableHomeLineRow = {
+  activeMemberLimit: number | null;
+  assignmentWeight: number;
+  maxNewConversationsPerDay: number | null;
+  phoneNumberEncrypted: string | null;
+  phoneNumberHint: string;
+  phoneNumberLookupKey: string;
+};
 
 export async function upsertHostedLinqLineForPhoneTx(input: {
   activeMemberLimit?: number | null;
   observedAt: Date;
   phoneNumber: string;
   prisma: HostedLinqLineClient;
+  providerPhoneNumberId?: string | null;
+  providerReason?: string | null;
+  providerStatus?: string | null;
+  source: "configured" | "provider" | "webhook";
+}) {
+  if ("$transaction" in input.prisma && typeof input.prisma.$transaction === "function") {
+    return input.prisma.$transaction((tx) => upsertHostedLinqLineForPhoneInTransaction({
+      ...input,
+      prisma: tx,
+    }));
+  }
+
+  return upsertHostedLinqLineForPhoneInTransaction(input);
+}
+
+async function upsertHostedLinqLineForPhoneInTransaction(input: {
+  activeMemberLimit?: number | null;
+  observedAt: Date;
+  phoneNumber: string;
+  prisma: HostedLinqLineClient;
+  providerPhoneNumberId?: string | null;
+  providerReason?: string | null;
+  providerStatus?: string | null;
   source: "configured" | "provider" | "webhook";
 }) {
   const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
   const lookupKey = createHostedPhoneLookupKey(normalizedPhoneNumber);
+  const lookupKeyReadCandidates = createHostedPhoneLookupKeyReadCandidates(normalizedPhoneNumber);
 
-  if (!normalizedPhoneNumber || !lookupKey) {
+  if (!normalizedPhoneNumber || !lookupKey || lookupKeyReadCandidates.length === 0) {
     throw new TypeError("Hosted Linq line upsert requires a valid phone number.");
   }
 
-  return input.prisma.hostedLinqLine.upsert({
+  await acquireHostedLinqLinePhoneLockTx({
+    phoneNumber: normalizedPhoneNumber,
+    prisma: input.prisma,
+  });
+
+  const providerStatus = normalizeNullableString(input.providerStatus);
+  const providerHealthStatus = providerStatus
+    ? classifyHostedLinqProviderStatus(providerStatus)
+    : null;
+  const phoneNumberEncrypted = encryptHostedLinqLinePhoneNumber(normalizedPhoneNumber);
+  const existingLines = await input.prisma.hostedLinqLine.findMany({
     where: {
-      phoneNumberLookupKey: lookupKey,
+      phoneNumberLookupKey: {
+        in: lookupKeyReadCandidates,
+      },
     },
-    create: {
-      assignmentWeight: 100,
-      ...(input.activeMemberLimit === undefined ? {} : { activeMemberLimit: input.activeMemberLimit }),
-      configuredAt: input.source === "configured" ? input.observedAt : null,
-      egressPolicy: "enabled",
-      healthStatus: "unknown",
-      phoneNumberHint: readHostedPhoneHint(normalizedPhoneNumber),
-      phoneNumberLookupKey: lookupKey,
-      providerSeenAt: input.source === "provider" ? input.observedAt : null,
-      source: input.source,
-    },
-    update: {
-      ...(input.activeMemberLimit === undefined ? {} : { activeMemberLimit: input.activeMemberLimit }),
-      ...(input.source === "configured" ? { configuredAt: input.observedAt } : {}),
-      ...(input.source === "provider" ? { providerSeenAt: input.observedAt } : {}),
-      phoneNumberHint: readHostedPhoneHint(normalizedPhoneNumber),
-      ...(input.source === "webhook" ? {} : { source: input.source }),
+    select: {
+      phoneNumberLookupKey: true,
     },
   });
+  const targetLookupKey =
+    chooseHostedLinqLineWriteLookupKey(existingLines, lookupKeyReadCandidates, lookupKey)
+    ?? lookupKey;
+
+  const updateData = {
+    ...(input.source === "configured" ? { configuredAt: input.observedAt } : {}),
+    ...(input.source === "provider"
+      ? {
+          providerLastSeenAt: input.observedAt,
+          providerSeenAt: input.observedAt,
+        }
+      : {}),
+    phoneNumberEncrypted,
+    phoneNumberHint: readHostedPhoneHint(normalizedPhoneNumber),
+    ...(input.providerPhoneNumberId === undefined
+      ? {}
+      : { providerPhoneNumberId: normalizeNullableString(input.providerPhoneNumberId) }),
+    ...(input.providerReason === undefined
+      ? {}
+      : { providerReason: normalizeNullableString(input.providerReason) }),
+    ...(input.providerStatus === undefined
+      ? {}
+      : {
+          ...(providerHealthStatus ? { healthStatus: providerHealthStatus } : {}),
+          providerStatus,
+          providerUpdatedAt: input.observedAt,
+        }),
+    ...(input.source === "configured" ? { source: input.source } : {}),
+  } satisfies Prisma.HostedLinqLineUpdateInput;
+
+  const createData = {
+    assignmentWeight: 100,
+    ...(input.activeMemberLimit === undefined ? {} : { activeMemberLimit: input.activeMemberLimit }),
+    configuredAt: input.source === "configured" ? input.observedAt : null,
+    egressPolicy: "enabled",
+    healthStatus: providerHealthStatus ?? "unknown",
+    phoneNumberEncrypted,
+    phoneNumberHint: readHostedPhoneHint(normalizedPhoneNumber),
+    phoneNumberLookupKey: lookupKey,
+    providerFirstSeenAt: input.source === "provider" ? input.observedAt : null,
+    providerLastSeenAt: input.source === "provider" ? input.observedAt : null,
+    providerPhoneNumberId: normalizeNullableString(input.providerPhoneNumberId),
+    providerReason: normalizeNullableString(input.providerReason),
+    providerSeenAt: input.source === "provider" ? input.observedAt : null,
+    providerStatus,
+    providerUpdatedAt: input.providerStatus === undefined ? null : input.observedAt,
+    source: input.source,
+  } satisfies Prisma.HostedLinqLineCreateInput;
+
+  const line = targetLookupKey === lookupKey && existingLines.length === 0
+    ? await input.prisma.hostedLinqLine.upsert({
+        where: {
+          phoneNumberLookupKey: lookupKey,
+        },
+        create: createData,
+        update: updateData,
+      })
+    : await input.prisma.hostedLinqLine.update({
+        where: {
+          phoneNumberLookupKey: targetLookupKey,
+        },
+        data: updateData,
+      });
+
+  if (input.source === "provider") {
+    await input.prisma.hostedLinqLine.updateMany({
+      where: {
+        phoneNumberLookupKey: line.phoneNumberLookupKey,
+        providerFirstSeenAt: null,
+      },
+      data: {
+        providerFirstSeenAt: input.observedAt,
+      },
+    });
+  }
+
+  if (
+    input.source === "configured"
+    && input.activeMemberLimit !== undefined
+    && input.activeMemberLimit !== null
+  ) {
+    await input.prisma.hostedLinqLine.updateMany({
+      where: {
+        activeMemberLimit: null,
+        phoneNumberLookupKey: line.phoneNumberLookupKey,
+      },
+      data: {
+        activeMemberLimit: input.activeMemberLimit,
+      },
+    });
+  }
+
+  return line;
+}
+
+async function acquireHostedLinqLinePhoneLockTx(input: {
+  phoneNumber: string;
+  prisma: HostedLinqLineClient;
+}): Promise<void> {
+  await input.prisma.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtext('hosted_linq_line_phone'),
+      hashtext(${input.phoneNumber})
+    )
+  `;
+}
+
+function chooseHostedLinqLineWriteLookupKey(
+  existingLines: readonly { phoneNumberLookupKey: string }[],
+  lookupKeyReadCandidates: readonly string[],
+  currentLookupKey: string,
+): string | null {
+  const existingLookupKeys = new Set(
+    existingLines.map((line) => line.phoneNumberLookupKey),
+  );
+  if (existingLookupKeys.has(currentLookupKey)) {
+    return currentLookupKey;
+  }
+  return lookupKeyReadCandidates.find((candidate) => existingLookupKeys.has(candidate)) ?? null;
 }
 
 export async function syncHostedLinqConfiguredLinesTx(input: {
@@ -69,6 +243,196 @@ export async function syncHostedLinqConfiguredLinesTx(input: {
     });
   }
 }
+
+export async function syncHostedLinqProviderLineInventoryTx(input: {
+  lines: readonly HostedLinqProviderInventoryLine[];
+  observedAt?: Date;
+  prisma: HostedLinqLineClient;
+}): Promise<number> {
+  const observedAt = input.observedAt ?? new Date();
+  let syncedCount = 0;
+
+  for (const line of input.lines) {
+    await upsertHostedLinqLineForPhoneTx({
+      observedAt,
+      phoneNumber: line.phoneNumber,
+      prisma: input.prisma,
+      providerPhoneNumberId: line.providerPhoneNumberId,
+      providerReason: line.providerReason,
+      providerStatus: line.providerStatus,
+      source: "provider",
+    });
+    syncedCount += 1;
+  }
+
+  return syncedCount;
+}
+
+export async function listHostedLinqAssignableHomeLines(input: {
+  prisma: HostedLinqLineClient;
+}): Promise<HostedLinqAssignableHomeLine[]> {
+  const limit = HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT;
+  const rows = await input.prisma.hostedLinqLine.findMany({
+    where: {
+      configuredAt: { not: null },
+      egressPolicy: "enabled",
+      healthStatus: { in: ["healthy", "unknown"] },
+      phoneNumberEncrypted: { not: null },
+    },
+    orderBy: [
+      { assignmentWeight: "desc" },
+      { phoneNumberLookupKey: "asc" },
+    ],
+    take: limit + 1,
+    select: {
+      activeMemberLimit: true,
+      assignmentWeight: true,
+      maxNewConversationsPerDay: true,
+      phoneNumberEncrypted: true,
+      phoneNumberHint: true,
+      phoneNumberLookupKey: true,
+    },
+  });
+
+  if (rows.length > limit) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_ASSIGNABLE_LINE_LIMIT_EXCEEDED",
+      httpStatus: 500,
+      message: `Hosted Linq assignment has more than ${limit} configured assignable line(s). Reduce the assignable pool or raise the reviewed limit before serving assignments.`,
+      retryable: false,
+    });
+  }
+
+  return mapHostedLinqAssignableHomeLineRows(rows);
+}
+
+export async function assertHostedLinqAssignableHomeLinePoolReady(input: {
+  prisma: HostedLinqLineClient;
+}): Promise<void> {
+  const line = await input.prisma.hostedLinqLine.findFirst({
+    where: {
+      configuredAt: { not: null },
+      egressPolicy: "enabled",
+      healthStatus: { in: ["healthy", "unknown"] },
+      phoneNumberEncrypted: { not: null },
+    },
+    select: {
+      phoneNumberLookupKey: true,
+    },
+  });
+
+  if (!line) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_ASSIGNABLE_LINE_POOL_REQUIRED",
+      httpStatus: 500,
+      message: "Hosted Linq DB home-line cutover requires at least one configured, enabled, healthy assignable line.",
+      retryable: false,
+    });
+  }
+}
+
+function mapHostedLinqAssignableHomeLineRows(
+  rows: readonly HostedLinqAssignableHomeLineRow[],
+): HostedLinqAssignableHomeLine[] {
+  return rows.flatMap((row) => {
+    const phoneNumber = normalizePhoneNumber(
+      decryptHostedLinqLinePhoneNumber(row.phoneNumberEncrypted),
+    );
+    if (!phoneNumber) {
+      return [];
+    }
+    return [{
+      activeMemberLimit: row.activeMemberLimit,
+      assignmentWeight: row.assignmentWeight,
+      maxNewConversationsPerDay: row.maxNewConversationsPerDay,
+      phoneNumber,
+      phoneNumberHint: row.phoneNumberHint,
+      phoneNumberLookupKey: row.phoneNumberLookupKey,
+    }];
+  });
+}
+
+export async function listHostedLinqContactCardLines(input: {
+  limit?: number;
+  prisma: HostedLinqLineClient;
+}): Promise<HostedLinqContactCardLine[]> {
+  const take = input.limit && input.limit > 0 ? input.limit : undefined;
+  const configuredRows = await input.prisma.hostedLinqLine.findMany({
+    where: {
+      configuredAt: { not: null },
+      phoneNumberEncrypted: { not: null },
+    },
+    orderBy: [
+      { configuredAt: "desc" },
+      { providerLastSeenAt: "desc" },
+      { phoneNumberLookupKey: "asc" },
+    ],
+    ...(take ? { take } : {}),
+    select: {
+      phoneNumberEncrypted: true,
+      phoneNumberHint: true,
+      phoneNumberLookupKey: true,
+      providerStatus: true,
+    },
+  });
+
+  if (take && configuredRows.length >= take) {
+    return mapHostedLinqContactCardRows(configuredRows);
+  }
+
+  const providerRows = await input.prisma.hostedLinqLine.findMany({
+    where: {
+      configuredAt: null,
+      phoneNumberEncrypted: { not: null },
+      providerSeenAt: { not: null },
+    },
+    orderBy: [
+      { providerLastSeenAt: "desc" },
+      { phoneNumberLookupKey: "asc" },
+    ],
+    ...(take ? { take: take - configuredRows.length } : {}),
+    select: {
+      phoneNumberEncrypted: true,
+      phoneNumberHint: true,
+      phoneNumberLookupKey: true,
+      providerStatus: true,
+    },
+  });
+
+  return mapHostedLinqContactCardRows([
+    ...configuredRows,
+    ...providerRows,
+  ]);
+}
+
+function mapHostedLinqContactCardRows(rows: readonly {
+  phoneNumberEncrypted: string | null;
+  phoneNumberHint: string;
+  phoneNumberLookupKey: string;
+  providerStatus: string | null;
+}[]): HostedLinqContactCardLine[] {
+  return rows.flatMap((row) => {
+    const phoneNumber = normalizePhoneNumber(
+      decryptHostedLinqLinePhoneNumber(row.phoneNumberEncrypted),
+    );
+    if (!phoneNumber) {
+      return [];
+    }
+    return [{
+      phoneNumber,
+      phoneNumberHint: row.phoneNumberHint,
+      phoneNumberLookupKey: row.phoneNumberLookupKey,
+      providerStatus: row.providerStatus,
+    }];
+  });
+}
+
+export type HostedLinqProviderInventoryLine = {
+  phoneNumber: string;
+  providerPhoneNumberId: string | null;
+  providerReason: string | null;
+  providerStatus: string | null;
+};
 
 export async function projectHostedLinqLineForProviderEventTx(input: {
   event: ParsedHostedLinqProviderEvent;
@@ -196,13 +560,28 @@ async function projectMessageDelivered(
     where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, progress),
     data: {
       consecutiveFailures: 0,
-      healthStatus: "healthy",
       lastDeliveredAt: event.providerCreatedAt,
       lastReceiptAt: event.providerCreatedAt,
       lastReceiptEventId: progress.eventLookupKey,
       totalDeliveredCount: { increment: 1 },
     },
   });
+  if (updated.count === 1) {
+    await prisma.hostedLinqLine.updateMany({
+      where: {
+        healthStatus: { notIn: ["degraded", "unhealthy"] },
+        lastReceiptAt: progress.providerCreatedAt,
+        lastReceiptEventId: progress.eventLookupKey,
+        phoneNumberLookupKey,
+      },
+      data: {
+        healthStatus: "healthy",
+        lastDeliveredAt: event.providerCreatedAt,
+        lastReceiptAt: event.providerCreatedAt,
+        lastReceiptEventId: progress.eventLookupKey,
+      },
+    });
+  }
   return updated.count === 1;
 }
 
@@ -237,7 +616,6 @@ async function projectPhoneNumberStatusUpdated(
   event: ParsedHostedLinqProviderEvent,
 ): Promise<boolean> {
   const healthStatus = classifyHostedLinqProviderStatus(event.providerStatus);
-  const egressPolicy = deriveHostedLinqEgressPolicy(event.providerStatus);
   const progress = createHostedLinqProviderEventProgress({
     eventId: event.eventId,
     providerCreatedAt: event.providerCreatedAt,
@@ -246,7 +624,6 @@ async function projectPhoneNumberStatusUpdated(
   const updated = await prisma.hostedLinqLine.updateMany({
     where: buildPhoneNumberStatusProjectionWhere(phoneNumberLookupKey, progress),
     data: {
-      ...(egressPolicy ? { egressPolicy } : {}),
       healthStatus,
       lastStatusEventId: progress.eventLookupKey,
       providerReason: event.providerReason,
@@ -313,11 +690,11 @@ function buildSameTimestampStatusProjectionWhere(
   if (progress.rank === 2) {
     return [
       {
-        egressPolicy: { not: "disabled" },
+        healthStatus: { not: "unhealthy" },
         providerUpdatedAt: sameTimestamp,
       },
       {
-        egressPolicy: "disabled",
+        healthStatus: "unhealthy",
         providerUpdatedAt: sameTimestamp,
         OR: [
           { lastStatusEventId: null },
@@ -330,11 +707,11 @@ function buildSameTimestampStatusProjectionWhere(
   if (progress.rank === 1) {
     return [
       {
-        egressPolicy: { notIn: ["disabled", "avoid_new_assignments"] },
+        healthStatus: { in: ["healthy", "unknown"] },
         providerUpdatedAt: sameTimestamp,
       },
       {
-        egressPolicy: "avoid_new_assignments",
+        healthStatus: "degraded",
         providerUpdatedAt: sameTimestamp,
         OR: [
           { lastStatusEventId: null },
@@ -346,7 +723,7 @@ function buildSameTimestampStatusProjectionWhere(
 
   return [
     {
-      egressPolicy: { notIn: ["disabled", "avoid_new_assignments"] },
+      healthStatus: { in: ["healthy", "unknown"] },
       providerUpdatedAt: sameTimestamp,
       OR: [
         { lastStatusEventId: null },
@@ -370,23 +747,12 @@ function classifyHostedLinqProviderStatus(value: string | null): string {
   return "unknown";
 }
 
-function deriveHostedLinqEgressPolicy(value: string | null): string | null {
-  const normalized = value?.trim().toLowerCase() ?? "";
-  if (/critical|flagged|blocked|disabled|suspended|banned/u.test(normalized)) {
-    return "disabled";
-  }
-  if (/at_risk|at-risk|degraded|warning|limited|throttled/u.test(normalized)) {
-    return "avoid_new_assignments";
-  }
-  return null;
-}
-
 function rankHostedLinqLineStatusProgress(value: string | null): number {
-  const egressPolicy = deriveHostedLinqEgressPolicy(value);
-  if (egressPolicy === "disabled") {
+  const healthStatus = classifyHostedLinqProviderStatus(value);
+  if (healthStatus === "unhealthy") {
     return 2;
   }
-  if (egressPolicy === "avoid_new_assignments") {
+  if (healthStatus === "degraded") {
     return 1;
   }
   return 0;

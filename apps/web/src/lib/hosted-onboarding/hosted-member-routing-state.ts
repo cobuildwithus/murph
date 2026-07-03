@@ -4,7 +4,6 @@ import {
 } from "@prisma/client";
 
 import {
-  readHostedMemberHomeLinqRoutePrivateState,
   readHostedMemberRoutingPrivateState,
 } from "./member-private-codecs";
 import {
@@ -16,6 +15,7 @@ import type { HostedOnboardingReadClient } from "./shared";
 export const hostedMemberRoutingStateSelect =
   Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
     linqChatIdEncrypted: true,
+    linqHomeLineAssignedAt: true,
     linqRecipientPhoneEncrypted: true,
     memberId: true,
     pendingLinqChatIdEncrypted: true,
@@ -33,20 +33,10 @@ export type HostedMemberRoutingRecord = Prisma.HostedMemberRoutingGetPayload<{
   select: typeof hostedMemberRoutingStateSelect;
 }>;
 
-export const hostedMemberHomeLinqRouteSelect =
-  Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
-    linqChatIdEncrypted: true,
-    linqRecipientPhoneEncrypted: true,
-    memberId: true,
-  });
-
-export type HostedMemberHomeLinqRouteRecord = Prisma.HostedMemberRoutingGetPayload<{
-  select: typeof hostedMemberHomeLinqRouteSelect;
-}>;
-
 export const hostedMemberRoutingLookupSelect =
   Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
     linqChatIdEncrypted: true,
+    linqHomeLineAssignedAt: true,
     linqRecipientPhoneEncrypted: true,
     memberId: true,
     pendingLinqChatIdEncrypted: true,
@@ -75,6 +65,7 @@ export type HostedMemberRoutingLookupRecord = Prisma.HostedMemberRoutingGetPaylo
 
 export interface HostedMemberRoutingStateSnapshot {
   linqChatId: string | null;
+  linqHomeLineAssignedAt: Date | null;
   linqRecipientPhone: string | null;
   memberId: string;
   pendingLinqChatId: string | null;
@@ -89,12 +80,6 @@ export interface HostedMemberRoutingStateSnapshot {
 export interface HostedMemberRoutingLookupSnapshot {
   hasTelegramUserBinding: boolean;
   linqChatId: string | null;
-  memberId: string;
-}
-
-export interface HostedMemberHomeLinqRouteSnapshot {
-  linqChatId: string | null;
-  linqRecipientPhone: string | null;
   memberId: string;
 }
 
@@ -125,6 +110,7 @@ export async function projectHostedMemberRoutingState(
 
   return {
     linqChatId: privateState.linqChatId,
+    linqHomeLineAssignedAt: routing.linqHomeLineAssignedAt,
     linqRecipientPhone: privateState.linqRecipientPhone,
     memberId: routing.memberId,
     pendingLinqChatId: privateState.pendingLinqChatId,
@@ -139,22 +125,6 @@ export async function projectHostedMemberRoutingState(
     telegramThreadId: privateState.telegramThreadId,
     telegramUserId: privateState.telegramUserId,
     telegramUserLookupKey: routing.telegramUserLookupKey ?? null,
-  };
-}
-
-export async function projectHostedMemberHomeLinqRouteState(
-  routing: HostedMemberHomeLinqRouteRecord,
-  prisma?: HostedOnboardingReadClient,
-): Promise<HostedMemberHomeLinqRouteSnapshot> {
-  const privateState = await readHostedMemberHomeLinqRoutePrivateState(
-    routing,
-    prisma,
-  );
-
-  return {
-    linqChatId: privateState.linqChatId,
-    linqRecipientPhone: privateState.linqRecipientPhone,
-    memberId: routing.memberId,
   };
 }
 

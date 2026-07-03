@@ -3,13 +3,12 @@ import "server-only";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
-import {
-  createHostedPhoneLookupKey,
-} from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
+import { listHostedLinqContactCardLines } from "./linq-line-store";
 import {
-  syncHostedLinqConfiguredLinesTx,
-} from "./linq-line-store";
+  HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT,
+  syncHostedLinqPhoneNumberInventory,
+} from "./linq-phone-number-inventory";
 import { normalizePhoneNumber } from "./phone";
 import {
   getHostedOnboardingEnvironment,
@@ -67,6 +66,7 @@ export async function reconcileHostedLinqContactCards(input: {
     maxLines: input.maxLines,
     observedAt,
     prisma: input.prisma,
+    signal: input.signal,
   });
   const murphImageUrl = getMurphContactCardImageUrl();
 
@@ -199,55 +199,27 @@ async function listHostedLinqConfiguredContactCardLines(input: {
   maxLines?: number;
   observedAt: Date;
   prisma: HostedLinqContactCardClient;
+  signal?: AbortSignal;
 }): Promise<Array<{
   phoneNumber: string;
   providerStatus: string | null;
 }>> {
-  const environment = getHostedOnboardingEnvironment();
   const maxLines = normalizeLineLimit(input.maxLines);
-  const phoneNumbers = uniqueNormalizedPhoneNumbers(
-    environment.linqConversationPhoneNumbers,
-  ).slice(0, maxLines);
-  const lineInputs = phoneNumbers
-    .map((phoneNumber) => ({
-      phoneNumber,
-      phoneNumberLookupKey: createHostedPhoneLookupKey(phoneNumber),
-    }))
-    .filter((line): line is {
-      phoneNumber: string;
-      phoneNumberLookupKey: string;
-    } => typeof line.phoneNumberLookupKey === "string" && line.phoneNumberLookupKey.length > 0);
 
-  if (lineInputs.length === 0) {
-    return [];
-  }
-
-  await syncHostedLinqConfiguredLinesTx({
-    activeMemberLimit: environment.linqMaxActiveMembersPerConversationPhone,
+  await syncHostedLinqPhoneNumberInventory({
+    maxLines: HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT,
     observedAt: input.observedAt,
-    phoneNumbers: lineInputs.map((line) => line.phoneNumber),
+    prisma: input.prisma,
+    signal: input.signal,
+  });
+
+  const lines = await listHostedLinqContactCardLines({
+    limit: maxLines,
     prisma: input.prisma,
   });
-
-  const rows = await input.prisma.hostedLinqLine.findMany({
-    where: {
-      phoneNumberLookupKey: {
-        in: lineInputs.map((line) => line.phoneNumberLookupKey),
-      },
-    },
-    select: {
-      phoneNumberLookupKey: true,
-      providerStatus: true,
-    },
-    take: maxLines,
-  });
-  const providerStatusByLookupKey = new Map(
-    rows.map((row) => [row.phoneNumberLookupKey, row.providerStatus]),
-  );
-
-  return lineInputs.map((line) => ({
+  return lines.map((line) => ({
     phoneNumber: line.phoneNumber,
-    providerStatus: providerStatusByLookupKey.get(line.phoneNumberLookupKey) ?? null,
+    providerStatus: line.providerStatus,
   }));
 }
 
@@ -460,23 +432,6 @@ function normalizeLineLimit(value: number | null | undefined): number {
   }
 
   return Math.min(value, HOSTED_LINQ_CONTACT_CARD_CRON_LINE_LIMIT);
-}
-
-function uniqueNormalizedPhoneNumbers(values: readonly string[]): string[] {
-  const seen = new Set<string>();
-  const phoneNumbers: string[] = [];
-
-  for (const value of values) {
-    const phoneNumber = normalizePhoneNumber(value);
-    if (!phoneNumber || seen.has(phoneNumber)) {
-      continue;
-    }
-
-    seen.add(phoneNumber);
-    phoneNumbers.push(phoneNumber);
-  }
-
-  return phoneNumbers;
 }
 
 const MURPH_CONTACT_CARD_VCF_PHOTO_MAX_BYTES = 2 * 1024 * 1024;

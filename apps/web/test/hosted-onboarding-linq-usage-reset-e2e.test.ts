@@ -4,6 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildHostedAiUsageGateNoticeIdempotencyKey } from "@/src/lib/hosted-execution/usage-allowance";
 import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
 import { getHostedAiUsageMonthlyAllowanceUsdMicros } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
+import {
+  encryptHostedLinqLinePhoneNumber,
+} from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
 
 const MEMBER_ID = "member_usage_reset";
 const CHAT_ID = "chat_usage_reset";
@@ -108,6 +115,7 @@ const mocks = vi.hoisted(() => {
       userId: "member_usage_reset",
     })),
     readHostedMemberHomeLinqRoute: vi.fn(),
+    readHostedMemberRoutingState: vi.fn(),
     sendHostedLinqChatMessage: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
     startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
@@ -166,6 +174,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
     lookupHostedMemberRoutingByPendingLinqParticipantContact:
       mocks.lookupHostedMemberRoutingByPendingLinqParticipantContact,
     readHostedMemberHomeLinqRoute: mocks.readHostedMemberHomeLinqRoute,
+    readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
     upsertHostedMemberHomeLinqBindingTx: mocks.upsertHostedMemberHomeLinqBindingTx,
   };
 });
@@ -313,12 +322,14 @@ type UsageResetPrismaFixture = {
   hostedLinqDelivery: {
     create: MockedFunction;
     findFirst: MockedFunction;
+    findMany: MockedFunction;
     findUnique: MockedFunction;
     update: MockedFunction;
     updateMany: MockedFunction;
     upsert: MockedFunction;
   };
   hostedLinqLine: {
+    findMany: MockedFunction;
     findUnique: MockedFunction;
     update: MockedFunction;
     upsert: MockedFunction;
@@ -330,6 +341,7 @@ type UsageResetPrismaFixture = {
     findUnique: MockedFunction;
   };
   hostedMemberRouting: {
+    findMany: MockedFunction;
     updateMany: MockedFunction;
   };
   hostedThreadRoute: {
@@ -369,6 +381,18 @@ describe("hosted Linq usage reset e2e", () => {
       linqChatId: CHAT_ID,
       linqRecipientPhone: OWNER_PHONE,
       memberId: MEMBER_ID,
+    });
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: CHAT_ID,
+      linqHomeLineAssignedAt: null,
+      linqRecipientPhone: OWNER_PHONE,
+      memberId: MEMBER_ID,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
     });
     mocks.incrementHostedLinqInboundDailyState.mockResolvedValue(makeHostedLinqDailyState());
     mocks.incrementHostedLinqOutboundDailyState.mockResolvedValue(makeHostedLinqDailyState({
@@ -749,12 +773,31 @@ function createUsageResetPrismaFixture(input: {
     hostedLinqDelivery: {
       create: vi.fn().mockResolvedValue({ id: "hld_random" }),
       findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockResolvedValue(undefined),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       upsert: vi.fn().mockResolvedValue({ id: "hld_123" }),
     },
     hostedLinqLine: {
+      findMany: vi.fn(async (query: { where?: { phoneNumberLookupKey?: { in?: string[] } } }) => {
+        const lookupKeys = new Set(query.where?.phoneNumberLookupKey?.in ?? []);
+        if (
+          !createHostedPhoneLookupKeyReadCandidates(OWNER_PHONE).some((lookupKey) =>
+            lookupKeys.has(lookupKey)
+          )
+        ) {
+          return [];
+        }
+        return [{
+          activeMemberLimit: null,
+          assignmentWeight: 1,
+          maxNewConversationsPerDay: null,
+          phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(OWNER_PHONE),
+          phoneNumberHint: "*** 0100",
+          phoneNumberLookupKey: createHostedPhoneLookupKey(OWNER_PHONE),
+        }];
+      }),
       findUnique: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
         Promise.resolve({
@@ -776,6 +819,7 @@ function createUsageResetPrismaFixture(input: {
       })),
     },
     hostedMemberRouting: {
+      findMany: vi.fn().mockResolvedValue([]),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     hostedThreadRoute: {

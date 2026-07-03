@@ -417,11 +417,13 @@ describe("hosted Linq egress engagement", () => {
       throw new Error("Expected test Linq chat lookup key.");
     }
     const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue([]),
       hostedLinqDelivery: {
         create: vi.fn().mockResolvedValue({ id: "hld_skip" }),
         findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedLinqLine: {
+        findMany: vi.fn().mockResolvedValue([]),
         upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) =>
           Promise.resolve({
             phoneNumberLookupKey: input.create.phoneNumberLookupKey,
@@ -478,11 +480,13 @@ describe("hosted Linq egress engagement", () => {
       throw new Error("Expected test Linq chat lookup key.");
     }
     const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue([]),
       hostedLinqDelivery: {
         create: vi.fn().mockResolvedValue({ id: "hld_skip" }),
         findUnique: vi.fn().mockResolvedValue(null),
       },
       hostedLinqLine: {
+        findMany: vi.fn().mockResolvedValue([]),
         upsert: vi.fn().mockImplementation((input: { create: { phoneNumberLookupKey: string } }) =>
           Promise.resolve({
             phoneNumberLookupKey: input.create.phoneNumberLookupKey,

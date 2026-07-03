@@ -14,13 +14,10 @@ import {
   type HostedLinqParticipantContact,
 } from "./linq-participant-contact";
 import {
-  hostedMemberHomeLinqRouteSelect,
   hostedMemberRoutingLookupSelect,
   hostedMemberRoutingStateSelect,
-  projectHostedMemberHomeLinqRouteState,
   projectHostedMemberRoutingLookup,
   projectHostedMemberRoutingState,
-  type HostedMemberHomeLinqRouteSnapshot,
   type HostedMemberRoutingLookup,
   type HostedMemberRoutingLookupRecord,
 } from "./hosted-member-routing-state";
@@ -28,6 +25,7 @@ import { type HostedOnboardingReadClient } from "./shared";
 
 export {
   acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
+  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
@@ -40,7 +38,6 @@ export {
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-telegram";
 export {
-  type HostedMemberHomeLinqRouteSnapshot,
   projectHostedMemberRoutingState,
   type HostedMemberRoutingLookupMatch,
   type HostedMemberRoutingLookupSnapshot,
@@ -330,20 +327,4 @@ export async function readHostedMemberRoutingState(input: {
   });
 
   return routingRecord ? await projectHostedMemberRoutingState(routingRecord, input.prisma) : null;
-}
-
-export async function readHostedMemberHomeLinqRoute(input: {
-  memberId: string;
-  prisma: HostedOnboardingReadClient;
-}): Promise<HostedMemberHomeLinqRouteSnapshot | null> {
-  const routingRecord = await input.prisma.hostedMemberRouting.findUnique({
-    where: {
-      memberId: input.memberId,
-    },
-    select: hostedMemberHomeLinqRouteSelect,
-  });
-
-  return routingRecord
-    ? await projectHostedMemberHomeLinqRouteState(routingRecord, input.prisma)
-    : null;
 }

@@ -237,6 +237,35 @@ test("HomePage shows the connected dialog with the signed-in member's assigned M
   });
 });
 
+test("HomePage uses a DB-assigned Messages line even when it is not in the legacy env pool", async () => {
+  vi.stubEnv("HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS", "+15550100001");
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  mocks.readHostedMemberRoutingState.mockResolvedValueOnce({
+    linqChatId: "linq-chat",
+    linqRecipientPhone: "+15550100999",
+    memberId: "member_123",
+    pendingLinqChatId: null,
+    pendingLinqRecipientPhone: null,
+    telegramThreadId: null,
+    telegramUserId: null,
+    telegramUserLookupKey: null,
+  });
+
+  const markup = renderToStaticMarkup(await HomePage({
+    searchParams: Promise.resolve({
+      deviceSyncCompletion: "1",
+      deviceSyncProvider: "whoop",
+      deviceSyncStatus: "connected",
+      source: "assistant",
+    }),
+  }));
+
+  assert.match(markup, /href="sms:\+15550100999\?body=I%20just%20connected%20my%20WHOOP"/);
+  assert.match(markup, />Text Murph</);
+  assert.doesNotMatch(markup, /href="sms:\+15550100001/);
+  assert.doesNotMatch(markup, /t\.me\/murph_bot/);
+});
+
 test("HomePage falls back to Telegram when no Messages line is assigned", async () => {
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   mocks.readHostedMemberRoutingState.mockResolvedValueOnce({

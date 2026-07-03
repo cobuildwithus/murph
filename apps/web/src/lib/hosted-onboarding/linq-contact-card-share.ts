@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 
 import { createHostedLinqChatLookupKey, createHostedLinqChatLookupKeyReadCandidates } from "./contact-privacy";
 import {
-  hasHostedMemberActiveAccess,
+  hasHostedMemberGeneralAccess,
 } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import { shareHostedLinqContactCard } from "./linq-client";
@@ -186,9 +186,14 @@ async function assertHostedLinqContactCardShareMemberChat(input: {
   });
 
   const readCandidates = new Set(chatLookup.readCandidates);
+  // First-contact members are not_started until they accept the invite, but we
+  // still want them to receive Murph's contact card so they can save the
+  // number during onboarding. Gate on general access (blocks suspended and
+  // canceled/paused/unpaid) rather than active-only access, while still
+  // requiring the chat to match the member's own bound route below.
   if (
     !routing
-    || !hasHostedMemberActiveAccess(routing.member)
+    || !hasHostedMemberGeneralAccess(routing.member)
     || !(
       (routing.linqChatLookupKey && readCandidates.has(routing.linqChatLookupKey))
       || (

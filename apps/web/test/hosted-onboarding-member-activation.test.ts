@@ -448,6 +448,7 @@ describe("hosted onboarding member activation", () => {
       },
       routing: {
         linqChatId: "chat_home_123",
+        linqHomeLineAssignedAt: null,
         linqRecipientPhone: null,
         memberId: "member_123",
         pendingLinqChatId: null,
@@ -539,6 +540,7 @@ describe("hosted onboarding member activation", () => {
       },
       routing: {
         linqChatId: null,
+        linqHomeLineAssignedAt: null,
         linqRecipientPhone: null,
         memberId: "member_123",
         pendingLinqChatId: null,
@@ -706,6 +708,7 @@ describe("hosted onboarding member activation", () => {
       },
       routing: {
         linqChatId: null,
+        linqHomeLineAssignedAt: null,
         linqRecipientPhone: null,
         memberId: "member_123",
         pendingLinqChatId: null,
@@ -750,6 +753,7 @@ describe("hosted onboarding member activation", () => {
       },
       routing: {
         linqChatId: null,
+        linqHomeLineAssignedAt: null,
         linqRecipientPhone: null,
         memberId: "member_123",
         pendingLinqChatId: null,

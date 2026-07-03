@@ -4,7 +4,11 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const linqLineStoreMocks = vi.hoisted(() => ({
-  syncHostedLinqConfiguredLinesTx: vi.fn(),
+  listHostedLinqContactCardLines: vi.fn(),
+}));
+
+const linqInventoryMocks = vi.hoisted(() => ({
+  syncHostedLinqPhoneNumberInventory: vi.fn(),
 }));
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -20,12 +24,14 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
-  syncHostedLinqConfiguredLinesTx: linqLineStoreMocks.syncHostedLinqConfiguredLinesTx,
+  listHostedLinqContactCardLines: linqLineStoreMocks.listHostedLinqContactCardLines,
 }));
 
-import {
-  createHostedPhoneLookupKey,
-} from "@/src/lib/hosted-onboarding/contact-privacy";
+vi.mock("@/src/lib/hosted-onboarding/linq-phone-number-inventory", () => ({
+  HOSTED_LINQ_PHONE_NUMBER_INVENTORY_SYNC_LIMIT: 250,
+  syncHostedLinqPhoneNumberInventory: linqInventoryMocks.syncHostedLinqPhoneNumberInventory,
+}));
+
 import {
   isHostedLinqAttachmentSendPrepareFailure,
   sendHostedLinqAttachmentMessage,
@@ -45,7 +51,8 @@ const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   runtimeMocks.getHostedOnboardingEnvironment.mockReset();
-  linqLineStoreMocks.syncHostedLinqConfiguredLinesTx.mockReset();
+  linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockReset();
+  linqLineStoreMocks.listHostedLinqContactCardLines.mockReset();
 
   if (originalFetch) {
     vi.stubGlobal("fetch", originalFetch);
@@ -189,45 +196,33 @@ describe("hosted Linq contact card client", () => {
     });
   });
 
-  it("reconciles configured line contact cards without provider-wide scans", async () => {
+  it("reconciles DB-backed line contact cards after provider inventory sync", async () => {
     const observedAt = new Date("2026-06-25T12:30:00.000Z");
     runtimeMocks.getHostedOnboardingEnvironment.mockReturnValue({
-      contactPrivacyKeyring: {
-        currentVersion: "v1",
-        keysByVersion: {
-          v1: Buffer.alloc(32),
-        },
-        readVersions: ["v1"],
-      },
-      linqConversationPhoneNumbers: ["+15550000001", "+15550000002", "+15550000002"],
-      linqMaxActiveMembersPerConversationPhone: 1000,
       publicBaseUrl: "https://app.example.test",
     });
     const contactCardImageUrl = "https://app.example.test/murph_headshot.png";
-    const firstLookupKey = createHostedPhoneLookupKey("+15550000001");
-    const secondLookupKey = createHostedPhoneLookupKey("+15550000002");
-    const findMany = vi.fn().mockResolvedValue([
+    linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({
+      syncedCount: 2,
+    });
+    linqLineStoreMocks.listHostedLinqContactCardLines.mockResolvedValue([
       {
-        phoneNumberLookupKey: firstLookupKey,
+        phoneNumber: "+15550000001",
+        phoneNumberHint: "*** 0001",
+        phoneNumberLookupKey: "lookup:1",
         providerStatus: "HEALTHY",
       },
       {
-        phoneNumberLookupKey: secondLookupKey,
+        phoneNumber: "+15550000002",
+        phoneNumberHint: "*** 0002",
+        phoneNumberLookupKey: "lookup:2",
         providerStatus: "AT_RISK",
       },
     ]);
-    const prisma = {
-      hostedLinqLine: {
-        findMany,
-      },
-    };
+    const prisma = {};
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof URL ? input : new URL(String(input));
-
-      if (url.pathname.endsWith("/phone_numbers")) {
-        throw new Error("Reconciliation should not scan provider phone numbers.");
-      }
 
       if (url.pathname.endsWith("/contact_card") && url.search === "" && init?.method === "GET") {
         throw new Error("Reconciliation should not scan provider contact cards.");
@@ -302,52 +297,34 @@ describe("hosted Linq contact card client", () => {
       updatedCards: 1,
     });
 
-    expect(linqLineStoreMocks.syncHostedLinqConfiguredLinesTx).toHaveBeenCalledWith({
-      activeMemberLimit: 1000,
+    expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).toHaveBeenCalledWith(expect.objectContaining({
+      maxLines: 250,
       observedAt,
-      phoneNumbers: ["+15550000001", "+15550000002"],
       prisma,
-    });
-    expect(findMany).toHaveBeenCalledWith({
-      select: {
-        phoneNumberLookupKey: true,
-        providerStatus: true,
-      },
-      take: 50,
-      where: {
-        phoneNumberLookupKey: {
-          in: [firstLookupKey, secondLookupKey],
-        },
-      },
+    }));
+    expect(linqLineStoreMocks.listHostedLinqContactCardLines).toHaveBeenCalledWith({
+      limit: 50,
+      prisma,
     });
   });
 
   it("treats Linq-hosted contact-card image URLs as current", async () => {
     const observedAt = new Date("2026-06-25T12:30:00.000Z");
     runtimeMocks.getHostedOnboardingEnvironment.mockReturnValue({
-      contactPrivacyKeyring: {
-        currentVersion: "v1",
-        keysByVersion: {
-          v1: Buffer.alloc(32),
-        },
-        readVersions: ["v1"],
-      },
-      linqConversationPhoneNumbers: ["+15550000001"],
-      linqMaxActiveMembersPerConversationPhone: 1000,
       publicBaseUrl: "https://app.example.test",
     });
-    const lookupKey = createHostedPhoneLookupKey("+15550000001");
-    const findMany = vi.fn().mockResolvedValue([
+    linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({
+      syncedCount: 1,
+    });
+    linqLineStoreMocks.listHostedLinqContactCardLines.mockResolvedValue([
       {
-        phoneNumberLookupKey: lookupKey,
+        phoneNumber: "+15550000001",
+        phoneNumberHint: "*** 0001",
+        phoneNumberLookupKey: "lookup:1",
         providerStatus: "HEALTHY",
       },
     ]);
-    const prisma = {
-      hostedLinqLine: {
-        findMany,
-      },
-    };
+    const prisma = {};
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof URL ? input : new URL(String(input));
@@ -388,6 +365,15 @@ describe("hosted Linq contact card client", () => {
       updatedCards: 0,
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).toHaveBeenCalledWith(expect.objectContaining({
+      maxLines: 250,
+      observedAt,
+      prisma,
+    }));
+    expect(linqLineStoreMocks.listHostedLinqContactCardLines).toHaveBeenCalledWith({
+      limit: 50,
+      prisma,
+    });
   });
 
 });
@@ -505,34 +491,30 @@ describe("fetchMurphHostedLinqContactCardVcfPhoto", () => {
 
 describe("resolveMurphHostedLinqContactCardBackupPhoneNumber", () => {
   it("returns the first healthy configured line that is not the chat's own", async () => {
-    runtimeMocks.getHostedOnboardingEnvironment.mockReturnValue({
-      contactPrivacyKeyring: {
-        currentVersion: "v1",
-        keysByVersion: { v1: Buffer.alloc(32) },
-        readVersions: ["v1"],
+    linqLineStoreMocks.listHostedLinqContactCardLines.mockResolvedValue([
+      {
+        phoneNumber: "+15550000001",
+        phoneNumberHint: "*** 0001",
+        phoneNumberLookupKey: "lookup:1",
+        providerStatus: "HEALTHY",
       },
-      linqConversationPhoneNumbers: ["+15550000001", "+15550000002", "+15550000003"],
-      linqMaxActiveMembersPerConversationPhone: 1000,
-      publicBaseUrl: "https://app.example.test",
-    });
-    const prisma = {
-      hostedLinqLine: {
-        findMany: vi.fn().mockResolvedValue([
-          {
-            phoneNumberLookupKey: createHostedPhoneLookupKey("+15550000002"),
-            providerStatus: "AT_RISK",
-          },
-          {
-            phoneNumberLookupKey: createHostedPhoneLookupKey("+15550000003"),
-            providerStatus: "HEALTHY",
-          },
-        ]),
+      {
+        phoneNumber: "+15550000002",
+        phoneNumberHint: "*** 0002",
+        phoneNumberLookupKey: "lookup:2",
+        providerStatus: "AT_RISK",
       },
-    };
+      {
+        phoneNumber: "+15550000003",
+        phoneNumberHint: "*** 0003",
+        phoneNumberLookupKey: "lookup:3",
+        providerStatus: "HEALTHY",
+      },
+    ]);
 
     await expect(resolveMurphHostedLinqContactCardBackupPhoneNumber({
       excludePhoneNumber: "+15550000001",
-      prisma: prisma as never,
+      prisma: {} as never,
     })).resolves.toBe("+15550000003");
   });
 
