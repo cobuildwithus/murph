@@ -6008,7 +6008,7 @@ test("Junction ambiguous skip detail drops object-shaped display-name diagnostic
   }
 });
 
-test("Junction ambiguous skip detail masks object-shaped direct user diagnostics", async () => {
+test("Junction ambiguous skip detail drops object-shaped unlabeled user diagnostics", async () => {
   const warnings: Record<string, unknown>[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
@@ -6032,7 +6032,7 @@ test("Junction ambiguous skip detail masks object-shaped direct user diagnostics
       return createJsonResponse({
         detail: {
           type: "resource_misconfigured",
-          msg: "user: Jane Doe cannot access sleep_cycle",
+          msg: "Jane Doe cannot access sleep_cycle",
         },
       }, 422);
     }
@@ -6058,7 +6058,7 @@ test("Junction ambiguous skip detail masks object-shaped direct user diagnostics
     }),
   );
 
-  const expectedDetail = "resource_misconfigured: user: <redacted-id>";
+  const expectedDetail = "resource_misconfigured";
   assert.equal(warnings.length, 1);
   assert.equal(warnings[0]?.responseDetail, expectedDetail);
   assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, expectedDetail);

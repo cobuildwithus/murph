@@ -794,7 +794,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             connectionId: "conn_01",
             localState: {
               lastErrorCode: "Authorization: Bearer secret-token",
-              lastErrorMessage: "Provider rejected Bearer abc12345",
+              lastErrorMessage: "Provider rejected Bearer abcdefghijklmnop1234",
               lastSyncErrorAt: "2026-04-12T10:20:00+10:00",
             },
             observedTokenVersion: 1,
@@ -895,6 +895,12 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ).toBe("Bearer [redacted]");
     expect(
       sanitizeHostedRuntimeErrorText("Provider rejected Bearer abc12345"),
+    ).toBe("Provider rejected Bearer [redacted]");
+    expect(
+      sanitizeHostedRuntimeErrorText("Provider rejected Bearer abcdefghijklmnop1234"),
+    ).toBe("Provider rejected Bearer [redacted]");
+    expect(
+      sanitizeHostedRuntimeErrorText("Provider rejected Bearer abcdefghijklmnop-foo"),
     ).toBe("Provider rejected Bearer [redacted]");
     expect(
       sanitizeHostedRuntimeDiagnosticText("Bearer abcdefghijklmnopqrst"),
@@ -2013,6 +2019,9 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("user: Jane Doe cannot access sleep_cycle"),
     ).toBe("user: <redacted-id>");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Jane Doe cannot access sleep_cycle"),
+    ).toBeNull();
     expect(
       sanitizeHostedRuntimeDiagnosticText("Provider reason: Refresh token expired. Reconnect WHOOP."),
     ).toBe("Provider reason: Refresh token expired. Reconnect WHOOP.");

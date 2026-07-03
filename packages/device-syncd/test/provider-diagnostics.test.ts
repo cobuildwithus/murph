@@ -69,6 +69,19 @@ test("provider diagnostics mask colon-form token descriptions", () => {
   );
 });
 
+test("provider diagnostics drop unlabeled direct-name descriptions", () => {
+  const diagnostics = inspectProviderErrorBody(JSON.stringify({
+    detail: {
+      type: "resource_misconfigured",
+      msg: "Jane Doe cannot access sleep_cycle",
+    },
+  }));
+
+  assert.equal(diagnostics.responseErrorCode, "resource_misconfigured");
+  assert.equal(diagnostics.responseErrorDescription, null);
+  assert.equal(diagnostics.responseErrorDescriptionFieldPresent, true);
+});
+
 test("provider diagnostics ignore top-level primitive JSON array entries", () => {
   assert.deepEqual(
     inspectProviderErrorBody(JSON.stringify(["Jane Doe"])),

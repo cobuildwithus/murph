@@ -21,7 +21,7 @@ const HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH = 512;
 const HOSTED_RUNTIME_ERROR_CONTROL_CHAR_PATTERN = /[\u0000-\u001F\u007F]+/gu;
 const HOSTED_RUNTIME_ERROR_WHITESPACE_PATTERN = /\s+/gu;
 const HOSTED_RUNTIME_ERROR_INLINE_BEARER_PATTERN =
-  /\bBearer\s+(?:[A-Za-z]{16,}|(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]{8,})/giu;
+  /\bBearer\s+(?=\S{8,})[^\s,;]+/giu;
 const HOSTED_RUNTIME_ERROR_JWT_PATTERN = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/gu;
 const HOSTED_RUNTIME_ERROR_QUERY_SECRET_PATTERN =
   /([?&](?:access_token|refresh_token|id_token|token|apikey|api_key|client_secret|session|session_token|code|state)=)[^&#\s]+/giu;
@@ -61,6 +61,8 @@ const HOSTED_RUNTIME_DIAGNOSTIC_ASSIGNMENT_TAIL_PATTERN =
 const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_PHRASE_PATTERN =
   /\b((?:account|client|external|member|owner|patient|subject|team|user)(?:\s+(?:id|identifier))?\s+["']?)(?=[A-Za-z0-9._~+/:-]*[\d_])[A-Za-z0-9._~+/:-]{6,}\b/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_IPV4_PATTERN = /\b\d{1,3}(?:\.\d{1,3}){3}\b/gu;
+const HOSTED_RUNTIME_DIAGNOSTIC_UNLABELED_NAME_ACTION_PATTERN =
+  /\b[A-Z][a-z][A-Za-z'-]*\s+[A-Z][a-z][A-Za-z'-]*\s+(?:can(?:not| not)|could|denied|does|failed|has|is|must|should|was|would)\b/u;
 // The catch-all for id-shaped values in any remaining context (quoted,
 // bracketed, mid-prose): a token of six or more characters containing a digit
 // is masked unless it is a recognizably safe shape — a small plain number, a
@@ -2379,6 +2381,9 @@ export function sanitizeHostedRuntimeDiagnosticText(value: string | null): strin
     .trim();
 
   if (!sanitized) {
+    return null;
+  }
+  if (HOSTED_RUNTIME_DIAGNOSTIC_UNLABELED_NAME_ACTION_PATTERN.test(sanitized)) {
     return null;
   }
 
