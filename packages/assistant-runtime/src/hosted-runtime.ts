@@ -1891,23 +1891,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               pendingDurableCheckpointEffects.length > 0
               || accumulatedProjection.projectedWakeRequiresCheckpoint
             );
-          // A checkpoint-blocked due assistant wake pulls the idle checkpoint
-          // forward (clamp below) and is then serviced in-attempt by the
-          // post-checkpoint branch. Returning it to the orchestrator instead
-          // would strand it: the DO alarm never schedules runtime wakes and
-          // the workflow may sleep a full owner recheck before reading facts
-          // again. Serviceable flavors: a wake minted by the pass that just
-          // ran (gate fresh), or a plain projected wake held back only by
-          // uncommitted durable effects. A stale carried post-checkpoint wake
-          // (an outbox retry preserved across a later pass) and non-assistant
-          // wakes (device-sync.reconcile) still return to the orchestrator.
-          const projectedWakeServiceableAfterCheckpoint =
-            projectedWakeBlockedByCheckpoint
-            && projectedRuntimeWakeCanRunAfterCheckpoint({
-              projection: accumulatedProjection,
-              requireDue: false,
-              servicedProjectedRuntimeWakeKey,
-            });
+          // A checkpoint-blocked wake pulls the idle checkpoint forward. Only
+          // checkpoint-gated assistant wakes that stay inside the attempt
+          // budget are serviced by the post-checkpoint branch below.
           if (!forceIdleCheckpointBeforeWake) {
             if (idleCheckpointStartByMs === null) {
               throw new Error("Dirty hosted runtime is missing an idle checkpoint timer.");
@@ -2824,10 +2810,15 @@ function projectedRuntimeWakeCanRunAfterCheckpoint(input: {
     | "nextWakeReason"
     | "projectedWakeCheckpointGateFresh"
     | "projectedWakeRequiresCheckpoint"
+    | "status"
   >;
   requireDue: boolean;
   servicedProjectedRuntimeWakeKey: string | null;
 }): boolean {
+  if (input.projection.status === "budget_exhausted") {
+    return false;
+  }
+
   const projectedRuntimeWakeKey = buildHostedRuntimeWakeKey({
     nextWakeAt: input.projection.nextWakeAt,
     nextWakeReason: input.projection.nextWakeReason,

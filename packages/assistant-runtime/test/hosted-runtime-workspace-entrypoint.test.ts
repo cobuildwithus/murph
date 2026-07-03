@@ -12596,6 +12596,99 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("hands off checkpoint-gated assistant wake after mailbox budget exhaustion", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const imported: string[] = [];
+    const dueAssistantWakeAt = new Date(Date.now() - 1_000).toISOString();
+    let assistantPhaseCalls = 0;
+
+    try {
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            budget: {
+              maxMailboxItems: 1,
+            },
+            idleCheckpointDelayMs: 10_000,
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${await readCheckpointConversationWatermark(snapshotInput, vaultRoot)}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "d".repeat(64),
+                key: "users/bundles/member-synthetic/workspace-budget-due-assistant-wake.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            imported.push(item.item.id);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_budget_due_wake_001",
+                  laneSeq: "1",
+                }),
+                createMailboxItem({
+                  createdAt: "9999-01-01T00:00:00.000Z",
+                  id: "mailbox_item_entrypoint_budget_due_wake_002",
+                  laneSeq: "2",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls > 1) {
+              throw new Error("Budget-exhausted attempt should hand off the checkpoint-gated wake.");
+            }
+
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              nextWakeAt: dueAssistantWakeAt,
+              nextWakeReason: "assistant",
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(imported, ["mailbox_item_entrypoint_budget_due_wake_001"]);
+      assert.equal(assistantPhaseCalls, 1);
+      assert.deepEqual(events, [
+        "workspace.read",
+        "mailbox.fetch",
+        "assistant:1",
+        "snapshot:1",
+        "workspace.checkpoint",
+      ]);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, dueAssistantWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant");
+      assert.equal(result.nextWakeAt, dueAssistantWakeAt);
+      assert.equal(result.status, "budget_exhausted");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("returns mailbox retry wake for an unbootstrapped sidecar item without idle checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
