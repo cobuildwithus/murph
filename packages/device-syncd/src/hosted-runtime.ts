@@ -44,13 +44,13 @@ const HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN =
 // renders; strip them before span matching so they cannot defeat the masks.
 const HOSTED_RUNTIME_DIAGNOSTIC_FORMAT_CHAR_PATTERN = /[\u00AD\u200B-\u200F\u2060-\u2064\uFEFF]/gu;
 const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN =
-  /\b((?:account|client|external|member|owner|patient|provider[_\s-]?account|subject|team|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*[:=]\s*["']?)[A-Za-z0-9._~+/:=-]+/giu;
+  /\b((?:account|client|external|member|owner|patient|provider[_\s-]?account|subject|team|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[A-Za-z0-9._~+/:=-]+)/giu;
 // Identifier values also appear as bare phrases ("user hbm_abc123xyz",
 // 'user id "hbm_abc123xyz"'); mask the value when it looks id-shaped
 // (contains a digit or underscore) so plain words ("user profile") stay
 // readable.
 const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_PHRASE_PATTERN =
-  /\b((?:account|client|external|member|owner|patient|subject|team|user)(?:\s+(?:id|identifier))?\s+["']?)(?=[A-Za-z0-9._:-]*[\d_])[A-Za-z0-9._:-]{6,}\b/giu;
+  /\b((?:account|client|external|member|owner|patient|subject|team|user)(?:\s+(?:id|identifier))?\s+["']?)(?=[A-Za-z0-9._~+/:-]*[\d_])[A-Za-z0-9._~+/:-]{6,}\b/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_IPV4_PATTERN = /\b\d{1,3}(?:\.\d{1,3}){3}\b/gu;
 // The catch-all for id-shaped values in any remaining context (quoted,
 // bracketed, mid-prose): a token of six or more characters containing a digit
@@ -1670,7 +1670,13 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails(
       const value = sanitizeHostedRuntimeErrorCode(
         readNullableStringValue(record[field], `${label}.${field}`),
       );
-      if (value) {
+      if (
+        value
+        && (
+          (field !== "providerResponseErrorCode" && field !== "providerOAuthErrorCode")
+          || !isHostedRuntimeIdShapedDiagnosticToken(value)
+        )
+      ) {
         details[field] = value;
       }
     }
@@ -2295,7 +2301,7 @@ function hostedRuntimeDiagnosticBracketRegionHasStructure(value: string): boolea
       continue;
     }
 
-    if (depth > 0 && (char === "=" || char === ",")) {
+    if (depth > 0 && (char === "=" || char === "," || char === ":")) {
       return true;
     }
   }

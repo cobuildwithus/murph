@@ -733,6 +733,58 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
   });
 
+  it("drops id-shaped provider failure codes from deploy-skewed apply updates", () => {
+    const parsed = parseHostedExecutionDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          connectionId: "conn_123",
+          failureDiagnostic: {
+            accountStatus: "reauthorization_required",
+            code: "WHOOP_TOKEN_REQUEST_FAILED",
+            details: {
+              providerResponseErrorCode: "11649ed4-27e2-4718-959f-d68de1d1a120f",
+              providerOAuthErrorCode: "invalid_grant",
+              providerOAuthErrorDescription: "Refresh token expired.",
+            },
+            retryable: false,
+          },
+          localState: {},
+          observedUpdatedAt: null,
+        },
+        {
+          connectionId: "conn_456",
+          failureDiagnostic: {
+            accountStatus: "active",
+            code: "PROVIDER_REQUEST_FAILED",
+            details: {
+              providerResponseErrorCode: "invalid_request",
+              providerOAuthErrorCode: "a1".repeat(16),
+              providerResponseErrorDescription: "Request rejected.",
+            },
+            retryable: true,
+          },
+          localState: {},
+          observedUpdatedAt: null,
+        },
+      ],
+      userId: "user_123",
+    });
+
+    const firstDetails = parsed.updates[0]?.failureDiagnostic?.details ?? {};
+    expect(firstDetails).toMatchObject({
+      providerOAuthErrorCode: "invalid_grant",
+      providerOAuthErrorDescription: "Refresh token expired.",
+    });
+    expect(firstDetails).not.toHaveProperty("providerResponseErrorCode");
+
+    const secondDetails = parsed.updates[1]?.failureDiagnostic?.details ?? {};
+    expect(secondDetails).toMatchObject({
+      providerResponseErrorCode: "invalid_request",
+      providerResponseErrorDescription: "Request rejected.",
+    });
+    expect(secondDetails).not.toHaveProperty("providerOAuthErrorCode");
+  });
+
   it("normalizes timestamps and sanitizes secret-bearing local-state fields", () => {
     expect(
       parseHostedExecutionDeviceSyncRuntimeApplyRequest({
@@ -1926,6 +1978,10 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("request rejected for user_id: hbm_abc123/Jane-Doe upstream"),
     ).toBe("request rejected for user_id: <redacted-id> upstream");
+    const quotedValue = sanitizeHostedRuntimeDiagnosticText('request rejected for user_id: "Jane Doe" upstream');
+    expect(quotedValue).toBe("request rejected for user_id: <redacted-id> upstream");
+    expect(quotedValue ?? "").not.toContain("Jane");
+    expect(quotedValue ?? "").not.toContain("Doe");
     expect(
       sanitizeHostedRuntimeDiagnosticText("user_id=1234 rejected"),
     ).toBe("user_id=<redacted-id> rejected");
@@ -1947,6 +2003,9 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("see [option] and [other] words"),
     ).toBe("see [option] and [other] words");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("see [docs] for details"),
+    ).toBe("see [docs] for details");
 
     // Structured validation info must arrive through JSON fields, not
     // best-effort parsing of semi-structured prose suffixes.
@@ -1963,6 +2022,9 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
   it("fails closed on bracketed assignment and comma segments", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("Validation failed [user_id=1234, display_name=Jane Doe]"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Validation failed [display_name: Jane]"),
     ).toBeNull();
     expect(
       sanitizeHostedRuntimeDiagnosticText("failed [display_name=Jane"),
@@ -2085,6 +2147,9 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("user hbm_abc123xyz is not configured"),
     ).toBe("user <redacted-id> is not configured");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("user hbm_abc123/Jane-Doe is blocked upstream"),
+    ).toBe("user <redacted-id> is blocked upstream");
     expect(
       sanitizeHostedRuntimeDiagnosticText("user profile summaries are disabled for this team"),
     ).toBe("user profile summaries are disabled for this team");

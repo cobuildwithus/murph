@@ -5919,6 +5919,67 @@ test("Junction ambiguous skip detail masks slash-bearing user_id assignments", a
   }
 });
 
+test("Junction ambiguous skip detail masks slash-bearing identifier phrases", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              profile: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
+      return createJsonResponse({
+        code: "invalid_request",
+        message: "user hbm_abc123/Jane-Doe is blocked upstream",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["profile"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const expectedDetail = "invalid_request: user <redacted-id> is blocked upstream";
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, expectedDetail);
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, expectedDetail);
+
+  const serializedWarnings = JSON.stringify(warnings);
+  const serializedMetadata = JSON.stringify(result.metadataPatch);
+  for (const sensitive of ["hbm_abc123", "Jane", "Doe"]) {
+    assert.equal(serializedWarnings.includes(sensitive), false);
+    assert.equal(serializedMetadata.includes(sensitive), false);
+  }
+});
+
 test("Junction ambiguous skip detail masks embedded ids from provider prose", async () => {
   const warnings: Record<string, unknown>[] = [];
   const provider = createJunctionProvider(async (input) => {
