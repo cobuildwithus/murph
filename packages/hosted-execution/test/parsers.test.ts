@@ -493,14 +493,14 @@ describe("parseHostedRuntimeGroupTool", () => {
       joinLink: {
         displayName: "Sunday sleep crew",
         kind: "friends",
-        requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+        requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
       },
     })).toEqual({
       action: "create_join_link",
       joinLink: {
         displayName: "Sunday sleep crew",
         kind: "friends",
-        requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+        requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
       },
     });
 

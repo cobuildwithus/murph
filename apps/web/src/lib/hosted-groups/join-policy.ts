@@ -34,6 +34,11 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   description: string;
   label: string;
 }> = {
+  "activity-days.v0": {
+    label: "Recent activity minutes",
+    description:
+      "Allows this group to receive your recent daily active-minute totals as bounded shared records.",
+  },
   "sleep-times.v0": {
     label: "Recent sleep timing",
     description:

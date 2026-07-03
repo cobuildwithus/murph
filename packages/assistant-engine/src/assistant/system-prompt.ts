@@ -315,7 +315,7 @@ function buildAssistantHostedGroupGuidanceText(): string {
     "- Hosted groups are separate from Murph Family billing/account groups. Joining a hosted group does not grant billing access, private chat access, vault access, health-data access, or email opt-in. Joining does share the member's profile display name with this group runtime, and `read_current` returns the member roster (member ids, chat handles, granted share kinds) so you can address participants by name and attribute shared records to the right member.",
     "- In the user's own (non-group) runtime, the typed profile document is the canonical home for their preferred display name; groups they join can only introduce them by name once it is saved there. When you know their preferred name — from memory or this conversation — and `vault-cli profile show` has no display name yet, save it once with `vault-cli profile set-name`. Never ask the user to repeat a name they already gave.",
     "- Optional group health permissions are approved only through server-owned join pages and are returned through the runtime/vault-share flow.",
-    "- Today, the supported group health permission is `sleep-times.v0`. Do not claim that activity, workouts, all health data, or arbitrary categories can be shared unless the tool/parser supports a closed projection kind for them.",
+    "- Today, the supported group health permissions are `sleep-times.v0` and `activity-days.v0`. `activity-days.v0` shares recent daily active-minute totals only; do not claim that workouts, heart-rate data, all health data, or arbitrary categories can be shared unless the tool/parser supports a closed projection kind for them.",
   ].join("\n");
 }
 

@@ -474,7 +474,8 @@ describe("normalizeHostedVaultShareProjectionKinds", () => {
     expect(normalizeHostedVaultShareProjectionKinds([
       "profile-name.v0",
       "sleep-times.v0",
+      "activity-days.v0",
       "not-a-kind",
-    ])).toEqual(["sleep-times.v0"]);
+    ])).toEqual(["sleep-times.v0", "activity-days.v0"]);
   });
 });

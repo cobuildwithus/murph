@@ -13,9 +13,11 @@ import {
   importHostedVaultShareDeliveryWake,
 } from "../src/hosted-runtime/vault-share-import.ts";
 import {
+  HOSTED_VAULT_SHARE_PROJECTION_MAX_ACTIVITY_DAY_AGE_DAYS,
   HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
   offerHostedVaultShareProjectionBestEffort,
   readProjectableProfileName,
+  selectProjectableActivityDays,
   selectProjectableSleepNights,
 } from "../src/hosted-runtime/vault-share-projection.ts";
 import {
@@ -36,6 +38,17 @@ const RECORD = {
   recordKey: NIGHT.date,
 };
 
+const ACTIVITY_DAY = {
+  activeMinutes: 73,
+  date: "2026-07-03",
+};
+
+const ACTIVITY_RECORD = {
+  data: ACTIVITY_DAY,
+  occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+  recordKey: ACTIVITY_DAY.date,
+};
+
 describe("offerHostedVaultShareProjectionBestEffort", () => {
   it("is a no-op without a vault-share port", async () => {
     const result = await offerHostedVaultShareProjectionBestEffort({
@@ -49,6 +62,8 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
   it("offers projectable records and reports delivery", async () => {
     const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
     const result = await offerHostedVaultShareProjectionBestEffort({
+      readActivityRecords: async () => [],
+      readProfileNameRecords: async () => [],
       readRecords: async () => [RECORD],
       vaultRoot: "/unused",
       vaultSharePort: { deliver },
@@ -61,9 +76,28 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
     });
   });
 
-  it("sends nothing when the vault has no fully timed nights", async () => {
+  it("offers projectable activity records when present", async () => {
+    const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+    const result = await offerHostedVaultShareProjectionBestEffort({
+      readActivityRecords: async () => [ACTIVITY_RECORD],
+      readProfileNameRecords: async () => [],
+      readRecords: async () => [],
+      vaultRoot: "/unused",
+      vaultSharePort: { deliver },
+    });
+
+    expect(result.outcome).toBe("delivered");
+    expect(deliver).toHaveBeenCalledWith({
+      projectionKind: "activity-days.v0",
+      records: [ACTIVITY_RECORD],
+    });
+  });
+
+  it("sends nothing when the vault has no projectable share data", async () => {
     const deliver = vi.fn();
     const result = await offerHostedVaultShareProjectionBestEffort({
+      readActivityRecords: async () => [],
+      readProfileNameRecords: async () => [],
       readRecords: async () => [],
       vaultRoot: "/unused",
       vaultSharePort: { deliver },
@@ -76,12 +110,61 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
   it("never throws when the port fails", async () => {
     const deliver = vi.fn().mockRejectedValue(new Error("network down"));
     const result = await offerHostedVaultShareProjectionBestEffort({
+      readActivityRecords: async () => [],
+      readProfileNameRecords: async () => [],
       readRecords: async () => [RECORD],
       vaultRoot: "/unused",
       vaultSharePort: { deliver },
     });
 
     expect(result.outcome).toBe("error");
+  });
+});
+
+describe("selectProjectableActivityDays", () => {
+  const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
+  const summary = (date: string, activeMinutes: number | null) => ({
+    date,
+    sessionMinutes: { selection: { value: activeMinutes } },
+  });
+
+  it("maps recent daily active-minute totals to records and drops stale or missing values", () => {
+    const selected = selectProjectableActivityDays([
+      summary(ACTIVITY_DAY.date, ACTIVITY_DAY.activeMinutes),
+      summary("2026-07-02", null),
+      summary("2026-06-01", 90),
+    ], nowMs);
+
+    expect(selected).toEqual([ACTIVITY_RECORD]);
+    expect(selected[0]?.recordKey).toBe(ACTIVITY_DAY.date);
+    expect(selected[0]?.occurredAt).toBe(`${ACTIVITY_DAY.date}T00:00:00.000Z`);
+  });
+
+  it("emits records the hosted-execution deliver-request parser accepts unchanged", () => {
+    const selected = selectProjectableActivityDays([
+      summary(ACTIVITY_DAY.date, ACTIVITY_DAY.activeMinutes),
+    ], nowMs);
+
+    expect(selected).toHaveLength(1);
+    expect(
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "activity-days.v0",
+        records: selected,
+      }).records,
+    ).toEqual(selected);
+  });
+
+  it("drops activity days older than the recency cutoff exactly", () => {
+    const dayMs = 24 * 60 * 60 * 1000;
+    const justInsideMs = nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_ACTIVITY_DAY_AGE_DAYS * dayMs;
+    const justInsideDate = new Date(justInsideMs).toISOString().slice(0, 10);
+    const justOutsideDate = new Date(justInsideMs - dayMs).toISOString().slice(0, 10);
+    const selected = selectProjectableActivityDays([
+      summary(justInsideDate, 45),
+      summary(justOutsideDate, 60),
+    ], nowMs);
+
+    expect(selected.map((record) => record.recordKey)).toEqual([justInsideDate]);
   });
 });
 
@@ -534,6 +617,7 @@ describe("readProjectableProfileName", () => {
 
     const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
     const result = await offerHostedVaultShareProjectionBestEffort({
+      readActivityRecords: async () => [],
       readRecords: async () => [],
       vaultRoot,
       vaultSharePort: { deliver },
@@ -552,6 +636,7 @@ describe("readProjectableProfileName", () => {
 
     const deliver = vi.fn();
     const result = await offerHostedVaultShareProjectionBestEffort({
+      readActivityRecords: async () => [],
       readRecords: async () => [],
       vaultRoot,
       vaultSharePort: { deliver },

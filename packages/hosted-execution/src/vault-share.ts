@@ -5,6 +5,7 @@ import {
 
 import {
   requireArray,
+  requireNumber,
   requireObject,
   requireString,
 } from "./parsers/assertions.ts";
@@ -24,6 +25,7 @@ import {
 export const HOSTED_VAULT_SHARE_PROJECTION_KINDS = [
   "profile-name.v0",
   "sleep-times.v0",
+  "activity-days.v0",
 ] as const;
 
 /**
@@ -33,6 +35,7 @@ export const HOSTED_VAULT_SHARE_PROJECTION_KINDS = [
  */
 export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS = [
   "sleep-times.v0",
+  "activity-days.v0",
 ] as const satisfies readonly HostedVaultShareProjectionKind[];
 
 export type HostedVaultShareSelectableProjectionKind =
@@ -80,11 +83,17 @@ export interface HostedVaultShareSleepTimesData {
   sleepStartAt: string;
 }
 
+export interface HostedVaultShareActivityDayData {
+  activeMinutes: number;
+  date: string;
+}
+
 export interface HostedVaultShareProfileNameData {
   displayName: string;
 }
 
 export type HostedVaultShareDeliveryRecordData =
+  | HostedVaultShareActivityDayData
   | HostedVaultShareProfileNameData
   | HostedVaultShareSleepTimesData;
 
@@ -198,6 +207,8 @@ function parseHostedVaultShareDeliveryRecordData(
   },
 ): HostedVaultShareDeliveryRecordData {
   switch (context.projectionKind) {
+    case "activity-days.v0":
+      return parseHostedVaultShareActivityDayData(value, context);
     case "profile-name.v0":
       return parseHostedVaultShareProfileNameData(value, context);
     case "sleep-times.v0":
@@ -238,6 +249,52 @@ function parseHostedVaultShareProfileNameData(
   }
 
   return { displayName };
+}
+
+const HOSTED_VAULT_SHARE_ACTIVITY_DAY_MAX_ACTIVE_MINUTES = 24 * 60;
+
+function parseHostedVaultShareActivityDayData(
+  value: unknown,
+  context: { occurredAt: string; recordKey: string },
+): HostedVaultShareActivityDayData {
+  const data = requireObject(value, "Vault share activity-days data");
+  const date = requireString(data.date, "Vault share activity-days data date");
+
+  if (!isStrictIsoDate(date)) {
+    throw new TypeError(
+      "Vault share activity-days data date must be a real calendar day formatted YYYY-MM-DD.",
+    );
+  }
+
+  // One compact daily aggregate per date: the record key, recency anchor, and payload date
+  // all match so mailbox metadata leaks no more than the shared day itself.
+  if (context.recordKey !== date) {
+    throw new TypeError(
+      "Vault share activity-days recordKey must equal the data date.",
+    );
+  }
+
+  if (context.occurredAt !== `${date}T00:00:00.000Z`) {
+    throw new TypeError(
+      "Vault share activity-days occurredAt must be the activity date at UTC midnight.",
+    );
+  }
+
+  const activeMinutes = requireNumber(
+    data.activeMinutes,
+    "Vault share activity-days data activeMinutes",
+  );
+
+  if (
+    activeMinutes < 0
+    || activeMinutes > HOSTED_VAULT_SHARE_ACTIVITY_DAY_MAX_ACTIVE_MINUTES
+  ) {
+    throw new TypeError(
+      "Vault share activity-days activeMinutes must be between 0 and 1440.",
+    );
+  }
+
+  return { activeMinutes, date };
 }
 
 const HOSTED_VAULT_SHARE_SLEEP_MAX_WINDOW_MS = 24 * 60 * 60 * 1000;

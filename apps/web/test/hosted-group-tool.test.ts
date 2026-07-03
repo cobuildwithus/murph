@@ -284,10 +284,10 @@ describe("handleHostedRuntimeGroupTool", () => {
 describe("hosted group join policy", () => {
   it("keeps optional health sharing on the closed projection registry", () => {
     expect(readHostedGroupJoinPolicy({
-      requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+      requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
       schema: "murph.hosted-group.join-policy.v1",
     })).toEqual({
-      requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+      requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
       schema: "murph.hosted-group.join-policy.v1",
     });
 
@@ -296,20 +296,31 @@ describe("hosted group join policy", () => {
         requestedVaultShareProjectionKinds: ["sleep-times.v0"],
         schema: "murph.hosted-group.join-policy.v1",
       },
-      requestedVaultShareProjectionKinds: ["sleep-times.v0"],
-    }).requestedVaultShareProjectionKinds).toEqual(["sleep-times.v0"]);
+      requestedVaultShareProjectionKinds: ["activity-days.v0", "sleep-times.v0"],
+    }).requestedVaultShareProjectionKinds).toEqual(["sleep-times.v0", "activity-days.v0"]);
 
     expect(readHostedGroupJoinPolicy({
       requestedVaultShareProjectionKinds: ["all-health-data"],
       schema: "murph.hosted-group.join-policy.v1",
     }).requestedVaultShareProjectionKinds).toEqual([]);
 
-    expect(projectHostedVaultShareProjectionDisplays(["sleep-times.v0"])).toEqual([{
-      description:
-        "Allows this group to receive your recent sleep start and end times as bounded shared records.",
-      label: "Recent sleep timing",
-      projectionKind: "sleep-times.v0",
-    }]);
+    expect(projectHostedVaultShareProjectionDisplays([
+      "sleep-times.v0",
+      "activity-days.v0",
+    ])).toEqual([
+      {
+        description:
+          "Allows this group to receive your recent sleep start and end times as bounded shared records.",
+        label: "Recent sleep timing",
+        projectionKind: "sleep-times.v0",
+      },
+      {
+        description:
+          "Allows this group to receive your recent daily active-minute totals as bounded shared records.",
+        label: "Recent activity minutes",
+        projectionKind: "activity-days.v0",
+      },
+    ]);
   });
 });
 

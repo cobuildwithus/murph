@@ -22,6 +22,15 @@ const VALID_RECORD = {
   recordKey: "2026-06-09",
 };
 
+const VALID_ACTIVITY_RECORD = {
+  data: {
+    activeMinutes: 73,
+    date: "2026-07-03",
+  },
+  occurredAt: "2026-07-03T00:00:00.000Z",
+  recordKey: "2026-07-03",
+};
+
 const VALID_DELIVERY = {
   grantorMemberId: "member_grantor",
   projectionKind: "sleep-times.v0",
@@ -326,6 +335,63 @@ describe("vault-share contracts", () => {
   });
 });
 
+
+describe("activity-days.v0 delivery records", () => {
+  it("parses a valid daily active-minutes record", () => {
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "activity-days.v0",
+      records: [VALID_ACTIVITY_RECORD],
+    })).toEqual({
+      projectionKind: "activity-days.v0",
+      records: [VALID_ACTIVITY_RECORD],
+    });
+  });
+
+  it("rejects an activity record whose recordKey drifts from the data date", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "activity-days.v0",
+        records: [{ ...VALID_ACTIVITY_RECORD, recordKey: "2026-07-04" }],
+      })
+    ).toThrow(/recordKey must equal the data date/u);
+  });
+
+  it("rejects an activity record whose occurredAt is not the activity-date UTC midnight", () => {
+    for (const occurredAt of ["2026-07-03T14:30:00.000Z", "2026-07-03T00:00:00Z"]) {
+      expect(() =>
+        parseHostedVaultShareDeliverRequest({
+          projectionKind: "activity-days.v0",
+          records: [{ ...VALID_ACTIVITY_RECORD, occurredAt }],
+        })
+      ).toThrow(/activity date at UTC midnight/u);
+    }
+  });
+
+  it("rejects malformed activity dates and implausible active-minute totals", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "activity-days.v0",
+        records: [{
+          ...VALID_ACTIVITY_RECORD,
+          data: { ...VALID_ACTIVITY_RECORD.data, date: "July 3" },
+          recordKey: "July3",
+        }],
+      })
+    ).toThrow(/YYYY-MM-DD/u);
+
+    for (const activeMinutes of [-1, 1441, Number.NaN]) {
+      expect(() =>
+        parseHostedVaultShareDeliverRequest({
+          projectionKind: "activity-days.v0",
+          records: [{
+            ...VALID_ACTIVITY_RECORD,
+            data: { ...VALID_ACTIVITY_RECORD.data, activeMinutes },
+          }],
+        })
+      ).toThrow(/activeMinutes|finite number/u);
+    }
+  });
+});
 
 describe("profile-name.v0 delivery records", () => {
   it("parses a valid profile-name record", () => {

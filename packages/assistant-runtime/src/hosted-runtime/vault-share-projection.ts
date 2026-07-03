@@ -8,14 +8,21 @@ import {
 import {
   type ProjectedWearableSleepSummary,
   readProfileDocumentRuntime,
+  summarizeWearableActivityRuntime,
   summarizeWearableSleepRuntime,
 } from "@murphai/query";
 
 import type { HostedRuntimeVaultSharePort } from "./platform.ts";
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export const HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW = 3;
 
 export const HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS = 7;
+
+export const HOSTED_VAULT_SHARE_PROJECTION_ACTIVITY_DAY_WINDOW = 3;
+
+export const HOSTED_VAULT_SHARE_PROJECTION_MAX_ACTIVITY_DAY_AGE_DAYS = 7;
 
 export interface HostedVaultShareProjectionOfferResult {
   outcome:
@@ -33,10 +40,12 @@ export interface HostedVaultShareProjectionOfferResult {
  * share state.
  *
  * Never throws — a projection failure must never affect the runtime's primary work — and
- * sends nothing for a kind the vault cannot project (no fully-timed nights, no typed
- * profile name), so members without that data make no delivery call for it at all.
+ * sends nothing for a kind the vault cannot project (no fully-timed nights, no daily
+ * activity minutes, no typed profile name), so members without that data make no
+ * delivery call for it at all.
  */
 export async function offerHostedVaultShareProjectionBestEffort(input: {
+  readActivityRecords?: (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]>;
   readProfileNameRecords?: (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]>;
   readRecords?: (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]>;
   vaultRoot: string;
@@ -53,6 +62,12 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
       port,
       projectionKind: "sleep-times.v0",
       readRecords: input.readRecords ?? readProjectableSleepNights,
+      vaultRoot: input.vaultRoot,
+    }),
+    await offerHostedVaultShareKindBestEffort({
+      port,
+      projectionKind: "activity-days.v0",
+      readRecords: input.readActivityRecords ?? readProjectableActivityDays,
       vaultRoot: input.vaultRoot,
     }),
     await offerHostedVaultShareKindBestEffort({
@@ -145,6 +160,17 @@ export async function readProjectableSleepNights(
   return selectProjectableSleepNights(summaries, Date.now());
 }
 
+export async function readProjectableActivityDays(
+  vaultRoot: string,
+): Promise<HostedVaultShareDeliveryRecord[]> {
+  const summaries = await summarizeWearableActivityRuntime(vaultRoot, {
+    limit:
+      HOSTED_VAULT_SHARE_PROJECTION_ACTIVITY_DAY_WINDOW
+      + HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  });
+  return selectProjectableActivityDays(summaries, Date.now());
+}
+
 /**
  * Pure selection step: keep the most recent fully-timed nights, capped at the projection
  * window, and drop nights older than the recency cutoff so members with only stale sleep
@@ -159,7 +185,7 @@ export function selectProjectableSleepNights(
   nowMs: number,
 ): HostedVaultShareDeliveryRecord[] {
   const cutoffMs =
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS * 24 * 60 * 60 * 1000;
+    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS * DAY_MS;
   const records: HostedVaultShareDeliveryRecord[] = [];
 
   for (const summary of summaries) {
@@ -183,6 +209,55 @@ export function selectProjectableSleepNights(
     });
 
     if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW) {
+      break;
+    }
+  }
+
+  return records;
+}
+
+/**
+ * Keep only recent daily active-minute aggregates. The projection deliberately omits
+ * heart rate, workout details, provider identity, and candidate provenance; group
+ * challenges need the compact total, not a broader wearable share.
+ */
+export function selectProjectableActivityDays(
+  summaries: readonly {
+    date: string;
+    sessionMinutes: { selection: { value: number | null } };
+  }[],
+  nowMs: number,
+): HostedVaultShareDeliveryRecord[] {
+  const cutoffMs =
+    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_ACTIVITY_DAY_AGE_DAYS * DAY_MS;
+  const records: HostedVaultShareDeliveryRecord[] = [];
+
+  for (const summary of summaries) {
+    const dayMs = Date.parse(`${summary.date}T00:00:00.000Z`);
+    if (!Number.isFinite(dayMs) || dayMs < cutoffMs) {
+      continue;
+    }
+
+    const activeMinutes = summary.sessionMinutes.selection.value;
+    if (
+      typeof activeMinutes !== "number"
+      || !Number.isFinite(activeMinutes)
+      || activeMinutes < 0
+      || activeMinutes > 24 * 60
+    ) {
+      continue;
+    }
+
+    records.push({
+      data: {
+        activeMinutes,
+        date: summary.date,
+      },
+      occurredAt: `${summary.date}T00:00:00.000Z`,
+      recordKey: summary.date,
+    });
+
+    if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_ACTIVITY_DAY_WINDOW) {
       break;
     }
   }
