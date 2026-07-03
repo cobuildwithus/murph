@@ -6,6 +6,10 @@ import {
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   parseHostedVaultShareDeliverRequest,
 } from "@murphai/hosted-execution/vault-share";
+import {
+  selectMetricSeries,
+  type MetricPoint,
+} from "@murphai/query";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -123,16 +127,16 @@ describe("offerHostedVaultShareProjectionBestEffort", () => {
 
 describe("selectProjectableActivityDays", () => {
   const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
-  const summary = (date: string, activeMinutes: number | null) => ({
+  const point = (date: string, activeMinutes: number | null) => ({
     date,
-    sessionMinutes: { selection: { value: activeMinutes } },
+    value: activeMinutes,
   });
 
   it("maps recent daily active-minute totals to records and drops stale or missing values", () => {
     const selected = selectProjectableActivityDays([
-      summary(ACTIVITY_DAY.date, ACTIVITY_DAY.activeMinutes),
-      summary("2026-07-02", null),
-      summary("2026-06-01", 90),
+      point(ACTIVITY_DAY.date, ACTIVITY_DAY.activeMinutes),
+      point("2026-07-02", null),
+      point("2026-06-01", 90),
     ], nowMs);
 
     expect(selected).toEqual([ACTIVITY_RECORD]);
@@ -142,7 +146,7 @@ describe("selectProjectableActivityDays", () => {
 
   it("emits records the hosted-execution deliver-request parser accepts unchanged", () => {
     const selected = selectProjectableActivityDays([
-      summary(ACTIVITY_DAY.date, ACTIVITY_DAY.activeMinutes),
+      point(ACTIVITY_DAY.date, ACTIVITY_DAY.activeMinutes),
     ], nowMs);
 
     expect(selected).toHaveLength(1);
@@ -160,13 +164,89 @@ describe("selectProjectableActivityDays", () => {
     const justInsideDate = new Date(justInsideMs).toISOString().slice(0, 10);
     const justOutsideDate = new Date(justInsideMs - dayMs).toISOString().slice(0, 10);
     const selected = selectProjectableActivityDays([
-      summary(justInsideDate, 45),
-      summary(justOutsideDate, 60),
+      point(justInsideDate, 45),
+      point(justOutsideDate, 60),
     ], nowMs);
 
     expect(selected.map((record) => record.recordKey)).toEqual([justInsideDate]);
   });
+
+  it("shares the selected activity-minutes metric series value for each day", () => {
+    const staleWearableSummary = activityMetricPoint({
+      date: ACTIVITY_DAY.date,
+      id: "metric-point:activity-minutes:wearable-summary",
+      observedAt: "2026-07-03T08:00:00.000Z",
+      sourceKind: "wearable-summary",
+      value: 73,
+    });
+    const selectedCanonicalPoint = activityMetricPoint({
+      date: ACTIVITY_DAY.date,
+      id: "metric-point:activity-minutes:canonical",
+      observedAt: "2026-07-03T18:00:00.000Z",
+      sourceKind: "measurement",
+      value: 51,
+    });
+    const series = selectMetricSeries({
+      duplicatePolicy: "selection-policy",
+      metricKey: "activity-minutes",
+      points: [staleWearableSummary, selectedCanonicalPoint],
+    });
+
+    expect(series.rows.map((row) => row.pointIds)).toEqual([[selectedCanonicalPoint.id]]);
+    expect(selectProjectableActivityDays(series.rows, nowMs)).toEqual([{
+      data: {
+        activeMinutes: 51,
+        date: ACTIVITY_DAY.date,
+      },
+      occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+      recordKey: ACTIVITY_DAY.date,
+    }]);
+  });
 });
+
+function activityMetricPoint(input: {
+  date: string;
+  id: string;
+  observedAt: string;
+  sourceKind: string;
+  value: number;
+}): MetricPoint {
+  return {
+    biomarkerKey: null,
+    canonicalUnit: "minutes",
+    canonicalValue: input.value,
+    comparator: null,
+    confidence: "high",
+    context: {},
+    effectiveDate: input.date,
+    grain: "day",
+    id: input.id,
+    metricKey: "activity-minutes",
+    observedAt: input.observedAt,
+    provenance: {
+      dataOrigin: null,
+      externalRef: null,
+      labName: null,
+      provider: null,
+      rawRefs: [],
+      sourceLabel: input.sourceKind,
+    },
+    recordedAt: null,
+    reportedAt: null,
+    schemaVersion: "murph.metric-point.v1",
+    source: {
+      family: "derived",
+      kind: input.sourceKind,
+      path: "",
+      recordId: input.id,
+      resultIndex: null,
+    },
+    statistic: "value",
+    textValue: null,
+    unit: "minutes",
+    value: input.value,
+  };
+}
 
 describe("selectProjectableSleepNights", () => {
   const nowMs = Date.parse("2026-06-10T00:00:00.000Z");

@@ -7,9 +7,11 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 import {
   type ProjectedWearableSleepSummary,
+  listMetricPoints,
   readProfileDocumentRuntime,
-  summarizeWearableActivityRuntime,
+  selectMetricSeries,
   summarizeWearableSleepRuntime,
+  type MetricSeriesPoint,
 } from "@murphai/query";
 
 import type { HostedRuntimeVaultSharePort } from "./platform.ts";
@@ -163,12 +165,22 @@ export async function readProjectableSleepNights(
 export async function readProjectableActivityDays(
   vaultRoot: string,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
-  const summaries = await summarizeWearableActivityRuntime(vaultRoot, {
-    limit:
-      HOSTED_VAULT_SHARE_PROJECTION_ACTIVITY_DAY_WINDOW
-      + HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  const nowMs = Date.now();
+  const cutoffDate = new Date(
+    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_ACTIVITY_DAY_AGE_DAYS * DAY_MS,
+  ).toISOString().slice(0, 10);
+  const points = await listMetricPoints(vaultRoot, {
+    from: cutoffDate,
+    limit: null,
+    metricKey: "activity-minutes",
   });
-  return selectProjectableActivityDays(summaries, Date.now());
+  const series = selectMetricSeries({
+    duplicatePolicy: "selection-policy",
+    from: cutoffDate,
+    metricKey: "activity-minutes",
+    points,
+  });
+  return selectProjectableActivityDays(series.rows, nowMs);
 }
 
 /**
@@ -217,28 +229,25 @@ export function selectProjectableSleepNights(
 }
 
 /**
- * Keep only recent daily active-minute aggregates. The projection deliberately omits
+ * Keep only recent daily active-minute metric rows. The projection deliberately omits
  * heart rate, workout details, provider identity, and candidate provenance; group
- * challenges need the compact total, not a broader wearable share.
+ * challenges need the query-owned selected daily total, not a broader wearable share.
  */
 export function selectProjectableActivityDays(
-  summaries: readonly {
-    date: string;
-    sessionMinutes: { selection: { value: number | null } };
-  }[],
+  points: readonly Pick<MetricSeriesPoint, "date" | "value">[],
   nowMs: number,
 ): HostedVaultShareDeliveryRecord[] {
   const cutoffMs =
     nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_ACTIVITY_DAY_AGE_DAYS * DAY_MS;
   const records: HostedVaultShareDeliveryRecord[] = [];
 
-  for (const summary of summaries) {
-    const dayMs = Date.parse(`${summary.date}T00:00:00.000Z`);
+  for (const point of [...points].sort((left, right) => right.date.localeCompare(left.date))) {
+    const dayMs = Date.parse(`${point.date}T00:00:00.000Z`);
     if (!Number.isFinite(dayMs) || dayMs < cutoffMs) {
       continue;
     }
 
-    const activeMinutes = summary.sessionMinutes.selection.value;
+    const activeMinutes = point.value;
     if (
       typeof activeMinutes !== "number"
       || !Number.isFinite(activeMinutes)
@@ -251,10 +260,10 @@ export function selectProjectableActivityDays(
     records.push({
       data: {
         activeMinutes,
-        date: summary.date,
+        date: point.date,
       },
-      occurredAt: `${summary.date}T00:00:00.000Z`,
-      recordKey: summary.date,
+      occurredAt: `${point.date}T00:00:00.000Z`,
+      recordKey: point.date,
     });
 
     if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_ACTIVITY_DAY_WINDOW) {
