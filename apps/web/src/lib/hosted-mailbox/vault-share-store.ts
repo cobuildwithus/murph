@@ -16,6 +16,7 @@ import {
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
 import {
   isHostedRuntimeInactiveAccessError,
   requireHostedRuntimeActiveAccessForUpdateTx,
@@ -63,6 +64,33 @@ export async function findActiveHostedVaultShares(input: {
       id: row.id,
       projectionKind: row.projectionKind,
     }];
+  });
+}
+
+export async function readDeliverableHostedVaultShareProjectionKinds(input: {
+  grantorMemberId: string;
+  prisma?: PrismaClient;
+}): Promise<HostedVaultShareProjectionKind[]> {
+  const prisma = input.prisma ?? getPrisma();
+  const rows = await prisma.hostedVaultShare.findMany({
+    distinct: ["projectionKind"],
+    orderBy: { projectionKind: "asc" },
+    select: {
+      projectionKind: true,
+    },
+    where: {
+      destination: activeHostedMemberAccessWhere(),
+      grantorMemberId: input.grantorMemberId,
+      status: "granted",
+    },
+  });
+
+  return rows.flatMap((row) => {
+    if (!isHostedVaultShareProjectionKind(row.projectionKind)) {
+      return [];
+    }
+
+    return [row.projectionKind];
   });
 }
 

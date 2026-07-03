@@ -9,6 +9,7 @@ import {
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
+  parseHostedVaultShareActiveProjectionKindsResponse,
   parseHostedVaultShareDeliverRequest,
   parseHostedVaultShareDeliverResponse,
 } from "../src/vault-share.ts";
@@ -25,8 +26,10 @@ const VALID_RECORD = {
 
 const VALID_ACTIVITY_RECORD = {
   data: {
-    activeMinutes: 73,
     date: "2026-07-03",
+    metricKey: "activity-minutes",
+    unit: "minutes",
+    value: 73,
   },
   occurredAt: "2026-07-03T00:00:00.000Z",
   recordKey: "2026-07-03",
@@ -329,6 +332,19 @@ describe("vault-share contracts", () => {
     ).toThrow(/delivered or no-active-share/u);
   });
 
+  it("parses active projection-kind responses through the closed registry", () => {
+    expect(parseHostedVaultShareActiveProjectionKindsResponse({
+      projectionKinds: ["profile-name.v0", "activity-days.v0", "activity-days.v0"],
+    })).toEqual({
+      projectionKinds: ["profile-name.v0", "activity-days.v0"],
+    });
+    expect(() =>
+      parseHostedVaultShareActiveProjectionKindsResponse({
+        projectionKinds: ["everything.v0"],
+      })
+    ).toThrow(/known vault-share projection kind/u);
+  });
+
   it("round-trips a vault-share delivery wake and pins the envelope occurredAt to the record", () => {
     // The envelope occurredAt becomes the plaintext occurred_at mailbox column, so the
     // builder derives it from the parsed record: a wire envelope timestamp that drifted
@@ -394,8 +410,8 @@ describe("vault-share contracts", () => {
 });
 
 
-describe("activity-days.v0 delivery records", () => {
-  it("parses a valid daily active-minutes record", () => {
+describe("activity-days.v0 scalar delivery records", () => {
+  it("parses activity minutes through the daily scalar metric parser", () => {
     expect(parseHostedVaultShareDeliverRequest({
       projectionKind: "activity-days.v0",
       records: [VALID_ACTIVITY_RECORD],
@@ -421,11 +437,11 @@ describe("activity-days.v0 delivery records", () => {
           projectionKind: "activity-days.v0",
           records: [{ ...VALID_ACTIVITY_RECORD, occurredAt }],
         })
-      ).toThrow(/activity date at UTC midnight/u);
+      ).toThrow(/date at UTC midnight/u);
     }
   });
 
-  it("rejects malformed activity dates and implausible active-minute totals", () => {
+  it("rejects malformed activity dates, wrong metric keys, and implausible active-minute totals", () => {
     expect(() =>
       parseHostedVaultShareDeliverRequest({
         projectionKind: "activity-days.v0",
@@ -437,16 +453,26 @@ describe("activity-days.v0 delivery records", () => {
       })
     ).toThrow(/YYYY-MM-DD/u);
 
-    for (const activeMinutes of [-1, 1441, Number.NaN]) {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "activity-days.v0",
+        records: [{
+          ...VALID_ACTIVITY_RECORD,
+          data: { ...VALID_ACTIVITY_RECORD.data, metricKey: "steps" },
+        }],
+      })
+    ).toThrow(/metricKey must be activity-minutes/u);
+
+    for (const value of [-1, 1441, Number.NaN]) {
       expect(() =>
         parseHostedVaultShareDeliverRequest({
           projectionKind: "activity-days.v0",
           records: [{
             ...VALID_ACTIVITY_RECORD,
-            data: { ...VALID_ACTIVITY_RECORD.data, activeMinutes },
+            data: { ...VALID_ACTIVITY_RECORD.data, value },
           }],
         })
-      ).toThrow(/activeMinutes|finite number/u);
+      ).toThrow(/value must be between|finite number/u);
     }
   });
 });

@@ -1,7 +1,6 @@
 import {
   getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
-  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH,
   HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
   type HostedVaultShareDeliveryRecord,
@@ -21,7 +20,7 @@ import {
 import type { HostedRuntimeVaultSharePort } from "./platform.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const MAX_DAILY_MINUTES = 24 * 60;
+const DAY_MAX_MINUTES = 24 * 60;
 const HEART_RATE_ZONE_MINUTES_METRIC_KEY_PATTERN = /^heart-rate-zone-(\d+)-minutes$/u;
 const HEART_RATE_ZONE_MINUTES_METRIC_KEYS = Array.from(
   { length: 21 },
@@ -31,10 +30,6 @@ const HEART_RATE_ZONE_MINUTES_METRIC_KEYS = Array.from(
 export const HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW = 3;
 
 export const HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS = 7;
-
-export const HOSTED_VAULT_SHARE_PROJECTION_ACTIVITY_DAY_WINDOW = 3;
-
-export const HOSTED_VAULT_SHARE_PROJECTION_MAX_ACTIVITY_DAY_AGE_DAYS = 7;
 
 export const HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW = 3;
 
@@ -50,23 +45,16 @@ export interface HostedVaultShareProjectionOfferResult {
 }
 
 /**
- * Deterministic, best-effort projection offer: read each projectable kind from the
- * member's own vault and offer it as delivery records through the vault-share port. The
- * web control plane is the sole authority on whether shares exist; this step holds no
- * share state.
+ * Deterministic, best-effort projection offer: ask the web control plane for the active
+ * projection kinds first, then read and offer only those projectable kinds from the
+ * member's own vault. The web control plane is the sole authority on whether shares exist;
+ * this step holds no share state.
  *
  * Never throws — a projection failure must never affect the runtime's primary work — and
  * sends nothing for a kind the vault cannot project, so members without that data make
  * no delivery call for it at all.
  */
 export async function offerHostedVaultShareProjectionBestEffort(input: {
-  readActivityRecords?: (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]>;
-  readProfileNameRecords?: (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]>;
-  readProjectionRecords?: (input: {
-    projectionKind: HostedVaultShareProjectionKind;
-    vaultRoot: string;
-  }) => Promise<HostedVaultShareDeliveryRecord[]>;
-  readRecords?: (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]>;
   vaultRoot: string;
   vaultSharePort: HostedRuntimeVaultSharePort | null | undefined;
 }): Promise<HostedVaultShareProjectionOfferResult> {
@@ -76,23 +64,29 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
     return { outcome: "no-port" };
   }
 
+  let projectionKinds: HostedVaultShareProjectionKind[];
+  try {
+    projectionKinds = uniqueHostedVaultShareProjectionKinds(
+      await port.listActiveProjectionKinds(),
+    );
+  } catch {
+    return { outcome: "error" };
+  }
+
+  if (projectionKinds.length === 0) {
+    return { outcome: "no-active-share" };
+  }
+
   const outcomes: HostedVaultShareOfferOutcome[] = [];
 
-  for (const projectionKind of HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS) {
+  for (const projectionKind of projectionKinds) {
     outcomes.push(await offerHostedVaultShareKindBestEffort({
       port,
       projectionKind,
-      readRecords: resolveProjectableRecordReader(input, projectionKind),
+      readRecords: resolveProjectableRecordReader(projectionKind),
       vaultRoot: input.vaultRoot,
     }));
   }
-
-  outcomes.push(await offerHostedVaultShareKindBestEffort({
-    port,
-    projectionKind: "profile-name.v0",
-    readRecords: resolveProjectableRecordReader(input, "profile-name.v0"),
-    vaultRoot: input.vaultRoot,
-  }));
 
   return { outcome: combineHostedVaultShareOfferOutcomes(outcomes) };
 }
@@ -124,31 +118,15 @@ async function offerHostedVaultShareKindBestEffort(input: {
 }
 
 function resolveProjectableRecordReader(
-  input: {
-    readActivityRecords?: (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]>;
-    readProfileNameRecords?: (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]>;
-    readProjectionRecords?: (input: {
-      projectionKind: HostedVaultShareProjectionKind;
-      vaultRoot: string;
-    }) => Promise<HostedVaultShareDeliveryRecord[]>;
-    readRecords?: (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]>;
-  },
   projectionKind: HostedVaultShareProjectionKind,
 ): (vaultRoot: string) => Promise<HostedVaultShareDeliveryRecord[]> {
-  const readProjectionRecords = input.readProjectionRecords;
-  if (readProjectionRecords) {
-    return (vaultRoot) => readProjectionRecords({ projectionKind, vaultRoot });
-  }
-
   switch (projectionKind) {
-    case "activity-days.v0":
-      return input.readActivityRecords ?? readProjectableActivityDays;
     case "heart-rate-zones-days.v0":
       return readProjectableHeartRateZoneDays;
     case "profile-name.v0":
-      return input.readProfileNameRecords ?? readProjectableProfileName;
+      return readProjectableProfileName;
     case "sleep-times.v0":
-      return input.readRecords ?? readProjectableSleepNights;
+      return readProjectableSleepNights;
     case "workout-days.v0":
       return readProjectableWorkoutDays;
     default: {
@@ -159,6 +137,18 @@ function resolveProjectableRecordReader(
       return async () => [];
     }
   }
+}
+
+function uniqueHostedVaultShareProjectionKinds(
+  projectionKinds: readonly HostedVaultShareProjectionKind[],
+): HostedVaultShareProjectionKind[] {
+  const unique: HostedVaultShareProjectionKind[] = [];
+  for (const projectionKind of projectionKinds) {
+    if (!unique.includes(projectionKind)) {
+      unique.push(projectionKind);
+    }
+  }
+  return unique;
 }
 
 /**
@@ -212,29 +202,6 @@ export async function readProjectableSleepNights(
     limit: HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW + HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   });
   return selectProjectableSleepNights(summaries, Date.now());
-}
-
-export async function readProjectableActivityDays(
-  vaultRoot: string,
-): Promise<HostedVaultShareDeliveryRecord[]> {
-  const nowMs = Date.now();
-  const cutoffDate = new Date(
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_ACTIVITY_DAY_AGE_DAYS * DAY_MS,
-  ).toISOString().slice(0, 10);
-  const points = await listMetricPoints(vaultRoot, {
-    from: cutoffDate,
-    limit: null,
-    metricKey: "activity-minutes",
-  });
-  const series = selectMetricSeries({
-    duplicatePolicy: "selection-policy",
-    from: cutoffDate,
-    grain: "day",
-    metricKey: "activity-minutes",
-    points,
-    statistic: "value",
-  });
-  return selectProjectableActivityDays(series.rows, nowMs);
 }
 
 export async function readProjectableDailyMetricDays(
@@ -376,55 +343,6 @@ export function selectProjectableSleepNights(
   return records;
 }
 
-/**
- * Keep only recent daily active-minute metric rows. The projection deliberately omits
- * provider identity and candidate provenance; group challenges need the query-owned
- * selected daily total, not a broader wearable share.
- */
-export function selectProjectableActivityDays(
-  points: readonly Pick<MetricSeriesPoint, "date" | "grain" | "statistic" | "value">[],
-  nowMs: number,
-): HostedVaultShareDeliveryRecord[] {
-  const cutoffMs =
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_ACTIVITY_DAY_AGE_DAYS * DAY_MS;
-  const records: HostedVaultShareDeliveryRecord[] = [];
-
-  for (const point of [...points].sort((left, right) => right.date.localeCompare(left.date))) {
-    const dayMs = Date.parse(`${point.date}T00:00:00.000Z`);
-    if (!Number.isFinite(dayMs) || dayMs < cutoffMs) {
-      continue;
-    }
-    if (point.grain !== "day" || point.statistic !== "value") {
-      continue;
-    }
-
-    const activeMinutes = point.value;
-    if (
-      typeof activeMinutes !== "number"
-      || !Number.isFinite(activeMinutes)
-      || activeMinutes < 0
-      || activeMinutes > MAX_DAILY_MINUTES
-    ) {
-      continue;
-    }
-
-    records.push({
-      data: {
-        activeMinutes,
-        date: point.date,
-      },
-      occurredAt: `${point.date}T00:00:00.000Z`,
-      recordKey: point.date,
-    });
-
-    if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_ACTIVITY_DAY_WINDOW) {
-      break;
-    }
-  }
-
-  return records;
-}
-
 export function selectProjectableDailyMetricDays(
   points: readonly Pick<MetricSeriesPoint, "date" | "grain" | "metricKey" | "statistic" | "unit" | "value">[],
   spec: HostedVaultShareDailyMetricProjectionSpec,
@@ -521,7 +439,7 @@ export function selectProjectableWorkoutDays(
       || workoutCount <= 0
       || workoutCount > 100
       || workoutMinutes < 0
-      || workoutMinutes > MAX_DAILY_MINUTES
+      || workoutMinutes > DAY_MAX_MINUTES
     ) {
       continue;
     }
@@ -570,7 +488,7 @@ export function selectProjectableHeartRateZoneDays(
       typeof durationMinutes !== "number"
       || !Number.isFinite(durationMinutes)
       || durationMinutes < 0
-      || durationMinutes > MAX_DAILY_MINUTES
+      || durationMinutes > DAY_MAX_MINUTES
     ) {
       continue;
     }

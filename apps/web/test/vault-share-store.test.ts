@@ -23,7 +23,10 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 }));
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { deliverHostedVaultShareRecords } from "@/src/lib/hosted-mailbox/vault-share-store";
+import {
+  deliverHostedVaultShareRecords,
+  readDeliverableHostedVaultShareProjectionKinds,
+} from "@/src/lib/hosted-mailbox/vault-share-store";
 
 const SHARE = {
   destinationMemberId: "member_referee",
@@ -94,6 +97,55 @@ function fakePrisma(
     }),
   } as unknown as PrismaClient;
 }
+
+function fakeProjectionKindPrisma(rows: Array<{ projectionKind: string }>): {
+  findMany: ReturnType<typeof vi.fn>;
+  prisma: PrismaClient;
+} {
+  const findMany = vi.fn().mockResolvedValue(rows);
+  return {
+    findMany,
+    prisma: {
+      hostedVaultShare: {
+        findMany,
+      },
+    } as unknown as PrismaClient,
+  };
+}
+
+describe("readDeliverableHostedVaultShareProjectionKinds", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("reads distinct granted projection kinds with active destination access", async () => {
+    const { findMany, prisma } = fakeProjectionKindPrisma([
+      { projectionKind: "activity-days.v0" },
+      { projectionKind: "unknown.v0" },
+      { projectionKind: "profile-name.v0" },
+    ]);
+
+    const result = await readDeliverableHostedVaultShareProjectionKinds({
+      grantorMemberId: "member_grantor",
+      prisma,
+    });
+
+    expect(result).toEqual(["activity-days.v0", "profile-name.v0"]);
+    expect(findMany).toHaveBeenCalledWith({
+      distinct: ["projectionKind"],
+      orderBy: { projectionKind: "asc" },
+      select: { projectionKind: true },
+      where: {
+        destination: expect.objectContaining({
+          OR: expect.any(Array),
+          suspendedAt: null,
+        }),
+        grantorMemberId: "member_grantor",
+        status: "granted",
+      },
+    });
+  });
+});
 
 describe("deliverHostedVaultShareRecords", () => {
   beforeEach(() => {

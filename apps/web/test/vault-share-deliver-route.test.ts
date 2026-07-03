@@ -74,7 +74,7 @@ function recentRecord(daysAgo: number): {
 }
 
 function recentActivityRecord(daysAgo: number): {
-  data: { activeMinutes: number; date: string };
+  data: { date: string; metricKey: string; unit: string; value: number };
   occurredAt: string;
   recordKey: string;
 } {
@@ -83,8 +83,10 @@ function recentActivityRecord(daysAgo: number): {
 
   return {
     data: {
-      activeMinutes: 37,
       date,
+      metricKey: "activity-minutes",
+      unit: "minutes",
+      value: 37,
     },
     occurredAt: `${date}T00:00:00.000Z`,
     recordKey: date,
