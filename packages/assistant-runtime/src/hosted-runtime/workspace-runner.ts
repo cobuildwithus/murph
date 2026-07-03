@@ -595,16 +595,12 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     });
   }
   let foregroundConversationWorkObserved = false;
-  let foregroundMailboxWorkObserved = false;
   const foregroundMailboxImportLoop =
     startHostedForegroundConversationMailboxImportLoop({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
       onForegroundConversationWorkObserved: () => {
         foregroundConversationWorkObserved = true;
-      },
-      onForegroundMailboxWorkObserved: () => {
-        foregroundMailboxWorkObserved = true;
       },
     });
   let foregroundMailboxImportLoopStopped = false;
@@ -619,7 +615,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   const shouldYieldBackgroundMaintenance = (): boolean => {
     if (
       foregroundConversationWorkObserved
-      || foregroundMailboxWorkObserved
       || foregroundRuntimeWakeObservedAfterStop
     ) {
       return true;
@@ -852,7 +847,6 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   input: HostedWorkspaceRunnerInput;
   onForegroundConversationWorkObserved?: (() => void) | null;
-  onForegroundMailboxWorkObserved?: (() => void) | null;
 }): {
   stop(): Promise<void>;
 } {
@@ -908,11 +902,6 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
           input: input.input,
           lanes: ["system", "conversation"],
           limitPerLane: input.input.foregroundLimitPerLane ?? input.input.limitPerLane,
-          onResolvedItem: (item) => {
-            if (item.item.lane === "conversation") {
-              input.onForegroundMailboxWorkObserved?.();
-            }
-          },
           requestId,
           signal: outerSignal,
         });
@@ -1158,7 +1147,6 @@ export async function importHostedMailboxForWorkspaceRunner(input: {
   input: HostedWorkspaceRunnerInput;
   lanes?: readonly ("conversation" | "system")[];
   limitPerLane?: number | null;
-  onResolvedItem?: ((item: HostedMailboxResolvedImportItem) => void) | null;
   prefetch?: HostedMailboxPrefixPrefetch | null;
   requestId: string;
   signal?: AbortSignal | null;
@@ -1192,7 +1180,6 @@ export async function importHostedMailboxForWorkspaceRunner(input: {
     limitPerLane: input.limitPerLane ?? input.input.limitPerLane,
     mailboxPort: input.input.platform.mailboxPort,
     now: input.input.now,
-    onResolvedItem: input.onResolvedItem ?? null,
     prefetch: input.prefetch ?? null,
     requestId: input.requestId,
     vaultRoot: input.input.vaultRoot,

@@ -164,7 +164,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   limitPerLane: number;
   mailboxPort: HostedRuntimeMailboxPort;
   now?: () => string;
-  onResolvedItem?: ((item: HostedMailboxResolvedImportItem) => void) | null;
   prefetch?: HostedMailboxPrefixPrefetch | null;
   requestId: string;
   state: HostedMailboxImportState;
@@ -348,14 +347,12 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
       continue;
     }
 
-    const resolvedItem = {
+    const outcome = await input.importItem({
       durablyConsumed: itemSeq <= consumedSeqByLane[lane],
       item,
       payload,
       route,
-    } satisfies HostedMailboxResolvedImportItem;
-    input.onResolvedItem?.(resolvedItem);
-    const outcome = await input.importItem(resolvedItem);
+    });
     if (outcome.status === "deferred") {
       const reasonCode = normalizeReasonCode(outcome.reasonCode, "import.deferred");
       if (

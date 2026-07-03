@@ -339,8 +339,7 @@ Touch: `webhook-service-types.ts:17-26`;
 - PR 1 CI follow-up (2026-07-03): scheduled-reminder overlap coverage
   additionally proves foreground Linq sends are observed before due
   background reminders without the wait helper advancing hosted-local
-  alarms, and workspace-runner foreground mailbox imports trip background
-  yield as soon as conversation work is resolved.
+  alarms.
 - PR 2: workflow replay tests per the patch procedure + Temporal
   orchestration E2E; full webhook owner suites for the wake-field
   collapse.
