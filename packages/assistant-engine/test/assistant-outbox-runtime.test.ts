@@ -2821,6 +2821,35 @@ describe('assistant outbox runtime', () => {
     expect(deliveryDependencies?.signal?.aborted).toBe(true)
   })
 
+  // Direct callers must get a loud typed failure for progress-ineligible
+  // contexts instead of the success-shaped silent no-op that previously made
+  // the model report undelivered updates as "sent". The only production
+  // caller invokes this inside createAssistantProgressDelivery's try/catch,
+  // which converts the throw into a structured best-effort failure, so the
+  // enclosing turn never fails.
+  it('rejects progress delivery for non-eligible contexts without dispatching', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-progress-suppressed-')
+
+    await expect(deliverAssistantProgressUpdate({
+      input: {
+        ...createMessageInput(vaultRoot),
+        deliveryDispatchMode: 'queue-only',
+        turnTrigger: 'automation-cron',
+      },
+      ordinal: 0,
+      session: createAssistantSession({
+        sessionId: 'session-progress-suppressed',
+      }),
+      sharedPlan: createSharedPlan(),
+      text: 'Checking current context.',
+      turnId: 'turn-progress-suppressed',
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_PROGRESS_DELIVERY_SUPPRESSED',
+    })
+
+    expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
+  })
+
   it('drains only due intents and summarizes mixed outbox states', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-drain-')
     vi.useFakeTimers()
