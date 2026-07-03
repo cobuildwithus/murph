@@ -41,7 +41,7 @@ const HOSTED_RUNTIME_ERROR_PHONE_PATTERN = /(?:\+\d[\d().\s-]{7,}\d|\(\d{3}\)\s*
 // suffixes (for example pydantic's `[type=...]`) survive with their values
 // span-redacted.
 const HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN =
-  /[{}]|\[\s*(?:["'{]|\d|(?:true|false|null)\b)|["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
+  /[{}]|\[\s*(?:["'{]|\d|(?:true|false|null)\b)|\[[^\]=]*,|["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
 // Default-ignorable format characters (zero-width spaces/joiners, soft
 // hyphens, BOM) can split an identifier visually without changing how it
 // renders; strip them before span matching so they cannot defeat the masks.
@@ -2269,16 +2269,18 @@ export function sanitizeHostedRuntimeErrorText(value: string | null): string | n
 }
 
 // Redacts by masking the unsafe spans (ids, token phrases, long tokens) so
-// provider error prose stays debuggable; only raw structured payload dumps
-// still fail closed, because their values can hide under keys the span
-// redactors do not know. Masking runs on the wide-bounded normalized string
-// and the diagnostic length cap applies last, so a token can never straddle
-// the clamp boundary and escape as a short unmaskable prefix.
+// provider error prose stays debuggable. Raw structured payload dumps fail
+// closed before span masking or the diagnostic length cap, because masking and
+// prefix clamping can make a structured leak look like safe prose.
 export function sanitizeHostedRuntimeDiagnosticText(value: string | null): string | null {
   const normalizedValue = value?.replace(HOSTED_RUNTIME_DIAGNOSTIC_FORMAT_CHAR_PATTERN, "") ?? null;
   const sanitizedBase = sanitizeHostedRuntimeErrorString(normalizedValue, HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH);
+  if (!sanitizedBase || HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN.test(sanitizedBase)) {
+    return null;
+  }
+
   const sanitized = sanitizedBase
-    ?.replace(HOSTED_RUNTIME_ERROR_FILE_URL_PATTERN, "<redacted-path>")
+    .replace(HOSTED_RUNTIME_ERROR_FILE_URL_PATTERN, "<redacted-path>")
     .replace(HOSTED_RUNTIME_ERROR_POSIX_PATH_PATTERN, "$1<redacted-path>")
     .replace(HOSTED_RUNTIME_ERROR_WINDOWS_PATH_PATTERN, "<redacted-path>")
     .replace(HOSTED_RUNTIME_ERROR_URL_PATTERN, "<redacted-url>")
@@ -2305,7 +2307,7 @@ export function sanitizeHostedRuntimeDiagnosticText(value: string | null): strin
     ? sanitized
     : `${sanitized.slice(0, HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH - 3).trimEnd()}...`;
 
-  return HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN.test(clamped) ? null : clamped;
+  return clamped;
 }
 
 function requireNumber(value: unknown, label: string): number {

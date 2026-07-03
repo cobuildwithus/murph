@@ -1913,6 +1913,9 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
       sanitizeHostedRuntimeDiagnosticText("request rejected for user_id: hbm_abc123xyz upstream"),
     ).toBe("request rejected for user_id: <redacted-id> upstream");
     expect(
+      sanitizeHostedRuntimeDiagnosticText("request rejected for user_id: hbm_abc123/Jane-Doe upstream"),
+    ).toBe("request rejected for user_id: <redacted-id> upstream");
+    expect(
       sanitizeHostedRuntimeDiagnosticText("user_id=1234 rejected"),
     ).toBe("user_id=<redacted-id> rejected");
     expect(
@@ -1943,6 +1946,9 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     ).toBeNull();
     expect(
       sanitizeHostedRuntimeDiagnosticText('["junction-user-1"]'),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("[junction-user-1, Jane Doe]"),
     ).toBeNull();
     expect(
       sanitizeHostedRuntimeDiagnosticText("[12345]"),
@@ -2000,12 +2006,12 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     expect(sanitized).not.toContain("secretvalue");
   });
 
-  it("keeps a safe prefix when a structured dump starts beyond the length cap", () => {
+  it("fails closed when a structured dump starts beyond the length cap", () => {
     const prefix = "safe provider explanation ".repeat(24).trim();
     const sanitized = sanitizeHostedRuntimeDiagnosticText(`${prefix} {"debug":"dump"}`);
-    expect(sanitized).not.toBeNull();
-    expect(sanitized).not.toContain("{");
-    expect(sanitized?.length).toBeLessThanOrEqual(512);
+    // Soundness beats prefix salvage: a structured dump anywhere in the
+    // normalized pre-mask diagnostic fails the whole value closed.
+    expect(sanitized).toBeNull();
   });
 
   it("masks long tokens that would straddle the diagnostic length cap", () => {
@@ -2023,6 +2029,11 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
         "Input should be a valid date [type=value_error, input_value=junction-user-1, input_type=str]",
       ),
     ).toBe("Input should be a valid date [type=value_error, input_value=<redacted-value>, input_type=str]");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText(
+        "Input should be a valid date [type=value_error, input_value='Jane Doe', input_type=str]",
+      ),
+    ).toBe("Input should be a valid date [type=value_error, input_value='<redacted-value>', input_type=str]");
   });
 
   it("masks id-shaped identifier phrases while keeping plain words", () => {
