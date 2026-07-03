@@ -1315,8 +1315,14 @@ async function planHostedLinqGroupChatWebhook(input: {
       prisma: input.prisma,
     }),
   );
+  // Group threads auto-provision only from a COMMITTED home line (bound home
+  // chat or bare assigned line). A pending route is provisional (ops
+  // re-invite in flight), so it fails closed here and provisioning happens on
+  // the next group message once the route promotes.
   const homeRecipientPhone =
-    homeLineAuthority.kind === "none" ? null : homeLineAuthority.recipientPhone;
+    homeLineAuthority.kind === "home" || homeLineAuthority.kind === "bare"
+      ? homeLineAuthority.recipientPhone
+      : null;
   const incomingRecipientPhone = normalizePhoneNumber(recipientPhoneNumber);
   if (
     !homeRecipientPhone

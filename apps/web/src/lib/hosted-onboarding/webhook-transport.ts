@@ -918,7 +918,11 @@ async function buildHostedInviteSideEffectMessage(input: {
   if (!invite) {
     throw hostedOnboardingError({
       code: "HOSTED_INVITE_NOT_FOUND",
-      message: `Hosted invite ${input.payload.inviteId} was not found for webhook side effect ${input.effectId}.`,
+      message: `Hosted invite ${
+        toHostedOnboardingLogIdSuffix(input.payload.inviteId) ?? "unknown"
+      } was not found for webhook side effect ${
+        toHostedOnboardingLogIdSuffix(input.effectId) ?? "unknown"
+      }.`,
       httpStatus: 500,
       retryable: false,
     });

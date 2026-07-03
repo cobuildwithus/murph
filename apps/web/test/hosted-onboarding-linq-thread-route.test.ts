@@ -1292,6 +1292,34 @@ describe("Linq group chat auto-provision", () => {
     });
   });
 
+  it("does not auto-provision group threads from a pending (uncommitted) route", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    mockSenderLookup(senderCore);
+    // Ops re-invite in flight: pending chat on the group's line, no committed
+    // home route. Group auto-provisioning must fail closed until promotion.
+    vi.mocked(memberRoutingStore.readHostedMemberRoutingState).mockResolvedValue({
+      linqChatId: null,
+      linqRecipientPhone: null,
+      pendingLinqChatId: "chat_pending_123",
+      pendingLinqRecipientPhone: "+15550000000",
+    } as Awaited<ReturnType<typeof memberRoutingStore.readHostedMemberRoutingState>>);
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat",
+    });
+    // The authority gate ran (not an earlier bail) and failed closed.
+    expect(memberRoutingStore.readHostedMemberRoutingState).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
   it("ignores group messages from senders without hosted member identity", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     mockSenderLookup(null);
