@@ -673,18 +673,22 @@ export function createJunctionDeviceSyncProvider(
   ): DeviceSyncJobInput[] {
     const metadata = account.metadata;
     const status = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]);
+    const connectWindow = buildConnectHistoricalBackfillWindow(account, summaryBackfillDays);
+    const metadataWindowStart = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]);
+    const metadataWindowEnd = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]);
+    const metadataMatchesConnectWindow =
+      metadataWindowStart === connectWindow.windowStart
+      && metadataWindowEnd === connectWindow.windowEnd;
 
-    if (status === "complete" || status === "exhausted") {
+    if ((status === "complete" || status === "exhausted") && metadataMatchesConnectWindow) {
       return [];
     }
 
-    if (status === "retrying") {
-      const windowStart = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]);
-      const windowEnd = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]);
-      if (!windowStart || !windowEnd) {
-        return [];
-      }
-      const emptyAttempts = Math.max(1, readHistoricalBackfillEmptyAttempts(metadata, windowStart, windowEnd));
+    if (status === "retrying" && metadataMatchesConnectWindow) {
+      const emptyAttempts = Math.max(
+        1,
+        readHistoricalBackfillEmptyAttempts(metadata, connectWindow.windowStart, connectWindow.windowEnd),
+      );
       const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
       if (retryDelayMs === null) {
         return [];
@@ -697,8 +701,8 @@ export function createJunctionDeviceSyncProvider(
       }
       return [buildExactWindowJob({
         kind: "backfill",
-        windowStart,
-        windowEnd,
+        windowStart: connectWindow.windowStart,
+        windowEnd: connectWindow.windowEnd,
         priority: 30,
       })];
     }
@@ -707,10 +711,10 @@ export function createJunctionDeviceSyncProvider(
     // completion (or predates this bookkeeping). Re-derive its exact window
     // from the connection's connect time and run it until a terminal status
     // lands; imports are idempotent so a redundant pass is safe.
-    return [buildWindowJob({
+    return [buildExactWindowJob({
       kind: "backfill",
-      now: account.connectedAt,
-      windowStart: subtractDays(account.connectedAt, summaryBackfillDays),
+      windowStart: connectWindow.windowStart,
+      windowEnd: connectWindow.windowEnd,
       priority: 30,
     })];
   }
@@ -800,7 +804,14 @@ export function createJunctionDeviceSyncProvider(
       }
     }
 
-    const backfillFollowUp = job.kind === "backfill"
+    const connectHistoricalWindow = buildConnectHistoricalBackfillWindow(
+      context.account,
+      summaryBackfillDays,
+    );
+    const isConnectHistoricalBackfill =
+      window.windowStart === connectHistoricalWindow.windowStart
+      && window.windowEnd === connectHistoricalWindow.windowEnd;
+    const backfillFollowUp = job.kind === "backfill" && isConnectHistoricalBackfill
       ? buildHistoricalBackfillFollowUp({
           hasRecords: historicalSummaryHasRecords,
           metadata: context.account.metadata,
@@ -4315,6 +4326,16 @@ function readHistoricalBackfillEmptyAttempts(
   return typeof rawAttempts === "number" && Number.isInteger(rawAttempts) && rawAttempts >= 0
     ? rawAttempts
     : 0;
+}
+
+function buildConnectHistoricalBackfillWindow(
+  account: Pick<DeviceSyncAccount, "connectedAt">,
+  summaryBackfillDays: number,
+): { windowStart: string; windowEnd: string } {
+  return {
+    windowStart: floorUtcDayTimestamp(subtractDays(account.connectedAt, summaryBackfillDays)),
+    windowEnd: floorUtcDayTimestamp(account.connectedAt),
+  };
 }
 
 function buildWindowJob(input: {

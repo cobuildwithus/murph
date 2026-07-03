@@ -58,7 +58,7 @@ function createAccount(overrides: Partial<Omit<DeviceSyncAccount, "credential">>
     scopes: [],
     accessTokenExpiresAt: null,
     metadata: {},
-    connectedAt: "2026-04-01T00:00:00.000Z",
+    connectedAt: "2026-04-03T00:00:00.000Z",
     lastWebhookAt: null,
     lastSyncStartedAt: null,
     lastSyncCompletedAt: null,
@@ -128,6 +128,7 @@ function createJunctionProvider(
     environment: "sandbox",
     region: "us",
     summaryResources: ["activity"],
+    summaryBackfillDays: 2,
     timeseriesResources: [],
     fetchImpl,
     ...overrides,
@@ -169,7 +170,9 @@ function createJunctionJobContext(overrides: Partial<ProviderJobContext> = {}): 
   };
 }
 
-function createEmptyJunctionBackfillProvider() {
+function createEmptyJunctionBackfillProvider(
+  overrides: Partial<Parameters<typeof createJunctionDeviceSyncProvider>[0]> = {},
+) {
   return createJunctionProvider(async (input) => {
     const url = readUrl(input);
 
@@ -194,7 +197,7 @@ function createEmptyJunctionBackfillProvider() {
       return createJsonResponse({ data: [] });
     }
     throw new Error(`Unexpected request: ${url}`);
-  });
+  }, overrides);
 }
 
 test("Junction provider defaults fetch every default summary resource", async () => {
@@ -576,8 +579,8 @@ test("Junction empty historical backfill records a retrying window the scheduled
     provider,
     context,
     createJob("backfill", {
-      windowStart: "2026-04-01T12:34:56.000Z",
-      windowEnd: "2026-04-03T08:09:10.000Z",
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
 
@@ -586,8 +589,8 @@ test("Junction empty historical backfill records a retrying window the scheduled
     junctionHistoricalBackfillStatus: "retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
-    junctionHistoricalBackfillWindowStart: "2026-04-01T12:34:56.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-04-03T08:09:10.000Z",
+    junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
   assert.equal(result.scheduledJobs, undefined);
 
@@ -603,15 +606,15 @@ test("Junction empty historical backfill records a retrying window the scheduled
   const due = executor.createScheduledJobs?.(retryingAccount, "2026-04-04T00:15:00.000Z");
   const retryJob = due?.jobs.find((job) => job.kind === "backfill");
   assert.deepEqual(retryJob?.payload, {
-    windowStart: "2026-04-01T12:34:56.000Z",
-    windowEnd: "2026-04-03T08:09:10.000Z",
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
   });
   assert.equal(
     retryJob?.dedupeKey,
     buildExpectedJunctionDedupeKey(
       "backfill",
-      "2026-04-01T12:34:56.000Z",
-      "2026-04-03T08:09:10.000Z",
+      "2026-04-01T00:00:00.000Z",
+      "2026-04-03T00:00:00.000Z",
     ),
   );
 });
@@ -625,8 +628,8 @@ test("Junction retrying historical backfill without attempts uses the first retr
     metadata: {
       junctionHistoricalBackfillStatus: "retrying",
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
-      junctionHistoricalBackfillWindowStart: "2026-04-01T12:34:56.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-03T08:09:10.000Z",
+      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
     },
   });
 
@@ -636,20 +639,20 @@ test("Junction retrying historical backfill without attempts uses the first retr
   const due = executor.createScheduledJobs?.(retryingAccount, "2026-04-04T00:16:00.000Z");
   const retryJob = due?.jobs.find((job) => job.kind === "backfill");
   assert.deepEqual(retryJob?.payload, {
-    windowStart: "2026-04-01T12:34:56.000Z",
-    windowEnd: "2026-04-03T08:09:10.000Z",
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
   });
   assert.equal(
     retryJob?.dedupeKey,
     buildExpectedJunctionDedupeKey(
       "backfill",
-      "2026-04-01T12:34:56.000Z",
-      "2026-04-03T08:09:10.000Z",
+      "2026-04-01T00:00:00.000Z",
+      "2026-04-03T00:00:00.000Z",
     ),
   );
 });
 
-test("Junction empty historical backfill preserves explicit windows", async () => {
+test("Junction non-connect backfill window does not write historical metadata", async () => {
   const provider = createEmptyJunctionBackfillProvider();
   const context = createJunctionJobContext({
     now: "2026-04-04T00:00:00.000Z",
@@ -664,31 +667,8 @@ test("Junction empty historical backfill preserves explicit windows", async () =
     }),
   );
 
-  assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "retrying",
-    junctionHistoricalBackfillEmptyAttempts: 1,
-    junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
-    junctionHistoricalBackfillWindowStart: "2025-01-01T12:34:56.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-04-05T08:09:10.000Z",
-  });
-  const executor = requireValue(provider.jobExecutor, "Junction provider should expose a job executor.");
-  const due = executor.createScheduledJobs?.(
-    createStoredAccount({ metadata: result.metadataPatch as Record<string, unknown> }),
-    "2026-04-04T01:00:00.000Z",
-  );
-  const retryJob = due?.jobs.find((job) => job.kind === "backfill");
-  assert.deepEqual(retryJob?.payload, {
-    windowStart: "2025-01-01T12:34:56.000Z",
-    windowEnd: "2026-04-05T08:09:10.000Z",
-  });
-  assert.equal(
-    retryJob?.dedupeKey,
-    buildExpectedJunctionDedupeKey(
-      "backfill",
-      "2025-01-01T12:34:56.000Z",
-      "2026-04-05T08:09:10.000Z",
-    ),
-  );
+  assert.equal(result.metadataPatch, undefined);
+  assert.equal(result.scheduledJobs, undefined);
 });
 
 test("Junction useful summary historical backfill marks the historical window complete", async () => {
@@ -730,8 +710,8 @@ test("Junction useful summary historical backfill marks the historical window co
       },
     }),
     createJob("backfill", {
-      windowStart: "2026-04-01T06:07:08.000Z",
-      windowEnd: "2026-04-03T09:10:11.000Z",
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
 
@@ -739,8 +719,8 @@ test("Junction useful summary historical backfill marks the historical window co
     junctionHistoricalBackfillStatus: "complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
-    junctionHistoricalBackfillWindowStart: "2026-04-01T06:07:08.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-04-03T09:10:11.000Z",
+    junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
   assert.equal(result.scheduledJobs, undefined);
   assert.equal(importedSnapshots.length, 1);
@@ -750,8 +730,8 @@ test("Junction useful summary historical backfill marks the historical window co
   );
   assertJunctionWindowQuery(
     summaryRequest,
-    "2026-04-01T06:07:08.000Z",
-    "2026-04-03T09:10:11.000Z",
+    "2026-04-01T00:00:00.000Z",
+    "2026-04-03T00:00:00.000Z",
   );
 });
 
@@ -1642,7 +1622,7 @@ for (const testCase of [
       }),
       createJob("backfill", {
         windowStart: "2026-04-01T00:00:00.000Z",
-        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
       }),
     );
 
@@ -1651,7 +1631,7 @@ for (const testCase of [
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
     });
     assert.equal(result.scheduledJobs, undefined);
     assert.equal(importedSnapshots.length, 1);
@@ -1825,7 +1805,7 @@ for (const summaryResource of ["activity", "sleep", "workouts", "body"] as const
       }),
       createJob("backfill", {
         windowStart: "2026-04-01T00:00:00.000Z",
-        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
       }),
     );
 
@@ -1834,7 +1814,7 @@ for (const summaryResource of ["activity", "sleep", "workouts", "body"] as const
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
     });
     assert.equal(result.scheduledJobs, undefined);
     assert.equal(importedSnapshots.length, 1);
@@ -1898,7 +1878,7 @@ for (const summaryResource of ["sleep", "workouts"] as const) {
       }),
       createJob("backfill", {
         windowStart: "2026-04-01T00:00:00.000Z",
-        windowEnd: "2026-04-04T00:00:00.000Z",
+        windowEnd: "2026-04-03T00:00:00.000Z",
       }),
     );
 
@@ -1907,7 +1887,7 @@ for (const summaryResource of ["sleep", "workouts"] as const) {
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
     });
     assert.equal(result.scheduledJobs, undefined);
     assert.equal(importedSnapshots.length, 1);
@@ -1953,7 +1933,7 @@ test("Junction useful summary without source linkage keeps the historical window
     }),
     createJob("backfill", {
       windowStart: "2026-04-01T00:00:00.000Z",
-      windowEnd: "2026-04-04T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
 
@@ -1962,7 +1942,7 @@ test("Junction useful summary without source linkage keeps the historical window
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
   assert.equal(result.scheduledJobs, undefined);
   assert.equal(importedSnapshots.length, 1);
@@ -2008,7 +1988,7 @@ test("Junction floating-provider metric-only summary keeps the historical window
     }),
     createJob("backfill", {
       windowStart: "2026-04-01T00:00:00.000Z",
-      windowEnd: "2026-04-04T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
 
@@ -2017,7 +1997,7 @@ test("Junction floating-provider metric-only summary keeps the historical window
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
   assert.equal(result.scheduledJobs, undefined);
   assert.equal(importedSnapshots.length, 1);
@@ -2136,7 +2116,7 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
     }),
     createJob("backfill", {
       windowStart: "2026-04-01T00:00:00.000Z",
-      windowEnd: "2026-04-04T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
 
@@ -2145,7 +2125,7 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
   assert.equal(result.scheduledJobs, undefined);
   assert.equal(importedSnapshots.length, 1);
@@ -2196,7 +2176,7 @@ test("Junction profile-only historical backfill keeps the summary window retryin
     }),
     createJob("backfill", {
       windowStart: "2026-04-01T00:00:00.000Z",
-      windowEnd: "2026-04-04T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
     }),
   );
 
@@ -2206,7 +2186,7 @@ test("Junction profile-only historical backfill keeps the summary window retryin
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-    junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+    junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
   assert.equal(result.scheduledJobs, undefined);
   assert.equal(importedSnapshots.length, 1);
@@ -3113,7 +3093,7 @@ test("Junction completeConnection treats Link callback as weak and enqueues scal
   assert.equal(connection.setupPhase, "link_returned");
   assert.deepEqual(connection.initialJobs?.map((job) => job.kind), ["backfill", "reconcile"]);
   assert.deepEqual(connection.initialJobs?.[0]?.payload, {
-    windowStart: "2025-10-05T00:00:00.000Z",
+    windowStart: "2026-04-01T00:00:00.000Z",
     windowEnd: "2026-04-03T00:00:00.000Z",
   });
   const payload = connection.initialJobs?.[0]?.payload as Record<string, unknown> | undefined;
@@ -3146,8 +3126,8 @@ test("Junction scheduled polling uses stable closed-day windows", () => {
   const derivedBackfill = first?.jobs[1];
   assert.equal(derivedBackfill?.kind, "backfill");
   assert.deepEqual(derivedBackfill?.payload, {
-    windowStart: "2025-10-03T00:00:00.000Z",
-    windowEnd: "2026-04-01T00:00:00.000Z",
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
   });
   assert.equal(derivedBackfill?.dedupeKey, second?.jobs[1]?.dedupeKey);
 });
@@ -3163,8 +3143,8 @@ test("Junction scheduled pass derives historical backfill work only until a term
       createStoredAccount({
         metadata: {
           junctionHistoricalBackfillStatus: status,
-          junctionHistoricalBackfillWindowStart: "2025-10-03T00:00:00.000Z",
-          junctionHistoricalBackfillWindowEnd: "2026-04-01T00:00:00.000Z",
+          junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+          junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
         },
       }),
       "2026-04-03T12:34:56.000Z",
@@ -3172,13 +3152,41 @@ test("Junction scheduled pass derives historical backfill work only until a term
     assert.equal(scheduled?.jobs.some((job) => job.kind === "backfill"), false, status);
   }
 
-  const retryingWithoutWindow = executor.createScheduledJobs?.(
+  const completeOtherWindow = executor.createScheduledJobs?.(
     createStoredAccount({
-      metadata: { junctionHistoricalBackfillStatus: "retrying" },
+      metadata: {
+        junctionHistoricalBackfillStatus: "complete",
+        junctionHistoricalBackfillWindowStart: "2026-04-02T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+      },
     }),
     "2026-04-03T12:34:56.000Z",
   );
-  assert.equal(retryingWithoutWindow?.jobs.some((job) => job.kind === "backfill"), false);
+  assert.deepEqual(
+    completeOtherWindow?.jobs.find((job) => job.kind === "backfill")?.payload,
+    {
+      windowStart: "2026-04-01T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    },
+  );
+
+  const retryingOtherWindow = executor.createScheduledJobs?.(
+    createStoredAccount({
+      metadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-04-03T12:30:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2026-04-02T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
+      },
+    }),
+    "2026-04-03T12:34:56.000Z",
+  );
+  const retryingBackfill = retryingOtherWindow?.jobs.find((job) => job.kind === "backfill");
+  assert.deepEqual(retryingBackfill?.payload, {
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
 });
 
 test("Junction reconcile keeps summaries current while compact timeseries stays on closed days", async () => {
@@ -4499,6 +4507,49 @@ test("Junction accepts user ids nested inside webhook envelopes", async () => {
     assert.equal(parsed.externalAccountId, expectedUserId);
     assert.deepEqual(parsed.jobs.map((job) => job.kind), ["backfill", "reconcile"]);
   }
+});
+
+test("Junction connection-event backfill completion does not write historical metadata for a non-connect window", async () => {
+  const provider = createEmptyJunctionBackfillProvider({
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const webhook = createJunctionSvixWebhook({
+    body: {
+      event_type: "provider.connection.created",
+      user_id: "junction-user-1",
+      data: {},
+    },
+    messageId: "msg_connection_created_backfill",
+    timestamp: "1775174400",
+  });
+
+  const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+    headers: webhook.headers,
+    rawBody: webhook.rawBody,
+    now: "2026-04-03T00:00:00.000Z",
+  });
+  const backfillJob = requireValue(
+    parsed.jobs.find((job) => job.kind === "backfill"),
+    "Junction connection event should derive a backfill job.",
+  );
+  assert.deepEqual(backfillJob.payload, {
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ connectedAt: "2026-04-01T00:00:00.000Z" }),
+      now: "2026-04-04T00:00:00.000Z",
+    }),
+    createJob(backfillJob.kind, backfillJob.payload ?? {}),
+  );
+
+  assert.equal(
+    Object.keys(result.metadataPatch ?? {}).some((key) => key.startsWith("junctionHistoricalBackfill")),
+    false,
+  );
 });
 
 test("Junction rejects webhooks with conflicting signed payload user ids", async () => {

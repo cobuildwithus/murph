@@ -26,7 +26,7 @@ function createAccount(): DeviceSyncAccount {
     scopes: [],
     accessTokenExpiresAt: null,
     metadata: {},
-    connectedAt: "2026-04-01T00:00:00.000Z",
+    connectedAt: "2026-04-03T00:00:00.000Z",
     lastWebhookAt: null,
     lastSyncStartedAt: null,
     lastSyncCompletedAt: null,
@@ -97,6 +97,7 @@ function createProvider(summaryRecord: Record<string, unknown>) {
     environment: "sandbox",
     region: "us",
     summaryResources: ["sleep_cycle"],
+    summaryBackfillDays: 2,
     fetchImpl: async (input) => {
       const url = readUrl(input);
 
