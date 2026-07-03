@@ -72,7 +72,9 @@ test("provider diagnostics mask colon-form token descriptions", () => {
 test("provider diagnostics mask structured credential-label descriptions", () => {
   for (const description of [
     "api key abcdefghijklmnop leaked",
+    "api key secretvalue leaked",
     "client secret abcdefghijklmnop leaked",
+    "refresh token secretvalue leaked",
     "generic token abcdefghijklmnop leaked",
   ]) {
     const diagnostics = inspectProviderErrorBody(JSON.stringify({
@@ -84,6 +86,7 @@ test("provider diagnostics mask structured credential-label descriptions", () =>
 
     assert.equal(diagnostics.responseErrorCode, "resource_misconfigured");
     assert.equal(diagnostics.responseErrorDescription?.includes("abcdefghijklmnop"), false);
+    assert.equal(diagnostics.responseErrorDescription?.includes("secretvalue"), false);
     assert.equal(diagnostics.responseErrorDescription?.includes("<redacted-token>"), true);
     assert.equal(diagnostics.responseErrorDescriptionFieldPresent, true);
   }
@@ -94,6 +97,9 @@ test("provider diagnostics drop unlabeled direct-name descriptions", () => {
     "Jane Doe",
     "detail: Jane Doe",
     "Jane Doe cannot access sleep_cycle",
+    "Jane Doe not found",
+    "User Jane Doe not found",
+    "Patient Jane Doe not found",
   ]) {
     const diagnostics = inspectProviderErrorBody(JSON.stringify({
       detail: {

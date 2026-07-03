@@ -2023,6 +2023,15 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
       sanitizeHostedRuntimeDiagnosticText("Jane Doe cannot access sleep_cycle"),
     ).toBeNull();
     expect(
+      sanitizeHostedRuntimeDiagnosticText("Jane Doe not found"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("User Jane Doe not found"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Patient Jane Doe not found"),
+    ).toBeNull();
+    expect(
       sanitizeHostedRuntimeDiagnosticText("Jane Doe"),
     ).toBeNull();
     expect(
@@ -2047,8 +2056,14 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
       sanitizeHostedRuntimeDiagnosticText("api key abcdefghijklmnop leaked"),
     ).toBe("api key <redacted-token> leaked");
     expect(
+      sanitizeHostedRuntimeDiagnosticText("api key secretvalue leaked"),
+    ).toBe("api key <redacted-token> leaked");
+    expect(
       sanitizeHostedRuntimeDiagnosticText("client secret abcdefghijklmnop leaked"),
     ).toBe("client secret <redacted-token> leaked");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("refresh token secretvalue leaked"),
+    ).toBe("refresh token <redacted-token> leaked");
     expect(
       sanitizeHostedRuntimeDiagnosticText("generic token abcdefghijklmnop leaked"),
     ).toBe("generic token <redacted-token> leaked");

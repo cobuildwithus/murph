@@ -6032,7 +6032,7 @@ test("Junction ambiguous skip detail drops object-shaped unlabeled user diagnost
       return createJsonResponse({
         detail: {
           type: "resource_misconfigured",
-          msg: "detail: Jane Doe",
+          msg: "Patient Jane Doe not found",
         },
       }, 422);
     }
@@ -6095,7 +6095,7 @@ test("Junction ambiguous skip detail masks object-shaped credential-label diagno
       return createJsonResponse({
         detail: {
           type: "resource_misconfigured",
-          msg: "api key abcdefghijklmnop leaked",
+          msg: "api key secretvalue leaked",
         },
       }, 422);
     }
@@ -6128,8 +6128,8 @@ test("Junction ambiguous skip detail masks object-shaped credential-label diagno
 
   const serializedWarnings = JSON.stringify(warnings);
   const serializedMetadata = JSON.stringify(result.metadataPatch);
-  assert.equal(serializedWarnings.includes("abcdefghijklmnop"), false);
-  assert.equal(serializedMetadata.includes("abcdefghijklmnop"), false);
+  assert.equal(serializedWarnings.includes("secretvalue"), false);
+  assert.equal(serializedMetadata.includes("secretvalue"), false);
 });
 
 test("Junction ambiguous skip detail masks slash-bearing identifier phrases", async () => {
