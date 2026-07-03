@@ -1978,7 +1978,7 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     ).toBe("record <redacted-token> was rejected upstream.");
   });
 
-  it("masks identifier assignments while keeping the key visible", () => {
+  it("masks colon-form identifier assignments and truncates equals-assignment tails", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("request rejected for user_id: hbm_abc123xyz upstream"),
     ).toBe("request rejected for user_id: <redacted-id> upstream");
@@ -1991,10 +1991,19 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     expect(quotedValue ?? "").not.toContain("Doe");
     expect(
       sanitizeHostedRuntimeDiagnosticText("user_id=1234 rejected"),
-    ).toBe("user_id=<redacted-id> rejected");
+    ).toBeNull();
     expect(
       sanitizeHostedRuntimeDiagnosticText("user_id=abcdef+tail rejected"),
-    ).toBe("user_id=<redacted-id> rejected");
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("request rejected for user_id: hbm_abc123, display_name=Jane Doe upstream"),
+    ).toBe("request rejected for user_id: <redacted-id>");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("request rejected for user_id: hbm_abc123, display_name = Jane Doe upstream"),
+    ).toBe("request rejected for user_id: <redacted-id>");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("request rejected for user_id: hbm_abc123, display_name: Jane Doe upstream"),
+    ).toBe("request rejected for user_id: <redacted-id>");
   });
 
   it("masks token phrases while keeping prose token labels", () => {
@@ -2009,7 +2018,7 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     ).toBe("session token expired");
   });
 
-  it("keeps plain bracketed prose and fails closed on validation suffixes", () => {
+  it("keeps plain bracketed prose and truncates validation suffixes", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("Provider returned [timeout] while checking sleep_cycle"),
     ).toBe("Provider returned [timeout] while checking sleep_cycle");
@@ -2020,33 +2029,34 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
       sanitizeHostedRuntimeDiagnosticText("see [docs] for details"),
     ).toBe("see [docs] for details");
 
-    // Structured validation info must arrive through JSON fields, not
-    // best-effort parsing of semi-structured prose suffixes.
     expect(
       sanitizeHostedRuntimeDiagnosticText(
         "Datetimes provided to dates should have zero time [type=date_from_datetime_inexact]",
       ),
-    ).toBeNull();
+    ).toBe("Datetimes provided to dates should have zero time");
     expect(
       sanitizeHostedRuntimeDiagnosticText("rejected [input_value='Jane Doe', input_type=str]"),
-    ).toBeNull();
+    ).toBe("rejected");
   });
 
-  it("fails closed on bracketed assignment and comma segments", () => {
+  it("truncates bracketed assignment, colon, and comma segments", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("Validation failed [user_id=1234, display_name=Jane Doe]"),
-    ).toBeNull();
+    ).toBe("Validation failed");
     expect(
       sanitizeHostedRuntimeDiagnosticText("Validation failed [display_name: Jane]"),
-    ).toBeNull();
+    ).toBe("Validation failed");
     expect(
       sanitizeHostedRuntimeDiagnosticText("failed [display_name=Jane"),
-    ).toBeNull();
+    ).toBe("failed");
     expect(
       sanitizeHostedRuntimeDiagnosticText("Validation failed [context [field] display_name=Jane]"),
-    ).toBeNull();
+    ).toBe("Validation failed");
     expect(
       sanitizeHostedRuntimeDiagnosticText("failed [outer [inner] a, b]"),
+    ).toBe("failed");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("[display_name=Jane]"),
     ).toBeNull();
   });
 
@@ -2071,13 +2081,16 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     ).toBeNull();
   });
 
-  it("masks explicit id-noun phrases and camel-case team assignments", () => {
+  it("masks explicit id-noun phrases and truncates camel-case team assignments", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("user id hbm_abc123xyz is blocked upstream"),
     ).toBe("user id <redacted-id> is blocked upstream");
     expect(
       sanitizeHostedRuntimeDiagnosticText("request denied for teamId=hbm_abc123xyz"),
-    ).toBe("request denied for teamId=<redacted-id>");
+    ).toBe("request denied for");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("request denied for team-id = hbm_abc123xyz"),
+    ).toBe("request denied for");
   });
 
   it("masks id-shaped values regardless of quoting or bracketing", () => {
@@ -2095,17 +2108,17 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     ).toBe("request from <redacted-ip> denied");
   });
 
-  it("fails closed on quoted echoed input values", () => {
+  it("truncates quoted echoed input values", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("rejected [input_value='user junction-user-1', input_type=str]"),
-    ).toBeNull();
+    ).toBe("rejected");
     const quotedInput = sanitizeHostedRuntimeDiagnosticText("rejected [input_value='Jane Doe', input_type=str]");
-    expect(quotedInput).toBeNull();
+    expect(quotedInput).toBe("rejected");
     expect(quotedInput ?? "").not.toContain("Doe");
     const mixedQuoteInput = sanitizeHostedRuntimeDiagnosticText(
       "rejected [input_value=\"Jane's device\", input_type=str]",
     );
-    expect(mixedQuoteInput).toBeNull();
+    expect(mixedQuoteInput).toBe("rejected");
     expect(mixedQuoteInput ?? "").not.toContain("Jane");
     expect(mixedQuoteInput ?? "").not.toContain("device");
   });
@@ -2115,13 +2128,13 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
       sanitizeHostedRuntimeDiagnosticText("user junction-\u200Buser-1 denied"),
     ).toBe("user <redacted-id> denied");
     const sanitized = sanitizeHostedRuntimeDiagnosticText("access\u200B_token=secretvalue");
-    expect(sanitized).toBe("access_token=[redacted]");
-    expect(sanitized).not.toContain("secretvalue");
+    expect(sanitized).toBeNull();
+    expect(sanitized ?? "").not.toContain("secretvalue");
     const bidiSecret = sanitizeHostedRuntimeDiagnosticText("access\u2066_token=secretvalue");
-    expect(bidiSecret).toBe("access_token=[redacted]");
-    expect(bidiSecret).not.toContain("secretvalue");
+    expect(bidiSecret).toBeNull();
+    expect(bidiSecret ?? "").not.toContain("secretvalue");
     const bidiIdentifier = sanitizeHostedRuntimeDiagnosticText('user\u2066_id="Jane Doe"');
-    expect(bidiIdentifier).toBe("user_id=<redacted-id>");
+    expect(bidiIdentifier).toBeNull();
     expect(bidiIdentifier ?? "").not.toContain("Jane");
     expect(bidiIdentifier ?? "").not.toContain("Doe");
   });
@@ -2143,24 +2156,22 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     expect(sanitized?.length).toBeLessThanOrEqual(512);
   });
 
-  it("fails closed on echoed validation input values inside bracket suffixes", () => {
-    // Structured validation info must arrive through JSON fields, not
-    // best-effort parsing of semi-structured prose suffixes.
+  it("truncates echoed validation input values inside bracket suffixes", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText(
         "Input should be a valid date [type=value_error, input_value=junction-user-1, input_type=str]",
       ),
-    ).toBeNull();
+    ).toBe("Input should be a valid date");
     expect(
       sanitizeHostedRuntimeDiagnosticText(
         "Input should be valid [type=value_error, input_value=Jane Doe, input_type=str]",
       ),
-    ).toBeNull();
+    ).toBe("Input should be valid");
     expect(
       sanitizeHostedRuntimeDiagnosticText(
         "Input should be a valid date [type=value_error, input_value='Jane Doe', input_type=str]",
       ),
-    ).toBeNull();
+    ).toBe("Input should be a valid date");
   });
 
   it("masks id-shaped identifier phrases while keeping plain words", () => {

@@ -46,8 +46,10 @@ const HOSTED_RUNTIME_DIAGNOSTIC_FORMAT_CHAR_PATTERN =
   /[\u00AD\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/gu;
 const HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_PATTERN =
   /\b((?:access|id|refresh|session)\s+token\s+["']?)[A-Za-z0-9._~+/=-]{16,}/giu;
-const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN =
-  /\b((?:account|client|external|member|owner|patient|provider[_\s-]?account|subject|team|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[A-Za-z0-9._~+/:=-]+)/giu;
+const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_COLON_ASSIGNMENT_PATTERN =
+  /\b((?:account|client|external|member|owner|patient|provider[_\s-]?account|subject|team|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*:\s*)(?:"[^"]*"|'[^']*'|[A-Za-z0-9._~+/:=-]+)/giu;
+const HOSTED_RUNTIME_DIAGNOSTIC_ASSIGNMENT_TAIL_PATTERN =
+  /(?:[A-Za-z0-9_][A-Za-z0-9_-]*\s*=\s*\S|,\s*[A-Za-z0-9_][A-Za-z0-9_-]*\s*:\s*\S)/u;
 // Identifier values also appear as bare phrases ("user hbm_abc123xyz",
 // 'user id "hbm_abc123xyz"'); mask the value when it looks id-shaped
 // (contains a digit or underscore) so plain words ("user profile") stay
@@ -2290,51 +2292,76 @@ function matchesEntireHostedRuntimeDiagnosticToken(pattern: RegExp, value: strin
   return match?.[0] === value;
 }
 
-function hostedRuntimeDiagnosticBracketRegionHasStructure(value: string): boolean {
-  let depth = 0;
+function findHostedRuntimeDiagnosticStructuredBracketIndex(value: string): number {
+  const openBracketIndexes: number[] = [];
 
-  for (const char of value) {
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+
     if (char === "[") {
-      depth += 1;
+      openBracketIndexes.push(index);
       continue;
     }
 
     if (char === "]") {
-      depth = Math.max(0, depth - 1);
+      openBracketIndexes.pop();
       continue;
     }
 
-    if (depth > 0 && (char === "=" || char === "," || char === ":")) {
-      return true;
+    if (openBracketIndexes.length > 0 && (char === "=" || char === "," || char === ":")) {
+      return openBracketIndexes[0] ?? -1;
     }
   }
 
-  return false;
+  return -1;
 }
 
-// Redacts by masking the unsafe spans (ids, digit-bearing tokens, long tokens)
-// so provider error prose stays debuggable. Raw structured payload dumps fail
-// closed before span masking or the diagnostic length cap, because masking and
-// prefix clamping can make a structured leak look like safe prose.
+function findHostedRuntimeDiagnosticUnsafeTailIndex(value: string): number {
+  const assignmentIndex = value.search(HOSTED_RUNTIME_DIAGNOSTIC_ASSIGNMENT_TAIL_PATTERN);
+  const bracketIndex = findHostedRuntimeDiagnosticStructuredBracketIndex(value);
+
+  if (assignmentIndex === -1) {
+    return bracketIndex;
+  }
+
+  if (bracketIndex === -1) {
+    return assignmentIndex;
+  }
+
+  return Math.min(assignmentIndex, bracketIndex);
+}
+
+// Keeps safe provider error prose debuggable by failing raw structured dumps
+// closed, truncating at unsafe assignment/bracket tails, then masking unsafe
+// spans that remain in the prose prefix.
 export function sanitizeHostedRuntimeDiagnosticText(value: string | null): string | null {
   const normalizedValue = value?.replace(HOSTED_RUNTIME_DIAGNOSTIC_FORMAT_CHAR_PATTERN, "") ?? null;
   const sanitizedBase = sanitizeHostedRuntimeErrorString(normalizedValue, HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH);
   if (
     !sanitizedBase
     || HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN.test(sanitizedBase)
-    || hostedRuntimeDiagnosticBracketRegionHasStructure(sanitizedBase)
   ) {
     return null;
   }
 
-  const sanitized = sanitizedBase
+  const unsafeTailIndex = findHostedRuntimeDiagnosticUnsafeTailIndex(sanitizedBase);
+  const prosePrefix = (unsafeTailIndex === -1
+    ? sanitizedBase
+    : sanitizedBase.slice(0, unsafeTailIndex)
+  ).replace(/[\s,;]+$/u, "");
+
+  if (!prosePrefix) {
+    return null;
+  }
+
+  const sanitized = prosePrefix
     .replace(HOSTED_RUNTIME_ERROR_FILE_URL_PATTERN, "<redacted-path>")
     .replace(HOSTED_RUNTIME_ERROR_POSIX_PATH_PATTERN, "$1<redacted-path>")
     .replace(HOSTED_RUNTIME_ERROR_WINDOWS_PATH_PATTERN, "<redacted-path>")
     .replace(HOSTED_RUNTIME_ERROR_URL_PATTERN, "<redacted-url>")
     .replace(HOSTED_RUNTIME_ERROR_EMAIL_PATTERN, "<redacted-email>")
     .replace(HOSTED_RUNTIME_ERROR_PHONE_PATTERN, "<redacted-phone>")
-    .replace(HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN, "$1<redacted-id>")
+    .replace(HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_COLON_ASSIGNMENT_PATTERN, "$1<redacted-id>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_PHRASE_PATTERN, "$1<redacted-id>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_IPV4_PATTERN, "<redacted-ip>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_PATTERN, "$1<redacted-token>")

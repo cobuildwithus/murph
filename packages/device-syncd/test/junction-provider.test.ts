@@ -3583,7 +3583,8 @@ test("Junction completeConnection masks secret-bearing Link failure reason value
       assert.equal(error.code, "JUNCTION_LINK_FAILED");
       assert.ok(error.message.includes("error=provider_connection_error"));
       assert.ok(!error.message.includes("secret-value-1"));
-      assert.ok(error.message.includes("error_description=User denied access access_token=[redacted]"));
+      assert.ok(error.message.includes("error_description=User denied access"));
+      assert.ok(!error.message.includes("access_token"));
       return true;
     },
   );
@@ -5858,7 +5859,7 @@ test("Junction ambiguous skip detail redacts the account id from provider error 
   assert.equal(JSON.stringify(result.metadataPatch).toLowerCase().includes("junction-user-1"), false);
 });
 
-test("Junction ambiguous skip detail masks slash-bearing user_id assignments", async () => {
+test("Junction ambiguous skip detail truncates unknown assignment tails after user_id prose", async () => {
   const warnings: Record<string, unknown>[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
@@ -5881,7 +5882,7 @@ test("Junction ambiguous skip detail masks slash-bearing user_id assignments", a
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
       return createJsonResponse({
         code: "invalid_request",
-        message: "request rejected for user_id: hbm_abc123/Jane-Doe upstream",
+        message: "request rejected for user_id: hbm_abc123, display_name=Jane Doe upstream",
       }, 422);
     }
 
@@ -5906,14 +5907,14 @@ test("Junction ambiguous skip detail masks slash-bearing user_id assignments", a
     }),
   );
 
-  const expectedDetail = "invalid_request: request rejected for user_id: <redacted-id> upstream";
+  const expectedDetail = "invalid_request: request rejected for user_id: <redacted-id>";
   assert.equal(warnings.length, 1);
   assert.equal(warnings[0]?.responseDetail, expectedDetail);
   assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, expectedDetail);
 
   const serializedWarnings = JSON.stringify(warnings);
   const serializedMetadata = JSON.stringify(result.metadataPatch);
-  for (const sensitive of ["hbm_abc123", "Jane", "Doe"]) {
+  for (const sensitive of ["display_name", "hbm_abc123", "Jane", "Doe"]) {
     assert.equal(serializedWarnings.includes(sensitive), false);
     assert.equal(serializedMetadata.includes(sensitive), false);
   }
@@ -6147,7 +6148,7 @@ test("Junction ambiguous skip detail reads FastAPI-shaped sleep_cycle validation
   assert.equal(warnings[0]?.responseDetail, expectedDetail);
 });
 
-test("Junction ambiguous skip detail fails closed on quoted validation input echoes", async () => {
+test("Junction ambiguous skip detail keeps safe date validation prose before bracket suffixes", async () => {
   const warnings: Record<string, unknown>[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
@@ -6169,7 +6170,7 @@ test("Junction ambiguous skip detail fails closed on quoted validation input ech
 
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
       return createJsonResponse({
-        detail: "Input should be a valid date [type=value_error, input_value='Jane Doe', input_type=str]",
+        detail: "Datetimes provided to dates should have zero time [type=date_from_datetime_inexact]",
       }, 422);
     }
 
@@ -6197,13 +6198,14 @@ test("Junction ambiguous skip detail fails closed on quoted validation input ech
   const storedDetail = result.metadataPatch?.junctionSkippedResourceLastDetail;
   const warningDetail = warnings[0]?.responseDetail;
 
-  // Structured validation info must arrive via JSON fields, not string parsing.
-  assert.equal(storedDetail, null);
-  assert.equal(warningDetail, undefined);
+  assert.equal(storedDetail, "Datetimes provided to dates should have zero time");
+  assert.equal(warningDetail, "Datetimes provided to dates should have zero time");
+  assert.equal(storedDetail?.endsWith("zero time"), true);
+  assert.equal(warningDetail?.includes("Datetimes provided to dates should have zero time"), true);
 
   for (const exposed of [JSON.stringify(warnings), JSON.stringify(result.metadataPatch)]) {
-    assert.equal(exposed.includes("Doe"), false);
-    assert.equal(exposed.includes("input_type=str"), false);
+    assert.equal(exposed.includes("date_from_datetime_inexact"), false);
+    assert.equal(exposed.includes("type="), false);
   }
 });
 
@@ -6262,7 +6264,7 @@ test("Junction ambiguous skip detail ignores top-level primitive arrays", async 
   }
 });
 
-test("Junction ambiguous skip detail drops bracketed diagnostics with unknown keys", async () => {
+test("Junction ambiguous skip detail truncates bracketed diagnostics with unknown keys", async () => {
   const warnings: Record<string, unknown>[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
@@ -6311,10 +6313,8 @@ test("Junction ambiguous skip detail drops bracketed diagnostics with unknown ke
   );
 
   assert.equal(warnings.length, 1);
-  // The unsafe bracketed prose fails closed at extraction; the vetted
-  // word-like code is still worth surfacing on its own.
-  assert.equal(warnings[0]?.responseDetail, "invalid_request");
-  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, "invalid_request");
+  assert.equal(warnings[0]?.responseDetail, "invalid_request: Validation failed");
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, "invalid_request: Validation failed");
 
   for (const exposed of [JSON.stringify(warnings), JSON.stringify(result.metadataPatch)]) {
     assert.equal(exposed.includes("Jane"), false);
@@ -6323,7 +6323,7 @@ test("Junction ambiguous skip detail drops bracketed diagnostics with unknown ke
   }
 });
 
-test("Junction ambiguous skip detail drops nested bracketed diagnostics", async () => {
+test("Junction ambiguous skip detail keeps safe prefix before nested bracketed diagnostics", async () => {
   const warnings: Record<string, unknown>[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
@@ -6371,8 +6371,8 @@ test("Junction ambiguous skip detail drops nested bracketed diagnostics", async 
   );
 
   assert.equal(warnings.length, 1);
-  assert.equal(warnings[0]?.responseDetail, undefined);
-  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, null);
+  assert.equal(warnings[0]?.responseDetail, "Validation failed");
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, "Validation failed");
 
   for (const exposed of [JSON.stringify(warnings), JSON.stringify(result.metadataPatch)]) {
     assert.equal(exposed.includes("Jane"), false);
