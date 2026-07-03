@@ -1221,6 +1221,158 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("clears a durable-effect due assistant wake after a fresh post-checkpoint wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const dueWakeAt = new Date(Date.now() - 60_000).toISOString();
+    const durableEffect = vi.fn(async () => {
+      events.push("durable-effect");
+      return {
+        nextWakeAt: dueWakeAt,
+        nextWakeReason: "assistant",
+        requiresFollowUpCheckpoint: true,
+      };
+    });
+    let assistantPass = 0;
+    let snapshotCount = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_follow_up_fresh_wake_clears_durable_wake",
+              idleCheckpointDelayMs: 25,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              snapshotCount += 1;
+              events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: String(snapshotCount).repeat(64),
+                  key:
+                    `users/bundles/member-synthetic/follow-up-fresh-wake-`
+                    + `${snapshotCount}.bundle.json`,
+                  size: 512,
+                }),
+              };
+            },
+            async importItem() {
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                checkpointWorkspace(request) {
+                  const workspace = createWorkspaceState({
+                    inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                    nextWakeAt: request.nextWakeAt ?? null,
+                    nextWakeReason: request.nextWakeReason ?? null,
+                    redactedStatus: request.redactedStatus ?? null,
+                    snapshotRef: request.snapshotRef,
+                    version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                  });
+                  if (request.expectedWorkspaceVersion === "1") {
+                    events.push("runtime-wake:after-follow-up-checkpoint");
+                    runtimeWakeSignal.notify();
+                  }
+                  return workspace;
+                },
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase(input) {
+              assistantPass += 1;
+              events.push(`assistant:${assistantPass}`);
+
+              if (assistantPass === 1) {
+                return {
+                  afterCheckpoint: async () => ({
+                    afterDurableCheckpoint: durableEffect,
+                    checkpointReason: "system_mailbox_receipt",
+                  }),
+                  checkpointReason: "system_mailbox_receipt",
+                  progressed: true,
+                };
+              }
+
+              if (assistantPass === 2) {
+                assert.equal(input.workspace?.nextWakeAt, dueWakeAt);
+                assert.equal(input.workspace?.nextWakeReason, "assistant");
+                assert.ok(
+                  events.includes("runtime-wake:after-follow-up-checkpoint"),
+                  events.join(","),
+                );
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  nextWakeAt: null,
+                  nextWakeReason: null,
+                  progressed: true,
+                };
+              }
+
+              throw new Error("Fresh post-checkpoint wake should run exactly once.");
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      assert.equal(assistantPass, 2, events.join(","));
+      assert.equal(durableEffect.mock.calls.length, 1);
+      assert.deepEqual(
+        checkpointRequests.map((request) => [
+          request.reason,
+          request.expectedWorkspaceVersion,
+          request.nextWakeAt,
+          request.nextWakeReason,
+        ]),
+        [
+          ["idle_shutdown", "0", null, null],
+          ["idle_shutdown", "1", dueWakeAt, "assistant"],
+          ["idle_shutdown", "2", null, null],
+        ],
+      );
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown:1")
+          < requireEventIndex(events, "durable-effect"),
+      );
+      assert.ok(
+        requireEventIndex(events, "durable-effect")
+          < requireEventIndex(events, "snapshot:idle_shutdown:2"),
+      );
+      assert.ok(
+        requireEventIndex(events, "runtime-wake:after-follow-up-checkpoint")
+          < requireEventIndex(events, "assistant:2"),
+      );
+      assert.ok(
+        requireEventIndex(events, "assistant:2")
+          < requireEventIndex(events, "snapshot:idle_shutdown:3"),
+      );
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("checkpoints durable follow-up effects before servicing a replacement due assistant wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

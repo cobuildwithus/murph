@@ -2201,32 +2201,22 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             options.shutdownSignal ?? null,
           );
         if (checkpointWakeLatencySeed) {
-          idleWakeOrdinal += 1;
-          result = await runForegroundPass({
-            initialMailboxImport: null,
-            initialMailboxImportContext: createHostedRuntimeWakeInitialImportContext(
-              checkpointWakeLatencySeed,
-            ),
-            requestId: `${requestId}:checkpoint-wake:${idleWakeOrdinal}`,
-            workspace: checkpoint.workspace,
+          const checkpointWakeKeyBeingSuperseded =
+            projectedRuntimeWakeCanRunAfterCheckpoint({
+              projection: accumulatedProjection,
+              requireDue: false,
+              servicedProjectedRuntimeWakeKey,
+            })
+              ? buildHostedRuntimeWakeKey({
+                  nextWakeAt: accumulatedProjection.nextWakeAt,
+                  nextWakeReason: accumulatedProjection.nextWakeReason,
+                })
+              : servicedProjectedRuntimeWakeKey;
+          await runIdleWakeForegroundPass({
+            latencySeed: checkpointWakeLatencySeed,
+            projectedWakeKeyBeingServiced: checkpointWakeKeyBeingSuperseded,
+            requestIdKind: "checkpoint-wake",
           });
-          pendingDurableCheckpointEffects.push(...result.afterDurableCheckpoint);
-          idleCheckpointStartByMs = result.runtimeStateDirty
-            ? Date.now() + idleCheckpointDelayMs
-            : null;
-          const nextProjection = buildHostedWorkspaceInvocationProjection({
-            mailboxBudgetExhausted: mailboxBudgetExhausted(),
-            result,
-            workspace: checkpoint.workspace,
-          });
-          accumulatedProjection = mergeHostedWorkspaceInvocationProjection(
-            accumulatedProjection,
-            nextProjection,
-            {
-              replaceWake: shouldReplaceHostedWorkspaceInvocationWake(result),
-            },
-          );
-          runtimeStateDirty = result.runtimeStateDirty;
           continue;
         }
         if (
