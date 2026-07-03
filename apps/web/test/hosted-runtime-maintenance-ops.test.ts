@@ -134,39 +134,27 @@ describe("hosted runtime maintenance ops", () => {
     }));
   });
 
-  it("keeps family-sponsored members and containers as maintenance candidates while filtering inactive access", async () => {
-    mocks.hostedWorkspace.count.mockResolvedValue(3);
+  it("selects candidates with the resolver access projection in the WHERE", async () => {
+    // Sponsored members and thread containers qualify inside the query, so
+    // count, cursor, page, and batch wakes all describe the same population
+    // and a leading inactive raw row cannot starve a limit-1 batch wake.
+    mocks.hostedWorkspace.count.mockResolvedValue(1);
     mocks.hostedWorkspace.findMany.mockResolvedValue([
-      workspaceRow("member_sponsored", "10", {
-        accountGroupMemberships: [{
-          group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
-          status: "active",
-        }],
-        billingStatus: HostedBillingStatus.not_started,
-      }),
-      workspaceRow("member_container", "11", {
-        billingStatus: HostedBillingStatus.not_started,
-        threadContainer: {
-          owner: {
-            accountGroupMemberships: [],
-            billingStatus: HostedBillingStatus.active,
-            suspendedAt: null,
-          },
-        },
-      }),
-      workspaceRow("member_inactive", "12", {
-        billingStatus: HostedBillingStatus.canceled,
-      }),
+      workspaceRow("member_sponsored", "10"),
     ]);
 
     await expect(runtimeMaintenanceService.readHostedRuntimeMaintenanceOverview({
-      limit: 3,
+      limit: 1,
     })).resolves.toMatchObject({
-      candidates: [
-        { userId: "member_sponsored" },
-        { userId: "member_container" },
-      ],
+      candidates: [{ userId: "member_sponsored" }],
       nextCursor: null,
+    });
+
+    expect(mocks.hostedWorkspace.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: activeCheckpointedWorkspaceWhere(),
+    }));
+    expect(mocks.hostedWorkspace.count).toHaveBeenCalledWith({
+      where: activeCheckpointedWorkspaceWhere(),
     });
   });
 
@@ -434,8 +422,38 @@ describe("hosted runtime maintenance ops", () => {
 });
 
 function activeCheckpointedWorkspaceWhere() {
+  const personAccess = [
+    { billingStatus: HostedBillingStatus.active },
+    {
+      accountGroupMemberships: {
+        some: {
+          group: {
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: null,
+          },
+          status: "active",
+        },
+      },
+    },
+  ];
   return {
     member: {
+      OR: [
+        {
+          OR: personAccess,
+          threadContainer: null,
+        },
+        {
+          threadContainer: {
+            is: {
+              owner: {
+                OR: personAccess,
+                suspendedAt: null,
+              },
+            },
+          },
+        },
+      ],
       suspendedAt: null,
     },
     snapshotRef: {
@@ -444,32 +462,9 @@ function activeCheckpointedWorkspaceWhere() {
   };
 }
 
-function workspaceRow(
-  userId: string,
-  version: string,
-  member?: {
-    accountGroupMemberships?: Array<{
-      group: { billingStatus: HostedBillingStatus; suspendedAt: Date | null };
-      status: string;
-    }>;
-    billingStatus?: HostedBillingStatus;
-    threadContainer?: {
-      owner: {
-        accountGroupMemberships: [];
-        billingStatus: HostedBillingStatus;
-        suspendedAt: Date | null;
-      };
-    } | null;
-  },
-) {
+function workspaceRow(userId: string, version: string) {
   return {
     checkpointedAt: new Date("2026-06-01T12:00:00.000Z"),
-    member: {
-      accountGroupMemberships: member?.accountGroupMemberships ?? [],
-      billingStatus: member?.billingStatus ?? HostedBillingStatus.active,
-      suspendedAt: null,
-      threadContainer: member?.threadContainer ?? null,
-    },
     snapshotRef: {
       objectKey: `snapshots/${userId}.tar.br.enc`,
     },

@@ -113,6 +113,49 @@ export function hasActiveHostedThreadContainerAccess(input: {
     && hasActiveHostedPersonAccess(input.owner);
 }
 
+/**
+ * Set-based projection of `hasActiveHostedMemberAccess` for queries that must
+ * select access-holding members in the database (pagination, counts, sweeps).
+ * Keep it semantically identical to the pure derivation above; the raw-SQL
+ * due-reconcile sweep in device-sync mirrors the person branch of this shape.
+ */
+export function activeHostedMemberAccessWhere(): Prisma.HostedMemberWhereInput {
+  const personAccess: Prisma.HostedMemberWhereInput["OR"] = [
+    { billingStatus: HostedBillingStatus.active },
+    {
+      accountGroupMemberships: {
+        some: {
+          group: {
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: null,
+          },
+          status: "active",
+        },
+      },
+    },
+  ];
+
+  return {
+    OR: [
+      {
+        OR: personAccess,
+        threadContainer: null,
+      },
+      {
+        threadContainer: {
+          is: {
+            owner: {
+              OR: personAccess,
+              suspendedAt: null,
+            },
+          },
+        },
+      },
+    ],
+    suspendedAt: null,
+  };
+}
+
 export async function readActiveHostedMemberAccess(input: {
   memberId: string;
   prisma?: HostedOnboardingReadClient;
