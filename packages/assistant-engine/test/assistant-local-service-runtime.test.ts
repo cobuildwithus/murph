@@ -5486,15 +5486,20 @@ test('sendAssistantMessageLocal lets the provider own hosted attachment progress
   await expect(
     progressDelivery.send('Still checking the attachment context.'),
   ).resolves.toEqual({
-    kind: 'skipped',
-    reason: 'too-soon',
+    kind: 'sent',
     source: 'model',
   })
   await expect(
     progressDelivery.send('One more progress update.'),
   ).resolves.toEqual({
+    kind: 'sent',
+    source: 'model',
+  })
+  await expect(
+    progressDelivery.send('A fourth progress update.'),
+  ).resolves.toEqual({
     kind: 'skipped',
-    reason: 'too-soon',
+    reason: 'limit',
     source: 'model',
   })
   await expect(
@@ -5503,7 +5508,7 @@ test('sendAssistantMessageLocal lets the provider own hosted attachment progress
     kind: 'sent',
     source: 'model',
   })
-  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(2)
+  expect(mocks.deliverAssistantProgressUpdate).toHaveBeenCalledTimes(4)
 })
 
 test('sendAssistantMessageLocal uses resolved audience channel for hosted model progress', async () => {
