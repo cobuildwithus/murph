@@ -46,6 +46,7 @@ export interface HostedMailboxImportCheckpointInput {
     input: HostedMailboxImportCheckpointRequestInput,
   ): Promise<HostedWorkspaceCheckpointRequest> | HostedWorkspaceCheckpointRequest;
   now?: () => string;
+  onResolvedItem?: ((item: HostedMailboxResolvedImportItem) => void) | null;
 }
 
 export interface HostedMailboxImportCheckpointRequestInput {
@@ -119,6 +120,7 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     limitPerLane: input.limitPerLane,
     mailboxPort: input.mailboxPort,
     now: input.now,
+    onResolvedItem: input.onResolvedItem ?? null,
     prefetch: input.prefetch ?? null,
     requestId: input.requestId,
     state: previousState,

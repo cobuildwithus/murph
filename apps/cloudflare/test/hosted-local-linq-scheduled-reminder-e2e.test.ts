@@ -38,11 +38,11 @@ const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const overlapReminderText = "Time to sleep. This is the overlap reminder.";
 const overlapForegroundInboundText = "still there while the bedtime reminder is due?";
 const overlapForegroundReplyText = "Yep mate, I am here.";
-const scheduledReminderLeadMs = 45_000;
-const setupLeadText = "about forty-five seconds";
+const scheduledReminderLeadMs = 120_000;
+const setupLeadText = "about two minutes";
 const setupReplyText = `Done - I will remind you here in ${setupLeadText}.`;
 const setupRequestText = `Remind me here in ${setupLeadText} to go to sleep.`;
-const scheduledReminderMinimumRunwayMs = 5_000;
+const scheduledReminderMinimumRunwayMs = 30_000;
 const scheduledReminderSendWaitMs = 60_000;
 const scheduledReminderCompletionWaitMs = 60_000;
 const productionLikeAssistantModel = "gpt-5.5";
@@ -251,19 +251,19 @@ describe("hosted local Linq scheduled reminder e2e", () => {
         userId,
       });
 
-      const overlapForegroundSend = await requireLinqStub().waitForAdditionalSend({
+      const overlapForegroundSend = await waitForPassiveLinqSendAtOffset({
         baselineCount: overlapSendBaselineCount,
         expectedPath: reminderPath,
-        scenario: requireScenario(),
+        offset: 0,
         userId,
       });
       expect(requireLinqStub().readObservedMessageText(overlapForegroundSend))
         .toBe(overlapForegroundReplyText);
       heldOverlapReminderResponse.release();
-      const overlapReminderSend = await requireLinqStub().waitForAdditionalSend({
-        baselineCount: overlapSendBaselineCount + 1,
+      const overlapReminderSend = await waitForPassiveLinqSendAtOffset({
+        baselineCount: overlapSendBaselineCount,
         expectedPath: reminderPath,
-        scenario: requireScenario(),
+        offset: 1,
         userId,
       });
       expect(requireLinqStub().readObservedMessageText(overlapReminderSend))
@@ -279,11 +279,11 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 });
 
 describe("hosted local Linq scheduled reminder timing helpers", () => {
-  it("uses a forty-five-second lead", () => {
+  it("uses a two-minute lead", () => {
     const now = new Date("2026-06-18T12:00:00.000Z");
 
     expect(resolveScheduledReminderTimes(now)).toEqual({
-      dueAtIso: "2026-06-18T12:00:45.000Z",
+      dueAtIso: "2026-06-18T12:02:00.000Z",
     });
     expect(scheduledReminderLeadMs).toBeGreaterThan(scheduledReminderMinimumRunwayMs);
   });
@@ -630,6 +630,41 @@ async function waitForScheduledReminderSend(input: {
     `expected path: ${input.expectedPath}`,
     `baseline count: ${input.baselineCount}`,
     `observed requests: ${JSON.stringify(summarizeObservedLinqRequests())}`,
+  ]));
+}
+
+async function waitForPassiveLinqSendAtOffset(input: {
+  baselineCount: number;
+  expectedPath: string;
+  offset: number;
+  timeoutMs?: number;
+  userId: string;
+}): Promise<ObservedLinqRequest> {
+  const timeoutMs = input.timeoutMs ?? scheduledReminderSendWaitMs;
+  const startedAt = Date.now();
+  while ((Date.now() - startedAt) < timeoutMs) {
+    const matchingRequests = requireLinqStub().observedRequests.filter((request) =>
+      request.method === "POST" && request.url === input.expectedPath
+    );
+    const request = matchingRequests[input.baselineCount + input.offset];
+    if (request) {
+      return request;
+    }
+
+    await sleep(100);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(input.userId, [
+    "Timed out waiting for passive Linq send ordering observation.",
+    `expected path: ${input.expectedPath}`,
+    `baseline count: ${input.baselineCount}`,
+    `offset: ${input.offset}`,
+    `observed sends after baseline: ${JSON.stringify(
+      requireLinqStub().observedRequests
+        .filter((request) => request.method === "POST" && request.url === input.expectedPath)
+        .slice(input.baselineCount)
+        .map((request) => requireLinqStub().readObservedMessageText(request)),
+    )}`,
   ]));
 }
 
