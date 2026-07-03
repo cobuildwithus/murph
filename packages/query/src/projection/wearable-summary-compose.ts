@@ -650,6 +650,7 @@ function projectedActivitySessionAggregate(
     candidateId: `projected:activity-session:${provider}:${summary.date}`,
     dataOrigin: null,
     date: summary.date,
+    heartRateZones: (summary.heartRateZones ?? []).map((zone) => ({ ...zone })),
     paths: [],
     provider,
     recordedAt: latestNullableIso([

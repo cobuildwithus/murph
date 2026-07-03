@@ -7,6 +7,7 @@ import {
   buildHostedVaultShareRevokeDedupeKey,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
   parseHostedVaultShareDeliverRequest,
   parseHostedVaultShareDeliverResponse,
@@ -26,6 +27,45 @@ const VALID_ACTIVITY_RECORD = {
   data: {
     activeMinutes: 73,
     date: "2026-07-03",
+  },
+  occurredAt: "2026-07-03T00:00:00.000Z",
+  recordKey: "2026-07-03",
+};
+
+const VALID_DAILY_METRIC_RECORD = {
+  data: {
+    date: "2026-07-03",
+    metricKey: "steps",
+    unit: "count",
+    value: 12_345,
+  },
+  occurredAt: "2026-07-03T00:00:00.000Z",
+  recordKey: "2026-07-03",
+};
+
+const VALID_WORKOUT_RECORD = {
+  data: {
+    activityTypes: ["running", "strength"],
+    date: "2026-07-03",
+    workoutCount: 2,
+    workoutMinutes: 85,
+  },
+  occurredAt: "2026-07-03T00:00:00.000Z",
+  recordKey: "2026-07-03",
+};
+
+const VALID_HEART_RATE_ZONE_RECORD = {
+  data: {
+    date: "2026-07-03",
+    zones: [
+      {
+        durationMinutes: 24,
+        label: "Zone 2",
+        maxHeartRate: 140,
+        minHeartRate: 120,
+        zone: 2,
+      },
+    ],
   },
   occurredAt: "2026-07-03T00:00:00.000Z",
   recordKey: "2026-07-03",
@@ -51,6 +91,27 @@ describe("vault-share contracts", () => {
   it("registers vault-share kinds in the mailbox kind registry", () => {
     expect(HOSTED_MAILBOX_KINDS).toContain("vault-share.delivery");
     expect(HOSTED_MAILBOX_KINDS).toContain("vault-share.revoke");
+  });
+
+  it("exposes challenge health projections as selectable closed kinds", () => {
+    expect(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS).toEqual([
+      "sleep-times.v0",
+      "activity-days.v0",
+      "workout-days.v0",
+      "heart-rate-zones-days.v0",
+      "steps-days.v0",
+      "max-heart-rate-days.v0",
+      "distance-days.v0",
+      "active-calories-days.v0",
+      "elevation-gain-days.v0",
+      "floors-climbed-days.v0",
+      "day-strain-days.v0",
+      "workout-strain-days.v0",
+      "activity-score-days.v0",
+      "vo2-max-days.v0",
+      "resting-heart-rate-days.v0",
+      "hrv-days.v0",
+    ]);
   });
 
   it("derives the delivery dedupe key from share id, record key, and revision", () => {
@@ -390,6 +451,120 @@ describe("activity-days.v0 delivery records", () => {
         })
       ).toThrow(/activeMinutes|finite number/u);
     }
+  });
+});
+
+describe("daily metric vault-share delivery records", () => {
+  it("parses a valid daily scalar metric record", () => {
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "steps-days.v0",
+      records: [VALID_DAILY_METRIC_RECORD],
+    })).toEqual({
+      projectionKind: "steps-days.v0",
+      records: [VALID_DAILY_METRIC_RECORD],
+    });
+  });
+
+  it("rejects daily scalar records that do not match the projection kind", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "steps-days.v0",
+        records: [{
+          ...VALID_DAILY_METRIC_RECORD,
+          data: { ...VALID_DAILY_METRIC_RECORD.data, metricKey: "distance-km" },
+        }],
+      })
+    ).toThrow(/metricKey must be steps/u);
+  });
+
+  it("rejects implausible daily scalar values and metadata drift", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "steps-days.v0",
+        records: [{
+          ...VALID_DAILY_METRIC_RECORD,
+          data: { ...VALID_DAILY_METRIC_RECORD.data, value: 1_000_001 },
+        }],
+      })
+    ).toThrow(/value must be between/u);
+
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "steps-days.v0",
+        records: [{ ...VALID_DAILY_METRIC_RECORD, occurredAt: "2026-07-03T10:00:00.000Z" }],
+      })
+    ).toThrow(/date at UTC midnight/u);
+  });
+});
+
+describe("workout-days.v0 delivery records", () => {
+  it("parses a valid daily workout summary record", () => {
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "workout-days.v0",
+      records: [VALID_WORKOUT_RECORD],
+    })).toEqual({
+      projectionKind: "workout-days.v0",
+      records: [VALID_WORKOUT_RECORD],
+    });
+  });
+
+  it("rejects malformed workout summaries", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "workout-days.v0",
+        records: [{
+          ...VALID_WORKOUT_RECORD,
+          data: { ...VALID_WORKOUT_RECORD.data, workoutCount: 1.5 },
+        }],
+      })
+    ).toThrow(/workoutCount/u);
+
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "workout-days.v0",
+        records: [{
+          ...VALID_WORKOUT_RECORD,
+          data: { ...VALID_WORKOUT_RECORD.data, activityTypes: ["x".repeat(81)] },
+        }],
+      })
+    ).toThrow(/activityTypes/u);
+  });
+});
+
+describe("heart-rate-zones-days.v0 delivery records", () => {
+  it("parses a valid daily heart-rate zone summary record", () => {
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "heart-rate-zones-days.v0",
+      records: [VALID_HEART_RATE_ZONE_RECORD],
+    })).toEqual({
+      projectionKind: "heart-rate-zones-days.v0",
+      records: [VALID_HEART_RATE_ZONE_RECORD],
+    });
+  });
+
+  it("rejects malformed heart-rate zone summaries", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "heart-rate-zones-days.v0",
+        records: [{
+          ...VALID_HEART_RATE_ZONE_RECORD,
+          data: { ...VALID_HEART_RATE_ZONE_RECORD.data, zones: [] },
+        }],
+      })
+    ).toThrow(/zones/u);
+
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "heart-rate-zones-days.v0",
+        records: [{
+          ...VALID_HEART_RATE_ZONE_RECORD,
+          data: {
+            ...VALID_HEART_RATE_ZONE_RECORD.data,
+            zones: [{ durationMinutes: 20 }],
+          },
+        }],
+      })
+    ).toThrow(/identify the zone/u);
   });
 });
 

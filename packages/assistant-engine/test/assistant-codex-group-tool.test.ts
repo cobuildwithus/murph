@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS } from "@murphai/hosted-execution/vault-share";
 
 import {
   MURPH_GROUP_TOOL,
@@ -25,7 +26,7 @@ describe("murph.group dynamic tool", () => {
       "share_contact_card",
     ]);
     expect(MURPH_GROUP_TOOL.inputSchema.properties.requestedVaultShareProjectionKinds.items.enum)
-      .toEqual(["sleep-times.v0", "activity-days.v0"]);
+      .toEqual([...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS]);
   });
 
   it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {

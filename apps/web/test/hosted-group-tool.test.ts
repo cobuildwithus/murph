@@ -92,6 +92,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 import { handleHostedRuntimeGroupTool } from "@/src/lib/hosted-groups/group-tool";
+import { HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS } from "@murphai/hosted-execution/vault-share";
 import {
   mergeHostedGroupJoinPolicy,
   projectHostedVaultShareProjectionDisplays,
@@ -297,7 +298,10 @@ describe("hosted group join policy", () => {
         schema: "murph.hosted-group.join-policy.v1",
       },
       requestedVaultShareProjectionKinds: ["activity-days.v0", "sleep-times.v0"],
-    }).requestedVaultShareProjectionKinds).toEqual(["sleep-times.v0", "activity-days.v0"]);
+    }).requestedVaultShareProjectionKinds).toEqual([
+      "sleep-times.v0",
+      "activity-days.v0",
+    ]);
 
     expect(readHostedGroupJoinPolicy({
       requestedVaultShareProjectionKinds: ["all-health-data"],
@@ -307,6 +311,7 @@ describe("hosted group join policy", () => {
     expect(projectHostedVaultShareProjectionDisplays([
       "sleep-times.v0",
       "activity-days.v0",
+      "heart-rate-zones-days.v0",
     ])).toEqual([
       {
         description:
@@ -320,6 +325,18 @@ describe("hosted group join policy", () => {
         label: "Recent activity minutes",
         projectionKind: "activity-days.v0",
       },
+      {
+        description:
+          "Allows this group to receive your recent daily workout heart-rate zone minutes as bounded shared records.",
+        label: "Recent heart-rate zones",
+        projectionKind: "heart-rate-zones-days.v0",
+      },
+    ]);
+
+    expect(projectHostedVaultShareProjectionDisplays(
+      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+    ).map((entry) => entry.projectionKind)).toEqual([
+      ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
     ]);
   });
 });

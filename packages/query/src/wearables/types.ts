@@ -32,6 +32,7 @@ export interface WearableMetricCandidate {
   title: string | null;
   unit: string | null;
   value: number;
+  heartRateZones?: WearableHeartRateZoneAggregate[];
   workoutMetricKeys?: string[];
 }
 
@@ -84,6 +85,7 @@ export interface WearableActivityDay {
   distanceKm: WearableResolvedMetric;
   estimatedVo2Max: WearableResolvedMetric;
   floorsClimbed: WearableResolvedMetric;
+  heartRateZones: WearableHeartRateZoneAggregate[];
   maxHeartRate: WearableResolvedMetric;
   notes: string[];
   percentRecorded: WearableResolvedMetric;
@@ -94,6 +96,14 @@ export interface WearableActivityDay {
   totalCalories: WearableResolvedMetric;
   totalElevationGainMeters: WearableResolvedMetric;
   workoutStrain: WearableResolvedMetric;
+}
+
+export interface WearableHeartRateZoneAggregate {
+  durationMinutes: number;
+  label?: string;
+  maxHeartRate?: number;
+  minHeartRate?: number;
+  zone?: number;
 }
 
 export interface WearableSleepNight {
@@ -374,6 +384,7 @@ export interface WearableActivitySessionAggregate {
   candidateId: string;
   dataOrigin?: DeviceDataOrigin | null;
   date: string;
+  heartRateZones: WearableHeartRateZoneAggregate[];
   paths: string[];
   provider: string;
   recordedAt: string | null;

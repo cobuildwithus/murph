@@ -147,7 +147,15 @@ const RECOVERY_METRIC_EVIDENCE = [
 const ACTIVITY_METRIC_EVIDENCE = [
   { metricKey: "steps", summaryField: "steps", sourceKind: "activity-summary" },
   { metricKey: "activity-minutes", summaryField: "sessionMinutes", sourceKind: "activity-summary" },
+  { metricKey: "active-calories", summaryField: "activeCalories", sourceKind: "activity-summary" },
+  { metricKey: "activity-score", summaryField: "activityScore", sourceKind: "activity-summary" },
+  { metricKey: "day-strain", summaryField: "dayStrain", sourceKind: "activity-summary" },
+  { metricKey: "distance-km", summaryField: "distanceKm", sourceKind: "activity-summary" },
+  { metricKey: "elevation-gain-meters", summaryField: "totalElevationGainMeters", sourceKind: "activity-summary" },
   { metricKey: "estimated-vo2-max", summaryField: "estimatedVo2Max", sourceKind: "activity-summary" },
+  { metricKey: "floors-climbed", summaryField: "floorsClimbed", sourceKind: "activity-summary" },
+  { metricKey: "max-heart-rate", summaryField: "maxHeartRate", sourceKind: "activity-summary" },
+  { metricKey: "workout-strain", summaryField: "workoutStrain", sourceKind: "activity-summary" },
 ] as const satisfies readonly SummaryMetricEvidenceEntry<WearableResolvedMetricField<WearableActivitySummary>>[];
 
 const BODY_STATE_METRIC_EVIDENCE = [

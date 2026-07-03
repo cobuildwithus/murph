@@ -35,6 +35,7 @@ import type {
   WearableDataset,
   WearableExternalRef,
   WearableFilters,
+  WearableHeartRateZoneAggregate,
   WearableMetricCandidate,
   WearableMetricKey,
   WearableProvenanceDiagnostic,
@@ -184,10 +185,15 @@ export function buildActivitySessionAggregates(
   for (const candidate of dedupeExactMetricCandidates(candidates).candidates) {
     const key = `${candidate.date}:${candidate.provider}:${wearableDataOriginKey(candidate.dataOrigin)}`;
     const activityType = candidate.activityType ?? null;
+    const heartRateZones = candidate.heartRateZones ?? [];
     const existing = grouped.get(key);
     if (existing) {
       existing.paths = uniqueStrings([...existing.paths, ...candidate.paths]);
       existing.recordIds = uniqueStrings([...existing.recordIds, ...candidate.recordIds]);
+      existing.heartRateZones = mergeHeartRateZoneAggregates([
+        ...existing.heartRateZones,
+        ...heartRateZones,
+      ]);
       existing.sessionMinutes += candidate.value;
       existing.sessionCount += 1;
       existing.workoutMetricKeys = uniqueStrings([
@@ -212,6 +218,7 @@ export function buildActivitySessionAggregates(
       ]),
       dataOrigin: candidate.dataOrigin ?? null,
       date: candidate.date,
+      heartRateZones: mergeHeartRateZoneAggregates(heartRateZones),
       paths: [...candidate.paths],
       provider: candidate.provider,
       recordedAt: candidate.recordedAt,
@@ -462,6 +469,18 @@ export function resolveSelectedActivityTypes(
   return selected?.activityTypes ?? [];
 }
 
+export function resolveSelectedHeartRateZones(
+  aggregates: readonly WearableActivitySessionAggregate[],
+  selectedProvider: string | null,
+): WearableHeartRateZoneAggregate[] {
+  if (!selectedProvider) {
+    return [];
+  }
+
+  const selected = aggregates.find((aggregate) => aggregate.provider === selectedProvider);
+  return selected ? selected.heartRateZones.map((zone) => ({ ...zone })) : [];
+}
+
 export function groupMetricCandidatesByDate(
   candidates: readonly WearableMetricCandidate[],
 ): Map<string, WearableMetricCandidate[]> {
@@ -679,6 +698,7 @@ function buildActivitySessionCandidate(
   return {
     ...createMetricCandidateBase(entity, provider, externalRef, date, "event", "activity_session"),
     activityType: resolveActivitySessionActivityType(entity),
+    heartRateZones: listWorkoutHeartRateZones(entity.attributes.workout),
     metric: "sessionMinutes",
     unit: "minutes",
     value: durationMinutes,
@@ -820,6 +840,89 @@ function listWorkoutMetricKeys(workout: unknown): string[] {
 
   const metricRecord = metrics as Record<string, unknown>;
   return WORKOUT_METRIC_KEYS.filter((metric) => readNumber(metricRecord[metric]) !== null);
+}
+
+function listWorkoutHeartRateZones(workout: unknown): WearableHeartRateZoneAggregate[] {
+  if (!workout || typeof workout !== "object" || Array.isArray(workout)) {
+    return [];
+  }
+
+  const zones = (workout as Record<string, unknown>).heartRateZones;
+  if (!Array.isArray(zones)) {
+    return [];
+  }
+
+  return mergeHeartRateZoneAggregates(
+    zones.flatMap((entry) => {
+      const zone = normalizeWorkoutHeartRateZone(entry);
+      return zone ? [zone] : [];
+    }),
+  );
+}
+
+function normalizeWorkoutHeartRateZone(value: unknown): WearableHeartRateZoneAggregate | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const durationMinutes = readNumber(record.durationMinutes);
+  if (durationMinutes === null || durationMinutes < 0) {
+    return null;
+  }
+
+  const zone = readNumber(record.zone);
+  const minHeartRate = readNumber(record.minHeartRate);
+  const maxHeartRate = readNumber(record.maxHeartRate);
+  const label = normalizeNullableString(record.label);
+  if (
+    zone === null
+    && minHeartRate === null
+    && maxHeartRate === null
+    && label === null
+  ) {
+    return null;
+  }
+
+  return {
+    ...(label === null ? {} : { label }),
+    ...(maxHeartRate === null ? {} : { maxHeartRate }),
+    ...(minHeartRate === null ? {} : { minHeartRate }),
+    ...(zone === null ? {} : { zone }),
+    durationMinutes,
+  };
+}
+
+function mergeHeartRateZoneAggregates(
+  zones: readonly WearableHeartRateZoneAggregate[],
+): WearableHeartRateZoneAggregate[] {
+  const merged = new Map<string, WearableHeartRateZoneAggregate>();
+
+  for (const zone of zones) {
+    const key = [
+      zone.zone ?? "",
+      zone.label ?? "",
+      zone.minHeartRate ?? "",
+      zone.maxHeartRate ?? "",
+    ].join("|");
+    const existing = merged.get(key);
+    if (existing) {
+      existing.durationMinutes += zone.durationMinutes;
+      continue;
+    }
+    merged.set(key, { ...zone });
+  }
+
+  return [...merged.values()].sort(compareHeartRateZoneAggregate);
+}
+
+function compareHeartRateZoneAggregate(
+  left: WearableHeartRateZoneAggregate,
+  right: WearableHeartRateZoneAggregate,
+): number {
+  return (left.zone ?? Number.MAX_SAFE_INTEGER) - (right.zone ?? Number.MAX_SAFE_INTEGER)
+    || (left.minHeartRate ?? Number.MAX_SAFE_INTEGER) - (right.minHeartRate ?? Number.MAX_SAFE_INTEGER)
+    || (left.maxHeartRate ?? Number.MAX_SAFE_INTEGER) - (right.maxHeartRate ?? Number.MAX_SAFE_INTEGER)
+    || (left.label ?? "").localeCompare(right.label ?? "");
 }
 
 function mapSleepStageToMetric(stage: string): WearableMetricKey | null {

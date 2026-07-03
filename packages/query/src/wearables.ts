@@ -9,6 +9,7 @@ import {
   groupMetricCandidatesByDate,
   groupSleepWindowsByDate,
   resolveSelectedActivityTypes,
+  resolveSelectedHeartRateZones,
   selectMetricCandidates,
 } from "./wearables/candidates.ts";
 import {
@@ -218,6 +219,7 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       { metricFamily: "activity" },
     );
     const activityTypes = resolveSelectedActivityTypes(aggregates, sessionMinutes.selection.provider);
+    const heartRateZones = resolveSelectedHeartRateZones(aggregates, sessionMinutes.selection.provider);
     const summaryConfidence = summarizeMetricsConfidence([
       ["steps", steps],
       ["activeCalories", activeCalories],
@@ -254,6 +256,7 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       distanceKm,
       estimatedVo2Max,
       floorsClimbed,
+      heartRateZones,
       maxHeartRate,
       notes,
       percentRecorded,
