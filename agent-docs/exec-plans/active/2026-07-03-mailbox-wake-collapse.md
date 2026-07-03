@@ -53,11 +53,19 @@ become one fact on one callback:
    needs no wake. It removes the need for any workflow-side coordination,
    delay timer, new patch marker, or replay fixture (see PR C — which this
    finding collapsed).
-   Implementation care: enumerate every reader of the reconciliation-facts
-   `mailboxLag` array (workflow `hasAnyMailboxLag`, usage-gate freshness
-   floor, any status surfaces) and confirm each wants consumed-netted lag;
-   the usage-gate freshness path already reads `consumedSeqByLane`
-   separately and must not double-net. A crashed-after-delivery container
+   Implementation care: `computeHostedMailboxLaneLag` gains an optional
+   `consumedSeq` input rather than netting implicitly, and BOTH callers
+   are updated deliberately: the reconciliation-facts route (netted — the
+   workflow backstop must stand down at delivery) and
+   `/api/internal/hosted-runtime/status` (`status/route.ts:35`, consumed
+   by runner status + transport-failure recovery in
+   `runtime-invocation.ts:471` / `hosted-user-runner.ts:157`) which must
+   either also net (fetch consumedSeq there too) or be explicitly
+   documented imported-only after auditing its Cloudflare consumers.
+   Decide during implementation with those consumers read first; do not
+   leave the two surfaces silently divergent. The usage-gate freshness
+   path already reads `consumedSeqByLane` separately and must not
+   double-net. A crashed-after-delivery container
    is the key scenario: `consumedSeq` (durable at delivery) > `importedSeq`
    (stale checkpoint) is the normal state, and the next invocation
    re-serves the consumed prefix as context-only - no wake owed, no reply
@@ -111,15 +119,28 @@ hosted-runtime-protocol.md §519–526):
   ack they nominally had never fired anyway (~0 acks/week), so deleting it
   regresses nothing. This constraint GATES PR B (see below).
 
-Coverage computation (verified design):
-- Compute in the auto-reply frame (`automation/reply.ts:1453-1520`) where
-  the answered candidates' `sourceRef.laneSeq` are already in hand: a
-  lane-ordered scan across ALL conversation-lane channels merged by laneSeq
-  (reusing `hasCompleteAssistantAutoReplyTerminalEvidence`), stopping at
-  the first input lacking terminal evidence. Per-channel `eligibleAfter`
-  cursors CANNOT express this (they would over-claim past another
-  channel's pending input) — there is no existing single source of truth;
-  this scan is the one new computation the PR adds.
+Coverage computation (verified design, hardened by adversarial review):
+- Compute in the auto-reply frame (`automation/reply.ts:1453-1520`), but
+  the scan input is the PERSISTED input store's conversation-lane staged
+  inputs ordered by laneSeq — NOT the current reply context or candidate
+  set (which is per-channel and context-bound and can over-claim past a
+  pending input from another channel, another Linq conversation, or a
+  thread-route/group item). Walk the lane-ordered prefix, stop at the
+  first input lacking terminal evidence, stamp that high water.
+- Suppression IS valid terminal evidence for the scan
+  (`hasCompleteAssistantAutoReplyTerminalEvidence` includes it, correctly):
+  a suppressed input re-suppresses on re-run, so covering it is safe and
+  desirable. The "no-reply turns get no ack" rule means only that a
+  suppressed turn produces no ack VEHICLE of its own — its inputs are
+  covered by the next delivered reply's scan.
+- Reaction-only sends (`setLinqMessageReaction`) do not emit the delivery
+  callback and are not reply coverage; a reaction-only turn's inputs are
+  likewise covered by the next delivered reply. No callback added for
+  them (measured-need rule).
+- Required tests: telegram-pending-below-linq-answered hold-back;
+  suppressed-prefix advance; group/thread-route item interleave; steered
+  multi-final turn; input staged mid-turn (arrives after scan snapshot —
+  must not be covered).
 - Thread as one optional field: intent schema
   (`assistant-cli-contracts.ts:816`) → create input (`outbox.ts:245`) →
   delivery payload (`side-effects.ts:107`) →
@@ -132,6 +153,11 @@ Coverage computation (verified design):
   are minted once and reused across retries; only the provider-accept path
   emits `acceptedAt`; the web route enforces accepted/failed XOR; the
   store's advance is monotonic so out-of-order accepts cannot regress.
+- Advance on ANY accepted outcome carrying coverage — not only on a
+  newly-accepted transition. The advance is monotonic-max, so replays are
+  free, and the deploy window requires it: new runner → old web records
+  accepted but ignores coverage; the retry hitting new web finds the row
+  already accepted and must still advance.
 - Rollback care: `assistantOutboxIntentSchema` is `.strict()`. A new
   runner writing the field then rolling back to an old runner must not
   brick outbox-state parsing. Follow the repo's outbox schema-evolution
@@ -139,17 +165,16 @@ Coverage computation (verified design):
   in one runner release before the producer).
 
 Riders (independent deletions, separate commits):
-- Delete the mailbox-fetch route's AI-usage gate re-check — VERIFIED
-  safe-to-delete. Enforcement is fully owned by turn admission
-  (`runtime-reconciliation-facts.ts:158-288`, which gates the exact same
-  work set: fresh conversation lag, gated system items, model-capable
-  wakes), backstopped by the route's member-active check (line 44, blocks
-  suspended users) and the sibling payload-fetch gate for sidecars. A
-  denied-over-quota runner would import items as context but spend nothing
-  and reply nothing; items stay pending until quota resets. Touch:
-  `fetch/route.ts` imports 15-17/24-26, call 66-71, helper 86-134. Keep
-  `hostedMailboxItemsRequireAiUsageAccess`/`resolveHostedRuntimeAiUsageGate`
-  (still used by payload route + reconciliation facts + signal-runtime).
+- Mailbox-fetch AI-usage gate: KEEP (rider withdrawn by adversarial
+  review). The original safe-to-delete verdict assumed every wake
+  traverses turn admission in reconciliation facts — true only for
+  Temporal-orchestrated wakes. A direct-woken container (PR B, or the
+  legacy workflow branch until PR C) fetches the mailbox WITHOUT ever
+  reading reconciliation facts, so the read-first fetch gate is the only
+  usage check on the fast path. It is cheap (fires only when the batch
+  contains gated work) and becomes load-bearing under PR B. Deleting it
+  would require runtime-local admission — complexity in the wrong
+  direction.
 - Relocate (NOT delete) `readRecordedHostedLinqFirstContactAdmissionDecision`:
   keyed by unique `eventId` (schema:951-961) so fresh events always read
   null; it is load-bearing only for retried deliveries (idempotent
@@ -283,7 +308,7 @@ Touch: `webhook-service-types.ts:17-26`;
 
 | PR | Deleted | Added |
 | --- | --- | --- |
-| A | ~220-line checkpoint ack block, consume route+port+compat wiring, fetch-route usage gate, every-message admission pre-read | intent field, report field, 1 store call, lag netting (one expression) |
+| A | ~220-line checkpoint ack block, consume route+port+compat wiring, dead lag export, every-message admission pre-read (relocated) | intent field, report field, 1 store call, lag netting (explicit param, both callers audited) |
 | B | — | ~500 lines restored (stateless hint; no new state/concepts) |
 | C | legacy patch branch, runtime seam, patch constant, direct-summary recorder, replay fixture+test | `deprecatePatch` intermediate (itself later deleted) |
 | D | two legacy wake fields + parallel consumers | — |
@@ -292,3 +317,11 @@ Plan-level collapse already banked: the original PR C ("demote workflow to
 recheck-only": delay timer, second patch marker, new replay fixture) was
 deleted from this plan — PR A's lag netting makes the existing patched
 reconcile loop the correct backstop as-is.
+
+Adversarial review (c1 gpt-5.5 xhigh, 2026-07-03) resolutions: fetch-gate
+deletion withdrawn (it is the only usage check on the direct-wake path);
+coverage scan pinned to the persisted lane prefix, not context candidates;
+suppression counts as terminal for coverage; lag netting made an explicit
+parameter with the status route audited alongside; watermark advances on
+any accepted+coverage report (replay/deploy-window safe); reaction-only
+sends excluded from callback assumptions.
