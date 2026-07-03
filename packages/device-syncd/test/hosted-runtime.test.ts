@@ -1939,6 +1939,9 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
       sanitizeHostedRuntimeDiagnosticText('["junction-user-1"]'),
     ).toBeNull();
     expect(
+      sanitizeHostedRuntimeDiagnosticText("[12345]"),
+    ).toBeNull();
+    expect(
       sanitizeHostedRuntimeDiagnosticText('{user_id:"junction-user-1", display_name:"Alice"}'),
     ).toBeNull();
   });
@@ -1950,6 +1953,41 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("request denied for teamId=hbm_abc123xyz"),
     ).toBe("request denied for teamId=<redacted-id>");
+  });
+
+  it("masks id-shaped values regardless of quoting or bracketing", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText('User "junction-user-1" is not configured'),
+    ).toBe('User "<redacted-id>" is not configured');
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("provider returned [junction-user-1] for the request"),
+    ).toBe("provider returned [<redacted-token>] for the request");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("retry after 2026-07-04T09:15:00Z with limit 250 on v1.2.3"),
+    ).toBe("retry after 2026-07-04T09:15:00Z with limit 250 on <redacted-token>");
+  });
+
+  it("masks quoted echoed input values as a whole", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("rejected [input_value='user junction-user-1', input_type=str]"),
+    ).toBe("rejected [input_value='<redacted-value>', input_type=str]");
+    const quotedInput = sanitizeHostedRuntimeDiagnosticText("rejected [input_value='Jane Doe', input_type=str]");
+    expect(quotedInput).toBe("rejected [input_value='<redacted-value>', input_type=str]");
+    expect(quotedInput).not.toContain("Doe");
+  });
+
+  it("strips default-ignorable format characters before masking", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("user junction-\u200Buser-1 denied"),
+    ).toBe("user <redacted-id> denied");
+  });
+
+  it("keeps a safe prefix when a structured dump starts beyond the length cap", () => {
+    const prefix = "safe provider explanation ".repeat(24).trim();
+    const sanitized = sanitizeHostedRuntimeDiagnosticText(`${prefix} {"debug":"dump"}`);
+    expect(sanitized).not.toBeNull();
+    expect(sanitized).not.toContain("{");
+    expect(sanitized?.length).toBeLessThanOrEqual(512);
   });
 
   it("masks long tokens that would straddle the diagnostic length cap", () => {

@@ -33,28 +33,47 @@ const HOSTED_RUNTIME_ERROR_WINDOWS_PATH_PATTERN = /[A-Za-z]:\\[^\s)"']+/gu;
 const HOSTED_RUNTIME_ERROR_URL_PATTERN = /\bhttps?:\/\/[^\s)"']+/giu;
 const HOSTED_RUNTIME_ERROR_EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu;
 const HOSTED_RUNTIME_ERROR_PHONE_PATTERN = /(?:\+\d[\d().\s-]{7,}\d|\(\d{3}\)\s*\d{3}[-.\s]\d{4}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b)/gu;
-// Braces, quoted-entry arrays, and quoted-key colons signal a raw structured
-// payload dump (JSON or object-repr, quoted or not), which can carry arbitrary
-// values under keys the span redactors do not know; those stay fail-closed.
+// Braces, primitive/structured arrays, and quoted-key colons signal a raw
+// structured payload dump (JSON or object-repr, quoted or not), which can carry
+// arbitrary values under keys the span redactors do not know; those stay
+// fail-closed.
 // Bare square brackets around prose are allowed so bracketed validation
 // suffixes (for example pydantic's `[type=...]`) survive with their values
 // span-redacted.
 const HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN =
-  /[{}]|\[\s*["']|["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
+  /[{}]|\[\s*(?:["'{]|\d|(?:true|false|null)\b)|["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
+// Default-ignorable format characters (zero-width spaces/joiners, soft
+// hyphens, BOM) can split an identifier visually without changing how it
+// renders; strip them before span matching so they cannot defeat the masks.
+const HOSTED_RUNTIME_DIAGNOSTIC_FORMAT_CHAR_PATTERN = /[\u00AD\u200B-\u200F\u2060-\u2064\uFEFF]/gu;
 const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN =
   /\b((?:account|client|external|member|owner|patient|provider[_\s-]?account|subject|team|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*[:=]\s*["']?)[A-Za-z0-9._:-]{6,}/giu;
 // Validation errors often echo the offending input back (for example pydantic
 // `input_value=...` suffixes); those values can be identifiers, so mask them
-// regardless of what the surrounding prose looks like.
+// regardless of what the surrounding prose looks like. Quoted echoes mask the
+// whole quoted value; unquoted echoes mask up to the next delimiter.
+const HOSTED_RUNTIME_DIAGNOSTIC_QUOTED_ECHOED_INPUT_PATTERN =
+  /\b((?:input(?:[_\s-]?value)?|value|ctx)\s*[:=]\s*)(["'])[^"']*\2/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_ECHOED_INPUT_PATTERN =
   /\b((?:input(?:[_\s-]?value)?|value|ctx)\s*[:=]\s*["']?)[^\s,;\])"']+/giu;
 // Identifier values also appear as bare phrases ("user hbm_abc123xyz",
-// "user id hbm_abc123xyz"); mask the value when it looks id-shaped (contains a
-// digit or underscore) so plain words ("user profile") stay readable.
+// 'user id "hbm_abc123xyz"'); mask the value when it looks id-shaped
+// (contains a digit or underscore) so plain words ("user profile") stay
+// readable.
 const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_PHRASE_PATTERN =
-  /\b((?:account|client|external|member|owner|patient|subject|team|user)(?:\s+(?:id|identifier))?\s+)(?=[A-Za-z0-9._:-]*[\d_])[A-Za-z0-9._:-]{6,}\b/giu;
+  /\b((?:account|client|external|member|owner|patient|subject|team|user)(?:\s+(?:id|identifier))?\s+["']?)(?=[A-Za-z0-9._:-]*[\d_])[A-Za-z0-9._:-]{6,}\b/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_TOKEN_PHRASE_PATTERN =
-  /\b((?:access|id|refresh|session)\s+token\s+)(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{6,}/giu;
+  /\b((?:access|id|refresh|session)\s+token\s+["']?)(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{6,}/giu;
+// The catch-all for id-shaped values in any remaining context (quoted,
+// bracketed, mid-prose): a token of six or more characters containing a digit
+// is masked unless it is a recognizably safe shape — a small plain number, a
+// dotted number (versions), or an ISO-8601 date/datetime. This makes leak
+// safety depend on the value's own shape rather than on enumerating every
+// surrounding context.
+const HOSTED_RUNTIME_DIAGNOSTIC_DIGIT_TOKEN_PATTERN =
+  /\b(?=[A-Za-z0-9._~+/:=-]*\d)[A-Za-z0-9._~+/:=-]{6,}\b/gu;
+const HOSTED_RUNTIME_DIAGNOSTIC_SAFE_DIGIT_TOKEN_PATTERN =
+  /^(?:\d{1,4}|\d+(?:\.\d+)+|\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})?)?)$/u;
 const HOSTED_RUNTIME_DIAGNOSTIC_LONG_TOKEN_PATTERN =
   /\b(?=[A-Za-z0-9._~+/=-]{32,}\b)(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]+\b/gu;
 const HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_BLOCKED_KEY_SUBSTRINGS = [
@@ -2256,16 +2275,22 @@ export function sanitizeHostedRuntimeErrorText(value: string | null): string | n
 // the clamp boundary and escape as a short unmaskable prefix.
 export function sanitizeHostedRuntimeDiagnosticText(value: string | null): string | null {
   const sanitized = sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH)
-    ?.replace(HOSTED_RUNTIME_ERROR_FILE_URL_PATTERN, "<redacted-path>")
+    ?.replace(HOSTED_RUNTIME_DIAGNOSTIC_FORMAT_CHAR_PATTERN, "")
+    .replace(HOSTED_RUNTIME_ERROR_FILE_URL_PATTERN, "<redacted-path>")
     .replace(HOSTED_RUNTIME_ERROR_POSIX_PATH_PATTERN, "$1<redacted-path>")
     .replace(HOSTED_RUNTIME_ERROR_WINDOWS_PATH_PATTERN, "<redacted-path>")
     .replace(HOSTED_RUNTIME_ERROR_URL_PATTERN, "<redacted-url>")
     .replace(HOSTED_RUNTIME_ERROR_EMAIL_PATTERN, "<redacted-email>")
     .replace(HOSTED_RUNTIME_ERROR_PHONE_PATTERN, "<redacted-phone>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN, "$1<redacted-id>")
+    .replace(HOSTED_RUNTIME_DIAGNOSTIC_QUOTED_ECHOED_INPUT_PATTERN, "$1$2<redacted-value>$2")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_ECHOED_INPUT_PATTERN, "$1<redacted-value>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_PHRASE_PATTERN, "$1<redacted-id>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_TOKEN_PHRASE_PATTERN, "$1<redacted-token>")
+    .replace(
+      HOSTED_RUNTIME_DIAGNOSTIC_DIGIT_TOKEN_PATTERN,
+      (token) => HOSTED_RUNTIME_DIAGNOSTIC_SAFE_DIGIT_TOKEN_PATTERN.test(token) ? token : "<redacted-token>",
+    )
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_LONG_TOKEN_PATTERN, "<redacted-token>")
     .trim();
 
@@ -2273,13 +2298,11 @@ export function sanitizeHostedRuntimeDiagnosticText(value: string | null): strin
     return null;
   }
 
-  if (HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN.test(sanitized)) {
-    return null;
-  }
-
-  return sanitized.length <= HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH
+  const clamped = sanitized.length <= HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH
     ? sanitized
     : `${sanitized.slice(0, HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH - 3).trimEnd()}...`;
+
+  return HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN.test(clamped) ? null : clamped;
 }
 
 function requireNumber(value: unknown, label: string): number {

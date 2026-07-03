@@ -5888,6 +5888,66 @@ test("Junction ambiguous skip detail masks embedded ids from provider prose", as
   assert.equal(JSON.stringify(result.metadataPatch).includes("11649ed4"), false);
 });
 
+test("Junction ambiguous skip detail masks quoted validation input echoes", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        detail: "Input should be a valid date [type=value_error, input_value='Jane Doe', input_type=str]",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const expectedDetail =
+    "Input should be a valid date [type=value_error, input_value='<redacted-value>', input_type=str]";
+  const storedDetail = result.metadataPatch?.junctionSkippedResourceLastDetail;
+  const warningDetail = warnings[0]?.responseDetail;
+
+  assert.equal(storedDetail, expectedDetail);
+  assert.equal(warningDetail, expectedDetail);
+  assert.equal(typeof storedDetail === "string" && storedDetail.includes("Doe"), false);
+  assert.equal(typeof warningDetail === "string" && warningDetail.includes("Doe"), false);
+  assert.equal(typeof storedDetail === "string" && storedDetail.includes("input_type=str"), true);
+  assert.equal(typeof warningDetail === "string" && warningDetail.includes("input_type=str"), true);
+});
+
 test("Junction ambiguous skip detail reads object-shaped provider error bodies", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
