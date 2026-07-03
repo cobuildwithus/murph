@@ -1840,6 +1840,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             }) === wakeInput.projectedWakeKeyBeingServiced
             ? wakeInput.projectedWakeKeyBeingServiced
             : null;
+        if (
+          wakeInput.projectedWakeKeyBeingServiced !== null
+          && wakeInput.projectedWakeKeyBeingServiced === buildHostedRuntimeWakeKey({
+            nextWakeAt: durableCheckpointWakeAt,
+            nextWakeReason: durableCheckpointWakeReason,
+          })
+        ) {
+          durableCheckpointWakeAt = null;
+          durableCheckpointWakeReason = null;
+        }
         runtimeStateDirty ||= result.runtimeStateDirty;
         return result;
       };
@@ -1858,11 +1868,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         let checkpointBlockedProjectedWakeKey: string | null = null;
         if (
           accumulatedProjection.status !== "budget_exhausted"
-          && !forceIdleCheckpointBeforeWake
         ) {
-          if (idleCheckpointStartByMs === null) {
-            throw new Error("Dirty hosted runtime is missing an idle checkpoint timer.");
-          }
           const projectedRuntimeWakeKey = buildHostedRuntimeWakeKey({
             nextWakeAt: accumulatedProjection.nextWakeAt,
             nextWakeReason: accumulatedProjection.nextWakeReason,
@@ -1896,42 +1902,47 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           checkpointBlockedProjectedWakeKey = projectedWakeServiceableAfterCheckpoint
             ? projectedRuntimeWakeKey
             : null;
-          const projectedRuntimeWakeAt =
-            !projectedWakeBlockedByCheckpoint
-              && projectedWakeIsUnserviced
-              ? accumulatedProjection.nextWakeAt
-              : null;
-          const dirtyCheckpointStartByMs = projectedWakeBlockedByCheckpoint
-            ? clampHostedRuntimeDirtyCheckpointStartByProjectedWake({
-                idleCheckpointStartByMs,
-                projectedWakeAt: accumulatedProjection.nextWakeAt,
-              })
-            : idleCheckpointStartByMs;
-          const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
-            idleCheckpointStartByMs: dirtyCheckpointStartByMs,
-            projectedRuntimeWakeAt,
-            runtimeAbortSignal: runtimeAbortController.signal,
-            runtimeWakeSignal: options.runtimeWakeSignal ?? null,
-            shutdownSignal: options.shutdownSignal ?? null,
-          });
-          const dirtyWakeLatencySeed =
-            dirtyWaitResult.kind === "external_wake"
-              ? createHostedRuntimeWakeLatencySeed(dirtyWaitResult.notification)
-              : null;
-          if (
-            dirtyWaitResult.kind === "external_wake"
-            || dirtyWaitResult.kind === "projected_runtime_wake"
-          ) {
-            const projectedWakeKeyBeingServiced: string | null =
-              dirtyWaitResult.kind === "projected_runtime_wake"
-                ? projectedRuntimeWakeKey
-                : servicedProjectedRuntimeWakeKey;
-            await runIdleWakeForegroundPass({
-              latencySeed: dirtyWakeLatencySeed,
-              projectedWakeKeyBeingServiced,
-              requestIdKind: "idle-wake",
+          if (!forceIdleCheckpointBeforeWake) {
+            if (idleCheckpointStartByMs === null) {
+              throw new Error("Dirty hosted runtime is missing an idle checkpoint timer.");
+            }
+            const projectedRuntimeWakeAt =
+              !projectedWakeBlockedByCheckpoint
+                && projectedWakeIsUnserviced
+                ? accumulatedProjection.nextWakeAt
+                : null;
+            const dirtyCheckpointStartByMs = projectedWakeBlockedByCheckpoint
+              ? clampHostedRuntimeDirtyCheckpointStartByProjectedWake({
+                  idleCheckpointStartByMs,
+                  projectedWakeAt: accumulatedProjection.nextWakeAt,
+                })
+              : idleCheckpointStartByMs;
+            const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
+              idleCheckpointStartByMs: dirtyCheckpointStartByMs,
+              projectedRuntimeWakeAt,
+              runtimeAbortSignal: runtimeAbortController.signal,
+              runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+              shutdownSignal: options.shutdownSignal ?? null,
             });
-            continue;
+            const dirtyWakeLatencySeed =
+              dirtyWaitResult.kind === "external_wake"
+                ? createHostedRuntimeWakeLatencySeed(dirtyWaitResult.notification)
+                : null;
+            if (
+              dirtyWaitResult.kind === "external_wake"
+              || dirtyWaitResult.kind === "projected_runtime_wake"
+            ) {
+              const projectedWakeKeyBeingServiced: string | null =
+                dirtyWaitResult.kind === "projected_runtime_wake"
+                  ? projectedRuntimeWakeKey
+                  : servicedProjectedRuntimeWakeKey;
+              await runIdleWakeForegroundPass({
+                latencySeed: dirtyWakeLatencySeed,
+                projectedWakeKeyBeingServiced,
+                requestIdKind: "idle-wake",
+              });
+              continue;
+            }
           }
         }
         forceIdleCheckpointBeforeWake = false;
@@ -2124,12 +2135,22 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               reason: durableCheckpointWakeReason,
             },
           ]);
+          const followUpCheckpointWakeCameFromDurableEffect =
+            durableCheckpointWakeAt !== null
+            && hostedWorkspaceInvocationProjectionWakeMatches(followUpCheckpointWake, {
+              nextWakeAt: durableCheckpointWakeAt,
+              nextWakeReason: durableCheckpointWakeReason,
+            })
+            && !hostedWorkspaceInvocationProjectionWakeMatches(
+              followUpCheckpointWake,
+              accumulatedProjection,
+            );
           accumulatedProjection = {
             ...accumulatedProjection,
             committedWorkspace: checkpoint.workspace,
             nextWakeAt: followUpCheckpointWake.nextWakeAt,
             nextWakeReason: followUpCheckpointWake.nextWakeReason,
-            projectedWakeCheckpointGateFresh: false,
+            projectedWakeCheckpointGateFresh: followUpCheckpointWakeCameFromDurableEffect,
             projectedWakeRequiresCheckpoint: true,
           };
           runtimeStateDirty = true;
