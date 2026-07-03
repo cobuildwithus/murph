@@ -78,7 +78,6 @@ vi.mock("../src/lib/hosted-onboarding/hosted-member-routing-store", async (impor
   >();
   return {
     ...actual,
-    readHostedMemberHomeLinqRoute: vi.fn(),
     readHostedMemberRoutingState: vi.fn(),
   };
 });

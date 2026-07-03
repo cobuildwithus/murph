@@ -610,26 +610,46 @@ function scheduleHostedLinqDeliveryMilestoneAfterAttempt(
   });
 }
 
+/**
+ * A fallback signup link targets a participant on the assigned line (its chat
+ * does not exist yet); every other side effect targets an existing thread.
+ * This is the one interpretation of a payload's delivery target, shared by
+ * attempt recording and dispatch claiming so the shapes cannot drift.
+ */
+function readHostedLinqSideEffectDeliveryTarget(payload: HostedLinqMessagePayload): {
+  linqChatId: string | null;
+  phoneNumber?: string;
+  targetKind: "participant" | "thread";
+} {
+  return payload.template === "invite_signup_fallback"
+    ? {
+        linqChatId: null,
+        phoneNumber: payload.assignedRecipientPhone,
+        targetKind: "participant",
+      }
+    : {
+        linqChatId: readHostedLinqSideEffectChatId(payload),
+        targetKind: "thread",
+      };
+}
+
 async function recordHostedLinqDeliveryAttemptBestEffort(input: {
   effect: HostedLinqMessageSideEffect;
   prisma: HostedLinqTransportPersistenceClient;
   startedAtMs: number;
 }): Promise<void> {
   const template = input.effect.payload.template;
+  const target = readHostedLinqSideEffectDeliveryTarget(input.effect.payload);
   try {
     await recordHostedLinqDeliveryAttemptTx({
       attemptedAt: new Date(input.startedAtMs),
       idempotencyKey: input.effect.effectId,
-      linqChatId: readHostedLinqSideEffectChatId(input.effect.payload),
-      phoneNumber: input.effect.payload.template === "invite_signup_fallback"
-        ? input.effect.payload.assignedRecipientPhone
-        : undefined,
+      linqChatId: target.linqChatId,
+      phoneNumber: target.phoneNumber,
       prisma: input.prisma,
       source: "hosted_webhook_side_effect",
       sourceRef: input.effect.effectId,
-      targetKind: input.effect.payload.template === "invite_signup_fallback"
-        ? "participant"
-        : "thread",
+      targetKind: target.targetKind,
       template: input.effect.payload.template,
     });
   } catch (error) {
@@ -1087,27 +1107,17 @@ async function claimHostedLinqNoticeForSideEffect(
   prisma: HostedLinqTransportPersistenceClient,
 ): Promise<boolean> {
   switch (effect.payload.template) {
-    case "invite_signup_fallback": {
-      const claim = await claimHostedLinqDeliveryProviderDispatchTx({
-        idempotencyKey: effect.effectId,
-        linqChatId: null,
-        phoneNumber: effect.payload.assignedRecipientPhone,
-        prisma,
-        source: "hosted_webhook_side_effect",
-        sourceRef: effect.effectId,
-        targetKind: "participant",
-        template: effect.payload.template,
-      });
-      return claim.claimed;
-    }
+    case "invite_signup_fallback":
     case "invite_signup": {
+      const target = readHostedLinqSideEffectDeliveryTarget(effect.payload);
       const claim = await claimHostedLinqDeliveryProviderDispatchTx({
         idempotencyKey: effect.effectId,
-        linqChatId: effect.payload.chatId,
+        linqChatId: target.linqChatId,
+        phoneNumber: target.phoneNumber,
         prisma,
         source: "hosted_webhook_side_effect",
         sourceRef: effect.effectId,
-        targetKind: "thread",
+        targetKind: target.targetKind,
         template: effect.payload.template,
       });
       return claim.claimed;

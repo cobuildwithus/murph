@@ -2020,17 +2020,17 @@ async function readRetryableUnsentFallbackRecipientPhone(input: {
     return null;
   }
 
-  const routing = await readHostedMemberRoutingState({
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
+  const routeAuthority = readHostedLinqHomeLineAuthority(
+    await readHostedMemberRoutingState({
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }),
+  );
   const fallbackRecipientPhone = normalizePhoneNumber(input.bindingResult.homeRecipientPhone);
   if (
     !fallbackRecipientPhone
-    || !routing
-    || routing.linqChatId
-    || routing.pendingLinqChatId
-    || normalizePhoneNumber(routing.linqRecipientPhone) !== fallbackRecipientPhone
+    || routeAuthority.kind !== "bare"
+    || routeAuthority.recipientPhone !== fallbackRecipientPhone
   ) {
     return null;
   }

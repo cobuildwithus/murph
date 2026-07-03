@@ -9,7 +9,6 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
-  readHostedMemberHomeLinqRoute: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
