@@ -261,6 +261,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       const route = await mocks.readHostedMemberHomeLinqRoute();
 
       return {
+        hasPendingLinqRouteState: false,
         linqChatId: route?.linqChatId ?? null,
         linqHomeLineAssignedAt: null,
         linqRecipientPhone: route?.linqRecipientPhone ?? null,

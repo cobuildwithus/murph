@@ -667,6 +667,7 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
   it("resolves an already-bound home chat without touching the shared pool lock", async () => {
     const assignedAt = new Date("2026-06-30T14:15:00.000Z");
     mocks.readHostedMemberRoutingState.mockResolvedValue({
+      hasPendingLinqRouteState: false,
       linqChatId: "chat_123",
       linqHomeLineAssignedAt: assignedAt,
       linqRecipientPhone: "+15550100001",
@@ -701,6 +702,7 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
   it("does not mark the route already bound while pending Linq state remains to clear", async () => {
     const assignedAt = new Date("2026-06-30T14:15:00.000Z");
     mocks.readHostedMemberRoutingState.mockResolvedValue({
+      hasPendingLinqRouteState: true,
       linqChatId: "chat_123",
       linqHomeLineAssignedAt: assignedAt,
       linqRecipientPhone: "+15550100001",
@@ -724,6 +726,39 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
     expect(pendingResult.kind).toBe("bind");
     expect(
       pendingResult.kind === "bind" ? pendingResult.routeAlreadyBound : null,
+    ).toBeUndefined();
+  });
+
+  it("keeps the rewrite when raw pending columns persist even though decoded pending fields read empty", async () => {
+    const assignedAt = new Date("2026-06-30T14:15:00.000Z");
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      // Stale pendingLinqParticipantContactLookupKey scenario: the encrypted
+      // pending value no longer decodes, so every decoded pending field is
+      // null, but the raw-column flag still reports pending state.
+      hasPendingLinqRouteState: true,
+      linqChatId: "chat_123",
+      linqHomeLineAssignedAt: assignedAt,
+      linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+
+    const result = await resolveHostedMemberLinqHomeLineRouteBindingTx({
+      incomingChatId: "chat_123",
+      incomingDirectAttested: true,
+      incomingRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      prisma: {} as never,
+    });
+    expect(result.kind).toBe("bind");
+    expect(
+      result.kind === "bind" ? result.routeAlreadyBound : null,
     ).toBeUndefined();
   });
 

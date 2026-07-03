@@ -19,11 +19,14 @@ export const hostedMemberRoutingStateSelect =
     linqRecipientPhoneEncrypted: true,
     memberId: true,
     pendingLinqChatIdEncrypted: true,
+    pendingLinqChatLookupKey: true,
+    pendingLinqLastInboundAt: true,
     pendingLinqParticipantContactEncrypted: true,
     pendingLinqParticipantContactKind: true,
     pendingLinqParticipantContactLookupKey: true,
     pendingLinqParticipantContactObservedAt: true,
     pendingLinqRecipientPhoneEncrypted: true,
+    pendingLinqRecipientPhoneLookupKey: true,
     replyAliasLookupKey: true,
     telegramUserLookupKey: true,
     telegramUserIdEncrypted: true,
@@ -40,11 +43,14 @@ export const hostedMemberRoutingLookupSelect =
     linqRecipientPhoneEncrypted: true,
     memberId: true,
     pendingLinqChatIdEncrypted: true,
+    pendingLinqChatLookupKey: true,
+    pendingLinqLastInboundAt: true,
     pendingLinqParticipantContactEncrypted: true,
     pendingLinqParticipantContactKind: true,
     pendingLinqParticipantContactLookupKey: true,
     pendingLinqParticipantContactObservedAt: true,
     pendingLinqRecipientPhoneEncrypted: true,
+    pendingLinqRecipientPhoneLookupKey: true,
     replyAliasLookupKey: true,
     telegramUserLookupKey: true,
     telegramUserIdEncrypted: true,
@@ -64,6 +70,12 @@ export type HostedMemberRoutingLookupRecord = Prisma.HostedMemberRoutingGetPaylo
 }>;
 
 export interface HostedMemberRoutingStateSnapshot {
+  // True when ANY persisted pending-Linq column is set, including lookup
+  // keys and metadata the decoded fields above cannot represent (for
+  // example a stale pending contact lookup key whose encrypted value no
+  // longer decodes). Cleanup paths must key off this raw-column view, not
+  // the decoded fields.
+  hasPendingLinqRouteState?: boolean;
   linqChatId: string | null;
   linqHomeLineAssignedAt: Date | null;
   linqRecipientPhone: string | null;
@@ -109,6 +121,17 @@ export async function projectHostedMemberRoutingState(
   const privateState = await readHostedMemberRoutingPrivateState(routing, prisma);
 
   return {
+    hasPendingLinqRouteState: [
+      routing.pendingLinqChatIdEncrypted,
+      routing.pendingLinqChatLookupKey,
+      routing.pendingLinqLastInboundAt,
+      routing.pendingLinqParticipantContactEncrypted,
+      routing.pendingLinqParticipantContactKind,
+      routing.pendingLinqParticipantContactLookupKey,
+      routing.pendingLinqParticipantContactObservedAt,
+      routing.pendingLinqRecipientPhoneEncrypted,
+      routing.pendingLinqRecipientPhoneLookupKey,
+    ].some((column) => column !== null && column !== undefined),
     linqChatId: privateState.linqChatId,
     linqHomeLineAssignedAt: routing.linqHomeLineAssignedAt,
     linqRecipientPhone: privateState.linqRecipientPhone,

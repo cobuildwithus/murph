@@ -212,13 +212,15 @@ async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
       || (authority.recipientPhone !== null && authority.recipientPhone === recipientPhone)
     )
   ) {
+    // The raw-column pending flag is the cleanup authority: decoded pending
+    // fields can read empty while stale pending lookup keys persist, and
+    // those must still be repaired by the rewrite. An absent flag (older
+    // fixtures/snapshots) fails safe by keeping the rewrite.
     const routeAlreadyBound =
       authority.kind === "home"
       && authority.chatId === input.incomingChatId
       && authority.recipientPhone === recipientPhone
-      && routing?.pendingLinqChatId === null
-      && routing?.pendingLinqParticipantContact === null
-      && routing?.pendingLinqRecipientPhone === null;
+      && routing?.hasPendingLinqRouteState === false;
     return {
       kind: "done",
       result: {
