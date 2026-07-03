@@ -282,7 +282,7 @@ describe("hosted onboarding client api", () => {
       url: "/api/hosted-onboarding/example",
     })).rejects.toMatchObject({
       code: null,
-      message: "Request failed.",
+      message: "Something went wrong. Try again.",
       retryable: false,
     });
   });

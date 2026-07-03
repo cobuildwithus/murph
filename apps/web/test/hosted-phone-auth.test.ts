@@ -1729,7 +1729,7 @@ describe("HostedPhoneAuth", () => {
     );
 
     assert.match(markup, /Sign in with this phone again/);
-    assert.match(markup, /missing a verified phone number/);
+    assert.match(markup, /have a verified phone number yet/);
     assert.match(markup, /Sign out/);
     assert.doesNotMatch(markup, /You already started logging in or signing up\./);
     assert.doesNotMatch(markup, /Use a different number/);

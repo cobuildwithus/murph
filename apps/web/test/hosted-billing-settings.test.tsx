@@ -169,8 +169,8 @@ describe("HostedBillingSettings", () => {
     }));
 
     assert.match(markup, /Manage Family billing/);
-    assert.match(markup, /Switching away from Family ends sponsored access/);
-    assert.match(markup, /Move to an individual plan only after/);
+    assert.match(markup, /family members lose their included access/);
+    assert.match(markup, /End or change the Family plan first/);
     assert.doesNotMatch(markup, /Choose Pulse/);
     assert.doesNotMatch(markup, /Choose Edge/);
   });

@@ -398,11 +398,11 @@ test("JoinInvitePage projects linked accounts to a minimal Telegram setup seed",
 test("JoinInvitePage keeps route copy and inherits the shared Open Graph image", async () => {
   const { metadata } = await import("../app/join/[inviteCode]/page");
 
-  expect(metadata.title).toBe("Murph hosted invite");
+  expect(metadata.title).toBe("Murph invite");
   expect(metadata.description).toBe(
     "Finish signup, then add a phone number or connect Telegram so Murph can reach you.",
   );
-  expect(metadata.openGraph?.title).toBe("Murph hosted invite");
+  expect(metadata.openGraph?.title).toBe("Murph invite");
   expect(metadata.openGraph?.images).toEqual([
     expect.objectContaining({
       url: "/opengraph-image",
@@ -410,7 +410,7 @@ test("JoinInvitePage keeps route copy and inherits the shared Open Graph image",
       height: 630,
     }),
   ]);
-  expect(metadata.twitter?.title).toBe("Murph hosted invite");
+  expect(metadata.twitter?.title).toBe("Murph invite");
   expect(metadata.twitter?.images).toEqual([
     expect.objectContaining({
       url: "/opengraph-image",
@@ -428,7 +428,7 @@ test("JoinInviteSuccessPage keeps the shared preview image and setup copy", asyn
 
   expect(metadata.title).toBe("Finishing setup — Murph");
   expect(metadata.description).toBe(
-    "Finish activating your Murph hosted account after checkout.",
+    "Finish setting up your Murph account after checkout.",
   );
   expect(metadata.openGraph?.images).toEqual([
     expect.objectContaining({

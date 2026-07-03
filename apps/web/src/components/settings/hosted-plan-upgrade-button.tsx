@@ -26,7 +26,7 @@ const edgePriceLabel = formatHostedBillingPlanMonthlyPrice(edgePlan.recurringAmo
 const EDGE_FEATURES = [
   "Everything in Pulse",
   "More usage on latest AI models",
-  "Longer experiment context",
+  "Murph remembers more of your history",
   "Deeper research and analysis",
 ];
 

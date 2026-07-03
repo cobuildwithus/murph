@@ -59,7 +59,7 @@ export function ActionApprovalScreen({
           {caveat ? (
             <div className="mt-6 border-l-[3px] border-l-[#7a8c6e] py-0.5 pl-4">
               <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5a6e32]">
-                Bound to this request
+                Only applies to this request
               </p>
               <p className="mt-1.5 text-[13px] leading-[1.55] text-muted-foreground">
                 {caveat}

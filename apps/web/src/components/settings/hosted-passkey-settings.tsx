@@ -30,7 +30,7 @@ function PasskeySetup() {
     ? "Enabled"
     : !ready
       ? "Checking…"
-      : "Not configured";
+      : "Not set up";
 
   return (
     <div className="flex flex-col gap-2">

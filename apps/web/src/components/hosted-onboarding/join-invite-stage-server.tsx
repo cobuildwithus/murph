@@ -54,15 +54,15 @@ const PULSE_FEATURES = [
   "Private before/after outcomes",
   "Chat via iMessage, Telegram, or email",
   "Guided experiment setup",
-  "Access to frontier AI models",
+  "Access to the most capable AI models",
 ];
 
 const EDGE_FEATURES = [
   "Everything in Pulse and:",
-  "More usage on frontier AI models",
-  "Longer experiment context",
+  "More usage on the most capable AI models",
+  "Murph remembers more of your history",
   "Deeper outcome analysis",
-  "Detailed biomarker deltas",
+  "Detailed biomarker changes",
   "Richer protocol recommendations",
   "Early access to new features",
 ];

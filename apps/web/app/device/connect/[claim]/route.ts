@@ -44,7 +44,7 @@ export async function GET(
     if (!target) {
       return deviceConnectIntentMessageResponse(request, {
         code: "HOSTED_DEVICE_CONNECT_SOURCE_NOT_CONFIGURED",
-        message: "This device source is not currently available.",
+        message: "This device connection is not available right now.",
         status: 404,
         title: "Connection unavailable",
       });
@@ -90,7 +90,7 @@ export async function POST(
       });
       return deviceConnectIntentMessageResponse(request, {
         code: "HOSTED_DEVICE_CONNECT_SOURCE_NOT_CONFIGURED",
-        message: "This device source is not currently available.",
+        message: "This device connection is not available right now.",
         status: 404,
         title: "Connection unavailable",
       });

@@ -11,7 +11,7 @@ import { JoinInviteSuccessClient } from "@/src/components/hosted-onboarding/join
 
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Finishing setup — Murph",
-  description: "Finish activating your Murph hosted account after checkout.",
+  description: "Finish setting up your Murph account after checkout.",
 });
 
 export default async function JoinInviteSuccessPage(input: {

@@ -92,7 +92,7 @@ export async function requestHostedPrivyCompletionWithRetry(input: {
 
   throw lastError instanceof Error
     ? lastError
-    : new Error("We could not verify your Privy session.");
+    : new Error("We couldn't verify your sign-in. Try again.");
 }
 
 function isRetryableHostedPrivyCompletionError(error: unknown): boolean {

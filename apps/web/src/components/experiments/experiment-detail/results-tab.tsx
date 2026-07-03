@@ -79,8 +79,8 @@ export function ResultsTab({
 
       {!hasPrivateRun && privateRunStatus === "error" && (
         <ResultsEmptyState
-          title="Protocol loaded, private run unavailable"
-          body={privateRunError ?? "Your private experiment state could not be decrypted right now. The protocol details are still available."}
+          title="Your private results couldn't load"
+          body={privateRunError ?? "We couldn't unlock your private results right now. The protocol details are still available."}
           action={onPrivateRunRetry
             ? <Button size="sm" variant="outline" onClick={() => void onPrivateRunRetry()}>Retry</Button>
             : null}
@@ -90,7 +90,7 @@ export function ResultsTab({
       {!hasPrivateRun && (privateRunStatus === "ready" || privateRunStatus === "empty") && (
         <ResultsEmptyState
           title="Run this on yourself"
-          body="You're previewing the public protocol. Start the experiment to track your own baseline, sessions, and outcomes — kept private in your browser vault."
+          body="You're previewing the public protocol. Start the experiment to track your own baseline, sessions, and outcomes — kept private on this device."
           action={
             startAction ?? (
               <StartExperimentButton
@@ -106,7 +106,7 @@ export function ResultsTab({
 
       {hasPrivateRun && privateRunError && (
         <ResultsEmptyState
-          title="Private run loaded, refresh unavailable"
+          title="Your results loaded, but couldn't refresh"
           body={privateRunError}
           action={onPrivateRunRetry
             ? <Button size="sm" variant="outline" onClick={() => void onPrivateRunRetry()}>Retry</Button>
@@ -117,19 +117,19 @@ export function ResultsTab({
       {hasPrivateRun && !hasPersonalOutcomeData && (
         <ResultsEmptyState
           title={isFinished
-            ? "No biomarker comparison exported yet"
+            ? "No before-and-after comparison yet"
             : isPaused
-              ? "Private run paused"
+              ? "Your experiment is paused"
               : isStopped
-                ? "Private run stopped"
-                : "Private run linked"}
+                ? "Your experiment was stopped"
+                : "You're running this experiment"}
           body={isFinished
-            ? "This run is present in your browser vault, but the dashboard snapshot does not include enough baseline-vs-protocol biomarker data yet."
+            ? "Your run is saved privately on this device, but there isn't enough before-and-after biomarker data to compare yet."
             : isPaused
-              ? "This private run is still in your browser vault, but it is paused. Resume it there to continue the protocol and export outcome comparisons later."
+              ? "Your run is saved privately on this device. Resume it to keep following the protocol and see outcomes here later."
               : isStopped
-                ? "This private run remains in your browser vault, but it was stopped before a browser-vault comparison was exported to the dashboard."
-                : "This private run is attached to the exact Health Commons protocol revision. Outcome cards will appear when the browser-vault snapshot includes measured comparisons."}
+                ? "This experiment was stopped before there was enough data to compare before and after."
+                : "Outcome cards will appear here once there's enough measured data to compare."}
         />
       )}
 
@@ -220,10 +220,10 @@ function RunContextPanel({ entries }: { entries: ExperimentRunContextEntry[] }) 
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-col gap-1.5">
           <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Interpretation context
+            Worth knowing
           </span>
           <h3 className="font-serif text-xl font-semibold text-foreground">
-            Confounders and notes
+            Other factors and notes
           </h3>
         </div>
         <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -239,7 +239,7 @@ function RunContextPanel({ entries }: { entries: ExperimentRunContextEntry[] }) 
 
       {extraCount > 0 && (
         <p className="text-xs text-muted-foreground">
-          {extraCount} earlier context {extraCount === 1 ? "entry" : "entries"} kept in the browser-vault snapshot.
+          {extraCount} earlier {extraCount === 1 ? "note" : "notes"} saved privately on this device.
         </p>
       )}
     </section>

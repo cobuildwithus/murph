@@ -5,7 +5,7 @@ import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 export const metadata: Metadata = createMurphPageMetadata({
   title: "History — Murph",
-  description: "Recent notes, events, assessments, and daily summaries from your vault.",
+  description: "Recent notes, events, assessments, and daily summaries.",
 });
 
 export default function HistoryLayout({
