@@ -794,7 +794,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             connectionId: "conn_01",
             localState: {
               lastErrorCode: "Authorization: Bearer secret-token",
-              lastErrorMessage: "refresh_token=super-secret",
+              lastErrorMessage: "Provider rejected Bearer abc12345",
               lastSyncErrorAt: "2026-04-12T10:20:00+10:00",
             },
             observedTokenVersion: 1,
@@ -840,7 +840,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           connectionId: "conn_01",
           localState: {
             lastErrorCode: "Authorization: [redacted]",
-            lastErrorMessage: "refresh_token=[redacted]",
+            lastErrorMessage: "Provider rejected Bearer [redacted]",
             lastSyncErrorAt: "2026-04-12T00:20:00.000Z",
           },
           observedTokenVersion: 1,
@@ -893,6 +893,9 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect(
       sanitizeHostedRuntimeErrorText("Bearer abcdefghijklmnopqrst"),
     ).toBe("Bearer [redacted]");
+    expect(
+      sanitizeHostedRuntimeErrorText("Provider rejected Bearer abc12345"),
+    ).toBe("Provider rejected Bearer [redacted]");
     expect(
       sanitizeHostedRuntimeDiagnosticText("Bearer abcdefghijklmnopqrst"),
     ).toBe("Bearer [redacted]");
@@ -2004,6 +2007,12 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("request rejected for user_id: hbm_abc123, display_name: Jane Doe upstream"),
     ).toBe("request rejected for user_id: <redacted-id>");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("display_name: Jane Doe cannot access sleep_cycle"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Provider reason: Refresh token expired. Reconnect WHOOP."),
+    ).toBe("Provider reason: Refresh token expired. Reconnect WHOOP.");
   });
 
   it("masks token phrases while keeping prose token labels", () => {

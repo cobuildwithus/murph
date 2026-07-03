@@ -21,7 +21,7 @@ const HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH = 512;
 const HOSTED_RUNTIME_ERROR_CONTROL_CHAR_PATTERN = /[\u0000-\u001F\u007F]+/gu;
 const HOSTED_RUNTIME_ERROR_WHITESPACE_PATTERN = /\s+/gu;
 const HOSTED_RUNTIME_ERROR_INLINE_BEARER_PATTERN =
-  /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/giu;
+  /\bBearer\s+(?:[A-Za-z]{16,}|(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]{8,})/giu;
 const HOSTED_RUNTIME_ERROR_JWT_PATTERN = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/gu;
 const HOSTED_RUNTIME_ERROR_QUERY_SECRET_PATTERN =
   /([?&](?:access_token|refresh_token|id_token|token|apikey|api_key|client_secret|session|session_token|code|state)=)[^&#\s]+/giu;
@@ -49,7 +49,7 @@ const HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_PATTERN =
 const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_COLON_ASSIGNMENT_PATTERN =
   /\b((?:account|client|external|member|owner|patient|provider[_\s-]?account|subject|team|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*:\s*)(?:"[^"]*"|'[^']*'|[A-Za-z0-9._~+/:=-]+)/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_ASSIGNMENT_TAIL_PATTERN =
-  /(?:[A-Za-z0-9_][A-Za-z0-9_-]*\s*=\s*\S|,\s*[A-Za-z0-9_][A-Za-z0-9_-]*\s*:\s*\S)/u;
+  /(?:[A-Za-z_][A-Za-z0-9_-]*\s*=\s*\S|(?:^|[\s,;])\s*(?!(?:account|client|external|member|owner|patient|provider[_-]?account|subject|team|user)(?:[_-]?(?:id|identifier))?\s*:)(?:display[_-]?name|first[_-]?name|last[_-]?name|full[_-]?name|user[_-]?name|email|phone|[A-Za-z_][A-Za-z0-9_-]*[_-][A-Za-z0-9_-]*)\s*:\s*\S)/iu;
 // Identifier values also appear as bare phrases ("user hbm_abc123xyz",
 // 'user id "hbm_abc123xyz"'); mask the value when it looks id-shaped
 // (contains a digit or underscore) so plain words ("user profile") stay
