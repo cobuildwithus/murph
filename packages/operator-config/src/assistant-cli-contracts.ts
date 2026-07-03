@@ -774,6 +774,12 @@ export const assistantTurnReceiptSchema = z
   .strict()
 
 export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
+export const assistantOutboxAnsweredCoverageSchema = z
+  .object({
+    lane: z.literal('conversation'),
+    laneSeq: z.string().min(1),
+  })
+  .strict()
 export const assistantOutboxIntentSchema = z
   .object({
     schema: z.literal('murph.assistant-outbox-intent.v1'),
@@ -810,6 +816,9 @@ export const assistantOutboxIntentSchema = z
     deliveryConfirmationPending: z.boolean().default(false),
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
     deliveryTransportIdempotent: z.boolean().default(false),
+    answeredCoverage: assistantOutboxAnsweredCoverageSchema
+      .nullable()
+      .default(null),
     preparedDispatchToken: z.string().min(1).nullable().default(null),
     lastError: assistantDeliveryErrorSchema.nullable(),
   })

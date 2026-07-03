@@ -2371,6 +2371,12 @@ describe("hosted runtime internal web routes", () => {
         maxSeq: "2",
       },
     ]);
+    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
+      {
+        consumedSeq: "12",
+        lane: "conversation",
+      },
+    ]);
     mocks.listHostedRuntimeLogs.mockResolvedValue([
       {
         at: FIXED_NOW,
@@ -2407,11 +2413,15 @@ describe("hosted runtime internal web routes", () => {
       limit: 5,
       userId: "member_routes_1",
     });
+    expect(mocks.readHostedMailboxConsumedSeqByLane).toHaveBeenCalledWith({
+      lanes: ["conversation"],
+      userId: "member_routes_1",
+    });
     expect(payload).toMatchObject({
       mailboxLag: [
         {
           importedSeq: "10",
-          lag: "2",
+          lag: "0",
           lane: "conversation",
           maxSeq: "12",
         },

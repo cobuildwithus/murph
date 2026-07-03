@@ -3,6 +3,7 @@ import {
   readAssistantDeliveryFailureClass,
 } from '@murphai/operator-config/assistant/delivery-failure'
 import type {
+  AssistantOutboxIntent,
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
@@ -47,6 +48,8 @@ import type {
 } from '../input-source.js'
 import {
   compareAssistantInputCursors,
+  listAssistantInputEvents,
+  type AssistantInputEventRecord,
   type AssistantInputConversationRef,
 } from '../input-store.js'
 import {
@@ -58,6 +61,7 @@ import {
 } from './artifacts.js'
 import {
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
+  hasCompleteAssistantAutoReplyTerminalEvidence,
   type AssistantAutoReplyTerminalEvidence,
   writeAssistantAutoReplyReplyIntentEvidence,
   writeAssistantAutoReplyReplyTerminalEvidence,
@@ -1450,6 +1454,77 @@ async function prepareAssistantAutoReplyInputWithContext(input: {
     : await prepareAssistantAutoReplyInput(input.inputs, input.vault)
 }
 
+const AUTO_REPLY_ANSWERED_COVERAGE_SCAN_LIMIT = Number.MAX_SAFE_INTEGER
+
+export async function computeAssistantAutoReplyAnsweredCoverage(input: {
+  terminalInputIds?: readonly string[] | null
+  vault: string
+}): Promise<AssistantOutboxIntent['answeredCoverage']> {
+  const terminalInputIds = new Set(
+    (input.terminalInputIds ?? [])
+      .map((inputId) => normalizeNullableString(inputId))
+      .filter((inputId): inputId is string => inputId !== null),
+  )
+  const listed = await listAssistantInputEvents({
+    limit: AUTO_REPLY_ANSWERED_COVERAGE_SCAN_LIMIT,
+    source: 'hosted-mailbox',
+    vault: input.vault,
+  })
+  const conversationLaneInputs = listed.events
+    .filter(isHostedConversationLaneInputEvent)
+    .sort(compareHostedConversationLaneInputEventsBySeq)
+
+  let highWater: AssistantOutboxIntent['answeredCoverage'] = null
+  for (const event of conversationLaneInputs) {
+    const terminal =
+      terminalInputIds.has(event.inputId) ||
+      await hasCompleteAssistantAutoReplyTerminalEvidence({
+        captureId: event.projection.captureId,
+        inputId: event.inputId,
+        vault: input.vault,
+      })
+    if (!terminal) {
+      break
+    }
+    highWater = {
+      lane: 'conversation',
+      laneSeq: event.sourceRef.laneSeq,
+    }
+  }
+
+  return highWater
+}
+
+function isHostedConversationLaneInputEvent(
+  event: AssistantInputEventRecord,
+): event is AssistantInputEventRecord & {
+  sourceRef: Extract<AssistantInputEventRecord['sourceRef'], { kind: 'hosted-mailbox' }>
+} {
+  return event.sourceRef.kind === 'hosted-mailbox' &&
+    event.sourceRef.lane === 'conversation'
+}
+
+function compareHostedConversationLaneInputEventsBySeq(
+  left: AssistantInputEventRecord & {
+    sourceRef: Extract<AssistantInputEventRecord['sourceRef'], { kind: 'hosted-mailbox' }>
+  },
+  right: AssistantInputEventRecord & {
+    sourceRef: Extract<AssistantInputEventRecord['sourceRef'], { kind: 'hosted-mailbox' }>
+  },
+): number {
+  return compareHostedMailboxLaneSeq(left.sourceRef.laneSeq, right.sourceRef.laneSeq)
+}
+
+function compareHostedMailboxLaneSeq(left: string, right: string): number {
+  try {
+    const leftSeq = BigInt(left)
+    const rightSeq = BigInt(right)
+    return leftSeq < rightSeq ? -1 : leftSeq > rightSeq ? 1 : 0
+  } catch {
+    return left.localeCompare(right)
+  }
+}
+
 async function executeAssistantAutoReply(input: {
   acceptedTurnInputInitialInputs?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnCheckpoint?: AssistantActiveTurnInputCheckpointHook
@@ -1501,6 +1576,11 @@ async function executeAssistantAutoReply(input: {
       turnEnvironment: input.turnEnvironment ?? null,
       turnTrigger: 'automation-auto-reply',
     })
+    const deliveryAnsweredCoverage =
+      await computeAssistantAutoReplyAnsweredCoverage({
+        terminalInputIds: input.inputIds,
+        vault: input.vault,
+      })
     const result = await sendAssistantMessage({
       vault: input.vault,
       ...automationTurn,
@@ -1520,6 +1600,7 @@ async function executeAssistantAutoReply(input: {
       userMessageContent: input.userMessageContent,
       includeEarlySessionOnboarding: true,
       deliverResponse: true,
+      deliveryAnsweredCoverage,
       onFinishWithoutReplyAccepted:
         input.onFinishWithoutReplyAccepted ?? null,
       bindingDeliveryTarget: input.bindingDeliveryTarget,

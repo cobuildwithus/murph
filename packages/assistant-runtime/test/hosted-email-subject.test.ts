@@ -58,6 +58,7 @@ describe('hosted runtime email subject support', () => {
             effectId: intent.intentId,
             payload: {
               actorId: null,
+              answeredCoverage: null,
               bindingDeliveryKind: null,
               bindingDeliveryTarget: null,
               channel: 'email',

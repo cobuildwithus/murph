@@ -1277,6 +1277,7 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
       sourceRef: "intent_123",
       targetKind: "thread",
+      userId: "member_123",
     })).resolves.toEqual({
       deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
       recorded: true,
@@ -1324,6 +1325,93 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
+  it("advances conversation consumed coverage on any accepted runtime outcome carrying coverage", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      deliveredAt: null,
+      failedAt: null,
+      id: "hld_replayed_accepted",
+      lastReceiptAt: null,
+      messageLookupKey: "hbidx:linq-message:existing",
+      phoneNumberLookupKey: null,
+      skippedAt: null,
+      status: "accepted",
+    });
+    fixture.hostedMailboxLaneCounterFindUnique
+      .mockResolvedValueOnce({
+        consumedSeq: 12n,
+        lane: "conversation",
+        nextSeq: 101n,
+        userId: "member_123",
+      })
+      .mockResolvedValueOnce({
+        consumedSeq: 42n,
+        lane: "conversation",
+        nextSeq: 101n,
+        userId: "member_123",
+      });
+
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt,
+      answeredCoverage: {
+        lane: "conversation",
+        laneSeq: "42",
+      },
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      idempotencyKey: "assistant-outbox:intent_replay",
+      linqChatId: "linq_chat_123",
+      messageId: "provider_message_123",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_replay",
+      targetKind: "thread",
+      userId: "member_123",
+    })).resolves.toEqual({
+      deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      recorded: true,
+    });
+
+    expect(fixture.hostedMailboxLaneCounterUpdateMany).toHaveBeenCalledWith({
+      data: {
+        consumedSeq: 42n,
+      },
+      where: {
+        consumedSeq: {
+          lt: 42n,
+        },
+        lane: "conversation",
+        userId: "member_123",
+      },
+    });
+  });
+
+  it("does not advance answered coverage for failed runtime outcomes", async () => {
+    const fixture = createObservabilityPrismaFixture();
+
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      answeredCoverage: {
+        lane: "conversation",
+        laneSeq: "42",
+      },
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      failedAt: new Date("2026-03-26T12:00:01.000Z"),
+      failureCode: "provider_unavailable",
+      idempotencyKey: "assistant-outbox:intent_failed",
+      linqChatId: "linq_chat_123",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_failed",
+      targetKind: "thread",
+      userId: "member_123",
+    })).resolves.toEqual({
+      deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      recorded: true,
+    });
+
+    expect(fixture.hostedMailboxLaneCounterFindUnique).not.toHaveBeenCalled();
+    expect(fixture.hostedMailboxLaneCounterUpdateMany).not.toHaveBeenCalled();
+  });
+
   it("does not create or project a runtime raw sender line that is not already known", async () => {
     const fixture = createObservabilityPrismaFixture();
 
@@ -1337,6 +1425,7 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
       sourceRef: "intent_unknown_line",
       targetKind: "thread",
+      userId: "member_123",
     })).resolves.toEqual({
       deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
       recorded: true,
@@ -1376,6 +1465,7 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
       sourceRef: "intent_echo_first",
       targetKind: "thread",
+      userId: "member_123",
     });
 
     expect(fixture.hostedLinqProviderEventFindFirst).toHaveBeenCalledWith(
@@ -1423,6 +1513,7 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
       sourceRef: "intent_123",
       targetKind: "thread",
+      userId: "member_123",
     });
 
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
@@ -1488,6 +1579,7 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
       sourceRef: "intent_123",
       targetKind: "thread",
+      userId: "member_123",
     });
 
     expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
@@ -1545,6 +1637,7 @@ describe("hosted Linq observability stores", () => {
       prisma: fixture.prisma as never,
       sourceRef: "intent_123",
       targetKind: "thread",
+      userId: "member_123",
     })).resolves.toEqual({
       deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
       recorded: true,
@@ -2182,6 +2275,13 @@ function createObservabilityPrismaFixture() {
   const hostedLinqDeliveryUpdate = vi.fn().mockResolvedValue(undefined);
   const hostedLinqDeliveryUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqDeliveryUpsert = vi.fn().mockResolvedValue({ id: "hld_123" });
+  const hostedMailboxLaneCounterFindUnique = vi.fn().mockResolvedValue({
+    consumedSeq: 0n,
+    lane: "conversation",
+    nextSeq: 101n,
+    userId: "member_123",
+  });
+  const hostedMailboxLaneCounterUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
   const hostedLinqLineFindMany = vi.fn().mockResolvedValue([]);
   const hostedLinqLineFindUnique = vi.fn().mockResolvedValue(null);
   const hostedLinqLineUpdate = vi.fn().mockImplementation((input: { where?: { phoneNumberLookupKey?: string } }) =>
@@ -2213,6 +2313,10 @@ function createObservabilityPrismaFixture() {
       updateMany: hostedLinqDeliveryUpdateMany,
       upsert: hostedLinqDeliveryUpsert,
     },
+    hostedMailboxLaneCounter: {
+      findUnique: hostedMailboxLaneCounterFindUnique,
+      updateMany: hostedMailboxLaneCounterUpdateMany,
+    },
     hostedLinqLine: {
       findMany: hostedLinqLineFindMany,
       findUnique: hostedLinqLineFindUnique,
@@ -2238,6 +2342,8 @@ function createObservabilityPrismaFixture() {
     hostedLinqDeliveryUpdate,
     hostedLinqDeliveryUpdateMany,
     hostedLinqDeliveryUpsert,
+    hostedMailboxLaneCounterFindUnique,
+    hostedMailboxLaneCounterUpdateMany,
     hostedLinqLineFindMany,
     hostedLinqLineFindUnique,
     hostedLinqLineUpdate,

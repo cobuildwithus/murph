@@ -4522,7 +4522,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
-  it("reuses stored classifier blocks even after the sender has active member state", async () => {
+  it("bypasses stored classifier blocks after the sender has active member state", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
 
     const prismaMocks = {
@@ -4578,20 +4578,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       signature: null,
       timestamp: null,
     })).resolves.toMatchObject({
-      ignored: true,
+      ignored: false,
       ok: true,
-      reason: "blocked-first-contact-admission",
+      reason: "wake-appended-active-member",
     });
 
     expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.findUnique).not.toHaveBeenCalled();
     expect(prismaMocks.hostedLinqFirstContactAdmissionDecision.createMany).not.toHaveBeenCalled();
-    expect(prismaMocks.hostedMember.findUnique).not.toHaveBeenCalled();
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
-    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
   });
 
   it("bounds first-contact classifier service metadata before OpenAI egress", async () => {

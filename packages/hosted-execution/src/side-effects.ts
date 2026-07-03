@@ -104,8 +104,14 @@ export type HostedAssistantMessageReaction =
   | "thumbs_up"
   | "laugh";
 
+export interface HostedAssistantAnsweredCoverage {
+  lane: "conversation";
+  laneSeq: string;
+}
+
 export interface HostedAssistantDeliveryPayload {
   actorId: string | null;
+  answeredCoverage: HostedAssistantAnsweredCoverage | null;
   bindingDeliveryKind: HostedAssistantBindingDeliveryKind | null;
   bindingDeliveryTarget: string | null;
   channel: string | null;
@@ -646,6 +652,10 @@ function parseHostedAssistantDeliveryPayload(
 
   return {
     actorId: requireNullableString(record.actorId ?? null, `${label}.actorId`),
+    answeredCoverage: parseHostedAssistantAnsweredCoverage(
+      record.answeredCoverage ?? null,
+      `${label}.answeredCoverage`,
+    ),
     bindingDeliveryKind: requireNullableHostedAssistantBindingDeliveryKind(
       record.bindingDeliveryKind ?? null,
       `${label}.bindingDeliveryKind`,
@@ -683,6 +693,24 @@ function parseHostedAssistantDeliveryPayload(
       `${label}.transportIdempotent`,
     ),
     turnId: requireString(record.turnId, `${label}.turnId`),
+  };
+}
+
+function parseHostedAssistantAnsweredCoverage(
+  value: unknown,
+  label: string,
+): HostedAssistantAnsweredCoverage | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const record = requireObject(value, label);
+  const lane = requireString(record.lane, `${label}.lane`);
+  if (lane !== "conversation") {
+    throw new TypeError(`${label}.lane must be conversation.`);
+  }
+  return {
+    lane,
+    laneSeq: requireString(record.laneSeq, `${label}.laneSeq`),
   };
 }
 

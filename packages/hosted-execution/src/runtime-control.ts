@@ -663,17 +663,6 @@ export interface HostedMailboxFetchResponse {
   userId: string;
 }
 
-export interface HostedMailboxConsumeRequest {
-  lanes: HostedMailboxLaneConsumed[];
-  requestId: string;
-}
-
-export interface HostedMailboxConsumeResponse {
-  acknowledgedAt: string;
-  consumedSeqByLane: HostedMailboxLaneConsumed[];
-  userId: string;
-}
-
 export const HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS = [
   "device-sync.wake",
   "device-sync.snapshot",
@@ -1035,6 +1024,7 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     temporalActivityStartedAtEpochMs?: number;
     temporalActivityRequestStartedAtEpochMs?: number;
     cloudflareRouteReceivedAtEpochMs?: number;
+    triggeredByWebDirect?: boolean;
     userRunnerEnsureStartedAtEpochMs?: number;
     activeWakeStartedAtEpochMs?: number;
     activeWakeFinishedAtEpochMs?: number;
@@ -1120,6 +1110,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "temporalActivityStartedAtEpochMs",
     "temporalActivityRequestStartedAtEpochMs",
     "cloudflareRouteReceivedAtEpochMs",
+    "triggeredByWebDirect",
     "userRunnerEnsureStartedAtEpochMs",
     "activeWakeStartedAtEpochMs",
     "activeWakeFinishedAtEpochMs",
@@ -1174,6 +1165,7 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
   [
     "orchestration.activeWakeAccepted",
     "orchestration.replacedStaleFence",
+    "orchestration.triggeredByWebDirect",
     "wake.activeRuntimePassForeground",
     "boot.restoreWasCold",
   ] as const;
@@ -1610,8 +1602,6 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "device-sync.reconnect_notice_duplicate",
   "device-sync.reconnect_notice_skipped",
   "mailbox.appended",
-  "mailbox.consume_ack_advanced",
-  "mailbox.consume_ack_skipped",
   "mailbox.dedupe_conflict",
   "mailbox.imported",
   "mailbox.linq_attachment_download_finished",

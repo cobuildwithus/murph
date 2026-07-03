@@ -222,6 +222,7 @@ export type DeliverAssistantOutboxMessageResult =
 
 export type AssistantOutboxCreateIntentInput = {
   actorId?: string | null
+  answeredCoverage?: AssistantOutboxIntent['answeredCoverage']
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   createdAt?: string
@@ -314,17 +315,21 @@ export async function createAssistantOutboxIntent(
         deliveryTransportIdempotent,
         intent: existing,
       })
+      const coverageUpgradedExisting = maybeUpgradeAssistantOutboxIntentAnsweredCoverage({
+        answeredCoverage: input.answeredCoverage ?? null,
+        intent: idempotencyUpgradedExisting,
+      })
       const upgradedExisting = operation
         ? maybeUpgradeAssistantOutboxIntentReactionOperation({
             deliveryTransportIdempotent,
-            intent: idempotencyUpgradedExisting,
+            intent: coverageUpgradedExisting,
             operation,
             persistedTarget,
             rawTargetIdentity,
             updatedAt: createdAt,
           })
         : maybeUpgradeAssistantOutboxIntentPreDispatchTarget({
-            intent: idempotencyUpgradedExisting,
+            intent: coverageUpgradedExisting,
             persistedTarget,
             rawTargetIdentity,
             updatedAt: createdAt,
@@ -376,6 +381,7 @@ export async function createAssistantOutboxIntent(
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
       deliveryTransportIdempotent,
+      answeredCoverage: input.answeredCoverage ?? null,
       lastError: null,
     })
     const persistedIntent = assistantOutboxIntentSchema.parse(
@@ -992,6 +998,7 @@ async function resolveDeviceActivityOutboxAuthorityError(input: {
 
 export async function deliverAssistantOutboxMessage(input: {
   actorId?: string | null
+  answeredCoverage?: AssistantOutboxIntent['answeredCoverage']
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   dedupeToken?: string | null
@@ -1018,6 +1025,7 @@ export async function deliverAssistantOutboxMessage(input: {
   throwIfAssistantOutboxSignalAborted(input.signal)
   const intent = await createAssistantOutboxIntent({
     actorId: input.actorId,
+    answeredCoverage: input.answeredCoverage ?? null,
     bindingDelivery: input.bindingDelivery,
     channel: input.channel,
     dedupeToken: input.dedupeToken,
@@ -1975,6 +1983,57 @@ function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {
       deliveryTransportIdempotent,
     }),
   )
+}
+
+function maybeUpgradeAssistantOutboxIntentAnsweredCoverage(input: {
+  answeredCoverage: AssistantOutboxIntent['answeredCoverage']
+  intent: AssistantOutboxIntent
+}): AssistantOutboxIntent {
+  const answeredCoverage = selectHighestAssistantOutboxAnsweredCoverage(
+    input.intent.answeredCoverage,
+    input.answeredCoverage,
+  )
+  if (
+    answeredCoverage === input.intent.answeredCoverage ||
+    (
+      answeredCoverage?.lane === input.intent.answeredCoverage?.lane &&
+      answeredCoverage?.laneSeq === input.intent.answeredCoverage?.laneSeq
+    )
+  ) {
+    return input.intent
+  }
+
+  return assistantOutboxIntentSchema.parse(
+    sanitizeAssistantOutboxIntentForPersistence({
+      ...input.intent,
+      answeredCoverage,
+    }),
+  )
+}
+
+function selectHighestAssistantOutboxAnsweredCoverage(
+  left: AssistantOutboxIntent['answeredCoverage'],
+  right: AssistantOutboxIntent['answeredCoverage'],
+): AssistantOutboxIntent['answeredCoverage'] {
+  if (!left) {
+    return right
+  }
+  if (!right) {
+    return left
+  }
+  return compareAssistantOutboxLaneSeq(left.laneSeq, right.laneSeq) >= 0
+    ? left
+    : right
+}
+
+function compareAssistantOutboxLaneSeq(left: string, right: string): number {
+  try {
+    const leftSeq = BigInt(left)
+    const rightSeq = BigInt(right)
+    return leftSeq < rightSeq ? -1 : leftSeq > rightSeq ? 1 : 0
+  } catch {
+    return left.localeCompare(right)
+  }
 }
 
 function maybeUpgradeAssistantOutboxIntentPreDispatchTarget(input: {

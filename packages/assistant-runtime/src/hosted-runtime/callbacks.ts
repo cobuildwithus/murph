@@ -12,6 +12,7 @@ import {
 } from "@murphai/hosted-execution";
 import {
   buildHostedAssistantDeliveryEffect,
+  type HostedAssistantAnsweredCoverage,
   type HostedAssistantDeliveryMedia,
   type HostedAssistantDeliveryPayload,
   type HostedAssistantDeliveryEffect,
@@ -1873,6 +1874,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         sendLinq: createHostedAssistantLinqSendDependency({
           actionApprovalPort: input.actionApprovalPort,
+          answeredCoverage: input.assistantDeliveryEffect.payload.answeredCoverage,
           assertLiveness: input.assertLiveness,
           effectsPort: input.effectsPort,
           expectedDedupeKey: input.assistantDeliveryEffect.fingerprint,
@@ -1889,6 +1891,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           vaultRoot: input.vaultRoot,
         }),
         sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
+          answeredCoverage: input.assistantDeliveryEffect.payload.answeredCoverage,
           assertLiveness: input.assertLiveness,
           effectsPort: input.effectsPort,
           linqEnv: input.linqEnv,
@@ -2189,6 +2192,7 @@ function resolveHostedAssistantLinqDeliveryContexts(input: {
 
 function createHostedAssistantLinqSendDependency(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
+  answeredCoverage?: HostedAssistantAnsweredCoverage | null;
   assertLiveness?: () => Promise<void>;
   effectsPort?: Pick<
     HostedRuntimeEffectsPort,
@@ -2283,6 +2287,7 @@ function createHostedAssistantLinqSendDependency(input: {
       queueHostedAssistantLinqDeliveryOutcomeWrite({
         effectsPort: input.effectsPort ?? null,
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+          answeredCoverage: input.answeredCoverage ?? null,
           attemptedAt,
           deliveryContext,
           failedAt: new Date(),
@@ -2304,6 +2309,7 @@ function createHostedAssistantLinqSendDependency(input: {
       effectsPort: input.effectsPort ?? null,
       outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
         acceptedAt: new Date(),
+        answeredCoverage: input.answeredCoverage ?? null,
         attemptedAt,
         deliveryContext,
         fromPhoneNumber,
@@ -2439,6 +2445,7 @@ function buildHostedVaultFileMediaIdentity(input: {
 }
 
 function createHostedAssistantLinqVoiceMemoSendDependency(input: {
+  answeredCoverage?: HostedAssistantAnsweredCoverage | null;
   assertLiveness?: () => Promise<void>;
   effectsPort?: Pick<
     HostedRuntimeEffectsPort,
@@ -2494,6 +2501,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       queueHostedAssistantLinqDeliveryOutcomeWrite({
         effectsPort: input.effectsPort ?? null,
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
+          answeredCoverage: input.answeredCoverage ?? null,
           attemptedAt,
           deliveryContext,
           failedAt: new Date(),
@@ -2515,6 +2523,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       effectsPort: input.effectsPort ?? null,
       outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
         acceptedAt: new Date(),
+        answeredCoverage: input.answeredCoverage ?? null,
         attemptedAt,
         deliveryContext,
         fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
@@ -2534,6 +2543,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
 
 function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   acceptedAt?: Date | null;
+  answeredCoverage?: HostedAssistantAnsweredCoverage | null;
   attemptedAt: Date;
   deliveryContext: HostedAssistantLinqDeliveryContext | null;
   failedAt?: Date | null;
@@ -2550,6 +2560,7 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
 }): HostedRuntimeLinqDeliveryOutcomeRequest {
   return {
     ...(input.acceptedAt ? { acceptedAt: input.acceptedAt.toISOString() } : {}),
+    answeredCoverage: input.answeredCoverage ?? null,
     attemptedAt: input.attemptedAt.toISOString(),
     ...(input.failedAt ? { failedAt: input.failedAt.toISOString() } : {}),
     failureCode: input.failureCode ?? null,
@@ -3313,6 +3324,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
   intent: Pick<
     AssistantOutboxIntent,
     | "actorId"
+    | "answeredCoverage"
     | "bindingDelivery"
     | "channel"
     | "deliveryIdempotencyKey"
@@ -3333,6 +3345,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
 ): HostedAssistantDeliveryPayload {
   const payload = {
     actorId: intent.actorId ?? null,
+    answeredCoverage: intent.answeredCoverage ?? null,
     bindingDeliveryKind: intent.bindingDelivery?.kind ?? null,
     bindingDeliveryTarget: intent.bindingDelivery?.target ?? null,
     channel: intent.channel ?? null,

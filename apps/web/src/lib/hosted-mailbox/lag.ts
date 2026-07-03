@@ -5,6 +5,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 
 export function computeHostedMailboxLaneLag(input: {
+  consumedSeq?: bigint | number | string | null;
   highWater: HostedMailboxLaneHighWater;
   redactedStatusJson: unknown;
 }): HostedMailboxLaneLag {
@@ -13,32 +14,20 @@ export function computeHostedMailboxLaneLag(input: {
     redactedStatus,
     input.highWater.lane,
   );
+  const consumedSeq = readNonNegativeBigInt(input.consumedSeq ?? null) ?? 0n;
+  const effectiveHandledSeq =
+    importedSeq > consumedSeq ? importedSeq : consumedSeq;
   const maxSeq = readNonNegativeBigInt(input.highWater.maxSeq) ?? 0n;
 
   return {
     importedSeq: importedSeq.toString(),
-    lag: (maxSeq > importedSeq ? maxSeq - importedSeq : 0n).toString(),
+    lag: (maxSeq > effectiveHandledSeq ? maxSeq - effectiveHandledSeq : 0n).toString(),
     lane: input.highWater.lane,
     maxSeq: maxSeq.toString(),
     ...(input.highWater.maxUpdatedAt === undefined
       ? {}
       : { maxUpdatedAt: input.highWater.maxUpdatedAt }),
   };
-}
-
-export function isHostedMailboxLaneCheckpointed(input: {
-  lane: HostedMailboxLane;
-  laneSeq: bigint | number | string;
-  redactedStatusJson: unknown;
-}): boolean {
-  const redactedStatus = readHostedMailboxRedactedStatusRecord(input.redactedStatusJson);
-  const importedSeq = readHostedMailboxImportedSeqForLane(redactedStatus, input.lane);
-  const laneSeq = readRequiredNonNegativeBigInt(
-    input.laneSeq,
-    "Hosted mailbox lane seq",
-  );
-
-  return importedSeq >= laneSeq;
 }
 
 export function readHostedMailboxImportedSeqForLane(
@@ -92,14 +81,4 @@ function readNonNegativeBigInt(value: unknown): bigint | null {
   }
 
   return null;
-}
-
-function readRequiredNonNegativeBigInt(value: unknown, label: string): bigint {
-  const parsed = readNonNegativeBigInt(value);
-
-  if (parsed === null) {
-    throw new TypeError(`${label} must be a non-negative integer.`);
-  }
-
-  return parsed;
 }

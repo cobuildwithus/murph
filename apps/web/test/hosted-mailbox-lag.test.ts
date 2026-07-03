@@ -25,4 +25,22 @@ describe("hosted mailbox lag", () => {
       maxSeq: "12",
     });
   });
+
+  it("nets consumed sequence into work-owed lag without rewriting importedSeq", () => {
+    expect(computeHostedMailboxLaneLag({
+      consumedSeq: "10",
+      highWater: {
+        lane: "conversation",
+        maxSeq: "12",
+      },
+      redactedStatusJson: {
+        hostedMailboxConversationImportedSeq: "4",
+      },
+    })).toEqual({
+      importedSeq: "4",
+      lag: "2",
+      lane: "conversation",
+      maxSeq: "12",
+    });
+  });
 });

@@ -123,6 +123,8 @@ export async function readHostedRuntimeReconciliationFacts(
   );
   const mailboxLag = maxSeqByLane.map((highWater) =>
     computeHostedMailboxLaneLag({
+      consumedSeq: consumedSeqByLane.find((entry) => entry.lane === highWater.lane)
+        ?.consumedSeq ?? null,
       highWater,
       redactedStatusJson: redactedStatus,
     })

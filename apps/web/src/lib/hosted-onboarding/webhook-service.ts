@@ -192,98 +192,53 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     const requireFirstContactAdmission = firstContactAdmissionMode === "enforce";
     let firstContactAdmissionClassified = false;
     try {
-      const recordedAdmission = requireFirstContactAdmission
-        ? await readRecordedHostedLinqFirstContactAdmissionDecision({
-            eventId: event.event_id,
-            prisma,
-          })
-        : null;
-
-      if (recordedAdmission?.kind === "block") {
-        plan = buildBlockedHostedLinqFirstContactAdmissionPlan();
-      } else {
-        plan = await runHostedOnboardingWebhookTransaction(
-          prisma,
-          (transaction) =>
-            planHostedOnboardingLinqWebhook({
-              event,
-              firstContactAdmitted: recordedAdmission?.kind === "allow",
-              requireFirstContactAdmission,
-              prisma: transaction,
-            }),
-        );
-      }
+      plan = await runHostedOnboardingWebhookTransaction(
+        prisma,
+        (transaction) =>
+          planHostedOnboardingLinqWebhook({
+            event,
+            requireFirstContactAdmission,
+            prisma: transaction,
+          }),
+      );
 
       if (plan.firstContactAdmissionRequest) {
         const firstContactAdmissionRequest = plan.firstContactAdmissionRequest;
-        // Resolve deterministic blocks (no OpenAI call) before claiming the
-        // per-contact budget so unsupported/textless events cannot exhaust the
-        // classifier-attempt cap.
-        const deterministicDecision = tryHostedLinqFirstContactAdmissionDeterministicDecision(
-          firstContactAdmissionRequest,
-        );
-        if (deterministicDecision) {
-          const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecision({
-            decision: deterministicDecision,
-            eventId: event.event_id,
-            prisma,
-          });
-          plan = firstContactAdmission.kind === "block"
-            ? buildBlockedHostedLinqFirstContactAdmissionPlan()
-            : await runHostedOnboardingWebhookTransaction(
+        const recordedAdmission = requireFirstContactAdmission
+          ? await readRecordedHostedLinqFirstContactAdmissionDecision({
+              eventId: event.event_id,
               prisma,
-              (transaction) =>
-                planHostedOnboardingLinqWebhook({
-                  event,
-                  firstContactAdmitted: true,
-                  requireFirstContactAdmission,
-                  prisma: transaction,
-                }),
-            );
-        } else {
-          const firstContactAdmissionParticipantContact = plan.firstContactAdmissionParticipantContact;
-          if (!firstContactAdmissionParticipantContact) {
-            throw new Error(
-              "Hosted Linq first-contact admission plan missing participant contact for budget claim.",
-            );
-          }
-          const admissionBudget = await runHostedOnboardingWebhookTransaction(
+            })
+          : null;
+        if (recordedAdmission?.kind === "block") {
+          plan = buildBlockedHostedLinqFirstContactAdmissionPlan();
+        } else if (recordedAdmission?.kind === "allow") {
+          plan = await runHostedOnboardingWebhookTransaction(
             prisma,
             (transaction) =>
-              claimHostedLinqFirstContactAdmissionBudget({
-                eventId: event.event_id,
-                participantContact: firstContactAdmissionParticipantContact,
-                tx: transaction,
+              planHostedOnboardingLinqWebhook({
+                event,
+                firstContactAdmitted: true,
+                requireFirstContactAdmission,
+                prisma: transaction,
               }),
           );
-          if (admissionBudget.kind === "exhausted") {
-            plan = buildBlockedHostedLinqFirstContactAdmissionPlan(
-              "first-contact-admission-budget-exhausted",
-            );
-          } else {
-            let classifiedAdmission: Awaited<ReturnType<typeof classifyHostedLinqFirstContactAdmission>>;
-            try {
-              classifiedAdmission = await classifyHostedLinqFirstContactAdmission({
-                request: firstContactAdmissionRequest,
-                signal: input.signal,
-              });
-            } catch (error) {
-              if (!isHostedLinqFirstContactAdmissionClassifierUnavailableError(error)) {
-                throw error;
-              }
-              classifiedAdmission = buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision();
-            }
-            firstContactAdmissionClassified = true;
-
+        } else {
+          // Resolve deterministic blocks (no OpenAI call) before claiming the
+          // per-contact budget so unsupported/textless events cannot exhaust
+          // the classifier-attempt cap.
+          const deterministicDecision = tryHostedLinqFirstContactAdmissionDeterministicDecision(
+            firstContactAdmissionRequest,
+          );
+          if (deterministicDecision) {
             const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecision({
-              decision: classifiedAdmission,
+              decision: deterministicDecision,
               eventId: event.event_id,
               prisma,
             });
-            if (firstContactAdmission.kind === "block") {
-              plan = buildBlockedHostedLinqFirstContactAdmissionPlan();
-            } else {
-              plan = await runHostedOnboardingWebhookTransaction(
+            plan = firstContactAdmission.kind === "block"
+              ? buildBlockedHostedLinqFirstContactAdmissionPlan()
+              : await runHostedOnboardingWebhookTransaction(
                 prisma,
                 (transaction) =>
                   planHostedOnboardingLinqWebhook({
@@ -293,6 +248,60 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                     prisma: transaction,
                   }),
               );
+          } else {
+            const firstContactAdmissionParticipantContact = plan.firstContactAdmissionParticipantContact;
+            if (!firstContactAdmissionParticipantContact) {
+              throw new Error(
+                "Hosted Linq first-contact admission plan missing participant contact for budget claim.",
+              );
+            }
+            const admissionBudget = await runHostedOnboardingWebhookTransaction(
+              prisma,
+              (transaction) =>
+                claimHostedLinqFirstContactAdmissionBudget({
+                  eventId: event.event_id,
+                  participantContact: firstContactAdmissionParticipantContact,
+                  tx: transaction,
+                }),
+            );
+            if (admissionBudget.kind === "exhausted") {
+              plan = buildBlockedHostedLinqFirstContactAdmissionPlan(
+                "first-contact-admission-budget-exhausted",
+              );
+            } else {
+              let classifiedAdmission: Awaited<ReturnType<typeof classifyHostedLinqFirstContactAdmission>>;
+              try {
+                classifiedAdmission = await classifyHostedLinqFirstContactAdmission({
+                  request: firstContactAdmissionRequest,
+                  signal: input.signal,
+                });
+              } catch (error) {
+                if (!isHostedLinqFirstContactAdmissionClassifierUnavailableError(error)) {
+                  throw error;
+                }
+                classifiedAdmission = buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision();
+              }
+              firstContactAdmissionClassified = true;
+
+              const firstContactAdmission = await recordHostedLinqFirstContactAdmissionDecision({
+                decision: classifiedAdmission,
+                eventId: event.event_id,
+                prisma,
+              });
+              if (firstContactAdmission.kind === "block") {
+                plan = buildBlockedHostedLinqFirstContactAdmissionPlan();
+              } else {
+                plan = await runHostedOnboardingWebhookTransaction(
+                  prisma,
+                  (transaction) =>
+                    planHostedOnboardingLinqWebhook({
+                      event,
+                      firstContactAdmitted: true,
+                      requireFirstContactAdmission,
+                      prisma: transaction,
+                    }),
+                );
+              }
             }
           }
         }

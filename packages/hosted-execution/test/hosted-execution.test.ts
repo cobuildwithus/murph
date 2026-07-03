@@ -619,7 +619,6 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH",
       "HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH",
       "HOSTED_RUNTIME_LOG_PATH",
-      "HOSTED_RUNTIME_MAILBOX_CONSUME_PATH",
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
       "HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH",
@@ -629,9 +628,6 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_PATH",
     ]);
-    expect(routeModule.HOSTED_RUNTIME_MAILBOX_CONSUME_PATH).toBe(
-      "/api/internal/hosted-mailbox/consume",
-    );
     expect(routeModule.HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH).toBe(
       "/api/internal/hosted-mailbox/payload/fetch",
     );

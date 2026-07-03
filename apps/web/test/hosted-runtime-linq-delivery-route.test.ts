@@ -63,6 +63,10 @@ describe("hosted runtime Linq delivery route", () => {
   it("records an accepted runtime delivery outcome without raw recipient fallback for participant sends", async () => {
     const response = await route.POST(buildDeliveryRequest({
       acceptedAt: "2026-04-26T00:00:04.000Z",
+      answeredCoverage: {
+        lane: "conversation",
+        laneSeq: "42",
+      },
       attemptedAt: "2026-04-26T00:00:03.000Z",
       fromPhoneNumber: "+15550100099",
       idempotencyKey: "assistant-outbox:intent_123",
@@ -82,6 +86,10 @@ describe("hosted runtime Linq delivery route", () => {
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedAt: new Date("2026-04-26T00:00:04.000Z"),
+        answeredCoverage: {
+          lane: "conversation",
+          laneSeq: "42",
+        },
         attemptedAt: new Date("2026-04-26T00:00:03.000Z"),
         failedAt: null,
         idempotencyKey: "assistant-outbox:intent_123",
@@ -91,6 +99,7 @@ describe("hosted runtime Linq delivery route", () => {
         phoneNumberLookupKey: null,
         sourceRef: "intent_123",
         targetKind: "participant",
+        userId: "member_123",
       }),
     );
     await expect(response.json()).resolves.toEqual({

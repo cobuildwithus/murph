@@ -9,7 +9,10 @@ import {
   computeHostedMailboxLaneLag,
   readHostedMailboxRedactedStatusRecord,
 } from "@/src/lib/hosted-mailbox/lag";
-import { readHostedMailboxMaxSeqByLane } from "@/src/lib/hosted-mailbox/store";
+import {
+  readHostedMailboxConsumedSeqByLane,
+  readHostedMailboxMaxSeqByLane,
+} from "@/src/lib/hosted-mailbox/store";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   listHostedRuntimeLogs,
@@ -23,17 +26,25 @@ export const GET = withJsonError(async (request: Request) => {
     maxBodyBytes: HOSTED_RUNTIME_STATUS_CALLBACK_BODY_LIMIT_BYTES,
   });
   const logLimit = readStatusLogLimit(request);
-  const [workspace, maxSeqByLane, recentLogs] = await Promise.all([
+  const [workspace, maxSeqByLane, consumedSeqByLane, recentLogs] = await Promise.all([
     readHostedWorkspace({ userId }),
     readHostedMailboxMaxSeqByLane({ userId }),
+    readHostedMailboxConsumedSeqByLane({
+      lanes: ["conversation"],
+      userId,
+    }),
     listHostedRuntimeLogs({ limit: logLimit, userId }),
   ]);
   const redactedStatus = readHostedMailboxRedactedStatusRecord(
     workspace?.redactedStatusJson,
   );
+  // Cloudflare status consumers treat mailboxLag as runtime work still owed, so
+  // delivery-time consume authority must net lag here as well as reconciliation.
 
   return jsonOk(parseHostedRuntimeWebStatusResponse({
     mailboxLag: maxSeqByLane.map((highWater) => computeHostedMailboxLaneLag({
+      consumedSeq: consumedSeqByLane.find((entry) => entry.lane === highWater.lane)
+        ?.consumedSeq ?? null,
       highWater,
       redactedStatusJson: redactedStatus,
     })),

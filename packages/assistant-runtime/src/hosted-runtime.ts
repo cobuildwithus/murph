@@ -3446,21 +3446,8 @@ function createAbortGuardedHostedRuntimePlatform(
     ...(platform.mailboxPort
       ? {
           mailboxPort: {
-            // Spread so optional port methods survive this wrapper; the
-            // consumed-watermark ack silently vanished here when consume was
-            // added to the port but not to this enumeration (2026-06 prod
-            // consume_port_missing incident). Reads stay unguarded because
-            // they are replay-safe; consume is a durable write and takes the
-            // abort guard like every other write port.
-            ...platform.mailboxPort,
             fetch: (request) => platform.mailboxPort!.fetch(request),
             fetchPayload: (request) => platform.mailboxPort!.fetchPayload(request),
-            ...(platform.mailboxPort.consume
-              ? {
-                  consume: (request) =>
-                    guard(() => platform.mailboxPort!.consume!(request)),
-                }
-              : {}),
           },
         }
       : {}),

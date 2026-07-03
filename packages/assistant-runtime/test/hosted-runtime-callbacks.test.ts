@@ -150,8 +150,11 @@ type HostedVoiceMemoDeliveryMedia = Extract<
 function createPayload(
   overrides: Partial<HostedAssistantDeliveryPayload> = {},
 ): HostedAssistantDeliveryPayload {
+  const { answeredCoverage = null, ...rest } = overrides;
+
   return {
     actorId: "actor_123",
+    answeredCoverage,
     bindingDeliveryKind: "participant",
     bindingDeliveryTarget: "chat_123",
     channel: "telegram",
@@ -168,7 +171,7 @@ function createPayload(
     threadIsDirect: true,
     transportIdempotent: false,
     turnId: "turn_123",
-    ...overrides,
+    ...rest,
   };
 }
 
@@ -715,6 +718,7 @@ describe("hosted runtime callbacks", () => {
         effectId: "intent_reaction",
         payload: {
           actorId: "actor_1",
+          answeredCoverage: null,
           bindingDeliveryKind: "participant",
           bindingDeliveryTarget: "chat_1",
           channel: "telegram",
@@ -739,6 +743,7 @@ describe("hosted runtime callbacks", () => {
         effectId: "intent_1",
         payload: {
           actorId: "actor_1",
+          answeredCoverage: null,
           bindingDeliveryKind: "participant",
           bindingDeliveryTarget: "chat_1",
           channel: "telegram",

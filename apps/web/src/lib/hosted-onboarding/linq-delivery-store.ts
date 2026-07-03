@@ -31,6 +31,9 @@ import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { normalizePhoneNumber } from "./phone";
 import { generateHostedRandomPrefixedId, sha256Hex } from "../primitives";
+import {
+  advanceHostedMailboxConsumedSeqByLane,
+} from "../hosted-mailbox/store";
 
 type HostedLinqDeliveryClient = PrismaClient | Prisma.TransactionClient;
 const HOSTED_LINQ_PROVIDER_DISPATCH_STALE_ATTEMPT_MS = 15 * 60 * 1000;
@@ -427,6 +430,10 @@ export async function markHostedLinqDeliveryAcceptedTx(input: {
 
 export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
   acceptedAt?: Date | null;
+  answeredCoverage?: {
+    lane: "conversation";
+    laneSeq: string;
+  } | null;
   attemptedAt?: Date | null;
   failedAt?: Date | null;
   failureCode?: string | null;
@@ -439,6 +446,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
   prisma: HostedLinqDeliveryClient;
   sourceRef?: string | null;
   targetKind?: string | null;
+  userId: string;
 }): Promise<{
   deliveryId: string | null;
   recorded: boolean;
@@ -579,6 +587,17 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
         prisma,
         sourceRef: input.sourceRef ?? null,
         targetKind: input.targetKind ?? null,
+      });
+    }
+
+    if (acceptedAt && input.answeredCoverage) {
+      await advanceHostedMailboxConsumedSeqByLane({
+        lanes: [{
+          consumedSeq: input.answeredCoverage.laneSeq,
+          lane: input.answeredCoverage.lane,
+        }],
+        prisma,
+        userId: input.userId,
       });
     }
 

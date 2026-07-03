@@ -1776,6 +1776,7 @@ describe("assistant delivery orchestration seam", () => {
 
     expect(runtimeState.outbox.deliverMessage).toHaveBeenCalledWith({
       actorId: "audience-actor",
+      answeredCoverage: null,
       bindingDelivery: {
         kind: "participant",
         target: "audience-delivery",

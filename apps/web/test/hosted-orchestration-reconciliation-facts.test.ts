@@ -801,6 +801,20 @@ describe("hosted orchestration reconciliation facts", () => {
     const facts = parseHostedRuntimeReconciliationFacts(await response.json());
 
     expect(facts.blocked).toBeNull();
+    expect(facts.mailboxLag).toEqual([
+      {
+        importedSeq: "0",
+        lag: "0",
+        lane: "conversation",
+        maxSeq: "250",
+      },
+      {
+        importedSeq: "0",
+        lag: "1",
+        lane: "system",
+        maxSeq: "1",
+      },
+    ]);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
     expect(mocks.readHostedMailboxPendingSystemItemsNeedAiUsageGate)
       .toHaveBeenCalledWith({
