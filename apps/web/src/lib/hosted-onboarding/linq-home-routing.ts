@@ -54,6 +54,10 @@ export type HostedLinqHomeLineRouteBindingResult =
       homeLineAssignedAt: Date | null;
       kind: "bind";
       recipientPhone: string | null;
+      // True only when the routing row already holds exactly this home
+      // binding and no pending-Linq state remains to clear, so re-writing
+      // the binding would be a no-op the caller may skip.
+      routeAlreadyBound?: boolean;
     }
   | Exclude<HostedLinqActiveRouteDecision, { kind: "bind_home" }>
   | {
@@ -208,12 +212,20 @@ async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
       || (authority.recipientPhone !== null && authority.recipientPhone === recipientPhone)
     )
   ) {
+    const routeAlreadyBound =
+      authority.kind === "home"
+      && authority.chatId === input.incomingChatId
+      && authority.recipientPhone === recipientPhone
+      && routing?.pendingLinqChatId === null
+      && routing?.pendingLinqParticipantContact === null
+      && routing?.pendingLinqRecipientPhone === null;
     return {
       kind: "done",
       result: {
         homeLineAssignedAt: authority.assignedAt,
         kind: "bind",
         recipientPhone,
+        ...(routeAlreadyBound ? { routeAlreadyBound: true } : {}),
       },
     };
   }

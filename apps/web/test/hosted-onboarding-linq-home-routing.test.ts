@@ -692,9 +692,68 @@ describe("resolveHostedMemberLinqHomeLineRouteBindingTx", () => {
       homeLineAssignedAt: assignedAt,
       kind: "bind",
       recipientPhone: "+15550100001",
+      routeAlreadyBound: true,
     });
 
     expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+  });
+
+  it("does not mark the route already bound while pending Linq state remains to clear", async () => {
+    const assignedAt = new Date("2026-06-30T14:15:00.000Z");
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "chat_123",
+      linqHomeLineAssignedAt: assignedAt,
+      linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqChatId: "chat_pending",
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+
+    const pendingResult = await resolveHostedMemberLinqHomeLineRouteBindingTx({
+      incomingChatId: "chat_123",
+      incomingDirectAttested: true,
+      incomingRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      prisma: {} as never,
+    });
+    expect(pendingResult.kind).toBe("bind");
+    expect(
+      pendingResult.kind === "bind" ? pendingResult.routeAlreadyBound : null,
+    ).toBeUndefined();
+  });
+
+  it("does not mark the route already bound when binding via the recipient line instead of the chat", async () => {
+    const assignedAt = new Date("2026-06-30T14:15:00.000Z");
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "chat_original",
+      linqHomeLineAssignedAt: assignedAt,
+      linqRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      pendingLinqRecipientPhone: null,
+      replyAliasLookupKey: null,
+      telegramThreadId: null,
+      telegramUserId: null,
+      telegramUserLookupKey: null,
+    });
+
+    const result = await resolveHostedMemberLinqHomeLineRouteBindingTx({
+      incomingChatId: "chat_new",
+      incomingDirectAttested: true,
+      incomingRecipientPhone: "+15550100001",
+      memberId: "member_123",
+      prisma: {} as never,
+    });
+    expect(result.kind).toBe("bind");
+    expect(
+      result.kind === "bind" ? result.routeAlreadyBound : null,
+    ).toBeUndefined();
   });
 
   it("redirects other-line inbound to a bare assigned home line without reserving", async () => {

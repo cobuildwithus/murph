@@ -2332,12 +2332,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
-    expect(hostedMemberRouting.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      update: expect.objectContaining({
-        linqRecipientPhoneEncrypted: null,
-        linqRecipientPhoneLookupKey: null,
-      }),
-    }));
+    // The chat is already the member's home chat with no pending state, so
+    // the wake skips the binding rewrite entirely — the missing recipient
+    // stays missing rather than being filled from inbound metadata.
+    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(hostedMemberRouting.groupBy).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();

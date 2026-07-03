@@ -43,6 +43,9 @@ import {
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
 import {
+  runWithHostedDomainRootUnwrapCache,
+} from "../hosted-crypto/domain-root-unwrap-cache";
+import {
   runWithPrismaOperationTimings,
   type PrismaOperationTiming,
 } from "../prisma-operation-timing";
@@ -704,9 +707,11 @@ async function runHostedOnboardingWebhookTransaction<TResult>(
   const operations: PrismaOperationTiming[] = [];
   try {
     return await runWithPrismaOperationTimings(operations, async () =>
-      typeof prisma.$transaction === "function"
-        ? prisma.$transaction(callback)
-        : callback(prisma as Prisma.TransactionClient),
+      runWithHostedDomainRootUnwrapCache(async () =>
+        typeof prisma.$transaction === "function"
+          ? prisma.$transaction(callback)
+          : callback(prisma as Prisma.TransactionClient),
+      ),
     );
   } finally {
     logHostedOnboardingDiagnostic("hosted-onboarding.webhook.plan-db", {

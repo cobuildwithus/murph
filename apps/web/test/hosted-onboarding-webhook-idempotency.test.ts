@@ -646,14 +646,13 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "wake-appended-active-member",
     });
 
-    expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
-      clearPending: true,
-      homeLineAssignedAt: null,
-      linqChatId: "chat_123",
-      memberId: "member_123",
-      prisma,
-      recipientPhone: "+15550000000",
-    });
+    // The route is already bound to exactly this chat and line, so the
+    // steady-state wake skips the no-op binding rewrite but still tracks
+    // the inbound message.
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith(
+      expect.objectContaining({ memberId: "member_123" }),
+    );
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       tx: prisma,
       envelope: expect.objectContaining({
