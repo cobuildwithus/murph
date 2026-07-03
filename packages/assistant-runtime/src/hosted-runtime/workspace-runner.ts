@@ -84,6 +84,9 @@ import {
 import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
 } from "./workspace-restore.ts";
+import {
+  drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
+} from "./callbacks.ts";
 
 export interface HostedWorkspaceCheckpointMetadata {
   attemptId: string;
@@ -952,6 +955,7 @@ async function prepareHostedAutoReplyDeliveryForWorkspaceRunner(input: {
   stopForegroundMailboxImportLoop: () => Promise<void>;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier | null> {
   await input.stopForegroundMailboxImportLoop();
+  await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
   let previousSystemSeq: string | null = null;
   let importPage = 0;

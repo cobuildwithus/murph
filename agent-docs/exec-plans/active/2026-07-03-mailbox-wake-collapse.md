@@ -352,6 +352,14 @@ Touch: `webhook-service-types.ts:17-26`;
   restarts the scenario before asserting attachment behavior so a failed
   or leftover rapid turn cannot steal its queued response. Focused local
   proof: `CI=true pnpm hosted-local e2e linq-webhook --no-bundle` passed.
+- PR 1 CI follow-up (2026-07-03): CI then exposed the real duplicate-send
+  window underneath that fixture: Linq provider acceptance returned before
+  the background delivery-outcome write advanced mailbox consume authority,
+  so a fresh auto-reply pass could prepare another send. The runner's
+  pre-auto-reply delivery barrier now drains pending Linq outcome writes
+  before importing fresh pre-dispatch work. Focused local proof:
+  `pnpm --dir packages/assistant-runtime test -- hosted-runtime-workspace-runner.test.ts -t "pre-auto-reply delivery preparation drains pending Linq outcomes before fresh imports"`
+  passed.
 - PR 2: workflow replay tests per the patch procedure + Temporal
   orchestration E2E; full webhook owner suites for the wake-field
   collapse.

@@ -69,6 +69,7 @@ import {
 } from "../src/hosted-runtime.ts";
 import {
   collectHostedAssistantDeliverySideEffects,
+  drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
 } from "../src/hosted-runtime/callbacks.ts";
@@ -790,6 +791,188 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(checkpointRequests, []);
     } finally {
       await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("pre-auto-reply delivery preparation drains pending Linq outcomes before fresh imports", async () => {
+    const pendingOutcomeVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const runnerVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const events: string[] = [];
+    const releaseOutcomeRef: { current: (() => void) | null } = { current: null };
+    let outcomeStarted: (() => void) | null = null;
+    const outcomeStartedPromise = new Promise<void>((resolve) => {
+      outcomeStarted = resolve;
+    });
+    const recordLinqDeliveryOutcome = vi.fn<
+      NonNullable<HostedRuntimeEffectsPort["recordLinqDeliveryOutcome"]>
+    >(async () => {
+      events.push("linq-outcome:start");
+      outcomeStarted?.();
+      await new Promise<void>((resolve) => {
+        releaseOutcomeRef.current = resolve;
+      });
+      events.push("linq-outcome:finish");
+    });
+    const providerFetch = vi.fn<typeof fetch>(async () =>
+      Response.json({
+        chat: {
+          id: "thread_synthetic_linq_outcome_barrier",
+          message: {
+            id: "provider_synthetic_linq_outcome_barrier",
+          },
+        },
+      })
+    );
+    const { mailboxPort } = createMailboxPort({
+      fetchRequests,
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_conversation_linq_outcome_barrier",
+          laneSeq: "1",
+        }),
+      ],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runnerPromise = (async () => {
+      await initializeVault({
+        createdAt: new Date(TEST_NOW),
+        timezone: "UTC",
+        title: "Hosted Workspace Runner Linq Outcome Barrier",
+        vaultRoot: pendingOutcomeVaultRoot,
+      });
+      await createAssistantOutboxIntent({
+        actorId: "+15550001",
+        bindingDelivery: {
+          kind: "thread",
+          target: "thread_synthetic_linq_outcome_barrier",
+        },
+        channel: "linq",
+        createdAt: TEST_NOW,
+        deliveryIdempotencyKey: "assistant-outbox:linq-outcome-barrier",
+        deliverySource: {
+          fromPhoneNumber: "+15550000",
+          kind: "linq",
+        },
+        identityId: "phone_lookup_synthetic_linq_outcome_barrier",
+        message: "Synthetic Linq outcome barrier reply",
+        sessionId: "session_synthetic_linq_outcome_barrier",
+        threadId: "thread_synthetic_linq_outcome_barrier",
+        threadIsDirect: true,
+        turnId: "turn_synthetic_linq_outcome_barrier",
+        vault: pendingOutcomeVaultRoot,
+      });
+      const effects = await collectHostedAssistantDeliverySideEffects({
+        includeBackgroundDueIntents: true,
+        preferredIntentIds: [],
+        vaultRoot: pendingOutcomeVaultRoot,
+      });
+      const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
+        assistantDeliveryEffects: effects,
+        now: () => TEST_NOW,
+        vaultRoot: pendingOutcomeVaultRoot,
+      });
+      await drainHostedPreparedAssistantDeliveries({
+        allowPreparedSending: true,
+        assistantDeliveryEffects: effects,
+        effectsPort: {
+          async assertLinqRecentInboundEngagement() {},
+          async readRawEmailMessage() {
+            return null;
+          },
+          recordLinqDeliveryOutcome,
+          async sendEmail() {},
+        },
+        forwardedEnv: {
+          LINQ_API_BASE_URL: "https://linq.example",
+          LINQ_API_TOKEN: "test-linq-token",
+        },
+        platformEnv: {},
+        preparedDispatches: preparation.preparedDispatches,
+        providerFetch,
+        vaultRoot: pendingOutcomeVaultRoot,
+        wake: createRunnerConversationWake(),
+      });
+      await outcomeStartedPromise;
+
+      return await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_linq_outcome_barrier",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 1,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_linq_outcome_barrier",
+        async runAssistantPhase(input) {
+          events.push("prepare:start");
+          const deliveryBarrier = await input.prepareAutoReplyDelivery?.() ?? null;
+          events.push("prepare:end");
+          assert.equal(deliveryBarrier, null);
+          return { progressed: false };
+        },
+        vaultRoot: runnerVaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+    })();
+
+    try {
+      await waitUntil(() => {
+        assert.deepEqual(events, [
+          "linq-outcome:start",
+          "prepare:start",
+        ]);
+      });
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+      ]);
+
+      releaseOutcomeRef.current?.();
+      releaseOutcomeRef.current = null;
+      const result = await withTestTimeout(runnerPromise, 1_000);
+
+      assert.deepEqual(events, [
+        "linq-outcome:start",
+        "prepare:start",
+        "linq-outcome:finish",
+        "prepare:end",
+      ]);
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "0", lane: "system" },
+        ],
+      ]);
+      assert.equal(recordLinqDeliveryOutcome.mock.calls.length, 1);
+      assert.equal(result.latestMailboxImport.state.watermarks.system, "0");
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      releaseOutcomeRef.current?.();
+      await runnerPromise.catch(() => undefined);
+      await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
+      await rm(pendingOutcomeVaultRoot, {
+        force: true,
+        recursive: true,
+      });
+      await rm(runnerVaultRoot, {
         force: true,
         recursive: true,
       });
