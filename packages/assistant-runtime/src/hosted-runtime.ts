@@ -2820,6 +2820,8 @@ export async function drainHostedRuntimeDeferredUsageCompletionsBestEffort(input
 
 interface HostedWorkspaceInvocationProjection {
   committedWorkspace: HostedWorkspaceState | null;
+  deferredAfterSelectedWakeAt: string | null;
+  deferredAfterSelectedWakeReason: string | null;
   inboxMediaRetentionWakeAt: string | null;
   projectedWakeCheckpointGateFresh: boolean;
   nextWakeAt: string | null;
@@ -2902,6 +2904,8 @@ function buildHostedWorkspaceInvocationProjection(input: {
 
   return {
     committedWorkspace,
+    deferredAfterSelectedWakeAt: null,
+    deferredAfterSelectedWakeReason: null,
     inboxMediaRetentionWakeAt: committedWorkspace?.inboxMediaRetentionWakeAt ?? null,
     nextWakeAt: nextWake.nextWakeAt,
     nextWakeReason: nextWake.nextWakeReason,
@@ -2927,6 +2931,21 @@ function mergeHostedWorkspaceInvocationProjection(
     nextWakeAt: previous.nextWakeAt,
     nextWakeReason: previous.nextWakeReason,
   });
+  const previousSelectedWake = readSelectedHostedWorkspaceInvocationProjectedWake(
+    previous,
+  );
+  const previousDeferredWake = readDeferredHostedWorkspaceInvocationProjectedWake(
+    previous,
+  );
+  const nextSelectedWake = readSelectedHostedWorkspaceInvocationProjectedWake(next);
+  const previousWakeWasServiced =
+    previousWakeKey !== null
+    && previousWakeKey === options.servicedProjectedWakeKey
+    && previousDeferredWake.nextWakeAt !== null
+    && !hostedWorkspaceInvocationProjectionWakeMatches(
+      nextSelectedWake,
+      previousSelectedWake,
+    );
   const preserveCheckpointGatedWake =
     options.replaceWake === true
     && previousWakeKey !== options.servicedProjectedWakeKey
@@ -2936,68 +2955,174 @@ function mergeHostedWorkspaceInvocationProjection(
       next.nextWakeAt === null
       || hostedWorkspaceInvocationProjectionWakeMatchesNormalized(next, previous)
     );
-  const selectedWake = preserveCheckpointGatedWake
-    ? {
-        nextWakeAt: previous.nextWakeAt,
-        nextWakeReason: previous.nextWakeReason,
-      }
-    : options.replaceWake
-    ? {
-        nextWakeAt: next.nextWakeAt,
-        nextWakeReason: next.nextWakeReason,
-      }
-    : selectEarliestHostedRuntimeWake([
-        {
-          at: previous.nextWakeAt,
-          reason: previous.nextWakeReason,
-        },
-        {
-          at: next.nextWakeAt,
-          reason: next.nextWakeReason,
-        },
-      ]);
-  let selectedWakeRequiresCheckpoint = false;
-  let selectedWakeCheckpointGateFresh = false;
+  let selectedProjectedWake: HostedWorkspaceInvocationProjectedWake;
   if (preserveCheckpointGatedWake) {
-    selectedWakeRequiresCheckpoint = true;
+    selectedProjectedWake = {
+      ...previousSelectedWake,
+      projectedWakeCheckpointGateFresh: false,
+      projectedWakeRequiresCheckpoint: true,
+    };
+  } else if (previousWakeWasServiced) {
+    selectedProjectedWake = selectEarliestHostedWorkspaceInvocationProjectedWake([
+      previousDeferredWake,
+      nextSelectedWake,
+    ]);
   } else if (options.replaceWake) {
-    selectedWakeRequiresCheckpoint = next.projectedWakeRequiresCheckpoint
-      || (
-        previous.projectedWakeRequiresCheckpoint
-        && next.nextWakeAt !== null
-        && next.nextWakeReason !== "assistant"
-      );
-    selectedWakeCheckpointGateFresh =
-      selectedWakeRequiresCheckpoint
-      && next.projectedWakeCheckpointGateFresh;
+    const selectedWakeRequiresCheckpoint = next.projectedWakeRequiresCheckpoint
+        || (
+          previous.projectedWakeRequiresCheckpoint
+          && next.nextWakeAt !== null
+          && next.nextWakeReason !== "assistant"
+        );
+    selectedProjectedWake = {
+      ...nextSelectedWake,
+      projectedWakeCheckpointGateFresh:
+        selectedWakeRequiresCheckpoint && next.projectedWakeCheckpointGateFresh,
+      projectedWakeRequiresCheckpoint: selectedWakeRequiresCheckpoint,
+    };
   } else {
-    if (hostedWorkspaceInvocationProjectionWakeMatches(selectedWake, previous)) {
-      selectedWakeRequiresCheckpoint ||= previous.projectedWakeRequiresCheckpoint;
-      selectedWakeCheckpointGateFresh ||= previous.projectedWakeCheckpointGateFresh;
-    }
-    if (hostedWorkspaceInvocationProjectionWakeMatches(selectedWake, next)) {
-      selectedWakeRequiresCheckpoint ||= next.projectedWakeRequiresCheckpoint;
-      selectedWakeCheckpointGateFresh ||= next.projectedWakeCheckpointGateFresh;
-    }
-    selectedWakeCheckpointGateFresh &&= selectedWakeRequiresCheckpoint;
+    selectedProjectedWake = selectEarliestHostedWorkspaceInvocationProjectedWake([
+      previousSelectedWake,
+      nextSelectedWake,
+    ]);
   }
+
+  let deferredAfterSelectedWake = emptyHostedWorkspaceInvocationProjectedWake();
+  if (
+    !previousWakeWasServiced
+    && selectedProjectedWake.nextWakeAt !== null
+    && hostedWorkspaceInvocationProjectionWakeMatches(
+      selectedProjectedWake,
+      previousSelectedWake,
+    )
+  ) {
+    const nextDeferredWake =
+      hostedWorkspaceInvocationProjectionWakeMatches(
+        selectedProjectedWake,
+        nextSelectedWake,
+      )
+        ? emptyHostedWorkspaceInvocationProjectedWake()
+        : nextSelectedWake;
+    deferredAfterSelectedWake =
+      selectEarliestHostedWorkspaceInvocationProjectedWake([
+        previousDeferredWake,
+        nextDeferredWake,
+      ]);
+  } else if (
+    previousWakeWasServiced
+    && selectedProjectedWake.nextWakeAt !== null
+    && hostedWorkspaceInvocationProjectionWakeMatches(
+      selectedProjectedWake,
+      previousDeferredWake,
+    )
+    && !hostedWorkspaceInvocationProjectionWakeMatches(
+      selectedProjectedWake,
+      nextSelectedWake,
+    )
+  ) {
+    deferredAfterSelectedWake = nextSelectedWake;
+  }
+
+  const baseStatus = options.replaceWake && !preserveCheckpointGatedWake
+    ? next.status
+    : mergeHostedWorkspaceInvocationStatus(previous.status, next.status);
+  const status = baseStatus === "budget_exhausted"
+    ? baseStatus
+    : selectedProjectedWake.nextWakeAt !== null
+    ? "scheduled"
+    : baseStatus;
 
   return {
     committedWorkspace: next.committedWorkspace ?? previous.committedWorkspace,
+    deferredAfterSelectedWakeAt: deferredAfterSelectedWake.nextWakeAt,
+    deferredAfterSelectedWakeReason: deferredAfterSelectedWake.nextWakeReason,
     inboxMediaRetentionWakeAt: next.committedWorkspace
       ? next.inboxMediaRetentionWakeAt
       : previous.inboxMediaRetentionWakeAt,
-    nextWakeAt: selectedWake.nextWakeAt,
-    nextWakeReason: selectedWake.nextWakeReason,
-    projectedWakeCheckpointGateFresh: selectedWakeCheckpointGateFresh,
-    projectedWakeRequiresCheckpoint: selectedWakeRequiresCheckpoint,
+    nextWakeAt: selectedProjectedWake.nextWakeAt,
+    nextWakeReason: selectedProjectedWake.nextWakeReason,
+    projectedWakeCheckpointGateFresh:
+      selectedProjectedWake.projectedWakeCheckpointGateFresh,
+    projectedWakeRequiresCheckpoint:
+      selectedProjectedWake.projectedWakeRequiresCheckpoint,
     redactedStatus: {
       ...previous.redactedStatus,
       ...next.redactedStatus,
     },
-    status: options.replaceWake && !preserveCheckpointGatedWake
-      ? next.status
-      : mergeHostedWorkspaceInvocationStatus(previous.status, next.status),
+    status,
+  };
+}
+
+interface HostedWorkspaceInvocationProjectedWake {
+  nextWakeAt: string | null;
+  nextWakeReason: string | null;
+  projectedWakeCheckpointGateFresh: boolean;
+  projectedWakeRequiresCheckpoint: boolean;
+}
+
+function emptyHostedWorkspaceInvocationProjectedWake():
+  HostedWorkspaceInvocationProjectedWake {
+  return {
+    nextWakeAt: null,
+    nextWakeReason: null,
+    projectedWakeCheckpointGateFresh: false,
+    projectedWakeRequiresCheckpoint: false,
+  };
+}
+
+function readSelectedHostedWorkspaceInvocationProjectedWake(
+  projection: HostedWorkspaceInvocationProjection,
+): HostedWorkspaceInvocationProjectedWake {
+  return {
+    nextWakeAt: projection.nextWakeAt,
+    nextWakeReason: projection.nextWakeReason,
+    projectedWakeCheckpointGateFresh: projection.projectedWakeCheckpointGateFresh,
+    projectedWakeRequiresCheckpoint: projection.projectedWakeRequiresCheckpoint,
+  };
+}
+
+function readDeferredHostedWorkspaceInvocationProjectedWake(
+  projection: HostedWorkspaceInvocationProjection,
+): HostedWorkspaceInvocationProjectedWake {
+  return {
+    nextWakeAt: projection.deferredAfterSelectedWakeAt,
+    nextWakeReason: projection.deferredAfterSelectedWakeReason,
+    projectedWakeCheckpointGateFresh: false,
+    projectedWakeRequiresCheckpoint:
+      projection.deferredAfterSelectedWakeAt !== null,
+  };
+}
+
+function selectEarliestHostedWorkspaceInvocationProjectedWake(
+  candidates: HostedWorkspaceInvocationProjectedWake[],
+): HostedWorkspaceInvocationProjectedWake {
+  const selectedWake = selectEarliestHostedRuntimeWake(
+    candidates.map((candidate) => ({
+      at: candidate.nextWakeAt,
+      reason: candidate.nextWakeReason,
+    })),
+  );
+  if (selectedWake.nextWakeAt === null) {
+    return emptyHostedWorkspaceInvocationProjectedWake();
+  }
+
+  let selectedWakeCheckpointGateFresh = false;
+  let selectedWakeRequiresCheckpoint = false;
+  for (const candidate of candidates) {
+    if (!hostedWorkspaceInvocationProjectionWakeMatches(selectedWake, candidate)) {
+      continue;
+    }
+    selectedWakeCheckpointGateFresh ||=
+      candidate.projectedWakeCheckpointGateFresh;
+    selectedWakeRequiresCheckpoint ||= candidate.projectedWakeRequiresCheckpoint;
+  }
+
+  return {
+    nextWakeAt: selectedWake.nextWakeAt,
+    nextWakeReason: selectedWake.nextWakeReason,
+    projectedWakeCheckpointGateFresh:
+      selectedWakeCheckpointGateFresh && selectedWakeRequiresCheckpoint,
+    projectedWakeRequiresCheckpoint: selectedWakeRequiresCheckpoint,
   };
 }
 

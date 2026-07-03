@@ -1228,6 +1228,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const dueWakeAt = new Date(Date.now() - 60_000).toISOString();
+    const freshFutureWakeAt = new Date(Date.now() + 3_600_000).toISOString();
     const durableEffect = vi.fn(async () => {
       events.push("durable-effect");
       return {
@@ -1326,8 +1327,8 @@ describe("hosted workspace runtime entrypoint", () => {
                 );
                 return {
                   checkpointReason: "assistant_runtime_commit",
-                  nextWakeAt: null,
-                  nextWakeReason: null,
+                  nextWakeAt: freshFutureWakeAt,
+                  nextWakeReason: "assistant",
                   progressed: true,
                 };
               }
@@ -1368,7 +1369,7 @@ describe("hosted workspace runtime entrypoint", () => {
           ["idle_shutdown", "0", null, null],
           ["idle_shutdown", "1", dueWakeAt, "assistant"],
           ["idle_shutdown", "2", dueWakeAt, "assistant"],
-          ["idle_shutdown", "3", null, null],
+          ["idle_shutdown", "3", freshFutureWakeAt, "assistant"],
         ],
       );
       assert.ok(
@@ -1395,8 +1396,8 @@ describe("hosted workspace runtime entrypoint", () => {
         requireEventIndex(events, "assistant:3")
           < requireEventIndex(events, "snapshot:idle_shutdown:4"),
       );
-      assert.equal(result.status, "idle");
-      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, freshFutureWakeAt);
     } finally {
       await removeTempRoot(vaultRoot);
     }
