@@ -1489,7 +1489,7 @@ describe("hosted workspace runtime entrypoint", () => {
         ]),
         [
           ["idle_shutdown", "0", null, null],
-          ["idle_shutdown", "1", wakeB, "assistant"],
+          ["idle_shutdown", "1", wakeA, "assistant"],
           ["idle_shutdown", "2", null, null],
         ],
       );
@@ -1499,14 +1499,14 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.ok(
         requireEventIndex(events, "durable-effect")
-          < requireEventIndex(events, "assistant:2"),
-      );
-      assert.ok(
-        requireEventIndex(events, "assistant:2")
           < requireEventIndex(events, "snapshot:idle_shutdown:2"),
       );
       assert.ok(
         requireEventIndex(events, "snapshot:idle_shutdown:2")
+          < requireEventIndex(events, "assistant:2"),
+      );
+      assert.ok(
+        requireEventIndex(events, "assistant:2")
           < requireEventIndex(events, "assistant:3"),
       );
       assert.ok(
