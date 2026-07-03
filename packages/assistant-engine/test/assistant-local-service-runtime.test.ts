@@ -4823,7 +4823,11 @@ test('sendAssistantMessageLocal probes active-turn input once before provider st
   ])
 })
 
-test('sendAssistantMessageLocal suppresses hosted progress in queue-only auto-replies', async () => {
+// Hosted-runner turns always run queue-only (the outbox owns final-reply
+// delivery), including interactive auto-replies where a member is actively
+// waiting. Progress delivery must stay wired there so mid-turn updates and
+// commentary-phase messages reach the member instead of silently vanishing.
+test('sendAssistantMessageLocal keeps hosted progress wired in queue-only auto-replies', async () => {
   const context = await createTempVaultContext(
     'assistant-local-service-hosted-auto-reply-progress-',
   )
@@ -4872,11 +4876,9 @@ test('sendAssistantMessageLocal suppresses hosted progress in queue-only auto-re
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery
   const hostedToolContext =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.hostedToolContext
-  assert.equal(progressDelivery, null)
+  assert.ok(progressDelivery, 'queue-only auto-reply turns keep progress delivery wired')
   assert.ok(hostedToolContext)
   assert.equal(hostedToolContext.computerToolsAvailable, true)
-  assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 0)
-  assert.equal(progressDeliveryDependencies.sendLinq.mock.calls.length, 0)
   assert.equal(mocks.dispatchAssistantReply.mock.calls.length, 1)
 })
 

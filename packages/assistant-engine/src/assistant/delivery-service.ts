@@ -6,6 +6,7 @@ import {
   parseTelegramThreadTarget,
 } from '@murphai/messaging-ingress/telegram-webhook'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { shouldCreateAssistantProgressDelivery } from './progress-constants.js'
 import { markAssistantFirstContactSeen } from './first-contact.js'
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from './first-contact-welcome.js'
 import { createHostedDeliveryId } from './hosted-delivery-id.js'
@@ -409,12 +410,19 @@ export async function deliverAssistantProgressUpdate(input: {
   turnId: string
 }): Promise<AssistantSession> {
   // Progress updates are ephemeral current-audience sends, not final-reply
-  // delivery or commit-aware outbox decisions.
-  if (!input.input.deliverResponse) {
-    return input.session
-  }
-  if (input.input.deliveryDispatchMode === 'queue-only') {
-    return input.session
+  // delivery or commit-aware outbox decisions. The caller gates on the same
+  // shared predicate before invoking, so failing it here means the delivery
+  // context diverged mid-send; fail loudly instead of returning a
+  // success-shaped no-op that the model reports to the user as "sent".
+  if (!shouldCreateAssistantProgressDelivery(input.input)) {
+    throw new VaultCliError(
+      'ASSISTANT_PROGRESS_DELIVERY_SUPPRESSED',
+      `Progress update suppressed: delivery context is not progress-eligible ` +
+      `(turn=${input.turnId} ordinal=${input.ordinal} ` +
+      `deliverResponse=${String(input.input.deliverResponse)} ` +
+      `dispatchMode=${String(input.input.deliveryDispatchMode)} ` +
+      `turnTrigger=${String(input.input.turnTrigger)}).`,
+    )
   }
 
   const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
@@ -437,6 +445,17 @@ export async function deliverAssistantProgressUpdate(input: {
     deliveryFields,
     input: input.input,
   })
+  // Progress sends bypass the persisted outbox, so this dispatch summary is
+  // the only durable trace tying a "sent" tool result to a transport attempt.
+  const progressTurnId = input.turnId
+  const progressOrdinal = input.ordinal
+  console.warn(
+    'Assistant progress update dispatching ' +
+    `(turn=${progressTurnId} ordinal=${progressOrdinal} ` +
+    `channel=${String(messageDeliveryFields.channel)} ` +
+    `explicitTargetPresent=${Boolean(messageDeliveryFields.explicitTarget)} ` +
+    `threadIdPresent=${Boolean(messageDeliveryFields.threadId)}).`,
+  )
 
   const delivery = await sendAssistantOutboxDispatchMessage({
     ...(input.dependencies ? { dependencies: input.dependencies } : {}),
@@ -450,6 +469,16 @@ export async function deliverAssistantProgressUpdate(input: {
     vault: input.input.vault,
     signal: input.signal,
   })
+  console.warn(
+    'Assistant progress update dispatched ' +
+    `(turn=${progressTurnId} ordinal=${progressOrdinal} ` +
+    `deliveredTargetPresent=${Boolean(delivery.delivery?.target)} ` +
+    `providerMessageIdPresent=${Boolean(
+      delivery.delivery && 'providerMessageId' in delivery.delivery
+        ? delivery.delivery.providerMessageId
+        : null,
+    )}).`,
+  )
   return delivery.session ?? input.session
 }
 
