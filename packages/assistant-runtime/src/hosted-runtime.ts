@@ -2204,7 +2204,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           const checkpointWakeKeyBeingSuperseded =
             projectedRuntimeWakeCanRunAfterCheckpoint({
               projection: accumulatedProjection,
-              requireDue: false,
+              requireDue: true,
               servicedProjectedRuntimeWakeKey,
             })
               ? buildHostedRuntimeWakeKey({
