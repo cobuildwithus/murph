@@ -1,4 +1,7 @@
 import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
+import {
+  mergeHostedJunctionHistoricalBackfillMetadata,
+} from "./junction-historical-backfill-progress.ts";
 import type {
   DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceStatus,
@@ -54,6 +57,18 @@ const HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_BLOCKED_KEY_SUBSTRINGS = [
 ] as const;
 const HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_SECRET_VALUE_PATTERN =
   /\b(?:authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|hmac|webhook[_-]?secret)\b|\bBearer\s+\S+/iu;
+
+export function mergeHostedDeviceSyncConnectionMetadata(input: {
+  hostedMetadata: Record<string, unknown>;
+  localConnectionStateUnpublished: boolean;
+  localMetadata: Record<string, unknown> | null | undefined;
+}): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } {
+  return mergeHostedJunctionHistoricalBackfillMetadata({
+    hostedMetadata: input.hostedMetadata,
+    localConnectionStateUnpublished: input.localConnectionStateUnpublished,
+    localMetadata: input.localMetadata ?? {},
+  });
+}
 
 export interface HostedExecutionDeviceSyncConnectLinkResponse {
   authorizationUrl: string;

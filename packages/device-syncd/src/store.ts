@@ -88,6 +88,13 @@ import type {
   UpsertDeviceConnectionSourceInput,
 } from "./types.ts";
 
+class DeviceSyncSuccessFenceRejectedError extends Error {
+  constructor() {
+    super("Device sync success fence rejected.");
+    this.name = "DeviceSyncSuccessFenceRejectedError";
+  }
+}
+
 export class SqliteDeviceSyncStore {
   readonly databasePath: string;
   private readonly database: DatabaseSync;
@@ -387,44 +394,52 @@ export class SqliteDeviceSyncStore {
     };
     workerId: string;
   }): { queuedJobs: DeviceSyncJobRecord[]; succeeded: boolean } {
-    return withImmediateTransaction(this.database, () => {
-      const completed = completeDeviceSyncJobsIfOwnedInTransaction(this.database, {
-        jobIds: input.jobIds,
-        now: input.completedAt,
-        workerId: input.workerId,
+    try {
+      return withImmediateTransaction(this.database, () => {
+        const completed = completeDeviceSyncJobsIfOwnedInTransaction(this.database, {
+          jobIds: input.jobIds,
+          now: input.completedAt,
+          workerId: input.workerId,
+        });
+
+        if (!completed) {
+          return { queuedJobs: [], succeeded: false };
+        }
+
+        const markedSucceeded = markStoredSyncSucceededInTransaction(
+          this.database,
+          input.accountId,
+          input.syncSucceededAt,
+          input.disconnectGeneration,
+          input.syncSuccessOptions,
+        );
+
+        if (!markedSucceeded) {
+          throw new DeviceSyncSuccessFenceRejectedError();
+        }
+
+        const queuedJobs = input.jobs.map((job) =>
+          enqueueDeviceSyncJobInTransaction(this.database, {
+            provider: input.provider,
+            accountId: input.accountId,
+            kind: job.kind,
+            payload: job.payload ?? {},
+            priority: job.priority ?? 0,
+            availableAt: job.availableAt,
+            maxAttempts: job.maxAttempts,
+            dedupeKey: job.dedupeKey,
+          })
+        );
+
+        return { queuedJobs, succeeded: true };
       });
-
-      if (!completed) {
+    } catch (error) {
+      if (error instanceof DeviceSyncSuccessFenceRejectedError) {
         return { queuedJobs: [], succeeded: false };
       }
 
-      const markedSucceeded = markStoredSyncSucceededInTransaction(
-        this.database,
-        input.accountId,
-        input.syncSucceededAt,
-        input.disconnectGeneration,
-        input.syncSuccessOptions,
-      );
-
-      if (!markedSucceeded) {
-        return { queuedJobs: [], succeeded: false };
-      }
-
-      const queuedJobs = input.jobs.map((job) =>
-        enqueueDeviceSyncJobInTransaction(this.database, {
-          provider: input.provider,
-          accountId: input.accountId,
-          kind: job.kind,
-          payload: job.payload ?? {},
-          priority: job.priority ?? 0,
-          availableAt: job.availableAt,
-          maxAttempts: job.maxAttempts,
-          dedupeKey: job.dedupeKey,
-        })
-      );
-
-      return { queuedJobs, succeeded: true };
-    });
+      throw error;
+    }
   }
 
   releaseJobIfOwned(jobId: string, workerId: string, now: string): boolean {

@@ -871,6 +871,7 @@ class DeviceSyncServiceController {
       });
 
       if (!completion.succeeded) {
+        releaseActiveJobsIfCurrentAccountActive(currentNow());
         return finishPass();
       }
 

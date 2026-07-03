@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import * as hostedRuntime from "../src/hosted-runtime.ts";
 import {
   buildHostedExecutionDeviceSyncConnectLinkPath,
+  mergeHostedDeviceSyncConnectionMetadata,
   normalizeHostedDeviceSyncJobHints,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
   parseHostedExecutionDeviceSyncDirtyAckRequest,
@@ -15,6 +16,98 @@ import {
   resolveHostedDeviceSyncWakeContext,
   sanitizeHostedRuntimeErrorText,
 } from "../src/hosted-runtime.ts";
+
+describe("mergeHostedDeviceSyncConnectionMetadata", () => {
+  it("preserves newer unpublished local Junction backfill progress", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        hostedOnly: true,
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        localOnly: true,
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 2,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:15:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(true);
+    expect(result.metadata).toEqual({
+      hostedOnly: true,
+      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillEmptyAttempts: 2,
+      junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:15:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+    });
+  });
+
+  it("keeps hosted terminal progress ahead of unpublished local retry progress", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        junctionHistoricalBackfillStatus: "complete",
+        junctionHistoricalBackfillEmptyAttempts: 0,
+        junctionHistoricalBackfillLastEmptyAt: null,
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 3,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:30:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(false);
+    expect(result.metadata).toEqual({
+      junctionHistoricalBackfillStatus: "complete",
+      junctionHistoricalBackfillEmptyAttempts: 0,
+      junctionHistoricalBackfillLastEmptyAt: null,
+      junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+    });
+  });
+
+  it("keeps hosted progress when local progress has already been published", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+      localConnectionStateUnpublished: false,
+      localMetadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 2,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:15:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(false);
+    expect(result.metadata).toEqual({
+      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillEmptyAttempts: 1,
+      junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+    });
+  });
+});
 
 describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
   it("parses staged dirty ack overlays on dirty-pending requests", () => {

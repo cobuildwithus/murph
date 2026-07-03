@@ -3688,7 +3688,7 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
   close();
 });
 
-test("device sync service fences success writes after local connection revision changes", async () => {
+test("device sync service releases success-fenced jobs after local connection revision changes", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-success-revision-fence");
   let providerStartedResolve: (() => void) | null = null;
   let releaseProviderResolve: (() => void) | null = null;
@@ -3763,7 +3763,9 @@ test("device sync service fences success writes after local connection revision 
   assert.equal(storedAccount.lastSyncCompletedAt, null);
   assert.equal(storedAccount.nextReconcileAt, accountBeforeWorker.nextReconcileAt);
   assert.equal(jobs.length, 1);
-  assert.equal(jobs[0]?.status, "succeeded");
+  assert.equal(jobs[0]?.kind, "backfill");
+  assert.equal(jobs[0]?.status, "queued");
+  assert.equal(service.summarize().jobsQueued, 1);
 
   close();
 });

@@ -27,6 +27,10 @@ import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-p
 
 import { deviceSyncError, isDeviceSyncError, type DeviceSyncError } from "../errors.ts";
 import { sanitizeHostedRuntimeDiagnosticText } from "../hosted-runtime.ts";
+import {
+  JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
+  type JunctionHistoricalBackfillStatus,
+} from "../junction-historical-backfill-progress.ts";
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
 import {
   assertValidJunctionClientUserIdSecret,
@@ -433,14 +437,6 @@ const EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS = Object.freeze([
   6 * 60 * 60_000,
   24 * 60 * 60_000,
 ] as const);
-const JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS = Object.freeze({
-  status: "junctionHistoricalBackfillStatus",
-  emptyAttempts: "junctionHistoricalBackfillEmptyAttempts",
-  lastEmptyAt: "junctionHistoricalBackfillLastEmptyAt",
-  windowStart: "junctionHistoricalBackfillWindowStart",
-  windowEnd: "junctionHistoricalBackfillWindowEnd",
-} as const);
-type JunctionHistoricalBackfillStatus = "complete" | "exhausted" | "retrying";
 
 export function createJunctionDeviceSyncProvider(
   config: JunctionDeviceSyncProviderConfig,

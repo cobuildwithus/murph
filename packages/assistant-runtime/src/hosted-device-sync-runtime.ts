@@ -9,6 +9,7 @@ import type {
   StoredDeviceSyncAccount,
 } from "@murphai/device-syncd/types";
 import {
+  mergeHostedDeviceSyncConnectionMetadata,
   normalizeHostedDeviceSyncJobHints,
   resolveHostedDeviceSyncWakeContext,
   sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata,
@@ -72,26 +73,6 @@ type HostedDirtyDeviceSyncStateSkipReason =
   | "provider_not_registered"
   | "reauthorization_required";
 type HostedTerminalDeviceSyncStatus = "disconnected" | "reauthorization_required";
-type JunctionHistoricalBackfillStatus = "complete" | "exhausted" | "retrying";
-
-interface JunctionHistoricalBackfillProgress {
-  emptyAttempts: number;
-  lastEmptyAt: string | null;
-  status: JunctionHistoricalBackfillStatus;
-  windowEnd: string;
-  windowStart: string;
-}
-
-const JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS = Object.freeze({
-  status: "junctionHistoricalBackfillStatus",
-  emptyAttempts: "junctionHistoricalBackfillEmptyAttempts",
-  lastEmptyAt: "junctionHistoricalBackfillLastEmptyAt",
-  windowStart: "junctionHistoricalBackfillWindowStart",
-  windowEnd: "junctionHistoricalBackfillWindowEnd",
-} as const);
-const JUNCTION_HISTORICAL_BACKFILL_METADATA_KEY_SET = new Set<string>(
-  Object.values(JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS),
-);
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
@@ -1097,7 +1078,7 @@ function shouldUseRawHostedMetadataBaseline(input: {
   entry: HostedDeviceSyncRuntimeConnectionSnapshot;
   stored: StoredDeviceSyncAccount;
 }): boolean {
-  return shouldPreserveLocalJunctionHistoricalBackfillProgress({
+  return mergeHostedDeviceSyncConnectionMetadata({
     hostedMetadata: input.entry.connection.metadata,
     localConnectionStateUnpublished: Boolean(
       input.stored.hostedObservedUpdatedAt
@@ -1105,7 +1086,7 @@ function shouldUseRawHostedMetadataBaseline(input: {
         && input.stored.localConnectionRevision !== input.stored.hostedObservedConnectionRevision,
     ),
     localMetadata: input.stored.metadata,
-  });
+  }).preservedLocalProgress;
 }
 
 function buildHostedAccountHydrationInput(input: {
@@ -1166,14 +1147,14 @@ function buildHostedAccountHydrationInput(input: {
     input.existing
       && input.existing.localConnectionRevision !== input.existing.hostedObservedConnectionRevision,
   );
-  const preserveUnpublishedLocalBackfillProgress = Boolean(
+  const hydratedMetadata = mergeHostedDeviceSyncConnectionMetadata({
+    hostedMetadata: hostedConnection.metadata,
+    localConnectionStateUnpublished,
+    localMetadata: input.existing?.metadata,
+  });
+  const preserveUnpublishedLocalProviderProgress = Boolean(
     input.existing
-      && localConnectionStateUnpublished
-      && shouldPreserveLocalJunctionHistoricalBackfillProgress({
-        hostedMetadata: hostedConnection.metadata,
-        localConnectionStateUnpublished,
-        localMetadata: input.existing.metadata,
-      }),
+      && hydratedMetadata.preservedLocalProgress,
   );
   const connection = (hostedConnectionStateStale || hostedConnectionStateReplayed) && input.existing
     ? {
@@ -1192,11 +1173,7 @@ function buildHostedAccountHydrationInput(input: {
         connectedAt: hostedConnection.connectedAt,
         displayName: hostedConnection.displayName ?? null,
         externalAccountId: hostedConnection.externalAccountId,
-        metadata: resolveHydratedConnectionMetadata({
-          existing: input.existing,
-          hostedMetadata: hostedConnection.metadata,
-          preserveUnpublishedLocalBackfillProgress,
-        }),
+        metadata: hydratedMetadata.metadata,
         provider: hostedConnection.provider,
         scopes: [...hostedConnection.scopes],
         setupExpiresAt: hostedConnection.setupExpiresAt ?? null,
@@ -1211,7 +1188,7 @@ function buildHostedAccountHydrationInput(input: {
 
   return {
     clearTokens: shouldClearTokens,
-    advanceHostedObservedConnectionRevision: !preserveUnpublishedLocalBackfillProgress,
+    advanceHostedObservedConnectionRevision: !preserveUnpublishedLocalProviderProgress,
     ...(credential ? { credential } : {}),
     hostedObservedTokenVersion: nextHostedObservedTokenVersion,
     hostedObservedUpdatedAt: nextHostedObservedUpdatedAt,
@@ -1220,7 +1197,7 @@ function buildHostedAccountHydrationInput(input: {
       existing: input.existing,
       hostedLocalState,
       hostedStateAdvanced,
-      preserveUnpublishedLocalBackfillProgress,
+      preserveUnpublishedLocalProviderProgress,
       status: connection.status,
     }),
     ...(hostedTokenBundle && !hostedTokenStateStale && !hostedTokenStateReplayed
@@ -1458,7 +1435,7 @@ function resolveHydratedHostedLocalState(input: {
   existing: StoredDeviceSyncAccount | null;
   hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot;
   hostedStateAdvanced: boolean;
-  preserveUnpublishedLocalBackfillProgress: boolean;
+  preserveUnpublishedLocalProviderProgress: boolean;
   status: StoredDeviceSyncAccount["status"];
 }): {
   lastErrorCode: string | null;
@@ -1489,122 +1466,6 @@ function resolveHydratedHostedLocalState(input: {
     ),
     nextReconcileAt: resolveHydratedNextReconcileAt(input),
   };
-}
-
-function resolveHydratedConnectionMetadata(input: {
-  existing: StoredDeviceSyncAccount | null;
-  hostedMetadata: Record<string, unknown>;
-  preserveUnpublishedLocalBackfillProgress: boolean;
-}): Record<string, unknown> {
-  const metadata = { ...input.hostedMetadata };
-
-  if (!input.existing || !input.preserveUnpublishedLocalBackfillProgress) {
-    return metadata;
-  }
-
-  for (const [key, value] of Object.entries(input.existing.metadata)) {
-    if (isJunctionHistoricalBackfillMetadataKey(key)) {
-      metadata[key] = value;
-    }
-  }
-
-  return metadata;
-}
-
-function shouldPreserveLocalJunctionHistoricalBackfillProgress(input: {
-  hostedMetadata: Record<string, unknown>;
-  localConnectionStateUnpublished: boolean;
-  localMetadata: Record<string, unknown>;
-}): boolean {
-  if (!input.localConnectionStateUnpublished) {
-    return false;
-  }
-
-  const localProgress = readJunctionHistoricalBackfillProgress(input.localMetadata);
-  if (!localProgress) {
-    return false;
-  }
-
-  const hostedProgress = readJunctionHistoricalBackfillProgress(input.hostedMetadata);
-  if (!hostedProgress) {
-    return true;
-  }
-
-  if (
-    localProgress.windowStart !== hostedProgress.windowStart
-    || localProgress.windowEnd !== hostedProgress.windowEnd
-  ) {
-    return false;
-  }
-
-  if (hostedProgress.status === "complete" || hostedProgress.status === "exhausted") {
-    return false;
-  }
-
-  if (localProgress.status === "complete" || localProgress.status === "exhausted") {
-    return true;
-  }
-
-  const localLastEmptyAtMs = localProgress.lastEmptyAt ? parseIsoMs(localProgress.lastEmptyAt) : null;
-  const hostedLastEmptyAtMs = hostedProgress.lastEmptyAt ? parseIsoMs(hostedProgress.lastEmptyAt) : null;
-
-  if (localLastEmptyAtMs !== null && hostedLastEmptyAtMs !== null) {
-    if (localLastEmptyAtMs > hostedLastEmptyAtMs) {
-      return true;
-    }
-
-    if (localLastEmptyAtMs < hostedLastEmptyAtMs) {
-      return false;
-    }
-  }
-
-  return localProgress.emptyAttempts > hostedProgress.emptyAttempts;
-}
-
-function readJunctionHistoricalBackfillProgress(
-  metadata: Record<string, unknown>,
-): JunctionHistoricalBackfillProgress | null {
-  const status = readJunctionHistoricalBackfillStatus(
-    metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status],
-  );
-  const windowStart = readMetadataString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]);
-  const windowEnd = readMetadataString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]);
-
-  if (!status || !windowStart || !windowEnd) {
-    return null;
-  }
-
-  return {
-    emptyAttempts: readNonNegativeInteger(
-      metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.emptyAttempts],
-    ),
-    lastEmptyAt: readNullableMetadataString(
-      metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.lastEmptyAt],
-    ),
-    status,
-    windowEnd,
-    windowStart,
-  };
-}
-
-function readJunctionHistoricalBackfillStatus(value: unknown): JunctionHistoricalBackfillStatus | null {
-  return value === "complete" || value === "exhausted" || value === "retrying" ? value : null;
-}
-
-function readMetadataString(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-function readNullableMetadataString(value: unknown): string | null {
-  return value === null ? null : readMetadataString(value);
-}
-
-function readNonNegativeInteger(value: unknown): number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
-}
-
-function isJunctionHistoricalBackfillMetadataKey(key: string): boolean {
-  return JUNCTION_HISTORICAL_BACKFILL_METADATA_KEY_SET.has(key);
 }
 
 function resolveHydratedHostedLocalErrorState(input: {
@@ -1788,7 +1649,7 @@ function resolveHydratedNextReconcileAt(input: {
   existing: StoredDeviceSyncAccount | null;
   hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot;
   hostedStateAdvanced: boolean;
-  preserveUnpublishedLocalBackfillProgress: boolean;
+  preserveUnpublishedLocalProviderProgress: boolean;
   status: StoredDeviceSyncAccount["status"];
 }): string | null {
   if (input.status === "disconnected" || input.status === "reauthorization_required") {
@@ -1802,7 +1663,7 @@ function resolveHydratedNextReconcileAt(input: {
     return hostedNextReconcileAt;
   }
 
-  if (input.preserveUnpublishedLocalBackfillProgress && localNextReconcileAt) {
+  if (input.preserveUnpublishedLocalProviderProgress && localNextReconcileAt) {
     return earliestIsoTimestamp(localNextReconcileAt, hostedNextReconcileAt);
   }
 
