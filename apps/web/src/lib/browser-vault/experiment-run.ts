@@ -756,7 +756,7 @@ function buildRunSummaryDetail(
       details.push(`Outcome confidence is ${outcome.confidence.level}.`);
       details.push(...outcome.confidence.reasons);
     } else {
-      details.push("The browser-vault snapshot has the finished run, but no outcome window is ready yet.");
+      details.push("The run is finished, but a full before-and-after window isn't ready yet.");
     }
   } else if (coverage) {
     details.push(`Coverage is ${coverage.status.replaceAll("_", " ")} for the primary signal.`);
@@ -808,7 +808,7 @@ function buildConclusions(
       variant: "insight",
       items: [{
         icon: "→",
-        text: "The private run is present, but the browser-vault snapshot does not contain enough metric data for a before-and-after conclusion yet.",
+        text: "This run doesn't have enough measured data for a before-and-after conclusion yet.",
       }],
     });
   }
@@ -889,8 +889,8 @@ function buildRunNextStep(input: {
           ?? input.protocol.protocol[0]?.detail
           ?? "Resume the protocol when you're ready and keep the rest of the week ordinary.",
       context: inBaseline
-        ? "The run exists in your browser vault, but the active protocol window has not started yet."
-        : "Murph kept the private run state, but the protocol is paused until you resume it.",
+        ? "Your run is saved privately on this device; the protocol window hasn't started yet."
+        : "Your run is saved, but the protocol is paused until you resume it.",
     };
   }
 
@@ -953,7 +953,7 @@ function buildPrivateRunTimeline(input: {
     title: input.baselineDays > 0 ? "Baseline started" : "Experiment started",
     description: input.baselineDays > 0
       ? `${input.baselineDays} baseline days before the protocol window.`
-      : "The private run is linked to this protocol.",
+      : "Your run of this protocol has started.",
     variant: "primary",
   }];
 
@@ -974,7 +974,7 @@ function buildPrivateRunTimeline(input: {
       date: formatShortDate(input.referenceDate),
       label: input.day ? `Day ${input.day}` : "Now",
       title: formatProgressPhase(input.phase),
-      description: "Murph has the private run state; Results update from the current browser-vault snapshot.",
+      description: "Results update automatically as new private data arrives on this device.",
       variant: "default",
     });
 
@@ -992,16 +992,16 @@ function buildPrivateRunTimeline(input: {
     events.push({
       date: formatShortDate(input.referenceDate),
       label: input.day ? `Day ${input.day}` : "Paused",
-      title: "Private run paused",
-      description: "The run is still present in your browser vault, but the protocol is paused for now.",
+      title: "Experiment paused",
+      description: "Your run is saved, but the protocol is paused for now.",
       variant: "muted",
     });
   } else if (input.status === "stopped") {
     events.push({
       date: formatShortDate(input.referenceDate),
       label: "Stopped",
-      title: "Private run stopped",
-      description: "The run remains in your browser vault, but it was marked stopped before a browser-vault outcome comparison was ready.",
+      title: "Experiment stopped",
+      description: "This run was stopped before a before-and-after comparison was ready.",
       variant: "muted",
     });
   } else if (input.analysisAvailableOn) {
@@ -1009,7 +1009,7 @@ function buildPrivateRunTimeline(input: {
       date: formatShortDate(input.analysisAvailableOn),
       label: "Finished",
       title: "Experiment window complete",
-      description: "The private run is marked finished in the browser-vault snapshot.",
+      description: "Your run is finished.",
       variant: "primary",
     });
   }

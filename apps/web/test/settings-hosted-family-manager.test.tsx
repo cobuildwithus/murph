@@ -91,7 +91,7 @@ test("HostedFamilyManager keeps the created invite visible for manual sharing", 
 
     try {
       await clickButton(container, window, "Invite member");
-      assert.match(container.textContent ?? "", /Murph will not message them automatically/);
+      assert.match(container.textContent ?? "", /Murph won't message them/);
 
       await act(async () => {
         setInputValue(window, inputById(container, "family-invite-phone"), "+48600000000");
@@ -99,8 +99,8 @@ test("HostedFamilyManager keeps the created invite visible for manual sharing", 
       await clickButton(container, window, "Create invite");
 
       assert.match(container.textContent ?? "", /Invite created/);
-      assert.match(container.textContent ?? "", /Murph did not text them automatically/);
-      assert.match(container.textContent ?? "", /copy the invite and send it yourself/i);
+      assert.match(container.textContent ?? "", /Murph won't send this for you/);
+      assert.match(container.textContent ?? "", /copy the link and text it to them yourself/i);
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(
         expect.objectContaining({
           payload: expect.objectContaining({

@@ -8,7 +8,6 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { shouldCreateAssistantProgressDelivery } from './progress-constants.js'
 import { markAssistantFirstContactSeen } from './first-contact.js'
-import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from './first-contact-welcome.js'
 import { createHostedDeliveryId } from './hosted-delivery-id.js'
 import {
   type AssistantOutboxDispatchMessage,
@@ -907,9 +906,12 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   const state = createAssistantRuntimeStateService(input.vault)
   await state.turns.finalizeReceipt(plan.receipt)
   await state.diagnostics.recordEvent(plan.diagnostic)
+  // Any accepted reply on a first-contact-scoped route is first contact, not
+  // just the canned welcome text: once the user has heard from the assistant
+  // here, a queued signup welcome for this route is stale and must skip.
   const firstContactAcceptedForDelivery =
     input.firstContactGuidanceInjected === true &&
-    input.response === ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE &&
+    input.response !== '' &&
     isAssistantFirstContactAcceptedForDelivery(input.outcome)
   if (firstContactAcceptedForDelivery) {
     await markAssistantFirstContactSeen({
@@ -920,14 +922,14 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   }
 }
 
+// The first-contact marker's only reader is the hosted signup-welcome skip,
+// so it must mean "a reply actually reached (or is queued for) this route".
+// A 'not-requested' outcome delivered nothing and must not suppress the
+// welcome for a route that has never heard from the assistant.
 function isAssistantFirstContactAcceptedForDelivery(
   outcome: AssistantDeliveryOutcome,
 ): boolean {
-  return (
-    outcome.kind === 'sent' ||
-    outcome.kind === 'queued' ||
-    outcome.kind === 'not-requested'
-  )
+  return outcome.kind === 'sent' || outcome.kind === 'queued'
 }
 
 export function buildAssistantTurnDeliveryFinalizationPlan(input: {

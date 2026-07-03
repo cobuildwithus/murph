@@ -44,6 +44,13 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/src/compo
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/src/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { PlanVisual } from "@/src/components/ui/plan-visual";
+import {
+  MURPH_CONTACT_AVATAR_OPTIONS,
+  MurphContactAvatarArt,
+  MurphContactAvatarGrid,
+  MurphContactCardPicker,
+  type MurphContactAvatarOption,
+} from "@/src/components/murph/murph-contact-card-picker";
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 
@@ -104,6 +111,10 @@ const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
 export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
+  const [contactCardPickerOpen, setContactCardPickerOpen] = useState(false);
+  const [addedContactAvatar, setAddedContactAvatar] =
+    useState<MurphContactAvatarOption | null>(null);
+  const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
 
   return (
     <TooltipProvider>
@@ -422,6 +433,63 @@ export function ComponentsContent() {
                 />
               </div>
             ))}
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Contact Card Picker">
+          <p className="text-sm text-muted-foreground">
+            Post-signup drawer/dialog where a new member picks the photo on
+            Murph&apos;s contact card, then adds Murph as a contact. Drawer under
+            768px, dialog above. The chosen avatar only changes the picture on
+            the vCard the member saves; Murph stays the same everywhere else.
+          </p>
+          <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-serif text-xl font-semibold tracking-normal text-foreground">
+                Add Murph to your contacts
+              </p>
+              <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
+                {addedContactAvatar
+                  ? `Last add used the ${addedContactAvatar.label} avatar.`
+                  : "No contact added yet in this preview."}
+              </p>
+            </div>
+            <Button onClick={() => setContactCardPickerOpen(true)}>
+              Preview picker
+            </Button>
+          </div>
+          <MurphContactCardPicker
+            onAddToContacts={(option) => {
+              setAddedContactAvatar(option);
+              setContactCardPickerOpen(false);
+            }}
+            onOpenChange={setContactCardPickerOpen}
+            open={contactCardPickerOpen}
+          />
+          <div className="flex flex-wrap items-center gap-4 rounded-xl border border-border bg-card px-4 py-3">
+            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Avatar set
+            </span>
+            <div className="flex flex-wrap items-center gap-3">
+              {MURPH_CONTACT_AVATAR_OPTIONS.map((option) => (
+                <MurphContactAvatarArt
+                  className="size-8 text-[32px] ring-1 ring-border"
+                  key={option.id}
+                  option={option}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="max-w-sm rounded-xl border border-border bg-card p-5">
+            <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Standalone grid
+            </p>
+            <MurphContactAvatarGrid
+              onChange={setInlineContactAvatarId}
+              value={inlineContactAvatarId}
+            />
           </div>
         </Section>
 

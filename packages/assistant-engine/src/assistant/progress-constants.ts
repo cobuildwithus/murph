@@ -6,8 +6,7 @@ import type {
   AssistantMessageInput,
 } from './service-contracts.js'
 
-export const MAX_PROGRESS_UPDATES_PER_TURN = 2
-export const MIN_PROGRESS_UPDATE_SPACING_MS = 2 * 60 * 1000
+export const MAX_PROGRESS_UPDATES_PER_TURN = 3
 
 export function shouldCreateAssistantProgressDelivery(
   input: Pick<

@@ -43,9 +43,7 @@ import {
 import {
   drainHostedLinqSideEffectsDirect,
 } from "../hosted-onboarding/webhook-transport";
-import {
-  hasHostedMemberEffectiveActiveAccessForMember,
-} from "../hosted-onboarding/family-plan";
+import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
   readHostedMemberCoreState,
 } from "../hosted-onboarding/hosted-member-store";
@@ -91,8 +89,8 @@ export async function readHostedRuntimeReconciliationFacts(
   ]);
   const projectedWorkspace = projectHostedRuntimeReconciliationWorkspace(workspace);
 
-  if (!member || !(await hasHostedMemberEffectiveActiveAccessForMember({
-    member,
+  if (!member || !(await readActiveHostedMemberAccess({
+    memberId: input.userId,
     prisma,
   }))) {
     const facts = buildHostedRuntimeBlockedFacts({

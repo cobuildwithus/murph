@@ -169,6 +169,14 @@ describe("hosted onboarding member channel sync", () => {
 
   it("derives active channel snapshots under the caller transaction lock", async () => {
     const tx = {
+      hostedMember: {
+        findUnique: vi.fn(async () => ({
+          accountGroupMemberships: [],
+          billingStatus: "active",
+          suspendedAt: null,
+          threadContainer: null,
+        })),
+      },
       label: "test-prisma-tx",
     };
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue({
@@ -212,9 +220,13 @@ describe("hosted onboarding member channel sync", () => {
 
   it("skips active channel dispatch when the current locked member is not active", async () => {
     const tx = {
-      hostedAccountGroupMembership: {
-        count: vi.fn(async () => 0),
-        findFirst: vi.fn(async () => null),
+      hostedMember: {
+        findUnique: vi.fn(async () => ({
+          accountGroupMemberships: [],
+          billingStatus: "incomplete",
+          suspendedAt: null,
+          threadContainer: null,
+        })),
       },
       label: "test-prisma-tx",
     };
@@ -249,28 +261,21 @@ describe("hosted onboarding member channel sync", () => {
 
   it("derives channel snapshots for sponsored Family members", async () => {
     const tx = {
-      hostedAccountGroupBillingRef: {
+      hostedMember: {
         findUnique: vi.fn(async () => ({
-          billedSeatCount: 2,
+          accountGroupMemberships: [
+            {
+              group: {
+                billingStatus: "active",
+                suspendedAt: null,
+              },
+              status: "active",
+            },
+          ],
+          billingStatus: "not_started",
+          suspendedAt: null,
+          threadContainer: null,
         })),
-      },
-      hostedAccountGroupMembership: {
-        count: vi.fn(async () => 2),
-        findFirst: vi.fn(async () => ({
-          group: {
-            billingStatus: "active",
-            id: "hbag_family",
-            ownerMemberId: "member_owner",
-            suspendedAt: null,
-          },
-          groupId: "hbag_family",
-          memberId: "member_123",
-          role: "member",
-          status: "active",
-        })),
-      },
-      hostedAccountGroupInvite: {
-        count: vi.fn(async () => 0),
       },
       label: "test-prisma-tx",
     };
@@ -300,11 +305,10 @@ describe("hosted onboarding member channel sync", () => {
       mailboxItemId: "mailbox_member_channels_1",
     });
 
-    expect(tx.hostedAccountGroupMembership.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        memberId: "member_123",
-        status: "active",
-      }),
+    expect(tx.hostedMember.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: "member_123",
+      },
     }));
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({

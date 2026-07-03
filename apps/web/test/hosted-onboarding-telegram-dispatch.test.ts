@@ -171,6 +171,9 @@ type TelegramWebhookPrismaHarness = {
   $executeRaw: () => Promise<unknown>;
   $queryRaw: () => Promise<unknown>;
   $transaction: (callback: (tx: TelegramWebhookPrismaHarness) => Promise<unknown>) => Promise<unknown>;
+  hostedMember?: {
+    findUnique?: ReturnType<typeof vi.fn>;
+  };
   hostedMemberRouting?: {
     findMany?: (...args: unknown[]) => Promise<unknown>;
     findFirst?: (...args: unknown[]) => Promise<unknown>;
@@ -1654,6 +1657,19 @@ function withPrismaTransaction<T extends Record<string, unknown>>(
     prismaWithTransaction.hostedMemberRouting.upsert === undefined
   ) {
     prismaWithTransaction.hostedMemberRouting.upsert = vi.fn().mockResolvedValue({});
+  }
+  if (prismaWithTransaction.hostedMember?.findUnique === undefined) {
+    // The unified access gate loads the member access shape directly; every
+    // linked member reaching that gate in these tests is a direct-paid active
+    // member.
+    prismaWithTransaction.hostedMember = {
+      findUnique: vi.fn(async () => ({
+        accountGroupMemberships: [],
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+        threadContainer: null,
+      })),
+    };
   }
   if (!prismaWithTransaction.hostedWebhookReceiptSideEffect?.deleteMany || !prismaWithTransaction.hostedWebhookReceiptSideEffect?.upsert) {
     prismaWithTransaction.hostedWebhookReceiptSideEffect = {

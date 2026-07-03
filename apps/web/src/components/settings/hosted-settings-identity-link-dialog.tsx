@@ -73,7 +73,7 @@ export function HostedSettingsIdentityLinkDialog({
         </DialogHeader>
         {!appId ? (
           <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
-            Identity linking is not configured yet.
+            Linking isn&apos;t available yet. Please try again later.
           </div>
         ) : (
           <HostedPrivyProvider appId={appId} clientId={clientId}>
@@ -153,13 +153,13 @@ function getSettingsIdentityLinkCopy(
             title: "Change Telegram",
           }
         : {
-            description: "Connect Telegram through Privy, then Murph will save the account to your app session.",
+            description: "Connect your Telegram account so Murph can message you there.",
             title: "Link Telegram",
           };
     case "email": {
       if (!hasExisting) {
         return {
-          description: "Verify the email address Murph should associate with your account.",
+          description: "Verify the email address Murph should use for your account.",
           title: "Link email",
         };
       }

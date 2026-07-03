@@ -1,20 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  hasHostedMemberActiveAccess: vi.fn(),
-  hasHostedMemberEffectiveActiveAccessForMember: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/entitlement", () => ({
-  hasHostedMemberActiveAccess: mocks.hasHostedMemberActiveAccess,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
-  hasHostedMemberEffectiveActiveAccessForMember:
-    mocks.hasHostedMemberEffectiveActiveAccessForMember,
-}));
-
 import { requireHostedRuntimeActiveAccessForUpdateTx } from "@/src/lib/hosted-mailbox/runtime-access";
 
 function buildRuntimeAccessTx(ownerReads: Array<string | null>): {
@@ -43,11 +29,13 @@ function buildRuntimeAccessTx(ownerReads: Array<string | null>): {
     }),
     hostedMember: {
       findUnique: vi.fn(async () => ({
+        accountGroupMemberships: [],
         billingStatus: "active",
         id: "member_group_runtime",
         suspendedAt: null,
         threadContainer: {
           owner: {
+            accountGroupMemberships: [],
             billingStatus: "active",
             suspendedAt: null,
           },
@@ -70,8 +58,6 @@ function buildRuntimeAccessTx(ownerReads: Array<string | null>): {
 describe("requireHostedRuntimeActiveAccessForUpdateTx", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.hasHostedMemberActiveAccess.mockReturnValue(true);
-    mocks.hasHostedMemberEffectiveActiveAccessForMember.mockResolvedValue(true);
   });
 
   it("locks thread-container owner before the runtime member", async () => {

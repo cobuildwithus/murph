@@ -30,7 +30,7 @@ export default async function JoinInviteCancelPage(input: {
               Checkout paused
             </CardTitle>
             <CardDescription className="leading-relaxed text-stone-500">
-              Your verified phone session is still ready. Jump back to the invite page whenever you want to finish
+              Your phone number is still verified. Jump back to the invite page whenever you want to finish
               checkout.
             </CardDescription>
           </div>

@@ -153,7 +153,7 @@ export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): st
     case "checkout":
       return status.messagingSetupRequired
         ? "Add your phone or Telegram so Murph can message you."
-        : "Self-host with your own keys, or let us run it for you.";
+        : "Let us run Murph for you, or run it yourself if you prefer.";
     case "activating":
       return JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle;
     case "blocked":

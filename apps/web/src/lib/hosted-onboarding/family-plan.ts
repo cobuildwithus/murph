@@ -38,11 +38,7 @@ import {
   readHostedPhoneHint,
 } from "./contact-privacy";
 import {
-  assertHostedMemberActiveAccessAllowed,
-  hasHostedMemberActiveAccess,
-  assertHostedMemberNotSuspended,
   isHostedMemberSuspended,
-  isHostedAccessBlockedBillingStatus,
 } from "./entitlement";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
@@ -277,11 +273,6 @@ export interface HostedAccountGroupInvitePrivateSnapshot
   targetTelegramUsername: string | null;
 }
 
-export interface HostedFamilyEntitlementInput {
-  familyAccessActive?: boolean;
-  memberBillingStatus: HostedBillingStatus;
-  memberSuspendedAt?: Date | null;
-}
 
 export interface HostedFamilyChatInviteResult {
   group: HostedAccountGroupAccessSnapshot;
@@ -373,25 +364,11 @@ type HostedFamilyDirectPaidUpgradeInput = {
   targetPriceId: string;
 };
 
-export function hasHostedMemberEffectiveActiveAccess(
-  input: HostedFamilyEntitlementInput,
-): boolean {
-  return !isHostedMemberSuspended(input.memberSuspendedAt) &&
-    (
-      hasHostedMemberActiveAccess({
-        billingStatus: input.memberBillingStatus,
-        suspendedAt: input.memberSuspendedAt,
-      }) ||
-      input.familyAccessActive === true
-    );
-}
-
 export function hasHostedAccountGroupAccess(input: {
   billingStatus: HostedBillingStatus;
   suspendedAt?: Date | null;
 }): boolean {
   return !isHostedMemberSuspended(input.suspendedAt) &&
-    !isHostedAccessBlockedBillingStatus(input.billingStatus) &&
     input.billingStatus === HostedBillingStatus.active;
 }
 
@@ -403,14 +380,20 @@ export function hasHostedAccountGroupMembershipAccess(input: {
     hasHostedAccountGroupAccess(input.group);
 }
 
+/**
+ * Sponsorship lookup for surfaces that need the sponsoring group itself
+ * (usage metering, settings, family tooling). The seat invariant is enforced
+ * at write time — invite issuance/acceptance assert seat fit and the
+ * subscription webhook fails the whole group to `unpaid` when active members
+ * exceed billed seats — so membership in an active, unsuspended group IS
+ * sponsored access. Pure access gates should use `member-access.ts` instead.
+ */
 export async function readHostedFamilyAccessForMember(input: {
   memberId: string;
-  now?: Date;
   prisma?: HostedOnboardingReadClient;
 }): Promise<HostedAccountGroupMembershipAccessSnapshot | null> {
   const prisma = input.prisma ?? getPrisma();
-  const now = input.now ?? new Date();
-  const membership = await prisma.hostedAccountGroupMembership.findFirst({
+  return prisma.hostedAccountGroupMembership.findFirst({
     orderBy: {
       createdAt: "asc",
     },
@@ -424,50 +407,6 @@ export async function readHostedFamilyAccessForMember(input: {
       status: "active",
     },
   });
-
-  if (!membership || !hasHostedAccountGroupMembershipAccess({
-    group: membership.group,
-    membershipStatus: membership.status,
-  })) {
-    return null;
-  }
-
-  const [activeMembershipCount, pendingInviteCount, billedSeatCount] = await Promise.all([
-    prisma.hostedAccountGroupMembership.count({
-      where: {
-        groupId: membership.groupId,
-        status: "active",
-      },
-    }),
-    prisma.hostedAccountGroupInvite.count({
-      where: {
-        expiresAt: {
-          gt: now,
-        },
-        groupId: membership.groupId,
-        status: "pending",
-      },
-    }),
-    readHostedFamilyBilledSeatCountTx({
-      groupId: membership.groupId,
-      tx: prisma,
-    }),
-  ]);
-  if (billedSeatCount === null) {
-    return null;
-  }
-  if (activeMembershipCount + pendingInviteCount > billedSeatCount) {
-    return null;
-  }
-
-  return membership;
-}
-
-export async function hasActiveHostedFamilyAccess(input: {
-  memberId: string;
-  prisma?: HostedOnboardingReadClient;
-}): Promise<boolean> {
-  return (await readHostedFamilyAccessForMember(input)) !== null;
 }
 
 export async function readHostedFamilyOwnerSnapshotForMember(input: {
@@ -727,52 +666,6 @@ export async function readHostedFamilyInviteAcceptanceView(input: {
         : null,
     webAcceptable: isPending && seatAvailable && groupActive && (isPhoneBound || isEmailBound),
   };
-}
-
-export async function hasHostedMemberEffectiveActiveAccessForMember(input: {
-  member: {
-    billingStatus: HostedBillingStatus;
-    id: string;
-    suspendedAt?: Date | null;
-  };
-  prisma?: HostedOnboardingReadClient;
-}): Promise<boolean> {
-  if (hasHostedMemberActiveAccess(input.member)) {
-    return true;
-  }
-
-  return hasHostedMemberEffectiveActiveAccess({
-    familyAccessActive: await hasActiveHostedFamilyAccess({
-      memberId: input.member.id,
-      prisma: input.prisma,
-    }),
-    memberBillingStatus: input.member.billingStatus,
-    memberSuspendedAt: input.member.suspendedAt,
-  });
-}
-
-export async function assertHostedMemberEffectiveActiveAccessAllowed(input: {
-  member: {
-    billingStatus: HostedBillingStatus;
-    id: string;
-    suspendedAt?: Date | null;
-  };
-  prisma?: HostedOnboardingReadClient;
-}): Promise<void> {
-  assertHostedMemberNotSuspended(input.member);
-
-  if (hasHostedMemberActiveAccess(input.member)) {
-    return;
-  }
-
-  if (await hasActiveHostedFamilyAccess({
-    memberId: input.member.id,
-    prisma: input.prisma,
-  })) {
-    return;
-  }
-
-  assertHostedMemberActiveAccessAllowed(input.member);
 }
 
 export async function readHostedAccountGroupStripeBillingRef(input: {

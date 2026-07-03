@@ -1,12 +1,13 @@
 import "server-only";
 
-import { HostedBillingStatus, Prisma, type PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
   signalHostedRuntimeMaintenanceRuntime,
   type HostedRuntimeSignalResult,
 } from "../hosted-orchestration/signal-runtime";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
 
 export const HOSTED_RUNTIME_MAINTENANCE_DEFAULT_READ_LIMIT = 20;
@@ -204,11 +205,11 @@ async function readHostedRuntimeMaintenanceCandidateForUser(input: {
 }
 
 function buildHostedRuntimeMaintenanceCandidateWhere(): Prisma.HostedWorkspaceWhereInput {
+  // Access is enforced in the WHERE so count, cursor, page, and wake signals
+  // all describe the same candidate population (a post-slice filter would let
+  // one inactive raw row starve a limit-1 batch wake forever).
   return {
-    member: {
-      billingStatus: HostedBillingStatus.active,
-      suspendedAt: null,
-    },
+    member: activeHostedMemberAccessWhere(),
     snapshotRef: {
       not: Prisma.DbNull,
     },

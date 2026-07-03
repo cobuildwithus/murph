@@ -18,6 +18,7 @@ Last verified: 2026-06-21
 | `agent-docs/product-specs/companion-app.md` | Native Swift iOS companion app for Apple Health sync (WHOOP relay), hybrid WHOOP posture, MVP scope, and phase plan. | Planned |
 | `agent-docs/product-specs/query-metric-universality.md` | Invariant that every metric-bearing canonical event yields a query metric point through one generic rule; summary pipeline becomes presentation + precedence, never a gatekeeper. | Specified |
 | `agent-docs/product-specs/companion-app-mvp.md` | Two-screen MVP build spec: Privy phone/email login, Connect Apple Health, Junction sign-in token endpoint. | Planned |
+| `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step where the member picks the avatar on Murph's vCard; picker components live on `/design`. | Planned |
 
 ## Rule
 

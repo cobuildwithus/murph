@@ -30,7 +30,7 @@ const PULSE_FEATURES = [
   "Private before/after outcomes",
   "Chat via iMessage, Telegram, or email",
   "Guided experiment setup",
-  "Access to frontier AI models",
+  "Access to the most capable AI models",
 ];
 
 export function StartPaidPulseButton(props: {

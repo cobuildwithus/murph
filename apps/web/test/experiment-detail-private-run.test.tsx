@@ -369,7 +369,7 @@ describe("experiment detail private-run composition", () => {
       />,
     );
 
-    expect(baselineMarkup).toContain("Private run linked");
+    expect(baselineMarkup).toContain("running this experiment");
     expect(baselineMarkup).toContain("Starts day 8");
     expect(baselineMarkup).toContain("Keep the baseline clean");
     expect(baselineMarkup).not.toContain("Active · Day 1");
@@ -425,9 +425,9 @@ describe("experiment detail private-run composition", () => {
       />,
     );
 
-    expect(finishedMarkup).toContain("No biomarker comparison exported yet");
+    expect(finishedMarkup).toContain("No before-and-after comparison yet");
     expect(finishedMarkup).toContain("Private run recorded");
-    expect(finishedMarkup).toContain("The browser-vault snapshot has the finished run, but no outcome window is ready yet.");
+    expect(finishedMarkup).toContain("The run is finished, but a full before-and-after window");
 
     const finishedFallbackRun = resolveBrowserVaultExperimentRun({
       client: await createClient({
@@ -446,7 +446,7 @@ describe("experiment detail private-run composition", () => {
     });
 
     expect(finishedFallbackRun?.conclusions?.[0]?.items[0]?.text).toBe(
-      "The private run is present, but the browser-vault snapshot does not contain enough metric data for a before-and-after conclusion yet.",
+      "This run doesn't have enough measured data for a before-and-after conclusion yet.",
     );
 
     const staleMarkup = renderToStaticMarkup(
@@ -457,7 +457,7 @@ describe("experiment detail private-run composition", () => {
       />,
     );
 
-    expect(staleMarkup).toContain("Private run loaded, refresh unavailable");
+    expect(staleMarkup).toContain("but couldn&#x27;t refresh");
     expect(staleMarkup).toContain("The latest private refresh failed.");
   });
 
@@ -493,9 +493,9 @@ describe("experiment detail private-run composition", () => {
     expect(doneRun).toEqual(expect.objectContaining({
       status: "finished",
     }));
-    expect(doneMarkup).toContain("No biomarker comparison exported yet");
+    expect(doneMarkup).toContain("No before-and-after comparison yet");
     expect(doneMarkup).toContain("Private run recorded");
-    expect(doneMarkup).toContain("The browser-vault snapshot has the finished run, but no outcome window is ready yet.");
+    expect(doneMarkup).toContain("The run is finished, but a full before-and-after window");
   });
 
   it("maps real browser-vault biomarker trends without inventing an expected range band", async () => {
@@ -976,7 +976,7 @@ describe("experiment detail private-run composition", () => {
       />,
     );
 
-    expect(markup).toContain("Confounders and notes");
+    expect(markup).toContain("Other factors and notes");
     expect(markup).toContain("After exercise");
     expect(markup).toContain("Training Load: heavy");
     expect(markup).toContain("Felt lightheaded near the end.");
@@ -1227,7 +1227,7 @@ describe("experiment detail private-run composition", () => {
       />,
     );
 
-    expect(pausedMarkup).toContain("Private run paused");
+    expect(pausedMarkup).toContain("Your experiment is paused");
     expect(pausedMarkup).toContain("Paused on day 4");
     expect(pausedMarkup).toContain("Resume the protocol");
     expect(pausedMarkup).not.toContain("Continue the protocol");

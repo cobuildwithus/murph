@@ -93,7 +93,7 @@ export async function requestHostedOnboardingJson<T>(input: {
     throw new HostedOnboardingApiError({
       code: errorPayload?.code ?? null,
       details: errorPayload?.details ?? null,
-      message: errorPayload?.message ?? "Request failed.",
+      message: errorPayload?.message ?? "Something went wrong. Try again.",
       retryable: errorPayload?.retryable === true,
     });
   }

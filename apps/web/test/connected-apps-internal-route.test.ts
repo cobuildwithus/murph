@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   executeHostedConnectedAppsRequest: vi.fn(),
   getPrisma: vi.fn(),
-  hasHostedMemberEffectiveActiveAccessForMember: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
 
@@ -15,14 +14,11 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
-  hasHostedMemberEffectiveActiveAccessForMember:
-    mocks.hasHostedMemberEffectiveActiveAccessForMember,
-}));
-
 vi.mock("@/src/lib/connected-apps/service", () => ({
   executeHostedConnectedAppsRequest: mocks.executeHostedConnectedAppsRequest,
 }));
+
+import { hostedMemberAccessSelect } from "@/src/lib/hosted-onboarding/member-access";
 
 type RouteModule = typeof import("../app/api/internal/connected-apps/route");
 
@@ -33,7 +29,6 @@ describe("internal connected-apps route", () => {
     vi.clearAllMocks();
     route ??= await import("../app/api/internal/connected-apps/route");
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_family");
-    mocks.hasHostedMemberEffectiveActiveAccessForMember.mockResolvedValue(true);
     mocks.executeHostedConnectedAppsRequest.mockResolvedValue({
       accounts: [],
       operation: "manage",
@@ -42,6 +37,10 @@ describe("internal connected-apps route", () => {
 
   it("allows a family-sponsored member whose direct billing is not active", async () => {
     const prisma = createPrisma({
+      accountGroupMemberships: [{
+        group: { billingStatus: "active", suspendedAt: null },
+        status: "active",
+      }],
       billingStatus: "not_started",
       id: "member_family",
       suspendedAt: null,
@@ -63,15 +62,9 @@ describe("internal connected-apps route", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(mocks.hasHostedMemberEffectiveActiveAccessForMember).toHaveBeenCalledWith({
-      member: {
-        billingStatus: "not_started",
-        createdAt: expect.any(Date),
-        id: "member_family",
-        suspendedAt: null,
-        updatedAt: expect.any(Date),
-      },
-      prisma,
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledWith({
+      select: hostedMemberAccessSelect,
+      where: { id: "member_family" },
     });
     expect(mocks.executeHostedConnectedAppsRequest).toHaveBeenCalledWith({
       memberId: "member_family",
@@ -90,14 +83,14 @@ describe("internal connected-apps route", () => {
     });
   });
 
-  it("rejects inactive members when effective Family access is absent", async () => {
+  it("rejects inactive members without an active Family sponsorship", async () => {
     const prisma = createPrisma({
+      accountGroupMemberships: [],
       billingStatus: "not_started",
       id: "member_family",
       suspendedAt: null,
     });
     mocks.getPrisma.mockReturnValue(prisma);
-    mocks.hasHostedMemberEffectiveActiveAccessForMember.mockResolvedValueOnce(false);
 
     const response = await route.POST(new Request(
       "https://join.example.test/api/internal/connected-apps",
@@ -124,21 +117,23 @@ describe("internal connected-apps route", () => {
 });
 
 function createPrisma(member: {
+  accountGroupMemberships: Array<{
+    group: { billingStatus: string; suspendedAt: Date | null };
+    status: string;
+  }>;
   billingStatus: string;
   id: string;
   suspendedAt: Date | null;
 }) {
-  const now = new Date("2026-06-18T12:00:00.000Z");
   return {
     hostedMember: {
-      findUnique: vi.fn(async ({ where }) =>
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
         where.id === member.id
           ? {
+              accountGroupMemberships: member.accountGroupMemberships,
               billingStatus: member.billingStatus,
-              createdAt: now,
-              id: member.id,
               suspendedAt: member.suspendedAt,
-              updatedAt: now,
+              threadContainer: null,
             }
           : null
       ),

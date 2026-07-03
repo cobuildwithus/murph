@@ -1644,16 +1644,22 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
-  it("does not seed onboarding follow-up when embedded member activation welcome delivery is skipped", async () => {
+  it("still seeds onboarding follow-up when the embedded member activation welcome is superseded by prior first contact", async () => {
+    const seededNextWakeAt = "2026-04-09T17:30:00.000Z";
     mocks.sendAssistantNotification.mockResolvedValueOnce({
       decision: {
         kind: "skip",
-        reason: "First contact was already accepted.",
+        privateSummary: "First-contact notification already accepted for this route.",
       },
-      deliveryOutcome: null,
       response: null,
       session: {
         sessionId: "session_notification_skip",
+      },
+    });
+    mocks.upsertAssistantCronAutomation.mockResolvedValueOnce({
+      enabled: true,
+      state: {
+        nextRunAt: seededNextWakeAt,
       },
     });
     const wake = buildHostedExecutionMemberActivatedWake({
@@ -1691,10 +1697,15 @@ describe("executeHostedMailboxEvent", () => {
     });
 
     expect(mocks.sendAssistantNotification).toHaveBeenCalledOnce();
-    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slug: "finish-onboarding-followup",
+      }),
+    );
     expect(result).toMatchObject({
       mailboxLane: "member-activated",
-      nextWakeAt: null,
+      nextWakeAt: seededNextWakeAt,
+      nextWakeReason: "assistant",
     });
   });
 
@@ -1951,13 +1962,21 @@ describe("executeHostedMailboxEvent", () => {
     expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
   });
 
-  it("does not seed onboarding follow-up when signup welcome delivery is skipped", async () => {
+  it("still seeds onboarding follow-up when the signup welcome notification is superseded by prior first contact", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_welcome_skip_result",
       memberId: "member_123",
       notification: {
+        deliveryDedupeToken: "signup-welcome:member_123",
         deliveryIdempotencyKey: "signup-welcome:member_123",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
         instructions: "Send exactly the signup welcome.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Welcome to Murph.",
+        },
         route: {
           actorId: "hid_telegram_actor_123",
           channel: "telegram",
@@ -1975,12 +1994,17 @@ describe("executeHostedMailboxEvent", () => {
     mocks.sendAssistantNotification.mockResolvedValueOnce({
       decision: {
         kind: "skip",
-        reason: "First contact was already accepted.",
+        privateSummary: "First-contact notification already accepted for this route.",
       },
-      deliveryOutcome: null,
       response: null,
       session: {
         sessionId: "session_notification_skip",
+      },
+    });
+    mocks.upsertAssistantCronAutomation.mockResolvedValueOnce({
+      enabled: true,
+      state: {
+        nextRunAt: "2026-04-09T17:30:00.000Z",
       },
     });
 
@@ -1993,7 +2017,11 @@ describe("executeHostedMailboxEvent", () => {
     });
 
     expect(mocks.sendAssistantNotification).toHaveBeenCalledOnce();
-    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slug: "finish-onboarding-followup",
+      }),
+    );
   });
 
   it("keeps signup welcome delivery successful when onboarding follow-up seeding fails", async () => {

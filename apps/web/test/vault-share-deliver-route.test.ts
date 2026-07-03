@@ -4,7 +4,6 @@ const mocks = vi.hoisted(() => ({
 	deliverHostedVaultShareRecords: vi.fn(),
 	findActiveHostedVaultShares: vi.fn(),
 	getPrisma: vi.fn(),
-	hasHostedMemberEffectiveActiveAccessForMember: vi.fn(),
 	isHostedRuntimeInactiveAccessError: vi.fn((error: unknown) => (
 		typeof error === "object"
 		&& error !== null
@@ -31,10 +30,7 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 	requireHostedRuntimeActiveAccess: mocks.requireHostedRuntimeActiveAccess,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
-	hasHostedMemberEffectiveActiveAccessForMember:
-		mocks.hasHostedMemberEffectiveActiveAccessForMember,
-}));
+vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({}));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberCoreState: mocks.readHostedMemberCoreState,
@@ -127,7 +123,6 @@ describe("vault-share deliver route", () => {
     mocks.findActiveHostedVaultShares.mockResolvedValue([ACTIVE_SHARE]);
 		mocks.getPrisma.mockReturnValue({ kind: "prisma" });
 		mocks.readHostedMemberCoreState.mockResolvedValue({ id: "member_referee" });
-		mocks.hasHostedMemberEffectiveActiveAccessForMember.mockResolvedValue(true);
 		mocks.requireHostedRuntimeActiveAccess.mockResolvedValue(undefined);
 		mocks.deliverHostedVaultShareRecords.mockResolvedValue({
 			lastAppendedMailboxItemId: "mailbox_item_1",
@@ -172,16 +167,6 @@ describe("vault-share deliver route", () => {
     expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
-
-  it("treats an inactive destination exactly like a missing grant", async () => {
-    mocks.hasHostedMemberEffectiveActiveAccessForMember.mockResolvedValue(false);
-
-    const response = await deliverRoute.POST(buildRequest(VALID_BODY));
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: "no-active-share" });
-		expect(mocks.deliverHostedVaultShareRecords).not.toHaveBeenCalled();
-	});
 
 	it("treats an inactive destination runtime exactly like a missing grant", async () => {
 		mocks.requireHostedRuntimeActiveAccess.mockImplementation(async (memberId: string) => {
@@ -235,7 +220,15 @@ describe("vault-share deliver route", () => {
   it("keeps an all-stale offer indistinguishable when the destination is inactive", async () => {
     // The status must be a function of share configuration alone: a grantor probing with
     // stale records learns nothing finer than the normal active/no-active-share split.
-    mocks.hasHostedMemberEffectiveActiveAccessForMember.mockResolvedValue(false);
+    mocks.requireHostedRuntimeActiveAccess.mockImplementation(async (memberId: string) => {
+      if (memberId === "member_referee") {
+        throw hostedOnboardingError({
+          code: "HOSTED_RUNTIME_MAILBOX_USER_INACTIVE",
+          httpStatus: 403,
+          message: "Hosted runtime mailbox access is not active.",
+        });
+      }
+    });
 
     const response = await deliverRoute.POST(
       buildRequest({

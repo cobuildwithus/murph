@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedAppSession: vi.fn(),
-  hasActiveHostedFamilyAccess: vi.fn(),
+  readActiveHostedMemberAccess: vi.fn(),
   redirect: vi.fn((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
   }),
@@ -19,8 +19,8 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   getHostedAppSession: mocks.getHostedAppSession,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
-  hasActiveHostedFamilyAccess: mocks.hasActiveHostedFamilyAccess,
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
 
 describe("hosted page auth", () => {
@@ -28,7 +28,7 @@ describe("hosted page auth", () => {
     vi.resetModules();
     vi.clearAllMocks();
     mocks.getHostedAppSession.mockResolvedValue(null);
-    mocks.hasActiveHostedFamilyAccess.mockResolvedValue(false);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
   });
 
   it("returns an anonymous snapshot when no hosted app session exists", async () => {
@@ -113,7 +113,7 @@ describe("hosted sidebar auth", () => {
     vi.resetModules();
     vi.clearAllMocks();
     mocks.getHostedAppSession.mockResolvedValue(null);
-    mocks.hasActiveHostedFamilyAccess.mockResolvedValue(false);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
   });
 
   it("returns anonymous sidebar auth without an app session", async () => {
@@ -187,7 +187,7 @@ describe("hosted dashboard page auth", () => {
     vi.resetModules();
     vi.clearAllMocks();
     mocks.getHostedAppSession.mockResolvedValue(null);
-    mocks.hasActiveHostedFamilyAccess.mockResolvedValue(false);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
   });
 
   it("returns the current auth snapshot for active members", async () => {
@@ -208,7 +208,7 @@ describe("hosted dashboard page auth", () => {
       session,
     });
     expect(mocks.redirect).not.toHaveBeenCalled();
-    expect(mocks.hasActiveHostedFamilyAccess).not.toHaveBeenCalled();
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -227,7 +227,7 @@ describe("hosted dashboard page auth", () => {
       await import("@/src/lib/hosted-onboarding/page-auth");
 
     await expect(getHostedDashboardPageAuthSnapshot()).rejects.toThrow("NEXT_REDIRECT:/join");
-    expect(mocks.hasActiveHostedFamilyAccess).toHaveBeenCalledWith({
+    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith({
       memberId: "member_123",
     });
     expect(mocks.redirect).toHaveBeenCalledWith("/join");
@@ -244,7 +244,7 @@ describe("hosted dashboard page auth", () => {
       sessionId: "hws_123",
     };
     mocks.getHostedAppSession.mockResolvedValue(session);
-    mocks.hasActiveHostedFamilyAccess.mockResolvedValue(true);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     const { getHostedDashboardPageAuthSnapshot } =
       await import("@/src/lib/hosted-onboarding/page-auth");
 
@@ -253,7 +253,7 @@ describe("hosted dashboard page auth", () => {
       authenticatedMember: member,
       session,
     });
-    expect(mocks.hasActiveHostedFamilyAccess).toHaveBeenCalledWith({
+    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith({
       memberId: "member_123",
     });
     expect(mocks.redirect).not.toHaveBeenCalled();
@@ -269,7 +269,7 @@ describe("hosted dashboard page auth", () => {
       session: null,
     });
     expect(mocks.redirect).not.toHaveBeenCalled();
-    expect(mocks.hasActiveHostedFamilyAccess).not.toHaveBeenCalled();
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
   });
 });
 

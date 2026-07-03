@@ -55,7 +55,7 @@ test("dashboard routes define page-specific metadata with the shared preview ima
   assert.equal(historyMetadata.title, "History — Murph");
   assert.equal(
     historyMetadata.description,
-    "Recent notes, events, assessments, and daily summaries from your vault.",
+    "Recent notes, events, assessments, and daily summaries.",
   );
   assert.equal(experimentsMetadata.title, "Experiments — Murph");
   assert.equal(
@@ -106,7 +106,7 @@ test("OverviewPage renders the dashboard overview", () => {
   assert.match(markup, /A quick read on your recent notes, experiments, and tracked trends\./);
   assert.match(markup, /Morning walk/);
   assert.match(markup, /Travel recovery note/);
-  assert.match(markup, /Weekly sample deltas/);
+  assert.match(markup, /Weekly changes/);
 });
 
 test("OverviewPage counts all tracked experiments while listing the most recent ones", async () => {
@@ -157,7 +157,7 @@ test("OverviewPage counts all tracked experiments while listing the most recent 
   assert.match(markup, /Recently finished[\s\S]*>1<\/div>/);
   assert.match(markup, /Finished hydration started/);
   const recentExperimentsMarkup =
-    markup.match(/Recent experiments[\s\S]*?Weekly sample deltas/)?.[0] ?? "";
+    markup.match(/Recent experiments[\s\S]*?Weekly changes/)?.[0] ?? "";
   assert.match(recentExperimentsMarkup, /Active extra 0/);
   assert.doesNotMatch(recentExperimentsMarkup, /Finished hydration/);
   assert.doesNotMatch(recentExperimentsMarkup, /Paused baseline/);
@@ -258,7 +258,7 @@ test("ExperimentsPage keeps the public library visible when browser-vault loadin
 
   const markup = renderToStaticMarkup(createExperimentsPageClientElement());
 
-  assert.match(markup, /Private overlays could not be refreshed/);
+  assert.match(markup, /Your experiments couldn/);
   assert.match(markup, /The latest refresh failed\./);
   assert.match(markup, /The public experiment library is still available below\./);
   assert.match(markup, /Finnish Dry Sauna/);

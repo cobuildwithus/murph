@@ -1,6 +1,6 @@
 import { HostedBillingStatus } from "@prisma/client";
 
-import { hasHostedMemberActiveAccess, isHostedMemberSuspended } from "./entitlement";
+import { hasHostedMemberOwnActiveBilling, isHostedMemberSuspended } from "./entitlement";
 import {
   resolveHostedAccessibleOnboardingStage,
   type HostedOnboardingStage,
@@ -18,7 +18,7 @@ export function deriveHostedOnboardingStage(input: {
   activationPending?: boolean;
   billingStatus: HostedBillingStatus;
   expiresAt: Date;
-  familyAccessActive?: boolean;
+  sponsoredAccessActive?: boolean;
   now: Date;
   sessionMatchesInvite: boolean;
   suspendedAt?: Date | null;
@@ -35,7 +35,7 @@ export function deriveHostedOnboardingStage(input: {
     return "blocked";
   }
 
-  if (hasHostedMemberActiveAccess(input) || input.familyAccessActive === true) {
+  if (hasHostedMemberOwnActiveBilling(input) || input.sponsoredAccessActive === true) {
     return resolveHostedAccessibleOnboardingStage(input.activationPending);
   }
 
@@ -49,14 +49,14 @@ export function deriveHostedOnboardingStage(input: {
 export function deriveHostedPostVerificationStage(input: {
   activationPending?: boolean;
   billingStatus: HostedBillingStatus;
-  familyAccessActive?: boolean;
+  sponsoredAccessActive?: boolean;
   suspendedAt?: Date | null;
 }): HostedPostVerificationStage {
   if (isHostedMemberSuspended(input.suspendedAt)) {
     return "blocked";
   }
 
-  if (hasHostedMemberActiveAccess(input) || input.familyAccessActive === true) {
+  if (hasHostedMemberOwnActiveBilling(input) || input.sponsoredAccessActive === true) {
     return resolveHostedAccessibleOnboardingStage(input.activationPending);
   }
 
