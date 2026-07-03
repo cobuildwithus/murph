@@ -142,6 +142,7 @@ type LegacyMessageOutboxIntentWire = {
 
 const LEGACY_MESSAGE_OUTBOX_INTENT_KEYS = [
   'actorId',
+  'answeredCoverage',
   'attemptCount',
   'bindingDelivery',
   'channel',
