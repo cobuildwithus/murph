@@ -15,6 +15,7 @@ import {
   Drawer,
   DrawerContent,
   DrawerDescription,
+  DrawerFooter,
   DrawerHeader,
   DrawerTitle,
 } from "@/src/components/ui/drawer";
@@ -201,42 +202,36 @@ export function MurphContactCardPicker({
   const [selectedId, setSelectedId] = useState(initialAvatarId);
   const selected = findMurphContactAvatarOption(selectedId);
 
-  const body = (
-    <div className="flex flex-col gap-6">
-      <MurphContactCardPreview option={selected} />
-      <div className="-mx-1 max-h-[42dvh] overflow-y-auto px-1 py-1">
-        <MurphContactAvatarGrid onChange={setSelectedId} value={selectedId} />
-      </div>
-      <div className="flex flex-col gap-2">
-        <a
-          className={buttonVariants({ className: "w-full", size: "xl" })}
-          download
-          href={murphContactCardDownloadHref(selected.id)}
-          onClick={() => onAddToContacts?.(selected)}
-        >
-          <ContactRoundIcon data-icon="inline-start" />
-          Add Murph to Contacts
-        </a>
-        <Button
-          className="w-full"
-          onClick={() => {
-            onSkip?.();
-            onOpenChange(false);
-          }}
-          size="xl"
-          type="button"
-          variant="ghost"
-        >
-          Skip for now
-        </Button>
-      </div>
+  const actions = (
+    <div className="flex flex-col gap-2">
+      <a
+        className={buttonVariants({ className: "w-full", size: "xl" })}
+        download
+        href={murphContactCardDownloadHref(selected.id)}
+        onClick={() => onAddToContacts?.(selected)}
+      >
+        <ContactRoundIcon data-icon="inline-start" />
+        Add Murph to Contacts
+      </a>
+      <Button
+        className="w-full"
+        onClick={() => {
+          onSkip?.();
+          onOpenChange(false);
+        }}
+        size="xl"
+        type="button"
+        variant="ghost"
+      >
+        Skip for now
+      </Button>
     </div>
   );
 
   if (isMobile) {
     return (
       <Drawer onOpenChange={onOpenChange} open={open}>
-        <DrawerContent className="max-h-[94dvh]">
+        <DrawerContent className="h-[92dvh] max-h-[92dvh]">
           <DrawerHeader className="items-center text-center">
             <DrawerTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
               {PICKER_TITLE}
@@ -245,11 +240,29 @@ export function MurphContactCardPicker({
               {PICKER_DESCRIPTION}
             </DrawerDescription>
           </DrawerHeader>
-          <div className="overflow-y-auto px-4 pb-8">{body}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-1">
+            <div className="flex flex-col gap-6">
+              <MurphContactCardPreview option={selected} />
+              <MurphContactAvatarGrid onChange={setSelectedId} value={selectedId} />
+            </div>
+          </div>
+          <DrawerFooter className="border-t border-border px-4 pb-6 pt-3">
+            {actions}
+          </DrawerFooter>
         </DrawerContent>
       </Drawer>
     );
   }
+
+  const body = (
+    <div className="flex flex-col gap-6">
+      <MurphContactCardPreview option={selected} />
+      <div className="-mx-1 max-h-[42dvh] overflow-y-auto px-1 py-1">
+        <MurphContactAvatarGrid onChange={setSelectedId} value={selectedId} />
+      </div>
+      {actions}
+    </div>
+  );
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
