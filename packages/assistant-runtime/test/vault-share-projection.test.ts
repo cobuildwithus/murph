@@ -10,6 +10,7 @@ import {
 import {
   selectMetricSeries,
   type MetricPoint,
+  type WearableResolvedMetric,
 } from "@murphai/query";
 import { describe, expect, it, vi } from "vitest";
 
@@ -58,6 +59,70 @@ const ACTIVITY_RECORD = {
   occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
   recordKey: ACTIVITY_DAY.date,
 };
+
+function activitySummaryMetric(
+  metric: string,
+  input: {
+    provider: string | null;
+    recordIds: string[];
+    unit: string | null;
+    value: number | null;
+  },
+): WearableResolvedMetric {
+  return {
+    candidates: [],
+    confidence: {
+      candidateCount: input.value === null ? 0 : 1,
+      conflictingProviders: [],
+      exactDuplicateCount: 0,
+      level: input.value === null ? "none" : "high",
+      reasons: [],
+    },
+    metric,
+    selection: {
+      fallbackFromMetric: null,
+      fallbackReason: null,
+      occurredAt: null,
+      paths: [],
+      provider: input.provider,
+      recordedAt: null,
+      recordIds: input.recordIds,
+      resolution: input.value === null ? "none" : "direct",
+      sourceFamily: input.value === null ? null : "derived",
+      sourceKind: input.value === null ? null : "activity-session-aggregate",
+      title: null,
+      unit: input.unit,
+      value: input.value,
+    },
+  };
+}
+
+function activitySummary(input: {
+  countRecordIds?: string[];
+  date: string;
+  minuteRecordIds?: string[];
+  provider?: string;
+  workoutCount: number;
+  workoutMinutes: number;
+}): { date: string; sessionCount: WearableResolvedMetric; sessionMinutes: WearableResolvedMetric } {
+  const provider = input.provider ?? "garmin";
+  const recordIds = [`evt_${provider}_${input.date}`];
+  return {
+    date: input.date,
+    sessionCount: activitySummaryMetric("sessionCount", {
+      provider,
+      recordIds: input.countRecordIds ?? recordIds,
+      unit: "count",
+      value: input.workoutCount,
+    }),
+    sessionMinutes: activitySummaryMetric("sessionMinutes", {
+      provider,
+      recordIds: input.minuteRecordIds ?? recordIds,
+      unit: "minutes",
+      value: input.workoutMinutes,
+    }),
+  };
+}
 
 async function createProfileVault(displayName: string | null): Promise<string> {
   const vaultRoot = await mkdtemp(join(tmpdir(), "murph-vault-share-profile-"));
@@ -340,23 +405,13 @@ describe("selectProjectableWorkoutDays", () => {
   const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
 
   it("maps selected workout session summaries without raw workout details", () => {
-    const selected = selectProjectableWorkoutDays({
-      countRows: [{
+    const selected = selectProjectableWorkoutDays([
+      activitySummary({
         date: ACTIVITY_DAY.date,
-        grain: "day",
-        metricKey: "workout-count",
-        statistic: "value",
-        value: 2,
-      }],
-      minuteRows: [{
-        date: ACTIVITY_DAY.date,
-        grain: "day",
-        metricKey: "activity-minutes",
-        statistic: "value",
-        value: 85,
-      }],
-      nowMs,
-    });
+        workoutCount: 2,
+        workoutMinutes: 85,
+      }),
+    ], nowMs);
 
     expect(selected).toEqual([
       {
@@ -375,6 +430,20 @@ describe("selectProjectableWorkoutDays", () => {
         records: selected,
       }).records,
     ).toEqual(selected);
+  });
+
+  it("drops split-provider workout tuples instead of joining count and minutes by date", () => {
+    const selected = selectProjectableWorkoutDays([
+      activitySummary({
+        countRecordIds: ["evt_garmin_count"],
+        date: ACTIVITY_DAY.date,
+        minuteRecordIds: ["evt_oura_minutes"],
+        workoutCount: 1,
+        workoutMinutes: 85,
+      }),
+    ], nowMs);
+
+    expect(selected).toEqual([]);
   });
 });
 

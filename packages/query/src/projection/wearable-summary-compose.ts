@@ -606,6 +606,13 @@ function projectedMetricCandidateFromResolvedMetric(
   if (!provider) {
     return null;
   }
+  const projectedRecordIds = projectedMetricRecordIds({
+    date,
+    provider,
+    resolved,
+    selectionRecordIds: selection.recordIds,
+    summaryKind,
+  });
 
   return {
     candidateId: `projected:${summaryKind}:${provider}:${date}:${resolved.metric}`,
@@ -617,7 +624,7 @@ function projectedMetricCandidateFromResolvedMetric(
     paths: [],
     provider,
     recordedAt: selection.recordedAt,
-    recordIds: [],
+    recordIds: projectedRecordIds,
     sourceFamily: projectedSourceFamily(selection.sourceFamily),
     sourceKind: selection.sourceKind ?? `projected-${summaryKind}`,
     title: selection.title,
@@ -657,11 +664,35 @@ function projectedActivitySessionAggregate(
       summary.sessionMinutes.selection.recordedAt,
       summary.sessionCount.selection.recordedAt,
     ]),
-    recordIds: [],
+    recordIds: [projectedActivitySessionRecordId(provider, summary.date)],
     sessionCount,
     sessionMinutes,
     workoutMetricKeys: [],
   };
+}
+
+function projectedMetricRecordIds(input: {
+  date: string;
+  provider: string;
+  resolved: WearableResolvedMetric;
+  selectionRecordIds: readonly string[];
+  summaryKind: string;
+}): string[] {
+  if (input.selectionRecordIds.length > 0) {
+    return [...input.selectionRecordIds];
+  }
+  if (
+    input.summaryKind === "activity"
+    && input.resolved.selection.sourceFamily === "derived"
+    && input.resolved.selection.sourceKind === "activity-session-aggregate"
+  ) {
+    return [projectedActivitySessionRecordId(input.provider, input.date)];
+  }
+  return [];
+}
+
+function projectedActivitySessionRecordId(provider: string, date: string): string {
+  return `projected:activity-session:${provider}:${date}`;
 }
 
 function projectedSleepWindow(summary: ProjectedWearableSleepSummary): WearableSleepWindowCandidate | null {

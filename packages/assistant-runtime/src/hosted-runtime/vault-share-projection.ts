@@ -13,8 +13,11 @@ import {
   listMetricPointsBatch,
   readProfileDocumentRuntime,
   selectMetricSeries,
+  summarizeWearableActivityRuntime,
   summarizeWearableSleepRuntime,
   type MetricSeriesPoint,
+  type WearableMetricSelection,
+  type WearableResolvedMetric,
 } from "@murphai/query";
 
 import type { HostedRuntimeVaultSharePort } from "./platform.ts";
@@ -34,6 +37,12 @@ export const HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS = 7;
 export const HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW = 3;
 
 export const HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS = 7;
+
+type ProjectableWorkoutDaySummary = {
+  date: string;
+  sessionCount: WearableResolvedMetric;
+  sessionMinutes: WearableResolvedMetric;
+};
 
 export interface HostedVaultShareProjectionOfferResult {
   outcome:
@@ -232,42 +241,8 @@ export async function readProjectableWorkoutDays(
   vaultRoot: string,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
-  const cutoffDate = new Date(
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
-  ).toISOString().slice(0, 10);
-  const points = await listMetricPointsBatch(vaultRoot, [
-    {
-      from: cutoffDate,
-      limit: null,
-      metricKey: "workout-count",
-    },
-    {
-      from: cutoffDate,
-      limit: null,
-      metricKey: "activity-minutes",
-    },
-  ]);
-  const countSeries = selectMetricSeries({
-    duplicatePolicy: "selection-policy",
-    from: cutoffDate,
-    grain: "day",
-    metricKey: "workout-count",
-    points,
-    statistic: "value",
-  });
-  const minuteSeries = selectMetricSeries({
-    duplicatePolicy: "selection-policy",
-    from: cutoffDate,
-    grain: "day",
-    metricKey: "activity-minutes",
-    points,
-    statistic: "value",
-  });
-  return selectProjectableWorkoutDays({
-    countRows: countSeries.rows,
-    minuteRows: minuteSeries.rows,
-    nowMs,
-  });
+  const summaries = await summarizeWearableActivityRuntime(vaultRoot);
+  return selectProjectableWorkoutDays(summaries, nowMs);
 }
 
 export async function readProjectableHeartRateZoneDays(
@@ -395,41 +370,25 @@ export function selectProjectableDailyMetricDays(
 }
 
 export function selectProjectableWorkoutDays(
-  input: {
-    countRows: readonly Pick<MetricSeriesPoint, "date" | "grain" | "metricKey" | "statistic" | "value">[];
-    minuteRows: readonly Pick<MetricSeriesPoint, "date" | "grain" | "metricKey" | "statistic" | "value">[];
-    nowMs: number;
-  },
+  summaries: readonly ProjectableWorkoutDaySummary[],
+  nowMs: number,
 ): HostedVaultShareDeliveryRecord[] {
   const cutoffMs =
-    input.nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
+    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
   const records: HostedVaultShareDeliveryRecord[] = [];
-  const minuteRowsByDate = new Map(
-    input.minuteRows
-      .filter((row) =>
-        row.metricKey === "activity-minutes"
-        && row.grain === "day"
-        && row.statistic === "value"
-      )
-      .map((row) => [row.date, row]),
-  );
 
-  for (const countRow of [...input.countRows].sort((left, right) => right.date.localeCompare(left.date))) {
-    const dayMs = Date.parse(`${countRow.date}T00:00:00.000Z`);
+  for (const summary of [...summaries].sort((left, right) => right.date.localeCompare(left.date))) {
+    const dayMs = Date.parse(`${summary.date}T00:00:00.000Z`);
     if (!Number.isFinite(dayMs) || dayMs < cutoffMs) {
       continue;
     }
-    if (
-      countRow.metricKey !== "workout-count"
-      || countRow.grain !== "day"
-      || countRow.statistic !== "value"
-    ) {
+
+    if (!sameMetricSelectionRecordIdentity(summary.sessionCount.selection, summary.sessionMinutes.selection)) {
       continue;
     }
 
-    const minuteRow = minuteRowsByDate.get(countRow.date);
-    const workoutCount = countRow.value;
-    const workoutMinutes = minuteRow?.value;
+    const workoutCount = summary.sessionCount.selection.value;
+    const workoutMinutes = summary.sessionMinutes.selection.value;
     if (
       typeof workoutCount !== "number"
       || typeof workoutMinutes !== "number"
@@ -446,12 +405,12 @@ export function selectProjectableWorkoutDays(
 
     records.push({
       data: {
-        date: countRow.date,
+        date: summary.date,
         workoutCount,
         workoutMinutes,
       },
-      occurredAt: `${countRow.date}T00:00:00.000Z`,
-      recordKey: countRow.date,
+      occurredAt: `${summary.date}T00:00:00.000Z`,
+      recordKey: summary.date,
     });
 
     if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW) {
@@ -460,6 +419,28 @@ export function selectProjectableWorkoutDays(
   }
 
   return records;
+}
+
+function sameMetricSelectionRecordIdentity(
+  left: WearableMetricSelection,
+  right: WearableMetricSelection,
+): boolean {
+  return left.provider !== null
+    && left.provider === right.provider
+    && left.sourceFamily === "derived"
+    && right.sourceFamily === "derived"
+    && left.sourceKind === "activity-session-aggregate"
+    && right.sourceKind === "activity-session-aggregate"
+    && left.recordIds.length > 0
+    && equalSortedStrings(sortedStrings(left.recordIds), sortedStrings(right.recordIds));
+}
+
+function sortedStrings(values: readonly string[]): string[] {
+  return [...new Set(values.filter((value) => value.trim().length > 0))].sort();
+}
+
+function equalSortedStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 export function selectProjectableHeartRateZoneDays(

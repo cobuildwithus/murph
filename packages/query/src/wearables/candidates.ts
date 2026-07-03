@@ -509,7 +509,7 @@ export function resolveSelectedHeartRateZones(
   return selected ? selected.heartRateZones.map((zone) => ({ ...zone })) : [];
 }
 
-function resolveSelectedActivitySessionAggregate(
+export function resolveSelectedActivitySessionAggregate(
   aggregates: readonly WearableActivitySessionAggregate[],
   selection: WearableMetricSelection,
 ): WearableActivitySessionAggregate | null {

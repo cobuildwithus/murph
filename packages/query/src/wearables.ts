@@ -9,6 +9,7 @@ import {
   groupActivitySessionAggregatesByDate,
   groupMetricCandidatesByDate,
   groupSleepWindowsByDate,
+  resolveSelectedActivitySessionAggregate,
   resolveSelectedActivityTypes,
   resolveSelectedHeartRateZones,
   selectMetricCandidates,
@@ -218,9 +219,15 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       aggregates.map((aggregate) => buildActivitySessionMetricCandidate(aggregate, "sessionMinutes")),
       { metricFamily: "activity" },
     );
+    const selectedActivitySessionAggregate = resolveSelectedActivitySessionAggregate(
+      aggregates,
+      sessionMinutes.selection,
+    );
     const sessionCount = resolveMetric(
       "sessionCount",
-      aggregates.map((aggregate) => buildActivitySessionMetricCandidate(aggregate, "sessionCount")),
+      selectedActivitySessionAggregate
+        ? [buildActivitySessionMetricCandidate(selectedActivitySessionAggregate, "sessionCount")]
+        : [],
       { metricFamily: "activity" },
     );
     const activityTypes = resolveSelectedActivityTypes(aggregates, sessionMinutes.selection);
