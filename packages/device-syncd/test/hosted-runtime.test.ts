@@ -1912,6 +1912,12 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("request rejected for user_id: hbm_abc123xyz upstream"),
     ).toBe("request rejected for user_id: <redacted-id> upstream");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("user_id=1234 rejected"),
+    ).toBe("user_id=<redacted-id> rejected");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("user_id=abcdef+tail rejected"),
+    ).toBe("user_id=<redacted-id> rejected");
   });
 
   it("masks token phrases in prose", () => {
@@ -1964,7 +1970,10 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     ).toBe("provider returned [<redacted-token>] for the request");
     expect(
       sanitizeHostedRuntimeDiagnosticText("retry after 2026-07-04T09:15:00Z with limit 250 on v1.2.3"),
-    ).toBe("retry after 2026-07-04T09:15:00Z with limit 250 on <redacted-token>");
+    ).toBe("retry after 2026-07-04T09:15:00Z with limit 250 on v1.2.3");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("request from 203.0.113.42 denied"),
+    ).toBe("request from <redacted-ip> denied");
   });
 
   it("masks quoted echoed input values as a whole", () => {
@@ -1974,12 +1983,21 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     const quotedInput = sanitizeHostedRuntimeDiagnosticText("rejected [input_value='Jane Doe', input_type=str]");
     expect(quotedInput).toBe("rejected [input_value='<redacted-value>', input_type=str]");
     expect(quotedInput).not.toContain("Doe");
+    const mixedQuoteInput = sanitizeHostedRuntimeDiagnosticText(
+      "rejected [input_value=\"Jane's device\", input_type=str]",
+    );
+    expect(mixedQuoteInput).toBe("rejected [input_value='<redacted-value>', input_type=str]");
+    expect(mixedQuoteInput).not.toContain("Jane");
+    expect(mixedQuoteInput).not.toContain("device");
   });
 
   it("strips default-ignorable format characters before masking", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("user junction-\u200Buser-1 denied"),
     ).toBe("user <redacted-id> denied");
+    const sanitized = sanitizeHostedRuntimeDiagnosticText("access\u200B_token=secretvalue");
+    expect(sanitized).toBe("access_token=[redacted]");
+    expect(sanitized).not.toContain("secretvalue");
   });
 
   it("keeps a safe prefix when a structured dump starts beyond the length cap", () => {
