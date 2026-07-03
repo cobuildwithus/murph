@@ -24,9 +24,15 @@ backstop compose instead of racing.
 Organizing constraint: the series must land net-negative in code,
 concepts, and branches. Each PR carries a deletion ledger.
 
-## PR sequence
+## PR sequence (two PRs)
 
-### PR A — delivery-report-as-consume-authority (net deletion)
+### PR 1 — consume authority at delivery + Linq direct wake
+
+One PR, two commits-worth of shape: the consume-authority foundation and
+the direct wake it makes safe. They deploy as one unit; the deploy-window
+analysis below replaces the earlier staged four-PR gate.
+
+#### Part 1a — delivery-report-as-consume-authority (net deletion)
 
 The runtime already reports every Linq delivery outcome to
 `POST /api/internal/hosted-runtime/linq-egress/delivery`
@@ -51,7 +57,7 @@ become one fact on one callback:
    what makes the Temporal backstop stand down when the direct wake has
    already handled a message, and it is semantically true: consumed input
    needs no wake. It removes the need for any workflow-side coordination,
-   delay timer, new patch marker, or replay fixture (see PR C — which this
+   delay timer, new patch marker, or replay fixture (see Part 2a — the recheck-only redesign this
    finding collapsed).
    Implementation care: `computeHostedMailboxLaneLag` gains an optional
    `consumedSeq` input rather than netting implicitly, and BOTH callers
@@ -117,7 +123,7 @@ hosted-runtime-protocol.md §519–526):
   path). Consequence: the watermark advances only for Linq-answered turns.
   Channels without a callback keep exactly today's behavior; the checkpoint
   ack they nominally had never fired anyway (~0 acks/week), so deleting it
-  regresses nothing. This constraint GATES PR B (see below).
+  regresses nothing. This constraint GATES the direct wake in Part 1b (see below).
 
 Coverage computation (verified design, hardened by adversarial review):
 - Compute in the auto-reply frame (`automation/reply.ts:1453-1520`), but
@@ -168,11 +174,11 @@ Riders (independent deletions, separate commits):
 - Mailbox-fetch AI-usage gate: KEEP (rider withdrawn by adversarial
   review). The original safe-to-delete verdict assumed every wake
   traverses turn admission in reconciliation facts — true only for
-  Temporal-orchestrated wakes. A direct-woken container (PR B, or the
-  legacy workflow branch until PR C) fetches the mailbox WITHOUT ever
+  Temporal-orchestrated wakes. A direct-woken container (Part 1b, or the
+  legacy workflow branch until PR 2) fetches the mailbox WITHOUT ever
   reading reconciliation facts, so the read-first fetch gate is the only
   usage check on the fast path. It is cheap (fires only when the batch
-  contains gated work) and becomes load-bearing under PR B. Deleting it
+  contains gated work) and becomes load-bearing under the direct wake. Deleting it
   would require runtime-local admission — complexity in the wrong
   direction.
 - Relocate (NOT delete) `readRecordedHostedLinqFirstContactAdmissionDecision`:
@@ -185,18 +191,18 @@ Riders (independent deletions, separate commits):
   plan transaction before short-circuiting. `recordedAdmission` has no
   other consumers (webhook-service.ts:202,210).
 
-### PR B — re-land the direct wake (revert of 3c2a41bda2)
+#### Part 1b — re-land the direct wake (revert of 3c2a41bda2)
 
 Restores the PR #362 fast path unchanged: webhook fires a fire-and-forget
 ensure at the Cloudflare worker in parallel with the unconditional Temporal
 signal. ~643 withdrawn lines return (web wake helper, CF dual-auth ensure
 route, control-client method, `triggeredByWebDirect` trace leaf, E2E).
-With PR A live, racing ensures are harmless by construction: a stale
+With Part 1a live, racing ensures are harmless by construction: a stale
 invocation fetches the mailbox, sees input consumed (null reply target),
 finds no fresh work, exits.
 
 GATE — Linq only: the direct wake fires only for `source === "linq"`,
-because only Linq's reply path advances the watermark (PR A channel
+because only Linq's reply path advances the watermark (Part 1a channel
 inventory). Firing it for Telegram/WhatsApp would reintroduce the #362
 duplicate hazard on channels with no delivery-time consume authority. One
 guarded condition in the shared wake helper, with the enabling rule named
@@ -206,17 +212,17 @@ callback. This composes instead of branching per provider ad hoc.
 Residual risk (documented, accepted): a dual-channel member whose turn
 answers a Telegram input during Linq-wake churn could still see a
 re-answered Telegram input in an inter-invocation gap — that window exists
-today under Temporal retries; PR B makes gaps marginally more frequent for
+today under Temporal retries; the direct wake makes gaps marginally more frequent for
 dual-channel members only. The measured trigger for closing it is a
 Telegram delivery callback, not speculative coordination.
 
 - No workflow-side coordination, no new flags, no deploy-order dance
   between web and worker beyond web-first for the trace leaf. The protocol
   doc's withdrawal constraint ("any future direct wake must carry pointer
-  awareness into the workflow") is satisfied by PR A's lag netting instead
+  awareness into the workflow") is satisfied by Part 1a's lag netting instead
   of a signal flag — update `hosted-runtime-protocol.md:268-274` to record
   that resolution in this PR.
-- Failure-mode ledger after PR A: duplicate reply → impossible (consumed
+- Failure-mode ledger with Part 1a live: duplicate reply → impossible (consumed
   items re-stage with null reply target); redundant ensure racing an active
   invocation → `already_running` on the DO fence; ensure landing in an
   inter-invocation gap → starts an invocation that imports, finds nothing
@@ -224,15 +230,39 @@ Telegram delivery callback, not speculative coordination.
   delivery ack lands within seconds).
 - The instrumented rapid-double-webhook E2E that killed #362 becomes the
   regression proof.
-- Gate: PR A deployed to BOTH web and the runner bundle, plus one prod
-  observation of `consumed_seq` advancing at delivery time.
 
-### PR C — retire the legacy workflow patch branch (pure deletion)
+Deploy-window analysis for the merged PR (replaces the old staged gate):
+- Web deploys first. The wake helper fires at a Cloudflare route that does
+  not exist yet → fire-and-forget 404, harmless no-op. The delivery route
+  accepts-but-never-receives coverage; lag netting is live but inert
+  (consumed_seq still 0 everywhere). Net: behavior identical to today.
+- Cloudflare deploys second (worker route + runner bundle ship together in
+  the hosted-execution deploy), with `container_rollout=immediate` so old
+  runner containers — which do not post coverage — are recycled rather
+  than left delivering coverage-less replies.
+- Residual one-window risk, accepted and documented: a duplicate would
+  require a direct wake racing an ensure into an inter-invocation gap for
+  a message whose reply was delivered by a still-running OLD container
+  during the minutes between web and CF deploys. With the 404 gating (the
+  wake route only exists once CF deploys, i.e. once new runners exist)
+  this shrinks to old-container stragglers under immediate rollout —
+  narrower than the ordinary risk of any hosted deploy.
+- Post-deploy verification before calling it done: one prod observation of
+  `consumed_seq` advancing at delivery time, and `triggeredByWebDirect`
+  appearing in orchestration traces.
+
+### PR 2 — retire the legacy workflow patch branch + collapse the wake fields
+
+Pure cleanup, no behavior. Merges after the patch drain is observed (the
+wake-field collapse has no precondition and simply rides along — the cost
+of two PRs instead of four, accepted).
+
+#### Part 2a — retire the legacy workflow patch branch (pure deletion)
 
 Exploration collapsed the original "demote to recheck-only" design: the
 patched workflow already IS recheck-shaped — on `mailbox_appended` it only
 bumps a signal version, re-reads reconciliation facts, and ensures on lag
-(`hosted-user-runtime.ts:308-379`). With PR A's lag netting, that loop
+(`hosted-user-runtime.ts:308-379`). With Part 1a's lag netting, that loop
 becomes the correct deferred backstop with zero workflow changes: the one
 ensure it fires while a direct-woken invocation is running no-ops against
 the DO fence, and post-delivery rechecks see lag 0. Adding a delay timer +
@@ -252,7 +282,7 @@ would be the repo's first patch retirement):
    `recordDirectMailboxProcessingSummary`, and the guard-required replay
    test/fixture in the same change (`hosted-temporal:guard` pins them).
 
-### PR D — wake-field triple collapse (net deletion)
+#### Part 2b — wake-field triple collapse (net deletion)
 
 Drop the four singular plan fields (`wakeLinqChatId`, `wakeMailboxCheckpoint`,
 `wakeMailboxItemId`, `wakeUserId` — `webhook-service-types.ts:22-25`) and
@@ -282,36 +312,39 @@ Touch: `webhook-service-types.ts:17-26`;
 
 ## Deploy order
 
-- PR A: web (accept new delivery field + advance) before runner bundle
-  (send it). Old runner + new web = today's behavior; new runner + old web
-  = unknown field ignored. Delete `/consume` route only after the runner
-  bundle that stops calling it is fully rolled out (or same PR if the
-  optional port wiring proves the runner tolerates 404s — verify).
-- PR B: web + CF worker; `container_rollout=immediate` not required (no
-  container-side change).
-- PR C: Render worker deploy with Temporal patch markers; two-phase per the
-  repo's established patch-retirement procedure.
+- PR 1: web first, then Cloudflare (worker + runner bundle) with
+  `container_rollout=immediate` — full analysis in Part 1b. Old runner +
+  new web = today's behavior; new runner + old web = coverage field
+  ignored (the monotonic advance-on-any-accepted rule makes later retries
+  converge). Delete the `/consume` route in this PR only if the optional
+  port wiring provably tolerates its absence during the window (the port
+  is optional and the old runner's post-checkpoint call is caught
+  best-effort with a retry wake — verify the 404 path in the E2E);
+  otherwise route deletion trails in PR 2.
+- PR 2: Render worker deploy (Temporal patch retirement, two-phase per the
+  repo's patch procedure: `deprecatePatch` intermediate after drain, then
+  branch deletion) + web (wake-field collapse, no deploy coupling).
 
 ## Verification
 
-- PR A: focused runtime tests for coverage stamping (multi-message turn,
-  cross-channel interleave hold-back, failed-reply hold-back); web route
-  test for advance-on-accepted-only; the rapid-double-webhook E2E; prod
-  readback of `consumed_seq` advancing.
-- PR B: restored #362 E2E suite + the Linq delivery E2E that was the
-  original failure signal, 2 consecutive green runs.
-- PR C: workflow replay tests + the recheck path exercised in the Temporal
-  orchestration E2E.
+- PR 1: focused runtime tests for coverage stamping (multi-message turn,
+  cross-channel interleave hold-back, failed-reply hold-back, suppressed
+  prefix, mid-turn staging); web route test for advance-on-any-accepted
+  with coverage; the restored #362 E2E suite including the
+  rapid-double-webhook scenario and the Linq delivery E2E that was the
+  original failure signal, 2 consecutive green runs; prod readback of
+  `consumed_seq` advancing at delivery.
+- PR 2: workflow replay tests per the patch procedure + Temporal
+  orchestration E2E; full webhook owner suites for the wake-field
+  collapse.
 - Each PR: c1 (codex gpt-5.5 xhigh) deep-review rounds to completion.
 
 ## Deletion ledger (running total)
 
 | PR | Deleted | Added |
 | --- | --- | --- |
-| A | ~220-line checkpoint ack block, consume route+port+compat wiring, dead lag export, every-message admission pre-read (relocated) | intent field, report field, 1 store call, lag netting (explicit param, both callers audited) |
-| B | — | ~500 lines restored (stateless hint; no new state/concepts) |
-| C | legacy patch branch, runtime seam, patch constant, direct-summary recorder, replay fixture+test | `deprecatePatch` intermediate (itself later deleted) |
-| D | two legacy wake fields + parallel consumers | — |
+| 1 | ~220-line checkpoint ack block, consume route+port+compat wiring, dead lag export, every-message admission pre-read (relocated) | intent field, report field, 1 store call, lag netting (explicit param, both callers audited), ~500 restored direct-wake lines (stateless hint; no new state/concepts) |
+| 2 | legacy patch branch, runtime seam, patch constant, direct-summary recorder, replay fixture+test, four legacy wake plan fields + parallel consumers | `deprecatePatch` intermediate (itself later deleted) |
 
 Plan-level collapse already banked: the original PR C ("demote workflow to
 recheck-only": delay timer, second patch marker, new replay fixture) was
