@@ -45,7 +45,6 @@ const VALID_DAILY_METRIC_RECORD = {
 
 const VALID_WORKOUT_RECORD = {
   data: {
-    activityTypes: ["running", "strength"],
     date: "2026-07-03",
     workoutCount: 2,
     workoutMinutes: 85,
@@ -61,8 +60,6 @@ const VALID_HEART_RATE_ZONE_RECORD = {
       {
         durationMinutes: 24,
         label: "Zone 2",
-        maxHeartRate: 140,
-        minHeartRate: 120,
         zone: 2,
       },
     ],
@@ -518,16 +515,6 @@ describe("workout-days.v0 delivery records", () => {
         }],
       })
     ).toThrow(/workoutCount/u);
-
-    expect(() =>
-      parseHostedVaultShareDeliverRequest({
-        projectionKind: "workout-days.v0",
-        records: [{
-          ...VALID_WORKOUT_RECORD,
-          data: { ...VALID_WORKOUT_RECORD.data, activityTypes: ["x".repeat(81)] },
-        }],
-      })
-    ).toThrow(/activityTypes/u);
   });
 });
 

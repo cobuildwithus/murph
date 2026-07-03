@@ -10,7 +10,6 @@ import {
 import {
   selectMetricSeries,
   type MetricPoint,
-  type ProjectedWearableActivitySummary,
 } from "@murphai/query";
 import { describe, expect, it, vi } from "vitest";
 
@@ -273,19 +272,27 @@ describe("selectProjectableWorkoutDays", () => {
   const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
 
   it("maps selected workout session summaries without raw workout details", () => {
-    const selected = selectProjectableWorkoutDays([
-      {
-        activityTypes: ["running", "strength"],
+    const selected = selectProjectableWorkoutDays({
+      countRows: [{
         date: ACTIVITY_DAY.date,
-        sessionCount: projectedWearableMetric("sessionCount", 2),
-        sessionMinutes: projectedWearableMetric("sessionMinutes", 85),
-      },
-    ], nowMs);
+        grain: "day",
+        metricKey: "workout-count",
+        statistic: "value",
+        value: 2,
+      }],
+      minuteRows: [{
+        date: ACTIVITY_DAY.date,
+        grain: "day",
+        metricKey: "activity-minutes",
+        statistic: "value",
+        value: 85,
+      }],
+      nowMs,
+    });
 
     expect(selected).toEqual([
       {
         data: {
-          activityTypes: ["running", "strength"],
           date: ACTIVITY_DAY.date,
           workoutCount: 2,
           workoutMinutes: 85,
@@ -309,16 +316,16 @@ describe("selectProjectableHeartRateZoneDays", () => {
   it("maps selected workout heart-rate zone summaries to bounded daily buckets", () => {
     const selected = selectProjectableHeartRateZoneDays([
       {
+        context: {
+          maxHeartRate: 140,
+          minHeartRate: 120,
+          zoneLabel: "Zone 2",
+        },
         date: ACTIVITY_DAY.date,
-        heartRateZones: [
-          {
-            durationMinutes: 24,
-            label: "Zone 2",
-            maxHeartRate: 140,
-            minHeartRate: 120,
-            zone: 2,
-          },
-        ],
+        grain: "day",
+        metricKey: "heart-rate-zone-2-minutes",
+        statistic: "value",
+        value: 24,
       },
     ], nowMs);
 
@@ -330,8 +337,6 @@ describe("selectProjectableHeartRateZoneDays", () => {
             {
               durationMinutes: 24,
               label: "Zone 2",
-              maxHeartRate: 140,
-              minHeartRate: 120,
               zone: 2,
             },
           ],
@@ -400,38 +405,6 @@ function requireDailyMetricSpec(kind: "steps-days.v0") {
     throw new Error(`Missing daily metric projection spec for ${kind}.`);
   }
   return spec;
-}
-
-function projectedWearableMetric(
-  metric: string,
-  value: number | null,
-): ProjectedWearableActivitySummary["sessionMinutes"] {
-  return {
-    candidates: [],
-    confidence: {
-      candidateCount: value === null ? 0 : 1,
-      conflictingProviders: [],
-      exactDuplicateCount: 0,
-      level: value === null ? "none" : "high",
-      reasons: [],
-    },
-    metric,
-    selection: {
-      fallbackFromMetric: null,
-      fallbackReason: null,
-      occurredAt: null,
-      paths: [],
-      provider: value === null ? null : "garmin",
-      recordedAt: null,
-      recordIds: [],
-      resolution: value === null ? "none" : "direct",
-      sourceFamily: value === null ? null : "derived",
-      sourceKind: value === null ? null : "activity-summary",
-      title: null,
-      unit: null,
-      value,
-    },
-  };
 }
 
 describe("selectProjectableSleepNights", () => {

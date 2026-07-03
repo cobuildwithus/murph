@@ -107,7 +107,7 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   "workout-days.v0": {
     label: "Recent workout summaries",
     description:
-      "Allows this group to receive your recent daily workout counts, minutes, and activity types as bounded shared records.",
+      "Allows this group to receive your recent daily workout counts and minutes as bounded shared records.",
   },
   "workout-strain-days.v0": {
     label: "Recent workout strain",

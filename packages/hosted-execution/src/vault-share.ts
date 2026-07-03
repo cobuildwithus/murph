@@ -143,7 +143,6 @@ export interface HostedVaultShareDailyMetricData {
 }
 
 export interface HostedVaultShareWorkoutDayData {
-  activityTypes: string[];
   date: string;
   workoutCount: number;
   workoutMinutes: number;
@@ -152,8 +151,6 @@ export interface HostedVaultShareWorkoutDayData {
 export interface HostedVaultShareHeartRateZoneBucket {
   durationMinutes: number;
   label?: string;
-  maxHeartRate?: number;
-  minHeartRate?: number;
   zone?: number;
 }
 
@@ -490,19 +487,7 @@ function parseHostedVaultShareWorkoutDayData(
     );
   }
 
-  const activityTypes = requireArray(
-    data.activityTypes,
-    "Vault share workout-days data activityTypes",
-  ).map((entry, index) =>
-    parseHostedVaultShareBoundedText(entry, `Vault share workout-days activityTypes[${index}]`, 80)
-  );
-  if (activityTypes.length > 16) {
-    throw new TypeError(
-      "Vault share workout-days activityTypes must contain at most 16 entries.",
-    );
-  }
-
-  return { activityTypes, date, workoutCount, workoutMinutes };
+  return { date, workoutCount, workoutMinutes };
 }
 
 function parseHostedVaultShareHeartRateZoneDayData(
@@ -548,18 +533,6 @@ function parseHostedVaultShareHeartRateZoneBucket(
         `Vault share heart-rate-zones-days zones[${index}] label`,
         80,
       );
-  const minHeartRate = data.minHeartRate === undefined
-    ? undefined
-    : requireNumber(
-        data.minHeartRate,
-        `Vault share heart-rate-zones-days zones[${index}] minHeartRate`,
-      );
-  const maxHeartRate = data.maxHeartRate === undefined
-    ? undefined
-    : requireNumber(
-        data.maxHeartRate,
-        `Vault share heart-rate-zones-days zones[${index}] maxHeartRate`,
-      );
   const durationMinutes = requireNumber(
     data.durationMinutes,
     `Vault share heart-rate-zones-days zones[${index}] durationMinutes`,
@@ -570,25 +543,6 @@ function parseHostedVaultShareHeartRateZoneBucket(
       `Vault share heart-rate-zones-days zones[${index}] zone must be an integer between 0 and 20.`,
     );
   }
-  if (minHeartRate !== undefined && (minHeartRate < 0 || minHeartRate > 260)) {
-    throw new TypeError(
-      `Vault share heart-rate-zones-days zones[${index}] minHeartRate must be between 0 and 260.`,
-    );
-  }
-  if (maxHeartRate !== undefined && (maxHeartRate < 0 || maxHeartRate > 260)) {
-    throw new TypeError(
-      `Vault share heart-rate-zones-days zones[${index}] maxHeartRate must be between 0 and 260.`,
-    );
-  }
-  if (
-    minHeartRate !== undefined
-    && maxHeartRate !== undefined
-    && maxHeartRate < minHeartRate
-  ) {
-    throw new TypeError(
-      `Vault share heart-rate-zones-days zones[${index}] maxHeartRate must be greater than or equal to minHeartRate.`,
-    );
-  }
   if (durationMinutes < 0 || durationMinutes > HOSTED_VAULT_SHARE_ACTIVITY_DAY_MAX_ACTIVE_MINUTES) {
     throw new TypeError(
       `Vault share heart-rate-zones-days zones[${index}] durationMinutes must be between 0 and 1440.`,
@@ -597,8 +551,6 @@ function parseHostedVaultShareHeartRateZoneBucket(
   if (
     zone === undefined
     && label === undefined
-    && minHeartRate === undefined
-    && maxHeartRate === undefined
   ) {
     throw new TypeError(
       `Vault share heart-rate-zones-days zones[${index}] must identify the zone.`,
@@ -607,8 +559,6 @@ function parseHostedVaultShareHeartRateZoneBucket(
 
   return {
     ...(label === undefined ? {} : { label }),
-    ...(maxHeartRate === undefined ? {} : { maxHeartRate }),
-    ...(minHeartRate === undefined ? {} : { minHeartRate }),
     ...(zone === undefined ? {} : { zone }),
     durationMinutes,
   };

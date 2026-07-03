@@ -285,6 +285,54 @@ test("Junction Oura explicit resting heart rate takes precedence over lowest sle
   assert.deepEqual(restingHeartRatePoints.map((point) => point.value), [52]);
 });
 
+test("wearable activity projection emits workout count and zone-minute metric points", () => {
+  const vault = makeVault([
+    makeEntity({
+      entityId: "evt_hr_zone_workout_01",
+      family: "event",
+      kind: "activity_session",
+      recordClass: "ledger",
+      occurredAt: "2026-04-08T12:00:00Z",
+      date: "2026-04-08",
+      title: "Garmin interval session",
+      attributes: {
+        dayKey: "2026-04-08",
+        durationMinutes: 35,
+        recordedAt: "2026-04-08T12:45:00Z",
+        externalRef: {
+          system: "garmin",
+          resourceType: "activity_session",
+          resourceId: "evt_hr_zone_workout_01-resource",
+        },
+        workout: {
+          heartRateZones: [{
+            durationMinutes: 20,
+            label: "Zone 2",
+            maxHeartRate: 140,
+            minHeartRate: 120,
+            zone: 2,
+          }],
+        },
+      },
+    }),
+  ]);
+
+  const projection = buildMetricProjection(vault);
+  const workoutCount = projection.metricPoints.find((point) =>
+    point.metricKey === "workout-count"
+  );
+  const zoneMinutes = projection.metricPoints.find((point) =>
+    point.metricKey === "heart-rate-zone-2-minutes"
+  );
+
+  assert.equal(workoutCount?.value, 1);
+  assert.equal(zoneMinutes?.value, 20);
+  assert.equal(zoneMinutes?.context.zone, 2);
+  assert.equal(zoneMinutes?.context.zoneLabel, "Zone 2");
+  assert.equal("maxHeartRate" in (zoneMinutes?.context ?? {}), false);
+  assert.equal("minHeartRate" in (zoneMinutes?.context ?? {}), false);
+});
+
 test("Junction raw-only timeseries stay out of default query/search and wearable summaries", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-raw-timeseries-query-"));
   const rawTimeseriesSnapshot = {

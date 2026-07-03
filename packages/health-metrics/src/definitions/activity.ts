@@ -67,6 +67,17 @@ export const ACTIVITY_METRICS = [
     valuePrecision: 0,
   },
   {
+    aliases: ["session-count", "session_count", "sessionCount", "workout-count", "workout_count", "workouts"],
+    biomarkerKey: null,
+    canonicalUnit: "count",
+    category: "activity",
+    displayName: "Workout count",
+    displayUnit: "workouts",
+    key: "workout-count",
+    selectionPolicy: { kind: "latest-valid", staleAfterDays: 14 },
+    valuePrecision: 0,
+  },
+  {
     aliases: ["activityScore", "activity_score", "activity-score", "movement-score"],
     biomarkerKey: null,
     canonicalUnit: "score",

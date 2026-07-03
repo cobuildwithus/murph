@@ -26,6 +26,7 @@ import {
 } from "./index.ts";
 
 const METRIC_PROJECTION_LIMIT = 365;
+const HEART_RATE_ZONE_MAX_DAILY_MINUTES = 24 * 60;
 
 export interface MetricProjection {
   dailySampleSummaries: DailySampleSummary[];
@@ -101,7 +102,10 @@ function buildWearableMetricProjectionEvidenceFromBundle(bundle: WearableSummary
   const evidence = [
     ...sleepSummaries.flatMap((summary) => summaryMetricEvidence(summary, SLEEP_METRIC_EVIDENCE)),
     ...recoverySummaries.flatMap((summary) => summaryMetricEvidence(summary, RECOVERY_METRIC_EVIDENCE)),
-    ...activitySummaries.flatMap((summary) => summaryMetricEvidence(summary, ACTIVITY_METRIC_EVIDENCE)),
+    ...activitySummaries.flatMap((summary) => [
+      ...summaryMetricEvidence(summary, ACTIVITY_METRIC_EVIDENCE),
+      ...heartRateZoneMetricEvidence(summary),
+    ]),
     ...bodyStateSummaries.flatMap((summary) => summaryMetricEvidence(summary, BODY_STATE_METRIC_EVIDENCE)),
   ];
 
@@ -147,6 +151,7 @@ const RECOVERY_METRIC_EVIDENCE = [
 const ACTIVITY_METRIC_EVIDENCE = [
   { metricKey: "steps", summaryField: "steps", sourceKind: "activity-summary" },
   { metricKey: "activity-minutes", summaryField: "sessionMinutes", sourceKind: "activity-summary" },
+  { metricKey: "workout-count", summaryField: "sessionCount", sourceKind: "activity-summary" },
   { metricKey: "active-calories", summaryField: "activeCalories", sourceKind: "activity-summary" },
   { metricKey: "activity-score", summaryField: "activityScore", sourceKind: "activity-summary" },
   { metricKey: "day-strain", summaryField: "dayStrain", sourceKind: "activity-summary" },
@@ -189,6 +194,81 @@ function summaryMetricEvidence<TField extends string>(
       entry.sourceKind,
     )
   );
+}
+
+function heartRateZoneMetricEvidence(summary: WearableActivitySummary): WearableMetricEvidenceResult[] {
+  return summary.heartRateZones.flatMap((zone) => {
+    if (
+      typeof zone.zone !== "number"
+      || !Number.isInteger(zone.zone)
+      || zone.zone < 0
+      || zone.zone > 20
+      || typeof zone.durationMinutes !== "number"
+      || !Number.isFinite(zone.durationMinutes)
+      || zone.durationMinutes < 0
+      || zone.durationMinutes > HEART_RATE_ZONE_MAX_DAILY_MINUTES
+    ) {
+      return [];
+    }
+
+    const metricKey = `heart-rate-zone-${zone.zone}-minutes`;
+    const sourceMetric = summary.sessionMinutes;
+    const selection = sourceMetric.selection;
+    const sourceCandidate = selectWearableSourceCandidate(sourceMetric);
+    const provider = selection.provider ?? sourceCandidate?.provider ?? null;
+    const rawRefs = uniqueStrings([
+      ...selection.paths,
+      ...(sourceCandidate?.paths ?? []),
+    ]);
+    const syntheticRecordId = `activity-summary:${metricKey}:${summary.date}`;
+    const contributingRecordIds = uniqueStrings([
+      ...selection.recordIds,
+      ...(sourceCandidate?.recordIds ?? []),
+    ]);
+    const recordIds = contributingRecordIds.length > 0 ? contributingRecordIds : [syntheticRecordId];
+    const suppressionRecordIds = uniqueStrings([
+      ...contributingRecordIds,
+      ...sourceMetric.candidates.flatMap((candidate) => candidate.recordIds),
+    ]);
+    const zoneLabel = sanitizeContextText(zone.label);
+
+    return [{
+      row: {
+        confidence: sourceMetric.confidence.level === "none"
+          ? summary.summaryConfidence.level
+          : sourceMetric.confidence.level,
+        context: {
+          candidateCount: sourceMetric.confidence.candidateCount,
+          conflictingProviders: sourceMetric.confidence.conflictingProviders,
+          contributingRecordIds,
+          exactDuplicateCount: sourceMetric.confidence.exactDuplicateCount,
+          recordedAt: selection.recordedAt,
+          sourceFamily: selection.sourceFamily ?? sourceCandidate?.sourceFamily ?? null,
+          sourceKind: selection.sourceKind ?? sourceCandidate?.sourceKind ?? null,
+          syntheticRecordId,
+          ...(zoneLabel === null ? {} : { zoneLabel }),
+          zone: zone.zone,
+        },
+        dataOrigin: sourceCandidate?.dataOrigin ?? null,
+        date: summary.date,
+        externalRef: sourceCandidate?.externalRef ?? null,
+        metricKey,
+        provider,
+        rawRefs,
+        recordIds,
+        sourceFamily: "derived",
+        sourceKind: "activity-summary",
+        sourceLabel: provider ? formatProviderName(provider) : sourceCandidate?.title ?? "Wearable summary",
+        unit: "minutes",
+        value: zone.durationMinutes,
+      },
+      suppressionEvidence: {
+        date: summary.date,
+        metricKey,
+        recordIds: suppressionRecordIds,
+      },
+    }];
+  });
 }
 
 // Precedence suppresses RAW OBSERVATION points only. Summary points are
@@ -310,4 +390,14 @@ function selectWearableSourceCandidate(resolved: WearableResolvedMetric): Wearab
 
 function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {
   return [...new Set(values.filter((value): value is string => typeof value === "string" && value.length > 0))];
+}
+
+function sanitizeContextText(value: string | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed.length <= 80 && !/[\u0000-\u001f\u007f]/u.test(trimmed)
+    ? trimmed
+    : null;
 }

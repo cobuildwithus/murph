@@ -1,5 +1,5 @@
 import {
-  isHostedVaultShareProjectionKind,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   type HostedVaultShareProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
 
@@ -22,6 +22,17 @@ export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
 const BODY_LIMIT_BYTES = 4_096;
+
+type HostedVaultShareSelectableProjectionKind =
+  (typeof HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS)[number];
+
+function isHostedVaultShareSelectableProjectionKind(
+  value: unknown,
+): value is HostedVaultShareSelectableProjectionKind {
+  return HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.includes(
+    value as HostedVaultShareSelectableProjectionKind,
+  );
+}
 
 export const POST = withJsonError(async (
   request: Request,
@@ -89,9 +100,9 @@ function parseSelectedVaultShareProjectionKinds(value: unknown): HostedVaultShar
       message: "Selected group permissions must be a list.",
     });
   }
-  const selected = new Set<HostedVaultShareProjectionKind>();
+  const selected = new Set<HostedVaultShareSelectableProjectionKind>();
   for (const entry of value) {
-    if (!isHostedVaultShareProjectionKind(entry)) {
+    if (!isHostedVaultShareSelectableProjectionKind(entry)) {
       throw hostedOnboardingError({
         code: "HOSTED_GROUP_SELECTED_PERMISSION_UNSUPPORTED",
         httpStatus: 400,
@@ -99,7 +110,7 @@ function parseSelectedVaultShareProjectionKinds(value: unknown): HostedVaultShar
       });
     }
     selected.add(entry);
-    if (selected.size > 8) {
+    if (selected.size > HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length) {
       throw hostedOnboardingError({
         code: "HOSTED_GROUP_SELECTED_PERMISSIONS_TOO_MANY",
         httpStatus: 400,

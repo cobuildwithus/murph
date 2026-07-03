@@ -9,12 +9,11 @@ import {
   type HostedVaultShareProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
 import {
-  type ProjectedWearableActivitySummary,
   type ProjectedWearableSleepSummary,
   listMetricPoints,
+  listMetricPointsBatch,
   readProfileDocumentRuntime,
   selectMetricSeries,
-  summarizeWearableActivityRuntime,
   summarizeWearableSleepRuntime,
   type MetricSeriesPoint,
 } from "@murphai/query";
@@ -23,6 +22,7 @@ import type { HostedRuntimeVaultSharePort } from "./platform.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_DAILY_MINUTES = 24 * 60;
+const HEART_RATE_ZONE_MINUTES_METRIC_KEY_PATTERN = /^heart-rate-zone-(\d+)-minutes$/u;
 
 export const HOSTED_VAULT_SHARE_PROJECTION_NIGHT_WINDOW = 3;
 
@@ -264,12 +264,39 @@ export async function readProjectableWorkoutDays(
   const cutoffDate = new Date(
     nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
   ).toISOString().slice(0, 10);
-  const summaries = await summarizeWearableActivityRuntime(vaultRoot, {
+  const points = await listMetricPointsBatch(vaultRoot, [
+    {
+      from: cutoffDate,
+      limit: null,
+      metricKey: "workout-count",
+    },
+    {
+      from: cutoffDate,
+      limit: null,
+      metricKey: "activity-minutes",
+    },
+  ]);
+  const countSeries = selectMetricSeries({
+    duplicatePolicy: "selection-policy",
     from: cutoffDate,
-    limit: HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW
-      + HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+    grain: "day",
+    metricKey: "workout-count",
+    points,
+    statistic: "value",
   });
-  return selectProjectableWorkoutDays(summaries, nowMs);
+  const minuteSeries = selectMetricSeries({
+    duplicatePolicy: "selection-policy",
+    from: cutoffDate,
+    grain: "day",
+    metricKey: "activity-minutes",
+    points,
+    statistic: "value",
+  });
+  return selectProjectableWorkoutDays({
+    countRows: countSeries.rows,
+    minuteRows: minuteSeries.rows,
+    nowMs,
+  });
 }
 
 export async function readProjectableHeartRateZoneDays(
@@ -279,12 +306,26 @@ export async function readProjectableHeartRateZoneDays(
   const cutoffDate = new Date(
     nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
   ).toISOString().slice(0, 10);
-  const summaries = await summarizeWearableActivityRuntime(vaultRoot, {
+  const points = await listMetricPoints(vaultRoot, {
     from: cutoffDate,
-    limit: HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW
-      + HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+    limit: null,
   });
-  return selectProjectableHeartRateZoneDays(summaries, nowMs);
+  const zoneMetricKeys = uniqueStrings(
+    points
+      .map((point) => point.metricKey)
+      .filter((metricKey) => HEART_RATE_ZONE_MINUTES_METRIC_KEY_PATTERN.test(metricKey)),
+  );
+  const rows = zoneMetricKeys.flatMap((metricKey) =>
+    selectMetricSeries({
+      duplicatePolicy: "selection-policy",
+      from: cutoffDate,
+      grain: "day",
+      metricKey,
+      points,
+      statistic: "value",
+    }).rows
+  );
+  return selectProjectableHeartRateZoneDays(rows, nowMs);
 }
 
 /**
@@ -433,24 +474,41 @@ export function selectProjectableDailyMetricDays(
 }
 
 export function selectProjectableWorkoutDays(
-  summaries: readonly Pick<
-    ProjectedWearableActivitySummary,
-    "activityTypes" | "date" | "sessionCount" | "sessionMinutes"
-  >[],
-  nowMs: number,
+  input: {
+    countRows: readonly Pick<MetricSeriesPoint, "date" | "grain" | "metricKey" | "statistic" | "value">[];
+    minuteRows: readonly Pick<MetricSeriesPoint, "date" | "grain" | "metricKey" | "statistic" | "value">[];
+    nowMs: number;
+  },
 ): HostedVaultShareDeliveryRecord[] {
   const cutoffMs =
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
+    input.nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
   const records: HostedVaultShareDeliveryRecord[] = [];
+  const minuteRowsByDate = new Map(
+    input.minuteRows
+      .filter((row) =>
+        row.metricKey === "activity-minutes"
+        && row.grain === "day"
+        && row.statistic === "value"
+      )
+      .map((row) => [row.date, row]),
+  );
 
-  for (const summary of [...summaries].sort((left, right) => right.date.localeCompare(left.date))) {
-    const dayMs = Date.parse(`${summary.date}T00:00:00.000Z`);
+  for (const countRow of [...input.countRows].sort((left, right) => right.date.localeCompare(left.date))) {
+    const dayMs = Date.parse(`${countRow.date}T00:00:00.000Z`);
     if (!Number.isFinite(dayMs) || dayMs < cutoffMs) {
       continue;
     }
+    if (
+      countRow.metricKey !== "workout-count"
+      || countRow.grain !== "day"
+      || countRow.statistic !== "value"
+    ) {
+      continue;
+    }
 
-    const workoutCount = summary.sessionCount.selection.value;
-    const workoutMinutes = summary.sessionMinutes.selection.value;
+    const minuteRow = minuteRowsByDate.get(countRow.date);
+    const workoutCount = countRow.value;
+    const workoutMinutes = minuteRow?.value;
     if (
       typeof workoutCount !== "number"
       || typeof workoutMinutes !== "number"
@@ -467,13 +525,12 @@ export function selectProjectableWorkoutDays(
 
     records.push({
       data: {
-        activityTypes: sanitizeActivityTypes(summary.activityTypes),
-        date: summary.date,
+        date: countRow.date,
         workoutCount,
         workoutMinutes,
       },
-      occurredAt: `${summary.date}T00:00:00.000Z`,
-      recordKey: summary.date,
+      occurredAt: `${countRow.date}T00:00:00.000Z`,
+      recordKey: countRow.date,
     });
 
     if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW) {
@@ -485,22 +542,53 @@ export function selectProjectableWorkoutDays(
 }
 
 export function selectProjectableHeartRateZoneDays(
-  summaries: readonly Pick<ProjectedWearableActivitySummary, "date" | "heartRateZones">[],
+  points: readonly Pick<MetricSeriesPoint, "context" | "date" | "grain" | "metricKey" | "statistic" | "value">[],
   nowMs: number,
 ): HostedVaultShareDeliveryRecord[] {
   const cutoffMs =
     nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
   const records: HostedVaultShareDeliveryRecord[] = [];
 
-  for (const summary of [...summaries].sort((left, right) => right.date.localeCompare(left.date))) {
-    const dayMs = Date.parse(`${summary.date}T00:00:00.000Z`);
+  const zonesByDate = new Map<string, {
+    durationMinutes: number;
+    label?: string;
+    zone: number;
+  }[]>();
+  for (const point of points) {
+    if (point.grain !== "day" || point.statistic !== "value") {
+      continue;
+    }
+    const zone = parseHeartRateZoneMetricKey(point.metricKey);
+    if (zone === null) {
+      continue;
+    }
+    const durationMinutes = point.value;
+    if (
+      typeof durationMinutes !== "number"
+      || !Number.isFinite(durationMinutes)
+      || durationMinutes < 0
+      || durationMinutes > MAX_DAILY_MINUTES
+    ) {
+      continue;
+    }
+    const label = sanitizeProjectionText(readContextString(point.context, "zoneLabel"), 80);
+    const zones = zonesByDate.get(point.date) ?? [];
+    zones.push({
+      ...(label === undefined ? {} : { label }),
+      durationMinutes,
+      zone,
+    });
+    zonesByDate.set(point.date, zones);
+  }
+
+  for (const [date, zonesForDate] of [...zonesByDate.entries()].sort((left, right) => right[0].localeCompare(left[0]))) {
+    const dayMs = Date.parse(`${date}T00:00:00.000Z`);
     if (!Number.isFinite(dayMs) || dayMs < cutoffMs) {
       continue;
     }
 
-    const zones = (summary.heartRateZones ?? [])
-      .map((zone) => sanitizeHeartRateZoneBucket(zone))
-      .filter((zone) => zone !== null)
+    const zones = zonesForDate
+      .sort((left, right) => left.zone - right.zone || (left.label ?? "").localeCompare(right.label ?? ""))
       .slice(0, 20);
 
     if (zones.length === 0) {
@@ -509,11 +597,11 @@ export function selectProjectableHeartRateZoneDays(
 
     records.push({
       data: {
-        date: summary.date,
+        date,
         zones,
       },
-      occurredAt: `${summary.date}T00:00:00.000Z`,
-      recordKey: summary.date,
+      occurredAt: `${date}T00:00:00.000Z`,
+      recordKey: date,
     });
 
     if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW) {
@@ -536,63 +624,6 @@ function sanitizeProjectionUnit(unit: string | null): string | null {
     : null;
 }
 
-function sanitizeHeartRateZoneBucket(
-  zone: ProjectedWearableActivitySummary["heartRateZones"][number],
-): {
-  durationMinutes: number;
-  label?: string;
-  maxHeartRate?: number;
-  minHeartRate?: number;
-  zone?: number;
-} | null {
-  if (
-    zone.durationMinutes < 0
-    || zone.durationMinutes > MAX_DAILY_MINUTES
-  ) {
-    return null;
-  }
-
-  const label = sanitizeProjectionText(zone.label, 80);
-  const zoneIndex = typeof zone.zone === "number"
-    && Number.isInteger(zone.zone)
-    && zone.zone >= 0
-    && zone.zone <= 20
-    ? zone.zone
-    : undefined;
-  const minHeartRate = isPlausibleHeartRate(zone.minHeartRate)
-    ? zone.minHeartRate
-    : undefined;
-  const maxHeartRate = isPlausibleHeartRate(zone.maxHeartRate)
-    ? zone.maxHeartRate
-    : undefined;
-  const hasValidRange =
-    minHeartRate === undefined
-    || maxHeartRate === undefined
-    || maxHeartRate >= minHeartRate;
-
-  const next = {
-    ...(label === undefined ? {} : { label }),
-    ...(hasValidRange && maxHeartRate !== undefined ? { maxHeartRate } : {}),
-    ...(hasValidRange && minHeartRate !== undefined ? { minHeartRate } : {}),
-    ...(zoneIndex === undefined ? {} : { zone: zoneIndex }),
-    durationMinutes: zone.durationMinutes,
-  };
-
-  return next.label !== undefined
-    || next.maxHeartRate !== undefined
-    || next.minHeartRate !== undefined
-    || next.zone !== undefined
-    ? next
-    : null;
-}
-
-function isPlausibleHeartRate(value: number | undefined): value is number {
-  return typeof value === "number"
-    && Number.isFinite(value)
-    && value >= 0
-    && value <= 260;
-}
-
 function sanitizeProjectionText(value: string | undefined, maxLength: number): string | undefined {
   if (typeof value !== "string") {
     return undefined;
@@ -606,12 +637,23 @@ function sanitizeProjectionText(value: string | undefined, maxLength: number): s
     : undefined;
 }
 
-function sanitizeActivityTypes(activityTypes: readonly string[]): string[] {
-  return [...new Set(activityTypes.map((type) => type.trim()))]
-    .filter((type) =>
-      type.length > 0
-      && type.length <= 80
-      && !/[\u0000-\u001f\u007f]/u.test(type)
-    )
-    .slice(0, 16);
+function parseHeartRateZoneMetricKey(metricKey: string): number | null {
+  const match = HEART_RATE_ZONE_MINUTES_METRIC_KEY_PATTERN.exec(metricKey);
+  if (!match) {
+    return null;
+  }
+  const zone = Number(match[1]);
+  return Number.isInteger(zone) && zone >= 0 && zone <= 20 ? zone : null;
+}
+
+function readContextString(context: MetricSeriesPoint["context"] | undefined, key: string): string | undefined {
+  if (!context || typeof context !== "object") {
+    return undefined;
+  }
+  const value = context[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values)];
 }
