@@ -6032,7 +6032,7 @@ test("Junction ambiguous skip detail drops object-shaped unlabeled user diagnost
       return createJsonResponse({
         detail: {
           type: "resource_misconfigured",
-          msg: "Jane Doe cannot access sleep_cycle",
+          msg: "detail: Jane Doe",
         },
       }, 422);
     }
@@ -6069,6 +6069,67 @@ test("Junction ambiguous skip detail drops object-shaped unlabeled user diagnost
     assert.equal(serializedWarnings.includes(sensitive), false);
     assert.equal(serializedMetadata.includes(sensitive), false);
   }
+});
+
+test("Junction ambiguous skip detail masks object-shaped credential-label diagnostics", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "oura",
+            name: "Oura Ring",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        detail: {
+          type: "resource_misconfigured",
+          msg: "api key abcdefghijklmnop leaked",
+        },
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const expectedDetail = "resource_misconfigured: api key <redacted-token> leaked";
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, expectedDetail);
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, expectedDetail);
+
+  const serializedWarnings = JSON.stringify(warnings);
+  const serializedMetadata = JSON.stringify(result.metadataPatch);
+  assert.equal(serializedWarnings.includes("abcdefghijklmnop"), false);
+  assert.equal(serializedMetadata.includes("abcdefghijklmnop"), false);
 });
 
 test("Junction ambiguous skip detail masks slash-bearing identifier phrases", async () => {

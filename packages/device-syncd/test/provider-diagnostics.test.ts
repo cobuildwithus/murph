@@ -69,17 +69,43 @@ test("provider diagnostics mask colon-form token descriptions", () => {
   );
 });
 
-test("provider diagnostics drop unlabeled direct-name descriptions", () => {
-  const diagnostics = inspectProviderErrorBody(JSON.stringify({
-    detail: {
-      type: "resource_misconfigured",
-      msg: "Jane Doe cannot access sleep_cycle",
-    },
-  }));
+test("provider diagnostics mask structured credential-label descriptions", () => {
+  for (const description of [
+    "api key abcdefghijklmnop leaked",
+    "client secret abcdefghijklmnop leaked",
+    "generic token abcdefghijklmnop leaked",
+  ]) {
+    const diagnostics = inspectProviderErrorBody(JSON.stringify({
+      detail: {
+        type: "resource_misconfigured",
+        msg: description,
+      },
+    }));
 
-  assert.equal(diagnostics.responseErrorCode, "resource_misconfigured");
-  assert.equal(diagnostics.responseErrorDescription, null);
-  assert.equal(diagnostics.responseErrorDescriptionFieldPresent, true);
+    assert.equal(diagnostics.responseErrorCode, "resource_misconfigured");
+    assert.equal(diagnostics.responseErrorDescription?.includes("abcdefghijklmnop"), false);
+    assert.equal(diagnostics.responseErrorDescription?.includes("<redacted-token>"), true);
+    assert.equal(diagnostics.responseErrorDescriptionFieldPresent, true);
+  }
+});
+
+test("provider diagnostics drop unlabeled direct-name descriptions", () => {
+  for (const msg of [
+    "Jane Doe",
+    "detail: Jane Doe",
+    "Jane Doe cannot access sleep_cycle",
+  ]) {
+    const diagnostics = inspectProviderErrorBody(JSON.stringify({
+      detail: {
+        type: "resource_misconfigured",
+        msg,
+      },
+    }));
+
+    assert.equal(diagnostics.responseErrorCode, "resource_misconfigured");
+    assert.equal(diagnostics.responseErrorDescription, null);
+    assert.equal(diagnostics.responseErrorDescriptionFieldPresent, true);
+  }
 });
 
 test("provider diagnostics ignore top-level primitive JSON array entries", () => {

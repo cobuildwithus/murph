@@ -45,9 +45,9 @@ const HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN =
 const HOSTED_RUNTIME_DIAGNOSTIC_FORMAT_CHAR_PATTERN =
   /[\u00AD\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/gu;
 const HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_DELIMITED_PATTERN =
-  /\b((?:access|id|refresh|session)\s+token\b\s*[:=]\s*["']?)[^'",;\]\s]+/giu;
+  /\b((?:api[_\s-]?key|client[_\s-]?secret|(?:access|id|refresh|session)\s+token|token)\b\s*[:=]\s*["']?)[^'",;\]\s]+/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_PATTERN =
-  /\b((?:access|id|refresh|session)\s+token\s+["']?)[A-Za-z0-9._~+/=-]{16,}/giu;
+  /\b((?:api[_\s-]?key|client[_\s-]?secret|(?:access|id|refresh|session)\s+token|token)\s+["']?)[A-Za-z0-9._~+/=-]{16,}/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_DIRECT_IDENTIFIER_COLON_ASSIGNMENT_PATTERN =
   /\b((?:account|client|external|member|owner|patient|provider[_\s-]?account|subject|team|user)\b\s*:\s*)(?:"[^"]*"|'[^']*'|[^,;\]\[]+)/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_COLON_ASSIGNMENT_PATTERN =
@@ -63,6 +63,10 @@ const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_PHRASE_PATTERN =
 const HOSTED_RUNTIME_DIAGNOSTIC_IPV4_PATTERN = /\b\d{1,3}(?:\.\d{1,3}){3}\b/gu;
 const HOSTED_RUNTIME_DIAGNOSTIC_UNLABELED_NAME_ACTION_PATTERN =
   /\b[A-Z][a-z][A-Za-z'-]*\s+[A-Z][a-z][A-Za-z'-]*\s+(?:can(?:not| not)|could|denied|does|failed|has|is|must|should|was|would)\b/u;
+const HOSTED_RUNTIME_DIAGNOSTIC_BARE_NAME_PATTERN =
+  /^(?:[a-z][a-z0-9_-]{0,40}\s*:\s*)?[A-Z][a-z][A-Za-z'-]*\s+[A-Z][a-z][A-Za-z'-]*$/u;
+const HOSTED_RUNTIME_DIAGNOSTIC_SAFE_BARE_TITLE_PATTERN =
+  /^(?:Bad Request|Not Found|Request Timeout|Connect Timeout|Gateway Timeout)$/u;
 // The catch-all for id-shaped values in any remaining context (quoted,
 // bracketed, mid-prose): a token of six or more characters containing a digit
 // is masked unless it is a recognizably safe shape — a small plain number, a
@@ -2384,6 +2388,12 @@ export function sanitizeHostedRuntimeDiagnosticText(value: string | null): strin
     return null;
   }
   if (HOSTED_RUNTIME_DIAGNOSTIC_UNLABELED_NAME_ACTION_PATTERN.test(sanitized)) {
+    return null;
+  }
+  if (
+    HOSTED_RUNTIME_DIAGNOSTIC_BARE_NAME_PATTERN.test(sanitized)
+    && !HOSTED_RUNTIME_DIAGNOSTIC_SAFE_BARE_TITLE_PATTERN.test(sanitized)
+  ) {
     return null;
   }
 
