@@ -162,6 +162,9 @@ export async function scanAssistantAutomationOnce(input: {
     replies.considered += context.inputCount
     const replyResult = await processAssistantAutoReplyGroup({
       allowSelfAuthored: input.allowSelfAuthored ?? false,
+      answeredCoverageContext: {
+        autoReply: scanState.autoReply,
+      },
       context,
       deliveryDispatchMode: input.deliveryDispatchMode,
       enabledChannels: replyChannels,

@@ -13,6 +13,7 @@ import {
 } from '../src/assistant/automation/evidence.js'
 import {
   upsertAssistantInputEvent,
+  type AssistantInputEventRecord,
 } from '../src/assistant/input-store.js'
 
 describe('assistant auto-reply answered coverage', () => {
@@ -42,6 +43,7 @@ describe('assistant auto-reply answered coverage', () => {
       })
 
       await expect(computeAssistantAutoReplyAnsweredCoverage({
+        context: coverageContext(),
         terminalInputIds: [linqThree.inputId],
         vault,
       })).resolves.toEqual({
@@ -65,10 +67,10 @@ describe('assistant auto-reply answered coverage', () => {
         text: 'suppressed second',
         vault,
       })
-      await stageHostedMailboxInput({
+      const third = await stageHostedMailboxInput({
         laneSeq: '3',
         source: 'linq',
-        text: 'pending third',
+        text: 'answered third',
         vault,
       })
       await writeAssistantAutoReplySuppressionEvidence({
@@ -81,10 +83,12 @@ describe('assistant auto-reply answered coverage', () => {
       })
 
       await expect(computeAssistantAutoReplyAnsweredCoverage({
+        context: coverageContext(),
+        terminalInputIds: [third.inputId],
         vault,
       })).resolves.toEqual({
         lane: 'conversation',
-        laneSeq: '2',
+        laneSeq: '3',
       })
     })
   })
@@ -117,6 +121,7 @@ describe('assistant auto-reply answered coverage', () => {
       })
 
       await expect(computeAssistantAutoReplyAnsweredCoverage({
+        context: coverageContext(),
         terminalInputIds: [third.inputId],
         vault,
       })).resolves.toEqual({
@@ -142,6 +147,7 @@ describe('assistant auto-reply answered coverage', () => {
       })
 
       await expect(computeAssistantAutoReplyAnsweredCoverage({
+        context: coverageContext(),
         terminalInputIds: [first.inputId, second.inputId],
         vault,
       })).resolves.toEqual({
@@ -167,11 +173,42 @@ describe('assistant auto-reply answered coverage', () => {
       })
 
       await expect(computeAssistantAutoReplyAnsweredCoverage({
+        context: coverageContext(),
         terminalInputIds: [first.inputId],
         vault,
       })).resolves.toEqual({
         lane: 'conversation',
         laneSeq: '1',
+      })
+    })
+  })
+
+  it('returns the shared cursor floor when no terminal input ids are provided', async () => {
+    await withCoverageVault(async (vault) => {
+      const linq = await stageHostedMailboxInput({
+        laneSeq: '12',
+        source: 'linq',
+        text: 'linq cursor',
+        vault,
+      })
+      const telegram = await stageHostedMailboxInput({
+        laneSeq: '10',
+        source: 'telegram',
+        text: 'telegram cursor',
+        vault,
+      })
+
+      await expect(computeAssistantAutoReplyAnsweredCoverage({
+        context: coverageContext({
+          autoReply: [
+            autoReplyCursor('linq', linq),
+            autoReplyCursor('telegram', telegram),
+          ],
+        }),
+        vault,
+      })).resolves.toEqual({
+        lane: 'conversation',
+        laneSeq: '10',
       })
     })
   })
@@ -229,6 +266,36 @@ async function stageHostedMailboxInput(input: {
     },
     vault: input.vault,
   })
+}
+
+function coverageContext(input: {
+  autoReply?: readonly ReturnType<typeof autoReplyCursor>[]
+} = {}) {
+  return {
+    autoReply: input.autoReply ?? [
+      {
+        channel: 'linq',
+        eligibleAfter: null,
+        enabledAt: '2026-04-26T00:00:00.000Z',
+      },
+      {
+        channel: 'telegram',
+        eligibleAfter: null,
+        enabledAt: '2026-04-26T00:00:00.000Z',
+      },
+    ],
+  }
+}
+
+function autoReplyCursor(
+  channel: string,
+  event: AssistantInputEventRecord,
+) {
+  return {
+    channel,
+    eligibleAfter: event.cursor,
+    enabledAt: '2026-04-26T00:00:00.000Z',
+  }
 }
 
 async function writeReplyEvidence(input: {

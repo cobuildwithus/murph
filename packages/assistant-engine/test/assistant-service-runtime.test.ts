@@ -1527,6 +1527,10 @@ describe("assistant delivery orchestration seam", () => {
     await deliverAssistantPrecedingReplies({
       input: {
         deliverResponse: true,
+        deliveryAnsweredCoverage: {
+          lane: "conversation",
+          laneSeq: "41",
+        },
         deliveryIdempotencyKey: "final-delivery",
         deliveryReplyToMessageId: "final-message",
         deliveryTarget: "final-thread",
@@ -1536,6 +1540,10 @@ describe("assistant delivery orchestration seam", () => {
       segments: [
         {
           deliveryContext: {
+            deliveryAnsweredCoverage: {
+              lane: "conversation",
+              laneSeq: "41",
+            },
             deliveryIdempotencyKey: "delivery-one",
             deliveryReplyToMessageId: "message-one",
             deliveryTarget: "thread-one",
@@ -1545,6 +1553,10 @@ describe("assistant delivery orchestration seam", () => {
         },
         {
           deliveryContext: {
+            deliveryAnsweredCoverage: {
+              lane: "conversation",
+              laneSeq: "41",
+            },
             deliveryIdempotencyKey: "delivery-two",
             deliveryReplyToMessageId: "message-two",
             deliveryTarget: "thread-two",
@@ -1562,6 +1574,7 @@ describe("assistant delivery orchestration seam", () => {
       runtimeState.outbox.deliverMessage.mock.calls.map((call) => ({
         dedupeToken: call[0]?.dedupeToken,
         deliveryIdempotencyKey: call[0]?.deliveryIdempotencyKey,
+        answeredCoverage: call[0]?.answeredCoverage,
         explicitTarget: call[0]?.explicitTarget,
         message: call[0]?.message,
         replyToMessageId: call[0]?.replyToMessageId,
@@ -1570,6 +1583,10 @@ describe("assistant delivery orchestration seam", () => {
       {
         dedupeToken: "delivery-one:segment:0",
         deliveryIdempotencyKey: "delivery-one:segment:0",
+        answeredCoverage: {
+          lane: "conversation",
+          laneSeq: "41",
+        },
         explicitTarget: "thread-one",
         message: "Answer one.",
         replyToMessageId: "message-one",
@@ -1577,6 +1594,10 @@ describe("assistant delivery orchestration seam", () => {
       {
         dedupeToken: "delivery-two:segment:1",
         deliveryIdempotencyKey: "delivery-two:segment:1",
+        answeredCoverage: {
+          lane: "conversation",
+          laneSeq: "41",
+        },
         explicitTarget: "thread-two",
         message: "Answer two.",
         replyToMessageId: "message-two",

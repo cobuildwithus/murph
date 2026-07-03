@@ -1412,6 +1412,28 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedMailboxLaneCounterUpdateMany).not.toHaveBeenCalled();
   });
 
+  it("does not advance answered coverage for accepted runtime outcomes without coverage", async () => {
+    const fixture = createObservabilityPrismaFixture();
+
+    await expect(recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      idempotencyKey: "assistant-outbox:intent_accepted_without_coverage",
+      linqChatId: "linq_chat_123",
+      messageId: "provider_message_123",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_accepted_without_coverage",
+      targetKind: "thread",
+      userId: "member_123",
+    })).resolves.toEqual({
+      deliveryId: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      recorded: true,
+    });
+
+    expect(fixture.hostedMailboxLaneCounterFindUnique).not.toHaveBeenCalled();
+    expect(fixture.hostedMailboxLaneCounterUpdateMany).not.toHaveBeenCalled();
+  });
+
   it("does not create or project a runtime raw sender line that is not already known", async () => {
     const fixture = createObservabilityPrismaFixture();
 

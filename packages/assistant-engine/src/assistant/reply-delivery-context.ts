@@ -2,6 +2,7 @@ import type { AssistantMessageInput } from './service-contracts.js'
 
 export type AssistantReplyDeliveryContext = Pick<
   AssistantMessageInput,
+  | 'deliveryAnsweredCoverage'
   | 'deliveryDispatchMode'
   | 'deliveryIdempotencyKey'
   | 'deliveryMessageReactionsAvailable'
@@ -19,6 +20,7 @@ export function pickAssistantReplyDeliveryContext(
   input: AssistantMessageInput,
 ): AssistantReplyDeliveryContext {
   return {
+    deliveryAnsweredCoverage: input.deliveryAnsweredCoverage ?? null,
     deliveryDispatchMode: input.deliveryDispatchMode,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     deliveryMessageReactionsAvailable:
@@ -38,6 +40,9 @@ export function pickDefinedAssistantReplyDeliveryContext(
     ...(input.deliveryDispatchMode === undefined
       ? {}
       : { deliveryDispatchMode: input.deliveryDispatchMode }),
+    ...(input.deliveryAnsweredCoverage === undefined
+      ? {}
+      : { deliveryAnsweredCoverage: input.deliveryAnsweredCoverage }),
     ...(input.deliveryIdempotencyKey === undefined
       ? {}
       : { deliveryIdempotencyKey: input.deliveryIdempotencyKey }),
@@ -74,6 +79,10 @@ export function mergeAssistantReplyDeliveryContextOverrides(
       second?.deliveryDispatchMode === undefined
         ? first.deliveryDispatchMode
         : second.deliveryDispatchMode,
+    deliveryAnsweredCoverage:
+      second?.deliveryAnsweredCoverage === undefined
+        ? first.deliveryAnsweredCoverage
+        : second.deliveryAnsweredCoverage,
     deliveryIdempotencyKey:
       second?.deliveryIdempotencyKey === undefined
         ? first.deliveryIdempotencyKey
@@ -115,6 +124,7 @@ export function applyAssistantReplyDeliveryContext(input: {
 
   return {
     ...input.input,
+    deliveryAnsweredCoverage: input.context.deliveryAnsweredCoverage,
     deliveryDispatchMode: input.context.deliveryDispatchMode,
     deliveryIdempotencyKey: input.context.deliveryIdempotencyKey,
     deliveryMessageReactionsAvailable:

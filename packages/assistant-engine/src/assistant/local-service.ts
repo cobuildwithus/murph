@@ -2133,6 +2133,7 @@ function buildActiveTurnInput(input: {
       input: input.input,
       overrides: input.acceptedInput,
     }),
+    deliveryAnsweredCoverage: null,
     prompt: input.acceptedInput.prompt,
     receiptMetadata:
       input.acceptedInput.receiptMetadata === undefined

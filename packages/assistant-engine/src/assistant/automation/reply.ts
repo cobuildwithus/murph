@@ -52,6 +52,7 @@ import {
   type AssistantInputEventRecord,
   type AssistantInputConversationRef,
 } from '../input-store.js'
+import type { AssistantAutoReplyChannelState } from '../automation-state.js'
 import {
   listAssistantTranscriptEntries,
   resolveAssistantSession,
@@ -140,6 +141,10 @@ export interface AssistantAutoReplyGroupContext {
   items: readonly AssistantAutoReplyGroupItem[]
   lastInputCursor: AssistantInputCandidate['event']['cursor']
   optionalInboxCaptureIds: string[]
+}
+
+export interface AssistantAutoReplyAnsweredCoverageContext {
+  autoReply: readonly AssistantAutoReplyChannelState[]
 }
 
 interface AssistantAutoReplyReplyDecision {
@@ -343,6 +348,7 @@ export function createAssistantAutoReplyGroupContext(
 
 export async function processAssistantAutoReplyGroup(input: {
   allowSelfAuthored: boolean
+  answeredCoverageContext?: AssistantAutoReplyAnsweredCoverageContext | null
   context: AssistantAutoReplyGroupContext
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
@@ -436,6 +442,7 @@ export async function processAssistantAutoReplyGroup(input: {
 
 async function resolveAssistantAutoReplyGroupOutcome(input: {
   allowSelfAuthored: boolean
+  answeredCoverageContext?: AssistantAutoReplyAnsweredCoverageContext | null
   context: AssistantAutoReplyGroupContext
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
@@ -529,6 +536,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       inputSummaries: context.items.map((item) => item.summary),
       inputCandidates: context.items.map((item) => item.inputCandidate ?? null),
     }),
+    answeredCoverageContext: input.answeredCoverageContext ?? null,
     bindingDeliveryTarget: decision.deliveryTarget,
     captureIds: context.optionalInboxCaptureIds,
     inputIds: context.inputIds,
@@ -1454,9 +1462,8 @@ async function prepareAssistantAutoReplyInputWithContext(input: {
     : await prepareAssistantAutoReplyInput(input.inputs, input.vault)
 }
 
-const AUTO_REPLY_ANSWERED_COVERAGE_SCAN_LIMIT = Number.MAX_SAFE_INTEGER
-
 export async function computeAssistantAutoReplyAnsweredCoverage(input: {
+  context?: AssistantAutoReplyAnsweredCoverageContext | null
   terminalInputIds?: readonly string[] | null
   vault: string
 }): Promise<AssistantOutboxIntent['answeredCoverage']> {
@@ -1465,34 +1472,162 @@ export async function computeAssistantAutoReplyAnsweredCoverage(input: {
       .map((inputId) => normalizeNullableString(inputId))
       .filter((inputId): inputId is string => inputId !== null),
   )
-  const listed = await listAssistantInputEvents({
-    limit: AUTO_REPLY_ANSWERED_COVERAGE_SCAN_LIMIT,
-    source: 'hosted-mailbox',
-    vault: input.vault,
-  })
-  const conversationLaneInputs = listed.events
-    .filter(isHostedConversationLaneInputEvent)
-    .sort(compareHostedConversationLaneInputEventsBySeq)
+  const context = input.context ?? null
+  if (!context) {
+    return null
+  }
 
-  let highWater: AssistantOutboxIntent['answeredCoverage'] = null
-  for (const event of conversationLaneInputs) {
-    const terminal =
-      terminalInputIds.has(event.inputId) ||
-      await hasCompleteAssistantAutoReplyTerminalEvidence({
-        captureId: event.projection.captureId,
-        inputId: event.inputId,
-        vault: input.vault,
-      })
-    if (!terminal) {
+  const scanStart = resolveAssistantAutoReplyAnsweredCoverageScanStart(
+    context.autoReply,
+  )
+  if (terminalInputIds.size === 0) {
+    return scanStart.coverage
+  }
+
+  let highWater = scanStart.coverage
+  let afterCursor = scanStart.afterCursor
+  let scannedEvents = 0
+  const pendingTerminalInputIds = new Set(terminalInputIds)
+
+  while (
+    pendingTerminalInputIds.size > 0 &&
+    scannedEvents < AUTO_REPLY_ANSWERED_COVERAGE_SCAN_LIMIT
+  ) {
+    const listed = await listAssistantInputEvents({
+      afterCursor,
+      limit: Math.min(
+        AUTO_REPLY_ANSWERED_COVERAGE_PAGE_LIMIT,
+        AUTO_REPLY_ANSWERED_COVERAGE_SCAN_LIMIT - scannedEvents,
+      ),
+      source: 'hosted-mailbox',
+      vault: input.vault,
+    })
+    if (listed.events.length === 0) {
       break
     }
-    highWater = {
-      lane: 'conversation',
-      laneSeq: event.sourceRef.laneSeq,
+    scannedEvents += listed.events.length
+    afterCursor = listed.nextCursor
+
+    const conversationLaneInputs = listed.events
+      .filter(isHostedConversationLaneInputEvent)
+      .sort(compareHostedConversationLaneInputEventsBySeq)
+
+    for (const event of conversationLaneInputs) {
+      if (
+        highWater &&
+        compareHostedMailboxLaneSeq(
+          event.sourceRef.laneSeq,
+          highWater.laneSeq,
+        ) <= 0
+      ) {
+        continue
+      }
+
+      const terminal =
+        terminalInputIds.has(event.inputId) ||
+        await hasCompleteAssistantAutoReplyTerminalEvidence({
+          captureId: event.projection.captureId,
+          inputId: event.inputId,
+          vault: input.vault,
+        })
+      if (!terminal) {
+        return highWater
+      }
+
+      highWater = {
+        lane: 'conversation',
+        laneSeq: event.sourceRef.laneSeq,
+      }
+      pendingTerminalInputIds.delete(event.inputId)
+      if (pendingTerminalInputIds.size === 0) {
+        return highWater
+      }
+    }
+
+    if (
+      !afterCursor ||
+      listed.events.length < AUTO_REPLY_ANSWERED_COVERAGE_PAGE_LIMIT
+    ) {
+      break
     }
   }
 
   return highWater
+}
+
+const AUTO_REPLY_ANSWERED_COVERAGE_PAGE_LIMIT = 100
+const AUTO_REPLY_ANSWERED_COVERAGE_SCAN_LIMIT = 500
+
+function resolveAssistantAutoReplyAnsweredCoverageScanStart(
+  autoReply: readonly AssistantAutoReplyChannelState[],
+): {
+  afterCursor: AssistantAutoReplyChannelState['eligibleAfter']
+  coverage: AssistantOutboxIntent['answeredCoverage']
+} {
+  if (autoReply.length === 0) {
+    return {
+      afterCursor: null,
+      coverage: null,
+    }
+  }
+
+  let floor: {
+    cursor: NonNullable<AssistantAutoReplyChannelState['eligibleAfter']>
+    coverage: NonNullable<AssistantOutboxIntent['answeredCoverage']>
+  } | null = null
+  for (const entry of autoReply) {
+    const laneSeq = readHostedConversationLaneSeqFromCursor(entry.eligibleAfter)
+    if (laneSeq === null) {
+      return {
+        afterCursor: null,
+        coverage: null,
+      }
+    }
+    if (!entry.eligibleAfter) {
+      return {
+        afterCursor: null,
+        coverage: null,
+      }
+    }
+    if (
+      !floor ||
+      compareHostedMailboxLaneSeq(laneSeq, floor.coverage.laneSeq) < 0
+    ) {
+      floor = {
+        cursor: entry.eligibleAfter,
+        coverage: {
+          lane: 'conversation',
+          laneSeq,
+        },
+      }
+    }
+  }
+
+  return {
+    afterCursor: floor?.cursor ?? null,
+    coverage: floor?.coverage ?? null,
+  }
+}
+
+function readHostedConversationLaneSeqFromCursor(
+  cursor: AssistantAutoReplyChannelState['eligibleAfter'],
+): string | null {
+  if (
+    cursor?.sourceKind !== 'hosted-mailbox' ||
+    !cursor.sourcePosition
+  ) {
+    return null
+  }
+
+  const [source, lane, laneSeq] = cursor.sourcePosition.split(':', 4)
+  if (source !== 'hosted-mailbox' || lane !== 'conversation' || !laneSeq) {
+    return null
+  }
+  return denormalizeHostedMailboxLaneSeqForCoverage(laneSeq)
+}
+
+function denormalizeHostedMailboxLaneSeqForCoverage(laneSeq: string): string {
+  return /^\d+$/u.test(laneSeq) ? BigInt(laneSeq).toString() : laneSeq
 }
 
 function isHostedConversationLaneInputEvent(
@@ -1529,6 +1664,7 @@ async function executeAssistantAutoReply(input: {
   acceptedTurnInputInitialInputs?: readonly AssistantAcceptedTurnInputItemInput[] | null
   activeTurnCheckpoint?: AssistantActiveTurnInputCheckpointHook
   activeTurnInput?: AssistantActiveTurnInputAdmissionHook
+  answeredCoverageContext?: AssistantAutoReplyAnsweredCoverageContext | null
   bindingDeliveryTarget: string | null
   captureIds: readonly string[]
   inputIds: readonly string[]
@@ -1578,6 +1714,7 @@ async function executeAssistantAutoReply(input: {
     })
     const deliveryAnsweredCoverage =
       await computeAssistantAutoReplyAnsweredCoverage({
+        context: input.answeredCoverageContext ?? null,
         terminalInputIds: input.inputIds,
         vault: input.vault,
       })
