@@ -16,6 +16,7 @@ import {
 import {
   MAX_PROGRESS_UPDATES_PER_TURN,
   MIN_PROGRESS_UPDATE_SPACING_MS,
+  shouldCreateAssistantProgressDelivery,
 } from './progress-constants.js'
 import {
   normalizeNullableString,
@@ -70,22 +71,23 @@ type AssistantProgressDeliveryContext = {
 }
 type AssistantProgressDeliverInput = Parameters<DeliverAssistantProgressUpdate>[0]
 
-export function shouldCreateAssistantProgressDelivery(
-  input: Pick<
-    AssistantMessageInput,
-    'channel' | 'deliverResponse' | 'deliveryDispatchMode' | 'turnTrigger'
-  >,
-  profile?: {
-    promptProfile?: AssistantCodexTurnPromptProfile | null
-    toolProfile?: AssistantCodexTurnToolProfile | null
-  } | null,
-): boolean {
-  return input.deliverResponse === true &&
-    input.deliveryDispatchMode !== 'queue-only' &&
-    input.channel !== 'email' &&
-    (profile?.toolProfile ?? 'provider-turn') === 'provider-turn' &&
-    (profile?.promptProfile ?? 'conversation') !== 'notification-decision'
+// Progress updates are best-effort and every suppressed send used to vanish
+// without a trace, which made "model says sent, user saw nothing" undebuggable.
+// Log one line per send attempt outcome; never include the update text itself.
+function logAssistantProgressSendOutcome(details: {
+  ordinal: number
+  outcome: string
+  source: string
+  textLength: number
+  turnId: string
+}): void {
+  console.warn(
+    `Assistant progress update ${details.outcome} ` +
+    `(turn=${details.turnId} ordinal=${details.ordinal} source=${details.source} textLength=${details.textLength}).`,
+  )
 }
+
+export { shouldCreateAssistantProgressDelivery } from './progress-constants.js'
 
 export function createAssistantProductFeedbackRecorder(input: {
   acceptedInputItems?: readonly AssistantAcceptedTurnInputItemInput[] | null
@@ -147,7 +149,16 @@ export function createAssistantProgressDelivery(input: {
     async send(rawText: string, options?: AssistantProgressDeliverySendOptions) {
       const source = options?.source ?? 'model'
       const required = options?.required === true
+      const logOutcome = (outcome: string) =>
+        logAssistantProgressSendOutcome({
+          ordinal: deliveryOrdinal,
+          outcome,
+          source,
+          textLength: rawText.length,
+          turnId: input.turnId,
+        })
       if (abortController.signal.aborted) {
+        logOutcome('failed: delivery already closed')
         return {
           kind: 'failed',
           source,
@@ -155,6 +166,7 @@ export function createAssistantProgressDelivery(input: {
       }
       const text = normalizeAssistantProgressText(rawText)
       if (!text || (!required && sentTexts.has(text))) {
+        logOutcome(`skipped: ${text ? 'duplicate' : 'empty'}`)
         return {
           kind: 'skipped',
           reason: text ? 'duplicate' : 'empty',
@@ -166,6 +178,12 @@ export function createAssistantProgressDelivery(input: {
         session: input.session,
       }
       if (!shouldCreateAssistantProgressDelivery(deliveryContext.messageInput)) {
+        logOutcome(
+          'skipped: unavailable ' +
+          `(deliverResponse=${String(deliveryContext.messageInput.deliverResponse)} ` +
+          `dispatchMode=${String(deliveryContext.messageInput.deliveryDispatchMode)} ` +
+          `channel=${String(deliveryContext.messageInput.channel)})`,
+        )
         return {
           kind: 'skipped',
           reason: 'unavailable',
@@ -173,6 +191,7 @@ export function createAssistantProgressDelivery(input: {
         }
       }
       if (!required && sentCount >= MAX_PROGRESS_UPDATES_PER_TURN) {
+        logOutcome(`skipped: limit (${sentCount}/${MAX_PROGRESS_UPDATES_PER_TURN})`)
         return {
           kind: 'skipped',
           reason: 'limit',
@@ -185,6 +204,10 @@ export function createAssistantProgressDelivery(input: {
         lastSentAtMs !== null &&
         currentTimeMs - lastSentAtMs < MIN_PROGRESS_UPDATE_SPACING_MS
       ) {
+        logOutcome(
+          `skipped: too-soon (${currentTimeMs - lastSentAtMs}ms since last, ` +
+          `minimum ${MIN_PROGRESS_UPDATE_SPACING_MS}ms)`,
+        )
         return {
           kind: 'skipped',
           reason: 'too-soon',
@@ -212,6 +235,7 @@ export function createAssistantProgressDelivery(input: {
         }
         const deliveredSession = await deliver(progressInput)
         input.onDeliveredSession?.(deliveredSession)
+        logOutcome('sent')
         return {
           kind: 'sent',
           source,
@@ -221,6 +245,7 @@ export function createAssistantProgressDelivery(input: {
           error,
           operation: 'progress update delivery',
         })
+        logOutcome('failed: delivery threw')
         return {
           kind: 'failed',
           source,

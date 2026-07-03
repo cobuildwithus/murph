@@ -271,7 +271,10 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     });
   }, 300_000);
 
-  it("suppresses model-authored progress updates from hosted queue-only Linq auto-replies", async () => {
+  // Hosted turns dispatch final replies queue-only through the outbox, but an
+  // auto-reply turn has a member actively waiting, so model-authored progress
+  // updates deliver immediately as ephemeral sends ahead of the final reply.
+  it("delivers model-authored progress updates from hosted queue-only Linq auto-replies", async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(progressToolUserId),
       memberId: progressToolUserId,
@@ -330,7 +333,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     const completionPromise = requireScenario()
       .waitForHostedCompletion(progressToolUserId);
     const matchingSends = await requireLinqStub().waitForMatchingSendCount({
-      expectedCount: outboundCountBeforeReply + 1,
+      expectedCount: outboundCountBeforeReply + 2,
       expectedPath: expectedDirectReplyChatPath,
       scenario: requireScenario(),
       userId: progressToolUserId,
@@ -342,14 +345,17 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       matchingSends
         .slice(outboundCountBeforeReply)
         .map((request) => request.authorizationStatus),
-    ).toEqual(["hosted-sentinel"]);
-    expect(newSendTexts).toEqual([progressToolFinalReplyText]);
+    ).toEqual(["hosted-sentinel", "hosted-sentinel"]);
+    expect(newSendTexts).toEqual([
+      progressToolAttemptText,
+      progressToolFinalReplyText,
+    ]);
 
     const finalStatus = await completionPromise;
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(requireLinqStub().countObservedSends(expectedDirectReplyChatPath)).toBe(
-      outboundCountBeforeReply + 1,
+      outboundCountBeforeReply + 2,
     );
   }, 300_000);
 
@@ -684,7 +690,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       computerToolsAvailable: true,
       connectedAppsAvailable: true,
       phoneCallsAvailable: true,
-      progressUpdatesAvailable: false,
+      progressUpdatesAvailable: true,
       vaultFileSendAvailable: true,
     });
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();

@@ -380,6 +380,48 @@ describe('assistant turn progress', () => {
       ),
     ).toBe(false)
   })
+
+  it('keeps queue-only auto-reply turns progress-eligible', () => {
+    // Hosted-runner turns always dispatch final replies queue-only through the
+    // outbox, including interactive auto-replies where a user is waiting.
+    // Progress updates are ephemeral direct sends and must stay available
+    // there, while queue-only background turns (cron and similar) stay
+    // suppressed because no current audience is waiting.
+    expect(
+      shouldCreateAssistantProgressDelivery(
+        createMessageInput({
+          deliveryDispatchMode: 'queue-only',
+          turnTrigger: 'automation-auto-reply',
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      shouldCreateAssistantProgressDelivery(
+        createMessageInput({
+          deliveryDispatchMode: 'queue-only',
+          turnTrigger: 'automation-cron',
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      shouldCreateAssistantProgressDelivery(
+        createMessageInput({
+          channel: 'email',
+          deliveryDispatchMode: 'queue-only',
+          turnTrigger: 'automation-auto-reply',
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      shouldCreateAssistantProgressDelivery(
+        createMessageInput({
+          deliverResponse: false,
+          deliveryDispatchMode: 'queue-only',
+          turnTrigger: 'automation-auto-reply',
+        }),
+      ),
+    ).toBe(false)
+  })
 })
 
 function createMessageInput(
