@@ -99,7 +99,7 @@ interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
 }
 
-type JunctionHistoricalBackfillFollowUp = Pick<ProviderJobResult, "metadataPatch"> & {
+type JunctionHistoricalBackfillFollowUp = Pick<ProviderJobResult, "metadataPatch" | "scheduledJobs"> & {
   nextRetryAt?: string;
 };
 
@@ -822,14 +822,22 @@ export function createJunctionDeviceSyncProvider(
     const isConnectHistoricalBackfill =
       window.windowStart === connectHistoricalWindow.windowStart
       && window.windowEnd === connectHistoricalWindow.windowEnd;
-    const backfillFollowUp = job.kind === "backfill" && isConnectHistoricalBackfill
-      ? buildHistoricalBackfillFollowUp({
-          hasRecords: historicalSummaryHasRecords,
-          metadata: context.account.metadata,
-          now: context.now,
-          windowStart: window.windowStart,
-          windowEnd: window.windowEnd,
-        })
+    const backfillFollowUp = job.kind === "backfill"
+      ? isConnectHistoricalBackfill
+        ? buildHistoricalBackfillFollowUp({
+            hasRecords: historicalSummaryHasRecords,
+            metadata: context.account.metadata,
+            now: context.now,
+            windowStart: window.windowStart,
+            windowEnd: window.windowEnd,
+          })
+        : buildNonConnectHistoricalBackfillFollowUp({
+            hasRecords: historicalSummaryHasRecords,
+            job,
+            now: context.now,
+            windowStart: window.windowStart,
+            windowEnd: window.windowEnd,
+          })
       : {};
     const { nextRetryAt, ...backfillFollowUpResult } = backfillFollowUp;
     const nextReconcileAt = nextRetryAt
@@ -4345,6 +4353,46 @@ function buildHistoricalBackfillFollowUp(input: {
   };
 }
 
+function buildNonConnectHistoricalBackfillFollowUp(input: {
+  hasRecords: boolean;
+  job: DeviceSyncJobRecord;
+  now: string;
+  windowStart: string;
+  windowEnd: string;
+}): JunctionHistoricalBackfillFollowUp {
+  if (input.hasRecords) {
+    return {};
+  }
+
+  const emptyAttempts = readNonConnectHistoricalBackfillEmptyAttempts(input.job) + 1;
+  const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
+  if (retryDelayMs === null) {
+    return {};
+  }
+
+  const retryAt = addMilliseconds(input.now, retryDelayMs);
+  const retryJob = buildExactWindowJob({
+    kind: "backfill",
+    priority: input.job.priority,
+    windowStart: input.windowStart,
+    windowEnd: input.windowEnd,
+  });
+
+  return {
+    nextRetryAt: retryAt,
+    scheduledJobs: [
+      {
+        ...retryJob,
+        availableAt: retryAt,
+        payload: {
+          ...(retryJob.payload ?? {}),
+          emptyBackfillAttempts: emptyAttempts,
+        },
+      },
+    ],
+  };
+}
+
 function buildHistoricalBackfillMetadataPatch(input: {
   status: JunctionHistoricalBackfillStatus;
   emptyAttempts: number;
@@ -4388,6 +4436,11 @@ function readHistoricalBackfillEmptyAttempts(
   return typeof rawAttempts === "number" && Number.isInteger(rawAttempts) && rawAttempts >= 0
     ? rawAttempts
     : 0;
+}
+
+function readNonConnectHistoricalBackfillEmptyAttempts(job: DeviceSyncJobRecord): number {
+  const rawAttempts = job.payload.emptyBackfillAttempts;
+  return typeof rawAttempts === "number" && Number.isInteger(rawAttempts) && rawAttempts > 0 ? rawAttempts : 0;
 }
 
 function buildConnectHistoricalBackfillWindow(

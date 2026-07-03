@@ -72,6 +72,26 @@ type HostedDirtyDeviceSyncStateSkipReason =
   | "provider_not_registered"
   | "reauthorization_required";
 type HostedTerminalDeviceSyncStatus = "disconnected" | "reauthorization_required";
+type JunctionHistoricalBackfillStatus = "complete" | "exhausted" | "retrying";
+
+interface JunctionHistoricalBackfillProgress {
+  emptyAttempts: number;
+  lastEmptyAt: string | null;
+  status: JunctionHistoricalBackfillStatus;
+  windowEnd: string;
+  windowStart: string;
+}
+
+const JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS = Object.freeze({
+  status: "junctionHistoricalBackfillStatus",
+  emptyAttempts: "junctionHistoricalBackfillEmptyAttempts",
+  lastEmptyAt: "junctionHistoricalBackfillLastEmptyAt",
+  windowStart: "junctionHistoricalBackfillWindowStart",
+  windowEnd: "junctionHistoricalBackfillWindowEnd",
+} as const);
+const JUNCTION_HISTORICAL_BACKFILL_METADATA_KEY_SET = new Set<string>(
+  Object.values(JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS),
+);
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
@@ -1077,12 +1097,15 @@ function shouldUseRawHostedMetadataBaseline(input: {
   entry: HostedDeviceSyncRuntimeConnectionSnapshot;
   stored: StoredDeviceSyncAccount;
 }): boolean {
-  return Boolean(
-    input.stored.hostedObservedUpdatedAt
-      && input.stored.hostedObservedUpdatedAt === input.entry.connection.updatedAt
-      && input.stored.localConnectionRevision !== input.stored.hostedObservedConnectionRevision
-      && hasLocalBackfillProgressMetadata(input.stored.metadata),
-  );
+  return shouldPreserveLocalJunctionHistoricalBackfillProgress({
+    hostedMetadata: input.entry.connection.metadata,
+    localConnectionStateUnpublished: Boolean(
+      input.stored.hostedObservedUpdatedAt
+        && input.stored.hostedObservedUpdatedAt === input.entry.connection.updatedAt
+        && input.stored.localConnectionRevision !== input.stored.hostedObservedConnectionRevision,
+    ),
+    localMetadata: input.stored.metadata,
+  });
 }
 
 function buildHostedAccountHydrationInput(input: {
@@ -1146,7 +1169,11 @@ function buildHostedAccountHydrationInput(input: {
   const preserveUnpublishedLocalBackfillProgress = Boolean(
     input.existing
       && localConnectionStateUnpublished
-      && hasLocalBackfillProgressMetadata(input.existing.metadata),
+      && shouldPreserveLocalJunctionHistoricalBackfillProgress({
+        hostedMetadata: hostedConnection.metadata,
+        localConnectionStateUnpublished,
+        localMetadata: input.existing.metadata,
+      }),
   );
   const connection = (hostedConnectionStateStale || hostedConnectionStateReplayed) && input.existing
     ? {
@@ -1476,7 +1503,7 @@ function resolveHydratedConnectionMetadata(input: {
   }
 
   for (const [key, value] of Object.entries(input.existing.metadata)) {
-    if (isLocalBackfillProgressMetadataKey(key)) {
+    if (isJunctionHistoricalBackfillMetadataKey(key)) {
       metadata[key] = value;
     }
   }
@@ -1484,12 +1511,100 @@ function resolveHydratedConnectionMetadata(input: {
   return metadata;
 }
 
-function isLocalBackfillProgressMetadataKey(key: string): boolean {
-  return key.startsWith("junctionHistoricalBackfill");
+function shouldPreserveLocalJunctionHistoricalBackfillProgress(input: {
+  hostedMetadata: Record<string, unknown>;
+  localConnectionStateUnpublished: boolean;
+  localMetadata: Record<string, unknown>;
+}): boolean {
+  if (!input.localConnectionStateUnpublished) {
+    return false;
+  }
+
+  const localProgress = readJunctionHistoricalBackfillProgress(input.localMetadata);
+  if (!localProgress) {
+    return false;
+  }
+
+  const hostedProgress = readJunctionHistoricalBackfillProgress(input.hostedMetadata);
+  if (!hostedProgress) {
+    return true;
+  }
+
+  if (
+    localProgress.windowStart !== hostedProgress.windowStart
+    || localProgress.windowEnd !== hostedProgress.windowEnd
+  ) {
+    return false;
+  }
+
+  if (hostedProgress.status === "complete" || hostedProgress.status === "exhausted") {
+    return false;
+  }
+
+  if (localProgress.status === "complete" || localProgress.status === "exhausted") {
+    return true;
+  }
+
+  const localLastEmptyAtMs = localProgress.lastEmptyAt ? parseIsoMs(localProgress.lastEmptyAt) : null;
+  const hostedLastEmptyAtMs = hostedProgress.lastEmptyAt ? parseIsoMs(hostedProgress.lastEmptyAt) : null;
+
+  if (localLastEmptyAtMs !== null && hostedLastEmptyAtMs !== null) {
+    if (localLastEmptyAtMs > hostedLastEmptyAtMs) {
+      return true;
+    }
+
+    if (localLastEmptyAtMs < hostedLastEmptyAtMs) {
+      return false;
+    }
+  }
+
+  return localProgress.emptyAttempts > hostedProgress.emptyAttempts;
 }
 
-function hasLocalBackfillProgressMetadata(metadata: Record<string, unknown>): boolean {
-  return Object.keys(metadata).some(isLocalBackfillProgressMetadataKey);
+function readJunctionHistoricalBackfillProgress(
+  metadata: Record<string, unknown>,
+): JunctionHistoricalBackfillProgress | null {
+  const status = readJunctionHistoricalBackfillStatus(
+    metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status],
+  );
+  const windowStart = readMetadataString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]);
+  const windowEnd = readMetadataString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]);
+
+  if (!status || !windowStart || !windowEnd) {
+    return null;
+  }
+
+  return {
+    emptyAttempts: readNonNegativeInteger(
+      metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.emptyAttempts],
+    ),
+    lastEmptyAt: readNullableMetadataString(
+      metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.lastEmptyAt],
+    ),
+    status,
+    windowEnd,
+    windowStart,
+  };
+}
+
+function readJunctionHistoricalBackfillStatus(value: unknown): JunctionHistoricalBackfillStatus | null {
+  return value === "complete" || value === "exhausted" || value === "retrying" ? value : null;
+}
+
+function readMetadataString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readNullableMetadataString(value: unknown): string | null {
+  return value === null ? null : readMetadataString(value);
+}
+
+function readNonNegativeInteger(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+function isJunctionHistoricalBackfillMetadataKey(key: string): boolean {
+  return JUNCTION_HISTORICAL_BACKFILL_METADATA_KEY_SET.has(key);
 }
 
 function resolveHydratedHostedLocalErrorState(input: {

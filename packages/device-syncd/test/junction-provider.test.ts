@@ -652,10 +652,40 @@ test("Junction retrying historical backfill without attempts uses the first retr
   );
 });
 
-test("Junction non-connect backfill window does not write historical metadata", async () => {
-  const provider = createEmptyJunctionBackfillProvider();
+test("Junction non-connect backfill window uses bounded job retry without historical metadata", async () => {
+  let activityRecords: unknown[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            id: "provider-garmin-1",
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              activity: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+      return createJsonResponse({ data: activityRecords });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  });
   const context = createJunctionJobContext({
     now: "2026-04-04T00:00:00.000Z",
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
   });
 
   const result = await executeJunctionJob(
@@ -668,7 +698,45 @@ test("Junction non-connect backfill window does not write historical metadata", 
   );
 
   assert.equal(result.metadataPatch, undefined);
-  assert.equal(result.scheduledJobs, undefined);
+  assert.equal(result.nextReconcileAt, "2026-04-04T00:15:00.000Z");
+  const retryJob = requireValue(
+    result.scheduledJobs?.[0],
+    "Empty non-connect Junction backfill should schedule a delayed exact-window retry.",
+  );
+  assert.equal(result.scheduledJobs?.length, 1);
+  assert.equal(retryJob.availableAt, "2026-04-04T00:15:00.000Z");
+  assert.equal(retryJob.kind, "backfill");
+  assert.deepEqual(retryJob.payload, {
+    windowStart: "2025-01-01T12:34:56.000Z",
+    windowEnd: "2026-04-05T08:09:10.000Z",
+    emptyBackfillAttempts: 1,
+  });
+  assert.equal(
+    retryJob.dedupeKey,
+    buildExpectedJunctionDedupeKey(
+      "backfill",
+      "2025-01-01T12:34:56.000Z",
+      "2026-04-05T08:09:10.000Z",
+    ),
+  );
+  assert.equal(importedSnapshots.length, 0);
+
+  activityRecords = [{ id: "activity-event-retry-1", connectionId: "provider-garmin-1", steps: 1234 }];
+  const retryResult = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-04T00:15:00.000Z",
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob(retryJob.kind, retryJob.payload ?? {}),
+  );
+
+  assert.equal(retryResult.metadataPatch, undefined);
+  assert.equal(retryResult.scheduledJobs, undefined);
+  assert.equal(importedSnapshots.length, 1);
 });
 
 test("Junction useful summary historical backfill marks the historical window complete", async () => {

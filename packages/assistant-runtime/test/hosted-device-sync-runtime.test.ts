@@ -4992,7 +4992,7 @@ describe("hosted device-sync runtime", () => {
       const afterReplayHydration = getStore(service).getAccountById(localAccountId);
       assert.equal(afterReplayHydration?.nextReconcileAt, retryDueAt);
       assert.equal(afterReplayHydration?.metadata.junctionHistoricalBackfillStatus, "retrying");
-      assert.notEqual(
+      assert.equal(
         afterReplayHydration?.localConnectionRevision,
         afterReplayHydration?.hostedObservedConnectionRevision,
       );
@@ -5017,6 +5017,125 @@ describe("hosted device-sync runtime", () => {
         vi.useRealTimers();
       }
 
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("sync keeps newer hosted backfill progress over stale unpublished local progress", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const connectionId = "hosted_conn_newer_backfill_progress";
+    const initialHostedUpdatedAt = "2026-04-04T00:00:10.000Z";
+    const newerHostedUpdatedAt = "2026-04-04T00:00:40.000Z";
+    const localRetryDueAt = "2026-04-04T00:15:00.000Z";
+    const hostedRetryDueAt = "2026-04-04T00:30:00.000Z";
+    const localBackfillMetadata = {
+      junctionHistoricalBackfillEmptyAttempts: 1,
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+    };
+    const hostedBackfillMetadata = {
+      hosted: true,
+      junctionHistoricalBackfillEmptyAttempts: 2,
+      junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:10:00.000Z",
+      junctionHistoricalBackfillStatus: "retrying",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+    };
+    const provider = createFakeProvider();
+    const service = createDeviceSyncServiceForVault(vaultRoot, [provider]);
+
+    try {
+      const begin = await service.startConnection({
+        provider: "demo",
+      });
+      const connected = await service.handleOAuthCallback({
+        code: "newer-backfill-progress",
+        provider: "demo",
+        state: begin.state,
+      });
+      let hostedSnapshot = buildRuntimeSnapshot({
+        connectionId,
+        externalAccountId: connected.account.externalAccountId,
+        hostedUpdatedAt: initialHostedUpdatedAt,
+        localState: {
+          nextReconcileAt: hostedRetryDueAt,
+        },
+      });
+      let appliedRequest: ApplyUpdatesRequest | null = null;
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+          appliedRequest = input;
+          return {
+            appliedAt: "2026-04-04T00:01:00.000Z",
+            updates: [],
+            userId: "member_123",
+          };
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during reconciliation");
+        },
+        async fetchSnapshot() {
+          return hostedSnapshot;
+        },
+      };
+
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-04T00:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const localAccountId = state.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(localAccountId);
+
+      getStore(service).patchAccount(localAccountId, {
+        metadata: localBackfillMetadata,
+        nextReconcileAt: localRetryDueAt,
+      });
+
+      hostedSnapshot = buildRuntimeSnapshot({
+        connectionId,
+        externalAccountId: connected.account.externalAccountId,
+        hostedUpdatedAt: newerHostedUpdatedAt,
+        localState: {
+          nextReconcileAt: hostedRetryDueAt,
+        },
+        metadata: hostedBackfillMetadata,
+      });
+
+      const hydratedState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-04T00:30:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      const hydratedAccount = getStore(service).getAccountById(localAccountId);
+      assert.deepEqual(hydratedAccount?.metadata, hostedBackfillMetadata);
+      assert.equal(hydratedAccount?.nextReconcileAt, hostedRetryDueAt);
+      assert.equal(
+        hydratedAccount?.localConnectionRevision,
+        hydratedAccount?.hostedObservedConnectionRevision,
+      );
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-04T00:30:05.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state: hydratedState,
+      });
+
+      assert.deepEqual(requireApplyUpdatesRequest(appliedRequest).updates, []);
+    } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
     }
