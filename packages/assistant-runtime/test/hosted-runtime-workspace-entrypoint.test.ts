@@ -987,6 +987,114 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("services a due wake blocked only by durable effects instead of exiting the attempt", async () => {
+    // Incident shape (2026-07-03): a reply turn leaves a plain due assistant
+    // wake (starved system-lane work) plus pending durable effects (consume
+    // acks). The attempt must checkpoint promptly, run the effects, service
+    // the still-due wake in-attempt, and finish with a non-due return —
+    // never hand a due wake to the orchestrator, which has no prompt
+    // transport for it.
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const dueWakeAt = new Date(Date.now() - 1_000).toISOString();
+    const durableEffect = vi.fn(async () => {
+      events.push("durable-effect");
+      return {};
+    });
+    let assistantPass = 0;
+    let snapshotCount = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_effects_blocked_due_wake",
+            idleCheckpointDelayMs: 25,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            snapshotCount += 1;
+            events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: String(snapshotCount).repeat(64),
+                key: `users/bundles/member-synthetic/effects-blocked-due-wake-${snapshotCount}.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            assistantPass += 1;
+            events.push(`assistant:${assistantPass}`);
+
+            if (assistantPass === 1) {
+              return {
+                afterCheckpoint: async () => ({
+                  afterDurableCheckpoint: durableEffect,
+                  checkpointReason: "system_mailbox_receipt",
+                }),
+                checkpointReason: "system_mailbox_receipt",
+                nextWakeAt: dueWakeAt,
+                nextWakeReason: "assistant",
+                progressed: true,
+              };
+            }
+
+            if (assistantPass === 2) {
+              // The service pass runs only after the checkpoint committed the
+              // pending durable effects.
+              assert.ok(events.includes("durable-effect"), events.join(","));
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: null,
+                nextWakeReason: null,
+                progressed: true,
+              };
+            }
+
+            throw new Error("Effects-blocked due wake should be serviced exactly once.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPass, 2, events.join(","));
+      assert.equal(durableEffect.mock.calls.length, 1);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+        "idle_shutdown",
+      ]);
+      assert.ok(events.indexOf("snapshot:idle_shutdown:1") < events.indexOf("durable-effect"));
+      assert.ok(events.indexOf("durable-effect") < events.indexOf("assistant:2"));
+      assert.ok(events.indexOf("assistant:2") < events.indexOf("snapshot:idle_shutdown:2"));
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("services a checkpoint-blocked projected assistant wake after idle checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

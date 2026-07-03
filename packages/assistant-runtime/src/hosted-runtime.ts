@@ -1876,12 +1876,24 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               pendingDurableCheckpointEffects.length > 0
               || accumulatedProjection.projectedWakeRequiresCheckpoint
             );
-          const projectedWakeBlockedByFreshAssistantCheckpointGate =
+          // A checkpoint-blocked due assistant wake pulls the idle checkpoint
+          // forward (clamp below) and is then serviced in-attempt by the
+          // post-checkpoint branch. Returning it to the orchestrator instead
+          // would strand it: the DO alarm never schedules runtime wakes and
+          // the workflow may sleep a full owner recheck before reading facts
+          // again. Serviceable flavors: a wake minted by the pass that just
+          // ran (gate fresh), or a plain projected wake held back only by
+          // uncommitted durable effects. A stale carried post-checkpoint wake
+          // (an outbox retry preserved across a later pass) and non-assistant
+          // wakes (device-sync.reconcile) still return to the orchestrator.
+          const projectedWakeServiceableAfterCheckpoint =
             projectedWakeBlockedByCheckpoint
-            && pendingDurableCheckpointEffects.length === 0
-            && accumulatedProjection.projectedWakeCheckpointGateFresh
-            && accumulatedProjection.nextWakeReason === "assistant";
-          checkpointBlockedProjectedWakeKey = projectedWakeBlockedByFreshAssistantCheckpointGate
+            && accumulatedProjection.nextWakeReason === "assistant"
+            && (
+              accumulatedProjection.projectedWakeCheckpointGateFresh
+              || !accumulatedProjection.projectedWakeRequiresCheckpoint
+            );
+          checkpointBlockedProjectedWakeKey = projectedWakeServiceableAfterCheckpoint
             ? projectedRuntimeWakeKey
             : null;
           const projectedRuntimeWakeAt =
