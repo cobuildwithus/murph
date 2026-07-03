@@ -223,8 +223,8 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       aggregates.map((aggregate) => buildActivitySessionMetricCandidate(aggregate, "sessionCount")),
       { metricFamily: "activity" },
     );
-    const activityTypes = resolveSelectedActivityTypes(aggregates, sessionMinutes.selection.provider);
-    const heartRateZones = resolveSelectedHeartRateZones(aggregates, sessionMinutes.selection.provider);
+    const activityTypes = resolveSelectedActivityTypes(aggregates, sessionMinutes.selection);
+    const heartRateZones = resolveSelectedHeartRateZones(aggregates, sessionMinutes.selection);
     const summaryConfidence = summarizeMetricsConfidence([
       ["steps", steps],
       ["activeCalories", activeCalories],

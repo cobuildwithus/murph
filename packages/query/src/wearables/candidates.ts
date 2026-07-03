@@ -39,6 +39,7 @@ import type {
   WearableHeartRateZoneAggregate,
   WearableMetricCandidate,
   WearableMetricKey,
+  WearableMetricSelection,
   WearableProvenanceDiagnostic,
   WearableSleepWindowCandidate,
 } from "./types.ts";
@@ -494,26 +495,46 @@ export function buildSleepWindowMetricCandidate(
 
 export function resolveSelectedActivityTypes(
   aggregates: readonly WearableActivitySessionAggregate[],
-  selectedProvider: string | null,
+  selection: WearableMetricSelection,
 ): string[] {
-  if (!selectedProvider) {
-    return [];
-  }
-
-  const selected = aggregates.find((aggregate) => aggregate.provider === selectedProvider);
+  const selected = resolveSelectedActivitySessionAggregate(aggregates, selection);
   return selected?.activityTypes ?? [];
 }
 
 export function resolveSelectedHeartRateZones(
   aggregates: readonly WearableActivitySessionAggregate[],
-  selectedProvider: string | null,
+  selection: WearableMetricSelection,
 ): WearableHeartRateZoneAggregate[] {
-  if (!selectedProvider) {
-    return [];
+  const selected = resolveSelectedActivitySessionAggregate(aggregates, selection);
+  return selected ? selected.heartRateZones.map((zone) => ({ ...zone })) : [];
+}
+
+function resolveSelectedActivitySessionAggregate(
+  aggregates: readonly WearableActivitySessionAggregate[],
+  selection: WearableMetricSelection,
+): WearableActivitySessionAggregate | null {
+  if (
+    selection.sourceFamily !== "derived"
+    || selection.sourceKind !== "activity-session-aggregate"
+    || !selection.provider
+    || selection.recordIds.length === 0
+  ) {
+    return null;
   }
 
-  const selected = aggregates.find((aggregate) => aggregate.provider === selectedProvider);
-  return selected ? selected.heartRateZones.map((zone) => ({ ...zone })) : [];
+  const selectedRecordIds = sortedStrings(selection.recordIds);
+  return aggregates.find((aggregate) =>
+    aggregate.provider === selection.provider
+    && equalSortedStrings(sortedStrings(aggregate.recordIds), selectedRecordIds)
+  ) ?? null;
+}
+
+function sortedStrings(values: readonly string[]): string[] {
+  return uniqueStrings(values).sort();
+}
+
+function equalSortedStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 export function groupMetricCandidatesByDate(

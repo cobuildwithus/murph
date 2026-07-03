@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { test } from "vitest";
 
-import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
+import { CURRENT_VAULT_FORMAT_VERSION, deviceDataOriginSchema, type DeviceDataOrigin } from "@murphai/contracts";
 import { normalizeJunctionSnapshot } from "@murphai/importers";
 
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
@@ -90,6 +90,14 @@ function makeActivitySession(input: {
   occurredAt: string;
   recordedAt: string;
   provider?: string;
+  dataOrigin?: DeviceDataOrigin;
+  heartRateZones?: Array<{
+    durationMinutes: number;
+    label?: string;
+    maxHeartRate?: number;
+    minHeartRate?: number;
+    zone?: number;
+  }>;
   path?: string;
   title?: string;
 }): CanonicalEntity {
@@ -111,6 +119,14 @@ function makeActivitySession(input: {
         resourceType: "activity_session",
         resourceId: `${input.entityId}-resource`,
       },
+      ...(input.dataOrigin ? { dataOrigin: input.dataOrigin } : {}),
+      ...(input.heartRateZones
+        ? {
+            workout: {
+              heartRateZones: input.heartRateZones,
+            },
+          }
+        : {}),
     },
   });
 }
@@ -331,6 +347,71 @@ test("wearable activity projection emits workout count and zone-minute metric po
   assert.equal(zoneMinutes?.context.zoneLabel, "Zone 2");
   assert.equal("maxHeartRate" in (zoneMinutes?.context ?? {}), false);
   assert.equal("minHeartRate" in (zoneMinutes?.context ?? {}), false);
+});
+
+test("heart-rate-zone projection follows the selected activity aggregate identity", () => {
+  const vault = makeVault([
+    makeActivitySession({
+      entityId: "evt_junction_garmin_activity_01",
+      dayKey: "2026-04-08",
+      durationMinutes: 30,
+      occurredAt: "2026-04-08T12:00:00Z",
+      recordedAt: "2026-04-08T12:35:00Z",
+      provider: "junction",
+      title: "Junction Garmin run",
+      dataOrigin: {
+        version: 1,
+        aggregatorProvider: "junction",
+        sourceProviderSlug: "garmin",
+        originConfidence: "high",
+      },
+      heartRateZones: [{
+        durationMinutes: 11,
+        label: "Garmin Zone 2",
+        zone: 2,
+      }],
+    }),
+    makeActivitySession({
+      entityId: "evt_junction_apple_activity_01",
+      dayKey: "2026-04-08",
+      durationMinutes: 45,
+      occurredAt: "2026-04-08T13:00:00Z",
+      recordedAt: "2026-04-08T13:50:00Z",
+      provider: "junction",
+      title: "Junction Apple workout",
+      dataOrigin: {
+        version: 1,
+        aggregatorProvider: "junction",
+        sourceProviderSlug: "apple-health",
+        originConfidence: "high",
+      },
+      heartRateZones: [{
+        durationMinutes: 23,
+        label: "Apple Zone 2",
+        zone: 2,
+      }],
+    }),
+  ]);
+
+  const latest = summarizeWearableLatest(vault);
+  const projection = buildMetricProjection(vault);
+  const zoneRow = projection.wearableMetricRows.find((row) =>
+    row.metricKey === "heart-rate-zone-2-minutes"
+  );
+  const zoneDataOrigin = deviceDataOriginSchema.parse(zoneRow?.dataOrigin);
+
+  assert.equal(latest?.activity?.sessionMinutes.selection.value, 45);
+  assert.deepEqual(latest?.activity?.heartRateZones, [{
+    durationMinutes: 23,
+    label: "Apple Zone 2",
+    zone: 2,
+  }]);
+  assert.ok(zoneRow);
+  assert.ok(zoneRow.context);
+  assert.equal(zoneRow?.value, 23);
+  assert.deepEqual(zoneRow?.recordIds, ["evt_junction_apple_activity_01"]);
+  assert.equal(zoneDataOrigin.sourceProviderSlug, "apple-health");
+  assert.deepEqual(zoneRow.context.contributingRecordIds, ["evt_junction_apple_activity_01"]);
 });
 
 test("Junction raw-only timeseries stay out of default query/search and wearable summaries", async () => {
