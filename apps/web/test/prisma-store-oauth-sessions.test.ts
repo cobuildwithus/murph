@@ -108,6 +108,20 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
     expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
   });
 
+  it("keeps an unexpired state available when the expected owner does not match", async () => {
+    const record = buildOAuthSessionRow({ userId: "user_123" });
+    const tx = createTransaction({ record });
+    const store = createStore(tx);
+
+    await expect(
+      store.consumeOAuthState(record.state, record.createdAt.toISOString(), record.provider, "user_456"),
+    ).resolves.toEqual({
+      status: "owner_mismatch",
+    });
+    expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
+    expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
+  });
+
   it("keeps a mismatched provider state available for the correct callback path", async () => {
     const record = buildOAuthSessionRow({ provider: "oura" });
     const tx = createTransaction({ record });
