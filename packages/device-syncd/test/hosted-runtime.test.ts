@@ -889,6 +889,13 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ).toBe(
       "Hosted device-sync agent bearer token expired. Pair again to create a new bearer token.",
     );
+    expect(sanitizeHostedRuntimeErrorText("bearer token expired")).toBe("bearer token expired");
+    expect(
+      sanitizeHostedRuntimeErrorText("Bearer abcdefghijklmnopqrst"),
+    ).toBe("Bearer [redacted]");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Bearer abcdefghijklmnopqrst"),
+    ).toBe("Bearer [redacted]");
 
     expect(
       sanitizeHostedRuntimeErrorText(
@@ -1990,10 +1997,16 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     ).toBe("user_id=<redacted-id> rejected");
   });
 
-  it("masks token phrases through the digit-token rule", () => {
+  it("masks token phrases while keeping prose token labels", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("refresh token abc123 leaked"),
     ).toBe("refresh token <redacted-token> leaked");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("refresh token abcdefghijklmnopqrst leaked"),
+    ).toBe("refresh token <redacted-token> leaked");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("session token expired"),
+    ).toBe("session token expired");
   });
 
   it("keeps plain bracketed prose and fails closed on validation suffixes", () => {
@@ -2104,6 +2117,13 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     const sanitized = sanitizeHostedRuntimeDiagnosticText("access\u200B_token=secretvalue");
     expect(sanitized).toBe("access_token=[redacted]");
     expect(sanitized).not.toContain("secretvalue");
+    const bidiSecret = sanitizeHostedRuntimeDiagnosticText("access\u2066_token=secretvalue");
+    expect(bidiSecret).toBe("access_token=[redacted]");
+    expect(bidiSecret).not.toContain("secretvalue");
+    const bidiIdentifier = sanitizeHostedRuntimeDiagnosticText('user\u2066_id="Jane Doe"');
+    expect(bidiIdentifier).toBe("user_id=<redacted-id>");
+    expect(bidiIdentifier ?? "").not.toContain("Jane");
+    expect(bidiIdentifier ?? "").not.toContain("Doe");
   });
 
   it("fails closed when a structured dump starts beyond the length cap", () => {

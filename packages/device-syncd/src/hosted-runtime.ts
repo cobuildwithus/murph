@@ -21,7 +21,7 @@ const HOSTED_RUNTIME_DIAGNOSTIC_TEXT_MAX_LENGTH = 512;
 const HOSTED_RUNTIME_ERROR_CONTROL_CHAR_PATTERN = /[\u0000-\u001F\u007F]+/gu;
 const HOSTED_RUNTIME_ERROR_WHITESPACE_PATTERN = /\s+/gu;
 const HOSTED_RUNTIME_ERROR_INLINE_BEARER_PATTERN =
-  /\bBearer\s+(?=[A-Za-z0-9._~+/=-]{8,}\b)(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]+\b/giu;
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/giu;
 const HOSTED_RUNTIME_ERROR_JWT_PATTERN = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+\b/gu;
 const HOSTED_RUNTIME_ERROR_QUERY_SECRET_PATTERN =
   /([?&](?:access_token|refresh_token|id_token|token|apikey|api_key|client_secret|session|session_token|code|state)=)[^&#\s]+/giu;
@@ -42,7 +42,10 @@ const HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN =
 // Default-ignorable format characters (zero-width spaces/joiners, soft
 // hyphens, BOM) can split an identifier visually without changing how it
 // renders; strip them before span matching so they cannot defeat the masks.
-const HOSTED_RUNTIME_DIAGNOSTIC_FORMAT_CHAR_PATTERN = /[\u00AD\u200B-\u200F\u2060-\u2064\uFEFF]/gu;
+const HOSTED_RUNTIME_DIAGNOSTIC_FORMAT_CHAR_PATTERN =
+  /[\u00AD\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/gu;
+const HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_PATTERN =
+  /\b((?:access|id|refresh|session)\s+token\s+["']?)[A-Za-z0-9._~+/=-]{16,}/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN =
   /\b((?:account|client|external|member|owner|patient|provider[_\s-]?account|subject|team|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[A-Za-z0-9._~+/:=-]+)/giu;
 // Identifier values also appear as bare phrases ("user hbm_abc123xyz",
@@ -2334,6 +2337,7 @@ export function sanitizeHostedRuntimeDiagnosticText(value: string | null): strin
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN, "$1<redacted-id>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_PHRASE_PATTERN, "$1<redacted-id>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_IPV4_PATTERN, "<redacted-ip>")
+    .replace(HOSTED_RUNTIME_DIAGNOSTIC_LABELED_TOKEN_PATTERN, "$1<redacted-token>")
     .replace(
       HOSTED_RUNTIME_DIAGNOSTIC_DIGIT_TOKEN_PATTERN,
       (token) => HOSTED_RUNTIME_DIAGNOSTIC_SAFE_DIGIT_TOKEN_PATTERN.test(token) ? token : "<redacted-token>",
