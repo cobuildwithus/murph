@@ -1830,22 +1830,41 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           result,
           workspace: passWorkspace,
         });
-        const replaceWake = shouldReplaceHostedWorkspaceInvocationWake(result);
+        const foregroundConversationWorkObserved =
+          hostedMailboxImportHasForegroundConversationWork(result.latestMailboxImport);
+        const checkpointWakePassCanServiceProjectedWake =
+          wakeInput.requestIdKind === "checkpoint-wake"
+          && !foregroundConversationWorkObserved
+          && projectedRuntimeWakeCanRunAfterCheckpoint({
+            projection: accumulatedProjection,
+            requireDue: true,
+            servicedProjectedRuntimeWakeKey,
+          });
+        const effectiveServicedProjectedWakeKey =
+          wakeInput.projectedWakeKeyBeingServiced
+          ?? (checkpointWakePassCanServiceProjectedWake ? projectedWakeKeyBeforePass : null);
+        const replaceWake =
+          shouldReplaceHostedWorkspaceInvocationWake(result)
+          && (
+            wakeInput.requestIdKind !== "checkpoint-wake"
+            || effectiveServicedProjectedWakeKey !== null
+            || !foregroundConversationWorkObserved
+          );
         accumulatedProjection = mergeHostedWorkspaceInvocationProjection(
           accumulatedProjection,
           nextProjection,
           {
             replaceWake,
-            servicedProjectedWakeKey: wakeInput.projectedWakeKeyBeingServiced,
+            servicedProjectedWakeKey: effectiveServicedProjectedWakeKey,
           },
         );
         servicedProjectedRuntimeWakeKey =
-          wakeInput.projectedWakeKeyBeingServiced !== null
+          effectiveServicedProjectedWakeKey !== null
             && buildHostedRuntimeWakeKey({
               nextWakeAt: accumulatedProjection.nextWakeAt,
               nextWakeReason: accumulatedProjection.nextWakeReason,
-            }) === wakeInput.projectedWakeKeyBeingServiced
-            ? wakeInput.projectedWakeKeyBeingServiced
+            }) === effectiveServicedProjectedWakeKey
+            ? effectiveServicedProjectedWakeKey
             : null;
         const durableCheckpointWakeKey = buildHostedRuntimeWakeKey({
           nextWakeAt: durableCheckpointWakeAt,
@@ -1854,7 +1873,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (
           durableCheckpointWakeKey !== null
           && (
-            wakeInput.projectedWakeKeyBeingServiced === durableCheckpointWakeKey
+            effectiveServicedProjectedWakeKey === durableCheckpointWakeKey
             || (replaceWake && projectedWakeKeyBeforePass === durableCheckpointWakeKey)
           )
         ) {
@@ -2229,20 +2248,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           );
         forcedCheckpointWakeLatencySeed = null;
         if (checkpointWakeLatencySeed) {
-          const checkpointWakeKeyBeingSuperseded =
-            projectedRuntimeWakeCanRunAfterCheckpoint({
-              projection: accumulatedProjection,
-              requireDue: true,
-              servicedProjectedRuntimeWakeKey,
-            })
-              ? buildHostedRuntimeWakeKey({
-                  nextWakeAt: accumulatedProjection.nextWakeAt,
-                  nextWakeReason: accumulatedProjection.nextWakeReason,
-                })
-              : servicedProjectedRuntimeWakeKey;
           await runIdleWakeForegroundPass({
             latencySeed: checkpointWakeLatencySeed,
-            projectedWakeKeyBeingServiced: checkpointWakeKeyBeingSuperseded,
+            projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
             requestIdKind: "checkpoint-wake",
           });
           continue;

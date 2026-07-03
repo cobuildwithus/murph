@@ -1221,10 +1221,11 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("clears a durable-effect due assistant wake after a fresh post-checkpoint wake", async () => {
+  test("preserves a durable-effect due assistant wake through fresh post-checkpoint input", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const dueWakeAt = new Date(Date.now() - 60_000).toISOString();
     const durableEffect = vi.fn(async () => {
@@ -1266,13 +1267,14 @@ describe("hosted workspace runtime entrypoint", () => {
                 }),
               };
             },
-            async importItem() {
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
               return { status: "imported" };
             },
             platform: createPlatform({
               mailboxPort: createMailboxPort({
                 events,
-                items: [],
+                items: mailboxItems,
               }),
               workspacePort: createWorkspacePort({
                 checkpointRequests,
@@ -1287,6 +1289,10 @@ describe("hosted workspace runtime entrypoint", () => {
                   });
                   if (request.expectedWorkspaceVersion === "1") {
                     events.push("runtime-wake:after-follow-up-checkpoint");
+                    mailboxItems.push(createMailboxItem({
+                      id: "mailbox_item_entrypoint_follow_up_fresh_input_001",
+                      laneSeq: "1",
+                    }));
                     runtimeWakeSignal.notify();
                   }
                   return workspace;
@@ -1326,7 +1332,18 @@ describe("hosted workspace runtime entrypoint", () => {
                 };
               }
 
-              throw new Error("Fresh post-checkpoint wake should run exactly once.");
+              if (assistantPass === 3) {
+                assert.equal(input.workspace?.nextWakeAt, dueWakeAt);
+                assert.equal(input.workspace?.nextWakeReason, "assistant");
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  nextWakeAt: null,
+                  nextWakeReason: null,
+                  progressed: true,
+                };
+              }
+
+              throw new Error("Durable-effect due wake should run exactly once after fresh input.");
             },
             vaultRoot,
           },
@@ -1335,8 +1352,11 @@ describe("hosted workspace runtime entrypoint", () => {
         () => events.join(","),
       );
 
-      assert.equal(assistantPass, 2, events.join(","));
+      assert.equal(assistantPass, 3, events.join(","));
       assert.equal(durableEffect.mock.calls.length, 1);
+      assert.deepEqual(events.filter((event) => event.startsWith("mailbox.importItem:")), [
+        "mailbox.importItem:mailbox_item_entrypoint_follow_up_fresh_input_001",
+      ]);
       assert.deepEqual(
         checkpointRequests.map((request) => [
           request.reason,
@@ -1347,7 +1367,8 @@ describe("hosted workspace runtime entrypoint", () => {
         [
           ["idle_shutdown", "0", null, null],
           ["idle_shutdown", "1", dueWakeAt, "assistant"],
-          ["idle_shutdown", "2", null, null],
+          ["idle_shutdown", "2", dueWakeAt, "assistant"],
+          ["idle_shutdown", "3", null, null],
         ],
       );
       assert.ok(
@@ -1366,6 +1387,14 @@ describe("hosted workspace runtime entrypoint", () => {
         requireEventIndex(events, "assistant:2")
           < requireEventIndex(events, "snapshot:idle_shutdown:3"),
       );
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown:3")
+          < requireEventIndex(events, "assistant:3"),
+      );
+      assert.ok(
+        requireEventIndex(events, "assistant:3")
+          < requireEventIndex(events, "snapshot:idle_shutdown:4"),
+      );
       assert.equal(result.status, "idle");
       assert.equal(result.nextWakeAt, null);
     } finally {
@@ -1373,13 +1402,12 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("checkpoints durable follow-up effects before servicing a replacement due assistant wake", async () => {
+  test("checkpoints durable follow-up effects before servicing their due assistant wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const wakeA = new Date(Date.now() - 60_000).toISOString();
-    const wakeB = new Date(Date.now() - 30_000).toISOString();
     const durableEffect = vi.fn(async () => {
       events.push("durable-effect");
       runtimeWakeSignal.notify();
@@ -1450,16 +1478,7 @@ describe("hosted workspace runtime entrypoint", () => {
 
               if (assistantPass === 2) {
                 assert.ok(events.includes("durable-effect"), events.join(","));
-                return {
-                  checkpointReason: "assistant_runtime_commit",
-                  nextWakeAt: wakeB,
-                  nextWakeReason: "assistant",
-                  progressed: true,
-                };
-              }
-
-              if (assistantPass === 3) {
-                assert.equal(input.workspace?.nextWakeAt, wakeB);
+                assert.equal(input.workspace?.nextWakeAt, wakeA);
                 assert.equal(input.workspace?.nextWakeReason, "assistant");
                 return {
                   checkpointReason: "assistant_runtime_commit",
@@ -1469,7 +1488,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 };
               }
 
-              throw new Error("Replacement due wake should be serviced exactly once.");
+              throw new Error("Durable-effect due wake should be serviced exactly once.");
             },
             vaultRoot,
           },
@@ -1478,7 +1497,7 @@ describe("hosted workspace runtime entrypoint", () => {
         () => events.join(","),
       );
 
-      assert.equal(assistantPass, 3, events.join(","));
+      assert.equal(assistantPass, 2, events.join(","));
       assert.equal(durableEffect.mock.calls.length, 1);
       assert.deepEqual(
         checkpointRequests.map((request) => [
@@ -1507,10 +1526,6 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.ok(
         requireEventIndex(events, "assistant:2")
-          < requireEventIndex(events, "assistant:3"),
-      );
-      assert.ok(
-        requireEventIndex(events, "assistant:3")
           < requireEventIndex(events, "snapshot:idle_shutdown:3"),
       );
       assert.equal(result.status, "idle");
