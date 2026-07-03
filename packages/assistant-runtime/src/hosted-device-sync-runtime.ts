@@ -1704,10 +1704,10 @@ function assignNextReconcileAtUpdate(
     return;
   }
 
-  if (latestIsoTimestamp(localValue, baselineValue) !== localValue) {
-    return;
-  }
-
+  // `nextReconcileAt` is owned by device-sync execution, not an append-only
+  // event timestamp. Empty-backfill retry floors may intentionally pull it
+  // earlier; stale hosted replays are still rejected by the web apply
+  // observedUpdatedAt/version fence before localState mutates hosted state.
   update.localState = {
     ...(update.localState ?? {}),
     nextReconcileAt: localValue,
