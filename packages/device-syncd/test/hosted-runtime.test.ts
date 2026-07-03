@@ -1946,6 +1946,18 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
         "Datetimes provided to dates should have zero time [type=date_from_datetime_inexact]",
       ),
     ).toBe("Datetimes provided to dates should have zero time [type=date_from_datetime_inexact]");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("rejected [input_value='Jane Doe', input_type=str]"),
+    ).toBe("rejected [input_value='<redacted-value>', input_type=str]");
+  });
+
+  it("fails closed on bracketed assignment lists with unknown keys", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Validation failed [user_id=1234, display_name=Jane Doe]"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("failed [display_name=Jane"),
+    ).toBeNull();
   });
 
   it("still fails closed on raw structured payload dumps", () => {

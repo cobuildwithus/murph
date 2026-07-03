@@ -42,6 +42,19 @@ const HOSTED_RUNTIME_ERROR_PHONE_PATTERN = /(?:\+\d[\d().\s-]{7,}\d|\(\d{3}\)\s*
 // span-redacted.
 const HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN =
   /[{}]|\[\s*(?:["'{]|\d|(?:true|false|null)\b)|\[[^\]=]*,|["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
+const HOSTED_RUNTIME_DIAGNOSTIC_BRACKET_SEGMENT_PATTERN = /\[[^\]]*\]?/gu;
+const HOSTED_RUNTIME_DIAGNOSTIC_BRACKET_KEY_PATTERN = /\b([A-Za-z_][A-Za-z0-9_]*)\s*=/gu;
+const HOSTED_RUNTIME_DIAGNOSTIC_ALLOWED_BRACKET_KEYS = new Set([
+  "ctx",
+  "input",
+  "input_type",
+  "input_value",
+  "loc",
+  "msg",
+  "type",
+  "url",
+  "value",
+]);
 // Default-ignorable format characters (zero-width spaces/joiners, soft
 // hyphens, BOM) can split an identifier visually without changing how it
 // renders; strip them before span matching so they cannot defeat the masks.
@@ -2294,6 +2307,36 @@ function matchesEntireHostedRuntimeDiagnosticToken(pattern: RegExp, value: strin
   return match?.[0] === value;
 }
 
+function hasOnlyAllowedHostedRuntimeDiagnosticBracketKeys(value: string): boolean {
+  HOSTED_RUNTIME_DIAGNOSTIC_BRACKET_SEGMENT_PATTERN.lastIndex = 0;
+
+  let segmentMatch: RegExpExecArray | null;
+  while ((segmentMatch = HOSTED_RUNTIME_DIAGNOSTIC_BRACKET_SEGMENT_PATTERN.exec(value)) !== null) {
+    const segment = segmentMatch[0];
+    if (!segment.includes("=")) {
+      continue;
+    }
+
+    let sawKey = false;
+    HOSTED_RUNTIME_DIAGNOSTIC_BRACKET_KEY_PATTERN.lastIndex = 0;
+
+    let keyMatch: RegExpExecArray | null;
+    while ((keyMatch = HOSTED_RUNTIME_DIAGNOSTIC_BRACKET_KEY_PATTERN.exec(segment)) !== null) {
+      sawKey = true;
+      const key = keyMatch[1];
+      if (!key || !HOSTED_RUNTIME_DIAGNOSTIC_ALLOWED_BRACKET_KEYS.has(key)) {
+        return false;
+      }
+    }
+
+    if (!sawKey) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 // Redacts by masking the unsafe spans (ids, token phrases, long tokens) so
 // provider error prose stays debuggable. Raw structured payload dumps fail
 // closed before span masking or the diagnostic length cap, because masking and
@@ -2301,7 +2344,11 @@ function matchesEntireHostedRuntimeDiagnosticToken(pattern: RegExp, value: strin
 export function sanitizeHostedRuntimeDiagnosticText(value: string | null): string | null {
   const normalizedValue = value?.replace(HOSTED_RUNTIME_DIAGNOSTIC_FORMAT_CHAR_PATTERN, "") ?? null;
   const sanitizedBase = sanitizeHostedRuntimeErrorString(normalizedValue, HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH);
-  if (!sanitizedBase || HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN.test(sanitizedBase)) {
+  if (
+    !sanitizedBase
+    || HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN.test(sanitizedBase)
+    || !hasOnlyAllowedHostedRuntimeDiagnosticBracketKeys(sanitizedBase)
+  ) {
     return null;
   }
 
