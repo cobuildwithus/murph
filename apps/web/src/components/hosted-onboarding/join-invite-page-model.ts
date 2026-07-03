@@ -129,7 +129,7 @@ async function resolveJoinInviteLaunchConsent(input: {
 
   if (!input.memberId) {
     return {
-      errorMessage: "We could not load Murph legal consent for this session.",
+      errorMessage: "We couldn’t load the consent form. Refresh and try again.",
       gateActive: true,
       initialStatus: null,
       status: "error",

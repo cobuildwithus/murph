@@ -105,7 +105,7 @@ export async function syncHostedLinkedTelegram(input: {
   } catch (error) {
     return {
       errorMessage: toHostedTelegramSyncErrorMessage(error),
-      successMessage: input.mode === "link" ? "Telegram linked in Privy." : null,
+      successMessage: input.mode === "link" ? "Telegram account linked." : null,
       syncResult: null,
     };
   }
@@ -180,7 +180,7 @@ export async function syncHostedTelegramConnectionWithRetry(input: {
       error instanceof HostedTelegramSyncError && error.code === "PRIVY_TELEGRAM_NOT_READY",
     sleepImpl: input.sleepImpl,
     timeoutMessage:
-      "Telegram linked in Privy, but the hosted assistant could not confirm it yet. Refresh and try again.",
+      "Telegram is linked, but Murph couldn't confirm it yet. Refresh and try again.",
   });
 }
 
@@ -249,7 +249,7 @@ async function syncHostedTelegramConnection(input: {
 
     throw new HostedTelegramSyncError(
       errorDetails.code,
-      errorDetails.message ?? "We could not sync Telegram to the hosted assistant yet.",
+      errorDetails.message ?? "We couldn't finish connecting Telegram to Murph yet.",
     );
   }
 
@@ -260,7 +260,7 @@ async function syncHostedTelegramConnection(input: {
   ) {
     throw new HostedTelegramSyncError(
       null,
-      "Telegram linked, but the hosted assistant returned an unexpected sync response.",
+      "Telegram is linked, but we couldn't confirm the connection. Refresh and try again.",
     );
   }
 
@@ -279,6 +279,6 @@ function toHostedTelegramSyncErrorMessage(error: unknown): string {
 
   return toErrorMessage(
     error,
-    "Telegram linked in Privy, but we could not sync it to the hosted assistant yet. Refresh and try again.",
+    "Telegram is linked, but we couldn't finish connecting it to Murph. Refresh and try again.",
   );
 }

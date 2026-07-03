@@ -18,6 +18,7 @@ import { normalizeNullableString } from "./shared";
 
 const HOSTED_LINQ_CONTACT_CARD_CRON_LINE_LIMIT = 50;
 const MURPH_CONTACT_CARD_FIRST_NAME = "Murph";
+const MURPH_CONTACT_CARD_DEFAULT_ORIGIN = "https://www.withmurph.ai";
 const MURPH_CONTACT_CARD_DEFAULT_IMAGE_URL =
   "https://www.withmurph.ai/murph_headshot.png";
 const MURPH_CONTACT_CARD_IMAGE_PATH = "/murph_headshot.png";
@@ -286,6 +287,18 @@ function isHostedLinqContactCardImageUrl(value: string | null): boolean {
   }
 }
 
+/**
+ * Absolute URL for one of our own public contact-card avatar assets. Anchored
+ * to the operator-configured public base URL (canonical production host as
+ * the fallback), never to request-derived origins, so a hostile Host header
+ * can not steer the server-side photo fetch.
+ */
+export function resolveMurphContactCardAssetUrl(assetPath: string): string {
+  const publicBaseUrl = getHostedOnboardingEnvironment().publicBaseUrl
+    ?? MURPH_CONTACT_CARD_DEFAULT_ORIGIN;
+  return new URL(assetPath, `${publicBaseUrl}/`).toString();
+}
+
 function getMurphContactCardImageUrl(): string | null {
   const publicBaseUrl = getHostedOnboardingEnvironment().publicBaseUrl;
   if (!publicBaseUrl) {
@@ -527,14 +540,17 @@ function foldMurphContactCardVcfLine(line: string): string {
 }
 
 /**
- * Best-effort fetch of the Murph headshot for embedding; any failure returns
- * null so the card ships without a photo instead of failing the share.
+ * Best-effort fetch of a Murph contact-card photo for embedding; any failure
+ * returns null so the card ships without a photo instead of failing the
+ * share. Defaults to the canonical headshot; pass `imageUrl` to embed a
+ * different member-chosen avatar asset.
  */
 export async function fetchMurphHostedLinqContactCardVcfPhoto(input: {
   fetchImpl?: typeof fetch;
+  imageUrl?: string | null;
   signal?: AbortSignal;
 } = {}): Promise<MurphHostedLinqContactCardVcfPhoto | null> {
-  const imageUrl = getMurphContactCardImageUrl();
+  const imageUrl = input.imageUrl ?? getMurphContactCardImageUrl();
   if (!imageUrl) {
     return null;
   }
@@ -542,6 +558,8 @@ export async function fetchMurphHostedLinqContactCardVcfPhoto(input: {
   try {
     const fetchImpl = input.fetchImpl ?? fetch;
     const response = await fetchImpl(imageUrl, {
+      // Own-asset fetch only; a redirect means the asset boundary was crossed.
+      redirect: "error",
       signal: input.signal ?? AbortSignal.timeout(MURPH_CONTACT_CARD_VCF_PHOTO_FETCH_TIMEOUT_MS),
     });
     if (!response.ok) {

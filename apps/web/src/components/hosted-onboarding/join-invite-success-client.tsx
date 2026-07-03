@@ -197,7 +197,7 @@ export function JoinInviteSuccessClient({
                     </p>
                     <p className="text-sm leading-relaxed text-muted-foreground">
                       We&apos;ll keep checking automatically. If you&apos;re stuck here,
-                      email support and the draft will include the setup context we need.
+                      email support. The draft already includes the details we need to help.
                     </p>
                   </div>
                 </div>
@@ -324,7 +324,7 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
     case "checkout":
       return {
         buttonLabel: "Back to invite",
-        description: "Setting up your vault and assistant. This takes about a minute.",
+        description: "Setting up your account and assistant. This takes about a minute.",
         pending: true,
         title: "Payment received",
         variant: "pending",

@@ -189,7 +189,7 @@ describe('assistant execution prompt contract', () => {
       'For work likely to finish in about a minute or less, send at most one progress update',
     )
     expect(prompt).toContain(
-      'never send a third',
+      'never send a fourth',
     )
     expect(prompt).toContain(
       'Prefer skipping progress updates on quota-sensitive messaging surfaces such as Linq/iMessage',
@@ -202,7 +202,7 @@ describe('assistant execution prompt contract', () => {
     )
     expect(
       prompt.match(
-        /If the turn becomes unusually long-running after substantial tool work, you may send one more brief update so the user is not left hanging; never send a third\./g,
+        /If the turn becomes unusually long-running after substantial tool work, you may send up to two more brief updates so the user is not left hanging; never send a fourth\./g,
       ) ?? [],
     ).toHaveLength(1)
     expect(
@@ -582,7 +582,7 @@ describe('assistant local PDF evidence guidance', () => {
       'If the current task requires substantial non-audio content inspection or multiple parse/import steps, use the progress-update budget above',
     )
     expect(prompt).toContain(
-      'at most one for ordinary long work, one more only after a multi-minute delay, and none when the final reply should be available shortly',
+      'at most one for ordinary long work, up to two more only after multi-minute delays, and none when the final reply should be available shortly',
     )
     expect(prompt).toContain(
       'Do not use it for straightforward one-shot logging or capture writes',

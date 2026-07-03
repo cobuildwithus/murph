@@ -499,8 +499,8 @@ export function HostedFamilyManager(props: {
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-[#736a58]">
               {createdInvite
-                ? "Murph did not text them automatically. Copy the invite and send it yourself."
-                : "Create a private invite, then send the link yourself by text, email, or Telegram. Murph will not message them automatically."}
+                ? "Murph won't send this for you. Copy the link and text it to them yourself."
+                : "Create an invite link, then send it yourself by text, email, or Telegram. Murph won't message them."}
             </DialogDescription>
           </DialogHeader>
 
@@ -516,7 +516,7 @@ export function HostedFamilyManager(props: {
                       Send this invite to {createdInvite.targetLabel ?? createdInvite.targetPhoneHint ?? "your family member"}.
                     </p>
                     <p className="mt-1 text-xs leading-5 text-[#736a58]">
-                      Phone, email, and Telegram only bind who can accept the invite. They do not trigger an automatic outbound message.
+                      The contact info you added just makes sure the right person can accept it. Murph hasn&apos;t sent them anything.
                     </p>
                   </div>
                 </div>
@@ -589,7 +589,7 @@ export function HostedFamilyManager(props: {
                   />
                 </div>
                 <p className="text-xs leading-5 text-[#736a58]">
-                  These fields bind the invite. After creation, copy the link and send it yourself.
+                  This info just makes sure the right person can accept the invite. You&apos;ll send the link yourself.
                 </p>
                 {inviteWillAddSeat ? (
                   <p
@@ -658,7 +658,7 @@ export function HostedFamilyManager(props: {
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-[#736a58]">
               {pendingAction?.kind === "remove-member"
-                ? `Remove ${pendingAction.label}? They keep their own Murph account and data, but sponsored access ends.`
+                ? `Remove ${pendingAction.label}? They keep their own Murph account and data, but their access through your Family plan ends.`
                 : `Cancel the invite for ${pendingAction?.label ?? "this person"}? The invite link stops working.`}
             </DialogDescription>
           </DialogHeader>

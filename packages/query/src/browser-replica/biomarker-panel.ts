@@ -150,8 +150,8 @@ export function selectBrowserVaultBiomarkerPanel(input: SelectBrowserVaultBiomar
         ...base,
         context,
         emptyState: {
-          body: `${input.label} trend rows were found, but this browser-vault snapshot did not include a selected current value.`,
-          title: "No current private value selected",
+          body: `${input.label} has trend history, but no current value is available yet.`,
+          title: "No current value yet",
         },
         primary,
         status: "missing_selection",
@@ -159,7 +159,7 @@ export function selectBrowserVaultBiomarkerPanel(input: SelectBrowserVaultBiomar
       };
     }
 
-    return { ...base, emptyState: { body: `No ${input.label} values were found in the current browser-vault snapshot.`, title: "No private values yet" }, status: "no_data", warnings };
+    return { ...base, emptyState: { body: `No ${input.label} values saved on this device yet.`, title: "No private values yet" }, status: "no_data", warnings };
   }
 
   return {

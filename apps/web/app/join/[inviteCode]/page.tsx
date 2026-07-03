@@ -8,7 +8,7 @@ const JOIN_INVITE_METADATA_DESCRIPTION =
   "Finish signup, then add a phone number or connect Telegram so Murph can reach you.";
 
 export const metadata: Metadata = createMurphPageMetadata({
-  title: "Murph hosted invite",
+  title: "Murph invite",
   description: JOIN_INVITE_METADATA_DESCRIPTION,
 });
 

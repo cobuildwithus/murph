@@ -167,7 +167,7 @@ export function HostedEmailSettingsContent(props: {
             className="w-full"
           >
             {isSyncingEmailRoute
-              ? "Syncing..."
+              ? "Saving..."
               : isSendingCode
                 ? "Sending..."
                 : "Send verification code"}
