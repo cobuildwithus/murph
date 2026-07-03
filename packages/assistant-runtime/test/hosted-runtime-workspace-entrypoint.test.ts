@@ -1403,6 +1403,177 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("services a due deferred assistant wake after fresh post-checkpoint input", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const dueWakeAt = new Date(Date.now() - 60_000).toISOString();
+    const freshDueWakeAt = new Date(Date.now() - 30_000).toISOString();
+    const durableEffect = vi.fn(async () => {
+      events.push("durable-effect");
+      return {
+        nextWakeAt: dueWakeAt,
+        nextWakeReason: "assistant",
+        requiresFollowUpCheckpoint: true,
+      };
+    });
+    let assistantPass = 0;
+    let snapshotCount = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const result = await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_follow_up_fresh_due_wake",
+              idleCheckpointDelayMs: 25,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              snapshotCount += 1;
+              events.push(`snapshot:${snapshotInput.reason}:${snapshotCount}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: String(snapshotCount).repeat(64),
+                  key:
+                    `users/bundles/member-synthetic/follow-up-fresh-due-wake-`
+                    + `${snapshotCount}.bundle.json`,
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: mailboxItems,
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                checkpointWorkspace(request) {
+                  const workspace = createWorkspaceState({
+                    inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                    nextWakeAt: request.nextWakeAt ?? null,
+                    nextWakeReason: request.nextWakeReason ?? null,
+                    redactedStatus: request.redactedStatus ?? null,
+                    snapshotRef: request.snapshotRef,
+                    version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                  });
+                  if (request.expectedWorkspaceVersion === "1") {
+                    events.push("runtime-wake:after-follow-up-checkpoint");
+                    mailboxItems.push(createMailboxItem({
+                      id: "mailbox_item_entrypoint_follow_up_fresh_due_input_001",
+                      laneSeq: "1",
+                    }));
+                    runtimeWakeSignal.notify();
+                  }
+                  return workspace;
+                },
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase(input) {
+              assistantPass += 1;
+              events.push(`assistant:${assistantPass}`);
+
+              if (assistantPass === 1) {
+                return {
+                  afterCheckpoint: async () => ({
+                    afterDurableCheckpoint: durableEffect,
+                    checkpointReason: "system_mailbox_receipt",
+                  }),
+                  checkpointReason: "system_mailbox_receipt",
+                  progressed: true,
+                };
+              }
+
+              if (assistantPass === 2) {
+                assert.equal(input.workspace?.nextWakeAt, dueWakeAt);
+                assert.equal(input.workspace?.nextWakeReason, "assistant");
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  nextWakeAt: freshDueWakeAt,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                };
+              }
+
+              if (assistantPass === 3) {
+                assert.equal(input.workspace?.nextWakeAt, dueWakeAt);
+                assert.equal(input.workspace?.nextWakeReason, "assistant");
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  nextWakeAt: null,
+                  nextWakeReason: null,
+                  progressed: true,
+                };
+              }
+
+              if (assistantPass === 4) {
+                assert.equal(input.workspace?.nextWakeAt, freshDueWakeAt);
+                assert.equal(input.workspace?.nextWakeReason, "assistant");
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  nextWakeAt: null,
+                  nextWakeReason: null,
+                  progressed: true,
+                };
+              }
+
+              throw new Error("Deferred due wake should run exactly once.");
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      );
+
+      assert.equal(assistantPass, 4, events.join(","));
+      assert.equal(durableEffect.mock.calls.length, 1);
+      assert.deepEqual(
+        checkpointRequests.map((request) => [
+          request.reason,
+          request.expectedWorkspaceVersion,
+          request.nextWakeAt,
+          request.nextWakeReason,
+        ]),
+        [
+          ["idle_shutdown", "0", null, null],
+          ["idle_shutdown", "1", dueWakeAt, "assistant"],
+          ["idle_shutdown", "2", dueWakeAt, "assistant"],
+          ["idle_shutdown", "3", freshDueWakeAt, "assistant"],
+          ["idle_shutdown", "4", null, null],
+        ],
+      );
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown:3")
+          < requireEventIndex(events, "assistant:3"),
+      );
+      assert.ok(
+        requireEventIndex(events, "snapshot:idle_shutdown:4")
+          < requireEventIndex(events, "assistant:4"),
+      );
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("checkpoints durable follow-up effects before servicing their due assistant wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -7231,6 +7402,153 @@ describe("hosted workspace runtime entrypoint", () => {
         ["1", "2"],
       );
       assert.equal(result.redactedStatus?.hostedMailboxConversationImportedSeq, "2");
+      assert.equal(result.status, "idle");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("forced durable follow-up checkpoints bypass foreground-pending idle conflicts", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const dueWakeAt = new Date(Date.now() - 60_000).toISOString();
+    const durableEffect = vi.fn(async () => {
+      events.push("durable-effect");
+      mailboxItems.push(createMailboxItem({
+        id: "mailbox_item_entrypoint_forced_checkpoint_pending_001",
+        laneSeq: "1",
+      }));
+      return {
+        nextWakeAt: dueWakeAt,
+        nextWakeReason: "assistant",
+        requiresFollowUpCheckpoint: true,
+      };
+    });
+    let assistantPass = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_forced_checkpoint_foreground_pending",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: `${checkpointRequests.length + 1}`.repeat(64).slice(0, 64),
+                key:
+                  `users/bundles/member-synthetic/forced-checkpoint-foreground-pending-`
+                  + `${checkpointRequests.length}.bundle.json`,
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: {
+              async read() {
+                events.push("workspace.read");
+                return {
+                  fetchedAt: TEST_NOW,
+                  workspace: createWorkspaceState({ version: "0" }),
+                };
+              },
+              async checkpoint(request) {
+                events.push(
+                  `workspace.checkpoint:${request.expectedWorkspaceVersion}:${request.reason}:`
+                  + `${request.continueOnForegroundPending === true ? "continue" : "interrupt"}`,
+                );
+                checkpointRequests.push(request);
+                if (
+                  request.expectedWorkspaceVersion === "1"
+                  && request.reason === "idle_shutdown"
+                  && request.continueOnForegroundPending !== true
+                ) {
+                  return {
+                    checkpointConflictReason: "foreground_pending",
+                    checkpointed: false,
+                    workspace: createWorkspaceState({ version: "1" }),
+                  };
+                }
+                return {
+                  checkpointed: true,
+                  workspace: createWorkspaceState({
+                    nextWakeAt: request.nextWakeAt ?? null,
+                    nextWakeReason: request.nextWakeReason ?? null,
+                    snapshotRef: request.snapshotRef,
+                    version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                  }),
+                };
+              },
+            },
+          }),
+          async runAssistantPhase(input) {
+            assistantPass += 1;
+            events.push(`assistant:${assistantPass}`);
+            if (assistantPass === 1) {
+              return {
+                afterCheckpoint: async () => ({
+                  afterDurableCheckpoint: durableEffect,
+                  checkpointReason: "system_mailbox_receipt",
+                }),
+                checkpointReason: "system_mailbox_receipt",
+                progressed: true,
+              };
+            }
+            assert.ok(
+              events.includes("workspace.checkpoint:1:idle_shutdown:continue"),
+              events.join(","),
+            );
+            assert.equal(input.workspace?.nextWakeAt, dueWakeAt);
+            assert.equal(input.workspace?.nextWakeReason, "assistant");
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              progressed: true,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPass, 2);
+      assert.equal(durableEffect.mock.calls.length, 1);
+      assert.ok(
+        requireEventIndex(events, "workspace.checkpoint:1:idle_shutdown:continue")
+          < requireEventIndex(
+            events,
+            "mailbox.importItem:mailbox_item_entrypoint_forced_checkpoint_pending_001",
+          ),
+      );
+      assert.deepEqual(checkpointRequests.map((request) => [
+        request.expectedWorkspaceVersion,
+        request.reason,
+        request.continueOnForegroundPending ?? false,
+        request.nextWakeAt,
+        request.nextWakeReason,
+      ]), [
+        ["0", "idle_shutdown", false, null, null],
+        ["1", "idle_shutdown", true, dueWakeAt, "assistant"],
+        ["2", "idle_shutdown", false, null, null],
+      ]);
       assert.equal(result.status, "idle");
     } finally {
       await removeTempRoot(vaultRoot);

@@ -2097,6 +2097,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
             assertRuntimeNotAborted,
             checkpointRequestBuilder,
+            continueOnForegroundPending: forceCheckpointBeforeWake ? true : undefined,
             expectedUserId: input.request.userId,
             nextWakeAt: idleCheckpointWake.nextWakeAt,
             nextWakeReason: idleCheckpointWake.nextWakeReason,
@@ -3087,7 +3088,8 @@ function readDeferredHostedWorkspaceInvocationProjectedWake(
   return {
     nextWakeAt: projection.deferredAfterSelectedWakeAt,
     nextWakeReason: projection.deferredAfterSelectedWakeReason,
-    projectedWakeCheckpointGateFresh: false,
+    projectedWakeCheckpointGateFresh:
+      projection.deferredAfterSelectedWakeAt !== null,
     projectedWakeRequiresCheckpoint:
       projection.deferredAfterSelectedWakeAt !== null,
   };
@@ -3425,6 +3427,7 @@ function hostedRuntimeWakeIsDue(
 async function checkpointHostedRuntimeDirtyWorkspace(input: {
   assertRuntimeNotAborted: () => void;
   checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
+  continueOnForegroundPending?: boolean;
   expectedUserId: string;
   inboxMediaRetentionWakeAt: string | null;
   issueExportPort?: HostedRuntimePlatform["issueExportPort"] | null;
@@ -3442,6 +3445,9 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
 
   input.assertRuntimeNotAborted();
   const checkpointInput = {
+    ...(input.continueOnForegroundPending === undefined
+      ? {}
+      : { continueOnForegroundPending: input.continueOnForegroundPending }),
     inboxMediaRetentionWakeAt: input.inboxMediaRetentionWakeAt,
     nextWakeAt: input.nextWakeAt,
     nextWakeReason: input.nextWakeReason,
