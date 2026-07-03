@@ -5,7 +5,8 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 6;
+// v7: oauth_state.consumed_at (replay-tolerant OAuth state consumption).
+export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 7;
 
 interface SqliteTableColumn {
   name?: unknown;

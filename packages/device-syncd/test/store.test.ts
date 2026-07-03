@@ -2466,6 +2466,55 @@ test("device sync store rejects pre-cutover sqlite user_version values", async (
   }
 });
 
+test("device sync store adds consumed_at when reopening a v6 database", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-v6-reopen");
+  const databasePath = path.join(tempDir, "state.sqlite");
+  const database = openSqliteRuntimeDatabase(databasePath);
+  database.exec(`
+    create table oauth_state (
+      state text primary key,
+      provider text not null,
+      owner_id text,
+      return_to text,
+      metadata_json text not null,
+      created_at text not null,
+      expires_at text not null
+    );
+
+    insert into oauth_state values (
+      'v6-state',
+      'demo',
+      null,
+      '/devices',
+      '{}',
+      '2026-04-07T00:00:00.000Z',
+      '2026-04-07T00:15:00.000Z'
+    );
+
+    pragma user_version = 6;
+  `);
+  database.close();
+
+  const store = new SqliteDeviceSyncStore(databasePath);
+
+  try {
+    assert.equal(
+      store.consumeOAuthState("v6-state", "2026-04-07T00:01:00.000Z", "demo").status,
+      "consumed",
+    );
+    assert.equal(
+      store.consumeOAuthState("v6-state", "2026-04-07T00:02:00.000Z", "demo").status,
+      "replayed",
+    );
+  } finally {
+    store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
 test("device sync store migrates existing token-only credential rows as oauth token credentials", async () => {
   const tempDir = await makeTempDirectory("murph-device-syncd-store-credential-migration");
   const databasePath = path.join(tempDir, "state.sqlite");
