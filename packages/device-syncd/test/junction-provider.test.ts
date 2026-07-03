@@ -2134,6 +2134,151 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
   assert.equal(timeseriesSnapshot.timeseries?.blood_oxygen?.length, 1);
 });
 
+test("Junction yielded connect-window backfills keep owner window and resume with a cursor", async () => {
+  const ownerWindowStart = "2026-04-01T00:00:00.000Z";
+  const ownerWindowEnd = "2026-04-03T00:00:00.000Z";
+  const cursor = "2026-04-02T00:00:00.000Z";
+  const createProviderForRequests = (requests: string[]) =>
+    createJunctionProvider(async (input) => {
+      const url = readUrl(input);
+      requests.push(url);
+
+      if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+        return createJsonResponse({
+          providers: [
+            {
+              id: "provider-garmin-1",
+              slug: "garmin",
+              name: "Garmin",
+              status: "connected",
+              resource_availability: {
+                activity: true,
+                blood_oxygen: true,
+              },
+            },
+          ],
+        });
+      }
+
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+        return createJsonResponse({
+          data: [{ id: "activity-1", sourceProviderSlug: "garmin", steps: 4321 }],
+        });
+      }
+
+      if (url.startsWith("https://api.sandbox.us.junction.com/v2/timeseries/junction-user-1/blood_oxygen/grouped")) {
+        return createJsonResponse({
+          groups: {
+            garmin: [{
+              data: [{
+                start: new URL(url).searchParams.get("start_date"),
+                value: 97,
+              }],
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    }, {
+      timeseriesResources: ["blood_oxygen"],
+    });
+
+  const firstRequests: string[] = [];
+  const firstImportedSnapshots: unknown[] = [];
+  const initialJob = createJob("backfill", {
+    windowStart: ownerWindowStart,
+    windowEnd: ownerWindowEnd,
+  });
+  const firstResult = await executeJunctionJob(
+    createProviderForRequests(firstRequests),
+    createJunctionJobContext({
+      now: "2026-04-04T00:00:00.000Z",
+      importSnapshot: async (snapshot) => {
+        firstImportedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      shouldYield: () => firstRequests.some((url) => url.includes("/v2/timeseries/")),
+    }),
+    initialJob,
+  );
+
+  const continuation = requireValue(
+    firstResult.scheduledJobs?.[0],
+    "Yielded Junction backfill should schedule a continuation.",
+  );
+  assert.equal(firstResult.metadataPatch, undefined);
+  assert.deepEqual(continuation.payload, {
+    windowStart: ownerWindowStart,
+    windowEnd: ownerWindowEnd,
+    timeseriesCursor: cursor,
+  });
+  assert.equal(
+    continuation.dedupeKey,
+    buildExpectedJunctionDedupeKey("backfill", ownerWindowStart, ownerWindowEnd),
+  );
+  assert.deepEqual(
+    firstRequests
+      .filter((url) => url.includes("/v2/timeseries/"))
+      .map((url) => {
+        const searchParams = new URL(url).searchParams;
+        return [searchParams.get("start_date"), searchParams.get("end_date")];
+      }),
+    [["2026-04-01", "2026-04-01"]],
+  );
+
+  const secondRequests: string[] = [];
+  const secondImportedSnapshots: unknown[] = [];
+  const continuationJob = {
+    ...createJob("backfill", continuation.payload ?? {}),
+    dedupeKey: continuation.dedupeKey ?? null,
+    priority: continuation.priority ?? 50,
+  };
+  const provider = createProviderForRequests(secondRequests);
+  const secondResult = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-04T00:05:00.000Z",
+      importSnapshot: async (snapshot) => {
+        secondImportedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    continuationJob,
+  );
+
+  assert.deepEqual(
+    secondRequests
+      .filter((url) => url.includes("/v2/timeseries/"))
+      .map((url) => {
+        const searchParams = new URL(url).searchParams;
+        return [searchParams.get("start_date"), searchParams.get("end_date")];
+      }),
+    [["2026-04-02", "2026-04-02"]],
+  );
+  assert.deepEqual(secondResult.metadataPatch, {
+    junctionHistoricalBackfillStatus: "complete",
+    junctionHistoricalBackfillEmptyAttempts: 0,
+    junctionHistoricalBackfillLastEmptyAt: null,
+    junctionHistoricalBackfillWindowStart: ownerWindowStart,
+    junctionHistoricalBackfillWindowEnd: ownerWindowEnd,
+  });
+  assert.equal(secondResult.scheduledJobs, undefined);
+  assert.equal(secondImportedSnapshots.length, 2);
+
+  const scheduledAfterCompletion = provider.jobExecutor?.createScheduledJobs?.(
+    createStoredAccount({
+      metadata: secondResult.metadataPatch ?? {},
+    }),
+    "2026-04-04T00:10:00.000Z",
+  );
+  assert.equal(
+    scheduledAfterCompletion?.jobs.some((job) => job.kind === "backfill"),
+    false,
+  );
+});
+
 test("Junction profile-only historical backfill keeps the summary window retrying", async () => {
   const importedSnapshots: unknown[] = [];
   const requests: string[] = [];

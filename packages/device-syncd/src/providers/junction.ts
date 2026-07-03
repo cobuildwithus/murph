@@ -760,9 +760,15 @@ export function createJunctionDeviceSyncProvider(
     }
     const historicalSummaryHasRecords = hasJunctionHistoricalBackfillSummaryRecords(summaries, sourceProviders);
     const summaryHasFetchedRecords = hasJunctionSnapshotRecords(summaries);
-    const timeseriesWindowStart = job.kind === "backfill"
+    const baseTimeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
+    const timeseriesCursor = job.kind === "backfill"
+      ? readBackfillTimeseriesCursor(job, window)
+      : null;
+    const timeseriesWindowStart = timeseriesCursor
+      ? maxIsoTimestamp(baseTimeseriesWindowStart, timeseriesCursor)
+      : baseTimeseriesWindowStart;
     if (job.kind !== "backfill" || summaryHasFetchedRecords) {
       await context.importSnapshot({
         provider: "junction",
@@ -795,7 +801,8 @@ export function createJunctionDeviceSyncProvider(
               context,
               job,
               windowEnd: window.windowEnd,
-              windowStart: timeseriesImport.yieldedAt,
+              windowStart: job.kind === "backfill" ? window.windowStart : timeseriesImport.yieldedAt,
+              timeseriesCursor: job.kind === "backfill" ? timeseriesImport.yieldedAt : null,
             }),
             profileMetadataPatch,
           ),
@@ -1796,6 +1803,7 @@ export function createJunctionDeviceSyncProvider(
   function buildYieldedJunctionJobResult(input: {
     context: ProviderJobContext;
     job: DeviceSyncJobRecord;
+    timeseriesCursor?: string | null;
     windowEnd: string;
     windowStart: string;
   }): ProviderJobResult {
@@ -1810,6 +1818,7 @@ export function createJunctionDeviceSyncProvider(
 
   function buildYieldedJunctionFollowUpJob(input: {
     job: DeviceSyncJobRecord;
+    timeseriesCursor?: string | null;
     windowEnd: string;
     windowStart: string;
   }): DeviceSyncJobInput | null {
@@ -1817,7 +1826,27 @@ export function createJunctionDeviceSyncProvider(
       return null;
     }
 
-    if (input.job.kind === "backfill" || input.job.kind === "reconcile") {
+    if (input.job.kind === "backfill") {
+      const cursor = toIsoTimestampIfValid(input.timeseriesCursor);
+      if (!cursor || !isTimestampInHalfOpenWindow(cursor, input)) {
+        return null;
+      }
+      const followUp = buildExactWindowJob({
+        kind: "backfill",
+        priority: input.job.priority,
+        windowEnd: input.windowEnd,
+        windowStart: input.windowStart,
+      });
+      return {
+        ...followUp,
+        payload: {
+          ...followUp.payload,
+          timeseriesCursor: cursor,
+        },
+      };
+    }
+
+    if (input.job.kind === "reconcile") {
       return buildExactWindowJob({
         kind: input.job.kind,
         priority: input.job.priority,
@@ -3692,6 +3721,30 @@ function resolveJobWindow(
     windowStart: Date.parse(windowStart) > Date.parse(windowEnd) ? windowEnd : windowStart,
     windowEnd,
   };
+}
+
+function readBackfillTimeseriesCursor(
+  job: DeviceSyncJobRecord,
+  ownerWindow: { windowStart: string; windowEnd: string },
+): string | null {
+  const cursor = toIsoTimestampIfValid(job.payload.timeseriesCursor);
+  return cursor && isTimestampInHalfOpenWindow(cursor, ownerWindow)
+    ? cursor
+    : null;
+}
+
+function isTimestampInHalfOpenWindow(
+  timestamp: string,
+  window: { windowStart: string; windowEnd: string },
+): boolean {
+  const timestampMs = Date.parse(timestamp);
+  const windowStartMs = Date.parse(window.windowStart);
+  const windowEndMs = Date.parse(window.windowEnd);
+  return Number.isFinite(timestampMs)
+    && Number.isFinite(windowStartMs)
+    && Number.isFinite(windowEndMs)
+    && timestampMs >= windowStartMs
+    && timestampMs < windowEndMs;
 }
 
 function resolveCurrentSummaryWindow(
