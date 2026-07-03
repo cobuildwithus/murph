@@ -379,6 +379,28 @@ describe("hosted Linq contact-card sharing", () => {
     });
   });
 
+  it("shares the contact card for a family-sponsored member with blocked own billing", async () => {
+    const prisma = createContactCardShareRuntimeClient({
+      billingStatus: HostedBillingStatus.canceled,
+      boundChatId: "chat_first_contact",
+      boundVia: "pending",
+      familySponsored: true,
+    });
+
+    const decision = await maybeShareHostedLinqContactCardAfterOutboundForRuntime({
+      authority: null,
+      boundUserId: "member_123",
+      chatId: "chat_first_contact",
+      eligibility: {
+        service: "iMessage",
+        threadIsDirect: true,
+      },
+      prisma: prisma.client,
+    });
+
+    expect(decision).toEqual({ action: "share" });
+  });
+
   it("refuses the contact card for a suspended member even on their own chat", async () => {
     const prisma = createContactCardShareRuntimeClient({
       billingStatus: HostedBillingStatus.canceled,
@@ -505,6 +527,7 @@ function createContactCardShareRuntimeClient(input: {
   billingStatus: HostedBillingStatus;
   boundChatId: string;
   boundVia: "home" | "pending";
+  familySponsored?: boolean;
   suspendedAt?: Date | null;
 }) {
   const stub = createContactCardSharePrismaStub();
@@ -520,14 +543,29 @@ function createContactCardShareRuntimeClient(input: {
     },
     pendingLinqChatLookupKey: input.boundVia === "pending" ? lookupKey : null,
   }));
+  const memberFindUnique = vi.fn(async () => ({
+    accountGroupMemberships: input.familySponsored
+      ? [{
+          group: {
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: null,
+          },
+          status: "active",
+        }]
+      : [],
+    billingStatus: input.billingStatus,
+    suspendedAt: input.suspendedAt ?? null,
+    threadContainer: null,
+  }));
 
   return {
     ...stub,
-    // Narrow test boundary: the runtime share only reads hostedMemberRouting
-    // and hostedLinqContactCardShare, so a stub of those two models stands in
-    // for the full Prisma read client.
+    // Narrow test boundary: the runtime share only reads hostedMemberRouting,
+    // hostedMember (sponsored-access fallback), and hostedLinqContactCardShare,
+    // so a stub of those models stands in for the full Prisma read client.
     client: {
       ...stub.client,
+      hostedMember: { findUnique: memberFindUnique },
       hostedMemberRouting: { findUnique },
     } as unknown as RuntimeShareClient,
     routingFindUnique: findUnique,
