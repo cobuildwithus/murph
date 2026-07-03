@@ -3298,6 +3298,117 @@ test("device sync service wakes Junction retrying historical backfill at the ret
   }
 });
 
+test("device sync service stores Junction non-connect empty backfill retry attempts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-non-connect-empty-retry");
+  const executedAt = "2026-04-04T00:00:00.000Z";
+  const retryDueAt = "2026-04-04T00:15:00.000Z";
+  const ownerWindowStart = "2026-04-02T00:00:00.000Z";
+  const ownerWindowEnd = "2026-04-03T00:00:00.000Z";
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => new Date(executedAt),
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_fake_test_placeholder",
+        clientUserIdSecret: "test-only-hmac-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileIntervalMs: 60 * 60_000,
+        summaryBackfillDays: 2,
+        summaryResources: ["activity"],
+        timeseriesResources: [],
+        fetchImpl: async (input) => {
+          const url = new URL(readUrl(input));
+
+          if (url.pathname === "/v2/user/providers/junction-account") {
+            return createJsonResponse({
+              providers: [
+                {
+                  id: "provider-garmin-1",
+                  slug: "garmin",
+                  status: "connected",
+                  resource_availability: {
+                    activity: true,
+                  },
+                },
+              ],
+            });
+          }
+
+          if (url.pathname === "/v2/summary/activity/junction-account") {
+            return createJsonResponse({ data: [] });
+          }
+
+          throw new Error(`Unexpected Junction request during non-connect retry test: ${url.pathname}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-account",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+    const expectedDedupeKey = createHash("sha256")
+      .update(JSON.stringify(["junction", "backfill", ownerWindowStart, ownerWindowEnd]))
+      .digest("hex");
+
+    store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "backfill",
+      payload: {
+        windowStart: ownerWindowStart,
+        windowEnd: ownerWindowEnd,
+      },
+      availableAt: executedAt,
+      priority: 30,
+      dedupeKey: expectedDedupeKey,
+    });
+
+    const processedJob = await service.runWorkerOnce();
+    const jobs = readJobsForAccountForTesting(store, account.id);
+    const retryRow = jobs.find((job) => job.status === "queued");
+
+    assert.equal(processedJob?.kind, "backfill");
+    assert.equal(store.getJobById(processedJob!.id)?.status, "succeeded");
+    assert.equal(jobs.length, 2);
+    assert.ok(retryRow);
+
+    const retryJob = store.getJobById(retryRow.id);
+    assert.ok(retryJob);
+    assert.equal(retryJob.kind, "backfill");
+    assert.equal(retryJob.availableAt, retryDueAt);
+    assert.deepEqual(retryJob.payload, {
+      windowStart: ownerWindowStart,
+      windowEnd: ownerWindowEnd,
+      emptyBackfillAttempts: 1,
+    });
+    assert.equal(retryJob.dedupeKey, expectedDedupeKey);
+    assert.equal(store.getAccountById(account.id)?.metadata.junctionHistoricalBackfillStatus, undefined);
+  } finally {
+    close();
+  }
+});
+
 test("device sync service preserves Junction yielded backfill timeseries cursor in queued continuation", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-yielded-backfill-cursor");
   const ownerWindowStart = "2026-04-07T00:00:00.000Z";
@@ -3378,6 +3489,7 @@ test("device sync service preserves Junction yielded backfill timeseries cursor 
       payload: {
         windowStart: ownerWindowStart,
         windowEnd: ownerWindowEnd,
+        emptyBackfillAttempts: 2,
       },
       availableAt: ownerWindowEnd,
       priority: 30,
@@ -3399,6 +3511,7 @@ test("device sync service preserves Junction yielded backfill timeseries cursor 
     assert.deepEqual(continuation.payload, {
       windowStart: ownerWindowStart,
       windowEnd: ownerWindowEnd,
+      emptyBackfillAttempts: 2,
       timeseriesCursor: ownerWindowStart,
     });
     assert.equal(continuation.dedupeKey, expectedDedupeKey);

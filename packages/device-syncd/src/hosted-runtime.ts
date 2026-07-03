@@ -443,7 +443,7 @@ export interface HostedExecutionDeviceSyncWakeEventLike {
   provider?: string | null;
 }
 
-type HostedExecutionDeviceSyncHintPayloadFieldKind = "boolean" | "isoTimestamp" | "string";
+type HostedExecutionDeviceSyncHintPayloadFieldKind = "boolean" | "isoTimestamp" | "number" | "string";
 
 // Keep this generic wake-hint seam aligned with the current manifest-owned hosted-hint fields
 // until hosted wake parsing becomes provider-aware at this boundary.
@@ -451,6 +451,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   Record<string, HostedExecutionDeviceSyncHintPayloadFieldKind>
 > = Object.freeze({
   dataType: "string",
+  emptyBackfillAttempts: "number",
   eventType: "string",
   includePersonalInfo: "boolean",
   includeProfile: "boolean",
@@ -1033,12 +1034,14 @@ function parseHostedExecutionDeviceSyncJobHintPayloadField(
   value: unknown,
   kind: HostedExecutionDeviceSyncHintPayloadFieldKind,
   label: string,
-): boolean | string {
+): boolean | number | string {
   switch (kind) {
     case "boolean":
       return requireBoolean(value, label);
     case "isoTimestamp":
       return requireIsoTimestamp(value, label);
+    case "number":
+      return requireNumber(value, label);
     case "string":
       return requireString(value, label);
   }

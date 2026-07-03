@@ -1847,6 +1847,7 @@ export function createJunctionDeviceSyncProvider(
       if (!cursor || !isTimestampInHalfOpenWindow(cursor, input)) {
         return null;
       }
+      const emptyBackfillAttempts = readNonConnectHistoricalBackfillEmptyAttempts(input.job);
       const followUp = buildExactWindowJob({
         kind: "backfill",
         priority: input.job.priority,
@@ -1857,6 +1858,7 @@ export function createJunctionDeviceSyncProvider(
         ...followUp,
         payload: {
           ...followUp.payload,
+          ...(emptyBackfillAttempts > 0 ? { emptyBackfillAttempts } : {}),
           timeseriesCursor: cursor,
         },
       };
