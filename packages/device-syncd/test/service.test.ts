@@ -5003,6 +5003,7 @@ test("sqlite store splits connection, credential, and observation state into exp
     "metadata_json",
     "created_at",
     "expires_at",
+    "consumed_at",
   ]);
   assert.deepEqual(readTableColumnsForTesting(store, "device_credential_state"), [
     "account_id",

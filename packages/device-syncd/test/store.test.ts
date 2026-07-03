@@ -2692,6 +2692,19 @@ test("device sync store filters listed accounts by provider and returns unexpire
       },
     });
     assert.deepEqual(store.consumeOAuthState("active-state", "2026-04-07T00:05:01.000Z"), {
+      status: "replayed",
+      record: {
+        state: "active-state",
+        provider: "demo",
+        returnTo: "/devices",
+        metadata: {
+          intent: "connect",
+        },
+        createdAt: "2026-04-07T00:00:00.000Z",
+        expiresAt: "2026-04-07T00:10:00.000Z",
+      },
+    });
+    assert.deepEqual(store.consumeOAuthState("active-state", "2026-04-07T00:10:00.000Z"), {
       status: "missing",
     });
   } finally {
@@ -2813,7 +2826,18 @@ test("device sync store preserves OAuth state on owner mismatch and returns owne
         "member_a",
       ),
       {
-        status: "missing",
+        status: "replayed",
+        record: {
+          state: "owner-bound-state",
+          provider: "demo",
+          ownerId: "member_a",
+          returnTo: "/devices",
+          metadata: {
+            intent: "connect",
+          },
+          createdAt: "2026-04-07T00:00:00.000Z",
+          expiresAt: "2026-04-07T00:10:00.000Z",
+        },
       },
     );
   } finally {

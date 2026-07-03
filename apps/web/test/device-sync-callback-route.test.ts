@@ -215,6 +215,84 @@ describe("hosted device-sync callback route", () => {
     expect(location).not.toContain("dsc_");
   });
 
+  it("sends replayed callback deliveries back to the stored returnTo without asserting an outcome", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.handleConnectionCallback.mockRejectedValue(deviceSyncError({
+      code: "OAUTH_STATE_REPLAYED",
+      message: "OAuth callback state was already handled by an earlier delivery.",
+      retryable: false,
+      httpStatus: 409,
+      details: {
+        connectSourceId: "oura",
+        connectTarget: "oura",
+        provider: "junction",
+        returnTo:
+          "https://app.example.test/device-sync/connect/complete?source=assistant&connectSource=oura&connectTarget=oura&deviceSyncStatus=connected",
+      },
+    }));
+
+    const response = await connectCallbackRoute.GET(
+      new Request(
+        "https://control.example.test/api/device-sync/connect/junction/callback?murph_state=xyz&state=success&isMobile=true&provider=oura",
+      ),
+      createRouteContext({ provider: "junction" }),
+    );
+
+    expect(response.status).toBe(302);
+    const destination = new URL(response.headers.get("location")!);
+    expect(destination.origin).toBe("https://app.example.test");
+    expect(destination.pathname).toBe("/device-sync/connect/complete");
+    expect(destination.searchParams.get("source")).toBe("assistant");
+    expect(destination.searchParams.get("connectSource")).toBe("oura");
+    expect(destination.searchParams.get("deviceSyncStatus")).toBeNull();
+    expect(destination.searchParams.get("deviceSyncError")).toBeNull();
+  });
+
+  it("sends replayed callback deliveries without a stored returnTo to the connect page", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.handleConnectionCallback.mockRejectedValue(deviceSyncError({
+      code: "OAUTH_STATE_REPLAYED",
+      message: "OAuth callback state was already handled by an earlier delivery.",
+      retryable: false,
+      httpStatus: 409,
+      details: {
+        provider: "junction",
+        returnTo: "javascript:alert(1)",
+      },
+    }));
+
+    const response = await connectCallbackRoute.GET(
+      new Request("https://control.example.test/api/device-sync/connect/junction/callback?murph_state=xyz"),
+      createRouteContext({ provider: "junction" }),
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("https://control.example.test/connect");
+  });
+
+  it("redirects unknown-state failures to the connect page instead of a dead-end page", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.handleConnectionCallback.mockRejectedValue(deviceSyncError({
+      code: "OAUTH_STATE_INVALID",
+      message: "OAuth state is invalid or expired.",
+      retryable: false,
+      httpStatus: 400,
+    }));
+
+    const response = await connectCallbackRoute.GET(
+      new Request("https://control.example.test/api/device-sync/connect/junction/callback?murph_state=stale"),
+      createRouteContext({ provider: "junction" }),
+    );
+
+    expect(response.status).toBe(302);
+    const destination = new URL(response.headers.get("location")!);
+    expect(destination.origin).toBe("https://control.example.test");
+    expect(destination.pathname).toBe("/connect");
+    expect(destination.searchParams.get("deviceSyncStatus")).toBe("error");
+    expect(destination.searchParams.get("deviceSyncError")).toBe("OAUTH_STATE_INVALID");
+    expect(destination.searchParams.get("deviceSyncProvider")).toBe("junction");
+  });
+
   it("uses generic callback html when device errors cannot redirect safely", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.handleConnectionCallback.mockRejectedValue(deviceSyncError({
