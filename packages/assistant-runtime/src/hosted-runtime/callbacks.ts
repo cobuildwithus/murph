@@ -251,6 +251,12 @@ export async function collectHostedAssistantDeliverySideEffects(
         preferredBoundaryOrder,
       })
     );
+  const retainedForegroundCandidates =
+    await abandonSupersededHostedAutoReplyForegroundCandidates({
+      candidates: foregroundCandidates,
+      preferredIntentOrder,
+      vaultRoot: request.vaultRoot,
+    });
   const backgroundCandidates = request.includeBackgroundDueIntents
     ? candidates
         .filter((intent) => {
@@ -266,18 +272,18 @@ export async function collectHostedAssistantDeliverySideEffects(
   const filteredBackgroundCandidates =
     await abandonStaleSignupWelcomeBackgroundCandidatesAfterForegroundReply({
       backgroundCandidates,
-      foregroundCandidates,
+      foregroundCandidates: retainedForegroundCandidates,
       vaultRoot: request.vaultRoot,
     });
   const cappedBackgroundCandidates = filteredBackgroundCandidates.slice(
     0,
     Math.max(
       0,
-      HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS - foregroundCandidates.length,
+      HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS - retainedForegroundCandidates.length,
     ),
   );
   const effects = [
-    ...foregroundCandidates.map((intent) =>
+    ...retainedForegroundCandidates.map((intent) =>
       buildHostedAssistantDeliveryEffectFromIntent(intent, "foreground_current_turn")
     ),
     ...cappedBackgroundCandidates.map((intent) =>
@@ -513,6 +519,90 @@ async function abandonStaleSignupWelcomeBackgroundCandidatesAfterForegroundReply
     retained.push(intent);
   }
   return retained;
+}
+
+async function abandonSupersededHostedAutoReplyForegroundCandidates(input: {
+  candidates: readonly AssistantOutboxIntent[];
+  preferredIntentOrder: ReadonlyMap<string, number>;
+  vaultRoot: string;
+}): Promise<AssistantOutboxIntent[]> {
+  if (input.candidates.length < 2 || input.preferredIntentOrder.size === 0) {
+    return [...input.candidates];
+  }
+
+  const autoReplyIntentIds = await findAssistantAutoReplyDeliveryIntentIds({
+    intents: input.candidates.map((intent) => ({
+      intentId: intent.intentId,
+      turnId: intent.turnId,
+    })),
+    vault: input.vaultRoot,
+  });
+  if (autoReplyIntentIds.size === 0) {
+    return [...input.candidates];
+  }
+
+  const retainedIntentIds = new Set(input.candidates.map((intent) => intent.intentId));
+  for (const boundaryIntents of groupHostedAssistantDeliveryBoundaryIntents(
+    input.candidates,
+  ).values()) {
+    const replaceable = boundaryIntents.filter((intent) =>
+      isReplaceableHostedAutoReplyForegroundDelivery({
+        autoReplyIntentIds,
+        intent,
+      })
+    );
+    if (replaceable.length < 2) {
+      continue;
+    }
+
+    const preferredReplaceableIntentIds = new Set(
+      replaceable
+        .filter((intent) => input.preferredIntentOrder.has(intent.intentId))
+        .map((intent) => intent.intentId),
+    );
+    if (preferredReplaceableIntentIds.size === 0) {
+      continue;
+    }
+
+    for (const intent of replaceable) {
+      if (preferredReplaceableIntentIds.has(intent.intentId)) {
+        continue;
+      }
+      await markAssistantOutboxIntentMirrorTerminalById({
+        error: new VaultCliError(
+          "ASSISTANT_SUPERSEDED_AUTO_REPLY_DELIVERY_SUPPRESSED",
+          "Superseded auto-reply delivery suppressed after a newer current-turn reply for the same route.",
+        ),
+        intentId: intent.intentId,
+        status: "abandoned",
+        vault: input.vaultRoot,
+      });
+      retainedIntentIds.delete(intent.intentId);
+    }
+  }
+
+  return input.candidates.filter((intent) => retainedIntentIds.has(intent.intentId));
+}
+
+function isReplaceableHostedAutoReplyForegroundDelivery(input: {
+  autoReplyIntentIds: ReadonlySet<string>;
+  intent: AssistantOutboxIntent;
+}): boolean {
+  const intent = input.intent;
+  return (
+    input.autoReplyIntentIds.has(intent.intentId)
+    && (intent.channel === "linq" || intent.channel === "email")
+    && intent.operation === null
+    && intent.status === "pending"
+    && intent.attemptCount === 0
+    && intent.lastAttemptAt === null
+    && intent.sentAt === null
+    && intent.delivery === null
+    && intent.deliveryConfirmationPending === false
+    && intent.preparedDispatchToken === null
+    && typeof intent.deliveryIdempotencyKey === "string"
+    && intent.deliveryIdempotencyKey.startsWith("sha256:")
+  );
 }
 
 function isHostedSignupWelcomeDeliveryPayload(

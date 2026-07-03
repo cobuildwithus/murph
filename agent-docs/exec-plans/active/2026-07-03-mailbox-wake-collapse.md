@@ -360,6 +360,16 @@ Touch: `webhook-service-types.ts:17-26`;
   before importing fresh pre-dispatch work. Focused local proof:
   `pnpm --dir packages/assistant-runtime test -- hosted-runtime-workspace-runner.test.ts -t "pre-auto-reply delivery preparation drains pending Linq outcomes before fresh imports"`
   passed.
+- PR 1 CI follow-up (2026-07-03): the next Linq webhook CI run proved a
+  second, simpler duplicate path: active-turn input can replace the
+  hosted auto-reply final delivery with a wider idempotency key while the
+  initial unattempted final delivery remains on the same foreground
+  boundary. The outbox collector now abandons superseded same-boundary
+  hosted auto-reply finals when the current turn has a preferred final
+  intent, preserving steered segments/reactions but preventing two Linq
+  text replies from dispatching in one drain. Focused local proof:
+  `pnpm --dir packages/assistant-runtime test -- hosted-runtime-callbacks.test.ts -t "abandons superseded hosted auto-reply same-boundary foreground replies"`
+  and `CI=true pnpm hosted-local e2e linq-webhook --no-bundle` passed.
 - PR 2: workflow replay tests per the patch procedure + Temporal
   orchestration E2E; full webhook owner suites for the wake-field
   collapse.

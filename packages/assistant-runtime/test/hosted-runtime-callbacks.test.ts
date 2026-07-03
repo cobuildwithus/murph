@@ -833,6 +833,93 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("abandons superseded hosted auto-reply same-boundary foreground replies", async () => {
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValueOnce(
+      new Set(["intent_initial", "intent_final"]),
+    );
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        attemptCount: 0,
+        bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:01:00.000Z",
+        dedupeKey: "dedupe_initial",
+        delivery: null,
+        deliveryConfirmationPending: false,
+        deliveryIdempotencyKey: `sha256:${"1".repeat(64)}`,
+        deliveryTransportIdempotent: false,
+        explicitTarget: null,
+        identityId: "identity_1",
+        intentId: "intent_initial",
+        lastAttemptAt: null,
+        lastError: null,
+        media: [],
+        message: "reply before active input",
+        nextAttemptAt: "2026-04-08T00:01:00.000Z",
+        operation: null,
+        preparedDispatchToken: null,
+        replyToMessageId: "linq_message_1",
+        sentAt: null,
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_active",
+      },
+      {
+        actorId: "actor_1",
+        attemptCount: 0,
+        bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+        channel: "linq",
+        createdAt: "2026-04-08T00:01:01.000Z",
+        dedupeKey: "dedupe_final",
+        delivery: null,
+        deliveryConfirmationPending: false,
+        deliveryIdempotencyKey: `sha256:${"2".repeat(64)}`,
+        deliveryTransportIdempotent: false,
+        explicitTarget: null,
+        identityId: "identity_1",
+        intentId: "intent_final",
+        lastAttemptAt: null,
+        lastError: null,
+        media: [],
+        message: "reply after active input",
+        nextAttemptAt: "2026-04-08T00:01:01.000Z",
+        operation: null,
+        preparedDispatchToken: null,
+        replyToMessageId: "linq_message_2",
+        sentAt: null,
+        sessionId: "session_1",
+        status: "pending",
+        subject: null,
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_active",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_final"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      "intent_final",
+    ]);
+    expect(sideEffects[0]?.payload.message).toBe("reply after active input");
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith({
+      error: expect.objectContaining({
+        code: "ASSISTANT_SUPERSEDED_AUTO_REPLY_DELIVERY_SUPPRESSED",
+      }),
+      intentId: "intent_initial",
+      status: "abandoned",
+      vault: "/tmp/vault",
+    });
+  });
+
   it("trusts the persisted transport idempotency flag for Linq effects", async () => {
     mocks.listAssistantOutboxIntents.mockResolvedValue([
       {
