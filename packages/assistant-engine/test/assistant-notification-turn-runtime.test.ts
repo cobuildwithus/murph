@@ -921,6 +921,196 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   })
 })
 
+test('an organic same-route reply supersedes the exact-text signup welcome through the real first-contact state', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-first-contact-supersede-'))
+  const routeBinding = {
+    actorId: 'hid_linq_actor_supersede',
+    channel: 'linq',
+    conversationKey: null,
+    delivery: {
+      kind: 'thread' as const,
+      target: 'hid_linq_thread_supersede',
+    },
+    identityId: 'hid_linq_identity_supersede',
+    threadId: 'hid_linq_thread_supersede',
+    threadIsDirect: true,
+  }
+  const initialSession = createAssistantSession({
+    binding: routeBinding,
+  })
+  const sharedPlan = createSharedPlan()
+  const deliverMessage = vi.fn(async () => {
+    throw new Error('superseded signup welcome must not reach the outbox')
+  })
+  const runtimeState = {
+    outbox: {
+      deliverMessage,
+    },
+    status: {
+      refreshSnapshot: vi.fn(async () => undefined),
+    },
+    turns: {
+      createReceipt: vi.fn(async () => undefined),
+      finalizeReceipt: vi.fn(async () => undefined),
+    },
+    diagnostics: {
+      recordEvent: vi.fn(async () => undefined),
+    },
+  }
+  const mocks = {
+    createAssistantRuntimeStateService: vi.fn(() => runtimeState),
+    executeCodexTurnWithRecovery: vi.fn(async () => {
+      throw new Error('provider should not run for a superseded exact-text welcome')
+    }),
+    normalizeAssistantExecutionContext: vi.fn((value) => value),
+    resolveAssistantExecutionDefaultTarget: vi.fn((input) => input.fallbackTarget),
+    resolveAssistantExecutionOperatorDefaults: vi.fn((input) => input.defaults ?? null),
+    persistAssistantTurnAndSession: vi.fn(async () => {
+      throw new Error('provider finalizer should not run for a superseded welcome')
+    }),
+    recordAdditionalAssistantUsageEvents: vi.fn(async () => undefined),
+    recordAssistantUsageEvent: vi.fn(async () => undefined),
+    resolveAssistantOperatorDefaults: vi.fn(async () => null),
+    resolveAssistantSessionForMessage: vi.fn(async () => ({
+      created: false,
+      session: initialSession,
+    })),
+    resolveAssistantTurnRoute: vi.fn(() => createRoute()),
+    resolveAssistantTurnSharedPlan: vi.fn(async () => sharedPlan),
+    withAssistantTurnLock: vi.fn(async (input: { run(): Promise<unknown> }) => await input.run()),
+  }
+
+  vi.doMock('@murphai/operator-config/operator-config', () => ({
+    resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
+  }))
+  vi.doMock('@murphai/operator-config/assistant-backend', () => ({
+    createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
+  }))
+  vi.doMock('../src/assistant/runtime-state-service.js', () => ({
+    createAssistantRuntimeStateService: mocks.createAssistantRuntimeStateService,
+  }))
+  vi.doMock('../src/assistant/execution-context.js', () => ({
+    normalizeAssistantExecutionContext: mocks.normalizeAssistantExecutionContext,
+    resolveAssistantExecutionDefaultTarget:
+      mocks.resolveAssistantExecutionDefaultTarget,
+    resolveAssistantExecutionOperatorDefaults:
+      mocks.resolveAssistantExecutionOperatorDefaults,
+  }))
+  vi.doMock('../src/assistant/session-resolution.js', () => ({
+    resolveAssistantSessionForMessage: mocks.resolveAssistantSessionForMessage,
+    resolveAssistantSessionTarget: vi.fn(() => createCodexTarget()),
+  }))
+  vi.doMock('../src/assistant/turn-plan.js', () => ({
+    resolveAssistantTurnSharedPlan: mocks.resolveAssistantTurnSharedPlan,
+  }))
+  vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
+    executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
+  }))
+  vi.doMock('../src/assistant/service-usage.js', () => ({
+    recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
+    recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
+  }))
+  vi.doMock('../src/assistant/turn-finalizer.js', () => ({
+    clearAssistantSessionCodexResumeState: vi.fn(async (input: { session: AssistantSession }) => input.session),
+    persistAssistantTurnAndSession: mocks.persistAssistantTurnAndSession,
+  }))
+  vi.doMock('../src/assistant/service-turn-routes.js', () => ({
+    resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
+  }))
+  vi.doMock('../src/assistant/turns.js', () => ({
+    createAssistantTurnId: () => 'turn-supersede',
+  }))
+  vi.doMock('../src/assistant/channel-adapters.js', async () => {
+    const actual = await vi.importActual<
+      typeof import('../src/assistant/channel-adapters.ts')
+    >('../src/assistant/channel-adapters.js')
+
+    return {
+      ...actual,
+      getAssistantChannelAdapter: vi.fn(() => null),
+    }
+  })
+  vi.doMock('../src/assistant/turn-lock.js', () => ({
+    withAssistantTurnLock: mocks.withAssistantTurnLock,
+  }))
+  // The first-contact module is intentionally NOT mocked: the organic reply
+  // writes the marker to the real vault state directory and the notification
+  // turn reads it back, proving both sides resolve the same route doc ids.
+
+  try {
+    const { resolveAssistantFirstContactStateDocIds } = await import(
+      '../src/assistant/first-contact.ts'
+    )
+    // Same locator shape the conversation turn resolves in
+    // resolveAssistantTurnSharedPlan (turn-plan.ts) from its
+    // conversation-policy audience / session binding.
+    const organicReplyDocIds = resolveAssistantFirstContactStateDocIds({
+      actorId: routeBinding.actorId,
+      channel: routeBinding.channel,
+      identityId: routeBinding.identityId,
+      threadId: routeBinding.threadId,
+      threadIsDirect: routeBinding.threadIsDirect,
+    })
+    expect(organicReplyDocIds.length).toBeGreaterThan(0)
+
+    const { finalizeAssistantTurnFromDeliveryOutcome } = await import(
+      '../src/assistant/delivery-service.ts'
+    )
+    await finalizeAssistantTurnFromDeliveryOutcome({
+      firstContactGuidanceInjected: true,
+      firstContactStateDocIds: organicReplyDocIds,
+      outcome: {
+        delivery: {
+          channel: 'linq',
+          idempotencyKey: null,
+          messageLength: 33,
+          providerMessageId: 'provider-organic-reply',
+          providerThreadId: null,
+          sentAt: '2026-04-08T12:00:00.000Z',
+          target: routeBinding.threadId,
+          targetKind: 'thread',
+        },
+        intentId: 'intent-organic-reply',
+        kind: 'sent',
+        media: [],
+        session: initialSession,
+      },
+      response: 'Nice. First, what should I call you?',
+      turnId: 'turn-organic-reply',
+      vault,
+    })
+
+    const { sendAssistantNotificationLocal } = await import(
+      '../src/assistant/notification-turn.ts'
+    )
+    const result = await sendAssistantNotificationLocal({
+      deliveryDedupeToken: 'signup-welcome:member_supersede',
+      deliveryDispatchMode: 'queue-only',
+      deliveryIdempotencyKey: 'signup-welcome:member_supersede',
+      firstContactPolicy: {
+        markSeenOnDeliveryAccepted: true,
+      },
+      instructions: 'Send the fixed hosted signup welcome.',
+      responsePolicy: {
+        kind: 'require_send_exact_text',
+        text: 'Fixed welcome text',
+      },
+      vault,
+    })
+
+    expect(result.decision).toEqual({
+      kind: 'skip',
+      privateSummary: 'First-contact notification already accepted for this route.',
+    })
+    expect(result.response).toBeNull()
+    expect(deliverMessage).not.toHaveBeenCalled()
+    expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+    expect(runtimeState.turns.createReceipt).not.toHaveBeenCalled()
+  } finally {
+    await rm(vault, { force: true, recursive: true })
+  }
+})
+
 test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery keys centrally', async () => {
   const linqSession = createAssistantSession({
     binding: {
