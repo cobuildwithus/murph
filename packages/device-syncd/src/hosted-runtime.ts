@@ -33,50 +33,24 @@ const HOSTED_RUNTIME_ERROR_WINDOWS_PATH_PATTERN = /[A-Za-z]:\\[^\s)"']+/gu;
 const HOSTED_RUNTIME_ERROR_URL_PATTERN = /\bhttps?:\/\/[^\s)"']+/giu;
 const HOSTED_RUNTIME_ERROR_EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu;
 const HOSTED_RUNTIME_ERROR_PHONE_PATTERN = /(?:\+\d[\d().\s-]{7,}\d|\(\d{3}\)\s*\d{3}[-.\s]\d{4}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b)/gu;
-// Braces, primitive/structured arrays, and quoted-key colons signal a raw
-// structured payload dump (JSON or object-repr, quoted or not), which can carry
-// arbitrary values under keys the span redactors do not know; those stay
-// fail-closed.
-// Bare square brackets around prose are allowed so bracketed validation
-// suffixes (for example pydantic's `[type=...]`) survive with their values
-// span-redacted.
+// Braces, structured-looking bracket segments, primitive arrays, and quoted-key
+// colons signal a raw structured payload dump or validation suffix that can
+// carry arbitrary values under keys the span redactors do not know; those stay
+// fail-closed. Bare square brackets around prose are allowed.
 const HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN =
-  /[{}]|\[\s*(?:["'{]|\d|(?:true|false|null)\b)|\[[^\]=]*,|["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
-const HOSTED_RUNTIME_DIAGNOSTIC_BRACKET_SEGMENT_PATTERN = /\[[^\]]*\]?/gu;
-const HOSTED_RUNTIME_DIAGNOSTIC_BRACKET_KEY_PATTERN = /\b([A-Za-z_][A-Za-z0-9_]*)\s*=/gu;
-const HOSTED_RUNTIME_DIAGNOSTIC_ALLOWED_BRACKET_KEYS = new Set([
-  "ctx",
-  "input",
-  "input_type",
-  "input_value",
-  "loc",
-  "msg",
-  "type",
-  "url",
-  "value",
-]);
+  /[{}]|\[[^\]]*[=,]|\[\s*(?:["']|\d|(?:true|false|null)\b)|["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
 // Default-ignorable format characters (zero-width spaces/joiners, soft
 // hyphens, BOM) can split an identifier visually without changing how it
 // renders; strip them before span matching so they cannot defeat the masks.
 const HOSTED_RUNTIME_DIAGNOSTIC_FORMAT_CHAR_PATTERN = /[\u00AD\u200B-\u200F\u2060-\u2064\uFEFF]/gu;
 const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN =
   /\b((?:account|client|external|member|owner|patient|provider[_\s-]?account|subject|team|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*[:=]\s*["']?)[A-Za-z0-9._~+/:=-]+/giu;
-// Validation errors often echo the offending input back (for example pydantic
-// `input_value=...` suffixes); those values can be identifiers, so mask them
-// regardless of what the surrounding prose looks like. Quoted echoes mask the
-// whole quoted value; unquoted echoes mask up to the next delimiter.
-const HOSTED_RUNTIME_DIAGNOSTIC_QUOTED_ECHOED_INPUT_PATTERN =
-  /\b((?:input(?:[_\s-]?value)?|value|ctx)\s*[:=]\s*)(?:"[^"]*"|'[^']*')/giu;
-const HOSTED_RUNTIME_DIAGNOSTIC_ECHOED_INPUT_PATTERN =
-  /\b((?:input(?:[_\s-]?value)?|value|ctx)\s*[:=]\s*["']?)[^\s,;\])"']+/giu;
 // Identifier values also appear as bare phrases ("user hbm_abc123xyz",
 // 'user id "hbm_abc123xyz"'); mask the value when it looks id-shaped
 // (contains a digit or underscore) so plain words ("user profile") stay
 // readable.
 const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_PHRASE_PATTERN =
   /\b((?:account|client|external|member|owner|patient|subject|team|user)(?:\s+(?:id|identifier))?\s+["']?)(?=[A-Za-z0-9._:-]*[\d_])[A-Za-z0-9._:-]{6,}\b/giu;
-const HOSTED_RUNTIME_DIAGNOSTIC_TOKEN_PHRASE_PATTERN =
-  /\b((?:access|id|refresh|session)\s+token\s+["']?)(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{6,}/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_IPV4_PATTERN = /\b\d{1,3}(?:\.\d{1,3}){3}\b/gu;
 // The catch-all for id-shaped values in any remaining context (quoted,
 // bracketed, mid-prose): a token of six or more characters containing a digit
@@ -2307,38 +2281,8 @@ function matchesEntireHostedRuntimeDiagnosticToken(pattern: RegExp, value: strin
   return match?.[0] === value;
 }
 
-function hasOnlyAllowedHostedRuntimeDiagnosticBracketKeys(value: string): boolean {
-  HOSTED_RUNTIME_DIAGNOSTIC_BRACKET_SEGMENT_PATTERN.lastIndex = 0;
-
-  let segmentMatch: RegExpExecArray | null;
-  while ((segmentMatch = HOSTED_RUNTIME_DIAGNOSTIC_BRACKET_SEGMENT_PATTERN.exec(value)) !== null) {
-    const segment = segmentMatch[0];
-    if (!segment.includes("=")) {
-      continue;
-    }
-
-    let sawKey = false;
-    HOSTED_RUNTIME_DIAGNOSTIC_BRACKET_KEY_PATTERN.lastIndex = 0;
-
-    let keyMatch: RegExpExecArray | null;
-    while ((keyMatch = HOSTED_RUNTIME_DIAGNOSTIC_BRACKET_KEY_PATTERN.exec(segment)) !== null) {
-      sawKey = true;
-      const key = keyMatch[1];
-      if (!key || !HOSTED_RUNTIME_DIAGNOSTIC_ALLOWED_BRACKET_KEYS.has(key)) {
-        return false;
-      }
-    }
-
-    if (!sawKey) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-// Redacts by masking the unsafe spans (ids, token phrases, long tokens) so
-// provider error prose stays debuggable. Raw structured payload dumps fail
+// Redacts by masking the unsafe spans (ids, digit-bearing tokens, long tokens)
+// so provider error prose stays debuggable. Raw structured payload dumps fail
 // closed before span masking or the diagnostic length cap, because masking and
 // prefix clamping can make a structured leak look like safe prose.
 export function sanitizeHostedRuntimeDiagnosticText(value: string | null): string | null {
@@ -2347,7 +2291,6 @@ export function sanitizeHostedRuntimeDiagnosticText(value: string | null): strin
   if (
     !sanitizedBase
     || HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN.test(sanitizedBase)
-    || !hasOnlyAllowedHostedRuntimeDiagnosticBracketKeys(sanitizedBase)
   ) {
     return null;
   }
@@ -2360,10 +2303,7 @@ export function sanitizeHostedRuntimeDiagnosticText(value: string | null): strin
     .replace(HOSTED_RUNTIME_ERROR_EMAIL_PATTERN, "<redacted-email>")
     .replace(HOSTED_RUNTIME_ERROR_PHONE_PATTERN, "<redacted-phone>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN, "$1<redacted-id>")
-    .replace(HOSTED_RUNTIME_DIAGNOSTIC_QUOTED_ECHOED_INPUT_PATTERN, "$1'<redacted-value>'")
-    .replace(HOSTED_RUNTIME_DIAGNOSTIC_ECHOED_INPUT_PATTERN, "$1<redacted-value>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_PHRASE_PATTERN, "$1<redacted-id>")
-    .replace(HOSTED_RUNTIME_DIAGNOSTIC_TOKEN_PHRASE_PATTERN, "$1<redacted-token>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_IPV4_PATTERN, "<redacted-ip>")
     .replace(
       HOSTED_RUNTIME_DIAGNOSTIC_DIGIT_TOKEN_PATTERN,

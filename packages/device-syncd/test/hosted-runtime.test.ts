@@ -1934,24 +1934,30 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     ).toBe("user_id=<redacted-id> rejected");
   });
 
-  it("masks token phrases in prose", () => {
+  it("masks token phrases through the digit-token rule", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("refresh token abc123 leaked"),
     ).toBe("refresh token <redacted-token> leaked");
   });
 
-  it("keeps bracketed validation prose", () => {
+  it("keeps plain bracketed prose and fails closed on validation suffixes", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Provider returned [timeout] while checking sleep_cycle"),
+    ).toBe("Provider returned [timeout] while checking sleep_cycle");
+
+    // Structured validation info must arrive through JSON fields, not
+    // best-effort parsing of semi-structured prose suffixes.
     expect(
       sanitizeHostedRuntimeDiagnosticText(
         "Datetimes provided to dates should have zero time [type=date_from_datetime_inexact]",
       ),
-    ).toBe("Datetimes provided to dates should have zero time [type=date_from_datetime_inexact]");
+    ).toBeNull();
     expect(
       sanitizeHostedRuntimeDiagnosticText("rejected [input_value='Jane Doe', input_type=str]"),
-    ).toBe("rejected [input_value='<redacted-value>', input_type=str]");
+    ).toBeNull();
   });
 
-  it("fails closed on bracketed assignment lists with unknown keys", () => {
+  it("fails closed on bracketed assignment and comma segments", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("Validation failed [user_id=1234, display_name=Jane Doe]"),
     ).toBeNull();
@@ -2005,19 +2011,19 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     ).toBe("request from <redacted-ip> denied");
   });
 
-  it("masks quoted echoed input values as a whole", () => {
+  it("fails closed on quoted echoed input values", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("rejected [input_value='user junction-user-1', input_type=str]"),
-    ).toBe("rejected [input_value='<redacted-value>', input_type=str]");
+    ).toBeNull();
     const quotedInput = sanitizeHostedRuntimeDiagnosticText("rejected [input_value='Jane Doe', input_type=str]");
-    expect(quotedInput).toBe("rejected [input_value='<redacted-value>', input_type=str]");
-    expect(quotedInput).not.toContain("Doe");
+    expect(quotedInput).toBeNull();
+    expect(quotedInput ?? "").not.toContain("Doe");
     const mixedQuoteInput = sanitizeHostedRuntimeDiagnosticText(
       "rejected [input_value=\"Jane's device\", input_type=str]",
     );
-    expect(mixedQuoteInput).toBe("rejected [input_value='<redacted-value>', input_type=str]");
-    expect(mixedQuoteInput).not.toContain("Jane");
-    expect(mixedQuoteInput).not.toContain("device");
+    expect(mixedQuoteInput).toBeNull();
+    expect(mixedQuoteInput ?? "").not.toContain("Jane");
+    expect(mixedQuoteInput ?? "").not.toContain("device");
   });
 
   it("strips default-ignorable format characters before masking", () => {
@@ -2046,17 +2052,24 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     expect(sanitized?.length).toBeLessThanOrEqual(512);
   });
 
-  it("masks echoed validation input values inside bracket suffixes", () => {
+  it("fails closed on echoed validation input values inside bracket suffixes", () => {
+    // Structured validation info must arrive through JSON fields, not
+    // best-effort parsing of semi-structured prose suffixes.
     expect(
       sanitizeHostedRuntimeDiagnosticText(
         "Input should be a valid date [type=value_error, input_value=junction-user-1, input_type=str]",
       ),
-    ).toBe("Input should be a valid date [type=value_error, input_value=<redacted-value>, input_type=str]");
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText(
+        "Input should be valid [type=value_error, input_value=Jane Doe, input_type=str]",
+      ),
+    ).toBeNull();
     expect(
       sanitizeHostedRuntimeDiagnosticText(
         "Input should be a valid date [type=value_error, input_value='Jane Doe', input_type=str]",
       ),
-    ).toBe("Input should be a valid date [type=value_error, input_value='<redacted-value>', input_type=str]");
+    ).toBeNull();
   });
 
   it("masks id-shaped identifier phrases while keeping plain words", () => {

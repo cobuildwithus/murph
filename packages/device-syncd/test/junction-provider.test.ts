@@ -6031,7 +6031,7 @@ test("Junction ambiguous skip detail drops id-shaped provider error codes", asyn
   assert.equal(JSON.stringify(result.metadataPatch).includes("11649ed4"), false);
 });
 
-test("Junction ambiguous skip detail reads top-level provider validation arrays", async () => {
+test("Junction ambiguous skip detail reads FastAPI-shaped sleep_cycle validation arrays", async () => {
   const warnings: Record<string, unknown>[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
@@ -6086,7 +6086,7 @@ test("Junction ambiguous skip detail reads top-level provider validation arrays"
   assert.equal(warnings[0]?.responseDetail, expectedDetail);
 });
 
-test("Junction ambiguous skip detail masks quoted validation input echoes", async () => {
+test("Junction ambiguous skip detail fails closed on quoted validation input echoes", async () => {
   const warnings: Record<string, unknown>[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
@@ -6133,17 +6133,72 @@ test("Junction ambiguous skip detail masks quoted validation input echoes", asyn
     }),
   );
 
-  const expectedDetail =
-    "Input should be a valid date [type=value_error, input_value='<redacted-value>', input_type=str]";
   const storedDetail = result.metadataPatch?.junctionSkippedResourceLastDetail;
   const warningDetail = warnings[0]?.responseDetail;
 
-  assert.equal(storedDetail, expectedDetail);
-  assert.equal(warningDetail, expectedDetail);
-  assert.equal(typeof storedDetail === "string" && storedDetail.includes("Doe"), false);
-  assert.equal(typeof warningDetail === "string" && warningDetail.includes("Doe"), false);
-  assert.equal(typeof storedDetail === "string" && storedDetail.includes("input_type=str"), true);
-  assert.equal(typeof warningDetail === "string" && warningDetail.includes("input_type=str"), true);
+  // Structured validation info must arrive via JSON fields, not string parsing.
+  assert.equal(storedDetail, null);
+  assert.equal(warningDetail, undefined);
+
+  for (const exposed of [JSON.stringify(warnings), JSON.stringify(result.metadataPatch)]) {
+    assert.equal(exposed.includes("Doe"), false);
+    assert.equal(exposed.includes("input_type=str"), false);
+  }
+});
+
+test("Junction ambiguous skip detail ignores top-level primitive arrays", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse(["Jane Doe"], 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, undefined);
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, null);
+
+  for (const exposed of [JSON.stringify(warnings), JSON.stringify(result.metadataPatch)]) {
+    assert.equal(exposed.includes("Jane"), false);
+    assert.equal(exposed.includes("Doe"), false);
+  }
 });
 
 test("Junction ambiguous skip detail drops bracketed diagnostics with unknown keys", async () => {

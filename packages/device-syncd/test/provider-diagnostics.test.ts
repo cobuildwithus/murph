@@ -38,6 +38,39 @@ test("provider diagnostics read top-level JSON array validation entries", () => 
   );
 });
 
+test("provider diagnostics read nested JSON array validation entries", () => {
+  assert.deepEqual(
+    inspectProviderErrorBody(JSON.stringify({
+      detail: [
+        {
+          type: "value_error.date",
+          msg: "start_date must be before end_date",
+        },
+      ],
+    })),
+    {
+      responseErrorCode: "value_error.date",
+      responseErrorDescription: "start_date must be before end_date",
+      responseErrorDescriptionFieldPresent: true,
+      responseErrorFieldPresent: true,
+      responseShapeKind: "json_object",
+    },
+  );
+});
+
+test("provider diagnostics ignore top-level primitive JSON array entries", () => {
+  assert.deepEqual(
+    inspectProviderErrorBody(JSON.stringify(["Jane Doe"])),
+    {
+      responseErrorCode: null,
+      responseErrorDescription: null,
+      responseErrorDescriptionFieldPresent: false,
+      responseErrorFieldPresent: false,
+      responseShapeKind: "json_array",
+    },
+  );
+});
+
 test("provider diagnostics keep word-like error codes", () => {
   assert.equal(
     inspectProviderErrorBody(JSON.stringify({ code: "invalid_request" })).responseErrorCode,

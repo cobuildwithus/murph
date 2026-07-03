@@ -304,14 +304,15 @@ function readFirstSafeProviderErrorDescription(
   return null;
 }
 
-// Nested error containers arrive as an array of entries, a single object, or
-// a single string depending on the provider (for example FastAPI's `detail`
-// is an array of objects, but object- and string-shaped bodies exist too).
+// Nested error containers arrive as an array of entries or a single object
+// depending on the provider. Only object entries are trusted to carry typed
+// error fields; primitive arrays are treated as raw structured payloads and
+// yield no description.
 function readNestedErrorEntries(value: unknown): readonly unknown[] {
   if (Array.isArray(value)) {
     return value;
   }
-  return typeof value === "string" || (value !== null && typeof value === "object") ? [value] : [];
+  return value !== null && typeof value === "object" ? [value] : [];
 }
 
 function readNestedErrorsCode(value: unknown): string | null {
@@ -332,14 +333,6 @@ function readNestedErrorsCode(value: unknown): string | null {
 
 function readNestedErrorsDescription(value: unknown): string | null {
   for (const entry of readNestedErrorEntries(value)) {
-    if (typeof entry === "string") {
-      const sanitized = sanitizeProviderDiagnosticReasonText(entry);
-      if (sanitized) {
-        return sanitized;
-      }
-      continue;
-    }
-
     if (entry && typeof entry === "object" && !Array.isArray(entry)) {
       const sanitized = readFirstSafeProviderErrorDescription(
         entry as Record<string, unknown>,
@@ -364,11 +357,10 @@ function hasNestedErrorsCode(value: unknown): boolean {
 
 function hasNestedErrorsDescription(value: unknown): boolean {
   return readNestedErrorEntries(value).some((entry) =>
-    typeof entry === "string"
-    || (entry
-      && typeof entry === "object"
-      && !Array.isArray(entry)
-      && hasAnyOwnProperty(entry as Record<string, unknown>, PROVIDER_ERROR_DESCRIPTION_FIELDS)));
+    entry
+    && typeof entry === "object"
+    && !Array.isArray(entry)
+    && hasAnyOwnProperty(entry as Record<string, unknown>, PROVIDER_ERROR_DESCRIPTION_FIELDS));
 }
 
 function sanitizeProviderDiagnosticReasonText(value: string): string | null {
