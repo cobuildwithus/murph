@@ -134,6 +134,42 @@ describe("hosted runtime maintenance ops", () => {
     }));
   });
 
+  it("keeps family-sponsored members and containers as maintenance candidates while filtering inactive access", async () => {
+    mocks.hostedWorkspace.count.mockResolvedValue(3);
+    mocks.hostedWorkspace.findMany.mockResolvedValue([
+      workspaceRow("member_sponsored", "10", {
+        accountGroupMemberships: [{
+          group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+          status: "active",
+        }],
+        billingStatus: HostedBillingStatus.not_started,
+      }),
+      workspaceRow("member_container", "11", {
+        billingStatus: HostedBillingStatus.not_started,
+        threadContainer: {
+          owner: {
+            accountGroupMemberships: [],
+            billingStatus: HostedBillingStatus.active,
+            suspendedAt: null,
+          },
+        },
+      }),
+      workspaceRow("member_inactive", "12", {
+        billingStatus: HostedBillingStatus.canceled,
+      }),
+    ]);
+
+    await expect(runtimeMaintenanceService.readHostedRuntimeMaintenanceOverview({
+      limit: 3,
+    })).resolves.toMatchObject({
+      candidates: [
+        { userId: "member_sponsored" },
+        { userId: "member_container" },
+      ],
+      nextCursor: null,
+    });
+  });
+
   it("caps batch wakes and returns the read cursor from the candidate page", async () => {
     mocks.hostedWorkspace.count.mockResolvedValue(4);
     mocks.hostedWorkspace.findMany.mockResolvedValue([
@@ -400,7 +436,6 @@ describe("hosted runtime maintenance ops", () => {
 function activeCheckpointedWorkspaceWhere() {
   return {
     member: {
-      billingStatus: HostedBillingStatus.active,
       suspendedAt: null,
     },
     snapshotRef: {
@@ -409,9 +444,32 @@ function activeCheckpointedWorkspaceWhere() {
   };
 }
 
-function workspaceRow(userId: string, version: string) {
+function workspaceRow(
+  userId: string,
+  version: string,
+  member?: {
+    accountGroupMemberships?: Array<{
+      group: { billingStatus: HostedBillingStatus; suspendedAt: Date | null };
+      status: string;
+    }>;
+    billingStatus?: HostedBillingStatus;
+    threadContainer?: {
+      owner: {
+        accountGroupMemberships: [];
+        billingStatus: HostedBillingStatus;
+        suspendedAt: Date | null;
+      };
+    } | null;
+  },
+) {
   return {
     checkpointedAt: new Date("2026-06-01T12:00:00.000Z"),
+    member: {
+      accountGroupMemberships: member?.accountGroupMemberships ?? [],
+      billingStatus: member?.billingStatus ?? HostedBillingStatus.active,
+      suspendedAt: null,
+      threadContainer: member?.threadContainer ?? null,
+    },
     snapshotRef: {
       objectKey: `snapshots/${userId}.tar.br.enc`,
     },

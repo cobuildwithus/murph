@@ -1,12 +1,16 @@
 import "server-only";
 
-import { HostedBillingStatus, Prisma, type PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
   signalHostedRuntimeMaintenanceRuntime,
   type HostedRuntimeSignalResult,
 } from "../hosted-orchestration/signal-runtime";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  hasActiveHostedMemberAccess,
+  hostedMemberAccessSelect,
+} from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
 
 export const HOSTED_RUNTIME_MAINTENANCE_DEFAULT_READ_LIMIT = 20;
@@ -78,6 +82,9 @@ export async function readHostedRuntimeMaintenanceOverview(input: {
       orderBy: { userId: "asc" },
       select: {
         checkpointedAt: true,
+        member: {
+          select: hostedMemberAccessSelect,
+        },
         snapshotRef: true,
         updatedAt: true,
         userId: true,
@@ -98,7 +105,12 @@ export async function readHostedRuntimeMaintenanceOverview(input: {
   const hasMoreRows = rows.length > limit;
 
   return {
-    candidates: pageRows.map(projectHostedRuntimeMaintenanceWorkspace),
+    // Access is decided by the shared resolver so sponsored members and
+    // thread containers stay maintainable; the page cursor advances over the
+    // raw rows, filtered rows are simply not maintenance candidates.
+    candidates: pageRows
+      .filter((row) => hasActiveHostedMemberAccess(row.member))
+      .map(projectHostedRuntimeMaintenanceWorkspace),
     generatedAt: new Date().toISOString(),
     limit,
     nextCursor: hasMoreRows ? pageRows[pageRows.length - 1]?.userId ?? null : null,
@@ -181,6 +193,9 @@ async function readHostedRuntimeMaintenanceCandidateForUser(input: {
   const row = await input.prisma.hostedWorkspace.findFirst({
     select: {
       checkpointedAt: true,
+      member: {
+        select: hostedMemberAccessSelect,
+      },
       snapshotRef: true,
       updatedAt: true,
       userId: true,
@@ -192,7 +207,7 @@ async function readHostedRuntimeMaintenanceCandidateForUser(input: {
     },
   });
 
-  if (!row) {
+  if (!row || !hasActiveHostedMemberAccess(row.member)) {
     throw hostedOnboardingError({
       code: "HOSTED_RUNTIME_MAINTENANCE_WORKSPACE_NOT_FOUND",
       httpStatus: 404,
@@ -206,7 +221,6 @@ async function readHostedRuntimeMaintenanceCandidateForUser(input: {
 function buildHostedRuntimeMaintenanceCandidateWhere(): Prisma.HostedWorkspaceWhereInput {
   return {
     member: {
-      billingStatus: HostedBillingStatus.active,
       suspendedAt: null,
     },
     snapshotRef: {

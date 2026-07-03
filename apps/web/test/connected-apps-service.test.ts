@@ -18,7 +18,11 @@ import {
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 interface MemberRow {
-  billingStatus: "active" | "canceled";
+  accountGroupMemberships?: Array<{
+    group: { billingStatus: string; suspendedAt: Date | null };
+    status: string;
+  }>;
+  billingStatus: "active" | "canceled" | "not_started";
   id: string;
   suspendedAt: Date | null;
 }
@@ -106,12 +110,8 @@ interface FakePrisma {
   };
   hostedMember: {
     findUnique: (input: {
-      select: {
-        billingStatus: true;
-        suspendedAt: true;
-      };
       where: { id: string };
-    }) => Promise<Pick<MemberRow, "billingStatus" | "suspendedAt"> | null>;
+    }) => Promise<unknown>;
   };
 }
 
@@ -215,8 +215,10 @@ class ConnectedAppsPrismaHarness {
           const member = this.members.get(where.id);
           return member
             ? {
+                accountGroupMemberships: member.accountGroupMemberships ?? [],
                 billingStatus: member.billingStatus,
                 suspendedAt: member.suspendedAt,
+                threadContainer: null,
               }
             : null;
         }),
@@ -307,6 +309,23 @@ describe("connected-app service", () => {
       startedAt: expect.any(Date),
       toolkit: "gmail",
     });
+  });
+
+  it("lets a family-sponsored member create and start connect intents", async () => {
+    const harness = installPrismaHarness();
+    harness.members.set("hbm_member", {
+      accountGroupMemberships: [{
+        group: { billingStatus: "active", suspendedAt: null },
+        status: "active",
+      }],
+      billingStatus: "not_started",
+      id: "hbm_member",
+      suspendedAt: null,
+    });
+
+    const claim = await createConnectClaim("hbm_member");
+    expect(claim).toBeTruthy();
+    expect(harness.intents.size).toBe(1);
   });
 
   it("rejects connected-app writes after the hosted member is suspended", async () => {
