@@ -1121,6 +1121,15 @@ function buildHostedAccountHydrationInput(input: {
     previousHostedObservedUpdatedAt,
     nextHostedObservedUpdatedAt,
   );
+  const localConnectionStateUnpublished = Boolean(
+    input.existing
+      && input.existing.localConnectionRevision !== input.existing.hostedObservedConnectionRevision,
+  );
+  const preserveUnpublishedLocalBackfillProgress = Boolean(
+    input.existing
+      && localConnectionStateUnpublished
+      && hasLocalBackfillProgressMetadata(input.existing.metadata),
+  );
   const connection = (hostedConnectionStateStale || hostedConnectionStateReplayed) && input.existing
     ? {
         connectedAt: input.existing.connectedAt,
@@ -1138,7 +1147,11 @@ function buildHostedAccountHydrationInput(input: {
         connectedAt: hostedConnection.connectedAt,
         displayName: hostedConnection.displayName ?? null,
         externalAccountId: hostedConnection.externalAccountId,
-        metadata: { ...hostedConnection.metadata },
+        metadata: resolveHydratedConnectionMetadata({
+          existing: input.existing,
+          hostedMetadata: hostedConnection.metadata,
+          preserveUnpublishedLocalBackfillProgress,
+        }),
         provider: hostedConnection.provider,
         scopes: [...hostedConnection.scopes],
         setupExpiresAt: hostedConnection.setupExpiresAt ?? null,
@@ -1153,6 +1166,7 @@ function buildHostedAccountHydrationInput(input: {
 
   return {
     clearTokens: shouldClearTokens,
+    advanceHostedObservedConnectionRevision: !preserveUnpublishedLocalBackfillProgress,
     ...(credential ? { credential } : {}),
     hostedObservedTokenVersion: nextHostedObservedTokenVersion,
     hostedObservedUpdatedAt: nextHostedObservedUpdatedAt,
@@ -1161,6 +1175,7 @@ function buildHostedAccountHydrationInput(input: {
       existing: input.existing,
       hostedLocalState,
       hostedStateAdvanced,
+      preserveUnpublishedLocalBackfillProgress,
       status: connection.status,
     }),
     ...(hostedTokenBundle && !hostedTokenStateStale && !hostedTokenStateReplayed
@@ -1398,6 +1413,7 @@ function resolveHydratedHostedLocalState(input: {
   existing: StoredDeviceSyncAccount | null;
   hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot;
   hostedStateAdvanced: boolean;
+  preserveUnpublishedLocalBackfillProgress: boolean;
   status: StoredDeviceSyncAccount["status"];
 }): {
   lastErrorCode: string | null;
@@ -1428,6 +1444,34 @@ function resolveHydratedHostedLocalState(input: {
     ),
     nextReconcileAt: resolveHydratedNextReconcileAt(input),
   };
+}
+
+function resolveHydratedConnectionMetadata(input: {
+  existing: StoredDeviceSyncAccount | null;
+  hostedMetadata: Record<string, unknown>;
+  preserveUnpublishedLocalBackfillProgress: boolean;
+}): Record<string, unknown> {
+  const metadata = { ...input.hostedMetadata };
+
+  if (!input.existing || !input.preserveUnpublishedLocalBackfillProgress) {
+    return metadata;
+  }
+
+  for (const [key, value] of Object.entries(input.existing.metadata)) {
+    if (isLocalBackfillProgressMetadataKey(key)) {
+      metadata[key] = value;
+    }
+  }
+
+  return metadata;
+}
+
+function isLocalBackfillProgressMetadataKey(key: string): boolean {
+  return key.startsWith("junctionHistoricalBackfill");
+}
+
+function hasLocalBackfillProgressMetadata(metadata: Record<string, unknown>): boolean {
+  return Object.keys(metadata).some(isLocalBackfillProgressMetadataKey);
 }
 
 function resolveHydratedHostedLocalErrorState(input: {
@@ -1510,6 +1554,29 @@ function latestIsoTimestamp(left: string | null, right: string | null): string |
   return leftMs >= rightMs ? left : right;
 }
 
+function earliestIsoTimestamp(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  const leftMs = parseIsoMs(left);
+  const rightMs = parseIsoMs(right);
+
+  if (leftMs === null) {
+    return right;
+  }
+
+  if (rightMs === null) {
+    return left;
+  }
+
+  return leftMs <= rightMs ? left : right;
+}
+
 function didHostedStateAdvance(
   previousObservedUpdatedAt: string | null,
   nextObservedUpdatedAt: string | null,
@@ -1588,6 +1655,7 @@ function resolveHydratedNextReconcileAt(input: {
   existing: StoredDeviceSyncAccount | null;
   hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot;
   hostedStateAdvanced: boolean;
+  preserveUnpublishedLocalBackfillProgress: boolean;
   status: StoredDeviceSyncAccount["status"];
 }): string | null {
   if (input.status === "disconnected" || input.status === "reauthorization_required") {
@@ -1599,6 +1667,10 @@ function resolveHydratedNextReconcileAt(input: {
 
   if (!input.existing) {
     return hostedNextReconcileAt;
+  }
+
+  if (input.preserveUnpublishedLocalBackfillProgress && localNextReconcileAt) {
+    return earliestIsoTimestamp(localNextReconcileAt, hostedNextReconcileAt);
   }
 
   if (input.hostedStateAdvanced) {
