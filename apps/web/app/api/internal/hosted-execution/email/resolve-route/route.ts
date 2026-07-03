@@ -11,13 +11,10 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { jsonOk, readOptionalJsonObject } from "@/src/lib/http";
-import {
-  hasHostedMemberEffectiveActiveAccessForMember,
-} from "@/src/lib/hosted-onboarding/family-plan";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { readActiveHostedMemberAccess } from "@/src/lib/hosted-onboarding/member-access";
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
-  readHostedMemberCoreState,
   readHostedMemberIdByAuthorizedDirectPublicSenderAddress,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
@@ -100,17 +97,8 @@ async function resolveHostedEmailRouteMemberUserId(input: {
     return null;
   }
 
-  const member = await readHostedMemberCoreState({
+  return await readActiveHostedMemberAccess({
     memberId: input.memberId,
-    prisma: input.prisma,
-  });
-
-  if (!member) {
-    return null;
-  }
-
-  return await hasHostedMemberEffectiveActiveAccessForMember({
-    member,
     prisma: input.prisma,
   })
     ? input.memberId

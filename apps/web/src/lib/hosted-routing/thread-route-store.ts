@@ -12,8 +12,10 @@ import {
   isHostedExternalThreadChannel,
 } from "../hosted-onboarding/contact-privacy";
 import {
-  hasHostedMemberActiveAccess,
-} from "../hosted-onboarding/entitlement";
+  hasActiveHostedThreadContainerAccess,
+  type HostedMemberPersonAccessState,
+  hostedMemberPersonAccessSelect,
+} from "../hosted-onboarding/member-access";
 import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
@@ -29,20 +31,22 @@ export type HostedThreadRouteChannel = Extract<
   "email" | "linq" | "telegram"
 >;
 
+export type HostedThreadRouteOwnerState = HostedMemberCoreState & HostedMemberPersonAccessState;
+
 export interface HostedThreadRouteSnapshot {
   accountLookupKey: string;
   channel: HostedThreadRouteChannel;
   container: HostedMemberCoreState;
   containerMemberId: string;
   lastInboundAt: Date | null;
-  owner: HostedMemberCoreState;
+  owner: HostedThreadRouteOwnerState;
 }
 
 export interface HostedThreadRouteIdentitySnapshot {
   channel: HostedThreadRouteChannel;
   container: HostedMemberCoreState;
   containerMemberId: string;
-  owner: HostedMemberCoreState;
+  owner: HostedThreadRouteOwnerState;
 }
 
 export type HostedThreadRouteEgressAuthority = HostedExecutionExternalThreadRouteAuthority;
@@ -87,10 +91,9 @@ export async function readHostedThreadRouteByExternalThread(input: {
           },
           owner: {
             select: {
-              billingStatus: true,
+              ...hostedMemberPersonAccessSelect,
               createdAt: true,
               id: true,
-              suspendedAt: true,
               updatedAt: true,
             },
           },
@@ -188,10 +191,9 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
           },
           owner: {
             select: {
-              billingStatus: true,
+              ...hostedMemberPersonAccessSelect,
               createdAt: true,
               id: true,
-              suspendedAt: true,
               updatedAt: true,
             },
           },
@@ -257,8 +259,10 @@ export async function assertHostedThreadRouteEgressAuthority(input: {
   if (
     route
     && route.containerMemberId === input.authority.containerMemberId
-    && hasHostedMemberActiveAccess(route.container)
-    && hasHostedMemberActiveAccess(route.owner)
+    && hasActiveHostedThreadContainerAccess({
+      container: route.container,
+      owner: route.owner,
+    })
   ) {
     return route;
   }

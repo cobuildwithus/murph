@@ -11,7 +11,7 @@ import {
   parseHostedBillingPlanCode,
   type HostedBillingPlanCode,
 } from "./billing-plans";
-import { assertHostedMemberActiveAccessAllowed } from "./entitlement";
+import { assertHostedMemberOwnActiveBillingAllowed } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import {
   lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId,
@@ -80,7 +80,7 @@ export async function scheduleHostedBillingPlanSwitchToPulse(input: {
     });
   }
 
-  assertHostedMemberActiveAccessAllowed(member);
+  assertHostedMemberOwnActiveBillingAllowed(member);
 
   const billingRef = await readHostedMemberStripeBillingRef({
     memberId: input.memberId,

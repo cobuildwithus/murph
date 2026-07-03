@@ -14,8 +14,8 @@ import { readHostedDeviceSyncEnvironment } from "./env";
 import { resolveConfiguredHostedDeviceSyncPublicBaseUrl } from "./public-base-url";
 import { buildHostedDeviceSyncSettingsSurfaceResponse } from "./sidebar-status-service";
 import {
-  assertHostedMemberEffectiveActiveAccessAllowed,
-} from "../hosted-onboarding/family-plan";
+  assertActiveHostedMemberAccessAllowed,
+} from "../hosted-onboarding/member-access";
 import type { HostedOnboardingReadClient } from "../hosted-onboarding/shared";
 
 export async function buildHostedDeviceSyncSettingsResponse(input: {
@@ -23,8 +23,8 @@ export async function buildHostedDeviceSyncSettingsResponse(input: {
   prisma?: HostedOnboardingReadClient;
   publicBaseUrl?: string | null;
 }): Promise<HostedDeviceSyncSettingsResponse> {
-  await assertHostedMemberEffectiveActiveAccessAllowed({
-    member: input.member,
+  await assertActiveHostedMemberAccessAllowed({
+    memberId: input.member.id,
     prisma: input.prisma,
   });
   const env = readHostedDeviceSyncEnvironment(process.env);

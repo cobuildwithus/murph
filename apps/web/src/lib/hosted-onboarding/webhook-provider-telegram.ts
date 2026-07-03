@@ -12,10 +12,10 @@ import {
   appendHostedFamilyChatNotificationTx,
   buildHostedFamilyInviteAcceptedReplyText,
   acceptHostedFamilyInviteFromTelegramTx,
-  hasHostedMemberEffectiveActiveAccessForMember,
   parseHostedFamilyInviteStartToken,
   resolveHostedFamilyChatNotificationRouteTx,
 } from "./family-plan";
+import { readActiveHostedMemberAccess } from "./member-access";
 import {
   buildHostedTelegramMessagePayload,
   buildHostedTelegramWebhookEventId,
@@ -135,8 +135,8 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("suspended-member");
   }
 
-  if (!await hasHostedMemberEffectiveActiveAccessForMember({
-    member: existingMember,
+  if (!await readActiveHostedMemberAccess({
+    memberId: existingMember.id,
     prisma: input.prisma,
   })) {
     return buildIgnoredTelegramWebhookPlan("inactive-member");

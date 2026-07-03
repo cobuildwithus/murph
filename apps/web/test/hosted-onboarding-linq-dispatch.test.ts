@@ -665,6 +665,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         },
         hostedMember: {
           findUnique: vi.fn().mockResolvedValue({
+            accountGroupMemberships: [],
             billingStatus: HostedBillingStatus.active,
             id: "member_123",
             invites: [],
@@ -804,6 +805,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -860,6 +862,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -1122,6 +1125,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -1187,6 +1191,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -1265,6 +1270,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -1334,6 +1340,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -1411,6 +1418,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -1478,6 +1486,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -1529,6 +1538,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -1585,6 +1595,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -1649,6 +1660,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -1822,6 +1834,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -1882,6 +1895,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -1921,6 +1935,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const transactionReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
     const transactionHostedMemberFindUnique = vi.fn().mockResolvedValue({
+      accountGroupMemberships: [],
       billingStatus: HostedBillingStatus.active,
       id: "member_123",
       invites: [],
@@ -1950,6 +1965,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -1972,7 +1988,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "wake-appended-active-member",
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(1);
+    // Identity match + unified access read both run on the transaction client.
+    expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(2);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         tx: transactionClient,
@@ -2080,6 +2097,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -2102,6 +2120,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -2155,6 +2174,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -2199,6 +2219,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -2228,6 +2249,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedLinqLine,
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -2298,6 +2320,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -2366,6 +2389,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -2415,6 +2439,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const prisma = asPrismaTransactionClient({
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -2482,6 +2507,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -2551,6 +2577,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -2613,6 +2640,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -2780,6 +2808,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.incomplete,
           id: "member_123",
           invites: [],
@@ -2878,6 +2907,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -3364,6 +3394,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: "+15551234567",
@@ -3626,6 +3657,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_email",
         }),
@@ -3741,6 +3773,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: "+15551234567",
@@ -3860,6 +3893,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: "+15551234567",
@@ -4042,6 +4076,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         findUnique: vi.fn()
           .mockResolvedValueOnce(null)
           .mockResolvedValue({
+            accountGroupMemberships: [],
             billingStatus: HostedBillingStatus.active,
             id: "member_concurrent",
             invites: [],
@@ -4522,6 +4557,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_after_block",
           invites: [],
@@ -4683,6 +4719,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: invite.memberId,
           phoneLookupKey: "+15551234567",
@@ -4879,6 +4916,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: invite.memberId,
           phoneLookupKey: "+15551234567",
@@ -4955,6 +4993,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -5026,6 +5065,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         hostedMember: {
           create: vi.fn(),
           findUnique: vi.fn().mockResolvedValue({
+            accountGroupMemberships: [],
             billingStatus: HostedBillingStatus.not_started,
             id: "member_123",
             invites: [],
@@ -5409,6 +5449,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: "+15551234567",
@@ -5505,6 +5546,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
@@ -5603,6 +5645,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
@@ -5900,6 +5943,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
@@ -6058,6 +6102,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
@@ -6179,6 +6224,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
@@ -6333,6 +6379,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: "+15551234567",
@@ -6403,6 +6450,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         create: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: "+15551234567",
@@ -6467,6 +6515,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -6589,6 +6638,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           linqChatId: "chat_123",
@@ -6675,6 +6725,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           linqChatId: "chat_123",
@@ -6767,6 +6818,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           phoneLookupKey: "+15551234567",
@@ -6879,6 +6931,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           linqChatId: "chat_123",
@@ -6954,6 +7007,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           linqChatId: "chat_123",
@@ -7032,6 +7086,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           linqChatId: "chat_123",
@@ -7080,6 +7135,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -7182,6 +7238,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -7269,6 +7326,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -7349,6 +7407,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -7465,6 +7524,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -7554,6 +7614,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           invites: [],
@@ -7628,6 +7689,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: "+15551234567",
@@ -7719,6 +7781,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: "+15551234567",
@@ -7812,6 +7875,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: "+15551234567",
@@ -7913,6 +7977,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedMember: {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: "+15551234567",
@@ -7984,6 +8049,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           phoneLookupKey: "+15551234567",
@@ -8046,6 +8112,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           phoneLookupKey: "+15551234567",
@@ -8112,6 +8179,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           phoneLookupKey: "+15551234567",
@@ -8160,6 +8228,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.active,
           id: "member_123",
           phoneLookupKey: "+15551234567",
@@ -8207,6 +8276,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
           billingStatus: HostedBillingStatus.not_started,
           id: "member_123",
           phoneLookupKey: "+15551234567",

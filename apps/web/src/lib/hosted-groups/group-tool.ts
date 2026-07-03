@@ -11,9 +11,8 @@ import {
 
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
-  hasHostedMemberActiveAccess,
-  isHostedMemberSuspended,
 } from "../hosted-onboarding/entitlement";
+import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
 import {
@@ -263,8 +262,10 @@ async function hasParticipantOwnMurphMembership(input: {
   const lookup = await lookupParticipantMemberByHandle(input);
   const member = lookup?.core ?? null;
   return member !== null
-    && !isHostedMemberSuspended(member.suspendedAt)
-    && hasHostedMemberActiveAccess(member);
+    && await readActiveHostedMemberAccess({
+      memberId: member.id,
+      prisma: input.prisma,
+    });
 }
 
 async function lookupParticipantMemberByHandle(input: {

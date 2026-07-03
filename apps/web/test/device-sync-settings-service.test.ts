@@ -4,11 +4,13 @@ const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   findManyDeviceConnectionSources: vi.fn(),
   findManyDeviceConnections: vi.fn(),
+  findUniqueHostedMember: vi.fn(),
   getPrisma: vi.fn(),
   listConnections: vi.fn(),
   prismaClient: {} as {
     deviceConnection: { findMany: ReturnType<typeof vi.fn> };
     deviceConnectionSource: { findMany: ReturnType<typeof vi.fn> };
+    hostedMember: { findUnique: ReturnType<typeof vi.fn> };
   },
   readHostedDeviceSyncPublicBaseUrl: vi.fn(() => null),
   readHostedPublicBaseUrl: vi.fn(() => "https://murph.example"),
@@ -43,9 +45,18 @@ beforeEach(() => {
   mocks.prismaClient.deviceConnectionSource = {
     findMany: mocks.findManyDeviceConnectionSources,
   };
+  mocks.prismaClient.hostedMember = {
+    findUnique: mocks.findUniqueHostedMember,
+  };
   mocks.getPrisma.mockReturnValue(mocks.prismaClient);
   mocks.findManyDeviceConnections.mockResolvedValue([]);
   mocks.findManyDeviceConnectionSources.mockResolvedValue([]);
+  mocks.findUniqueHostedMember.mockResolvedValue({
+    accountGroupMemberships: [],
+    billingStatus: "active",
+    suspendedAt: null,
+    threadContainer: null,
+  });
   mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
     listConnections: mocks.listConnections,
   });
@@ -76,21 +87,18 @@ test("buildHostedDeviceSyncSettingsResponse reads device sync connections server
 });
 
 test("buildHostedDeviceSyncSettingsResponse allows a family-sponsored member without direct active billing", async () => {
-  mocks.listConnections.mockResolvedValue({
-    connections: [],
-    providers: [],
-  });
-  const prisma = createFamilyAccessPrisma({
-    activeMembershipCount: 2,
-    billedSeatCount: 2,
-    membership: {
-      group: {
-        billingStatus: "active",
-        suspendedAt: null,
+  const prisma = createAccessPrisma({
+    accountGroupMemberships: [
+      {
+        group: {
+          billingStatus: "active",
+          suspendedAt: null,
+        },
+        status: "active",
       },
-      groupId: "hbag_family",
-      status: "active",
-    },
+    ],
+    billingStatus: "not_started",
+    suspendedAt: null,
   });
 
   const { buildHostedDeviceSyncSettingsResponse } = await import("@/src/lib/device-sync/settings-service");
@@ -110,20 +118,19 @@ test("buildHostedDeviceSyncSettingsResponse allows a family-sponsored member wit
       userId: "member_family",
     },
   }));
-  expect(prisma.hostedAccountGroupMembership.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-    where: expect.objectContaining({
-      memberId: "member_family",
-      status: "active",
-    }),
+  expect(prisma.hostedMember.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+    where: {
+      id: "member_family",
+    },
   }));
 });
 
 test("buildHostedDeviceSyncSettingsResponse explains canceled access before reading connections", async () => {
   const { buildHostedDeviceSyncSettingsResponse } = await import("@/src/lib/device-sync/settings-service");
-  const prisma = createFamilyAccessPrisma({
-    activeMembershipCount: 0,
-    billedSeatCount: null,
-    membership: null,
+  const prisma = createAccessPrisma({
+    accountGroupMemberships: [],
+    billingStatus: "canceled",
+    suspendedAt: null,
   });
 
   await expect(buildHostedDeviceSyncSettingsResponse({
@@ -138,44 +145,32 @@ test("buildHostedDeviceSyncSettingsResponse explains canceled access before read
     message: "Your subscription is canceled. Open billing to resume access.",
   });
 
-  expect(prisma.hostedAccountGroupMembership.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-    where: expect.objectContaining({
-      memberId: "member_123",
-      status: "active",
-    }),
+  expect(prisma.hostedMember.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+    where: {
+      id: "member_123",
+    },
   }));
   expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
   expect(mocks.listConnections).not.toHaveBeenCalled();
 });
 
-function createFamilyAccessPrisma(input: {
-  activeMembershipCount: number;
-  billedSeatCount: number | null;
-  membership: null | {
+function createAccessPrisma(member: {
+  accountGroupMemberships: Array<{
     group: {
       billingStatus: string;
       suspendedAt: Date | null;
     };
-    groupId: string;
     status: string;
-  };
+  }>;
+  billingStatus: string;
+  suspendedAt: Date | null;
 }) {
   return {
-    hostedAccountGroupBillingRef: {
-      findUnique: vi.fn(async () =>
-        input.billedSeatCount === null
-          ? null
-          : {
-              billedSeatCount: input.billedSeatCount,
-            }
-      ),
-    },
-    hostedAccountGroupMembership: {
-      count: vi.fn(async () => input.activeMembershipCount),
-      findFirst: vi.fn(async () => input.membership),
-    },
-    hostedAccountGroupInvite: {
-      count: vi.fn(async () => 0),
+    hostedMember: {
+      findUnique: vi.fn(async () => ({
+        ...member,
+        threadContainer: null,
+      })),
     },
   };
 }

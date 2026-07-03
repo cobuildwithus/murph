@@ -290,7 +290,15 @@ describe("hosted onboarding member activation", () => {
     await expect(activateHostedMemberForFamilySponsorshipTx({
       memberId: member.core.id,
       occurredAt: new Date("2026-06-18T12:00:00.000Z"),
-      prisma: makeTransactionHarness() as never,
+      prisma: makeTransactionHarness({
+        accountGroupMemberships: [{
+          group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+          status: "active",
+        }],
+        billingStatus: HostedBillingStatus.canceled,
+        suspendedAt: null,
+        threadContainer: null,
+      }) as never,
       sourceEventId: "family-subscription:sub_family",
     })).resolves.toEqual({
       activated: true,
@@ -1016,6 +1024,18 @@ function setActivationMemberSnapshot(member: HostedMemberSnapshot | null): void 
   mocks.readHostedMemberRoutingState.mockResolvedValue(member?.routing ?? null);
 }
 
-function makeTransactionHarness() {
-  return {};
+function makeTransactionHarness(memberAccess?: {
+  accountGroupMemberships: Array<{
+    group: { billingStatus: HostedBillingStatus; suspendedAt: Date | null };
+    status: string;
+  }>;
+  billingStatus: HostedBillingStatus;
+  suspendedAt: Date | null;
+  threadContainer: null;
+}) {
+  return {
+    hostedMember: {
+      findUnique: vi.fn(async () => memberAccess ?? null),
+    },
+  };
 }
