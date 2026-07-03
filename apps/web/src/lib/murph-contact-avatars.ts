@@ -33,21 +33,14 @@ export const MURPH_CONTACT_AVATAR_OPTIONS: readonly MurphContactAvatarOption[] =
   {
     id: "referee",
     kind: "headshot",
-    label: "Referee",
+    label: "Coach",
     src: "/murph-headshots/murph-headshot-04-sm.png",
   },
-  { id: "none", kind: "blank", label: "No photo" },
   {
     id: "gremlin",
     kind: "headshot",
     label: "Gremlin",
     src: "/murph-headshots/murph-headshot-03-sm.png",
-  },
-  {
-    id: "cool",
-    kind: "headshot",
-    label: "Cool",
-    src: "/murph-headshots/murph-headshot-06-sm.png",
   },
   {
     id: "disco",
@@ -85,6 +78,7 @@ export const MURPH_CONTACT_AVATAR_OPTIONS: readonly MurphContactAvatarOption[] =
     label: "Light",
     src: "/brand-logos/murph-logo-avatar-light.png",
   },
+  { id: "none", kind: "blank", label: "No photo" },
 ];
 
 export const DEFAULT_MURPH_CONTACT_AVATAR_ID = "classic";
