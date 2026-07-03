@@ -4748,15 +4748,37 @@ describe("hosted device-sync runtime", () => {
 
           return {
             appliedAt: "2026-04-04T00:00:30.000Z",
-            updates: input.updates.map((update) => ({
-              connection: null,
-              connectionId: update.connectionId,
-              status: "updated",
-              tokenUpdate: "unchanged",
-              writeUpdate: update.observedUpdatedAt === currentUpdatedAt
+            updates: input.updates.map((update) => {
+              const writeUpdate = update.observedUpdatedAt === currentUpdatedAt
                 ? "applied"
-                : "skipped_version_mismatch",
-            })),
+                : "skipped_version_mismatch";
+
+              if (writeUpdate === "applied") {
+                const hostedEntry = hostedSnapshot.connections.find(
+                  (entry) => entry.connection.id === update.connectionId,
+                );
+
+                if (hostedEntry) {
+                  if (update.connection?.metadata) {
+                    hostedEntry.connection.metadata = { ...update.connection.metadata };
+                  }
+
+                  if (update.localState && "nextReconcileAt" in update.localState) {
+                    hostedEntry.localState.nextReconcileAt = update.localState.nextReconcileAt ?? null;
+                  }
+
+                  hostedEntry.connection.updatedAt = "2026-04-04T00:00:35.000Z";
+                }
+              }
+
+              return {
+                connection: null,
+                connectionId: update.connectionId,
+                status: "updated",
+                tokenUpdate: "unchanged",
+                writeUpdate,
+              };
+            }),
             userId: "member_123",
           };
         },
@@ -4843,7 +4865,7 @@ describe("hosted device-sync runtime", () => {
       assert.equal(request.updates[0]?.localState?.nextReconcileAt, retryDueAt);
 
       vi.setSystemTime(new Date(retryDueAt));
-      await syncHostedDeviceSyncControlPlaneState({
+      const concurrentState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
         wake: buildCronWake(retryDueAt),
         secret: DEVICE_SYNC_SECRET,
@@ -4864,6 +4886,101 @@ describe("hosted device-sync runtime", () => {
         afterConcurrentHydration?.localConnectionRevision,
         afterConcurrentHydration?.hostedObservedConnectionRevision,
       );
+
+      appliedRequest = null;
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-04T00:15:05.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state: concurrentState,
+      });
+
+      const republishRequest = requireApplyUpdatesRequest(appliedRequest);
+      assert.equal(republishRequest.updates.length, 1);
+      assert.equal(republishRequest.updates[0]?.observedUpdatedAt, concurrentHostedUpdatedAt);
+      assert.equal(republishRequest.updates[0]?.localState?.nextReconcileAt, retryDueAt);
+      assert.deepEqual(republishRequest.updates[0]?.connection?.metadata, {
+        hosted: true,
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: executedAt,
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+      });
+
+      const freshWorkspace = await createHostedRuntimeWorkspace(
+        "hosted-device-sync-runtime-fresh-",
+      );
+      await mkdir(freshWorkspace.vaultRoot, { recursive: true });
+      const freshScheduledInputs: Array<{
+        emptyAttempts: unknown;
+        nextReconcileAt: string | null;
+        now: string;
+        status: unknown;
+        windowEnd: unknown;
+        windowStart: unknown;
+      }> = [];
+      const freshProvider = createFakeProvider({
+        jobExecutor: {
+          createScheduledJobs(account, now) {
+            freshScheduledInputs.push({
+              emptyAttempts: account.metadata.junctionHistoricalBackfillEmptyAttempts,
+              nextReconcileAt: account.nextReconcileAt,
+              now,
+              status: account.metadata.junctionHistoricalBackfillStatus,
+              windowEnd: account.metadata.junctionHistoricalBackfillWindowEnd,
+              windowStart: account.metadata.junctionHistoricalBackfillWindowStart,
+            });
+            return {
+              jobs: [],
+              nextReconcileAt: laterBaselineAt,
+            };
+          },
+          async executeJob() {
+            return {};
+          },
+        },
+      });
+      const freshService = createDeviceSyncServiceForVault(freshWorkspace.vaultRoot, [freshProvider]);
+
+      try {
+        const freshState = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort,
+          wake: buildCronWake(retryDueAt),
+          secret: DEVICE_SYNC_SECRET,
+          service: freshService,
+        });
+        const freshAccountId = freshState.hostedToLocalAccountIds.get(connectionId);
+        assert.ok(freshAccountId);
+
+        const freshAccount = getStore(freshService).getAccountById(freshAccountId);
+        assert.equal(freshAccount?.nextReconcileAt, retryDueAt);
+        assert.deepEqual(freshAccount?.metadata, {
+          hosted: true,
+          junctionHistoricalBackfillEmptyAttempts: 1,
+          junctionHistoricalBackfillLastEmptyAt: executedAt,
+          junctionHistoricalBackfillStatus: "retrying",
+          junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+          junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+        });
+
+        await freshService.runSchedulerOnce();
+
+        assert.deepEqual(freshScheduledInputs, [
+          {
+            emptyAttempts: 1,
+            nextReconcileAt: retryDueAt,
+            now: retryDueAt,
+            status: "retrying",
+            windowEnd: "2026-04-03T00:00:00.000Z",
+            windowStart: "2026-04-01T00:00:00.000Z",
+          },
+        ]);
+      } finally {
+        closeHostedRuntimeDeviceSyncService(freshService);
+        await freshWorkspace.cleanup();
+      }
 
       await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,

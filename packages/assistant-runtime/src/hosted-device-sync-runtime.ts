@@ -1038,6 +1038,12 @@ function buildAcceptedHostedDeviceSyncRuntimeSnapshotEntry(input: {
       : "local-runtime",
     observedTokenVersion: input.stored.hostedObservedTokenVersion ?? null,
   });
+  const baselineMetadata = shouldUseRawHostedMetadataBaseline({
+    entry: input.entry,
+    stored: input.stored,
+  })
+    ? input.entry.connection.metadata
+    : input.stored.metadata;
 
   return {
     connection: {
@@ -1047,7 +1053,7 @@ function buildAcceptedHostedDeviceSyncRuntimeSnapshotEntry(input: {
       displayName: input.stored.displayName ?? null,
       externalAccountId: input.stored.externalAccountId,
       id: input.entry.connection.id,
-      metadata: { ...input.stored.metadata },
+      metadata: { ...baselineMetadata },
       provider: input.stored.provider,
       scopes: [...input.stored.scopes],
       setupExpiresAt: input.stored.setupExpiresAt ?? null,
@@ -1065,6 +1071,18 @@ function buildAcceptedHostedDeviceSyncRuntimeSnapshotEntry(input: {
     ...(input.entry.sources === undefined ? {} : { sources: input.entry.sources }),
     credential,
   };
+}
+
+function shouldUseRawHostedMetadataBaseline(input: {
+  entry: HostedDeviceSyncRuntimeConnectionSnapshot;
+  stored: StoredDeviceSyncAccount;
+}): boolean {
+  return Boolean(
+    input.stored.hostedObservedUpdatedAt
+      && input.stored.hostedObservedUpdatedAt === input.entry.connection.updatedAt
+      && input.stored.localConnectionRevision !== input.stored.hostedObservedConnectionRevision
+      && hasLocalBackfillProgressMetadata(input.stored.metadata),
+  );
 }
 
 function buildHostedAccountHydrationInput(input: {
