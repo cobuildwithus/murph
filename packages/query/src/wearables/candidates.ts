@@ -30,6 +30,7 @@ import {
   uniqueStrings,
 } from "./shared.ts";
 import type {
+  WearableActivitySessionMetricValues,
   WearableActivitySessionAggregate,
   WearableCandidateSourceFamily,
   WearableDataset,
@@ -200,6 +201,10 @@ export function buildActivitySessionAggregates(
         ...existing.workoutMetricKeys,
         ...(candidate.workoutMetricKeys ?? []),
       ]).sort();
+      existing.workoutMetricValues = mergeActivitySessionWorkoutMetricValues(
+        existing.workoutMetricValues,
+        candidate.workoutMetricValues,
+      );
       if (activityType && !existing.activityTypes.includes(activityType)) {
         existing.activityTypes.push(activityType);
         existing.activityTypes.sort();
@@ -226,6 +231,7 @@ export function buildActivitySessionAggregates(
       sessionCount: 1,
       sessionMinutes: candidate.value,
       workoutMetricKeys: uniqueStrings(candidate.workoutMetricKeys ?? []).sort(),
+      workoutMetricValues: candidate.workoutMetricValues ?? {},
     });
   }
 
@@ -433,6 +439,35 @@ export function buildActivitySessionMetricCandidate(
     unit: metric === "sessionMinutes" ? "minutes" : "count",
     value: metric === "sessionMinutes" ? aggregate.sessionMinutes : aggregate.sessionCount,
   };
+}
+
+export function buildActivitySessionWorkoutMetricCandidates(
+  aggregate: WearableActivitySessionAggregate,
+): WearableMetricCandidate[] {
+  return ACTIVITY_SESSION_WORKOUT_METRIC_SPECS.flatMap((spec) => {
+    const value = aggregate.workoutMetricValues?.[spec.metric];
+    if (value === undefined) {
+      return [];
+    }
+
+    return [{
+      candidateId: `${aggregate.candidateId}:${spec.metric}`,
+      dataOrigin: aggregate.dataOrigin ?? null,
+      date: aggregate.date,
+      externalRef: null,
+      metric: spec.metric,
+      occurredAt: null,
+      paths: [...aggregate.paths],
+      provider: aggregate.provider,
+      recordedAt: aggregate.recordedAt,
+      recordIds: [...aggregate.recordIds],
+      sourceFamily: "derived",
+      sourceKind: "activity-session-aggregate",
+      title: `${formatProviderName(aggregate.provider)} activity sessions`,
+      unit: spec.unit,
+      value,
+    }];
+  });
 }
 
 export function buildSleepWindowMetricCandidate(
@@ -703,6 +738,7 @@ function buildActivitySessionCandidate(
     unit: "minutes",
     value: durationMinutes,
     workoutMetricKeys: listWorkoutMetricKeys(entity.attributes.workout),
+    workoutMetricValues: readActivitySessionWorkoutMetricValues(entity),
   };
 }
 
@@ -807,6 +843,17 @@ function mapScalarMetric(
     : null;
 }
 
+const ACTIVITY_SESSION_WORKOUT_METRIC_SPECS = [
+  { metric: "activeCalories", unit: "kcal" },
+  { metric: "distanceKm", unit: "km" },
+  { metric: "totalElevationGainMeters", unit: "meter" },
+  { metric: "maxHeartRate", unit: "bpm" },
+  { metric: "workoutStrain", unit: "strain" },
+] as const satisfies readonly {
+  metric: keyof WearableActivitySessionMetricValues;
+  unit: string;
+}[];
+
 const WORKOUT_METRIC_KEYS = [
   "activeCalories",
   "altitudeChangeMeters",
@@ -840,6 +887,87 @@ function listWorkoutMetricKeys(workout: unknown): string[] {
 
   const metricRecord = metrics as Record<string, unknown>;
   return WORKOUT_METRIC_KEYS.filter((metric) => readNumber(metricRecord[metric]) !== null);
+}
+
+function readActivitySessionWorkoutMetricValues(
+  entity: CanonicalEntity,
+): WearableActivitySessionMetricValues {
+  const workout = readPlainRecord(entity.attributes.workout);
+  const metrics = readPlainRecord(workout?.metrics);
+  const activeCalories = firstFiniteNumber(metrics?.activeCalories, entity.attributes.activeCalories);
+  const distanceKm = firstFiniteNumber(entity.attributes.distanceKm, metrics?.distanceKm);
+  const totalElevationGainMeters = firstFiniteNumber(
+    metrics?.totalElevationGainMeters,
+    entity.attributes.totalElevationGainMeters,
+  );
+  const maxHeartRate = firstFiniteNumber(metrics?.maxHeartRate, entity.attributes.maxHeartRate);
+  const workoutStrain = firstFiniteNumber(metrics?.workoutStrain, entity.attributes.workoutStrain);
+
+  return {
+    ...(activeCalories === undefined ? {} : { activeCalories }),
+    ...(distanceKm === undefined ? {} : { distanceKm }),
+    ...(maxHeartRate === undefined ? {} : { maxHeartRate }),
+    ...(totalElevationGainMeters === undefined ? {} : { totalElevationGainMeters }),
+    ...(workoutStrain === undefined ? {} : { workoutStrain }),
+  };
+}
+
+function mergeActivitySessionWorkoutMetricValues(
+  left: WearableActivitySessionMetricValues = {},
+  right: WearableActivitySessionMetricValues = {},
+): WearableActivitySessionMetricValues {
+  const activeCalories = sumOptionalNumbers(left.activeCalories, right.activeCalories);
+  const distanceKm = sumOptionalNumbers(left.distanceKm, right.distanceKm);
+  const maxHeartRate = maxOptionalNumbers(left.maxHeartRate, right.maxHeartRate);
+  const totalElevationGainMeters = sumOptionalNumbers(
+    left.totalElevationGainMeters,
+    right.totalElevationGainMeters,
+  );
+  const workoutStrain = maxOptionalNumbers(left.workoutStrain, right.workoutStrain);
+
+  return {
+    ...(activeCalories === undefined ? {} : { activeCalories }),
+    ...(distanceKm === undefined ? {} : { distanceKm }),
+    ...(maxHeartRate === undefined ? {} : { maxHeartRate }),
+    ...(totalElevationGainMeters === undefined ? {} : { totalElevationGainMeters }),
+    ...(workoutStrain === undefined ? {} : { workoutStrain }),
+  };
+}
+
+function firstFiniteNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const numberValue = readNumber(value);
+    if (numberValue !== null) {
+      return numberValue;
+    }
+  }
+  return undefined;
+}
+
+function sumOptionalNumbers(left: number | undefined, right: number | undefined): number | undefined {
+  if (left === undefined) {
+    return right;
+  }
+  if (right === undefined) {
+    return left;
+  }
+  return left + right;
+}
+
+function maxOptionalNumbers(left: number | undefined, right: number | undefined): number | undefined {
+  if (left === undefined) {
+    return right;
+  }
+  if (right === undefined) {
+    return left;
+  }
+  return Math.max(left, right);
+}
+
+function readPlainRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 function listWorkoutHeartRateZones(workout: unknown): WearableHeartRateZoneAggregate[] {

@@ -33,6 +33,7 @@ export interface WearableMetricCandidate {
   unit: string | null;
   value: number;
   heartRateZones?: WearableHeartRateZoneAggregate[];
+  workoutMetricValues?: WearableActivitySessionMetricValues;
   workoutMetricKeys?: string[];
 }
 
@@ -104,6 +105,14 @@ export interface WearableHeartRateZoneAggregate {
   maxHeartRate?: number;
   minHeartRate?: number;
   zone?: number;
+}
+
+export interface WearableActivitySessionMetricValues {
+  activeCalories?: number;
+  distanceKm?: number;
+  maxHeartRate?: number;
+  totalElevationGainMeters?: number;
+  workoutStrain?: number;
 }
 
 export interface WearableSleepNight {
@@ -391,6 +400,7 @@ export interface WearableActivitySessionAggregate {
   recordIds: string[];
   sessionCount: number;
   sessionMinutes: number;
+  workoutMetricValues?: WearableActivitySessionMetricValues;
   workoutMetricKeys: string[];
 }
 

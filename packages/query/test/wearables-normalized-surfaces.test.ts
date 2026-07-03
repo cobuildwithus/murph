@@ -860,7 +860,7 @@ test("metric latest and trend surfaces keep derived sleep and aggregate-backed p
   assert.equal(sessionCount?.provider, "garmin");
 });
 
-test("workout session metrics stay out of wearable summary projection without an explicit projector", () => {
+test("allowlisted workout session metrics project without raw workout details", () => {
   const vault = makeVault([
     makeEntity({
       entityId: "evt_workout_metrics_01",
@@ -872,6 +872,7 @@ test("workout session metrics stay out of wearable summary projection without an
       title: "Garmin trail run",
       attributes: {
         dayKey: "2026-04-08",
+        distanceKm: 8.2,
         durationMinutes: 42,
         recordedAt: "2026-04-08T12:50:00Z",
         externalRef: {
@@ -914,23 +915,32 @@ test("workout session metrics stay out of wearable summary projection without an
   const latest = summarizeWearableLatest(vault, { providers: ["garmin"] });
   const activeCalories = summarizeWearableMetricLatest(vault, "active-calories", { providers: ["garmin"] });
   const maxHeartRate = summarizeWearableMetricLatest(vault, "max-heart-rate", { providers: ["garmin"] });
+  const projection = buildMetricProjection(vault);
   const sourceHealth = summarizeWearableSourceHealth(vault, { providers: ["garmin"] });
   const workoutDetailNote = sourceHealth[0]?.notes.find((note) =>
     note.includes("workout detail metrics on activity sessions")
   );
+  const pointValue = (metricKey: string) =>
+    projection.metricPoints.find((point) => point.metricKey === metricKey)?.value ?? null;
 
   assert.equal(latest?.activity?.sessionMinutes.selection.value, 42);
   assert.equal(latest?.activity?.sessionCount.selection.value, 1);
-  assert.equal(latest?.activity?.activeCalories.selection.value, null);
+  assert.equal(latest?.activity?.activeCalories.selection.value, 320);
+  assert.equal(latest?.activity?.distanceKm.selection.value, 8.2);
   assert.equal(latest?.activity?.totalCalories.selection.value, null);
-  assert.equal(latest?.activity?.maxHeartRate.selection.value, null);
-  assert.equal(latest?.activity?.workoutStrain.selection.value, null);
+  assert.equal(latest?.activity?.maxHeartRate.selection.value, 175);
+  assert.equal(latest?.activity?.workoutStrain.selection.value, 12.4);
   assert.equal(latest?.activity?.percentRecorded.selection.value, null);
-  assert.equal(latest?.activity?.totalElevationGainMeters.selection.value, null);
+  assert.equal(latest?.activity?.totalElevationGainMeters.selection.value, 88);
   assert.equal(latest?.activity?.altitudeChangeMeters.selection.value, null);
-  assert.equal(activeCalories?.value, null);
-  assert.equal(maxHeartRate?.value, null);
-  assert.equal(sourceHealth[0]?.metricsContributed.includes("activeCalories"), false);
+  assert.equal(activeCalories?.value, 320);
+  assert.equal(maxHeartRate?.value, 175);
+  assert.equal(pointValue("active-calories"), 320);
+  assert.equal(pointValue("distance-km"), 8.2);
+  assert.equal(pointValue("elevation-gain-meters"), 88);
+  assert.equal(pointValue("max-heart-rate"), 175);
+  assert.equal(pointValue("workout-strain"), 12.4);
+  assert.equal(pointValue("total-calories"), null);
   assert.equal(sourceHealth[0]?.metricsContributed.includes("averagePowerWatts"), false);
   assert.ok(workoutDetailNote);
   assert.match(workoutDetailNote, /averagePowerWatts/u);

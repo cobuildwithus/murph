@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -21,6 +21,7 @@ import {
   HOSTED_VAULT_SHARE_PROJECTION_MAX_ACTIVITY_DAY_AGE_DAYS,
   HOSTED_VAULT_SHARE_PROJECTION_MAX_NIGHT_AGE_DAYS,
   offerHostedVaultShareProjectionBestEffort,
+  readProjectableDailyMetricDays,
   readProjectableProfileName,
   selectProjectableActivityDays,
   selectProjectableDailyMetricDays,
@@ -29,6 +30,7 @@ import {
   selectProjectableWorkoutDays,
 } from "../src/hosted-runtime/vault-share-projection.ts";
 import {
+  CURRENT_VAULT_FORMAT_VERSION,
   createEmptyProfileDocument,
   renderProfileDocument,
   setProfileDisplayName,
@@ -266,6 +268,86 @@ describe("selectProjectableDailyMetricDays", () => {
       }).records,
     ).toEqual(selected);
   });
+
+  it("reads allowlisted activity-session workout metrics as scalar share records", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-workout-metrics-"));
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+    const expectedRecords = [
+      ["active-calories-days.v0", "active-calories", "kcal", 360],
+      ["distance-days.v0", "distance-km", "km", 5],
+      ["elevation-gain-days.v0", "elevation-gain-meters", "meter", 42],
+      ["max-heart-rate-days.v0", "max-heart-rate", "bpm", 165],
+      ["workout-strain-days.v0", "workout-strain", "strain", 13.2],
+    ] as const;
+
+    try {
+      await mkdir(join(vaultRoot, "ledger", "events", "2026"), { recursive: true });
+      await writeFile(
+        join(vaultRoot, "vault.json"),
+        `${JSON.stringify({
+          formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+          vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4B",
+          createdAt: "2026-07-03T00:00:00.000Z",
+          title: "Vault share workout metrics test",
+          timezone: "UTC",
+        })}\n`,
+        "utf8",
+      );
+      await writeFile(
+        join(vaultRoot, "ledger", "events", "2026", "2026-07.jsonl"),
+        `${JSON.stringify({
+          schemaVersion: "murph.event.v1",
+          id: "evt_vault_share_workout_metrics_01",
+          kind: "activity_session",
+          occurredAt: "2026-07-03T12:00:00Z",
+          dayKey: "2026-07-03",
+          recordedAt: "2026-07-03T12:45:00Z",
+          title: "Shared challenge workout",
+          durationMinutes: 35,
+          distanceKm: 5,
+          source: "device",
+          externalRef: {
+            system: "strava",
+            resourceType: "activity_session",
+            resourceId: "strava_activity_01",
+          },
+          workout: {
+            metrics: {
+              activeCalories: 360,
+              averagePowerWatts: 215,
+              maxHeartRate: 165,
+              totalElevationGainMeters: 42,
+              workoutStrain: 13.2,
+            },
+          },
+        })}\n`,
+        "utf8",
+      );
+
+      for (const [projectionKind, metricKey, unit, value] of expectedRecords) {
+        const selected = await readProjectableDailyMetricDays(
+          vaultRoot,
+          requireDailyMetricSpec(projectionKind),
+        );
+
+        expect(selected).toEqual([{
+          data: {
+            date: ACTIVITY_DAY.date,
+            metricKey,
+            unit,
+            value,
+          },
+          occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+          recordKey: ACTIVITY_DAY.date,
+        }]);
+        expect(JSON.stringify(selected)).not.toContain("strava");
+        expect(JSON.stringify(selected)).not.toContain("averagePowerWatts");
+      }
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("selectProjectableWorkoutDays", () => {
@@ -399,7 +481,7 @@ function activityMetricPoint(input: {
   };
 }
 
-function requireDailyMetricSpec(kind: "steps-days.v0") {
+function requireDailyMetricSpec(kind: Parameters<typeof getHostedVaultShareDailyMetricProjectionSpec>[0]) {
   const spec = getHostedVaultShareDailyMetricProjectionSpec(kind);
   if (!spec) {
     throw new Error(`Missing daily metric projection spec for ${kind}.`);
