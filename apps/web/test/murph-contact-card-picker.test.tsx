@@ -44,10 +44,10 @@ test("avatar assets exist for each declared option src", () => {
   }
 });
 
-test("findMurphContactAvatarOption falls back to the first option", () => {
+test("findMurphContactAvatarOption falls back to the default option", () => {
   expect(findMurphContactAvatarOption("gremlin").id).toBe("gremlin");
   expect(findMurphContactAvatarOption("does-not-exist").id).toBe(
-    MURPH_CONTACT_AVATAR_OPTIONS[0].id,
+    DEFAULT_MURPH_CONTACT_AVATAR_ID,
   );
 });
 

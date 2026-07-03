@@ -74,7 +74,7 @@ describe("murph contact card route", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/vcard");
     expect(response.headers.get("content-disposition")).toBe(
-      'attachment; filename="Murph.vcf"',
+      'inline; filename="Murph.vcf"',
     );
 
     const body = await response.text();
@@ -85,7 +85,7 @@ describe("murph contact card route", () => {
     expect(body).toContain("PHOTO;ENCODING=b;TYPE=PNG:cGhvdG8=");
 
     expect(mocks.fetchMurphHostedLinqContactCardVcfPhoto).toHaveBeenCalledWith({
-      imageUrl: "https://www.withmurph.ai/murph-headshots/murph-headshot-01-sm.png",
+      imageUrl: "https://www.withmurph.ai/murph-headshots/murph-headshot-02-sm.png",
     });
     expect(
       mocks.resolveMurphHostedLinqContactCardBackupPhoneNumber,
@@ -125,7 +125,7 @@ describe("murph contact card route", () => {
     await route.GET(buildRequest("?avatar=does-not-exist"));
 
     expect(mocks.fetchMurphHostedLinqContactCardVcfPhoto).toHaveBeenCalledWith({
-      imageUrl: "https://www.withmurph.ai/murph-headshots/murph-headshot-01-sm.png",
+      imageUrl: "https://www.withmurph.ai/murph-headshots/murph-headshot-02-sm.png",
     });
   });
 

@@ -25,10 +25,10 @@ export const MURPH_CONTACT_AVATAR_OPTIONS: readonly MurphContactAvatarOption[] =
     src: "/murph-headshots/murph-headshot-02-sm.png",
   },
   {
-    id: "gremlin",
+    id: "rancher",
     kind: "headshot",
-    label: "Gremlin",
-    src: "/murph-headshots/murph-headshot-03-sm.png",
+    label: "Rancher",
+    src: "/murph-headshots/murph-headshot-05-sm.png",
   },
   {
     id: "referee",
@@ -38,10 +38,10 @@ export const MURPH_CONTACT_AVATAR_OPTIONS: readonly MurphContactAvatarOption[] =
   },
   { id: "none", kind: "blank", label: "No photo" },
   {
-    id: "rancher",
+    id: "gremlin",
     kind: "headshot",
-    label: "Rancher",
-    src: "/murph-headshots/murph-headshot-05-sm.png",
+    label: "Gremlin",
+    src: "/murph-headshots/murph-headshot-03-sm.png",
   },
   {
     id: "cool",
@@ -87,11 +87,14 @@ export const MURPH_CONTACT_AVATAR_OPTIONS: readonly MurphContactAvatarOption[] =
   },
 ];
 
-export const DEFAULT_MURPH_CONTACT_AVATAR_ID = "hooded";
+export const DEFAULT_MURPH_CONTACT_AVATAR_ID = "classic";
 
 export function findMurphContactAvatarOption(id: string): MurphContactAvatarOption {
   return (
     MURPH_CONTACT_AVATAR_OPTIONS.find((option) => option.id === id)
+    ?? MURPH_CONTACT_AVATAR_OPTIONS.find(
+      (option) => option.id === DEFAULT_MURPH_CONTACT_AVATAR_ID,
+    )
     ?? MURPH_CONTACT_AVATAR_OPTIONS[0]
   );
 }

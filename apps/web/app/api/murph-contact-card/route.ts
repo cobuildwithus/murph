@@ -63,10 +63,14 @@ export const GET = withJsonError(async (request: Request) => {
     photo,
   });
 
+  // `inline` so iOS Safari opens its native contact preview (Add to
+  // Contacts) directly instead of routing through the Downloads manager;
+  // Android Chrome and desktop browsers download the file either way and
+  // use the filename parameter.
   return new Response(vcf, {
     headers: {
       "cache-control": "no-store",
-      "content-disposition": `attachment; filename="${MURPH_CONTACT_CARD_VCF_FILE_NAME}"`,
+      "content-disposition": `inline; filename="${MURPH_CONTACT_CARD_VCF_FILE_NAME}"`,
       "content-type": MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
     },
   });
