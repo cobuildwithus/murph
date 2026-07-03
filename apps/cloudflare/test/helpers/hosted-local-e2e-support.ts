@@ -86,7 +86,7 @@ export type HostedLocalAssistantProviderScriptedResponse =
 
 /**
  * Scripts a sandboxed shell execution through the real Codex app-server.
- * Codex 0.142.5 (CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
+ * Codex 0.143.0-alpha.32 (CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
  * advertises the unified `exec_command` tool on Linux; bump the tool name here
  * if a Codex upgrade changes the advertised exec tool.
  */

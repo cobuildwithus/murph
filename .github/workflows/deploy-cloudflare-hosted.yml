@@ -490,7 +490,7 @@ jobs:
           tar --hard-dereference -czf .artifacts/cloudflare-hosted-deploy/runner-bundle.tar.gz \
             -C apps/cloudflare/.deploy \
             runner-bundle
-          docker save ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.142.5 \
+          docker save ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.143.0-alpha.32 \
             | gzip -1 > .artifacts/cloudflare-hosted-deploy/runner-base-image.tar.gz
 
       - name: Upload immediate build handoff
