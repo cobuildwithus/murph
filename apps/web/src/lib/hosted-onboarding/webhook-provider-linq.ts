@@ -596,6 +596,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       occurredAt,
       prisma: input.prisma,
       recipientPhone: bindingResult.recipientPhone,
+      routeAlreadyBound: bindingResult.routeAlreadyBound === true,
     });
 
     // Read-first: the webhook only needs the gate decision for quota notices;

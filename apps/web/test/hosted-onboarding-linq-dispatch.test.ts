@@ -2285,6 +2285,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         memberId: "member_123",
         value: "chat_123",
       }),
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
       linqRecipientPhoneEncrypted: null,
       linqRecipientPhoneLookupKey: null,
       memberId: "member_123",
@@ -2332,16 +2333,81 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "wake-appended-active-member",
     });
-    expect(hostedMemberRouting.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      update: expect.objectContaining({
-        linqRecipientPhoneEncrypted: null,
-        linqRecipientPhoneLookupKey: null,
-      }),
-    }));
+    // The chat is already the member's home chat with no pending state, so
+    // the wake skips the binding rewrite entirely — the missing recipient
+    // stays missing rather than being filled from inbound metadata.
+    expect(hostedMemberRouting.upsert).not.toHaveBeenCalled();
     expect(hostedMemberRouting.groupBy).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("still rewrites the home binding when a stale pending lookup key persists on the routing row", async () => {
+    const hostedMemberRouting = createStatefulHostedMemberRoutingMock({
+      linqChatIdEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-routing.home-linq-chat-id",
+        memberId: "member_123",
+        value: "chat_123",
+      }),
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      linqRecipientPhoneEncrypted: null,
+      linqRecipientPhoneLookupKey: null,
+      memberId: "member_123",
+      pendingLinqChatIdEncrypted: null,
+      // Stale artifact: the lookup key survived while its encrypted pending
+      // contact value is gone, so decoded pending fields all read empty.
+      pendingLinqParticipantContactLookupKey: "stale-pending-contact-key",
+      pendingLinqRecipientPhoneEncrypted: null,
+      telegramUserIdEncrypted: null,
+      telegramUserLookupKey: null,
+    });
+    const prisma = asPrismaTransactionClient({
+      hostedLinqLine: buildUnassignableHostedLinqLineFixture(),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          phoneLookupKey: "+15551234567",
+          suspendedAt: null,
+        }),
+      },
+      hostedMemberRouting,
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        eventId: "evt_active_same_chat_stale_pending_key",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    // The raw pending column keeps the rewrite alive so clearPending repairs
+    // the stale lookup key instead of leaving it to misroute later inbounds.
+    expect(hostedMemberRouting.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        pendingLinqParticipantContactLookupKey: null,
+      }),
+    }));
   });
 
   it("does not bind a new active member home route from a sparse Linq payload", async () => {

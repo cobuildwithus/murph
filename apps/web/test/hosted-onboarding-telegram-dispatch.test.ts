@@ -694,8 +694,10 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       expect(hostedMemberRoutingFindMany).toHaveBeenCalledWith({
         select: {
           linqChatIdEncrypted: true,
+          linqChatLookupKey: true,
           linqHomeLineAssignedAt: true,
           linqRecipientPhoneEncrypted: true,
+          linqRecipientPhoneLookupKey: true,
           member: {
             select: {
               billingStatus: true,
@@ -707,11 +709,14 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           },
           memberId: true,
           pendingLinqChatIdEncrypted: true,
+          pendingLinqChatLookupKey: true,
+          pendingLinqLastInboundAt: true,
           pendingLinqParticipantContactEncrypted: true,
           pendingLinqParticipantContactKind: true,
           pendingLinqParticipantContactLookupKey: true,
           pendingLinqParticipantContactObservedAt: true,
           pendingLinqRecipientPhoneEncrypted: true,
+          pendingLinqRecipientPhoneLookupKey: true,
           replyAliasLookupKey: true,
           telegramUserIdEncrypted: true,
           telegramUserLookupKey: true,
