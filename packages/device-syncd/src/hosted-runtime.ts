@@ -41,6 +41,16 @@ const HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN =
   /["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
 const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN =
   /\b((?:account|external|member|owner|provider[_\s-]?account|subject|user)(?:[_\s-]?id|[_\s-]?identifier)?\b\s*[:=]\s*["']?)[A-Za-z0-9._:-]{6,}/giu;
+// Validation errors often echo the offending input back (for example pydantic
+// `input_value=...` suffixes); those values can be identifiers, so mask them
+// regardless of what the surrounding prose looks like.
+const HOSTED_RUNTIME_DIAGNOSTIC_ECHOED_INPUT_PATTERN =
+  /\b((?:input(?:[_\s-]?value)?|value|ctx)\s*[:=]\s*["']?)[^\s,;\])"']+/giu;
+// Identifier values also appear as bare phrases ("user hbm_abc123xyz"); mask
+// the value when it looks id-shaped (contains a digit or underscore) so plain
+// words ("user profile") stay readable.
+const HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_PHRASE_PATTERN =
+  /\b((?:account|client|external|member|owner|patient|subject|team|user)\s+)(?=[A-Za-z0-9._:-]*[\d_])[A-Za-z0-9._:-]{6,}\b/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_TOKEN_PHRASE_PATTERN =
   /\b((?:access|id|refresh|session)\s+token\s+)(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{6,}/giu;
 const HOSTED_RUNTIME_DIAGNOSTIC_LONG_TOKEN_PATTERN =
@@ -2249,6 +2259,8 @@ export function sanitizeHostedRuntimeDiagnosticText(value: string | null): strin
     .replace(HOSTED_RUNTIME_ERROR_EMAIL_PATTERN, "<redacted-email>")
     .replace(HOSTED_RUNTIME_ERROR_PHONE_PATTERN, "<redacted-phone>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_ASSIGNMENT_PATTERN, "$1<redacted-id>")
+    .replace(HOSTED_RUNTIME_DIAGNOSTIC_ECHOED_INPUT_PATTERN, "$1<redacted-value>")
+    .replace(HOSTED_RUNTIME_DIAGNOSTIC_IDENTIFIER_PHRASE_PATTERN, "$1<redacted-id>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_TOKEN_PHRASE_PATTERN, "$1<redacted-token>")
     .replace(HOSTED_RUNTIME_DIAGNOSTIC_LONG_TOKEN_PATTERN, "<redacted-token>")
     .trim();

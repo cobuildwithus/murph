@@ -5792,11 +5792,11 @@ test("Junction ambiguous skip detail redacts the account id from provider error 
   assert.equal(warnings.length, 1);
   assert.equal(
     warnings[0]?.responseDetail,
-    "invalid_request: User <redacted-account> cannot access this summary.",
+    "invalid_request: User <redacted-id> cannot access this summary.",
   );
   assert.equal(
     result.metadataPatch?.junctionSkippedResourceLastDetail,
-    "invalid_request: User <redacted-account> cannot access this summary.",
+    "invalid_request: User <redacted-id> cannot access this summary.",
   );
   assert.equal(JSON.stringify(warnings).toLowerCase().includes("junction-user-1"), false);
   assert.equal(JSON.stringify(result.metadataPatch).toLowerCase().includes("junction-user-1"), false);
@@ -5851,11 +5851,11 @@ test("Junction ambiguous skip detail masks embedded ids from provider prose", as
 
   assert.equal(
     result.metadataPatch?.junctionSkippedResourceLastDetail,
-    "Team <redacted-token> is not configured for sleep_cycle.",
+    "Team <redacted-id> is not configured for sleep_cycle.",
   );
   assert.equal(
     warnings[0]?.responseDetail,
-    "Team <redacted-token> is not configured for sleep_cycle.",
+    "Team <redacted-id> is not configured for sleep_cycle.",
   );
   assert.equal(JSON.stringify(result.metadataPatch).includes("11649ed4"), false);
 });
@@ -5881,7 +5881,7 @@ test("Junction ambiguous skip detail reads object-shaped provider error bodies",
 
     if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
       return createJsonResponse({
-        detail: { type: "resource_misconfigured", msg: "sleep_cycle summaries are disabled." },
+        detail: { type: "resource_misconfigured", msg: "user hbm_abc123xyz sleep_cycle summaries are disabled." },
       }, 422);
     }
 
@@ -5902,7 +5902,7 @@ test("Junction ambiguous skip detail reads object-shaped provider error bodies",
 
   assert.equal(
     result.metadataPatch?.junctionSkippedResourceLastDetail,
-    "resource_misconfigured: sleep_cycle summaries are disabled.",
+    "resource_misconfigured: user <redacted-id> sleep_cycle summaries are disabled.",
   );
 });
 

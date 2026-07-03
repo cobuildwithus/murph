@@ -1900,7 +1900,12 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
       sanitizeHostedRuntimeDiagnosticText(
         "Team 11649ed4-27e2-4718-959f-d68de1d1a120 is not configured for sleep_cycle.",
       ),
-    ).toBe("Team <redacted-token> is not configured for sleep_cycle.");
+    ).toBe("Team <redacted-id> is not configured for sleep_cycle.");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText(
+        "record 11649ed4-27e2-4718-959f-d68de1d1a120 was rejected upstream.",
+      ),
+    ).toBe("record <redacted-token> was rejected upstream.");
   });
 
   it("masks identifier assignments while keeping the key visible", () => {
@@ -1929,11 +1934,28 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     ).toBeNull();
   });
 
+  it("masks echoed validation input values inside bracket suffixes", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText(
+        "Input should be a valid date [type=value_error, input_value=junction-user-1, input_type=str]",
+      ),
+    ).toBe("Input should be a valid date [type=value_error, input_value=<redacted-value>, input_type=str]");
+  });
+
+  it("masks id-shaped identifier phrases while keeping plain words", () => {
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("user hbm_abc123xyz is not configured"),
+    ).toBe("user <redacted-id> is not configured");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("user profile summaries are disabled for this team"),
+    ).toBe("user profile summaries are disabled for this team");
+  });
+
   it("masks multiple unsafe spans in one string", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText(
         "user 0123456789abcdef0123456789abcdef01 denied; retry as 11649ed4-27e2-4718-959f-d68de1d1a120",
       ),
-    ).toBe("user <redacted-token> denied; retry as <redacted-token>");
+    ).toBe("user <redacted-id> denied; retry as <redacted-token>");
   });
 });
