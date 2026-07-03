@@ -182,6 +182,7 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
   jobs: freezeConfiguredDeviceSyncProviderJobDefinitions({
     backfill: {
       payload: {
+        timeseriesCursor: stringJobField({ includeInHostedHint: true }),
         windowEnd: stringJobField({ includeInHostedHint: true }),
         windowStart: stringJobField({ includeInHostedHint: true }),
       },

@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { expect, test, vi } from "vitest";
@@ -3166,6 +3166,115 @@ test("manual reconcile boosts Junction reconcile priority without promoting hist
       windowStart: "2025-10-03T00:00:00.000Z",
       windowEnd: "2026-04-01T00:00:00.000Z",
     });
+  } finally {
+    close();
+  }
+});
+
+test("device sync service preserves Junction yielded backfill timeseries cursor in queued continuation", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-yielded-backfill-cursor");
+  const ownerWindowStart = "2026-04-07T00:00:00.000Z";
+  const ownerWindowEnd = "2026-04-10T00:00:00.000Z";
+  let yieldRequested = false;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => new Date("2026-04-10T12:00:00.000Z"),
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      shouldYieldJobExecution: () => yieldRequested,
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_fake_test_placeholder",
+        clientUserIdSecret: "test-only-hmac-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileIntervalMs: 60_000,
+        summaryBackfillDays: 3,
+        summaryResources: ["activity"],
+        timeseriesBackfillDays: 3,
+        timeseriesResources: ["stress"],
+        fetchImpl: async (input) => {
+          const url = new URL(readUrl(input));
+
+          if (url.pathname === "/v2/user/providers/junction-account") {
+            return createJsonResponse({
+              providers: [
+                {
+                  slug: "garmin",
+                  status: "connected",
+                },
+              ],
+            });
+          }
+
+          if (url.pathname === "/v2/summary/activity/junction-account") {
+            yieldRequested = true;
+            return createJsonResponse({
+              activity: [],
+            });
+          }
+
+          throw new Error(`Unexpected Junction request during yield continuation test: ${url.pathname}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-account",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: ownerWindowEnd,
+      nextReconcileAt: null,
+    });
+    const expectedDedupeKey = createHash("sha256")
+      .update(JSON.stringify(["junction", "backfill", ownerWindowStart, ownerWindowEnd]))
+      .digest("hex");
+
+    store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "backfill",
+      payload: {
+        windowStart: ownerWindowStart,
+        windowEnd: ownerWindowEnd,
+      },
+      availableAt: ownerWindowEnd,
+      priority: 30,
+      dedupeKey: expectedDedupeKey,
+    });
+
+    const processedJob = await service.runWorkerOnce();
+    const jobs = readJobsForAccountForTesting(store, account.id);
+    const continuationRow = jobs.find((job) => job.status === "queued");
+
+    assert.equal(processedJob?.kind, "backfill");
+    assert.equal(jobs.length, 2);
+    assert.equal(jobs[0]?.status, "succeeded");
+    assert.ok(continuationRow);
+
+    const continuation = store.getJobById(continuationRow.id);
+    assert.ok(continuation);
+    assert.equal(continuation.kind, "backfill");
+    assert.deepEqual(continuation.payload, {
+      windowStart: ownerWindowStart,
+      windowEnd: ownerWindowEnd,
+      timeseriesCursor: ownerWindowStart,
+    });
+    assert.equal(continuation.dedupeKey, expectedDedupeKey);
   } finally {
     close();
   }

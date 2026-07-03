@@ -141,6 +141,7 @@ describe("deviceSyncProviderManifests", () => {
   it("declares provider-owned job definitions for every built-in provider job kind", () => {
     expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "backfill")).toEqual({
       payload: {
+        timeseriesCursor: { kind: "string", includeInHostedHint: true },
         windowEnd: { kind: "string", includeInHostedHint: true },
         windowStart: { kind: "string", includeInHostedHint: true },
       },
@@ -441,11 +442,13 @@ describe("deviceSyncProviderManifests", () => {
         kind: "backfill",
         payload: {
           resources: ["profile"],
+          timeseriesCursor: "2026-04-01T00:00:00.000Z",
           windowEnd: "2026-04-22T00:00:00.000Z",
           windowStart: "2026-01-22T00:00:00.000Z",
         },
       }),
     ).toEqual({
+      timeseriesCursor: "2026-04-01T00:00:00.000Z",
       windowEnd: "2026-04-22T00:00:00.000Z",
       windowStart: "2026-01-22T00:00:00.000Z",
     });
