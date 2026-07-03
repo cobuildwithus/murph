@@ -1,4 +1,7 @@
-import { sanitizeHostedRuntimeDiagnosticText } from "../hosted-runtime.ts";
+import {
+  isHostedRuntimeIdShapedDiagnosticToken,
+  sanitizeHostedRuntimeDiagnosticText,
+} from "../hosted-runtime.ts";
 import { normalizeString, splitScopeList } from "../shared.ts";
 
 type ProviderDiagnosticValue = boolean | number | string | null | undefined;
@@ -181,7 +184,11 @@ export function inspectProviderErrorBody(body: string): ProviderErrorBodyDiagnos
 
   try {
     const parsed: unknown = JSON.parse(trimmed);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (Array.isArray(parsed)) {
+      return inspectProviderErrorEntries(parsed, "json_array");
+    }
+
+    if (!parsed || typeof parsed !== "object") {
       return {
         responseErrorCode: null,
         responseErrorDescription: null,
@@ -248,6 +255,19 @@ function inspectProviderErrorObject(record: Record<string, unknown>): ProviderEr
   };
 }
 
+function inspectProviderErrorEntries(
+  entries: readonly unknown[],
+  responseShapeKind: string,
+): ProviderErrorBodyDiagnostics {
+  return {
+    responseErrorCode: readNestedErrorsCode(entries),
+    responseErrorDescription: readNestedErrorsDescription(entries),
+    responseErrorDescriptionFieldPresent: hasNestedErrorsDescription(entries),
+    responseErrorFieldPresent: hasNestedErrorsCode(entries),
+    responseShapeKind,
+  };
+}
+
 function readFirstSafeProviderErrorCode(
   record: Record<string, unknown>,
   fields: readonly string[],
@@ -255,7 +275,11 @@ function readFirstSafeProviderErrorCode(
   for (const field of fields) {
     const value = record[field];
     const normalized = typeof value === "string" ? normalizeString(value)?.toLowerCase() : null;
-    if (normalized && /^[A-Za-z0-9_.:-]{1,128}$/u.test(normalized)) {
+    if (
+      normalized
+      && /^[A-Za-z0-9_.:-]{1,128}$/u.test(normalized)
+      && !isHostedRuntimeIdShapedDiagnosticToken(normalized)
+    ) {
       return normalized;
     }
   }

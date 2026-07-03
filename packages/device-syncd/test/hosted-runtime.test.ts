@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import * as hostedRuntime from "../src/hosted-runtime.ts";
 import {
   buildHostedExecutionDeviceSyncConnectLinkPath,
+  isHostedRuntimeIdShapedDiagnosticToken,
   normalizeHostedDeviceSyncJobHints,
   parseHostedExecutionDeviceSyncConnectLinkResponse,
   parseHostedExecutionDeviceSyncDirtyAckRequest,
@@ -1895,6 +1896,16 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
 });
 
 describe("sanitizeHostedRuntimeDiagnosticText", () => {
+  it("classifies standalone id-shaped diagnostic tokens", () => {
+    expect(isHostedRuntimeIdShapedDiagnosticToken("11649ed4-27e2-4718-959f-d68de1d1a120")).toBe(true);
+    expect(isHostedRuntimeIdShapedDiagnosticToken("a1".repeat(16))).toBe(true);
+    expect(isHostedRuntimeIdShapedDiagnosticToken("invalid_request")).toBe(false);
+    expect(isHostedRuntimeIdShapedDiagnosticToken("value_error.date")).toBe(false);
+    expect(isHostedRuntimeIdShapedDiagnosticToken("ERR_42")).toBe(false);
+    expect(isHostedRuntimeIdShapedDiagnosticToken("2026-07-04T09:15:00Z")).toBe(false);
+    expect(isHostedRuntimeIdShapedDiagnosticToken("v1.2.3")).toBe(false);
+  });
+
   it("masks long opaque tokens in place instead of dropping the whole text", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText(

@@ -2268,6 +2268,32 @@ export function sanitizeHostedRuntimeErrorText(value: string | null): string | n
   return sanitizeHostedRuntimeErrorString(value, HOSTED_RUNTIME_ERROR_TEXT_MAX_LENGTH);
 }
 
+export function isHostedRuntimeIdShapedDiagnosticToken(value: string): boolean {
+  const token = value.replace(HOSTED_RUNTIME_DIAGNOSTIC_FORMAT_CHAR_PATTERN, "").trim();
+  if (!token) {
+    return false;
+  }
+
+  const tokenAlphanumericLength = token.replace(/[^A-Za-z0-9]/gu, "").length;
+
+  return (
+    matchesEntireHostedRuntimeDiagnosticToken(HOSTED_RUNTIME_DIAGNOSTIC_LONG_TOKEN_PATTERN, token)
+    || (
+      tokenAlphanumericLength >= 6
+      &&
+      matchesEntireHostedRuntimeDiagnosticToken(HOSTED_RUNTIME_DIAGNOSTIC_DIGIT_TOKEN_PATTERN, token)
+      && !HOSTED_RUNTIME_DIAGNOSTIC_SAFE_DIGIT_TOKEN_PATTERN.test(token)
+    )
+  );
+}
+
+function matchesEntireHostedRuntimeDiagnosticToken(pattern: RegExp, value: string): boolean {
+  pattern.lastIndex = 0;
+  const match = pattern.exec(value);
+  pattern.lastIndex = 0;
+  return match?.[0] === value;
+}
+
 // Redacts by masking the unsafe spans (ids, token phrases, long tokens) so
 // provider error prose stays debuggable. Raw structured payload dumps fail
 // closed before span masking or the diagnostic length cap, because masking and

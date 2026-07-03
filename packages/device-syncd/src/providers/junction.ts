@@ -26,7 +26,10 @@ import {
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 
 import { deviceSyncError, isDeviceSyncError, type DeviceSyncError } from "../errors.ts";
-import { sanitizeHostedRuntimeDiagnosticText } from "../hosted-runtime.ts";
+import {
+  isHostedRuntimeIdShapedDiagnosticToken,
+  sanitizeHostedRuntimeDiagnosticText,
+} from "../hosted-runtime.ts";
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../metadata.ts";
 import {
   assertValidJunctionClientUserIdSecret,
@@ -2118,7 +2121,9 @@ function readJunctionDiagnosticToken(value: unknown): string | null {
   }
 
   const token = value.trim();
-  return /^[A-Za-z0-9_.:-]{1,128}$/u.test(token) ? token : null;
+  return /^[A-Za-z0-9_.:-]{1,128}$/u.test(token) && !isHostedRuntimeIdShapedDiagnosticToken(token)
+    ? token
+    : null;
 }
 
 interface JunctionDiagnosticCallResult {

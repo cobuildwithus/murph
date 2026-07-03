@@ -5977,6 +5977,115 @@ test("Junction ambiguous skip detail masks embedded ids from provider prose", as
   assert.equal(JSON.stringify(result.metadataPatch).includes("11649ed4"), false);
 });
 
+test("Junction ambiguous skip detail drops id-shaped provider error codes", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        code: "11649ed4-27e2-4718-959f-d68de1d1a120",
+        message: "sleep_cycle disabled",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, "sleep_cycle disabled");
+  assert.equal(warnings[0]?.responseDetail, "sleep_cycle disabled");
+  assert.equal(JSON.stringify(warnings).includes("11649ed4"), false);
+  assert.equal(JSON.stringify(result.metadataPatch).includes("11649ed4"), false);
+});
+
+test("Junction ambiguous skip detail reads top-level provider validation arrays", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse([
+        {
+          type: "value_error.date",
+          msg: "start_date must be before end_date",
+        },
+      ], 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const expectedDetail = "value_error.date: start_date must be before end_date";
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, expectedDetail);
+  assert.equal(warnings[0]?.responseDetail, expectedDetail);
+});
+
 test("Junction ambiguous skip detail masks quoted validation input echoes", async () => {
   const warnings: Record<string, unknown>[] = [];
   const provider = createJunctionProvider(async (input) => {
