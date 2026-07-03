@@ -33,12 +33,12 @@ const HOSTED_RUNTIME_ERROR_WINDOWS_PATH_PATTERN = /[A-Za-z]:\\[^\s)"']+/gu;
 const HOSTED_RUNTIME_ERROR_URL_PATTERN = /\bhttps?:\/\/[^\s)"']+/giu;
 const HOSTED_RUNTIME_ERROR_EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu;
 const HOSTED_RUNTIME_ERROR_PHONE_PATTERN = /(?:\+\d[\d().\s-]{7,}\d|\(\d{3}\)\s*\d{3}[-.\s]\d{4}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b)/gu;
-// Braces, structured-looking bracket segments, primitive arrays, and quoted-key
-// colons signal a raw structured payload dump or validation suffix that can
+// Braces, primitive arrays, quoted-key colons, and structured-looking bracket
+// regions signal a raw structured payload dump or validation suffix that can
 // carry arbitrary values under keys the span redactors do not know; those stay
 // fail-closed. Bare square brackets around prose are allowed.
 const HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN =
-  /[{}]|\[[^\]]*[=,]|\[\s*(?:["']|\d|(?:true|false|null)\b)|["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
+  /[{}]|\[\s*(?:["']|\d|(?:true|false|null)\b)|["'][A-Za-z0-9_.:-]{1,80}["']\s*:/u;
 // Default-ignorable format characters (zero-width spaces/joiners, soft
 // hyphens, BOM) can split an identifier visually without changing how it
 // renders; strip them before span matching so they cannot defeat the masks.
@@ -2281,6 +2281,28 @@ function matchesEntireHostedRuntimeDiagnosticToken(pattern: RegExp, value: strin
   return match?.[0] === value;
 }
 
+function hostedRuntimeDiagnosticBracketRegionHasStructure(value: string): boolean {
+  let depth = 0;
+
+  for (const char of value) {
+    if (char === "[") {
+      depth += 1;
+      continue;
+    }
+
+    if (char === "]") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+
+    if (depth > 0 && (char === "=" || char === ",")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // Redacts by masking the unsafe spans (ids, digit-bearing tokens, long tokens)
 // so provider error prose stays debuggable. Raw structured payload dumps fail
 // closed before span masking or the diagnostic length cap, because masking and
@@ -2291,6 +2313,7 @@ export function sanitizeHostedRuntimeDiagnosticText(value: string | null): strin
   if (
     !sanitizedBase
     || HOSTED_RUNTIME_DIAGNOSTIC_JSON_FRAGMENT_PATTERN.test(sanitizedBase)
+    || hostedRuntimeDiagnosticBracketRegionHasStructure(sanitizedBase)
   ) {
     return null;
   }

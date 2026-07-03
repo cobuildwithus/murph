@@ -6262,6 +6262,63 @@ test("Junction ambiguous skip detail drops bracketed diagnostics with unknown ke
   }
 });
 
+test("Junction ambiguous skip detail drops nested bracketed diagnostics", async () => {
+  const warnings: Record<string, unknown>[] = [];
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [
+          {
+            slug: "garmin",
+            name: "Garmin",
+            status: "connected",
+            resource_availability: {
+              sleep_cycle: true,
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/sleep_cycle/junction-user-1")) {
+      return createJsonResponse({
+        message: "Validation failed [context [field] display_name=Jane]",
+      }, 422);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["sleep_cycle"],
+    timeseriesResources: [],
+  });
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      logger: {
+        warn(_message, context) {
+          warnings.push(context ?? {});
+        },
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.responseDetail, undefined);
+  assert.equal(result.metadataPatch?.junctionSkippedResourceLastDetail, null);
+
+  for (const exposed of [JSON.stringify(warnings), JSON.stringify(result.metadataPatch)]) {
+    assert.equal(exposed.includes("Jane"), false);
+    assert.equal(exposed.includes("display_name"), false);
+  }
+});
+
 test("Junction ambiguous skip detail reads object-shaped provider error bodies", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);

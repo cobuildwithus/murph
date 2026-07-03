@@ -1944,6 +1944,9 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     expect(
       sanitizeHostedRuntimeDiagnosticText("Provider returned [timeout] while checking sleep_cycle"),
     ).toBe("Provider returned [timeout] while checking sleep_cycle");
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("see [option] and [other] words"),
+    ).toBe("see [option] and [other] words");
 
     // Structured validation info must arrive through JSON fields, not
     // best-effort parsing of semi-structured prose suffixes.
@@ -1963,6 +1966,12 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     ).toBeNull();
     expect(
       sanitizeHostedRuntimeDiagnosticText("failed [display_name=Jane"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("Validation failed [context [field] display_name=Jane]"),
+    ).toBeNull();
+    expect(
+      sanitizeHostedRuntimeDiagnosticText("failed [outer [inner] a, b]"),
     ).toBeNull();
   });
 
