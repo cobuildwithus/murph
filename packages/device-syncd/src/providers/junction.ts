@@ -645,7 +645,7 @@ export function createJunctionDeviceSyncProvider(
   }
 
   function createScheduledJobs(
-    _account: StoredDeviceSyncAccount,
+    account: StoredDeviceSyncAccount,
     now: string,
   ): ProviderScheduleResult {
     return {
@@ -656,9 +656,63 @@ export function createJunctionDeviceSyncProvider(
           windowStart: subtractDays(now, reconcileDays),
           priority: 40,
         }),
+        ...buildDueHistoricalBackfillJobs(account, now),
       ],
       nextReconcileAt: addMilliseconds(now, reconcileIntervalMs),
     };
+  }
+
+  // Historical backfill work is derived from durable connection metadata on
+  // every scheduled pass, not carried by in-flight job chains: if a backfill
+  // job dies (worker crash, provider outage, attempts exhausted), the next
+  // pass re-materializes the due work from the recorded state. The exact
+  // window dedupe key keeps re-enqueueing idempotent while a job is queued.
+  function buildDueHistoricalBackfillJobs(
+    account: StoredDeviceSyncAccount,
+    now: string,
+  ): DeviceSyncJobInput[] {
+    const metadata = account.metadata;
+    const status = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]);
+
+    if (status === "complete" || status === "exhausted") {
+      return [];
+    }
+
+    if (status === "retrying") {
+      const windowStart = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]);
+      const windowEnd = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]);
+      if (!windowStart || !windowEnd) {
+        return [];
+      }
+      const emptyAttempts = readHistoricalBackfillEmptyAttempts(metadata, windowStart, windowEnd);
+      const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
+      if (retryDelayMs === null) {
+        return [];
+      }
+      const lastEmptyAtMs = Date.parse(
+        normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.lastEmptyAt]) ?? "",
+      );
+      if (Number.isFinite(lastEmptyAtMs) && Date.parse(now) < lastEmptyAtMs + retryDelayMs) {
+        return [];
+      }
+      return [buildExactWindowJob({
+        kind: "backfill",
+        windowStart,
+        windowEnd,
+        priority: 30,
+      })];
+    }
+
+    // No recorded outcome: the connect-time historical backfill never ran to
+    // completion (or predates this bookkeeping). Re-derive its exact window
+    // from the connection's connect time and run it until a terminal status
+    // lands; imports are idempotent so a redundant pass is safe.
+    return [buildWindowJob({
+      kind: "backfill",
+      now: account.connectedAt,
+      windowStart: subtractDays(account.connectedAt, summaryBackfillDays),
+      priority: 30,
+    })];
   }
 
   async function executeJob(
@@ -4176,7 +4230,7 @@ function buildHistoricalBackfillFollowUp(input: {
   now: string;
   windowStart: string;
   windowEnd: string;
-}): Pick<ProviderJobResult, "metadataPatch" | "scheduledJobs"> {
+}): Pick<ProviderJobResult, "metadataPatch"> {
   if (input.hasRecords) {
     return {
       metadataPatch: buildHistoricalBackfillMetadataPatch({
@@ -4203,31 +4257,18 @@ function buildHistoricalBackfillFollowUp(input: {
   ) + 1;
   const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
   const status: JunctionHistoricalBackfillStatus = retryDelayMs === null ? "exhausted" : "retrying";
-  const metadataPatch = buildHistoricalBackfillMetadataPatch({
-    status,
-    emptyAttempts,
-    lastEmptyAt: input.now,
-    windowStart: input.windowStart,
-    windowEnd: input.windowEnd,
-  });
 
-  if (retryDelayMs === null) {
-    return { metadataPatch };
-  }
-
-  const retryJob = buildExactWindowJob({
-    kind: "backfill",
-    windowStart: input.windowStart,
-    windowEnd: input.windowEnd,
-    priority: 30,
-  });
-
+  // No retry job is scheduled here: the scheduled pass derives due retries
+  // from this metadata (buildDueHistoricalBackfillJobs), which survives job
+  // loss where an in-flight chain would not.
   return {
-    metadataPatch,
-    scheduledJobs: [{
-      ...retryJob,
-      availableAt: addMilliseconds(input.now, retryDelayMs),
-    }],
+    metadataPatch: buildHistoricalBackfillMetadataPatch({
+      status,
+      emptyAttempts,
+      lastEmptyAt: input.now,
+      windowStart: input.windowStart,
+      windowEnd: input.windowEnd,
+    }),
   };
 }
 

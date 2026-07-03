@@ -214,7 +214,7 @@ test("Junction sleep-cycle id-only historical backfill keeps retrying", async ()
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
     junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
-  assert.equal(result.scheduledJobs?.[0]?.kind, "backfill");
+  assert.equal(result.scheduledJobs, undefined);
   assert.equal(importedSnapshots.length, 1);
 });
 
@@ -233,7 +233,7 @@ for (const stageCount of [0, -1]) {
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
       junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
     });
-    assert.equal(result.scheduledJobs?.[0]?.kind, "backfill");
+    assert.equal(result.scheduledJobs, undefined);
     assert.equal(importedSnapshots.length, 1);
   });
 }
