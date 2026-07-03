@@ -1538,6 +1538,76 @@ describe("hosted Linq observability stores", () => {
     );
   });
 
+  it("projects receipt-before-runtime callbacks through group-thread no-receipt-expected rows", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const acceptedAt = new Date("2026-03-26T12:00:01.000Z");
+    const receiptAt = new Date("2026-03-26T12:00:03.000Z");
+    fixture.hostedLinqLineFindUnique.mockResolvedValueOnce({
+      phoneNumberHint: "+0000",
+      phoneNumberLookupKey: "hbidx:phone:runtime-line",
+    });
+    fixture.hostedLinqProviderEventFindMany.mockResolvedValueOnce([
+      {
+        deliveryStatus: "delivered",
+        eventId: createHostedLinqProviderEventLookupKey("evt_group_delivered_123"),
+        failureCode: null,
+        failureReason: null,
+        phoneNumberLookupKey: null,
+        providerCreatedAt: receiptAt,
+        service: "imessage",
+      },
+    ]);
+
+    await recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt,
+      attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+      idempotencyKey: "assistant-outbox:intent_group_receipt",
+      linqChatId: "linq_chat_group",
+      messageId: "provider_message_group_receipt",
+      phoneNumber: "+15550000000",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent_group_receipt",
+      targetKind: "thread",
+      threadIsDirect: false,
+    });
+
+    expect(fixture.hostedLinqDeliveryCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          acceptedAt,
+          phoneNumberLookupKey: "hbidx:phone:runtime-line",
+          status: "sent_no_receipt_expected",
+          targetKind: "thread",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqLineUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          totalOutboundCount: { increment: 1 },
+        },
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          deliveredAt: receiptAt,
+          lastReceiptAt: receiptAt,
+          status: "delivered",
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqLineUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          lastDeliveredAt: receiptAt,
+          lastReceiptAt: receiptAt,
+          totalDeliveredCount: { increment: 1 },
+        }),
+      }),
+    );
+  });
+
   it("lets a hosted runtime acceptance replace a pre-provider skipped delivery", async () => {
     const fixture = createObservabilityPrismaFixture();
     const deliveryIdempotencyLookupKey = createHostedLinqDeliveryIdempotencyLookupKey(

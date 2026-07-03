@@ -6852,6 +6852,7 @@ describe("hosted runtime callbacks", () => {
       bindingDeliveryTarget: "linq_chat_current",
       channel: "linq",
       explicitTarget: "linq_chat_current",
+      threadIsDirect: false,
       transportIdempotent: false,
     });
     const providerFetch = vi.fn<typeof fetch>(async () => {
@@ -6883,14 +6884,18 @@ describe("hosted runtime callbacks", () => {
         status: "sent",
       });
     });
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
 
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
       wake: HOSTED_WAKE.wake,
-      effectsPort: createHostedRuntimeEffectsPortStub(),
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
       providerFetch,
       vaultRoot: HOSTED_WAKE.vaultRoot,
     });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
     expect(mocks.sendLinqVoiceMemoMessage).toHaveBeenCalledWith({
       attachmentId: "attachment_voice_1",
@@ -6920,6 +6925,18 @@ describe("hosted runtime callbacks", () => {
         target: "linq_chat_current",
       }),
     ]);
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "linq-voice-memo:intent_123",
+        providerMessageId: "linq_voice_sent",
+        providerTarget: "linq_chat_current",
+        providerThreadId: "linq_chat_current",
+        target: "linq_chat_current",
+        targetKind: "thread",
+        threadIsDirect: false,
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
   });
 
   it("sends hosted Linq voice memos to the same-wake concrete chat target", async () => {
