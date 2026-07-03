@@ -527,14 +527,17 @@ function foldMurphContactCardVcfLine(line: string): string {
 }
 
 /**
- * Best-effort fetch of the Murph headshot for embedding; any failure returns
- * null so the card ships without a photo instead of failing the share.
+ * Best-effort fetch of a Murph contact-card photo for embedding; any failure
+ * returns null so the card ships without a photo instead of failing the
+ * share. Defaults to the canonical headshot; pass `imageUrl` to embed a
+ * different member-chosen avatar asset.
  */
 export async function fetchMurphHostedLinqContactCardVcfPhoto(input: {
   fetchImpl?: typeof fetch;
+  imageUrl?: string | null;
   signal?: AbortSignal;
 } = {}): Promise<MurphHostedLinqContactCardVcfPhoto | null> {
-  const imageUrl = getMurphContactCardImageUrl();
+  const imageUrl = input.imageUrl ?? getMurphContactCardImageUrl();
   if (!imageUrl) {
     return null;
   }
