@@ -11058,6 +11058,105 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("preserves system mailbox receipt counters across a checkpointed follow-up pass", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-redacted-status-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_runtime_receipt_status_followup",
+            idleCheckpointDelayMs: 25,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: `${checkpointRequests.length}`.repeat(64).slice(0, 64),
+                key: "users/bundles/member-synthetic/runtime-receipt-status-followup.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              const preparedStatus: HostedRuntimeRedactedJson = {
+                hostedSystemMailboxPrepared: 1,
+              };
+              const recordedStatus: HostedRuntimeRedactedJson = {
+                hostedSystemMailboxRecorded: 1,
+              };
+              return {
+                afterCheckpoint: async () => ({
+                  checkpointReason: "system_mailbox_receipt" as const,
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  redactedStatus: recordedStatus,
+                }),
+                checkpointReason: "system_mailbox_receipt" as const,
+                nextWakeAt: TEST_NOW,
+                nextWakeReason: "assistant",
+                progressed: true,
+                redactedStatus: preparedStatus,
+              };
+            }
+
+            if (assistantPhaseCalls === 2) {
+              const followUpStatus: HostedRuntimeRedactedJson = {
+                hostedAssistantProgressed: true,
+                hostedSystemMailboxPrepared: 0,
+                hostedSystemMailboxRecorded: 0,
+              };
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                nextWakeAt: null,
+                nextWakeReason: null,
+                progressed: true,
+                redactedStatus: followUpStatus,
+              };
+            }
+
+            throw new Error("System mailbox receipt follow-up should service exactly once.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 2, events.join(","));
+      assert.equal(result.status, "idle");
+      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.redactedStatus?.hostedSystemMailboxPrepared, 1);
+      assert.equal(result.redactedStatus?.hostedSystemMailboxRecorded, 1);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("external runtime wake preserves already-serviced projected wake guard", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];

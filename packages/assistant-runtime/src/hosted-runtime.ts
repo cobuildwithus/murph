@@ -2990,12 +2990,51 @@ function mergeHostedWorkspaceInvocationProjection(
     nextWakeReason: selectedProjectedWake.nextWakeReason,
     projectedWakeRequiresCheckpoint:
       selectedProjectedWake.projectedWakeRequiresCheckpoint,
-    redactedStatus: {
-      ...previous.redactedStatus,
-      ...next.redactedStatus,
-    },
+    redactedStatus: mergeHostedWorkspaceInvocationRedactedStatus(
+      previous.redactedStatus,
+      next.redactedStatus,
+    ),
     status,
   };
+}
+
+function mergeHostedWorkspaceInvocationRedactedStatus(
+  previous: HostedWorkspaceInvocationProjection["redactedStatus"],
+  next: HostedWorkspaceInvocationProjection["redactedStatus"],
+): HostedWorkspaceInvocationProjection["redactedStatus"] {
+  const merged = {
+    ...previous,
+    ...next,
+  };
+  const counterKeys = [
+    "hostedSystemMailboxPrepared",
+    "hostedSystemMailboxRecordFailed",
+    "hostedSystemMailboxRecorded",
+    "hostedSystemMailboxRetryableFailed",
+  ];
+  for (const key of counterKeys) {
+    const total =
+      readHostedWorkspaceInvocationRedactedNumber(previous, key)
+      + readHostedWorkspaceInvocationRedactedNumber(next, key);
+    if (total > 0) {
+      merged[key] = total;
+    }
+  }
+  if (
+    previous.hostedAssistantProgressed === true
+    || next.hostedAssistantProgressed === true
+  ) {
+    merged.hostedAssistantProgressed = true;
+  }
+  return merged;
+}
+
+function readHostedWorkspaceInvocationRedactedNumber(
+  value: HostedWorkspaceInvocationProjection["redactedStatus"],
+  key: string,
+): number {
+  const field = value[key];
+  return typeof field === "number" ? field : 0;
 }
 
 interface HostedWorkspaceInvocationProjectedWake {
