@@ -7431,7 +7431,9 @@ describe("hosted workspace runtime entrypoint", () => {
     const mailboxItems: HostedMailboxItem[] = [];
     const dueWakeAt = new Date(Date.now() - 60_000).toISOString();
     const freshFutureWakeAt = new Date(Date.now() + 60_000).toISOString();
+    const laterFutureWakeAt = new Date(Date.now() + 120_000).toISOString();
     const foregroundAfterCheckpointGate = createDeferred<void>();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const durableEffect = vi.fn(async () => {
       events.push("durable-effect");
       mailboxItems.push(createMailboxItem({
@@ -7536,6 +7538,7 @@ describe("hosted workspace runtime entrypoint", () => {
               },
             },
           }),
+          runtimeWakeSignal,
           async runAssistantPhase(input) {
             assistantPass += 1;
             events.push(`assistant:${assistantPass}`);
@@ -7567,6 +7570,40 @@ describe("hosted workspace runtime entrypoint", () => {
                 progressed: true,
               };
             }
+            if (assistantPass === 3) {
+              assert.ok(
+                !events.includes(
+                  "mailbox.importItem:mailbox_item_entrypoint_forced_checkpoint_pending_002",
+                ),
+                events.join(","),
+              );
+              assert.notEqual(input.workspace?.nextWakeAt, dueWakeAt);
+              assert.ok(
+                !events.includes("workspace.checkpoint:1:idle_shutdown:accept"),
+                events.join(","),
+              );
+              return { progressed: false };
+            }
+            if (assistantPass === 4) {
+              assert.ok(
+                events.includes(
+                  "mailbox.importItem:mailbox_item_entrypoint_forced_checkpoint_pending_002",
+                ),
+                events.join(","),
+              );
+              assert.notEqual(input.workspace?.nextWakeAt, dueWakeAt);
+              assert.ok(
+                !events.includes("workspace.checkpoint:1:idle_shutdown:accept"),
+                events.join(","),
+              );
+              return {
+                checkpointReason: "system_mailbox_receipt",
+                nextWakeAt: laterFutureWakeAt,
+                nextWakeReason: "assistant",
+                progressed: true,
+              };
+            }
+            assert.equal(assistantPass, 5);
             assert.ok(
               events.includes("workspace.checkpoint:1:idle_shutdown:accept"),
               events.join(","),
@@ -7591,6 +7628,34 @@ describe("hosted workspace runtime entrypoint", () => {
         !events.includes("workspace.checkpoint:1:idle_shutdown:accept"),
         events.join(","),
       );
+      const fetchCountBeforeSourceBlindWake =
+        events.filter((event) => event === "mailbox.fetch").length;
+      runtimeWakeSignal.notify();
+      await waitUntil(() => {
+        assert.ok(
+          events.filter((event) => event === "mailbox.fetch").length
+            > fetchCountBeforeSourceBlindWake,
+        );
+      });
+      await waitUntil(() => {
+        assert.equal(events.includes("assistant:3"), true);
+      });
+      assert.ok(
+        !events.includes("workspace.checkpoint:1:idle_shutdown:accept"),
+        events.join(","),
+      );
+      mailboxItems.push(createMailboxItem({
+        id: "mailbox_item_entrypoint_forced_checkpoint_pending_002",
+        laneSeq: "2",
+      }));
+      runtimeWakeSignal.notify();
+      await waitUntil(() => {
+        assert.equal(events.includes("assistant:4"), true);
+      });
+      assert.ok(
+        !events.includes("workspace.checkpoint:1:idle_shutdown:accept"),
+        events.join(","),
+      );
       foregroundAfterCheckpointGate.resolve();
       const result = await withRealTimeout(
         resultPromise,
@@ -7598,7 +7663,7 @@ describe("hosted workspace runtime entrypoint", () => {
         () => events.join(","),
       );
 
-      assert.equal(assistantPass, 3);
+      assert.equal(assistantPass, 5);
       assert.equal(durableEffect.mock.calls.length, 1);
       assert.ok(
         requireEventIndex(events, "workspace.checkpoint:1:idle_shutdown:interrupt")
@@ -7613,6 +7678,24 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.ok(
         requireEventIndex(events, "assistant:2")
+          < requireEventIndex(events, "assistant:3"),
+      );
+      assert.ok(
+        requireEventIndex(events, "assistant:3")
+          < requireEventIndex(
+            events,
+            "mailbox.importItem:mailbox_item_entrypoint_forced_checkpoint_pending_002",
+          ),
+      );
+      assert.ok(
+        requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_forced_checkpoint_pending_002",
+        )
+          < requireEventIndex(events, "assistant:4"),
+      );
+      assert.ok(
+        requireEventIndex(events, "assistant:4")
           < requireEventIndex(events, "mailbox.afterCheckpoint:done"),
       );
       assert.ok(
@@ -7621,7 +7704,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.ok(
         requireEventIndex(events, "workspace.checkpoint:1:idle_shutdown:accept")
-          < requireEventIndex(events, "assistant:3"),
+          < requireEventIndex(events, "assistant:5"),
       );
       assert.deepEqual(checkpointRequests.map((request) => [
         request.expectedWorkspaceVersion,

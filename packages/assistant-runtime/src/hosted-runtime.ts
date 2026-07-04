@@ -1797,6 +1797,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         );
       };
       const runIdleWakeForegroundPass = async (wakeInput: {
+        includeProjectedWakeInWorkspace?: boolean;
         latencySeed?: HostedRuntimeWakeLatencySeed | null;
         projectedWakeKeyBeingServiced: string | null;
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
@@ -1806,13 +1807,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           nextWakeAt: accumulatedProjection.nextWakeAt,
           nextWakeReason: accumulatedProjection.nextWakeReason,
         });
-        const passWorkspace = projectHostedWorkspaceWakeForForegroundPass({
-          projection: accumulatedProjection,
-          workspace:
-            accumulatedProjection.committedWorkspace
-            ?? result.latestWorkspace
-            ?? workspaceRead.workspace,
-        });
+        const basePassWorkspace =
+          accumulatedProjection.committedWorkspace
+          ?? result.latestWorkspace
+          ?? workspaceRead.workspace;
+        const passWorkspace = wakeInput.includeProjectedWakeInWorkspace === false
+          ? stripCheckpointGatedWakeFromForegroundPassWorkspace({
+              projection: accumulatedProjection,
+              workspace: basePassWorkspace,
+            })
+          : projectHostedWorkspaceWakeForForegroundPass({
+              projection: accumulatedProjection,
+              workspace: basePassWorkspace,
+            });
         result = await runForegroundPass({
           initialMailboxImport: null,
           initialMailboxImportContext: createHostedRuntimeWakeInitialImportContext(
@@ -1984,11 +1991,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             await waitForMailboxPostCheckpointEffects();
           if (mailboxEffectsWaitResult.kind === "external_wake") {
             await runIdleWakeForegroundPass({
+              includeProjectedWakeInWorkspace: false,
               latencySeed: createHostedRuntimeWakeLatencySeed(
                 mailboxEffectsWaitResult.notification,
               ),
               projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
-              requestIdKind: "idle-wake",
+              requestIdKind: "checkpoint-interrupt",
             });
             continue;
           }
@@ -3224,6 +3232,29 @@ function projectHostedWorkspaceWakeForForegroundPass(input: {
     ...input.workspace,
     nextWakeAt: input.projection.nextWakeAt,
     nextWakeReason: input.projection.nextWakeReason,
+  };
+}
+
+function stripCheckpointGatedWakeFromForegroundPassWorkspace(input: {
+  projection: Pick<
+    HostedWorkspaceInvocationProjection,
+    "nextWakeAt" | "nextWakeReason" | "projectedWakeRequiresCheckpoint"
+  >;
+  workspace: HostedWorkspaceState | null;
+}): HostedWorkspaceState | null {
+  if (
+    !input.workspace
+    || !input.projection.projectedWakeRequiresCheckpoint
+    || input.workspace.nextWakeAt !== input.projection.nextWakeAt
+    || input.workspace.nextWakeReason !== input.projection.nextWakeReason
+  ) {
+    return input.workspace;
+  }
+
+  return {
+    ...input.workspace,
+    nextWakeAt: null,
+    nextWakeReason: null,
   };
 }
 
