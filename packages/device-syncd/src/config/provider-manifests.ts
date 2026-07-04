@@ -182,6 +182,8 @@ const JUNCTION_DEVICE_SYNC_PROVIDER_MANIFEST = defineConfiguredDeviceSyncProvide
   jobs: freezeConfiguredDeviceSyncProviderJobDefinitions({
     backfill: {
       payload: {
+        emptyBackfillAttempts: numberJobField({ includeInHostedHint: true }),
+        timeseriesCursor: stringJobField({ includeInHostedHint: true }),
         windowEnd: stringJobField({ includeInHostedHint: true }),
         windowStart: stringJobField({ includeInHostedHint: true }),
       },
@@ -757,6 +759,15 @@ function booleanJobField(
 ): DeviceSyncJobPayloadFieldSpec {
   return {
     kind: "boolean",
+    ...options,
+  };
+}
+
+function numberJobField(
+  options: Pick<DeviceSyncJobPayloadFieldSpec, "includeInHostedHint" | "required"> = {},
+): DeviceSyncJobPayloadFieldSpec {
+  return {
+    kind: "number",
     ...options,
   };
 }

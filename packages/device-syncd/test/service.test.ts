@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { expect, test, vi } from "vitest";
@@ -12,6 +12,7 @@ import {
   createDeviceSyncService,
   resolveDeviceSyncStoreNextWakeAt,
 } from "../src/service.ts";
+import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
 import { scopeWebhookTraceId } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION } from "../src/store/schema.ts";
@@ -87,6 +88,31 @@ function createWhoopWebhookHeaders(clientSecret: string, rawBody: Buffer, timest
     "x-whoop-signature": signature,
     "x-whoop-signature-timestamp": timestamp,
   });
+}
+
+function createJunctionSvixWebhook(input: {
+  body: Record<string, unknown>;
+  messageId?: string;
+  secret?: string;
+  timestamp?: string;
+}): { headers: Headers; rawBody: Buffer } {
+  const messageId = input.messageId ?? "msg_test_123";
+  const timestamp = input.timestamp ?? Math.floor(Date.now() / 1000).toString();
+  const secret = input.secret ?? "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==";
+  const rawBody = Buffer.from(JSON.stringify(input.body));
+  const key = Buffer.from(secret.slice("whsec_".length), "base64");
+  const signature = createHmac("sha256", key)
+    .update(Buffer.concat([Buffer.from(`${messageId}.${timestamp}.`), rawBody]))
+    .digest("base64");
+
+  return {
+    headers: new Headers({
+      "svix-id": messageId,
+      "svix-timestamp": timestamp,
+      "svix-signature": `v1,${signature}`,
+    }),
+    rawBody,
+  };
 }
 
 type FakeProviderOverrides = Partial<DeviceSyncProvider> & {
@@ -2343,6 +2369,67 @@ test("device sync service preserves provider-level yield job results", async () 
   }
 });
 
+test("device sync service rolls back job success when scheduled follow-up enqueue fails", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-follow-up-enqueue-rollback");
+  const circularPayload: Record<string, unknown> = {};
+  circularPayload.self = circularPayload;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      log: {
+        warn() {
+          // The rollback is asserted through durable job/account state below.
+        },
+      },
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          return {
+            nextReconcileAt: "2026-03-19T00:00:00.000Z",
+            scheduledJobs: [
+              {
+                kind: "backfill",
+                payload: circularPayload,
+              },
+            ],
+          };
+        },
+      }),
+    ],
+  });
+
+  try {
+    const begin = await service.startConnection({
+      provider: "demo",
+    });
+    const connected = await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "enqueue-rollback",
+    });
+    const beforeWorker = store.getAccountById(connected.account.id);
+
+    const processedJob = await service.runWorkerOnce();
+    const jobs = readJobsForAccountForTesting(store, connected.account.id);
+    const afterWorker = store.getAccountById(connected.account.id);
+    const failedJob = store.getJobById(processedJob!.id);
+
+    assert.equal(processedJob?.kind, "backfill");
+    assert.equal(jobs.length, 1);
+    assert.equal(failedJob?.status, "dead");
+    assert.equal(failedJob?.lastErrorCode, "SYNC_JOB_FAILED");
+    assert.equal(afterWorker?.lastSyncCompletedAt, beforeWorker?.lastSyncCompletedAt);
+    assert.equal(afterWorker?.nextReconcileAt, beforeWorker?.nextReconcileAt);
+    assert.equal(afterWorker?.lastErrorCode, "SYNC_JOB_FAILED");
+  } finally {
+    close();
+  }
+});
+
 test("device sync worker skips claims while foreground work should yield", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-persistent-yield");
   const { service, store, close } = createServiceFixture({
@@ -3113,6 +3200,848 @@ test("manual reconcile queues every scheduled job and store claims only one job 
   close();
 });
 
+test("Junction connection webhooks share the initial connect backfill identity", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-webhook-backfill-identity");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: ["activity"],
+        timeseriesResources: [],
+        webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+        fetchImpl: async (input) => {
+          throw new Error(`Unexpected Junction request during webhook backfill identity test: ${readUrl(input)}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const windowStart = "2026-04-01T00:00:00.000Z";
+    const windowEnd = "2026-04-03T00:00:00.000Z";
+    const expectedDedupeKey = createHash("sha256")
+      .update(JSON.stringify(["junction", "backfill", windowStart, windowEnd]))
+      .digest("hex");
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-connection-webhook",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: windowEnd,
+      nextReconcileAt: null,
+    });
+    const initialBackfill = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "backfill",
+      payload: {
+        windowStart,
+        windowEnd,
+      },
+      availableAt: windowEnd,
+      priority: 30,
+      dedupeKey: expectedDedupeKey,
+    });
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: "provider.connection.created",
+        user_id: account.externalAccountId,
+        data: {},
+      },
+      messageId: "msg_connection_backfill_identity",
+    });
+
+    const result = await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+    const jobs = readJobsForAccountForTesting(store, account.id)
+      .map((job) => store.getJobById(job.id))
+      .filter((job): job is DeviceSyncJobRecord => job !== null);
+    const connectBackfills = jobs.filter((job) =>
+      job.kind === "backfill"
+      && job.payload.windowStart === windowStart
+      && job.payload.windowEnd === windowEnd
+    );
+
+    assert.equal(result.accepted, true);
+    assert.equal(result.duplicate, false);
+    assert.equal(connectBackfills.length, 1);
+    assert.equal(connectBackfills[0]?.id, initialBackfill.id);
+    assert.equal(connectBackfills[0]?.dedupeKey, expectedDedupeKey);
+    assert.equal(connectBackfills[0]?.status, "queued");
+    assert.equal(jobs.filter((job) => job.kind === "reconcile").length, 1);
+  } finally {
+    close();
+  }
+});
+
+test("manual reconcile boosts Junction reconcile priority without promoting historical backfill", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-manual-junction-backfill-priority");
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => new Date("2026-04-03T12:34:56.000Z"),
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryResources: ["activity"],
+        timeseriesResources: [],
+        fetchImpl: async (input) => {
+          throw new Error(`Unexpected Junction request during manual queue test: ${readUrl(input)}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+
+    const reconcile = service.queueManualReconcile(account.id);
+    const queuedByKind = new Map(reconcile.jobs.map((job) => [job.kind, job]));
+
+    assert.equal(queuedByKind.get("reconcile")?.priority, 80);
+    assert.equal(queuedByKind.get("backfill")?.priority, 30);
+    assert.deepEqual(queuedByKind.get("backfill")?.payload, {
+      windowStart: "2025-10-03T00:00:00.000Z",
+      windowEnd: "2026-04-01T00:00:00.000Z",
+    });
+  } finally {
+    close();
+  }
+});
+
+test("manual reconcile preserves delayed Junction retry metadata timing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-manual-junction-retry-timing");
+  const queuedAt = "2026-04-04T00:05:00.000Z";
+  const retryDueAt = "2026-04-04T00:15:00.000Z";
+  const ownerWindowStart = "2026-04-01T00:00:00.000Z";
+  const ownerWindowEnd = "2026-04-03T00:00:00.000Z";
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => new Date(queuedAt),
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: ["activity"],
+        timeseriesResources: [],
+        fetchImpl: async (input) => {
+          throw new Error(`Unexpected Junction request during manual retry timing test: ${readUrl(input)}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: ownerWindowEnd,
+      metadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: ownerWindowStart,
+        junctionHistoricalBackfillWindowEnd: ownerWindowEnd,
+      },
+      nextReconcileAt: queuedAt,
+    });
+
+    const reconcile = service.queueManualReconcile(account.id);
+    const queuedByKind = new Map(reconcile.jobs.map((job) => [job.kind, job]));
+
+    assert.equal(queuedByKind.get("reconcile")?.availableAt, queuedAt);
+    assert.equal(queuedByKind.get("reconcile")?.priority, 80);
+    assert.equal(queuedByKind.has("backfill"), false);
+  } finally {
+    close();
+  }
+});
+
+test("device sync service wakes Junction retrying historical backfill at the retry due time", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-empty-backfill-wake");
+  const executedAt = "2026-04-04T00:00:00.000Z";
+  const retryDueAt = "2026-04-04T00:15:00.000Z";
+  const ownerWindowStart = "2026-04-01T00:00:00.000Z";
+  const ownerWindowEnd = "2026-04-03T00:00:00.000Z";
+  let now = new Date(executedAt);
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => now,
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileIntervalMs: 60 * 60_000,
+        summaryBackfillDays: 2,
+        summaryResources: ["activity"],
+        timeseriesResources: [],
+        fetchImpl: async (input) => {
+          const url = readUrl(input);
+
+          if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+            return createJsonResponse({
+              providers: [
+                {
+                  id: "provider-garmin-1",
+                  slug: "garmin",
+                  name: "Garmin",
+                  status: "connected",
+                  resource_availability: {
+                    activity: true,
+                  },
+                },
+              ],
+            });
+          }
+
+          if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+            return createJsonResponse({ data: [] });
+          }
+
+          throw new Error(`Unexpected Junction request during empty backfill wake test: ${url}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: ownerWindowEnd,
+      nextReconcileAt: null,
+    });
+    const expectedDedupeKey = createHash("sha256")
+      .update(JSON.stringify(["junction", "backfill", ownerWindowStart, ownerWindowEnd]))
+      .digest("hex");
+
+    store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "backfill",
+      payload: {
+        windowStart: ownerWindowStart,
+        windowEnd: ownerWindowEnd,
+      },
+      availableAt: executedAt,
+      priority: 30,
+      dedupeKey: expectedDedupeKey,
+    });
+
+    const processedJob = await service.runWorkerOnce();
+    assert.equal(processedJob?.kind, "backfill");
+
+    const afterEmptyBackfill = store.getAccountById(account.id);
+    assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillStatus, "retrying");
+    assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillEmptyAttempts, 1);
+    assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillLastEmptyAt, executedAt);
+    assert.equal(afterEmptyBackfill?.nextReconcileAt, retryDueAt);
+    assert.equal(service.getNextWakeAt(executedAt), retryDueAt);
+    assert.equal(
+      readJobsForAccountForTesting(store, account.id).filter((job) =>
+        job.kind === "backfill" && job.status === "queued"
+      ).length,
+      0,
+    );
+
+    now = new Date("2026-04-04T00:05:00.000Z");
+    service.queueManualReconcile(account.id);
+    const manualReconcile = await service.runWorkerOnce();
+
+    assert.equal(manualReconcile?.kind, "reconcile");
+    assert.equal(service.getNextWakeAt("2026-04-04T00:05:00.000Z"), retryDueAt);
+
+    now = new Date("2026-04-04T00:14:59.000Z");
+    await service.runSchedulerOnce();
+    assert.equal(
+      readJobsForAccountForTesting(store, account.id).filter((job) =>
+        job.kind === "backfill" && job.status === "queued"
+      ).length,
+      0,
+    );
+
+    now = new Date(retryDueAt);
+    await service.runSchedulerOnce();
+    const dueRaceReconcile = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "reconcile",
+      payload: {
+        windowStart: "2026-04-02T00:00:00.000Z",
+        windowEnd: "2026-04-04T00:00:00.000Z",
+      },
+      availableAt: retryDueAt,
+      priority: 40,
+      dedupeKey: "junction-due-backfill-race-reconcile",
+    });
+    const dueRaceJob = await service.runWorkerOnce();
+    const afterDueRetryBackfill = store.getAccountById(account.id);
+
+    assert.equal(dueRaceJob?.kind, "backfill");
+    assert.notEqual(dueRaceJob?.id, dueRaceReconcile.id);
+    assert.equal(store.getJobById(dueRaceReconcile.id)?.status, "queued");
+    assert.equal(afterDueRetryBackfill?.metadata.junctionHistoricalBackfillEmptyAttempts, 2);
+    assert.equal(afterDueRetryBackfill?.nextReconcileAt, "2026-04-04T01:15:00.000Z");
+    assert.equal(
+      readJobsForAccountForTesting(store, account.id).filter((job) =>
+        job.kind === "backfill" && job.status === "queued"
+      ).length,
+      0,
+    );
+  } finally {
+    close();
+  }
+});
+
+test("device sync scheduler materializes Junction metadata retry when it is due", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-legacy-retry-priority");
+  const scheduledAt = "2026-04-04T00:05:00.000Z";
+  const retryDueAt = "2026-04-04T00:15:00.000Z";
+  const ownerWindowStart = "2026-04-01T00:00:00.000Z";
+  const ownerWindowEnd = "2026-04-03T00:00:00.000Z";
+  let now = new Date(scheduledAt);
+  const importer: DeviceSyncImporterPort = {
+    async importDeviceProviderSnapshot() {
+      return { ok: true };
+    },
+  };
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => now,
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileIntervalMs: 60 * 60_000,
+        summaryBackfillDays: 2,
+        summaryResources: ["activity"],
+        timeseriesResources: [],
+        fetchImpl: async (input) => {
+          const url = readUrl(input);
+
+          if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+            return createJsonResponse({
+              providers: [
+                {
+                  id: "provider-garmin-1",
+                  slug: "garmin",
+                  name: "Garmin",
+                  status: "connected",
+                  resource_availability: {
+                    activity: true,
+                  },
+                },
+              ],
+            });
+          }
+
+          if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+            return createJsonResponse({ data: [] });
+          }
+
+          throw new Error(`Unexpected Junction request during metadata retry priority test: ${url}`);
+        },
+      }),
+    ],
+    importer,
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: ownerWindowEnd,
+      metadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: ownerWindowStart,
+        junctionHistoricalBackfillWindowEnd: ownerWindowEnd,
+      },
+      nextReconcileAt: scheduledAt,
+    });
+
+    await service.runSchedulerOnce();
+    const queuedJobs = readJobsForAccountForTesting(store, account.id).filter((job) => job.status === "queued");
+    const queuedBackfillRow = queuedJobs.find((job) => job.kind === "backfill");
+    const queuedReconcileRow = queuedJobs.find((job) => job.kind === "reconcile");
+    const queuedReconcile = queuedReconcileRow ? store.getJobById(queuedReconcileRow.id) : null;
+
+    assert.equal(queuedBackfillRow, undefined);
+    assert.ok(queuedReconcile);
+    assert.equal(queuedReconcile.priority, 40);
+
+    const routineJob = await service.runWorkerOnce();
+
+    assert.equal(routineJob?.id, queuedReconcile.id);
+    assert.equal(store.getJobById(queuedReconcile.id)?.status, "succeeded");
+    assert.equal(service.getNextWakeAt(scheduledAt), retryDueAt);
+
+    now = new Date(retryDueAt);
+    await service.runSchedulerOnce();
+    const dueBackfillRow = readJobsForAccountForTesting(store, account.id)
+      .filter((job) => job.status === "queued")
+      .find((job) => job.kind === "backfill");
+    const dueBackfill = dueBackfillRow ? store.getJobById(dueBackfillRow.id) : null;
+    assert.ok(dueBackfill);
+    assert.equal(dueBackfill.availableAt, retryDueAt);
+    assert.equal(dueBackfill.priority, 50);
+    assert.deepEqual(dueBackfill.payload, {
+      windowStart: ownerWindowStart,
+      windowEnd: ownerWindowEnd,
+    });
+    const dueRaceReconcile = store.enqueueJob({
+      provider: "junction",
+      accountId: account.id,
+      kind: "reconcile",
+      payload: {
+        windowStart: "2026-04-02T00:15:00.000Z",
+        windowEnd: retryDueAt,
+      },
+      priority: 40,
+      availableAt: retryDueAt,
+      dedupeKey: "junction-legacy-retry-race-reconcile",
+    });
+    const claimedJob = store.claimDueJob("worker-legacy-retry", retryDueAt, 60_000);
+
+    assert.equal(claimedJob?.id, dueBackfill.id);
+    assert.equal(store.getJobById(dueBackfill.id)?.status, "running");
+    assert.equal(store.getJobById(dueRaceReconcile.id)?.status, "queued");
+  } finally {
+    close();
+  }
+});
+
+test("device sync scheduler rematerializes dead Junction metadata retries", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-dead-metadata-retry");
+  const retryDueAt = "2026-04-04T00:15:00.000Z";
+  const scheduledAt = "2026-04-04T01:00:00.000Z";
+  const ownerWindowStart = "2026-04-01T00:00:00.000Z";
+  const ownerWindowEnd = "2026-04-03T00:00:00.000Z";
+  let now = new Date(scheduledAt);
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => now,
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileIntervalMs: 60 * 60_000,
+        summaryBackfillDays: 2,
+        summaryResources: ["activity"],
+        timeseriesResources: [],
+        fetchImpl: async (input) => {
+          throw new Error(`Unexpected Junction request during dead metadata retry test: ${readUrl(input)}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: ownerWindowEnd,
+      metadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: ownerWindowStart,
+        junctionHistoricalBackfillWindowEnd: ownerWindowEnd,
+      },
+      nextReconcileAt: scheduledAt,
+    });
+    const expectedDedupeKey = createHash("sha256")
+      .update(JSON.stringify(["junction", "backfill", ownerWindowStart, ownerWindowEnd]))
+      .digest("hex");
+    const retryJob = store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "backfill",
+      payload: {
+        windowStart: ownerWindowStart,
+        windowEnd: ownerWindowEnd,
+        emptyBackfillAttempts: 1,
+      },
+      availableAt: retryDueAt,
+      priority: 50,
+      maxAttempts: 1,
+      dedupeKey: expectedDedupeKey,
+    });
+
+    now = new Date(retryDueAt);
+    const claimedRetry = store.claimDueJob("worker-dead-junction-retry", retryDueAt, 60_000);
+    assert.equal(claimedRetry?.id, retryJob.id);
+    assert.equal(
+      store.failJobIfOwned(
+        retryJob.id,
+        "worker-dead-junction-retry",
+        retryDueAt,
+        "JUNCTION_API_REQUEST_FAILED",
+        "Junction retry unavailable.",
+        null,
+        true,
+      ),
+      true,
+    );
+    assert.equal(store.getJobById(retryJob.id)?.status, "dead");
+
+    now = new Date(scheduledAt);
+    await service.runSchedulerOnce();
+
+    const jobs = readJobsForAccountForTesting(store, account.id);
+    const backfillJobs = jobs
+      .filter((job) => job.kind === "backfill")
+      .flatMap((job) => {
+        const storedJob = store.getJobById(job.id);
+        return storedJob ? [storedJob] : [];
+      });
+    const activeBackfillJobs = backfillJobs.filter((job) => job.status !== "dead");
+    assert.equal(activeBackfillJobs.length, 1);
+    assert.equal(activeBackfillJobs[0]?.availableAt, scheduledAt);
+    assert.equal(activeBackfillJobs[0]?.dedupeKey, expectedDedupeKey);
+    assert.deepEqual(activeBackfillJobs[0]?.payload, {
+      windowStart: ownerWindowStart,
+      windowEnd: ownerWindowEnd,
+    });
+    assert.equal(backfillJobs.filter((job) => job.dedupeKey === expectedDedupeKey).length, 2);
+    assert.equal(
+      jobs.filter((job) => job.kind === "reconcile" && job.status === "queued").length,
+      1,
+    );
+  } finally {
+    close();
+  }
+});
+
+test("device sync service stores Junction non-connect empty backfill retry attempts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-non-connect-empty-retry");
+  const executedAt = "2026-04-04T00:00:00.000Z";
+  const retryDueAt = "2026-04-04T00:15:00.000Z";
+  const ownerWindowStart = "2026-04-02T00:00:00.000Z";
+  const ownerWindowEnd = "2026-04-03T00:00:00.000Z";
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => new Date(executedAt),
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_fake_test_placeholder",
+        clientUserIdSecret: "test-only-hmac-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileIntervalMs: 60 * 60_000,
+        summaryBackfillDays: 2,
+        summaryResources: ["activity"],
+        timeseriesResources: [],
+        fetchImpl: async (input) => {
+          const url = new URL(readUrl(input));
+
+          if (url.pathname === "/v2/user/providers/junction-account") {
+            return createJsonResponse({
+              providers: [
+                {
+                  id: "provider-garmin-1",
+                  slug: "garmin",
+                  status: "connected",
+                  resource_availability: {
+                    activity: true,
+                  },
+                },
+              ],
+            });
+          }
+
+          if (url.pathname === "/v2/summary/activity/junction-account") {
+            return createJsonResponse({ data: [] });
+          }
+
+          throw new Error(`Unexpected Junction request during non-connect retry test: ${url.pathname}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-account",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+      nextReconcileAt: null,
+    });
+    const expectedDedupeKey = createHash("sha256")
+      .update(JSON.stringify(["junction", "backfill", ownerWindowStart, ownerWindowEnd]))
+      .digest("hex");
+
+    store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "backfill",
+      payload: {
+        windowStart: ownerWindowStart,
+        windowEnd: ownerWindowEnd,
+      },
+      availableAt: executedAt,
+      priority: 30,
+      dedupeKey: expectedDedupeKey,
+    });
+
+    const processedJob = await service.runWorkerOnce();
+    const jobs = readJobsForAccountForTesting(store, account.id);
+    const retryRow = jobs.find((job) => job.status === "queued");
+
+    assert.equal(processedJob?.kind, "backfill");
+    assert.equal(store.getJobById(processedJob!.id)?.status, "succeeded");
+    assert.equal(jobs.length, 2);
+    assert.ok(retryRow);
+
+    const retryJob = store.getJobById(retryRow.id);
+    assert.ok(retryJob);
+    assert.equal(retryJob.kind, "backfill");
+    assert.equal(retryJob.availableAt, retryDueAt);
+    assert.deepEqual(retryJob.payload, {
+      windowStart: ownerWindowStart,
+      windowEnd: ownerWindowEnd,
+      emptyBackfillAttempts: 1,
+    });
+    assert.equal(retryJob.dedupeKey, expectedDedupeKey);
+    assert.equal(store.getAccountById(account.id)?.metadata.junctionHistoricalBackfillStatus, undefined);
+  } finally {
+    close();
+  }
+});
+
+test("device sync service preserves Junction yielded backfill timeseries cursor in queued continuation", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-yielded-backfill-cursor");
+  const ownerWindowStart = "2026-04-07T00:00:00.000Z";
+  const ownerWindowEnd = "2026-04-10T00:00:00.000Z";
+  let yieldRequested = false;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => new Date("2026-04-10T12:00:00.000Z"),
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      shouldYieldJobExecution: () => yieldRequested,
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_fake_test_placeholder",
+        clientUserIdSecret: "test-only-hmac-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileIntervalMs: 60_000,
+        summaryBackfillDays: 3,
+        summaryResources: ["activity"],
+        timeseriesBackfillDays: 3,
+        timeseriesResources: ["stress"],
+        fetchImpl: async (input) => {
+          const url = new URL(readUrl(input));
+
+          if (url.pathname === "/v2/user/providers/junction-account") {
+            return createJsonResponse({
+              providers: [
+                {
+                  slug: "garmin",
+                  status: "connected",
+                },
+              ],
+            });
+          }
+
+          if (url.pathname === "/v2/summary/activity/junction-account") {
+            yieldRequested = true;
+            return createJsonResponse({
+              activity: [],
+            });
+          }
+
+          throw new Error(`Unexpected Junction request during yield continuation test: ${url.pathname}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-account",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: ownerWindowEnd,
+      nextReconcileAt: null,
+    });
+    const expectedDedupeKey = createHash("sha256")
+      .update(JSON.stringify(["junction", "backfill", ownerWindowStart, ownerWindowEnd]))
+      .digest("hex");
+
+    store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "backfill",
+      payload: {
+        windowStart: ownerWindowStart,
+        windowEnd: ownerWindowEnd,
+        emptyBackfillAttempts: 2,
+      },
+      availableAt: ownerWindowEnd,
+      priority: 30,
+      dedupeKey: expectedDedupeKey,
+    });
+
+    const processedJob = await service.runWorkerOnce();
+    const jobs = readJobsForAccountForTesting(store, account.id);
+    const continuationRow = jobs.find((job) => job.status === "queued");
+
+    assert.equal(processedJob?.kind, "backfill");
+    assert.equal(jobs.length, 2);
+    assert.equal(jobs[0]?.status, "succeeded");
+    assert.ok(continuationRow);
+
+    const continuation = store.getJobById(continuationRow.id);
+    assert.ok(continuation);
+    assert.equal(continuation.kind, "backfill");
+    assert.deepEqual(continuation.payload, {
+      windowStart: ownerWindowStart,
+      windowEnd: ownerWindowEnd,
+      emptyBackfillAttempts: 2,
+      timeseriesCursor: ownerWindowStart,
+    });
+    assert.equal(continuation.dedupeKey, expectedDedupeKey);
+  } finally {
+    close();
+  }
+});
+
 test("device sync service fences in-flight jobs after disconnect", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-disconnect-fence");
   const imports: unknown[] = [];
@@ -3220,7 +4149,7 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
   close();
 });
 
-test("device sync service fences success writes after local connection revision changes", async () => {
+test("device sync service releases success-fenced jobs after local connection revision changes", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-success-revision-fence");
   let providerStartedResolve: (() => void) | null = null;
   let releaseProviderResolve: (() => void) | null = null;
@@ -3269,17 +4198,14 @@ test("device sync service fences success writes after local connection revision 
   });
   const accountBeforeWorker = store.getAccountById(connected.account.id);
   assert.ok(accountBeforeWorker);
-  const originalCompleteJobsIfOwned = store.completeJobsIfOwned.bind(store);
-  store.completeJobsIfOwned = (jobIds, workerId, now) => {
-    const completed = originalCompleteJobsIfOwned(jobIds, workerId, now);
-    if (completed) {
-      store.patchAccount(connected.account.id, {
-        metadata: {
-          localRevisionChanged: true,
-        },
-      });
-    }
-    return completed;
+  const originalCompleteAndSucceed = store.completeJobsMarkSyncSucceededAndEnqueueJobs.bind(store);
+  store.completeJobsMarkSyncSucceededAndEnqueueJobs = (input) => {
+    store.patchAccount(connected.account.id, {
+      metadata: {
+        localRevisionChanged: true,
+      },
+    });
+    return originalCompleteAndSucceed(input);
   };
 
   const workerPromise = service.runWorkerOnce();
@@ -3298,7 +4224,9 @@ test("device sync service fences success writes after local connection revision 
   assert.equal(storedAccount.lastSyncCompletedAt, null);
   assert.equal(storedAccount.nextReconcileAt, accountBeforeWorker.nextReconcileAt);
   assert.equal(jobs.length, 1);
-  assert.equal(jobs[0]?.status, "succeeded");
+  assert.equal(jobs[0]?.kind, "backfill");
+  assert.equal(jobs[0]?.status, "queued");
+  assert.equal(service.summarize().jobsQueued, 1);
 
   close();
 });

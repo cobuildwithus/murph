@@ -9,12 +9,14 @@ test("hosted job hint payload shaping keeps only the provider-specific job-defin
     shapeHostedDeviceSyncJobHintPayload("junction", {
       kind: "backfill",
       payload: {
+        emptyBackfillAttempts: 2,
         windowEnd: "2026-04-07T01:00:00.000Z",
         windowStart: 123,
         ignored: "discarded",
       },
     }),
     {
+      emptyBackfillAttempts: 2,
       windowEnd: "2026-04-07T01:00:00.000Z",
     },
   );

@@ -28,6 +28,7 @@ type HostedAccountCredentialInput = DeviceAccountCredential & {
 };
 
 export interface HostedAccountHydrationInput {
+  advanceHostedObservedConnectionRevision?: boolean;
   clearTokens?: boolean;
   connection: {
     connectedAt: string;
@@ -643,6 +644,7 @@ export function hydrateHostedAccount(
       ? input.hostedObservedUpdatedAt ?? existing?.hostedObservedUpdatedAt ?? null
       : existing?.hostedObservedUpdatedAt ?? null;
     const hostedObservedConnectionRevision = hydrationPlan.connectionAccepted
+      && input.advanceHostedObservedConnectionRevision !== false
       ? existing?.localConnectionRevision ?? 0
       : existing?.hostedObservedConnectionRevision ?? 0;
     const hostedObservedTokenVersion = shouldClearTokens

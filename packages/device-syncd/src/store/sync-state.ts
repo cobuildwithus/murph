@@ -25,6 +25,84 @@ export function markSyncStarted(database: DatabaseSync, accountId: string, now: 
   `).run(now, now, accountId);
 }
 
+export function markSyncSucceededInTransaction(
+  database: DatabaseSync,
+  accountId: string,
+  now: string,
+  disconnectGeneration: number | null = null,
+  options: {
+    localConnectionRevision?: number | null;
+    metadataPatch?: Record<string, unknown>;
+    nextReconcileAt?: string | null;
+  } = {},
+): boolean {
+  const existing = getAccountById(database, accountId);
+
+  if (!existing) {
+    return false;
+  }
+
+  const expectedLocalConnectionRevision = options.localConnectionRevision ?? null;
+  if (
+    expectedLocalConnectionRevision !== null
+    && existing.localConnectionRevision !== expectedLocalConnectionRevision
+  ) {
+    return false;
+  }
+
+  const metadata = mergeStoredDeviceSyncMetadataPatch(existing.metadata, options.metadataPatch);
+  const nextReconcileAt = Object.prototype.hasOwnProperty.call(options, "nextReconcileAt")
+    ? options.nextReconcileAt ?? null
+    : existing.nextReconcileAt;
+
+  const connectionResult = database.prepare(`
+    update device_connection
+    set status = case when status = 'disconnected' then status else 'active' end,
+        setup_phase = case
+          when setup_phase in ('pending_link', 'link_returned') then 'source_confirmed'
+          else setup_phase
+        end,
+        setup_expires_at = case
+          when setup_phase in ('pending_link', 'link_returned') then null
+          else setup_expires_at
+        end,
+        metadata_json = ?,
+        updated_at = ?
+    where id = ?
+      and (? is null or (disconnect_generation = ? and status = 'active'))
+  `).run(
+    stringifyJson(metadata),
+    now,
+    accountId,
+    disconnectGeneration ?? null,
+    disconnectGeneration ?? null,
+  ) as { changes: number };
+
+  if ((connectionResult.changes ?? 0) === 0) {
+    return false;
+  }
+
+  database.prepare(`
+    update device_observation_state
+    set next_reconcile_at = ?,
+        last_sync_completed_at = ?,
+        last_sync_error_at = null,
+        last_error_code = null,
+        last_error_message = null,
+        local_connection_revision = ?,
+        updated_at = ?
+    where account_id = ?
+  `).run(
+    nextReconcileAt,
+    now,
+    existing.localConnectionRevision + 1,
+    now,
+    accountId,
+  );
+
+  return true;
+}
+
 export function markSyncSucceeded(
   database: DatabaseSync,
   accountId: string,
@@ -36,73 +114,9 @@ export function markSyncSucceeded(
     nextReconcileAt?: string | null;
   } = {},
 ): boolean {
-  return withImmediateTransaction(database, () => {
-    const existing = getAccountById(database, accountId);
-
-    if (!existing) {
-      return false;
-    }
-
-    const expectedLocalConnectionRevision = options.localConnectionRevision ?? null;
-    if (
-      expectedLocalConnectionRevision !== null
-      && existing.localConnectionRevision !== expectedLocalConnectionRevision
-    ) {
-      return false;
-    }
-
-    const metadata = mergeStoredDeviceSyncMetadataPatch(existing.metadata, options.metadataPatch);
-    const nextReconcileAt = Object.prototype.hasOwnProperty.call(options, "nextReconcileAt")
-      ? options.nextReconcileAt ?? null
-      : existing.nextReconcileAt;
-
-    const connectionResult = database.prepare(`
-      update device_connection
-      set status = case when status = 'disconnected' then status else 'active' end,
-          setup_phase = case
-            when setup_phase in ('pending_link', 'link_returned') then 'source_confirmed'
-            else setup_phase
-          end,
-          setup_expires_at = case
-            when setup_phase in ('pending_link', 'link_returned') then null
-            else setup_expires_at
-          end,
-          metadata_json = ?,
-          updated_at = ?
-      where id = ?
-        and (? is null or (disconnect_generation = ? and status = 'active'))
-    `).run(
-      stringifyJson(metadata),
-      now,
-      accountId,
-      disconnectGeneration ?? null,
-      disconnectGeneration ?? null,
-    ) as { changes: number };
-
-    if ((connectionResult.changes ?? 0) === 0) {
-      return false;
-    }
-
-    database.prepare(`
-      update device_observation_state
-      set next_reconcile_at = ?,
-          last_sync_completed_at = ?,
-          last_sync_error_at = null,
-          last_error_code = null,
-          last_error_message = null,
-          local_connection_revision = ?,
-          updated_at = ?
-      where account_id = ?
-    `).run(
-      nextReconcileAt,
-      now,
-      existing.localConnectionRevision + 1,
-      now,
-      accountId,
-    );
-
-    return true;
-  });
+  return withImmediateTransaction(database, () =>
+    markSyncSucceededInTransaction(database, accountId, now, disconnectGeneration, options)
+  );
 }
 
 export function markSyncFailed(

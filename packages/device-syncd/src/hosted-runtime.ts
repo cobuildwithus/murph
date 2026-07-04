@@ -1,4 +1,7 @@
 import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
+import {
+  mergeHostedJunctionHistoricalBackfillMetadata,
+} from "./junction-historical-backfill-progress.ts";
 import type {
   DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceStatus,
@@ -94,6 +97,18 @@ const HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_BLOCKED_KEY_SUBSTRINGS = [
 ] as const;
 const HOSTED_DEVICE_SYNC_CREDENTIAL_METADATA_SECRET_VALUE_PATTERN =
   /\b(?:authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|hmac|webhook[_-]?secret)\b|\bBearer\s+\S+/iu;
+
+export function mergeHostedDeviceSyncConnectionMetadata(input: {
+  hostedMetadata: Record<string, unknown>;
+  localConnectionStateUnpublished: boolean;
+  localMetadata: Record<string, unknown> | null | undefined;
+}): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } {
+  return mergeHostedJunctionHistoricalBackfillMetadata({
+    hostedMetadata: input.hostedMetadata,
+    localConnectionStateUnpublished: input.localConnectionStateUnpublished,
+    localMetadata: input.localMetadata ?? {},
+  });
+}
 
 export interface HostedExecutionDeviceSyncConnectLinkResponse {
   authorizationUrl: string;
@@ -483,7 +498,7 @@ export interface HostedExecutionDeviceSyncWakeEventLike {
   provider?: string | null;
 }
 
-type HostedExecutionDeviceSyncHintPayloadFieldKind = "boolean" | "isoTimestamp" | "string";
+type HostedExecutionDeviceSyncHintPayloadFieldKind = "boolean" | "isoTimestamp" | "number" | "string";
 
 // Keep this generic wake-hint seam aligned with the current manifest-owned hosted-hint fields
 // until hosted wake parsing becomes provider-aware at this boundary.
@@ -491,6 +506,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   Record<string, HostedExecutionDeviceSyncHintPayloadFieldKind>
 > = Object.freeze({
   dataType: "string",
+  emptyBackfillAttempts: "number",
   eventType: "string",
   includePersonalInfo: "boolean",
   includeProfile: "boolean",
@@ -502,6 +518,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   resourceType: "string",
   sourceEventType: "string",
   sourceProviderSlug: "string",
+  timeseriesCursor: "isoTimestamp",
   webhookDataJson: "string",
   windowEnd: "isoTimestamp",
   windowStart: "isoTimestamp",
@@ -1072,12 +1089,14 @@ function parseHostedExecutionDeviceSyncJobHintPayloadField(
   value: unknown,
   kind: HostedExecutionDeviceSyncHintPayloadFieldKind,
   label: string,
-): boolean | string {
+): boolean | number | string {
   switch (kind) {
     case "boolean":
       return requireBoolean(value, label);
     case "isoTimestamp":
       return requireIsoTimestamp(value, label);
+    case "number":
+      return requireNumber(value, label);
     case "string":
       return requireString(value, label);
   }
