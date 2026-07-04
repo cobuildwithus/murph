@@ -76,11 +76,15 @@ export function shouldPreserveLocalJunctionHistoricalBackfillProgress(input: {
     return false;
   }
 
+  if (localProgress.status === "complete") {
+    return hostedProgress.status !== "complete";
+  }
+
   if (hostedProgress.status === "complete" || hostedProgress.status === "exhausted") {
     return false;
   }
 
-  if (localProgress.status === "complete" || localProgress.status === "exhausted") {
+  if (localProgress.status === "exhausted") {
     return true;
   }
 
