@@ -34,6 +34,7 @@ import {
   normalizeAssistantDeliveryError,
   readAssistantAutomationState,
   readAssistantOutboxIntent,
+  readAssistantOutboxIntentAnsweredCoverage,
   readAssistantVaultFileMedia,
   readVerifiedAssistantVaultFileBytes,
   sendTelegramMessage,
@@ -660,7 +661,10 @@ async function buildHostedAssistantDeliveryEffectFromIntent(input: {
   intent: AssistantOutboxIntent;
   vaultRoot: string;
 }): Promise<HostedAssistantDeliveryEffect> {
-  const payload = buildHostedAssistantDeliveryPayloadFromIntent(input.intent);
+  const payload = await buildHostedAssistantDeliveryPayloadFromIntentForDispatch({
+    intent: input.intent,
+    vaultRoot: input.vaultRoot,
+  });
   return buildHostedAssistantDeliveryEffect({
     dedupeKey: input.intent.dedupeKey,
     deliveryPhase: input.deliveryPhase,
@@ -3539,6 +3543,24 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
 
   assertSupportedHostedAssistantDeliveryPayload(payload);
   return payload;
+}
+
+async function buildHostedAssistantDeliveryPayloadFromIntentForDispatch(input: {
+  intent: AssistantOutboxIntent;
+  vaultRoot: string;
+}): Promise<HostedAssistantDeliveryPayload> {
+  const answeredCoverage =
+    input.intent.answeredCoverage ??
+    (await readAssistantOutboxIntentAnsweredCoverage({
+      intentId: input.intent.intentId,
+      turnId: input.intent.turnId,
+      vault: input.vaultRoot,
+    }));
+
+  return buildHostedAssistantDeliveryPayloadFromIntent({
+    ...input.intent,
+    answeredCoverage,
+  });
 }
 
 function normalizeHostedAssistantDeliveryMedia(

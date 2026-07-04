@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   normalizeAssistantDeliveryError: vi.fn(),
   readAssistantAutomationState: vi.fn(),
   readAssistantOutboxIntent: vi.fn(),
+  readAssistantOutboxIntentAnsweredCoverage: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
   readAssistantVaultFileMedia: vi.fn(),
   readVerifiedAssistantVaultFileBytes: vi.fn(),
@@ -85,6 +86,8 @@ vi.mock("@murphai/assistant-engine", () => ({
   normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
   readAssistantAutomationState: mocks.readAssistantAutomationState,
   readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
+  readAssistantOutboxIntentAnsweredCoverage:
+    mocks.readAssistantOutboxIntentAnsweredCoverage,
   readAssistantOutboxIntentMirrorState:
     mocks.readAssistantOutboxIntentMirrorState,
   readAssistantVaultFileMedia: mocks.readAssistantVaultFileMedia,
@@ -314,6 +317,7 @@ beforeEach(() => {
     }),
   );
   mocks.readAssistantOutboxIntent.mockResolvedValue(null);
+  mocks.readAssistantOutboxIntentAnsweredCoverage.mockResolvedValue(null);
   mocks.readAssistantVaultFileMedia.mockReturnValue(null);
   mocks.readVerifiedAssistantVaultFileBytes.mockResolvedValue(
     new Uint8Array([1, 2, 3]),
@@ -868,6 +872,52 @@ describe("hosted runtime callbacks", () => {
 
     expect(sideEffects).toHaveLength(1);
     expect(sideEffects[0]?.payload.answeredCoverage).toEqual(answeredCoverage);
+    expect(mocks.readAssistantOutboxIntentAnsweredCoverage).not.toHaveBeenCalled();
+  });
+
+  it("hydrates answered coverage from the outbox receipt metadata", async () => {
+    const answeredCoverage = {
+      lane: "conversation" as const,
+      laneSeq: "42",
+    };
+    mocks.readAssistantOutboxIntentAnsweredCoverage.mockResolvedValueOnce(
+      answeredCoverage,
+    );
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        answeredCoverage: null,
+        bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+        channel: "linq",
+        dedupeKey: "dedupe_reply",
+        deliveryIdempotencyKey: "assistant-segment:turn_1:0",
+        deliveryTransportIdempotent: false,
+        explicitTarget: null,
+        identityId: "identity_1",
+        intentId: "intent_reply",
+        media: [],
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+      },
+    ]);
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_reply"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects).toHaveLength(1);
+    expect(sideEffects[0]?.payload.answeredCoverage).toEqual(answeredCoverage);
+    expect(mocks.readAssistantOutboxIntentAnsweredCoverage).toHaveBeenCalledWith({
+      intentId: "intent_reply",
+      turnId: "turn_1",
+      vault: "/tmp/vault",
+    });
   });
 
   it("abandons superseded hosted auto-reply same-boundary foreground replies", async () => {

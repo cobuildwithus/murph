@@ -32,6 +32,7 @@ import {
   deliverAssistantOutboxMessage,
   listAssistantOutboxIntentsLocal,
   readAssistantOutboxIntentMirrorState,
+  readAssistantOutboxIntentAnsweredCoverage,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
@@ -151,7 +152,7 @@ describe('assistant outbox runtime', () => {
     ).rejects.toThrow('Assistant outbox messages must include text or response media.')
   })
 
-  it('uses persisted auto-reply answered coverage when receipt repair has no receipt', async () => {
+  it('uses in-memory auto-reply answered coverage when receipt repair has no receipt', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-auto-reply-coverage-')
     const answeredCoverage = {
       lane: 'conversation' as const,
@@ -188,12 +189,21 @@ describe('assistant outbox runtime', () => {
     ).resolves.toEqual(new Set([intent.intentId]))
   })
 
-  it('persists auto-reply answered coverage on the outbox intent', async () => {
+  it('records auto-reply answered coverage without writing it into outbox JSON', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-auto-reply-coverage-')
     const answeredCoverage = {
       lane: 'conversation' as const,
       laneSeq: '42',
     }
+    await createAssistantTurnReceipt({
+      deliveryRequested: true,
+      prompt: 'queue an auto reply',
+      provider: 'codex-cli',
+      providerModel: 'gpt-5.4',
+      sessionId: 'session_auto_reply_coverage',
+      turnId: 'turn_auto_reply_coverage',
+      vault: vaultRoot,
+    })
 
     const intent = await createAssistantOutboxIntent({
       answeredCoverage,
@@ -212,7 +222,14 @@ describe('assistant outbox runtime', () => {
 
     const rawIntent = await readRawOutboxIntent(vaultRoot, intent.intentId)
     expect(intent.answeredCoverage).toEqual(answeredCoverage)
-    expect(rawIntent).toHaveProperty('answeredCoverage', answeredCoverage)
+    expect(rawIntent).not.toHaveProperty('answeredCoverage')
+    await expect(
+      readAssistantOutboxIntentAnsweredCoverage({
+        intentId: intent.intentId,
+        turnId: intent.turnId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toEqual(answeredCoverage)
   })
 
   it('upgrades auto-reply answered coverage when a malformed-receipt retry dedupes to an existing intent', async () => {
@@ -262,7 +279,7 @@ describe('assistant outbox runtime', () => {
     expect(dedupedIntent.intentId).toBe(legacyIntent.intentId)
     expect(dedupedIntent.answeredCoverage).toEqual(answeredCoverage)
     const rawIntent = await readRawOutboxIntent(vaultRoot, dedupedIntent.intentId)
-    expect(rawIntent).toHaveProperty('answeredCoverage', answeredCoverage)
+    expect(rawIntent).not.toHaveProperty('answeredCoverage')
     expect(await readAssistantTurnReceipt(vaultRoot, legacyIntent.turnId)).toBeNull()
     await expect(
       findAssistantAutoReplyDeliveryIntentIds({

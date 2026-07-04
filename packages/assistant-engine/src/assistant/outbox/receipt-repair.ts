@@ -4,8 +4,14 @@ import type {
   AssistantTurnReceipt,
   AssistantTurnTimelineEventKind,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  assistantOutboxAnsweredCoverageSchema,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import { sanitizeAssistantDeliveryErrorForPersistence } from '../redaction.js'
 import { updateAssistantTurnReceipt } from '../turns.js'
+
+const ASSISTANT_OUTBOX_ANSWERED_COVERAGE_LANE_KEY = 'answeredCoverageLane'
+const ASSISTANT_OUTBOX_ANSWERED_COVERAGE_LANE_SEQ_KEY = 'answeredCoverageLaneSeq'
 
 export async function repairAssistantOutboxReceiptForIntent(input: {
   at?: string
@@ -46,7 +52,21 @@ export async function repairAssistantOutboxReceiptForIntent(input: {
             ? 'failed'
             : repair.status ?? receipt.status,
         timeline: hasEvent
-          ? receipt.timeline
+          ? receipt.timeline.map((event) =>
+              isSameAssistantOutboxReceiptRepairEvent({
+                event,
+                intentId: input.intent.intentId,
+                repair,
+              })
+                ? {
+                    ...event,
+                    metadata: {
+                      ...event.metadata,
+                      ...repair.metadata,
+                    },
+                  }
+                : event
+            )
           : [
               ...receipt.timeline,
               {
@@ -116,6 +136,9 @@ function buildAssistantOutboxReceiptRepair(
       lastError: null,
       metadata: {
         channel,
+        ...buildAssistantOutboxAnsweredCoverageReceiptMetadata(
+          intent.answeredCoverage,
+        ),
         intentId: intent.intentId,
       },
       status: null,
@@ -148,6 +171,9 @@ function buildAssistantOutboxReceiptRepair(
       lastError: null,
       metadata: {
         channel: intent.delivery.channel,
+        ...buildAssistantOutboxAnsweredCoverageReceiptMetadata(
+          intent.answeredCoverage,
+        ),
         intentId: intent.intentId,
         target: intent.delivery.target,
       },
@@ -188,6 +214,27 @@ function buildAssistantOutboxReceiptRepair(
   }
 
   return null
+}
+
+function buildAssistantOutboxAnsweredCoverageReceiptMetadata(
+  coverage: AssistantOutboxIntent['answeredCoverage'],
+): Record<string, string> {
+  return coverage
+    ? {
+        [ASSISTANT_OUTBOX_ANSWERED_COVERAGE_LANE_KEY]: coverage.lane,
+        [ASSISTANT_OUTBOX_ANSWERED_COVERAGE_LANE_SEQ_KEY]: coverage.laneSeq,
+      }
+    : {}
+}
+
+export function readAssistantOutboxAnsweredCoverageFromReceiptMetadata(
+  metadata: Record<string, string>,
+): AssistantOutboxIntent['answeredCoverage'] {
+  const parsed = assistantOutboxAnsweredCoverageSchema.nullable().safeParse({
+    lane: metadata[ASSISTANT_OUTBOX_ANSWERED_COVERAGE_LANE_KEY] ?? null,
+    laneSeq: metadata[ASSISTANT_OUTBOX_ANSWERED_COVERAGE_LANE_SEQ_KEY] ?? null,
+  })
+  return parsed.success ? parsed.data : null
 }
 
 function laterAssistantTimestamp(

@@ -32,7 +32,10 @@ import { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { getAssistantSession, resolveAssistantStatePaths, saveAssistantSession } from './store.js'
-import { appendAssistantTurnReceiptEvent } from './turns.js'
+import {
+  appendAssistantTurnReceiptEvent,
+  readAssistantTurnReceipt,
+} from './turns.js'
 import {
   buildAssistantOutboxPersistedTarget,
   buildAssistantOutboxRawTargetIdentity,
@@ -51,7 +54,10 @@ import {
   shouldDispatchAssistantOutboxIntent,
 } from './outbox/retry-policy.js'
 import { buildAssistantOutboxSummary as buildAssistantOutboxSummaryLocal } from './outbox/summary.js'
-import { repairAssistantOutboxReceiptForIntent } from './outbox/receipt-repair.js'
+import {
+  readAssistantOutboxAnsweredCoverageFromReceiptMetadata,
+  repairAssistantOutboxReceiptForIntent,
+} from './outbox/receipt-repair.js'
 import {
   findAssistantOutboxIntentByDedupeIdentity,
   listAssistantOutboxIntentsLocal as listAssistantOutboxIntentsLocalStore,
@@ -381,14 +387,13 @@ export async function createAssistantOutboxIntent(
     })
     const persistedIntentValue =
       sanitizeAssistantOutboxIntentForPersistence(intent)
-    const persistedIntent = assistantOutboxIntentSchema.parse(persistedIntentValue)
     await writeJsonFileAtomic(
       resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId),
       persistedIntentValue,
     )
     await repairAssistantOutboxReceiptForIntent({
       at: createdAt,
-      intent: persistedIntent,
+      intent,
       vault: input.vault,
     })
     await recordAssistantDiagnosticEvent({
@@ -404,7 +409,7 @@ export async function createAssistantOutboxIntent(
       },
     })
 
-    return persistedIntent
+    return intent
   })
 }
 
@@ -413,6 +418,32 @@ export async function readAssistantOutboxIntent(
   intentId: string,
 ): Promise<AssistantOutboxIntent | null> {
   return readAssistantOutboxIntentLocal(vault, intentId)
+}
+
+export async function readAssistantOutboxIntentAnsweredCoverage(input: {
+  intentId: string
+  turnId: string
+  vault: string
+}): Promise<AssistantOutboxIntent['answeredCoverage']> {
+  const receipt = await readAssistantTurnReceipt(input.vault, input.turnId)
+  if (!receipt) {
+    return null
+  }
+
+  for (let index = receipt.timeline.length - 1; index >= 0; index -= 1) {
+    const event = receipt.timeline[index]
+    if (!event || event.metadata.intentId !== input.intentId) {
+      continue
+    }
+    const coverage = readAssistantOutboxAnsweredCoverageFromReceiptMetadata(
+      event.metadata,
+    )
+    if (coverage) {
+      return coverage
+    }
+  }
+
+  return null
 }
 
 export async function readAssistantOutboxIntentMirrorState(input: {
@@ -1988,13 +2019,11 @@ function maybeUpgradeAssistantOutboxIntentAnsweredCoverage(input: {
     return input.intent
   }
 
-  return assistantOutboxIntentSchema.parse(
-    sanitizeAssistantOutboxIntentForPersistence({
-      ...input.intent,
-      answeredCoverage,
-      updatedAt: input.updatedAt,
-    }),
-  )
+  return assistantOutboxIntentSchema.parse({
+    ...input.intent,
+    answeredCoverage,
+    updatedAt: input.updatedAt,
+  })
 }
 
 function selectHighestAssistantOutboxAnsweredCoverage(
