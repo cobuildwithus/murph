@@ -393,7 +393,7 @@ export class SqliteDeviceSyncStore {
       nextReconcileAt?: string | null;
     };
     workerId: string;
-  }): { queuedJobs: DeviceSyncJobRecord[]; succeeded: boolean } {
+  }): boolean {
     try {
       return withImmediateTransaction(this.database, () => {
         const completed = completeDeviceSyncJobsIfOwnedInTransaction(this.database, {
@@ -403,7 +403,7 @@ export class SqliteDeviceSyncStore {
         });
 
         if (!completed) {
-          return { queuedJobs: [], succeeded: false };
+          return false;
         }
 
         const markedSucceeded = markStoredSyncSucceededInTransaction(
@@ -418,7 +418,7 @@ export class SqliteDeviceSyncStore {
           throw new DeviceSyncSuccessFenceRejectedError();
         }
 
-        const queuedJobs = input.jobs.map((job) =>
+        for (const job of input.jobs) {
           enqueueDeviceSyncJobInTransaction(this.database, {
             provider: input.provider,
             accountId: input.accountId,
@@ -428,14 +428,14 @@ export class SqliteDeviceSyncStore {
             availableAt: job.availableAt,
             maxAttempts: job.maxAttempts,
             dedupeKey: job.dedupeKey,
-          })
-        );
+          });
+        }
 
-        return { queuedJobs, succeeded: true };
+        return true;
       });
     } catch (error) {
       if (error instanceof DeviceSyncSuccessFenceRejectedError) {
-        return { queuedJobs: [], succeeded: false };
+        return false;
       }
 
       throw error;

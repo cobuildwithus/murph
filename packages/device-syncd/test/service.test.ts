@@ -3328,18 +3328,21 @@ test("device sync service wakes Junction retrying historical backfill at the ret
     assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillStatus, "retrying");
     assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillEmptyAttempts, 1);
     assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillLastEmptyAt, executedAt);
-    assert.equal(afterEmptyBackfill?.nextReconcileAt, retryDueAt);
-    assert.notEqual(afterEmptyBackfill?.nextReconcileAt, hourlyReconcileAt);
+    assert.equal(afterEmptyBackfill?.nextReconcileAt, hourlyReconcileAt);
     assert.equal(service.getNextWakeAt(executedAt), retryDueAt);
+    const firstRetryBackfillRow = readJobsForAccountForTesting(store, account.id).find((job) =>
+      job.kind === "backfill" && job.status === "queued"
+    );
+    const firstRetryBackfill = firstRetryBackfillRow ? store.getJobById(firstRetryBackfillRow.id) : null;
+    assert.ok(firstRetryBackfill);
+    assert.equal(firstRetryBackfill.availableAt, retryDueAt);
+    assert.equal(firstRetryBackfill.priority, 50);
 
     now = new Date("2026-04-04T00:05:00.000Z");
     service.queueManualReconcile(account.id);
     const manualReconcile = await service.runWorkerOnce();
-    const afterManualReconcile = store.getAccountById(account.id);
 
     assert.equal(manualReconcile?.kind, "reconcile");
-    assert.equal(afterManualReconcile?.nextReconcileAt, retryDueAt);
-    assert.notEqual(afterManualReconcile?.nextReconcileAt, "2026-04-04T01:05:00.000Z");
     assert.equal(service.getNextWakeAt("2026-04-04T00:05:00.000Z"), retryDueAt);
 
     now = new Date("2026-04-04T00:14:59.000Z");
@@ -3348,7 +3351,7 @@ test("device sync service wakes Junction retrying historical backfill at the ret
       readJobsForAccountForTesting(store, account.id).filter((job) =>
         job.kind === "backfill" && job.status === "queued"
       ).length,
-      0,
+      1,
     );
 
     now = new Date(retryDueAt);
@@ -3365,32 +3368,131 @@ test("device sync service wakes Junction retrying historical backfill at the ret
       dedupeKey: "junction-due-backfill-race-reconcile",
     });
     const dueRaceJob = await service.runWorkerOnce();
-    const afterDueRaceReconcile = store.getAccountById(account.id);
+    const afterDueRetryBackfill = store.getAccountById(account.id);
 
-    assert.equal(dueRaceJob?.id, dueRaceReconcile.id);
-    assert.equal(afterDueRaceReconcile?.nextReconcileAt, retryDueAt);
-    assert.equal(
-      readJobsForAccountForTesting(store, account.id).filter((job) =>
-        job.kind === "backfill" && job.status === "queued"
-      ).length,
-      0,
-    );
-
-    now = new Date(retryDueAt);
-    await service.runSchedulerOnce();
-    const queuedBackfills = readJobsForAccountForTesting(store, account.id).filter((job) =>
+    assert.equal(dueRaceJob?.kind, "backfill");
+    assert.notEqual(dueRaceJob?.id, dueRaceReconcile.id);
+    assert.equal(store.getJobById(dueRaceReconcile.id)?.status, "queued");
+    assert.equal(afterDueRetryBackfill?.metadata.junctionHistoricalBackfillEmptyAttempts, 2);
+    assert.equal(afterDueRetryBackfill?.nextReconcileAt, "2026-04-04T01:15:00.000Z");
+    const nextRetryBackfillRow = readJobsForAccountForTesting(store, account.id).find((job) =>
       job.kind === "backfill" && job.status === "queued"
     );
+    const nextRetryBackfill = nextRetryBackfillRow ? store.getJobById(nextRetryBackfillRow.id) : null;
+    assert.ok(nextRetryBackfill);
+    assert.deepEqual(nextRetryBackfill.payload, {
+      windowStart: ownerWindowStart,
+      windowEnd: ownerWindowEnd,
+      emptyBackfillAttempts: 2,
+    });
+    assert.equal(nextRetryBackfill.availableAt, "2026-04-04T01:15:00.000Z");
+    assert.equal(nextRetryBackfill.priority, 50);
+    assert.equal(nextRetryBackfill.dedupeKey, expectedDedupeKey);
+  } finally {
+    close();
+  }
+});
 
-    assert.equal(queuedBackfills.length, 1);
-    const queuedBackfill = store.getJobById(queuedBackfills[0]!.id);
+test("device sync scheduler prioritizes legacy Junction retry repair before routine reconcile", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-legacy-retry-priority");
+  const retryDueAt = "2026-04-04T00:15:00.000Z";
+  const ownerWindowStart = "2026-04-01T00:00:00.000Z";
+  const ownerWindowEnd = "2026-04-03T00:00:00.000Z";
+  let now = new Date(retryDueAt);
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => now,
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        reconcileIntervalMs: 60 * 60_000,
+        summaryBackfillDays: 2,
+        summaryResources: ["activity"],
+        timeseriesResources: [],
+        fetchImpl: async (input) => {
+          const url = readUrl(input);
+
+          if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+            return createJsonResponse({
+              providers: [
+                {
+                  id: "provider-garmin-1",
+                  slug: "garmin",
+                  name: "Garmin",
+                  status: "connected",
+                  resource_availability: {
+                    activity: true,
+                  },
+                },
+              ],
+            });
+          }
+
+          if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/activity/junction-user-1")) {
+            return createJsonResponse({ data: [] });
+          }
+
+          throw new Error(`Unexpected Junction request during legacy retry priority test: ${url}`);
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: ownerWindowEnd,
+      metadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 1,
+        junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
+        junctionHistoricalBackfillWindowStart: ownerWindowStart,
+        junctionHistoricalBackfillWindowEnd: ownerWindowEnd,
+      },
+      nextReconcileAt: retryDueAt,
+    });
+
+    await service.runSchedulerOnce();
+    const queuedJobs = readJobsForAccountForTesting(store, account.id).filter((job) => job.status === "queued");
+    const queuedBackfillRow = queuedJobs.find((job) => job.kind === "backfill");
+    const queuedReconcileRow = queuedJobs.find((job) => job.kind === "reconcile");
+    const queuedBackfill = queuedBackfillRow ? store.getJobById(queuedBackfillRow.id) : null;
+    const queuedReconcile = queuedReconcileRow ? store.getJobById(queuedReconcileRow.id) : null;
+
     assert.ok(queuedBackfill);
+    assert.ok(queuedReconcile);
+    assert.equal(queuedBackfill.priority, 50);
+    assert.equal(queuedReconcile.priority, 40);
     assert.deepEqual(queuedBackfill.payload, {
       windowStart: ownerWindowStart,
       windowEnd: ownerWindowEnd,
+      emptyBackfillAttempts: 1,
     });
-    assert.equal(queuedBackfill.dedupeKey, expectedDedupeKey);
-    assert.equal(store.getAccountById(account.id)?.nextReconcileAt, "2026-04-04T01:15:00.000Z");
+
+    const claimedJob = store.claimDueJob("worker-legacy-retry", retryDueAt, 60_000);
+
+    assert.equal(claimedJob?.id, queuedBackfill.id);
+    assert.equal(store.getJobById(queuedBackfill.id)?.status, "running");
+    assert.equal(store.getJobById(queuedReconcile.id)?.status, "queued");
   } finally {
     close();
   }

@@ -858,7 +858,7 @@ class DeviceSyncServiceController {
       }
 
       const scheduledJobs = this.normalizeJobsForEnqueue(storedAccount, result.scheduledJobs ?? []);
-      const completion = this.store.completeJobsMarkSyncSucceededAndEnqueueJobs({
+      const completed = this.store.completeJobsMarkSyncSucceededAndEnqueueJobs({
         accountId: storedAccount.id,
         completedAt: currentNow(),
         disconnectGeneration,
@@ -870,7 +870,7 @@ class DeviceSyncServiceController {
         workerId: this.workerId,
       });
 
-      if (!completion.succeeded) {
+      if (!completed) {
         releaseActiveJobsIfCurrentAccountActive(currentNow());
         return finishPass();
       }

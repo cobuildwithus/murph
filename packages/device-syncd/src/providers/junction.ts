@@ -103,9 +103,7 @@ interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
 }
 
-type JunctionHistoricalBackfillFollowUp = Pick<ProviderJobResult, "metadataPatch" | "scheduledJobs"> & {
-  nextRetryAt?: string;
-};
+type JunctionHistoricalBackfillFollowUp = Pick<ProviderJobResult, "metadataPatch" | "scheduledJobs">;
 
 type JunctionResourceCategory = "summary" | "timeseries";
 
@@ -437,6 +435,9 @@ const EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS = Object.freeze([
   6 * 60 * 60_000,
   24 * 60 * 60_000,
 ] as const);
+const JUNCTION_SCHEDULED_RECONCILE_PRIORITY = 40;
+const JUNCTION_HISTORICAL_BACKFILL_PRIORITY = 30;
+const JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY = 50;
 
 export function createJunctionDeviceSyncProvider(
   config: JunctionDeviceSyncProviderConfig,
@@ -649,10 +650,6 @@ export function createJunctionDeviceSyncProvider(
     now: string,
   ): ProviderScheduleResult {
     const dueHistoricalBackfillJobs = buildDueHistoricalBackfillJobs(account, now);
-    const scheduledNextReconcileAt = addMilliseconds(now, reconcileIntervalMs);
-    const nextReconcileAt = dueHistoricalBackfillJobs.length > 0
-      ? scheduledNextReconcileAt
-      : clampConnectHistoricalBackfillRetryNextReconcileAt(account, scheduledNextReconcileAt);
 
     return {
       jobs: [
@@ -660,19 +657,17 @@ export function createJunctionDeviceSyncProvider(
           kind: "reconcile",
           now,
           windowStart: subtractDays(now, reconcileDays),
-          priority: 40,
+          priority: JUNCTION_SCHEDULED_RECONCILE_PRIORITY,
         }),
         ...dueHistoricalBackfillJobs,
       ],
-      nextReconcileAt,
+      nextReconcileAt: addMilliseconds(now, reconcileIntervalMs),
     };
   }
 
-  // Historical backfill work is derived from durable connection metadata on
-  // every scheduled pass, not carried by in-flight job chains: if a backfill
-  // job dies (worker crash, provider outage, attempts exhausted), the next
-  // pass re-materializes the due work from the recorded state. The exact
-  // window dedupe key keeps re-enqueueing idempotent while a job is queued.
+  // Retry execution is owned by the durable device job row. Retry metadata is
+  // terminal/diagnostic state, with this narrow scheduled-pass repair for
+  // existing retrying windows that predate materialized retry jobs.
   function buildDueHistoricalBackfillJobs(
     account: StoredDeviceSyncAccount,
     now: string,
@@ -695,11 +690,18 @@ export function createJunctionDeviceSyncProvider(
       if (!retryAt || Date.parse(now) < Date.parse(retryAt)) {
         return [];
       }
+      const emptyBackfillAttempts = readHistoricalBackfillEmptyAttempts(
+        metadata,
+        connectWindow.windowStart,
+        connectWindow.windowEnd,
+      );
       return [buildExactWindowJob({
         kind: "backfill",
         windowStart: connectWindow.windowStart,
         windowEnd: connectWindow.windowEnd,
-        priority: 30,
+        availableAt: now,
+        priority: JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY,
+        ...(emptyBackfillAttempts > 0 ? { payload: { emptyBackfillAttempts } } : {}),
       })];
     }
 
@@ -711,20 +713,9 @@ export function createJunctionDeviceSyncProvider(
       kind: "backfill",
       windowStart: connectWindow.windowStart,
       windowEnd: connectWindow.windowEnd,
-      priority: 30,
+      availableAt: now,
+      priority: JUNCTION_HISTORICAL_BACKFILL_PRIORITY,
     })];
-  }
-
-  function clampConnectHistoricalBackfillRetryNextReconcileAt(
-    account: Pick<DeviceSyncAccount, "connectedAt" | "metadata">,
-    nextReconcileAt: string,
-  ): string {
-    const retryAt = readPendingConnectHistoricalBackfillRetryAt(account);
-    if (!retryAt) {
-      return nextReconcileAt;
-    }
-
-    return minIsoTimestamp(nextReconcileAt, retryAt);
   }
 
   function isConnectHistoricalBackfillWindow(
@@ -873,6 +864,7 @@ export function createJunctionDeviceSyncProvider(
       ? isConnectHistoricalBackfill
         ? buildHistoricalBackfillFollowUp({
             hasRecords: historicalSummaryHasRecords,
+            job,
             metadata: context.account.metadata,
             now: context.now,
             windowStart: window.windowStart,
@@ -886,23 +878,12 @@ export function createJunctionDeviceSyncProvider(
             windowEnd: window.windowEnd,
           })
       : {};
-    const { nextRetryAt, ...backfillFollowUpResult } = backfillFollowUp;
-    const scheduledNextReconcileAt = addMilliseconds(context.now, reconcileIntervalMs);
-    const nextReconcileAt = nextRetryAt
-      ? minIsoTimestamp(scheduledNextReconcileAt, nextRetryAt)
-      : job.kind === "backfill" && isConnectHistoricalBackfill
-        ? scheduledNextReconcileAt
-        : clampConnectHistoricalBackfillRetryNextReconcileAt(
-            context.account,
-            scheduledNextReconcileAt,
-          );
-
     return withJunctionSkippedResourceMetadata(
       context,
       withJunctionMetadataPatch(
         {
-          ...backfillFollowUpResult,
-          nextReconcileAt,
+          ...backfillFollowUp,
+          nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
         },
         profileMetadataPatch,
       ),
@@ -1877,23 +1858,11 @@ export function createJunctionDeviceSyncProvider(
     windowStart: string;
   }): ProviderJobResult {
     const followUp = buildYieldedJunctionFollowUpJob(input);
-    const scheduledNextReconcileAt = addMilliseconds(input.context.now, reconcileIntervalMs);
-    const shouldPreserveConnectRetryGate =
-      input.job.kind !== "backfill"
-      || !isConnectHistoricalBackfillWindow(input.context.account, {
-        windowEnd: input.windowEnd,
-        windowStart: input.windowStart,
-      });
     return {
       ...(followUp ? { scheduledJobs: [followUp] } : {}),
       nextReconcileAt: input.job.kind === "resource"
         ? clampWebhookJobNextReconcileAt(input.context)
-        : shouldPreserveConnectRetryGate
-          ? clampConnectHistoricalBackfillRetryNextReconcileAt(
-              input.context.account,
-              scheduledNextReconcileAt,
-            )
-          : scheduledNextReconcileAt,
+        : addMilliseconds(input.context.now, reconcileIntervalMs),
     };
   }
 
@@ -1912,7 +1881,7 @@ export function createJunctionDeviceSyncProvider(
       if (!cursor || !isTimestampInHalfOpenWindow(cursor, input)) {
         return null;
       }
-      const emptyBackfillAttempts = readNonConnectHistoricalBackfillEmptyAttempts(input.job);
+      const emptyBackfillAttempts = readHistoricalBackfillJobEmptyAttempts(input.job);
       const followUp = buildExactWindowJob({
         kind: "backfill",
         priority: input.job.priority,
@@ -4373,6 +4342,7 @@ function isJunctionSourceSpecificFloatingTimestampProvider(sourceProviderSlug: s
 
 function buildHistoricalBackfillFollowUp(input: {
   hasRecords: boolean;
+  job: DeviceSyncJobRecord;
   metadata: Record<string, unknown>;
   now: string;
   windowStart: string;
@@ -4397,26 +4367,49 @@ function buildHistoricalBackfillFollowUp(input: {
     return {};
   }
 
-  const emptyAttempts = readHistoricalBackfillEmptyAttempts(
-    input.metadata,
-    input.windowStart,
-    input.windowEnd,
-  ) + 1;
+  const previousEmptyAttempts = Math.max(
+    readHistoricalBackfillEmptyAttempts(
+      input.metadata,
+      input.windowStart,
+      input.windowEnd,
+    ),
+    readHistoricalBackfillJobEmptyAttempts(input.job),
+  );
+  const emptyAttempts = previousEmptyAttempts + 1;
   const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
   const status: JunctionHistoricalBackfillStatus = retryDelayMs === null ? "exhausted" : "retrying";
 
-  // No retry job is scheduled here: the scheduled pass derives due retries
-  // from this metadata (buildDueHistoricalBackfillJobs), which survives job
-  // loss where an in-flight chain would not.
+  const metadataPatch = buildHistoricalBackfillMetadataPatch({
+    status,
+    emptyAttempts,
+    lastEmptyAt: input.now,
+    windowStart: input.windowStart,
+    windowEnd: input.windowEnd,
+  });
+
+  if (retryDelayMs === null) {
+    return { metadataPatch };
+  }
+
+  const retryAt = addMilliseconds(input.now, retryDelayMs);
+  const retryJob = buildExactWindowJob({
+    kind: "backfill",
+    priority: JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY,
+    windowStart: input.windowStart,
+    windowEnd: input.windowEnd,
+    payload: {
+      emptyBackfillAttempts: emptyAttempts,
+    },
+  });
+
   return {
-    metadataPatch: buildHistoricalBackfillMetadataPatch({
-      status,
-      emptyAttempts,
-      lastEmptyAt: input.now,
-      windowStart: input.windowStart,
-      windowEnd: input.windowEnd,
-    }),
-    ...(retryDelayMs === null ? {} : { nextRetryAt: addMilliseconds(input.now, retryDelayMs) }),
+    metadataPatch,
+    scheduledJobs: [
+      {
+        ...retryJob,
+        availableAt: retryAt,
+      },
+    ],
   };
 }
 
@@ -4431,7 +4424,7 @@ function buildNonConnectHistoricalBackfillFollowUp(input: {
     return {};
   }
 
-  const emptyAttempts = readNonConnectHistoricalBackfillEmptyAttempts(input.job) + 1;
+  const emptyAttempts = readHistoricalBackfillJobEmptyAttempts(input.job) + 1;
   const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
   if (retryDelayMs === null) {
     return {};
@@ -4440,13 +4433,12 @@ function buildNonConnectHistoricalBackfillFollowUp(input: {
   const retryAt = addMilliseconds(input.now, retryDelayMs);
   const retryJob = buildExactWindowJob({
     kind: "backfill",
-    priority: input.job.priority,
+    priority: Math.max(input.job.priority, JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY),
     windowStart: input.windowStart,
     windowEnd: input.windowEnd,
   });
 
   return {
-    nextRetryAt: retryAt,
     scheduledJobs: [
       {
         ...retryJob,
@@ -4505,7 +4497,7 @@ function readHistoricalBackfillEmptyAttempts(
     : 0;
 }
 
-function readNonConnectHistoricalBackfillEmptyAttempts(job: DeviceSyncJobRecord): number {
+function readHistoricalBackfillJobEmptyAttempts(job: DeviceSyncJobRecord): number {
   const rawAttempts = job.payload.emptyBackfillAttempts;
   return typeof rawAttempts === "number" && Number.isInteger(rawAttempts) && rawAttempts > 0 ? rawAttempts : 0;
 }
@@ -4533,12 +4525,15 @@ function buildWindowJob(input: {
     kind: input.kind,
     windowStart,
     windowEnd,
+    availableAt: input.now,
     priority: input.priority,
   });
 }
 
 function buildExactWindowJob(input: {
+  availableAt?: string;
   kind: "backfill" | "reconcile";
+  payload?: Record<string, unknown>;
   windowStart: string;
   windowEnd: string;
   priority: number;
@@ -4548,8 +4543,10 @@ function buildExactWindowJob(input: {
     payload: {
       windowStart: input.windowStart,
       windowEnd: input.windowEnd,
+      ...(input.payload ?? {}),
     },
     priority: input.priority,
+    ...(input.availableAt ? { availableAt: input.availableAt } : {}),
     dedupeKey: sha256Text(JSON.stringify(["junction", input.kind, input.windowStart, input.windowEnd])),
   };
 }

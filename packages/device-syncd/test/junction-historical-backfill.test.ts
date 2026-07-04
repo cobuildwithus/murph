@@ -6,6 +6,7 @@ import { createJsonResponse, readUrl } from "./helpers.ts";
 
 import type {
   DeviceSyncAccount,
+  DeviceSyncJobInput,
   DeviceSyncJobRecord,
   ProviderJobContext,
 } from "../src/types.ts";
@@ -61,6 +62,21 @@ function createJob(payload: Record<string, unknown>): DeviceSyncJobRecord {
     startedAt: null,
     finishedAt: null,
   };
+}
+
+function assertConnectBackfillRetryJob(
+  scheduledJobs: readonly DeviceSyncJobInput[] | undefined,
+): void {
+  assert.equal(scheduledJobs?.length, 1);
+  const retryJob = scheduledJobs?.[0];
+  assert.equal(retryJob?.availableAt, "2026-04-03T00:15:00.000Z");
+  assert.equal(retryJob?.kind, "backfill");
+  assert.equal(retryJob?.priority, 50);
+  assert.deepEqual(retryJob?.payload, {
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    emptyBackfillAttempts: 1,
+  });
 }
 
 function createJobContext(importedSnapshots: unknown[]): ProviderJobContext {
@@ -215,7 +231,7 @@ test("Junction sleep-cycle id-only historical backfill keeps retrying", async ()
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
     junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
-  assert.equal(result.scheduledJobs, undefined);
+  assertConnectBackfillRetryJob(result.scheduledJobs);
   assert.equal(importedSnapshots.length, 1);
 });
 
@@ -234,7 +250,7 @@ for (const stageCount of [0, -1]) {
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
       junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
     });
-    assert.equal(result.scheduledJobs, undefined);
+    assertConnectBackfillRetryJob(result.scheduledJobs);
     assert.equal(importedSnapshots.length, 1);
   });
 }
