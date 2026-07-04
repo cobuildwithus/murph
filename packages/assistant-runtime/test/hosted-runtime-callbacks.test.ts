@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   listAssistantOutboxIntents: vi.fn(),
   markAssistantOutboxIntentMirrorTerminalById: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
+  readAssistantAutoReplyIntentProvenance: vi.fn(),
   readAssistantAutomationState: vi.fn(),
   readAssistantOutboxIntent: vi.fn(),
   readAssistantOutboxIntentMirrorState: vi.fn(),
@@ -83,6 +84,8 @@ vi.mock("@murphai/assistant-engine", () => ({
   markAssistantOutboxIntentMirrorTerminalById:
     mocks.markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError: mocks.normalizeAssistantDeliveryError,
+  readAssistantAutoReplyIntentProvenance:
+    mocks.readAssistantAutoReplyIntentProvenance,
   readAssistantAutomationState: mocks.readAssistantAutomationState,
   readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
   readAssistantOutboxIntentMirrorState:
@@ -325,6 +328,7 @@ beforeEach(() => {
   mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue(null);
   mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(new Set());
   mocks.hasAssistantAutoReplyChannel.mockReturnValue(true);
+  mocks.readAssistantAutoReplyIntentProvenance.mockResolvedValue(null);
   mocks.readAssistantAutomationState.mockResolvedValue({ autoReply: [{ channel: "telegram" }] });
   mocks.shouldDispatchAssistantOutboxIntent.mockReturnValue(true);
   mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockResolvedValue({
@@ -831,6 +835,53 @@ describe("hosted runtime callbacks", () => {
       false,
       false,
     ]);
+  });
+
+  it("hydrates answered coverage from auto-reply intent provenance", async () => {
+    const answeredCoverage = {
+      lane: "conversation" as const,
+      laneSeq: "42",
+    };
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      {
+        actorId: "actor_1",
+        bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+        channel: "linq",
+        dedupeKey: "dedupe_reply",
+        deliveryIdempotencyKey: "assistant-segment:turn_1:0",
+        deliveryTransportIdempotent: false,
+        explicitTarget: null,
+        identityId: "identity_1",
+        intentId: "intent_reply",
+        media: [],
+        message: "hello from hosted",
+        replyToMessageId: "linq_message_1",
+        sessionId: "session_1",
+        threadId: "thread_1",
+        threadIsDirect: true,
+        turnId: "turn_1",
+      },
+    ]);
+    mocks.readAssistantAutoReplyIntentProvenance.mockResolvedValueOnce({
+      answeredCoverage,
+      intentId: "intent_reply",
+      recordedAt: "2026-04-08T00:00:00.000Z",
+      schema: "murph.assistant-auto-reply-intent-provenance.v1",
+      turnId: "turn_1",
+    });
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_reply"],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects).toHaveLength(1);
+    expect(sideEffects[0]?.payload.answeredCoverage).toEqual(answeredCoverage);
+    expect(mocks.readAssistantAutoReplyIntentProvenance).toHaveBeenCalledWith({
+      intentId: "intent_reply",
+      vault: "/tmp/vault",
+    });
   });
 
   it("abandons superseded hosted auto-reply same-boundary foreground replies", async () => {
@@ -5210,6 +5261,88 @@ describe("hosted runtime callbacks", () => {
       { errorName: "Error" },
     );
     warnSpy.mockRestore();
+  });
+
+  it("keeps coverage-bearing Linq sends retryable until accepted outcomes record", async () => {
+    const answeredCoverage = {
+      lane: "conversation" as const,
+      laneSeq: "42",
+    };
+    const effect = createEffect({
+      answeredCoverage,
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      explicitTarget: "linq_chat_123",
+      transportIdempotent: false,
+    });
+    const recordDeliveryOutcome = vi.fn(async () => {
+      throw new Error("web callback unavailable");
+    });
+    mocks.sendLinqMessage.mockResolvedValueOnce({
+      providerMessageId: "linq_message_sent",
+      providerThreadId: "linq_chat_123",
+      target: "linq_chat_123",
+      targetKind: "thread" as const,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendLinq({
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "reply",
+          replyToMessageId: null,
+          target: "linq_chat_123",
+          targetKind: "thread",
+        });
+      } catch (error) {
+        expect((error as { deliveryMayHaveSucceeded?: boolean }).deliveryMayHaveSucceeded)
+          .toBe(true);
+        return createDispatchResult(
+          {
+            delivery: null,
+            lastError: {
+              code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+              message: "Accepted Linq delivery outcome could not be recorded.",
+            },
+            status: "retryable",
+          },
+          {
+            code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+            message: "Accepted Linq delivery outcome could not be recorded.",
+          },
+        );
+      }
+
+      throw new Error("Expected coverage-bearing Linq send to await outcome recording.");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryErrorCode: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+        deliveryStatus: "retryable",
+      }),
+    ]);
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: expect.stringMatching(/Z$/u),
+        answeredCoverage,
+        providerMessageId: "linq_message_sent",
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
   });
 
   it("does not let one hung Linq outcome write block later outcome writes", async () => {

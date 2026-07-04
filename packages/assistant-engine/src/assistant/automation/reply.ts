@@ -48,8 +48,7 @@ import type {
 } from '../input-source.js'
 import {
   compareAssistantInputCursors,
-  listAssistantInputEvents,
-  type AssistantInputEventRecord,
+  readAssistantInputEvent,
   type AssistantInputConversationRef,
 } from '../input-store.js'
 import type { AssistantAutoReplyChannelState } from '../automation-state.js'
@@ -61,6 +60,7 @@ import {
   writeAssistantChatErrorArtifacts,
 } from './artifacts.js'
 import {
+  readAssistantAutoReplyAnsweredCoverage,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   hasCompleteAssistantAutoReplyTerminalEvidence,
   type AssistantAutoReplyTerminalEvidence,
@@ -1480,83 +1480,23 @@ export async function computeAssistantAutoReplyAnsweredCoverage(input: {
   const scanStart = resolveAssistantAutoReplyAnsweredCoverageScanStart(
     context.autoReply,
   )
+  const storedCoverage = await readAssistantAutoReplyAnsweredCoverage({
+    vault: input.vault,
+  })
+  const baseCoverage = selectHighestAssistantAutoReplyAnsweredCoverage(
+    scanStart.coverage,
+    storedCoverage,
+  )
   if (terminalInputIds.size === 0) {
-    return scanStart.coverage
+    return baseCoverage
   }
 
-  let highWater = scanStart.coverage
-  let afterCursor = scanStart.afterCursor
-  let scannedEvents = 0
-  const pendingTerminalInputIds = new Set(terminalInputIds)
-
-  while (
-    pendingTerminalInputIds.size > 0 &&
-    scannedEvents < AUTO_REPLY_ANSWERED_COVERAGE_SCAN_LIMIT
-  ) {
-    const listed = await listAssistantInputEvents({
-      afterCursor,
-      limit: Math.min(
-        AUTO_REPLY_ANSWERED_COVERAGE_PAGE_LIMIT,
-        AUTO_REPLY_ANSWERED_COVERAGE_SCAN_LIMIT - scannedEvents,
-      ),
-      source: 'hosted-mailbox',
-      vault: input.vault,
-    })
-    if (listed.events.length === 0) {
-      break
-    }
-    scannedEvents += listed.events.length
-    afterCursor = listed.nextCursor
-
-    const conversationLaneInputs = listed.events
-      .filter(isHostedConversationLaneInputEvent)
-      .sort(compareHostedConversationLaneInputEventsBySeq)
-
-    for (const event of conversationLaneInputs) {
-      if (
-        highWater &&
-        compareHostedMailboxLaneSeq(
-          event.sourceRef.laneSeq,
-          highWater.laneSeq,
-        ) <= 0
-      ) {
-        continue
-      }
-
-      const terminal =
-        terminalInputIds.has(event.inputId) ||
-        await hasCompleteAssistantAutoReplyTerminalEvidence({
-          captureId: event.projection.captureId,
-          inputId: event.inputId,
-          vault: input.vault,
-        })
-      if (!terminal) {
-        return highWater
-      }
-
-      highWater = {
-        lane: 'conversation',
-        laneSeq: event.sourceRef.laneSeq,
-      }
-      pendingTerminalInputIds.delete(event.inputId)
-      if (pendingTerminalInputIds.size === 0) {
-        return highWater
-      }
-    }
-
-    if (
-      !afterCursor ||
-      listed.events.length < AUTO_REPLY_ANSWERED_COVERAGE_PAGE_LIMIT
-    ) {
-      break
-    }
-  }
-
-  return highWater
+  return await advanceAssistantAutoReplyAnsweredCoverageWithTerminalInputs({
+    coverage: baseCoverage,
+    terminalInputIds: [...terminalInputIds],
+    vault: input.vault,
+  })
 }
-
-const AUTO_REPLY_ANSWERED_COVERAGE_PAGE_LIMIT = 100
-const AUTO_REPLY_ANSWERED_COVERAGE_SCAN_LIMIT = 500
 
 function resolveAssistantAutoReplyAnsweredCoverageScanStart(
   autoReply: readonly AssistantAutoReplyChannelState[],
@@ -1630,26 +1570,6 @@ function denormalizeHostedMailboxLaneSeqForCoverage(laneSeq: string): string {
   return /^\d+$/u.test(laneSeq) ? BigInt(laneSeq).toString() : laneSeq
 }
 
-function isHostedConversationLaneInputEvent(
-  event: AssistantInputEventRecord,
-): event is AssistantInputEventRecord & {
-  sourceRef: Extract<AssistantInputEventRecord['sourceRef'], { kind: 'hosted-mailbox' }>
-} {
-  return event.sourceRef.kind === 'hosted-mailbox' &&
-    event.sourceRef.lane === 'conversation'
-}
-
-function compareHostedConversationLaneInputEventsBySeq(
-  left: AssistantInputEventRecord & {
-    sourceRef: Extract<AssistantInputEventRecord['sourceRef'], { kind: 'hosted-mailbox' }>
-  },
-  right: AssistantInputEventRecord & {
-    sourceRef: Extract<AssistantInputEventRecord['sourceRef'], { kind: 'hosted-mailbox' }>
-  },
-): number {
-  return compareHostedMailboxLaneSeq(left.sourceRef.laneSeq, right.sourceRef.laneSeq)
-}
-
 function compareHostedMailboxLaneSeq(left: string, right: string): number {
   try {
     const leftSeq = BigInt(left)
@@ -1657,6 +1577,73 @@ function compareHostedMailboxLaneSeq(left: string, right: string): number {
     return leftSeq < rightSeq ? -1 : leftSeq > rightSeq ? 1 : 0
   } catch {
     return left.localeCompare(right)
+  }
+}
+
+function selectHighestAssistantAutoReplyAnsweredCoverage(
+  left: AssistantOutboxIntent['answeredCoverage'],
+  right: AssistantOutboxIntent['answeredCoverage'],
+): AssistantOutboxIntent['answeredCoverage'] {
+  if (!left) {
+    return right
+  }
+  if (!right) {
+    return left
+  }
+  return compareHostedMailboxLaneSeq(left.laneSeq, right.laneSeq) >= 0
+    ? left
+    : right
+}
+
+async function advanceAssistantAutoReplyAnsweredCoverageWithTerminalInputs(input: {
+  coverage: AssistantOutboxIntent['answeredCoverage']
+  terminalInputIds: readonly string[]
+  vault: string
+}): Promise<AssistantOutboxIntent['answeredCoverage']> {
+  let coveredSeq = input.coverage
+    ? parseNumericHostedMailboxLaneSeq(input.coverage.laneSeq)
+    : 0n
+  if (coveredSeq === null) {
+    return input.coverage
+  }
+
+  const terminalSeqs = new Set<bigint>()
+  for (const inputId of input.terminalInputIds) {
+    const event = await readAssistantInputEvent({
+      inputId,
+      vault: input.vault,
+    })
+    if (
+      event?.sourceRef.kind !== 'hosted-mailbox' ||
+      event.sourceRef.lane !== 'conversation'
+    ) {
+      continue
+    }
+    const laneSeq = parseNumericHostedMailboxLaneSeq(event.sourceRef.laneSeq)
+    if (laneSeq !== null && laneSeq > coveredSeq) {
+      terminalSeqs.add(laneSeq)
+    }
+  }
+
+  let nextSeq = coveredSeq + 1n
+  while (terminalSeqs.delete(nextSeq)) {
+    coveredSeq = nextSeq
+    nextSeq += 1n
+  }
+
+  return coveredSeq > 0n
+    ? {
+        lane: 'conversation',
+        laneSeq: coveredSeq.toString(),
+      }
+    : null
+}
+
+function parseNumericHostedMailboxLaneSeq(laneSeq: string): bigint | null {
+  try {
+    return /^\d+$/u.test(laneSeq) ? BigInt(laneSeq) : null
+  } catch {
+    return null
   }
 }
 

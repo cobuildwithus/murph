@@ -63,7 +63,7 @@ describe("createCloudflareHostedControlClient", () => {
   });
 
   it("rejects blank user identifiers for runtime ensure-processing before issuing requests", () => {
-    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const fetchImpl = vi.fn(async () => createJsonResponse(createRunnerStatus())) as typeof fetch;
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test",
       fetchImpl,

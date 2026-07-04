@@ -48,6 +48,9 @@ import {
   findAssistantAutoReplyDeliveryIntentIds,
 } from '../src/assistant/automation/evidence.ts'
 import {
+  readAssistantAutoReplyIntentProvenance,
+} from '../src/assistant/automation/intent-provenance.ts'
+import {
   deliverAssistantProgressUpdate,
 } from '../src/assistant/delivery-service.ts'
 import {
@@ -186,6 +189,42 @@ describe('assistant outbox runtime', () => {
         vault: vaultRoot,
       }),
     ).resolves.toEqual(new Set([intent.intentId]))
+  })
+
+  it('keeps auto-reply answered coverage out of strict outbox persistence', async () => {
+    const { vaultRoot } = await createAssistantVault('assistant-outbox-auto-reply-coverage-')
+    const answeredCoverage = {
+      lane: 'conversation' as const,
+      laneSeq: '42',
+    }
+
+    const intent = await createAssistantOutboxIntent({
+      answeredCoverage,
+      actorId: 'telegram-user-1',
+      channel: 'telegram',
+      createdAt: '2026-04-08T00:00:00.000Z',
+      dedupeToken: 'stable-auto-reply-coverage-token',
+      message: 'auto reply',
+      sessionId: 'session_auto_reply_coverage',
+      threadId: 'telegram-thread-1',
+      threadIsDirect: true,
+      turnId: 'turn_auto_reply_coverage',
+      turnTrigger: 'automation-auto-reply',
+      vault: vaultRoot,
+    })
+
+    const rawIntent = await readRawOutboxIntent(vaultRoot, intent.intentId)
+    expect(rawIntent).not.toHaveProperty('answeredCoverage')
+    await expect(
+      readAssistantAutoReplyIntentProvenance({
+        intentId: intent.intentId,
+        vault: vaultRoot,
+      }),
+    ).resolves.toMatchObject({
+      answeredCoverage,
+      intentId: intent.intentId,
+      turnId: intent.turnId,
+    })
   })
 
   it('persists auto-reply provenance when a malformed-receipt retry dedupes to an existing intent', async () => {

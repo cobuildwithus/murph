@@ -315,10 +315,10 @@ export function sanitizeAssistantTurnReceiptForPersistence(
 
 export function sanitizeAssistantOutboxIntentForPersistence(
   intent: AssistantOutboxIntent,
-): Omit<AssistantOutboxIntent, 'operation'> & {
+): Omit<AssistantOutboxIntent, 'answeredCoverage' | 'operation'> & {
   operation?: NonNullable<AssistantOutboxIntent['operation']>
 } {
-  const { operation, ...baseIntent } = intent
+  const { answeredCoverage: _answeredCoverage, operation, ...baseIntent } = intent
   return {
     ...baseIntent,
     schema: 'murph.assistant-outbox-intent.v1',

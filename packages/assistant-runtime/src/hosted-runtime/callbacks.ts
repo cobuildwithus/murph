@@ -32,6 +32,7 @@ import {
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
+  readAssistantAutoReplyIntentProvenance,
   readAssistantAutomationState,
   readAssistantOutboxIntent,
   readAssistantVaultFileMedia,
@@ -283,15 +284,43 @@ export async function collectHostedAssistantDeliverySideEffects(
     ),
   );
   const effects = [
-    ...retainedForegroundCandidates.map((intent) =>
-      buildHostedAssistantDeliveryEffectFromIntent(intent, "foreground_current_turn")
-    ),
-    ...cappedBackgroundCandidates.map((intent) =>
-      buildHostedAssistantDeliveryEffectFromIntent(intent, "background_retry")
-    ),
+    ...(await Promise.all(retainedForegroundCandidates.map((intent) =>
+      buildHostedAssistantDeliveryEffectFromIntent({
+        deliveryPhase: "foreground_current_turn",
+        intent,
+        vaultRoot: request.vaultRoot,
+      })
+    ))),
+    ...(await Promise.all(cappedBackgroundCandidates.map((intent) =>
+      buildHostedAssistantDeliveryEffectFromIntent({
+        deliveryPhase: "background_retry",
+        intent,
+        vaultRoot: request.vaultRoot,
+      })
+    ))),
   ];
 
   return effects;
+}
+
+async function buildHostedAssistantDeliveryPayloadFromIntentForDispatch(input: {
+  intent: AssistantOutboxIntent;
+  vaultRoot: string;
+}): Promise<HostedAssistantDeliveryPayload> {
+  const provenance = await readAssistantAutoReplyIntentProvenance({
+    intentId: input.intent.intentId,
+    vault: input.vaultRoot,
+  });
+  const payload = buildHostedAssistantDeliveryPayloadFromIntent({
+    ...input.intent,
+    answeredCoverage: selectHighestHostedAssistantAnsweredCoverage(
+      input.intent.answeredCoverage ?? null,
+      provenance?.turnId === input.intent.turnId
+        ? provenance.answeredCoverage
+        : null,
+    ),
+  });
+  return payload;
 }
 
 /**
@@ -650,15 +679,20 @@ function buildHostedAssistantDeliveryRecipientKeys(
   ].filter((key): key is string => key !== null);
 }
 
-function buildHostedAssistantDeliveryEffectFromIntent(
-  intent: AssistantOutboxIntent,
-  deliveryPhase: HostedAssistantDeliveryPhase,
-): HostedAssistantDeliveryEffect {
+async function buildHostedAssistantDeliveryEffectFromIntent(input: {
+  deliveryPhase: HostedAssistantDeliveryPhase;
+  intent: AssistantOutboxIntent;
+  vaultRoot: string;
+}): Promise<HostedAssistantDeliveryEffect> {
+  const payload = await buildHostedAssistantDeliveryPayloadFromIntentForDispatch({
+    intent: input.intent,
+    vaultRoot: input.vaultRoot,
+  });
   return buildHostedAssistantDeliveryEffect({
-    dedupeKey: intent.dedupeKey,
-    deliveryPhase,
-    effectId: intent.intentId,
-    payload: buildHostedAssistantDeliveryPayloadFromIntent(intent),
+    dedupeKey: input.intent.dedupeKey,
+    deliveryPhase: input.deliveryPhase,
+    effectId: input.intent.intentId,
+    payload,
   });
 }
 
@@ -2395,23 +2429,31 @@ function createHostedAssistantLinqSendDependency(input: {
       });
       throw error;
     }
-    queueHostedAssistantLinqDeliveryOutcomeWrite({
-      effectsPort: input.effectsPort ?? null,
-      outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
-        acceptedAt: new Date(),
-        answeredCoverage: input.answeredCoverage ?? null,
-        attemptedAt,
-        deliveryContext,
-        fromPhoneNumber,
-        idempotencyKey: request.idempotencyKey ?? null,
-        intentId: input.intentId ?? null,
-        providerTarget,
-        providerThreadId: result.providerThreadId ?? null,
-        result,
-        target: request.target,
-        targetKind: request.targetKind ?? null,
-      }),
+    const acceptedOutcome = buildHostedAssistantLinqDeliveryOutcomeRequest({
+      acceptedAt: new Date(),
+      answeredCoverage: input.answeredCoverage ?? null,
+      attemptedAt,
+      deliveryContext,
+      fromPhoneNumber,
+      idempotencyKey: request.idempotencyKey ?? null,
+      intentId: input.intentId ?? null,
+      providerTarget,
+      providerThreadId: result.providerThreadId ?? null,
+      result,
+      target: request.target,
+      targetKind: request.targetKind ?? null,
     });
+    if (input.answeredCoverage) {
+      await recordHostedAssistantLinqDeliveryOutcomeRequired({
+        effectsPort: input.effectsPort ?? null,
+        outcome: acceptedOutcome,
+      });
+    } else {
+      queueHostedAssistantLinqDeliveryOutcomeWrite({
+        effectsPort: input.effectsPort ?? null,
+        outcome: acceptedOutcome,
+      });
+    }
     await assertHostedDeliveryLiveNow(input);
     return result;
   };
@@ -2609,23 +2651,31 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
       });
       throw error;
     }
-    queueHostedAssistantLinqDeliveryOutcomeWrite({
-      effectsPort: input.effectsPort ?? null,
-      outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
-        acceptedAt: new Date(),
-        answeredCoverage: input.answeredCoverage ?? null,
-        attemptedAt,
-        deliveryContext,
-        fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
-        idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
-        intentId: input.intentId ?? null,
-        providerTarget,
-        providerThreadId: result.providerThreadId ?? null,
-        result,
-        target: providerTarget,
-        targetKind: "thread",
-      }),
+    const acceptedOutcome = buildHostedAssistantLinqDeliveryOutcomeRequest({
+      acceptedAt: new Date(),
+      answeredCoverage: input.answeredCoverage ?? null,
+      attemptedAt,
+      deliveryContext,
+      fromPhoneNumber: deliveryContext?.fromPhoneNumber ?? null,
+      idempotencyKey: input.intentId ? `linq-voice-memo:${input.intentId}` : null,
+      intentId: input.intentId ?? null,
+      providerTarget,
+      providerThreadId: result.providerThreadId ?? null,
+      result,
+      target: providerTarget,
+      targetKind: "thread",
     });
+    if (input.answeredCoverage) {
+      await recordHostedAssistantLinqDeliveryOutcomeRequired({
+        effectsPort: input.effectsPort ?? null,
+        outcome: acceptedOutcome,
+      });
+    } else {
+      queueHostedAssistantLinqDeliveryOutcomeWrite({
+        effectsPort: input.effectsPort ?? null,
+        outcome: acceptedOutcome,
+      });
+    }
     await assertHostedDeliveryLiveNow(input);
     return result;
   };
@@ -2669,6 +2719,39 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
 
 const pendingHostedAssistantLinqDeliveryOutcomeWrites = new Set<Promise<void>>();
 
+async function recordHostedAssistantLinqDeliveryOutcomeRequired(input: {
+  effectsPort?: Pick<HostedRuntimeEffectsPort, "recordLinqDeliveryOutcome"> | null;
+  outcome: HostedRuntimeLinqDeliveryOutcomeRequest;
+}): Promise<void> {
+  const recordOutcome = input.effectsPort?.recordLinqDeliveryOutcome;
+  if (!recordOutcome) {
+    throw markHostedDeliveryMayHaveSucceeded(new VaultCliError(
+      "HOSTED_LINQ_DELIVERY_OUTCOME_RECORDER_MISSING",
+      "Hosted Linq delivery was accepted, but the outcome recorder was unavailable.",
+      { assistantDeliveryFailureClass: "transient" },
+    ));
+  }
+
+  try {
+    const result = await recordHostedAssistantLinqDeliveryOutcomeWithTimeout({
+      outcome: input.outcome,
+      recordOutcome,
+    });
+    if (result === "timed_out") {
+      throw new VaultCliError(
+        "HOSTED_LINQ_DELIVERY_OUTCOME_RECORD_TIMEOUT",
+        "Hosted Linq delivery was accepted, but recording the outcome timed out.",
+        {
+          assistantDeliveryFailureClass: "transient",
+          timeoutMs: HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS,
+        },
+      );
+    }
+  } catch (error) {
+    throw markHostedDeliveryMayHaveSucceeded(error);
+  }
+}
+
 function queueHostedAssistantLinqDeliveryOutcomeWrite(input: {
   effectsPort?: Pick<HostedRuntimeEffectsPort, "recordLinqDeliveryOutcome"> | null;
   outcome: HostedRuntimeLinqDeliveryOutcomeRequest;
@@ -2679,22 +2762,11 @@ function queueHostedAssistantLinqDeliveryOutcomeWrite(input: {
   }
 
   const write = Promise.resolve().then(async () => {
-    const abortController = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | null = null;
     try {
-      const record = recordOutcome(input.outcome, { signal: abortController.signal });
-      void record.catch(() => undefined);
-      const timeout = new Promise<"timed_out">((resolve) => {
-        timer = setTimeout(() => {
-          abortController.abort();
-          resolve("timed_out");
-        }, HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS);
-        timer.unref?.();
+      const result = await recordHostedAssistantLinqDeliveryOutcomeWithTimeout({
+        outcome: input.outcome,
+        recordOutcome,
       });
-      const result = await Promise.race([
-        record.then(() => "recorded" as const),
-        timeout,
-      ]);
       if (result === "timed_out") {
         console.warn("Hosted Linq delivery outcome recording timed out.", {
           timeoutMs: HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS,
@@ -2705,13 +2777,39 @@ function queueHostedAssistantLinqDeliveryOutcomeWrite(input: {
         errorName: error instanceof Error ? error.name : typeof error,
       });
     } finally {
-      if (timer !== null) {
-        clearTimeout(timer);
-      }
       pendingHostedAssistantLinqDeliveryOutcomeWrites.delete(write);
     }
   });
   pendingHostedAssistantLinqDeliveryOutcomeWrites.add(write);
+}
+
+async function recordHostedAssistantLinqDeliveryOutcomeWithTimeout(input: {
+  outcome: HostedRuntimeLinqDeliveryOutcomeRequest;
+  recordOutcome: NonNullable<HostedRuntimeEffectsPort["recordLinqDeliveryOutcome"]>;
+}): Promise<"recorded" | "timed_out"> {
+  const abortController = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const record = input.recordOutcome(input.outcome, {
+      signal: abortController.signal,
+    });
+    void record.catch(() => undefined);
+    const timeout = new Promise<"timed_out">((resolve) => {
+      timer = setTimeout(() => {
+        abortController.abort();
+        resolve("timed_out");
+      }, HOSTED_LINQ_DELIVERY_OUTCOME_WRITE_TIMEOUT_MS);
+      timer.unref?.();
+    });
+    return await Promise.race([
+      record.then(() => "recorded" as const),
+      timeout,
+    ]);
+  } finally {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 export async function drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort(
@@ -3456,6 +3554,34 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
 
   assertSupportedHostedAssistantDeliveryPayload(payload);
   return payload;
+}
+
+function selectHighestHostedAssistantAnsweredCoverage(
+  left: HostedAssistantAnsweredCoverage | null,
+  right: HostedAssistantAnsweredCoverage | null,
+): HostedAssistantAnsweredCoverage | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+  return compareHostedAssistantAnsweredCoverageLaneSeq(left.laneSeq, right.laneSeq) >= 0
+    ? left
+    : right;
+}
+
+function compareHostedAssistantAnsweredCoverageLaneSeq(
+  left: string,
+  right: string,
+): number {
+  try {
+    const leftSeq = BigInt(left);
+    const rightSeq = BigInt(right);
+    return leftSeq < rightSeq ? -1 : leftSeq > rightSeq ? 1 : 0;
+  } catch {
+    return left.localeCompare(right);
+  }
 }
 
 function normalizeHostedAssistantDeliveryMedia(

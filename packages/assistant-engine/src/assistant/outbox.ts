@@ -315,27 +315,24 @@ export async function createAssistantOutboxIntent(
         deliveryTransportIdempotent,
         intent: existing,
       })
-      const coverageUpgradedExisting = maybeUpgradeAssistantOutboxIntentAnsweredCoverage({
-        answeredCoverage: input.answeredCoverage ?? null,
-        intent: idempotencyUpgradedExisting,
-      })
       const upgradedExisting = operation
         ? maybeUpgradeAssistantOutboxIntentReactionOperation({
             deliveryTransportIdempotent,
-            intent: coverageUpgradedExisting,
+            intent: idempotencyUpgradedExisting,
             operation,
             persistedTarget,
             rawTargetIdentity,
             updatedAt: createdAt,
           })
         : maybeUpgradeAssistantOutboxIntentPreDispatchTarget({
-            intent: coverageUpgradedExisting,
+            intent: idempotencyUpgradedExisting,
             persistedTarget,
             rawTargetIdentity,
             updatedAt: createdAt,
           })
       if (isAutoReplyIntent) {
         await writeAssistantAutoReplyIntentProvenance({
+          answeredCoverage: input.answeredCoverage ?? null,
           intentId: upgradedExisting.intentId,
           recordedAt: upgradedExisting.updatedAt,
           turnId: upgradedExisting.turnId,
@@ -391,6 +388,7 @@ export async function createAssistantOutboxIntent(
       sanitizeAssistantOutboxIntentForPersistence(persistedIntent)
     if (isAutoReplyIntent) {
       await writeAssistantAutoReplyIntentProvenance({
+        answeredCoverage: input.answeredCoverage ?? null,
         intentId: intent.intentId,
         recordedAt: createdAt,
         turnId: intent.turnId,
@@ -1983,57 +1981,6 @@ function maybeUpgradeAssistantOutboxIntentDeliveryIdempotency(input: {
       deliveryTransportIdempotent,
     }),
   )
-}
-
-function maybeUpgradeAssistantOutboxIntentAnsweredCoverage(input: {
-  answeredCoverage: AssistantOutboxIntent['answeredCoverage']
-  intent: AssistantOutboxIntent
-}): AssistantOutboxIntent {
-  const answeredCoverage = selectHighestAssistantOutboxAnsweredCoverage(
-    input.intent.answeredCoverage,
-    input.answeredCoverage,
-  )
-  if (
-    answeredCoverage === input.intent.answeredCoverage ||
-    (
-      answeredCoverage?.lane === input.intent.answeredCoverage?.lane &&
-      answeredCoverage?.laneSeq === input.intent.answeredCoverage?.laneSeq
-    )
-  ) {
-    return input.intent
-  }
-
-  return assistantOutboxIntentSchema.parse(
-    sanitizeAssistantOutboxIntentForPersistence({
-      ...input.intent,
-      answeredCoverage,
-    }),
-  )
-}
-
-function selectHighestAssistantOutboxAnsweredCoverage(
-  left: AssistantOutboxIntent['answeredCoverage'],
-  right: AssistantOutboxIntent['answeredCoverage'],
-): AssistantOutboxIntent['answeredCoverage'] {
-  if (!left) {
-    return right
-  }
-  if (!right) {
-    return left
-  }
-  return compareAssistantOutboxLaneSeq(left.laneSeq, right.laneSeq) >= 0
-    ? left
-    : right
-}
-
-function compareAssistantOutboxLaneSeq(left: string, right: string): number {
-  try {
-    const leftSeq = BigInt(left)
-    const rightSeq = BigInt(right)
-    return leftSeq < rightSeq ? -1 : leftSeq > rightSeq ? 1 : 0
-  } catch {
-    return left.localeCompare(right)
-  }
 }
 
 function maybeUpgradeAssistantOutboxIntentPreDispatchTarget(input: {
