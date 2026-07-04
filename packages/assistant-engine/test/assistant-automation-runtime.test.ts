@@ -106,6 +106,7 @@ const replyMocks = vi.hoisted(() => ({
 const evidenceMocks = vi.hoisted(() => ({
   assistantAutoReplyTerminalEvidenceExists: vi.fn(),
   hasCompleteAssistantAutoReplyTerminalEvidence: vi.fn(),
+  readAssistantAutoReplyAnsweredCoverage: vi.fn(),
   readAssistantAutoReplyTerminalEvidenceByEvidenceId: vi.fn(),
   writeAssistantAutoReplyReplyIntentEvidence: vi.fn(),
   writeAssistantAutoReplyReplyTerminalEvidence: vi.fn(),
@@ -123,6 +124,8 @@ vi.mock('../src/assistant/automation/evidence.ts', () => ({
     evidenceMocks.assistantAutoReplyTerminalEvidenceExists,
   hasCompleteAssistantAutoReplyTerminalEvidence:
     evidenceMocks.hasCompleteAssistantAutoReplyTerminalEvidence,
+  readAssistantAutoReplyAnsweredCoverage:
+    evidenceMocks.readAssistantAutoReplyAnsweredCoverage,
   readAssistantAutoReplyTerminalEvidenceByEvidenceId:
     evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId,
   writeAssistantAutoReplyReplyIntentEvidence:
@@ -851,6 +854,55 @@ function createCapturelessAssistantInputCandidate(input: {
   }
 }
 
+function createHostedMailboxSourceRefForTest(input: {
+  dedupeKey: string
+  eventId: string
+  itemId: string
+  laneSeq: string
+  sourceRefItemId?: string
+}): Extract<AssistantInputCandidate['event']['sourceRef'], { kind: 'hosted-mailbox' }> {
+  return {
+    dedupeKey: input.dedupeKey,
+    eventId: input.eventId,
+    itemId: input.sourceRefItemId ?? input.itemId,
+    kind: 'hosted-mailbox',
+    lane: 'conversation',
+    laneSeq: input.laneSeq,
+    payloadSchema: 'murph.hosted-mailbox-payload.v1',
+    payloadSource: 'inline',
+    source: 'hosted-mailbox',
+    wakeSchema: 'murph.hosted-execution-wake.v1',
+  }
+}
+
+async function stageHostedMailboxAssistantInputEvent(input: {
+  candidate: AssistantInputCandidate
+  vault: string
+}) {
+  const event = input.candidate.event
+  if (event.sourceRef.kind !== 'hosted-mailbox') {
+    throw new Error('expected hosted mailbox input candidate')
+  }
+  return upsertAssistantInputEvent({
+    vault: input.vault,
+    event: {
+      content: {
+        text: event.text,
+        transcriptText: event.transcriptText,
+        userMessageContent: event.text
+          ? [{ text: event.text, type: 'text' }]
+          : null,
+      },
+      conversation: event.conversation,
+      occurredAt: event.occurredAt,
+      receivedAt: event.receivedAt,
+      replyTarget: event.replyTarget,
+      sourceMetadata: event.sourceMetadata,
+      sourceRef: event.sourceRef,
+    },
+  })
+}
+
 async function stageInboxCaptureAssistantInputEvent(input: {
   attachmentDescriptors?: AssistantInputAttachmentDescriptor[]
   capture: InboxShowResult['capture'] | ReturnType<typeof createCaptureSummary>
@@ -1225,6 +1277,9 @@ beforeEach(() => {
       )
       return groupEvidence.every((entry) => entry !== null)
     })
+  evidenceMocks.readAssistantAutoReplyAnsweredCoverage
+    .mockReset()
+    .mockResolvedValue(null)
   evidenceMocks.readAssistantAutoReplyTerminalEvidenceByEvidenceId
     .mockReset()
     .mockResolvedValue(null)
@@ -7597,16 +7652,28 @@ describe('assistant auto-reply runtime', () => {
     const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
       '../src/assistant/automation/reply.ts',
     )
+    const context = await createTempVaultContext('assistant-active-turn-coverage-')
+    tempRoots.push(context.parentRoot)
+    const initialMailboxRow = {
+      dedupeKey: 'dedupe_active_initial',
+      eventId: 'event_active_initial',
+      itemId: 'raw_mailbox_item_active_initial',
+      laneSeq: '42',
+      sourceRefItemId: 'blinded_mailbox_item_active_initial',
+    }
+    const lateMailboxRow = {
+      dedupeKey: 'dedupe_active_late',
+      eventId: 'event_active_late',
+      itemId: 'raw_mailbox_item_active_late',
+      laneSeq: '43',
+      sourceRefItemId: 'blinded_mailbox_item_active_late',
+    }
     const initialInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'safe_thread_active',
-      inputId: 'ain_44444444444444444444444444444444',
-      mailboxRow: {
-        dedupeKey: 'dedupe_active_initial',
-        eventId: 'event_active_initial',
-        itemId: 'raw_mailbox_item_active_initial',
-        laneSeq: '42',
-        sourceRefItemId: 'blinded_mailbox_item_active_initial',
-      },
+      inputId: createAssistantInputEventId({
+        sourceRef: createHostedMailboxSourceRefForTest(initialMailboxRow),
+      }),
+      mailboxRow: initialMailboxRow,
       occurredAt: '2026-04-08T00:09:00.000Z',
       receivedAt: '2026-04-08T00:09:01.000Z',
       replyTarget: {
@@ -7619,14 +7686,10 @@ describe('assistant auto-reply runtime', () => {
     })
     const lateInput = createCapturelessAssistantInputCandidate({
       conversationThreadId: 'safe_thread_active',
-      inputId: 'ain_55555555555555555555555555555555',
-      mailboxRow: {
-        dedupeKey: 'dedupe_active_late',
-        eventId: 'event_active_late',
-        itemId: 'raw_mailbox_item_active_late',
-        laneSeq: '43',
-        sourceRefItemId: 'blinded_mailbox_item_active_late',
-      },
+      inputId: createAssistantInputEventId({
+        sourceRef: createHostedMailboxSourceRefForTest(lateMailboxRow),
+      }),
+      mailboxRow: lateMailboxRow,
       occurredAt: '2026-04-08T00:09:10.000Z',
       receivedAt: '2026-04-08T00:09:11.000Z',
       replyTarget: {
@@ -7637,6 +7700,24 @@ describe('assistant auto-reply runtime', () => {
       source: 'linq',
       text: 'late hosted text',
     })
+    await stageHostedMailboxAssistantInputEvent({
+      candidate: initialInput,
+      vault: context.vaultRoot,
+    })
+    await stageHostedMailboxAssistantInputEvent({
+      candidate: lateInput,
+      vault: context.vaultRoot,
+    })
+    const answeredCoverageContext = {
+      autoReply: createAutoReplyEntries([
+        'linq',
+      ], createAssistantInputCursor({
+        inputId: 'ain_11111111111111111111111111111111',
+        occurredAt: '2026-04-08T00:08:59.000Z',
+        sourceKind: 'hosted-mailbox',
+        sourcePosition: 'hosted-mailbox:conversation:41',
+      })),
+    }
     const executionContext = {
       hosted: {
         memberId: 'member_active_replay',
@@ -7656,13 +7737,14 @@ describe('assistant auto-reply runtime', () => {
 
     await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
+      answeredCoverageContext,
       context: activeTurnContext,
       enabledChannels: ['linq'],
       executionContext,
       inboxServices,
       requestId: null,
       sessionMaxAgeMs: null,
-      vault: '/tmp/assistant-automation-vault',
+      vault: context.vaultRoot,
     })
     const replayKey = replyMocks.sendAssistantMessage.mock.calls[0]?.[0]
       ?.deliveryIdempotencyKey
@@ -7682,13 +7764,21 @@ describe('assistant auto-reply runtime', () => {
         ) => Promise<
           | { kind: 'no-new-input' }
           | {
+              deliveryAnsweredCoverage?: {
+                lane: 'conversation'
+                laneSeq: string
+              } | null
               deliveryIdempotencyKey?: string | null
               hostedDeliveryIdempotency?: {
                 inboundMailboxItemIds?: readonly string[] | null
               } | null
               kind: 'accepted'
-            }
+          }
         >
+        deliveryAnsweredCoverage?: {
+          lane: 'conversation'
+          laneSeq: string
+        } | null
         deliveryIdempotencyKey?: string | null
         hostedDeliveryIdempotency?: {
           inboundMailboxItemIds?: readonly string[] | null
@@ -7699,15 +7789,23 @@ describe('assistant auto-reply runtime', () => {
         expect(input.hostedDeliveryIdempotency?.inboundMailboxItemIds).toEqual([
           'raw_mailbox_item_active_initial',
         ])
+        expect(input.deliveryAnsweredCoverage).toEqual({
+          lane: 'conversation',
+          laneSeq: '42',
+        })
         const admitted = await input.activeTurnInput?.({
           sessionId: 'session-1',
           turnId: 'turn-1',
-          vault: '/tmp/assistant-automation-vault',
+          vault: context.vaultRoot,
         })
         if (admitted?.kind !== 'accepted') {
           throw new Error('expected active input admission')
         }
         expect(admitted.deliveryIdempotencyKey).toBe(replayKey)
+        expect(admitted.deliveryAnsweredCoverage).toEqual({
+          lane: 'conversation',
+          laneSeq: '43',
+        })
         expect(admitted.hostedDeliveryIdempotency?.inboundMailboxItemIds).toEqual([
           'raw_mailbox_item_active_initial',
           'raw_mailbox_item_active_late',
@@ -7751,6 +7849,7 @@ describe('assistant auto-reply runtime', () => {
 
     await reply.processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
+      answeredCoverageContext,
       context: initialContext,
       enabledChannels: ['linq'],
       executionContext,
@@ -7758,7 +7857,7 @@ describe('assistant auto-reply runtime', () => {
       inputSource,
       requestId: null,
       sessionMaxAgeMs: null,
-      vault: '/tmp/assistant-automation-vault',
+      vault: context.vaultRoot,
     })
   })
 

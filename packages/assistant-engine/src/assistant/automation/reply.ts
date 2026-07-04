@@ -513,6 +513,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   })
   const activeTurnHooks = input.inputSource
     ? createAssistantAutoReplyActiveTurnInputHooks({
+        answeredCoverageContext: input.answeredCoverageContext ?? null,
         context,
         deliveryTarget: decision.deliveryTarget,
         executionContext: input.executionContext,
@@ -1818,6 +1819,7 @@ interface AssistantAutoReplyActiveTurnPendingAcceptance {
 }
 
 function createAssistantAutoReplyActiveTurnInputHooks(input: {
+  answeredCoverageContext?: AssistantAutoReplyAnsweredCoverageContext | null
   context: AssistantAutoReplyGroupContext
   deliveryTarget: string | null
   executionContext?: AssistantExecutionContext | null
@@ -1887,6 +1889,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
     )
     if (lateCaptureCandidates.length === 0) {
       return admitCapturelessAssistantInputs({
+        answeredCoverageContext: input.answeredCoverageContext ?? null,
         deliveryTarget: input.deliveryTarget,
         executionContext: input.executionContext,
         getContext: () => context,
@@ -1899,6 +1902,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         },
         onEvent: input.onEvent,
         pendingAcceptances,
+        vault: input.vault,
       })
     }
 
@@ -2000,6 +2004,18 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       ],
       lastInputCursor: lateInputs.nextCursor ?? nextContext.lastInputCursor,
     })
+    const hostedDelivery = createHostedAutoReplyDeliveryIdempotency({
+      context: finalContext,
+      deliveryTarget:
+        acceptedInputDeliveryTargetForIdempotency ?? input.deliveryTarget,
+      executionContext: input.executionContext,
+    })
+    const deliveryAnsweredCoverage =
+      await computeAssistantAutoReplyAnsweredCoverage({
+        context: input.answeredCoverageContext ?? null,
+        terminalInputIds: finalContext.inputIds,
+        vault: input.vault,
+      })
     input.onEvent?.({
       type: 'input.reply-progress',
       inputId: primaryAutoReplyInputId(context),
@@ -2031,15 +2047,9 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         })
       },
     })
-
-    const hostedDelivery = createHostedAutoReplyDeliveryIdempotency({
-      context: finalContext,
-      deliveryTarget:
-        acceptedInputDeliveryTargetForIdempotency ?? input.deliveryTarget,
-      executionContext: input.executionContext,
-    })
     const result: AssistantActiveTurnInputAdmissionResult = {
       acceptedInputs,
+      deliveryAnsweredCoverage,
       deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
       hostedDeliveryIdempotency: hostedDelivery.hostedDeliveryIdempotency,
       ...(acceptedInputDeliveryTarget !== null
@@ -2306,7 +2316,8 @@ function assistantAutoReplyGroupItemFromInputCandidate(
   }
 }
 
-function admitCapturelessAssistantInputs(input: {
+async function admitCapturelessAssistantInputs(input: {
+  answeredCoverageContext?: AssistantAutoReplyAnsweredCoverageContext | null
   deliveryTarget: string | null
   executionContext?: AssistantExecutionContext | null
   getContext(): AssistantAutoReplyGroupContext
@@ -2315,7 +2326,8 @@ function admitCapturelessAssistantInputs(input: {
   onAcceptedContext(context: AssistantAutoReplyGroupContext): void
   onEvent?: (event: AssistantRunEvent) => void
   pendingAcceptances: AssistantAutoReplyActiveTurnPendingAcceptance[]
-}): AssistantActiveTurnInputAdmissionResult {
+  vault: string
+}): Promise<AssistantActiveTurnInputAdmissionResult> {
   const queuedContext = input.getContext()
   const prompt = buildCapturelessAssistantInputPrompt(input.lateInputs)
   if (!prompt) {
@@ -2335,6 +2347,30 @@ function admitCapturelessAssistantInputs(input: {
     lastInputCursor: input.inputSourceCursor ?? queuedContext.lastInputCursor,
   })
 
+  const transcriptText = input.lateInputs
+    .map(buildAssistantInputCandidateTranscriptText)
+    .filter((text): text is string => text !== null)
+    .join('\n\n')
+
+  const deliveryReplyToMessageId = readLatestAssistantInputReplyTargetMessageId({
+    candidates: input.lateInputs,
+    expectedChannel: queuedContext.firstItem.summary.source,
+  })
+  const deliveryTarget = readLatestAssistantInputDeliveryTarget({
+    candidates: input.lateInputs,
+    expectedChannel: queuedContext.firstItem.summary.source,
+  })
+  const hostedDelivery = createHostedAutoReplyDeliveryIdempotency({
+    context: nextContext,
+    deliveryTarget: deliveryTarget ?? input.deliveryTarget,
+    executionContext: input.executionContext,
+  })
+  const deliveryAnsweredCoverage =
+    await computeAssistantAutoReplyAnsweredCoverage({
+      context: input.answeredCoverageContext ?? null,
+      terminalInputIds: nextContext.inputIds,
+      vault: input.vault,
+    })
   input.onEvent?.({
     type: 'input.reply-progress',
     inputId: primaryAutoReplyInputId(queuedContext),
@@ -2364,27 +2400,9 @@ function admitCapturelessAssistantInputs(input: {
     },
   })
 
-  const transcriptText = input.lateInputs
-    .map(buildAssistantInputCandidateTranscriptText)
-    .filter((text): text is string => text !== null)
-    .join('\n\n')
-
-  const deliveryReplyToMessageId = readLatestAssistantInputReplyTargetMessageId({
-    candidates: input.lateInputs,
-    expectedChannel: queuedContext.firstItem.summary.source,
-  })
-  const deliveryTarget = readLatestAssistantInputDeliveryTarget({
-    candidates: input.lateInputs,
-    expectedChannel: queuedContext.firstItem.summary.source,
-  })
-  const hostedDelivery = createHostedAutoReplyDeliveryIdempotency({
-    context: nextContext,
-    deliveryTarget: deliveryTarget ?? input.deliveryTarget,
-    executionContext: input.executionContext,
-  })
-
   return {
     acceptedInputs,
+    deliveryAnsweredCoverage,
     deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
     hostedDeliveryIdempotency: hostedDelivery.hostedDeliveryIdempotency,
     ...(deliveryReplyToMessageId !== undefined
