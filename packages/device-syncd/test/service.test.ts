@@ -3359,11 +3359,13 @@ test("device sync service wakes Junction retrying historical backfill at the ret
 
     assert.equal(queuedBackfills.length, 1);
     const queuedBackfill = store.getJobById(queuedBackfills[0]!.id);
-    assert.deepEqual(queuedBackfill?.payload, {
+    assert.ok(queuedBackfill);
+    assert.deepEqual(queuedBackfill.payload, {
       windowStart: ownerWindowStart,
       windowEnd: ownerWindowEnd,
     });
-    assert.equal(queuedBackfill?.dedupeKey, expectedDedupeKey);
+    assert.equal(queuedBackfill.dedupeKey, expectedDedupeKey);
+    assert.equal(store.getAccountById(account.id)?.nextReconcileAt, "2026-04-04T01:15:00.000Z");
   } finally {
     close();
   }

@@ -652,7 +652,7 @@ export function createJunctionDeviceSyncProvider(
     const scheduledNextReconcileAt = addMilliseconds(now, reconcileIntervalMs);
     const nextReconcileAt = dueHistoricalBackfillJobs.length > 0
       ? scheduledNextReconcileAt
-      : clampConnectHistoricalBackfillRetryNextReconcileAt(account, scheduledNextReconcileAt);
+      : clampConnectHistoricalBackfillRetryNextReconcileAt(account, scheduledNextReconcileAt, now);
 
     return {
       jobs: [
@@ -718,9 +718,14 @@ export function createJunctionDeviceSyncProvider(
   function clampConnectHistoricalBackfillRetryNextReconcileAt(
     account: Pick<DeviceSyncAccount, "connectedAt" | "metadata">,
     nextReconcileAt: string,
+    now: string,
   ): string {
     const retryAt = readPendingConnectHistoricalBackfillRetryAt(account);
-    return retryAt ? minIsoTimestamp(nextReconcileAt, retryAt) : nextReconcileAt;
+    if (!retryAt || Date.parse(retryAt) <= Date.parse(now)) {
+      return nextReconcileAt;
+    }
+
+    return minIsoTimestamp(nextReconcileAt, retryAt);
   }
 
   function readPendingConnectHistoricalBackfillRetryAt(
@@ -880,6 +885,7 @@ export function createJunctionDeviceSyncProvider(
       : clampConnectHistoricalBackfillRetryNextReconcileAt(
           context.account,
           addMilliseconds(context.now, reconcileIntervalMs),
+          context.now,
         );
 
     return withJunctionSkippedResourceMetadata(
@@ -1869,6 +1875,7 @@ export function createJunctionDeviceSyncProvider(
         : clampConnectHistoricalBackfillRetryNextReconcileAt(
             input.context.account,
             addMilliseconds(input.context.now, reconcileIntervalMs),
+            input.context.now,
           ),
     };
   }
