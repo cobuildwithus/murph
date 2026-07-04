@@ -106,7 +106,7 @@ interface JunctionTimeseriesImportResult {
   yieldedAt: string | null;
 }
 
-type JunctionHistoricalBackfillFollowUp = Pick<ProviderJobResult, "metadataPatch" | "scheduledJobs">;
+type JunctionHistoricalBackfillFollowUp = Pick<ProviderJobResult, "metadataPatch" | "nextReconcileAt" | "scheduledJobs">;
 
 type JunctionResourceCategory = "summary" | "timeseries";
 
@@ -653,6 +653,11 @@ export function createJunctionDeviceSyncProvider(
     now: string,
   ): ProviderScheduleResult {
     const scheduledHistoricalBackfillJobs = buildScheduledHistoricalBackfillJobs(account, now);
+    const nextReconcileAt = resolveJunctionNextReconcileAt(
+      account,
+      now,
+      addMilliseconds(now, reconcileIntervalMs),
+    );
 
     return {
       jobs: [
@@ -664,7 +669,7 @@ export function createJunctionDeviceSyncProvider(
         }),
         ...scheduledHistoricalBackfillJobs,
       ],
-      nextReconcileAt: addMilliseconds(now, reconcileIntervalMs),
+      nextReconcileAt,
     };
   }
 
@@ -690,22 +695,17 @@ export function createJunctionDeviceSyncProvider(
 
     if (status === "retrying" && metadataMatchesConnectWindow) {
       const retryAt = readPendingConnectHistoricalBackfillRetryAt(account);
-      const emptyBackfillAttempts = readHistoricalBackfillEmptyAttempts(
-        metadata,
-        connectWindow.windowStart,
-        connectWindow.windowEnd,
-      );
       const retryAtMs = retryAt ? Date.parse(retryAt) : NaN;
-      const availableAt = retryAt && Number.isFinite(retryAtMs) && Date.parse(now) < retryAtMs
-        ? retryAt
-        : now;
+      if (retryAt && Number.isFinite(retryAtMs) && Date.parse(now) < retryAtMs) {
+        return [];
+      }
+
       return [buildExactWindowJob({
         kind: "backfill",
         windowStart: connectWindow.windowStart,
         windowEnd: connectWindow.windowEnd,
-        availableAt,
+        availableAt: now,
         priority: JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY,
-        ...(emptyBackfillAttempts > 0 ? { payload: { emptyBackfillAttempts } } : {}),
       })];
     }
 
@@ -769,6 +769,27 @@ export function createJunctionDeviceSyncProvider(
     }
 
     return addMilliseconds(lastEmptyAt, retryDelayMs);
+  }
+
+  function resolveJunctionNextReconcileAt(
+    account: Pick<DeviceSyncAccount, "connectedAt" | "metadata">,
+    now: string,
+    fallbackNextReconcileAt: string,
+  ): string {
+    const retryAt = readPendingConnectHistoricalBackfillRetryAt(account);
+    if (!retryAt) {
+      return fallbackNextReconcileAt;
+    }
+
+    const retryAtMs = Date.parse(retryAt);
+    if (!Number.isFinite(retryAtMs) || Date.parse(now) >= retryAtMs) {
+      return fallbackNextReconcileAt;
+    }
+
+    const fallbackMs = Date.parse(fallbackNextReconcileAt);
+    return Number.isFinite(fallbackMs) && fallbackMs <= retryAtMs
+      ? fallbackNextReconcileAt
+      : retryAt;
   }
 
   async function executeJob(
@@ -868,7 +889,6 @@ export function createJunctionDeviceSyncProvider(
       ? isConnectHistoricalBackfill
         ? buildHistoricalBackfillFollowUp({
             hasRecords: historicalSummaryHasRecords,
-            job,
             metadata: context.account.metadata,
             now: context.now,
             windowStart: window.windowStart,
@@ -882,12 +902,17 @@ export function createJunctionDeviceSyncProvider(
             windowEnd: window.windowEnd,
           })
       : {};
+    const nextReconcileAt = backfillFollowUp.nextReconcileAt ?? resolveJunctionNextReconcileAt(
+      context.account,
+      context.now,
+      addMilliseconds(context.now, reconcileIntervalMs),
+    );
     return withJunctionSkippedResourceMetadata(
       context,
       withJunctionMetadataPatch(
         {
           ...backfillFollowUp,
-          nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
+          nextReconcileAt,
         },
         profileMetadataPatch,
       ),
@@ -4348,7 +4373,6 @@ function isJunctionSourceSpecificFloatingTimestampProvider(sourceProviderSlug: s
 
 function buildHistoricalBackfillFollowUp(input: {
   hasRecords: boolean;
-  job: DeviceSyncJobRecord;
   metadata: Record<string, unknown>;
   now: string;
   windowStart: string;
@@ -4373,13 +4397,10 @@ function buildHistoricalBackfillFollowUp(input: {
     return {};
   }
 
-  const previousEmptyAttempts = Math.max(
-    readHistoricalBackfillEmptyAttempts(
-      input.metadata,
-      input.windowStart,
-      input.windowEnd,
-    ),
-    readHistoricalBackfillJobEmptyAttempts(input.job),
+  const previousEmptyAttempts = readHistoricalBackfillEmptyAttempts(
+    input.metadata,
+    input.windowStart,
+    input.windowEnd,
   );
   const emptyAttempts = previousEmptyAttempts + 1;
   const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
@@ -4398,24 +4419,9 @@ function buildHistoricalBackfillFollowUp(input: {
   }
 
   const retryAt = addMilliseconds(input.now, retryDelayMs);
-  const retryJob = buildExactWindowJob({
-    kind: "backfill",
-    priority: JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY,
-    windowStart: input.windowStart,
-    windowEnd: input.windowEnd,
-    payload: {
-      emptyBackfillAttempts: emptyAttempts,
-    },
-  });
-
   return {
     metadataPatch,
-    scheduledJobs: [
-      {
-        ...retryJob,
-        availableAt: retryAt,
-      },
-    ],
+    nextReconcileAt: retryAt,
   };
 }
 
@@ -4571,20 +4577,12 @@ function buildJunctionWebhookJobs(input: {
     const backfillWindowStart = subtractDays(input.window.windowEnd, input.summaryBackfillDays);
 
     return [
-      {
+      buildExactWindowJob({
         kind: "backfill",
-        payload: {
-          windowStart: backfillWindowStart,
-          windowEnd: input.window.windowEnd,
-        },
+        windowStart: backfillWindowStart,
+        windowEnd: input.window.windowEnd,
         priority: 35,
-        dedupeKey: sha256Text(JSON.stringify([
-          "junction-webhook",
-          "connection-backfill",
-          backfillWindowStart,
-          input.window.windowEnd,
-        ])),
-      },
+      }),
       {
         kind: "reconcile",
         payload: {
