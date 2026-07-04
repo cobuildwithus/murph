@@ -629,14 +629,21 @@ test("Junction empty historical backfill records progress and queues a durable r
     emptyBackfillAttempts: 1,
   });
 
-  // Legacy retry metadata still has a one-time repair path: nothing before
-  // the 15-minute delay elapses, the exact window once due.
+  // Legacy retry metadata has a one-time repair path: materialize the exact
+  // window as a durable delayed job immediately so the job table owns the wake.
   const executor = requireValue(provider.jobExecutor, "Junction provider should expose a job executor.");
   const retryingAccount = createStoredAccount({
     metadata: result.metadataPatch as Record<string, unknown>,
   });
   const beforeDue = executor.createScheduledJobs?.(retryingAccount, "2026-04-04T00:10:00.000Z");
-  assert.equal(beforeDue?.jobs.some((job) => job.kind === "backfill"), false);
+  const delayedRetryJob = beforeDue?.jobs.find((job) => job.kind === "backfill");
+  assert.equal(delayedRetryJob?.availableAt, "2026-04-04T00:15:00.000Z");
+  assert.equal(delayedRetryJob?.priority, 50);
+  assert.deepEqual(delayedRetryJob?.payload, {
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+    emptyBackfillAttempts: 1,
+  });
   assert.equal(beforeDue?.nextReconcileAt, "2026-04-04T01:10:00.000Z");
 
   const due = executor.createScheduledJobs?.(retryingAccount, "2026-04-04T00:15:00.000Z");
@@ -791,7 +798,13 @@ test("Junction retrying historical backfill without attempts uses the first retr
   });
 
   const beforeDue = executor.createScheduledJobs?.(retryingAccount, "2026-04-04T00:05:00.000Z");
-  assert.equal(beforeDue?.jobs.some((job) => job.kind === "backfill"), false);
+  const delayedRetryJob = beforeDue?.jobs.find((job) => job.kind === "backfill");
+  assert.equal(delayedRetryJob?.availableAt, "2026-04-04T00:15:00.000Z");
+  assert.equal(delayedRetryJob?.priority, 50);
+  assert.deepEqual(delayedRetryJob?.payload, {
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  });
   assert.equal(beforeDue?.nextReconcileAt, "2026-04-04T01:05:00.000Z");
 
   const due = executor.createScheduledJobs?.(retryingAccount, "2026-04-04T00:16:00.000Z");

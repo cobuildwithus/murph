@@ -3393,12 +3393,18 @@ test("device sync service wakes Junction retrying historical backfill at the ret
   }
 });
 
-test("device sync scheduler prioritizes legacy Junction retry repair before routine reconcile", async () => {
+test("device sync scheduler materializes legacy Junction retry repair before it is due", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-legacy-retry-priority");
+  const scheduledAt = "2026-04-04T00:05:00.000Z";
   const retryDueAt = "2026-04-04T00:15:00.000Z";
   const ownerWindowStart = "2026-04-01T00:00:00.000Z";
   const ownerWindowEnd = "2026-04-03T00:00:00.000Z";
-  let now = new Date(retryDueAt);
+  let now = new Date(scheduledAt);
+  const importer: DeviceSyncImporterPort = {
+    async importDeviceProviderSnapshot() {
+      return { ok: true };
+    },
+  };
   const { service, store, close } = createServiceFixture({
     secret: "secret-for-tests",
     clock: {
@@ -3446,6 +3452,7 @@ test("device sync scheduler prioritizes legacy Junction retry repair before rout
         },
       }),
     ],
+    importer,
   });
 
   try {
@@ -3468,7 +3475,7 @@ test("device sync scheduler prioritizes legacy Junction retry repair before rout
         junctionHistoricalBackfillWindowStart: ownerWindowStart,
         junctionHistoricalBackfillWindowEnd: ownerWindowEnd,
       },
-      nextReconcileAt: retryDueAt,
+      nextReconcileAt: scheduledAt,
     });
 
     await service.runSchedulerOnce();
@@ -3480,6 +3487,7 @@ test("device sync scheduler prioritizes legacy Junction retry repair before rout
 
     assert.ok(queuedBackfill);
     assert.ok(queuedReconcile);
+    assert.equal(queuedBackfill.availableAt, retryDueAt);
     assert.equal(queuedBackfill.priority, 50);
     assert.equal(queuedReconcile.priority, 40);
     assert.deepEqual(queuedBackfill.payload, {
@@ -3488,11 +3496,30 @@ test("device sync scheduler prioritizes legacy Junction retry repair before rout
       emptyBackfillAttempts: 1,
     });
 
+    const routineJob = await service.runWorkerOnce();
+
+    assert.equal(routineJob?.id, queuedReconcile.id);
+    assert.equal(store.getJobById(queuedReconcile.id)?.status, "succeeded");
+    assert.equal(service.getNextWakeAt(scheduledAt), retryDueAt);
+
+    now = new Date(retryDueAt);
+    const dueRaceReconcile = store.enqueueJob({
+      provider: "junction",
+      accountId: account.id,
+      kind: "reconcile",
+      payload: {
+        windowStart: "2026-04-02T00:15:00.000Z",
+        windowEnd: retryDueAt,
+      },
+      priority: 40,
+      availableAt: retryDueAt,
+      dedupeKey: "junction-legacy-retry-race-reconcile",
+    });
     const claimedJob = store.claimDueJob("worker-legacy-retry", retryDueAt, 60_000);
 
     assert.equal(claimedJob?.id, queuedBackfill.id);
     assert.equal(store.getJobById(queuedBackfill.id)?.status, "running");
-    assert.equal(store.getJobById(queuedReconcile.id)?.status, "queued");
+    assert.equal(store.getJobById(dueRaceReconcile.id)?.status, "queued");
   } finally {
     close();
   }

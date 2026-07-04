@@ -206,6 +206,12 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
       codec,
       failureDiagnostic: failureDiagnosticByLocalAccountId.get(localAccountId) ?? null,
       hostedConnectionId,
+      nextReconcileAt: account.status === "active"
+        ? earliestIsoTimestamp(
+            account.nextReconcileAt ?? null,
+            store.readNextJobWakeAtForAccount(account.id),
+          )
+        : account.nextReconcileAt ?? null,
       observedTokenVersion: input.state.observedTokenVersions.get(hostedConnectionId) ?? null,
       sourceApplyEnabled: input.state.snapshot?.capabilities?.connectionSourceApply === true,
       sources: store.listConnectionSources({
@@ -629,6 +635,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   codec: ReturnType<typeof createSecretCodec>;
   failureDiagnostic: DeviceSyncJobFailureDiagnostic | null;
   hostedConnectionId: string;
+  nextReconcileAt: string | null;
   observedTokenVersion: number | null;
   sourceApplyEnabled: boolean;
   sources: readonly StoredDeviceConnectionSource[];
@@ -697,7 +704,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     assignNextReconcileAtUpdate(
       update,
       input.account.status,
-      input.account.nextReconcileAt ?? null,
+      input.nextReconcileAt,
       baselineLocalState?.nextReconcileAt ?? null,
     );
     assignFailureDiagnosticUpdate(
@@ -755,7 +762,7 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   assignNextReconcileAtUpdate(
     update,
     input.account.status,
-    input.account.nextReconcileAt ?? null,
+    input.nextReconcileAt,
     baselineLocalState?.nextReconcileAt ?? null,
   );
 

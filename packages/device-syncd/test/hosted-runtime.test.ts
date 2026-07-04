@@ -18,7 +18,7 @@ import {
 } from "../src/hosted-runtime.ts";
 
 describe("mergeHostedDeviceSyncConnectionMetadata", () => {
-  it("preserves newer unpublished local Junction backfill progress", () => {
+  it("keeps hosted Junction retry metadata because retry wakes are job-owned", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: {
         hostedOnly: true,
@@ -39,27 +39,27 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       },
     });
 
-    expect(result.preservedLocalProgress).toBe(true);
+    expect(result.preservedLocalProgress).toBe(false);
     expect(result.metadata).toEqual({
       hostedOnly: true,
       junctionHistoricalBackfillStatus: "retrying",
-      junctionHistoricalBackfillEmptyAttempts: 2,
-      junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:15:00.000Z",
+      junctionHistoricalBackfillEmptyAttempts: 1,
+      junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
       junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
     });
   });
 
-  it("places preserved local Junction progress before full hosted metadata", () => {
+  it("places preserved local Junction terminal progress before full hosted metadata", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: Object.fromEntries(
         Array.from({ length: 16 }, (_, index) => [`hostedKey${index}`, `hosted-value-${index}`]),
       ),
       localConnectionStateUnpublished: true,
       localMetadata: {
-        junctionHistoricalBackfillStatus: "retrying",
-        junctionHistoricalBackfillEmptyAttempts: 2,
-        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:15:00.000Z",
+        junctionHistoricalBackfillStatus: "complete",
+        junctionHistoricalBackfillEmptyAttempts: 0,
+        junctionHistoricalBackfillLastEmptyAt: null,
         junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
         junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
       },

@@ -1,8 +1,6 @@
 export type JunctionHistoricalBackfillStatus = "complete" | "exhausted" | "retrying";
 
 export interface JunctionHistoricalBackfillProgress {
-  emptyAttempts: number;
-  lastEmptyAt: string | null;
   status: JunctionHistoricalBackfillStatus;
   windowEnd: string;
   windowStart: string;
@@ -38,19 +36,13 @@ export function readJunctionHistoricalBackfillProgress(
   }
 
   return {
-    emptyAttempts: readNonNegativeInteger(
-      metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.emptyAttempts],
-    ),
-    lastEmptyAt: readNullableMetadataString(
-      metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.lastEmptyAt],
-    ),
     status,
     windowEnd,
     windowStart,
   };
 }
 
-export function shouldPreserveLocalJunctionHistoricalBackfillProgress(input: {
+export function shouldPreserveLocalJunctionHistoricalBackfillTerminalProgress(input: {
   hostedMetadata: Record<string, unknown>;
   localConnectionStateUnpublished: boolean;
   localMetadata: Record<string, unknown>;
@@ -61,6 +53,10 @@ export function shouldPreserveLocalJunctionHistoricalBackfillProgress(input: {
 
   const localProgress = readJunctionHistoricalBackfillProgress(input.localMetadata);
   if (!localProgress) {
+    return false;
+  }
+
+  if (localProgress.status === "retrying") {
     return false;
   }
 
@@ -80,28 +76,7 @@ export function shouldPreserveLocalJunctionHistoricalBackfillProgress(input: {
     return hostedProgress.status !== "complete";
   }
 
-  if (hostedProgress.status === "complete" || hostedProgress.status === "exhausted") {
-    return false;
-  }
-
-  if (localProgress.status === "exhausted") {
-    return true;
-  }
-
-  const localLastEmptyAtMs = localProgress.lastEmptyAt ? parseIsoMs(localProgress.lastEmptyAt) : null;
-  const hostedLastEmptyAtMs = hostedProgress.lastEmptyAt ? parseIsoMs(hostedProgress.lastEmptyAt) : null;
-
-  if (localLastEmptyAtMs !== null && hostedLastEmptyAtMs !== null) {
-    if (localLastEmptyAtMs > hostedLastEmptyAtMs) {
-      return true;
-    }
-
-    if (localLastEmptyAtMs < hostedLastEmptyAtMs) {
-      return false;
-    }
-  }
-
-  return localProgress.emptyAttempts > hostedProgress.emptyAttempts;
+  return hostedProgress.status === "retrying";
 }
 
 export function mergeHostedJunctionHistoricalBackfillMetadata(input: {
@@ -109,7 +84,7 @@ export function mergeHostedJunctionHistoricalBackfillMetadata(input: {
   localConnectionStateUnpublished: boolean;
   localMetadata: Record<string, unknown>;
 }): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } {
-  const preservedLocalProgress = shouldPreserveLocalJunctionHistoricalBackfillProgress(input);
+  const preservedLocalProgress = shouldPreserveLocalJunctionHistoricalBackfillTerminalProgress(input);
 
   if (!preservedLocalProgress) {
     return { metadata: { ...input.hostedMetadata }, preservedLocalProgress };
@@ -138,17 +113,4 @@ function readJunctionHistoricalBackfillStatus(value: unknown): JunctionHistorica
 
 function readMetadataString(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
-}
-
-function readNullableMetadataString(value: unknown): string | null {
-  return value === null ? null : readMetadataString(value);
-}
-
-function readNonNegativeInteger(value: unknown): number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
-}
-
-function parseIsoMs(value: string): number | null {
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? null : parsed;
 }

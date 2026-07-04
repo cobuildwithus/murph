@@ -649,7 +649,7 @@ export function createJunctionDeviceSyncProvider(
     account: StoredDeviceSyncAccount,
     now: string,
   ): ProviderScheduleResult {
-    const dueHistoricalBackfillJobs = buildDueHistoricalBackfillJobs(account, now);
+    const scheduledHistoricalBackfillJobs = buildScheduledHistoricalBackfillJobs(account, now);
 
     return {
       jobs: [
@@ -659,16 +659,16 @@ export function createJunctionDeviceSyncProvider(
           windowStart: subtractDays(now, reconcileDays),
           priority: JUNCTION_SCHEDULED_RECONCILE_PRIORITY,
         }),
-        ...dueHistoricalBackfillJobs,
+        ...scheduledHistoricalBackfillJobs,
       ],
       nextReconcileAt: addMilliseconds(now, reconcileIntervalMs),
     };
   }
 
   // Retry execution is owned by the durable device job row. Retry metadata is
-  // terminal/diagnostic state, with this narrow scheduled-pass repair for
-  // existing retrying windows that predate materialized retry jobs.
-  function buildDueHistoricalBackfillJobs(
+  // terminal/diagnostic state, with this narrow scheduled-pass repair to
+  // materialize existing retrying windows that predate retry jobs.
+  function buildScheduledHistoricalBackfillJobs(
     account: StoredDeviceSyncAccount,
     now: string,
   ): DeviceSyncJobInput[] {
@@ -687,19 +687,20 @@ export function createJunctionDeviceSyncProvider(
 
     if (status === "retrying" && metadataMatchesConnectWindow) {
       const retryAt = readPendingConnectHistoricalBackfillRetryAt(account);
-      if (!retryAt || Date.parse(now) < Date.parse(retryAt)) {
-        return [];
-      }
       const emptyBackfillAttempts = readHistoricalBackfillEmptyAttempts(
         metadata,
         connectWindow.windowStart,
         connectWindow.windowEnd,
       );
+      const retryAtMs = retryAt ? Date.parse(retryAt) : NaN;
+      const availableAt = retryAt && Number.isFinite(retryAtMs) && Date.parse(now) < retryAtMs
+        ? retryAt
+        : now;
       return [buildExactWindowJob({
         kind: "backfill",
         windowStart: connectWindow.windowStart,
         windowEnd: connectWindow.windowEnd,
-        availableAt: now,
+        availableAt,
         priority: JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY,
         ...(emptyBackfillAttempts > 0 ? { payload: { emptyBackfillAttempts } } : {}),
       })];
