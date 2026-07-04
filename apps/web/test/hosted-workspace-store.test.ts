@@ -258,63 +258,6 @@ describe("hosted workspace store", () => {
     });
   });
 
-  it("allows forced idle checkpoints to continue behind fresh conversation mailbox rows", async () => {
-    const current = buildHostedWorkspaceRow({
-      snapshotRef: createBundleRef("snapshot_current"),
-      version: 4n,
-    });
-    const updated = buildHostedWorkspaceRow({
-      snapshotRef: createBundleRef("snapshot_forced"),
-      version: 5n,
-    });
-    const hostedWorkspace = createHostedWorkspaceDelegate({
-      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => current),
-      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
-    });
-    hostedWorkspace.findUnique
-      .mockResolvedValueOnce(current)
-      .mockResolvedValueOnce(current)
-      .mockResolvedValueOnce(updated);
-    const hostedMailboxItem = {
-      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => ({ laneSeq: 2n })),
-    };
-    const executeRaw = vi.fn<HostedWorkspaceExecuteRaw>(async () => 0);
-    const queryRaw = vi.fn<HostedWorkspaceQueryRaw>(async () => [{ next_seq: 3n }]);
-    const tx = createHostedWorkspaceTx({
-      $executeRaw: executeRaw,
-      $queryRaw: queryRaw,
-      hostedMailboxItem,
-      hostedWorkspace,
-    });
-
-    const result = await checkpointHostedWorkspaceTx({
-      continueOnForegroundPending: true,
-      expectedVersion: "4",
-      nextWakeAt: "2026-04-26T00:05:00.000Z",
-      nextWakeReason: "assistant",
-      reason: "idle_shutdown",
-      redactedStatusJson: {
-        hostedMailboxConversationImportedSeq: "1",
-        state: "idle",
-      },
-      snapshotRef: createBundleRef("snapshot_forced"),
-      tx,
-      userId: "member_workspace_1",
-    });
-
-    expect(executeRaw).not.toHaveBeenCalled();
-    expect(queryRaw).toHaveBeenCalledOnce();
-    expect(hostedMailboxItem.findFirst).not.toHaveBeenCalled();
-    expect(hostedWorkspace.updateMany).toHaveBeenCalledOnce();
-    expect(result).toMatchObject({
-      status: "updated",
-      workspace: {
-        snapshotRef: createBundleRef("snapshot_forced"),
-        version: "5",
-      },
-    });
-  });
-
   it("returns workspace-version conflict before foreground-pending when the locked row is stale", async () => {
     const current = buildHostedWorkspaceRow({
       snapshotRef: createBundleRef("snapshot_current"),

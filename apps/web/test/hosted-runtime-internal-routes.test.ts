@@ -1456,44 +1456,6 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
   });
 
-  it("forwards forced idle checkpoint foreground-pending continuation", async () => {
-    mocks.checkpointHostedWorkspace.mockResolvedValue({
-      replacedSnapshotRef: createBundleRef("snapshot_current"),
-      status: "updated",
-      workspace: buildWorkspaceRecord({
-        snapshotRef: createBundleRef("snapshot_forced"),
-        version: "5",
-      }),
-    });
-
-    const response = await workspaceCheckpointRoute.POST(jsonRequest(
-      "/api/internal/hosted-workspace/checkpoint",
-      {
-        attemptId: "attempt_idle_shutdown_forced",
-        continueOnForegroundPending: true,
-        expectedWorkspaceVersion: "4",
-        leaseGeneration: "2",
-        nextWakeAt: "2026-04-26T00:05:00.000Z",
-        nextWakeReason: "assistant",
-        reason: "idle_shutdown",
-        snapshotRef: createBundleRef("snapshot_forced"),
-      },
-    ));
-    const payload = parseHostedWorkspaceCheckpointResponse(await response.json());
-
-    expect(response.status).toBe(200);
-    expect(payload.checkpointed).toBe(true);
-    expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
-      continueOnForegroundPending: true,
-      expectedVersion: "4",
-      nextWakeAt: "2026-04-26T00:05:00.000Z",
-      nextWakeReason: "assistant",
-      reason: "idle_shutdown",
-      snapshotRef: createBundleRef("snapshot_forced"),
-      userId: "member_routes_1",
-    });
-  });
-
   it("keeps old idle checkpoint callers compatible with the redacted mailbox imported seq", async () => {
     mocks.checkpointHostedWorkspace.mockResolvedValue({
       status: "foreground_pending",
@@ -1587,7 +1549,47 @@ describe("hosted runtime internal web routes", () => {
     }
   });
 
-  it("does not fail checkpointing when the future wake recheck signal is unavailable", async () => {
+  it("signals a runtime recheck after checkpointing a due workspace wake", async () => {
+    const nextWakeAt = "2026-04-25T23:59:00.000Z";
+    mocks.checkpointHostedWorkspace.mockResolvedValue({
+      status: "updated",
+      workspace: buildWorkspaceRecord({
+        checkpointedAt: "2026-04-26T00:01:00.000Z",
+        nextWakeAt,
+        nextWakeReason: "assistant",
+        version: "5",
+      }),
+    });
+
+    const response = await workspaceCheckpointRoute.POST(jsonRequest(
+      "/api/internal/hosted-workspace/checkpoint",
+      {
+        attemptId: "attempt_due_wake_1",
+        expectedWorkspaceVersion: "4",
+        leaseGeneration: "2",
+        nextWakeAt,
+        nextWakeReason: "assistant",
+        reason: "idle_shutdown",
+        snapshotRef: createBundleRef("snapshot_due_wake"),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(parseHostedWorkspaceCheckpointResponse(await response.json()))
+      .toMatchObject({
+        checkpointed: true,
+        workspace: {
+          nextWakeAt,
+          nextWakeReason: "assistant",
+          version: "5",
+        },
+      });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
+  });
+
+  it("does not fail checkpointing when the wake recheck signal is unavailable", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);

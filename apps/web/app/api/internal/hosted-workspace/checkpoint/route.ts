@@ -21,9 +21,6 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const body = parseHostedWorkspaceCheckpointRequest(await readOptionalJsonObject(request));
   const result = await checkpointHostedWorkspace({
-    ...("continueOnForegroundPending" in body
-      ? { continueOnForegroundPending: body.continueOnForegroundPending }
-      : {}),
     expectedVersion: body.expectedWorkspaceVersion,
     ...("inboxMediaRetentionWakeAt" in body
       ? { inboxMediaRetentionWakeAt: body.inboxMediaRetentionWakeAt }
@@ -40,7 +37,7 @@ export const POST = withJsonError(async (request: Request) => {
     throw new TypeError("Hosted workspace checkpoint requires an existing workspace row.");
   }
 
-  await signalFutureWorkspaceWakeBestEffort({
+  await signalWorkspaceWakeBestEffort({
     checkpointed: result.status === "updated",
     inboxMediaRetentionWakeAt: result.workspace.inboxMediaRetentionWakeAt,
     nextWakeAt: result.workspace.nextWakeAt,
@@ -73,7 +70,7 @@ export const POST = withJsonError(async (request: Request) => {
   }));
 });
 
-async function signalFutureWorkspaceWakeBestEffort(input: {
+async function signalWorkspaceWakeBestEffort(input: {
   checkpointed: boolean;
   inboxMediaRetentionWakeAt: string | null;
   nextWakeAt: string | null;
@@ -81,10 +78,7 @@ async function signalFutureWorkspaceWakeBestEffort(input: {
 }): Promise<void> {
   if (
     !input.checkpointed
-    || (
-      !isFutureIsoTimestamp(input.nextWakeAt)
-      && !isFutureIsoTimestamp(input.inboxMediaRetentionWakeAt)
-    )
+    || (input.nextWakeAt === null && input.inboxMediaRetentionWakeAt === null)
   ) {
     return;
   }
@@ -98,12 +92,4 @@ async function signalFutureWorkspaceWakeBestEffort(input: {
       errorName: error instanceof Error ? error.name : typeof error,
     });
   }
-}
-
-function isFutureIsoTimestamp(value: string | null): boolean {
-  if (!value) {
-    return false;
-  }
-  const parsedMs = Date.parse(value);
-  return Number.isFinite(parsedMs) && parsedMs > Date.now();
 }

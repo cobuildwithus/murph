@@ -1511,7 +1511,6 @@ export type HostedWorkspaceCheckpointConflictReason =
 export interface HostedWorkspaceCheckpointRequest {
   attemptId: string;
   browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
-  continueOnForegroundPending?: boolean;
   expectedWorkspaceVersion: string;
   inboxMediaRetentionWakeAt?: string | null;
   leaseGeneration: string;

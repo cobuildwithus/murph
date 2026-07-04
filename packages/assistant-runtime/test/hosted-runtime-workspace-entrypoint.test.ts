@@ -7424,7 +7424,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("forced durable follow-up checkpoints bypass foreground-pending idle conflicts", async () => {
+  test("forced durable follow-up checkpoints yield to foreground-pending idle conflicts", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -7443,6 +7443,7 @@ describe("hosted workspace runtime entrypoint", () => {
       };
     });
     let assistantPass = 0;
+    let checkpointInterrupted = false;
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -7487,16 +7488,19 @@ describe("hosted workspace runtime entrypoint", () => {
                 };
               },
               async checkpoint(request) {
-                events.push(
-                  `workspace.checkpoint:${request.expectedWorkspaceVersion}:${request.reason}:`
-                  + `${request.continueOnForegroundPending === true ? "continue" : "interrupt"}`,
-                );
-                checkpointRequests.push(request);
-                if (
+                const checkpointAttemptKind =
                   request.expectedWorkspaceVersion === "1"
                   && request.reason === "idle_shutdown"
-                  && request.continueOnForegroundPending !== true
-                ) {
+                  && !checkpointInterrupted
+                    ? "interrupt"
+                    : "accept";
+                events.push(
+                  `workspace.checkpoint:${request.expectedWorkspaceVersion}:${request.reason}:`
+                  + checkpointAttemptKind,
+                );
+                checkpointRequests.push(request);
+                if (checkpointAttemptKind === "interrupt") {
+                  checkpointInterrupted = true;
                   return {
                     checkpointConflictReason: "foreground_pending",
                     checkpointed: false,
@@ -7528,8 +7532,24 @@ describe("hosted workspace runtime entrypoint", () => {
                 progressed: true,
               };
             }
+            if (assistantPass === 2) {
+              assert.ok(
+                events.includes(
+                  "mailbox.importItem:mailbox_item_entrypoint_forced_checkpoint_pending_001",
+                ),
+                events.join(","),
+              );
+              assert.ok(
+                !events.includes("workspace.checkpoint:1:idle_shutdown:accept"),
+                events.join(","),
+              );
+              return {
+                checkpointReason: "system_mailbox_receipt",
+                progressed: true,
+              };
+            }
             assert.ok(
-              events.includes("workspace.checkpoint:1:idle_shutdown:continue"),
+              events.includes("workspace.checkpoint:1:idle_shutdown:accept"),
               events.join(","),
             );
             assert.equal(input.workspace?.nextWakeAt, dueWakeAt);
@@ -7545,25 +7565,37 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.equal(assistantPass, 2);
+      assert.equal(assistantPass, 3);
       assert.equal(durableEffect.mock.calls.length, 1);
       assert.ok(
-        requireEventIndex(events, "workspace.checkpoint:1:idle_shutdown:continue")
+        requireEventIndex(events, "workspace.checkpoint:1:idle_shutdown:interrupt")
           < requireEventIndex(
             events,
             "mailbox.importItem:mailbox_item_entrypoint_forced_checkpoint_pending_001",
           ),
       );
+      assert.ok(
+        requireEventIndex(events, "mailbox.importItem:mailbox_item_entrypoint_forced_checkpoint_pending_001")
+          < requireEventIndex(events, "assistant:2"),
+      );
+      assert.ok(
+        requireEventIndex(events, "assistant:2")
+          < requireEventIndex(events, "workspace.checkpoint:1:idle_shutdown:accept"),
+      );
+      assert.ok(
+        requireEventIndex(events, "workspace.checkpoint:1:idle_shutdown:accept")
+          < requireEventIndex(events, "assistant:3"),
+      );
       assert.deepEqual(checkpointRequests.map((request) => [
         request.expectedWorkspaceVersion,
         request.reason,
-        request.continueOnForegroundPending ?? false,
         request.nextWakeAt,
         request.nextWakeReason,
       ]), [
-        ["0", "idle_shutdown", false, null, null],
-        ["1", "idle_shutdown", true, dueWakeAt, "assistant"],
-        ["2", "idle_shutdown", false, null, null],
+        ["0", "idle_shutdown", null, null],
+        ["1", "idle_shutdown", dueWakeAt, "assistant"],
+        ["1", "idle_shutdown", dueWakeAt, "assistant"],
+        ["2", "idle_shutdown", null, null],
       ]);
       assert.equal(result.status, "idle");
     } finally {

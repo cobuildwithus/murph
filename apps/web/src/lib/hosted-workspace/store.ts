@@ -288,7 +288,6 @@ export async function readHostedWorkspace(input: {
 }
 
 export async function checkpointHostedWorkspace(input: {
-  continueOnForegroundPending?: boolean;
   checkpointedAt?: Date | string | null;
   expectedVersion: bigint | number | string;
   inboxMediaRetentionWakeAt?: Date | string | null;
@@ -309,7 +308,6 @@ export async function checkpointHostedWorkspace(input: {
 }
 
 export async function checkpointHostedWorkspaceTx(input: {
-  continueOnForegroundPending?: boolean;
   checkpointedAt?: Date | string | null;
   expectedVersion: bigint | number | string;
   inboxMediaRetentionWakeAt?: Date | string | null;
@@ -392,7 +390,7 @@ export async function checkpointHostedWorkspaceTx(input: {
         workspace: lockedWorkspace ? projectHostedWorkspace(lockedWorkspace) : null,
       };
     }
-    if (input.continueOnForegroundPending !== true && !isMailboxContinuationCheckpoint(input)) {
+    if (!isMailboxContinuationCheckpoint(input)) {
       const pendingConversationSeq = await readForegroundPendingConversationSeqTx({
         conversationImportedSeq,
         tx: input.tx,

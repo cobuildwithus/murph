@@ -159,9 +159,6 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
         readCurrentLease,
         request: {
           attemptId: input.request.attemptId,
-          ...(Object.hasOwn(checkpointInput, "continueOnForegroundPending")
-            ? { continueOnForegroundPending: checkpointInput.continueOnForegroundPending }
-            : {}),
           expectedWorkspaceVersion:
             checkpointInput.expectedWorkspaceVersion ?? input.request.workspaceVersion,
           inboxMediaRetentionWakeAt: Object.hasOwn(checkpointInput, "inboxMediaRetentionWakeAt")

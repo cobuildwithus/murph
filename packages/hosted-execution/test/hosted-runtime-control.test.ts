@@ -1212,7 +1212,6 @@ describe("hosted runtime control contracts", () => {
     });
     expect(parseHostedWorkspaceCheckpointRequest({
       attemptId: "attempt_1",
-      continueOnForegroundPending: true,
       expectedWorkspaceVersion: "4",
       leaseGeneration: "9",
       nextWakeAt: null,
@@ -1227,7 +1226,6 @@ describe("hosted runtime control contracts", () => {
       snapshotRef: null,
     })).toEqual({
       attemptId: "attempt_1",
-      continueOnForegroundPending: true,
       expectedWorkspaceVersion: "4",
       leaseGeneration: "9",
       nextWakeAt: null,
@@ -1241,14 +1239,6 @@ describe("hosted runtime control contracts", () => {
       },
       snapshotRef: null,
     });
-    expect(() => parseHostedWorkspaceCheckpointRequest({
-      attemptId: "attempt_1",
-      continueOnForegroundPending: "true",
-      expectedWorkspaceVersion: "4",
-      leaseGeneration: "9",
-      reason: "idle_shutdown",
-      snapshotRef: null,
-    })).toThrow(/continueOnForegroundPending.*boolean/u);
     for (const key of [
       "assistantContextSnapshotRefreshAttempted",
       "assistantContextSnapshotRefreshed",

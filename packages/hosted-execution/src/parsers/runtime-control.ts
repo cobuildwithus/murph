@@ -2064,14 +2064,6 @@ export function parseHostedWorkspaceCheckpointRequest(
             "Hosted workspace checkpoint request browserVaultReplicaRef",
           ),
         }),
-    ...(record.continueOnForegroundPending === undefined
-      ? {}
-      : {
-          continueOnForegroundPending: requireBoolean(
-            record.continueOnForegroundPending,
-            "Hosted workspace checkpoint request continueOnForegroundPending",
-          ),
-        }),
     expectedWorkspaceVersion: requireNonNegativeBigIntString(
       record.expectedWorkspaceVersion,
       "Hosted workspace checkpoint request expectedWorkspaceVersion",

@@ -198,51 +198,6 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(putArtifact).not.toHaveBeenCalled();
   });
 
-  it("preserves forced foreground continuation on idle snapshot checkpoints", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
-    cleanupPaths.push(vaultRoot);
-    await writeFile(path.join(vaultRoot, "note.md"), "workspace snapshot\n", "utf8");
-    const completedCheckpointRequests: Array<
-      WorkspaceSnapshotCompleteRequest["checkpointRequest"]
-    > = [];
-    const options = createHostedWorkspaceRuntimeBridgeJobOptions({
-      platform: createPlatform({
-        onWorkspaceSnapshotComplete: (request) => {
-          completedCheckpointRequests.push(request.checkpointRequest);
-        },
-        putArtifact: vi.fn(async () => {}),
-        readWorkspace: async () => createWorkspaceReadResponse({ version: "7" }),
-      }),
-      readCurrentLease: () => ({
-        attemptId: "attempt_1",
-        leaseGeneration: "4",
-        userId: "member_1",
-        workspaceVersion: "7",
-      }),
-      request: {
-        attemptId: "attempt_1",
-        leaseGeneration: "4",
-        userId: "member_1",
-        workspaceVersion: "7",
-      },
-      runtime: {},
-      vaultRoot,
-    });
-
-    await options.createCheckpointSnapshot({
-      ...createCheckpointInput("idle_shutdown"),
-      continueOnForegroundPending: true,
-    });
-
-    expect(completedCheckpointRequests).toEqual([
-      expect.objectContaining({
-        continueOnForegroundPending: true,
-        expectedWorkspaceVersion: "7",
-        reason: "idle_shutdown",
-      }),
-    ]);
-  });
-
   it("writes idle shutdown full compactions without the browser-vault replica port", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-workspace-"));
     cleanupPaths.push(vaultRoot);
@@ -2833,10 +2788,6 @@ Run the sauna protocol and review the resulting biomarker trend.
 `;
 }
 
-type WorkspaceSnapshotCompleteRequest = Parameters<
-  NonNullable<HostedWorkspaceRuntimeJobOptions["platform"]["workspaceSnapshotPort"]>["completeSnapshotSession"]
->[0];
-
 function createPlatform(input: {
   getArtifact?: (hash: string) => Promise<Uint8Array | null>;
   latencyTracePort?: NonNullable<HostedWorkspaceRuntimeJobOptions["platform"]["latencyTracePort"]>;
@@ -2855,7 +2806,6 @@ function createPlatform(input: {
     sourceFilePath: string;
     snapshotId: string;
   }) => void;
-  onWorkspaceSnapshotComplete?: (request: WorkspaceSnapshotCompleteRequest) => void;
   workspaceSnapshotUploads?: Map<string, WorkspaceSnapshotUpload>;
   writeBrowserVaultReplica?: (payload: { replica: unknown }) => Promise<ReturnType<typeof createBrowserVaultReplicaRef>>;
   writeLog?: (request: {
@@ -2895,19 +2845,19 @@ function createPlatform(input: {
         }
       : {}),
     workspaceSnapshotPort: {
-      completeSnapshotSession: async (request: WorkspaceSnapshotCompleteRequest) => {
-        input.onWorkspaceSnapshotComplete?.(request);
-        return {
-          checkpoint: {
-            checkpointed: true,
-            workspace: createWorkspaceReadResponse({
-              snapshotRef: request.ref,
-              version: request.checkpointRequest.expectedWorkspaceVersion,
-            }).workspace!,
-          },
-          snapshotRef: request.ref,
-        };
-      },
+      completeSnapshotSession: async (request: {
+        checkpointRequest: Parameters<NonNullable<HostedWorkspaceRuntimeJobOptions["platform"]["workspaceSnapshotPort"]>["completeSnapshotSession"]>[0]["checkpointRequest"];
+        ref: HostedWorkspaceSnapshotV2Ref;
+      }) => ({
+        checkpoint: {
+          checkpointed: true,
+          workspace: createWorkspaceReadResponse({
+            snapshotRef: request.ref,
+            version: request.checkpointRequest.expectedWorkspaceVersion,
+          }).workspace!,
+        },
+        snapshotRef: request.ref,
+      }),
       putSnapshotObjectDirect: async (request: {
         encryptedByteSize: number;
         encryptedObjectSha256: string;

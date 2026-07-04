@@ -125,7 +125,6 @@ export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
     }
   ) & {
     expectedWorkspaceVersion?: string;
-    continueOnForegroundPending?: boolean;
     inboxMediaRetentionWakeAt?: string | null;
     nextWakeAt?: string | null;
     nextWakeReason?: string | null;
@@ -353,9 +352,6 @@ export function createHostedWorkspaceCheckpointRequestBuilder(
         ...(Object.hasOwn(metadata, "browserVaultReplicaRef")
           ? { browserVaultReplicaRef: metadata.browserVaultReplicaRef ?? null }
           : {}),
-        ...(Object.hasOwn(input, "continueOnForegroundPending")
-          ? { continueOnForegroundPending: input.continueOnForegroundPending }
-          : {}),
         expectedWorkspaceVersion: metadata.expectedWorkspaceVersion,
         leaseGeneration: metadata.leaseGeneration,
         nextWakeAt: Object.hasOwn(input, "nextWakeAt")
@@ -451,9 +447,6 @@ function buildHostedWorkspaceSnapshotCheckpointRequest(input: {
       : {}),
     expectedWorkspaceVersion:
       input.requestInput.expectedWorkspaceVersion ?? input.metadata.expectedWorkspaceVersion,
-    ...(Object.hasOwn(input.requestInput, "continueOnForegroundPending")
-      ? { continueOnForegroundPending: input.requestInput.continueOnForegroundPending }
-      : {}),
     inboxMediaRetentionWakeAt: Object.hasOwn(input.requestInput, "inboxMediaRetentionWakeAt")
       ? input.requestInput.inboxMediaRetentionWakeAt ?? null
       : input.metadata.inboxMediaRetentionWakeAt ?? null,
