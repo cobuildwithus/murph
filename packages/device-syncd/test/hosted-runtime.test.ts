@@ -50,6 +50,31 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     });
   });
 
+  it("places preserved local Junction progress before full hosted metadata", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: Object.fromEntries(
+        Array.from({ length: 16 }, (_, index) => [`hostedKey${index}`, `hosted-value-${index}`]),
+      ),
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionHistoricalBackfillStatus: "retrying",
+        junctionHistoricalBackfillEmptyAttempts: 2,
+        junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:15:00.000Z",
+        junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
+        junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
+      },
+    });
+
+    expect(result.preservedLocalProgress).toBe(true);
+    expect(Object.keys(result.metadata).slice(0, 5)).toEqual([
+      "junctionHistoricalBackfillStatus",
+      "junctionHistoricalBackfillEmptyAttempts",
+      "junctionHistoricalBackfillLastEmptyAt",
+      "junctionHistoricalBackfillWindowStart",
+      "junctionHistoricalBackfillWindowEnd",
+    ]);
+  });
+
   it("preserves unpublished local complete progress ahead of hosted exhausted progress", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: {

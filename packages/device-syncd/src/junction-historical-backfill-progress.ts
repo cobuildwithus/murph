@@ -109,15 +109,22 @@ export function mergeHostedJunctionHistoricalBackfillMetadata(input: {
   localConnectionStateUnpublished: boolean;
   localMetadata: Record<string, unknown>;
 }): { metadata: Record<string, unknown>; preservedLocalProgress: boolean } {
-  const metadata = { ...input.hostedMetadata };
   const preservedLocalProgress = shouldPreserveLocalJunctionHistoricalBackfillProgress(input);
 
   if (!preservedLocalProgress) {
-    return { metadata, preservedLocalProgress };
+    return { metadata: { ...input.hostedMetadata }, preservedLocalProgress };
   }
+
+  const metadata: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(input.localMetadata)) {
     if (isJunctionHistoricalBackfillMetadataKey(key)) {
+      metadata[key] = value;
+    }
+  }
+
+  for (const [key, value] of Object.entries(input.hostedMetadata)) {
+    if (!Object.prototype.hasOwnProperty.call(metadata, key)) {
       metadata[key] = value;
     }
   }
