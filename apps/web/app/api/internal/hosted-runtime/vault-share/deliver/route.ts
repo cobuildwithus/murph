@@ -46,12 +46,13 @@ const DELIVERED_RESPONSE: HostedVaultShareDeliverResponse = {
 
 /**
  * The single cross-member write seam. The grantor identity comes exclusively from the
- * signed Cloudflare callback; the grantor's runtime offers projected records without
- * knowing whether shares exist. Web is the sole authority: it fans the offer out to every
- * active HostedVaultShare for (grantor, projectionKind), skipping inactive destinations.
- * The response is a function of share configuration alone — no grants, or only inactive
- * destinations, resolves to `no-active-share`; everything else resolves to a bare
- * `delivered`, so the grantor runtime learns nothing beyond "an active share exists".
+ * signed Cloudflare callback. The grantor runtime first asks web for active projection
+ * kinds, then this write seam revalidates the requested kind before fanout. Web remains
+ * the sole authority: it delivers only to active HostedVaultShare rows for
+ * (grantor, projectionKind), skipping inactive destinations. The response is a function
+ * of share configuration alone — no grants, or only inactive destinations, resolves to
+ * `no-active-share`; everything else resolves to a bare `delivered`, so the grantor
+ * runtime learns nothing beyond "an active share exists".
  */
 export const POST = withJsonError(async (request: Request) => {
   const grantorMemberId = await requireHostedCloudflareCallbackRequest(request, {

@@ -1,5 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
+import { HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS } from "@murphai/hosted-execution/vault-share";
+
 const mocks = vi.hoisted(() => ({
   acceptHostedGroupJoinCodeTx: vi.fn(),
   assertHostedMemberNotSuspended: vi.fn(),
@@ -102,5 +104,31 @@ test("signals destination cleanup wakes after a group permission revoke without 
   expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
     expectedUserId: "member_group_runtime",
     mailboxItemId: "mailbox_item_revoke_1",
+  });
+});
+
+test("accepts the full closed set of selectable vault-share permissions", async () => {
+  const request = new Request("https://join.example.test/api/groups/join/JOIN123/accept", {
+    body: JSON.stringify({
+      selectedVaultShareProjectionKinds: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+    }),
+    headers: {
+      "content-type": "application/json",
+      origin: "https://join.example.test",
+    },
+    method: "POST",
+  });
+
+  const response = await route.POST(request, {
+    params: Promise.resolve({ joinCode: "JOIN123" }),
+  });
+
+  expect(response.status).toBe(200);
+  expect(mocks.acceptHostedGroupJoinCodeTx).toHaveBeenCalledWith({
+    joinCode: "JOIN123",
+    memberId: "member_grantor",
+    now: expect.any(Date),
+    selectedVaultShareProjectionKinds: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
+    tx: { tx: true },
   });
 });

@@ -29,6 +29,7 @@ import {
   HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
+  HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
 } from "@murphai/hosted-execution/routes";
 
 const mocks = vi.hoisted(() => ({
@@ -3594,6 +3595,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           status: 200,
         });
       }
+      if (url.pathname.endsWith(HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH)) {
+        return new Response(JSON.stringify({
+          projectionKinds: ["activity-days.v0"],
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
       if (url.pathname.endsWith(HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH)) {
         return new Response(JSON.stringify({
           ok: true,
@@ -3635,6 +3644,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.issueExportPort).toBeDefined();
     expect(platform.usageRecordPort).toBeDefined();
     expect(platform.productFeedbackPort).toBeDefined();
+    expect(platform.vaultSharePort).toBeDefined();
     expect(platform.deviceSyncPort).toBeDefined();
     await platform.mailboxPort!.fetch({
       lanes: [{ importedSeq: "0", lane: "conversation" }],
@@ -3682,6 +3692,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       relatedChangelogItemIds: ["native-message-formatting"],
       summary: "Interested in native message formatting.",
     });
+    await expect(platform.vaultSharePort!.listActiveProjectionKinds()).resolves.toEqual([
+      "activity-days.v0",
+    ]);
     await platform.effectsPort.maybeShareLinqContactCardAfterOutbound!({
       authority: {
         accountLookupKey: "hbidx:phone:v1:account",
@@ -3697,7 +3710,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       connectionId: "conn_123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(10);
+    expect(fetchMock).toHaveBeenCalledTimes(11);
     const requests = fetchMock.mock.calls.map((call, index) =>
       requireFetchRequest(call, `callback web-control request ${index}`)
     );
@@ -3710,6 +3723,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "http://web-control.worker/api/internal/hosted-execution/issues/record",
       "http://web-control.worker/api/internal/hosted-execution/usage/record",
       "http://web-control.worker/api/internal/hosted-execution/product-feedback/record",
+      `http://web-control.worker${HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH}`,
       `http://web-control.worker${HOSTED_RUNTIME_LINQ_CONTACT_CARD_SHARE_AFTER_OUTBOUND_PATH}`,
       "http://web-control.worker/api/internal/device-sync/runtime/snapshot",
     ]);

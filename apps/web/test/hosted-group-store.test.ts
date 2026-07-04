@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS } from "@murphai/hosted-execution/vault-share";
 
 const mocks = vi.hoisted(() => ({
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
@@ -473,8 +474,8 @@ describe("normalizeHostedVaultShareProjectionKinds", () => {
   it("keeps selectable health kinds and silently drops the membership-implied profile name", () => {
     expect(normalizeHostedVaultShareProjectionKinds([
       "profile-name.v0",
-      "sleep-times.v0",
+      ...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
       "not-a-kind",
-    ])).toEqual(["sleep-times.v0"]);
+    ])).toEqual([...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS]);
   });
 });

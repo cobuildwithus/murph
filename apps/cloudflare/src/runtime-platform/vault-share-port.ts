@@ -1,6 +1,12 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import { parseHostedVaultShareDeliverResponse } from "@murphai/hosted-execution/vault-share";
-import { HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH } from "@murphai/hosted-execution/routes";
+import {
+  parseHostedVaultShareActiveProjectionKindsResponse,
+  parseHostedVaultShareDeliverResponse,
+} from "@murphai/hosted-execution/vault-share";
+import {
+  HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
+  HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
+} from "@murphai/hosted-execution/routes";
 
 import { fetchHostedWebControlPlaneJson, type HostedWebControlTransport } from "./web-control-transport.ts";
 
@@ -11,6 +17,19 @@ export function createHostedWebVaultSharePort(input: {
   transport: HostedWebControlTransport;
 }) {
   return {
+    async listActiveProjectionKinds() {
+      const payload = await fetchHostedWebControlPlaneJson({
+        boundUserId: input.boundUserId,
+        description: "Hosted vault share active projection kinds",
+        fetchImpl: input.fetchImpl,
+        method: "GET",
+        path: HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+
+      return parseHostedVaultShareActiveProjectionKindsResponse(payload).projectionKinds;
+    },
     async deliver(request: Parameters<NonNullable<HostedRuntimePlatform["vaultSharePort"]>["deliver"]>[0]) {
       const payload = await fetchHostedWebControlPlaneJson({
         body: request,

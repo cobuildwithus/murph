@@ -31,6 +31,7 @@ import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
+  HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
@@ -76,6 +77,7 @@ export type HostedRunnerWebControlOperation =
   | "runtime_log_write"
   | "product_feedback_recording"
   | "usage_recording"
+  | "vault_share_active_kinds"
   | "vault_share_deliver"
   | "workspace_checkpoint"
   | "workspace_read"
@@ -162,6 +164,16 @@ export function readHostedRunnerWebControlPolicy(input: {
     return {
       allowed: true,
       operation: "workspace_read",
+    };
+  }
+
+  if (
+    input.method === "GET"
+    && input.path === HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH
+  ) {
+    return {
+      allowed: true,
+      operation: "vault_share_active_kinds",
     };
   }
 

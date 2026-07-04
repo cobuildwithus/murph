@@ -336,7 +336,7 @@ export const MURPH_GROUP_TOOL = {
       },
       requestedVaultShareProjectionKinds: {
         type: 'array',
-        maxItems: 8,
+        maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length,
         items: {
           type: 'string',
           enum: [...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS],
@@ -699,7 +699,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       kind: z.enum(HOSTED_RUNTIME_GROUP_KINDS).optional(),
       requestedVaultShareProjectionKinds: z
         .array(z.enum(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS))
-        .max(8)
+        .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS.length)
         .optional(),
     })
     .strict(),

@@ -73,6 +73,26 @@ function recentRecord(daysAgo: number): {
   };
 }
 
+function recentActivityRecord(daysAgo: number): {
+  data: { date: string; metricKey: string; unit: string; value: number };
+  occurredAt: string;
+  recordKey: string;
+} {
+  const day = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
+  const date = day.toISOString().slice(0, 10);
+
+  return {
+    data: {
+      date,
+      metricKey: "activity-minutes",
+      unit: "minutes",
+      value: 37,
+    },
+    occurredAt: `${date}T00:00:00.000Z`,
+    recordKey: date,
+  };
+}
+
 const STALE_RECORD = {
   data: {
     date: "1999-01-01",
@@ -155,6 +175,28 @@ describe("vault-share deliver route", () => {
 			expectedUserId: "member_referee",
 			mailboxItemId: "mailbox_item_1",
 		});
+  });
+
+  it("delivers recent activity-day records through the closed projection kind", async () => {
+    const activityShare = { ...ACTIVE_SHARE, projectionKind: "activity-days.v0" };
+    const record = recentActivityRecord(1);
+    mocks.findActiveHostedVaultShares.mockResolvedValue([activityShare]);
+
+    const response = await deliverRoute.POST(buildRequest({
+      projectionKind: "activity-days.v0",
+      records: [record],
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "delivered" });
+    expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
+      grantorMemberId: "member_grantor",
+      projectionKind: "activity-days.v0",
+    });
+    expect(mocks.deliverHostedVaultShareRecords).toHaveBeenCalledWith({
+      records: [record],
+      share: activityShare,
+    });
   });
 
   it("returns no-active-share and appends nothing when no grant exists", async () => {
