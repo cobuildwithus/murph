@@ -1910,6 +1910,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             || accumulatedProjection.projectedWakeRequiresCheckpoint
           );
       };
+      const runCheckpointInterruptForegroundPass = async (input: {
+        latencySeed: HostedRuntimeWakeLatencySeed | null;
+      }): Promise<void> => {
+        const checkpointBlockedWakeInterrupted = hasCheckpointBlockedProjectedWake();
+        await runIdleWakeForegroundPass({
+          includeProjectedWakeInWorkspace:
+            checkpointBlockedWakeInterrupted ? false : undefined,
+          latencySeed: input.latencySeed,
+          protectProjectedWakeFromReplacement: checkpointBlockedWakeInterrupted,
+          projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
+          requestIdKind: "checkpoint-interrupt",
+        });
+      };
       if (!runtimeStateDirty) {
         const vaultShareOfferWakeLatencySeed =
           await offerHostedVaultShareProjectionDuringIdle();
@@ -2007,13 +2020,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           const mailboxEffectsWaitResult =
             await waitForMailboxPostCheckpointEffects();
           if (mailboxEffectsWaitResult.kind === "external_wake") {
-            await runIdleWakeForegroundPass({
-              includeProjectedWakeInWorkspace: false,
+            await runCheckpointInterruptForegroundPass({
               latencySeed: createHostedRuntimeWakeLatencySeed(
                 mailboxEffectsWaitResult.notification,
               ),
-              projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
-              requestIdKind: "checkpoint-interrupt",
             });
             continue;
           }
@@ -2154,18 +2164,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           });
         } catch (error) {
           if (error instanceof HostedRuntimeCheckpointInterruptedByWakeError) {
-            await runIdleWakeForegroundPass({
+            await runCheckpointInterruptForegroundPass({
               latencySeed: createHostedRuntimeWakeLatencySeed(error.notification),
-              projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
-              requestIdKind: "checkpoint-interrupt",
             });
             continue;
           }
           if (isHostedRuntimeCheckpointSupersededByWorkspaceProgress(error)) {
-            await runIdleWakeForegroundPass({
+            await runCheckpointInterruptForegroundPass({
               latencySeed: null,
-              projectedWakeKeyBeingServiced: servicedProjectedRuntimeWakeKey,
-              requestIdKind: "checkpoint-interrupt",
             });
             continue;
           }

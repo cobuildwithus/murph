@@ -7651,6 +7651,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 ),
                 events.join(","),
               );
+              assert.notEqual(input.workspace?.nextWakeAt, dueWakeAt);
               assert.ok(
                 !events.includes("workspace.checkpoint:1:idle_shutdown:accept"),
                 events.join(","),
