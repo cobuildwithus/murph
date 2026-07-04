@@ -155,6 +155,9 @@ function buildAssistantOutboxReceiptRepair(
       lastError: intent.lastError,
       metadata: {
         attempt: String(intent.attemptCount),
+        ...buildAssistantOutboxAnsweredCoverageReceiptMetadata(
+          intent.answeredCoverage,
+        ),
         intentId: intent.intentId,
       },
       status: null,
@@ -190,6 +193,9 @@ function buildAssistantOutboxReceiptRepair(
       eventKind: 'delivery.retry-scheduled',
       lastError: sanitizeAssistantDeliveryErrorForPersistence(intent.lastError),
       metadata: {
+        ...buildAssistantOutboxAnsweredCoverageReceiptMetadata(
+          intent.answeredCoverage,
+        ),
         intentId: intent.intentId,
         retryable: 'true',
       },

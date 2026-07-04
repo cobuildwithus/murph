@@ -292,6 +292,94 @@ describe('assistant outbox runtime', () => {
     ).toBe(false)
   })
 
+  it('repairs migrated retryable and sending auto-reply coverage without failing active intents', async () => {
+    for (const status of ['retryable', 'sending'] as const) {
+      const { vaultRoot } = await createAssistantVault(
+        `assistant-outbox-auto-reply-${status}-coverage-`,
+      )
+      const answeredCoverage = {
+        lane: 'conversation' as const,
+        laneSeq: status === 'retryable' ? '44' : '45',
+      }
+      const sessionId = `session_auto_reply_${status}_coverage`
+      const turnId = `turn_auto_reply_${status}_coverage`
+      const dedupeToken = `stable-auto-reply-${status}-token`
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'queue an auto reply',
+        provider: 'codex-cli',
+        providerModel: 'gpt-5.4',
+        sessionId,
+        turnId,
+        vault: vaultRoot,
+      })
+      const legacyIntent = await createAssistantOutboxIntent({
+        actorId: 'telegram-user-1',
+        channel: 'telegram',
+        createdAt: '2026-04-08T00:00:00.000Z',
+        dedupeToken,
+        message: 'auto reply',
+        sessionId,
+        threadId: 'telegram-thread-1',
+        threadIsDirect: true,
+        turnId,
+        vault: vaultRoot,
+      })
+
+      await saveAssistantOutboxIntent(
+        vaultRoot,
+        status === 'retryable'
+          ? {
+              ...legacyIntent,
+              lastError: {
+                code: 'ASSISTANT_DELIVERY_TRANSIENT',
+                message: 'transient delivery failure',
+              },
+              nextAttemptAt: '2026-04-08T00:02:00.000Z',
+              status,
+              updatedAt: '2026-04-08T00:01:00.000Z',
+            }
+          : {
+              ...legacyIntent,
+              attemptCount: 1,
+              lastAttemptAt: '2026-04-08T00:01:00.000Z',
+              nextAttemptAt: null,
+              status,
+              updatedAt: '2026-04-08T00:01:00.000Z',
+            },
+      )
+
+      const dedupedIntent = await createAssistantOutboxIntent({
+        answeredCoverage,
+        actorId: 'telegram-user-1',
+        channel: 'telegram',
+        createdAt: '2026-04-08T00:03:00.000Z',
+        dedupeToken,
+        message: 'auto reply',
+        sessionId,
+        threadId: 'telegram-thread-1',
+        threadIsDirect: true,
+        turnId,
+        turnTrigger: 'automation-auto-reply',
+        vault: vaultRoot,
+      })
+
+      expect(dedupedIntent.intentId).toBe(legacyIntent.intentId)
+      expect(dedupedIntent.status).toBe(status)
+      expect(dedupedIntent.answeredCoverage).toEqual(answeredCoverage)
+      await expect(
+        readAssistantOutboxIntentAnsweredCoverage({
+          intentId: dedupedIntent.intentId,
+          turnId,
+          vault: vaultRoot,
+        }),
+      ).resolves.toEqual(answeredCoverage)
+      const rawIntent = await readRawOutboxIntent(vaultRoot, legacyIntent.intentId)
+      expect(rawIntent).toHaveProperty('status', status)
+      expect(rawIntent).not.toHaveProperty('answeredCoverage')
+    }
+  })
+
   it('repairs a targetless queued dedupe hit before the first dispatch attempt', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-target-repair-')
 
