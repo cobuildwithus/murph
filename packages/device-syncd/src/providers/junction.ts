@@ -648,6 +648,12 @@ export function createJunctionDeviceSyncProvider(
     account: StoredDeviceSyncAccount,
     now: string,
   ): ProviderScheduleResult {
+    const dueHistoricalBackfillJobs = buildDueHistoricalBackfillJobs(account, now);
+    const scheduledNextReconcileAt = addMilliseconds(now, reconcileIntervalMs);
+    const nextReconcileAt = dueHistoricalBackfillJobs.length > 0
+      ? scheduledNextReconcileAt
+      : clampConnectHistoricalBackfillRetryNextReconcileAt(account, scheduledNextReconcileAt);
+
     return {
       jobs: [
         buildWindowJob({
@@ -656,9 +662,9 @@ export function createJunctionDeviceSyncProvider(
           windowStart: subtractDays(now, reconcileDays),
           priority: 40,
         }),
-        ...buildDueHistoricalBackfillJobs(account, now),
+        ...dueHistoricalBackfillJobs,
       ],
-      nextReconcileAt: addMilliseconds(now, reconcileIntervalMs),
+      nextReconcileAt,
     };
   }
 
@@ -685,18 +691,8 @@ export function createJunctionDeviceSyncProvider(
     }
 
     if (status === "retrying" && metadataMatchesConnectWindow) {
-      const emptyAttempts = Math.max(
-        1,
-        readHistoricalBackfillEmptyAttempts(metadata, connectWindow.windowStart, connectWindow.windowEnd),
-      );
-      const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
-      if (retryDelayMs === null) {
-        return [];
-      }
-      const lastEmptyAtMs = Date.parse(
-        normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.lastEmptyAt]) ?? "",
-      );
-      if (Number.isFinite(lastEmptyAtMs) && Date.parse(now) < lastEmptyAtMs + retryDelayMs) {
+      const retryAt = readPendingConnectHistoricalBackfillRetryAt(account);
+      if (!retryAt || Date.parse(now) < Date.parse(retryAt)) {
         return [];
       }
       return [buildExactWindowJob({
@@ -717,6 +713,49 @@ export function createJunctionDeviceSyncProvider(
       windowEnd: connectWindow.windowEnd,
       priority: 30,
     })];
+  }
+
+  function clampConnectHistoricalBackfillRetryNextReconcileAt(
+    account: Pick<DeviceSyncAccount, "connectedAt" | "metadata">,
+    nextReconcileAt: string,
+  ): string {
+    const retryAt = readPendingConnectHistoricalBackfillRetryAt(account);
+    return retryAt ? minIsoTimestamp(nextReconcileAt, retryAt) : nextReconcileAt;
+  }
+
+  function readPendingConnectHistoricalBackfillRetryAt(
+    account: Pick<DeviceSyncAccount, "connectedAt" | "metadata">,
+  ): string | null {
+    const metadata = account.metadata;
+    const status = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]);
+
+    if (status !== "retrying") {
+      return null;
+    }
+
+    const connectWindow = buildConnectHistoricalBackfillWindow(account, summaryBackfillDays);
+    const metadataWindowStart = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]);
+    const metadataWindowEnd = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]);
+
+    if (
+      metadataWindowStart !== connectWindow.windowStart
+      || metadataWindowEnd !== connectWindow.windowEnd
+    ) {
+      return null;
+    }
+
+    const emptyAttempts = Math.max(
+      1,
+      readHistoricalBackfillEmptyAttempts(metadata, connectWindow.windowStart, connectWindow.windowEnd),
+    );
+    const retryDelayMs = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS[emptyAttempts - 1] ?? null;
+    const lastEmptyAt = normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.lastEmptyAt]);
+
+    if (retryDelayMs === null || !lastEmptyAt || !Number.isFinite(Date.parse(lastEmptyAt))) {
+      return null;
+    }
+
+    return addMilliseconds(lastEmptyAt, retryDelayMs);
   }
 
   async function executeJob(
@@ -838,7 +877,10 @@ export function createJunctionDeviceSyncProvider(
     const { nextRetryAt, ...backfillFollowUpResult } = backfillFollowUp;
     const nextReconcileAt = nextRetryAt
       ? minIsoTimestamp(addMilliseconds(context.now, reconcileIntervalMs), nextRetryAt)
-      : addMilliseconds(context.now, reconcileIntervalMs);
+      : clampConnectHistoricalBackfillRetryNextReconcileAt(
+          context.account,
+          addMilliseconds(context.now, reconcileIntervalMs),
+        );
 
     return withJunctionSkippedResourceMetadata(
       context,
@@ -1824,7 +1866,10 @@ export function createJunctionDeviceSyncProvider(
       ...(followUp ? { scheduledJobs: [followUp] } : {}),
       nextReconcileAt: input.job.kind === "resource"
         ? clampWebhookJobNextReconcileAt(input.context)
-        : addMilliseconds(input.context.now, reconcileIntervalMs),
+        : clampConnectHistoricalBackfillRetryNextReconcileAt(
+            input.context.account,
+            addMilliseconds(input.context.now, reconcileIntervalMs),
+          ),
     };
   }
 

@@ -602,6 +602,7 @@ test("Junction empty historical backfill records a retrying window the scheduled
   });
   const beforeDue = executor.createScheduledJobs?.(retryingAccount, "2026-04-04T00:10:00.000Z");
   assert.equal(beforeDue?.jobs.some((job) => job.kind === "backfill"), false);
+  assert.equal(beforeDue?.nextReconcileAt, "2026-04-04T00:15:00.000Z");
 
   const due = executor.createScheduledJobs?.(retryingAccount, "2026-04-04T00:15:00.000Z");
   const retryJob = due?.jobs.find((job) => job.kind === "backfill");
@@ -635,6 +636,7 @@ test("Junction retrying historical backfill without attempts uses the first retr
 
   const beforeDue = executor.createScheduledJobs?.(retryingAccount, "2026-04-04T00:05:00.000Z");
   assert.equal(beforeDue?.jobs.some((job) => job.kind === "backfill"), false);
+  assert.equal(beforeDue?.nextReconcileAt, "2026-04-04T00:15:00.000Z");
 
   const due = executor.createScheduledJobs?.(retryingAccount, "2026-04-04T00:16:00.000Z");
   const retryJob = due?.jobs.find((job) => job.kind === "backfill");

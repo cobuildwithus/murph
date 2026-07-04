@@ -3332,6 +3332,16 @@ test("device sync service wakes Junction retrying historical backfill at the ret
     assert.notEqual(afterEmptyBackfill?.nextReconcileAt, hourlyReconcileAt);
     assert.equal(service.getNextWakeAt(executedAt), retryDueAt);
 
+    now = new Date("2026-04-04T00:05:00.000Z");
+    service.queueManualReconcile(account.id);
+    const manualReconcile = await service.runWorkerOnce();
+    const afterManualReconcile = store.getAccountById(account.id);
+
+    assert.equal(manualReconcile?.kind, "reconcile");
+    assert.equal(afterManualReconcile?.nextReconcileAt, retryDueAt);
+    assert.notEqual(afterManualReconcile?.nextReconcileAt, "2026-04-04T01:05:00.000Z");
+    assert.equal(service.getNextWakeAt("2026-04-04T00:05:00.000Z"), retryDueAt);
+
     now = new Date("2026-04-04T00:14:59.000Z");
     await service.runSchedulerOnce();
     assert.equal(
