@@ -7430,6 +7430,8 @@ describe("hosted workspace runtime entrypoint", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const dueWakeAt = new Date(Date.now() - 60_000).toISOString();
+    const freshFutureWakeAt = new Date(Date.now() + 60_000).toISOString();
+    const foregroundAfterCheckpointGate = createDeferred<void>();
     const durableEffect = vi.fn(async () => {
       events.push("durable-effect");
       mailboxItems.push(createMailboxItem({
@@ -7444,10 +7446,11 @@ describe("hosted workspace runtime entrypoint", () => {
     });
     let assistantPass = 0;
     let checkpointInterrupted = false;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
             attemptId: "attempt_synthetic_forced_checkpoint_foreground_pending",
@@ -7472,7 +7475,21 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item) {
             events.push(`mailbox.importItem:${item.item.id}`);
-            return { status: "imported" };
+            return {
+              afterCheckpoint: async () => {
+                events.push("mailbox.afterCheckpoint:start");
+                await foregroundAfterCheckpointGate.promise;
+                events.push("mailbox.afterCheckpoint:done");
+                return {
+                  attachmentEvidenceUpdated: true,
+                  kind: "inbox_projection",
+                  projectionUpdated: true,
+                  reasonCode: null,
+                  status: "succeeded",
+                };
+              },
+              status: "imported",
+            };
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
@@ -7545,6 +7562,8 @@ describe("hosted workspace runtime entrypoint", () => {
               );
               return {
                 checkpointReason: "system_mailbox_receipt",
+                nextWakeAt: freshFutureWakeAt,
+                nextWakeReason: "assistant",
                 progressed: true,
               };
             }
@@ -7565,6 +7584,20 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
+      await waitUntil(() => {
+        assert.equal(events.includes("mailbox.afterCheckpoint:start"), true);
+      });
+      assert.ok(
+        !events.includes("workspace.checkpoint:1:idle_shutdown:accept"),
+        events.join(","),
+      );
+      foregroundAfterCheckpointGate.resolve();
+      const result = await withRealTimeout(
+        resultPromise,
+        15_000,
+        () => events.join(","),
+      );
+
       assert.equal(assistantPass, 3);
       assert.equal(durableEffect.mock.calls.length, 1);
       assert.ok(
@@ -7580,6 +7613,10 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.ok(
         requireEventIndex(events, "assistant:2")
+          < requireEventIndex(events, "mailbox.afterCheckpoint:done"),
+      );
+      assert.ok(
+        requireEventIndex(events, "mailbox.afterCheckpoint:done")
           < requireEventIndex(events, "workspace.checkpoint:1:idle_shutdown:accept"),
       );
       assert.ok(
@@ -7595,10 +7632,13 @@ describe("hosted workspace runtime entrypoint", () => {
         ["0", "idle_shutdown", null, null],
         ["1", "idle_shutdown", dueWakeAt, "assistant"],
         ["1", "idle_shutdown", dueWakeAt, "assistant"],
-        ["2", "idle_shutdown", null, null],
+        ["2", "idle_shutdown", freshFutureWakeAt, "assistant"],
       ]);
-      assert.equal(result.status, "idle");
+      assert.equal(result.status, "scheduled");
+      assert.equal(result.nextWakeAt, freshFutureWakeAt);
     } finally {
+      foregroundAfterCheckpointGate.resolve();
+      await resultPromise?.catch(() => undefined);
       await removeTempRoot(vaultRoot);
     }
   });
